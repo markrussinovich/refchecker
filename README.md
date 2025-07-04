@@ -44,7 +44,7 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/refchecker.git
+git clone https://github.com/markrussinovich/refchecker.git
 cd refchecker
 ```
 
