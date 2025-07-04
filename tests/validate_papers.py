@@ -116,9 +116,15 @@ def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, 
 
         if errors:
             error_count += 1
-            print(f"  Errors found: {len(errors)}")
             for error in errors:
-                print(f"    - {error['error_type']}: {error['error_details']}")
+                # Handle both error_type and warning_type
+                if 'error_type' in error:
+                    print(f"    - {error['error_type']}: {error['error_details']}")
+                elif 'warning_type' in error:
+                    print(f"    - {error['warning_type']}: {error['warning_details']}")
+                else:
+                    # Fallback for unexpected error structure
+                    print(f"    - unknown: {error}")
         else:
             print("  ✓ No errors found (reference is correct)")
 
