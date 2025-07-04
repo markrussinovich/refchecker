@@ -1,0 +1,417 @@
+#!/usr/bin/env python3
+"""
+Semantic Scholar API Client for Reference Verification
+
+This module provides functionality to verify non-arXiv references using the Semantic Scholar API.
+It can check if a reference's metadata (authors, year, title) matches what's in the Semantic Scholar database.
+
+Usage:
+    from semantic_scholar import NonArxivReferenceChecker
+    
+    # Initialize the checker
+    checker = NonArxivReferenceChecker(api_key="your_api_key")  # API key is optional
+    
+    # Verify a reference
+    reference = {
+        'title': 'Title of the paper',
+        'authors': ['Author 1', 'Author 2'],
+        'year': 2020,
+        'url': 'https://example.com/paper',
+        'raw_text': 'Full citation text'
+    }
+    
+    verified_data, errors = checker.verify_reference(reference)
+"""
+
+import requests
+import time
+import logging
+import re
+from typing import Dict, List, Tuple, Optional, Any, Union
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+class NonArxivReferenceChecker:
+    """
+    A class to verify non-arXiv references using the Semantic Scholar API
+    """
+    
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        Initialize the Semantic Scholar API client
+        
+        Args:
+            api_key: Optional API key for Semantic Scholar (increases rate limits)
+        """
+        self.base_url = "https://api.semanticscholar.org/graph/v1"
+        self.headers = {
+            "Accept": "application/json"
+        }
+        
+        if api_key:
+            self.headers["x-api-key"] = api_key
+        
+        # Rate limiting parameters
+        self.request_delay = 1.0  # Initial delay between requests (seconds)
+        self.max_retries = 5
+        self.backoff_factor = 2  # Exponential backoff factor
+    
+    def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Search for papers matching the query
+        
+        Args:
+            query: Search query (title, authors, etc.)
+            year: Publication year to filter by
+            
+        Returns:
+            List of paper data dictionaries
+        """
+        endpoint = f"{self.base_url}/paper/search"
+        
+        # Build query parameters
+        params = {
+            "query": query,
+            "limit": 10,
+            "fields": "title,authors,year,externalIds,url,abstract"
+        }
+        
+        # Add year filter if provided
+        if year:
+            params["year"] = year
+        
+        # Make the request with retries and backoff
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(endpoint, headers=self.headers, params=params)
+                
+                # Check for rate limiting
+                if response.status_code == 429:
+                    wait_time = self.request_delay * (self.backoff_factor ** attempt)
+                    logger.debug(f"Rate limit exceeded. Increasing delay and retrying...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Check for other errors
+                response.raise_for_status()
+                
+                # Parse the response
+                data = response.json()
+                return data.get('data', [])
+                
+            except requests.exceptions.RequestException as e:
+                wait_time = self.request_delay * (self.backoff_factor ** attempt)
+                logger.warning(f"Request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+        
+        # If we get here, all retries failed
+        logger.error(f"Failed to search for paper after {self.max_retries} attempts")
+        return []
+    
+    def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
+        """
+        Get paper data by DOI
+        
+        Args:
+            doi: DOI of the paper
+            
+        Returns:
+            Paper data dictionary or None if not found
+        """
+        endpoint = f"{self.base_url}/paper/DOI:{doi}"
+        
+        params = {
+            "fields": "title,authors,year,externalIds,url,abstract"
+        }
+        
+        # Make the request with retries and backoff
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(endpoint, headers=self.headers, params=params)
+                
+                # Check for rate limiting
+                if response.status_code == 429:
+                    wait_time = self.request_delay * (self.backoff_factor ** attempt)
+                    logger.debug(f"Rate limit exceeded. Increasing delay and retrying...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # If not found, return None
+                if response.status_code == 404:
+                    logger.warning(f"Paper with DOI {doi} not found")
+                    return None
+                
+                # Check for other errors
+                response.raise_for_status()
+                
+                # Parse the response
+                return response.json()
+                
+            except requests.exceptions.RequestException as e:
+                wait_time = self.request_delay * (self.backoff_factor ** attempt)
+                logger.warning(f"Request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+        
+        # If we get here, all retries failed
+        logger.error(f"Failed to get paper by DOI after {self.max_retries} attempts")
+        return None
+    
+    def extract_doi_from_url(self, url: str) -> Optional[str]:
+        """
+        Extract DOI from a URL
+        
+        Args:
+            url: URL that might contain a DOI
+            
+        Returns:
+            Extracted DOI or None if not found
+        """
+        if not url:
+            return None
+        
+        # Check if it's a DOI URL
+        if 'doi.org' in url:
+            # Extract the DOI part after doi.org/
+            match = re.search(r'doi\.org/([^/\s]+)', url)
+            if match:
+                return match.group(1)
+        
+        return None
+    
+    def normalize_author_name(self, name: str) -> str:
+        """
+        Normalize author name for comparison
+        
+        Args:
+            name: Author name
+            
+        Returns:
+            Normalized name
+        """
+        # Remove reference numbers (e.g., "[1]")
+        name = re.sub(r'^\[\d+\]', '', name)
+        
+        # Remove line breaks and extra spaces
+        name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
+        
+        # Remove special characters
+        name = re.sub(r'[^\w\s]', '', name)
+        
+        return name.lower()
+    
+    def compare_authors(self, cited_authors: List[str], correct_authors: List[Dict[str, str]]) -> Tuple[bool, str]:
+        """
+        Compare author lists to check if they match
+        
+        Args:
+            cited_authors: List of author names as cited
+            correct_authors: List of author data from Semantic Scholar
+            
+        Returns:
+            Tuple of (match_result, error_message)
+        """
+        # Extract author names from Semantic Scholar data
+        correct_names = [author.get('name', '') for author in correct_authors]
+        
+        # Normalize names for comparison
+        normalized_cited = [self.normalize_author_name(name) for name in cited_authors]
+        normalized_correct = [self.normalize_author_name(name) for name in correct_names]
+        
+        # If the cited list is much shorter, it might be using "et al."
+        # In this case, just check the authors that are listed
+        if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
+            # Only compare the first few authors
+            normalized_correct = normalized_correct[:len(normalized_cited)]
+        
+        # Compare first author (most important)
+        if normalized_cited and normalized_correct:
+            if not self.is_name_match(normalized_cited[0], normalized_correct[0]):
+                return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
+        
+        return True, "Authors match"
+    
+    def is_name_match(self, name1: str, name2: str) -> bool:
+        """
+        Check if two author names match, allowing for variations
+        
+        Args:
+            name1: First author name
+            name2: Second author name
+            
+        Returns:
+            True if names match, False otherwise
+        """
+        # If one is a substring of the other, consider it a match
+        if name1 in name2 or name2 in name1:
+            return True
+        
+        # Split into parts (first name, last name, etc.)
+        parts1 = name1.split()
+        parts2 = name2.split()
+        
+        # If either name has only one part, compare directly
+        if len(parts1) == 1 or len(parts2) == 1:
+            return parts1[-1] == parts2[-1]  # Compare last parts (last names)
+        
+        # Compare last names (last parts)
+        if parts1[-1] != parts2[-1]:
+            return False
+        
+        # Compare first initials
+        if parts1[0][0] != parts2[0][0]:
+            return False
+        
+        return True
+    
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Verify a non-arXiv reference using Semantic Scholar
+        
+        Args:
+            reference: Reference data dictionary
+            
+        Returns:
+            Tuple of (verified_data, errors)
+            - verified_data: Paper data from Semantic Scholar or None if not found
+            - errors: List of error dictionaries
+        """
+        errors = []
+        
+        # Extract reference data
+        title = reference.get('title', '')
+        authors = reference.get('authors', [])
+        year = reference.get('year', 0)
+        url = reference.get('url', '')
+        raw_text = reference.get('raw_text', '')
+        
+        # If we have a DOI, try to get the paper directly
+        doi = None
+        if 'doi' in reference and reference['doi']:
+            doi = reference['doi']
+        elif url:
+            doi = self.extract_doi_from_url(url)
+        
+        paper_data = None
+        
+        if doi:
+            # Try to get the paper by DOI
+            paper_data = self.get_paper_by_doi(doi)
+            
+            if paper_data:
+                logger.info(f"Found paper by DOI: {doi}")
+            else:
+                logger.warning(f"Could not find paper with DOI: {doi}")
+        
+        # If we couldn't get the paper by DOI, try searching by title
+        if not paper_data and title:
+            # Clean up the title
+            clean_title = title.replace('\n', ' ').strip()
+            clean_title = re.sub(r'\s+', ' ', clean_title)
+            
+            # Search for the paper
+            search_results = self.search_paper(clean_title, year)
+            
+            if search_results:
+                # Find the best match
+                best_match = None
+                for result in search_results:
+                    result_title = result.get('title', '')
+                    
+                    # Simple string matching for now
+                    # Could be improved with more sophisticated matching
+                    if clean_title.lower() in result_title.lower() or result_title.lower() in clean_title.lower():
+                        best_match = result
+                        break
+                
+                if best_match:
+                    paper_data = best_match
+                    logger.info(f"Found paper by title: {clean_title}")
+                else:
+                    logger.warning(f"No good match found for title: {clean_title}")
+            else:
+                logger.warning(f"No papers found for title: {clean_title}")
+        
+        # If we still couldn't find the paper, try searching by the raw text
+        if not paper_data and raw_text:
+            # Extract a reasonable search query from the raw text
+            # This is a simple approach - could be improved
+            search_query = raw_text[:100].replace('\n', ' ').strip()
+            
+            # Search for the paper
+            search_results = self.search_paper(search_query)
+            
+            if search_results:
+                # Take the first result as a best guess
+                paper_data = search_results[0]
+                logger.info(f"Found paper by raw text search")
+            else:
+                logger.warning(f"No papers found for raw text search")
+        
+        # If we couldn't find the paper, return no errors (can't verify)
+        if not paper_data:
+            logger.warning(f"Could not find matching paper for reference")
+            return None, []
+        
+        # Verify authors
+        if authors:
+            authors_match, author_error = self.compare_authors(authors, paper_data.get('authors', []))
+            
+            if not authors_match:
+                errors.append({
+                    'error_type': 'author',
+                    'error_details': author_error,
+                    'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
+                })
+        
+        # Verify year
+        paper_year = paper_data.get('year')
+        if year and paper_year and year != paper_year:
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'ref_year_correct': paper_year
+            })
+        
+        # Verify DOI
+        paper_doi = None
+        external_ids = paper_data.get('externalIds', {})
+        if external_ids and 'DOI' in external_ids:
+            paper_doi = external_ids['DOI']
+            
+            if doi and paper_doi and doi.lower() != paper_doi.lower():
+                errors.append({
+                    'error_type': 'doi',
+                    'error_details': f"DOI mismatch: cited as {doi} but actually {paper_doi}",
+                    'ref_doi_correct': paper_doi
+                })
+        
+        return paper_data, errors
+
+if __name__ == "__main__":
+    # Example usage
+    checker = NonArxivReferenceChecker()
+    
+    # Example reference
+    reference = {
+        'title': 'Attention is All You Need',
+        'authors': ['Ashish Vaswani', 'Noam Shazeer'],
+        'year': 2017,
+        'url': 'https://example.com/paper',
+        'raw_text': 'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.'
+    }
+    
+    # Verify the reference
+    verified_data, errors = checker.verify_reference(reference)
+    
+    if verified_data:
+        print(f"Found paper: {verified_data.get('title')}")
+        
+        if errors:
+            print("Errors found:")
+            for error in errors:
+                print(f"  - {error['error_type']}: {error['error_details']}")
+        else:
+            print("No errors found")
+    else:
+        print("Could not find matching paper")

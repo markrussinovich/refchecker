@@ -1,0 +1,3233 @@
+#!/usr/bin/env python3
+"""
+ArXiv Reference Checker
+
+This script:
+1. Obtains ArXiv metadata from the last year
+2. Extracts references from the bibliography (both arXiv and non-arXiv references)
+3. Verifies if the references are accurate (author list, year, links)
+4. Creates a dataset of incorrect references
+
+For arXiv references, it uses the arXiv API to verify metadata.
+For non-arXiv references, it uses the Semantic Scholar API to verify metadata.
+
+Usage:
+    python refchecker.py [--max-papers N] [--days N] [--category CATEGORY] [--paper PAPER_SPEC] [--semantic-scholar-api-key KEY] [--db-path PATH]
+
+Options:
+    --max-papers N                Maximum number of papers to process (default: 50)
+    --days N                      Number of days to look back (default: 365)
+    --category CATEGORY           ArXiv category to filter by (e.g., cs.AI, math.CO)
+    --debug                       Run in debug mode with verbose logging
+    --paper PAPER_SPEC            Validate a specific paper by:
+                                    - ArXiv ID (e.g., 1234.5678)
+                                    - ArXiv URL (e.g., https://arxiv.org/abs/1234.5678)
+                                    - Local PDF file path (e.g., /path/to/paper.pdf)
+                                    - Local LaTeX file path (e.g., /path/to/paper.tex)
+    --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits)
+    --db-path PATH                Path to local Semantic Scholar database (automatically enables local DB mode)
+    --help                        Show this help message
+"""
+
+import arxiv
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
+import re
+import datetime
+import time
+import logging
+import os
+from urllib.parse import urlparse, parse_qs
+import csv
+from tqdm import tqdm
+import PyPDF2
+import pdfplumber
+import tempfile
+import io
+import argparse
+import sys
+import json
+import random
+from checkers.semantic_scholar import NonArxivReferenceChecker
+from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from checkers.google_scholar import GoogleScholarReferenceChecker
+from utils.text_utils import (clean_author_name, clean_title, normalize_text, 
+                       extract_arxiv_id_from_url, clean_conference_markers_from_title,
+                       remove_year_from_title)
+from utils.author_utils import compare_authors, levenshtein_distance, extract_authors_list
+from checkers.hybrid_reference_checker import HybridReferenceChecker
+
+def setup_logging(debug_mode=False, level=logging.DEBUG):
+    """Set up logging configuration"""
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    
+    # Configure root logger to control all child loggers
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Remove any existing handlers from root logger
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # Create formatters
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # Add file handler with DEBUG level
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(level)
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
+    
+    # Add console handler with INFO or DEBUG level based on debug_mode
+    console_handler = logging.StreamHandler(stream=sys.stdout)
+    if debug_mode:
+        console_handler.setLevel(logging.DEBUG)
+    else:
+        console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Get logger for this module
+    logger = logging.getLogger(__name__)
+    
+    return logger
+
+# Initialize logger (default to INFO for console)
+logger = setup_logging(debug_mode=False)
+
+class ArxivReferenceChecker:
+    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt"):
+        # Initialize the reference checker for non-arXiv references
+        # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
+        self.db_path = db_path
+        self.verification_output_file = output_file
+        
+        if db_path:
+            logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
+            self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
+            # Force offline mode - don't use Google Scholar which has online fallbacks
+            use_google_scholar = False
+            self.service_order = "Local Semantic Scholar Database (offline)"
+        elif use_google_scholar:
+            logger.info("Using Semantic Scholar API as primary source with Google Scholar as fallback")
+            # Create a hybrid checker that prioritizes Semantic Scholar
+            self.non_arxiv_checker = HybridReferenceChecker(semantic_scholar_api_key)
+            self.service_order = "Semantic Scholar API → Google Scholar"
+        else:
+            logger.info("Using Semantic Scholar API as primary source")
+            self.non_arxiv_checker = NonArxivReferenceChecker(semantic_scholar_api_key)
+            self.service_order = "Semantic Scholar API"
+        
+        # Initialize errors list
+        self.errors = []
+        
+        # Track if we're processing a single paper (for output optimization)
+        self.single_paper_mode = False
+        self.current_paper_info = None
+        
+        # Report service order for arXiv lookups
+        if not db_path:
+            logger.info(f"Service order for arXiv verification: Local DB → Intelligent API Switching (Semantic Scholar ↔ arXiv)")
+        else:
+            logger.info(f"Service order for arXiv verification: Local DB only (offline mode)")
+        
+        # Report service order for non-arXiv lookups
+        if not db_path:
+            logger.info(f"Service order for reference verification: {self.service_order}")
+        self.client = arxiv.Client(
+            page_size=100,
+            delay_seconds=3,  # Rate limiting to avoid overloading the API
+            num_retries=5
+        )
+        self.days_back = days_back
+        self.category = category
+        
+        # Create output directory
+        self.output_dir = "output"
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir)
+        
+        # Initialize consolidated error storage
+        self.errors = []
+        
+        # Create or clear output file and write headers
+        with open(self.verification_output_file, 'w', encoding='utf-8') as f:
+            f.write("REFERENCE VERIFICATION ERRORS\n")
+            f.write("=" * 50 + "\n\n")
+            f.write(f"Service order used: {self.service_order}\n\n")
+    
+    
+    def get_papers_from_last_year(self, max_results=100):
+        """
+        Fetch papers from the specified time period from ArXiv
+        """
+        # Calculate date range
+        end_date = datetime.datetime.now()
+        start_date = end_date - datetime.timedelta(days=self.days_back)
+        
+        # Format dates for ArXiv query
+        date_query = f"submittedDate:[{start_date.strftime('%Y%m%d')}000000 TO {end_date.strftime('%Y%m%d')}235959]"
+        
+        # Add category filter if specified
+        query = date_query
+        if self.category:
+            query = f"cat:{self.category} AND {query}"
+        
+        logger.info(f"Fetching papers from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        if self.category:
+            logger.info(f"Filtering by category: {self.category}")
+        
+        # Create search query
+        search = arxiv.Search(
+            query=query,
+            max_results=max_results,
+            sort_by=arxiv.SortCriterion.SubmittedDate
+        )
+        
+        # Fetch results
+        results = list(self.client.results(search))
+        logger.info(f"Retrieved {len(results)} papers")
+        return results
+    
+    def extract_arxiv_id_from_url(self, url):
+        """
+        Extract ArXiv ID from a URL
+        """
+        if not url:
+            return None
+
+        # Remove version string from end if present (e.g., 'v1')
+        url = re.sub(r'v\d+$', '', url)
+            
+        # Parse URL
+        parsed_url = urlparse(url)
+        
+        # Check if it's an arxiv.org URL
+        if 'arxiv.org' in parsed_url.netloc:
+            # Extract ID from path
+            path = parsed_url.path.strip('/')
+            
+            # Handle different URL formats
+            if path.startswith('abs/'):
+                return path.replace('abs/', '')
+            elif path.startswith('pdf/'):
+                return path.replace('pdf/', '').replace('.pdf', '')
+            elif '/abs/' in path:
+                return path.split('/abs/')[1]
+            elif '/pdf/' in path:
+                return path.split('/pdf/')[1].replace('.pdf', '')
+            else:
+                return path
+        
+        return None
+    
+    def get_paper_metadata(self, arxiv_id):
+        """
+        Get metadata for a paper using its ArXiv ID with intelligent API switching.
+        Priority: Local DB > Semantic Scholar API > arXiv API, with fallback switching.
+        """
+        # First, try to get the paper from local Semantic Scholar database
+        logger.info(f"Attempting to fetch {arxiv_id} from local database first")
+        local_result = self.get_arxiv_paper_from_local_db(arxiv_id)
+        
+        if local_result:
+            logger.info(f"Successfully found {arxiv_id} in local database")
+            return local_result
+        
+        # If not found in local database and we have a local DB, we're done
+        if self.db_path:
+            logger.warning(f"Paper {arxiv_id} not found in local database")
+            return None
+        
+        # If no local database, try both APIs with intelligent switching
+        logger.info(f"Paper {arxiv_id} not found in local database, trying online APIs with intelligent switching")
+        return self.get_paper_metadata_with_api_switching(arxiv_id)
+    
+    def get_paper_metadata_with_api_switching(self, arxiv_id):
+        """
+        Get paper metadata with intelligent API switching between Semantic Scholar and arXiv APIs
+        
+        Args:
+            arxiv_id: arXiv ID of the paper
+            
+        Returns:
+            Paper object or None if not found
+        """
+        # Track API performance for this session
+        if not hasattr(self, '_api_performance'):
+            self._api_performance = {
+                'semantic_scholar': {'success': 0, 'rate_limited': 0, 'failed': 0},
+                'arxiv': {'success': 0, 'rate_limited': 0, 'failed': 0}
+            }
+        
+        # Try Semantic Scholar API first (faster)
+        logger.info(f"Trying Semantic Scholar API for {arxiv_id}")
+        semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
+        
+        if semantic_result:
+            self._api_performance['semantic_scholar']['success'] += 1
+            logger.info(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
+            return semantic_result
+        
+        # If Semantic Scholar failed, try arXiv API
+        logger.info(f"Semantic Scholar API failed for {arxiv_id}, trying arXiv API")
+        arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
+        
+        if arxiv_result:
+            self._api_performance['arxiv']['success'] += 1
+            logger.info(f"Successfully fetched {arxiv_id} from arXiv API")
+            return arxiv_result
+        
+        # If both failed, try reverse order (sometimes one API works when the other doesn't)
+        logger.info(f"Both APIs failed for {arxiv_id}, trying reverse order")
+        
+        # Try arXiv API first this time
+        arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
+        if arxiv_result:
+            self._api_performance['arxiv']['success'] += 1
+            logger.info(f"Successfully fetched {arxiv_id} from arXiv API (reverse order)")
+            return arxiv_result
+        
+        # Try Semantic Scholar API again
+        semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
+        if semantic_result:
+            self._api_performance['semantic_scholar']['success'] += 1
+            logger.info(f"Successfully fetched {arxiv_id} from Semantic Scholar API (reverse order)")
+            return semantic_result
+        
+        # Both APIs failed
+        logger.error(f"Paper {arxiv_id} not found in any source")
+        return None
+    
+    def get_paper_metadata_from_semantic_scholar(self, arxiv_id):
+        """
+        Get paper metadata from Semantic Scholar API
+        
+        Args:
+            arxiv_id: arXiv ID of the paper
+            
+        Returns:
+            MockArxivPaper object or None if not found
+        """
+        try:
+            import requests
+            
+            url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}"
+            params = {
+                'fields': 'title,authors,year,externalIds,abstract,url'
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Create a mock arXiv paper object from Semantic Scholar data
+                class MockArxivPaper:
+                    def __init__(self, data, arxiv_id):
+                        self.title = data.get('title', 'Unknown Title')
+                        
+                        # Create a proper published object with year attribute
+                        class MockPublished:
+                            def __init__(self, year):
+                                self.year = year
+                        
+                        self.published = MockPublished(data.get('year', 0))
+                        
+                        # Convert authors to the format expected by the rest of the code
+                        authors_data = data.get('authors', [])
+                        self.authors = []
+                        for author in authors_data:
+                            class MockAuthor:
+                                def __init__(self, name):
+                                    self.name = name
+                                def __str__(self):
+                                    return self.name
+                                def __repr__(self):
+                                    return f"MockAuthor('{self.name}')"
+                            self.authors.append(MockAuthor(author.get('name', 'Unknown Author')))
+                        
+                        self.arxiv_id = arxiv_id
+                        self.external_ids = data.get('externalIds', {})
+                        self.abstract = data.get('abstract', '')
+                        self.url = data.get('url', '')
+                        
+                        # Add pdf_url for compatibility with the rest of the code
+                        self.pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    
+                    def get_short_id(self):
+                        return self.arxiv_id
+                    
+                    def __str__(self):
+                        return f"MockArxivPaper('{self.title}', {len(self.authors)} authors, {self.published.year})"
+                    
+                    def __repr__(self):
+                        return self.__str__()
+                
+                return MockArxivPaper(data, arxiv_id)
+                
+            elif response.status_code == 429:
+                self._api_performance['semantic_scholar']['rate_limited'] += 1
+                logger.warning(f"Rate limited by Semantic Scholar API for {arxiv_id}")
+                return None
+            else:
+                self._api_performance['semantic_scholar']['failed'] += 1
+                logger.warning(f"Semantic Scholar API returned status {response.status_code} for {arxiv_id}")
+                return None
+                
+        except requests.exceptions.RequestException as e:
+            self._api_performance['semantic_scholar']['failed'] += 1
+            logger.warning(f"Error fetching from Semantic Scholar API for {arxiv_id}: {str(e)}")
+            return None
+        except Exception as e:
+            self._api_performance['semantic_scholar']['failed'] += 1
+            logger.warning(f"Unexpected error fetching from Semantic Scholar API for {arxiv_id}: {str(e)}")
+            return None
+    
+    def get_paper_metadata_from_arxiv(self, arxiv_id):
+        """
+        Get paper metadata from arXiv API
+        
+        Args:
+            arxiv_id: arXiv ID of the paper
+            
+        Returns:
+            ArXiv paper object or None if not found
+        """
+        try:
+            search = arxiv.Search(id_list=[arxiv_id])
+            results = list(self.client.results(search))
+            
+            if results:
+                return results[0]
+            else:
+                self._api_performance['arxiv']['failed'] += 1
+                logger.warning(f"Paper {arxiv_id} not found in arXiv API")
+                return None
+                
+        except Exception as e:
+            self._api_performance['arxiv']['failed'] += 1
+            logger.error(f"Error fetching metadata from arXiv API for {arxiv_id}: {str(e)}")
+            return None
+    
+    def _create_local_file_paper(self, file_path):
+        """
+        Create a paper object for local PDF, LaTeX, or text files
+        
+        Args:
+            file_path: Path to the local file
+            
+        Returns:
+            Paper object compatible with ArXiv paper interface
+        """
+        class LocalFilePaper:
+            def __init__(self, path):
+                self.file_path = path
+                self.is_latex = path.lower().endswith('.tex')
+                self.is_text_refs = path.lower().endswith('.txt')
+                
+                # Extract filename without extension for title
+                filename = os.path.splitext(os.path.basename(path))[0]
+                self.title = filename.replace('_', ' ').title()
+                    
+                self.authors = []  # Empty list for compatibility
+                self.pdf_url = None
+                
+                class PublishedDate:
+                    def __init__(self):
+                        self.year = datetime.datetime.now().year
+                
+                self.published = PublishedDate()
+                
+            def get_short_id(self):
+                filename = os.path.splitext(os.path.basename(self.file_path))[0]
+                return f"local_{filename}"
+        
+        return LocalFilePaper(file_path)
+
+    def get_api_performance_summary(self):
+        """
+        Get a summary of API performance for this session
+        
+        Returns:
+            Dict with performance statistics
+        """
+        if not hasattr(self, '_api_performance'):
+            return {'message': 'No API calls made yet'}
+        
+        total_semantic = sum(self._api_performance['semantic_scholar'].values())
+        total_arxiv = sum(self._api_performance['arxiv'].values())
+        
+        summary = {
+            'semantic_scholar': {
+                'total_calls': total_semantic,
+                'success_rate': (self._api_performance['semantic_scholar']['success'] / total_semantic * 100) if total_semantic > 0 else 0,
+                'rate_limited': self._api_performance['semantic_scholar']['rate_limited'],
+                'failed': self._api_performance['semantic_scholar']['failed'],
+                'successful': self._api_performance['semantic_scholar']['success']
+            },
+            'arxiv': {
+                'total_calls': total_arxiv,
+                'success_rate': (self._api_performance['arxiv']['success'] / total_arxiv * 100) if total_arxiv > 0 else 0,
+                'rate_limited': self._api_performance['arxiv']['rate_limited'],
+                'failed': self._api_performance['arxiv']['failed'],
+                'successful': self._api_performance['arxiv']['success']
+            }
+        }
+        
+        return summary
+    
+    def download_pdf(self, paper):
+        """Download the PDF of a paper and return the content as bytes."""
+        # Check if this is a local file
+        if hasattr(paper, 'file_path') and paper.file_path:
+            logger.info(f"Reading local file: {paper.file_path}")
+            try:
+                with open(paper.file_path, 'rb') as f:
+                    return io.BytesIO(f.read())
+            except Exception as e:
+                logger.error(f"Failed to read local file {paper.file_path}: {e}")
+                return None
+        
+        # Check if paper.pdf_url is available
+        if paper.pdf_url:
+            pdf_url = paper.pdf_url
+            logger.info(f"Using provided PDF URL: {pdf_url}")
+        else:
+            # Construct the PDF URL manually from the paper ID
+            pdf_url = f"https://arxiv.org/pdf/{paper.get_short_id()}.pdf"
+            logger.info(f"PDF URL was None, constructed manually: {pdf_url}")
+        
+        logger.info(f"Downloading PDF from {pdf_url}")
+        
+        try:
+            response = requests.get(pdf_url, timeout=30)
+            response.raise_for_status()
+            return io.BytesIO(response.content)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download PDF for {paper.get_short_id()}: {e}")
+            return None
+
+    def extract_text_from_latex(self, latex_file_path):
+        """
+        Extract text from a LaTeX file
+        
+        Args:
+            latex_file_path: Path to the LaTeX file
+            
+        Returns:
+            String containing the LaTeX file content
+        """
+        try:
+            logger.info(f"Reading LaTeX file: {latex_file_path}")
+            with open(latex_file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            logger.info(f"Successfully read LaTeX file with {len(content)} characters")
+            return content
+        except UnicodeDecodeError:
+            # Try with latin-1 encoding if utf-8 fails
+            try:
+                logger.warning(f"UTF-8 encoding failed for {latex_file_path}, trying latin-1")
+                with open(latex_file_path, 'r', encoding='latin-1') as f:
+                    content = f.read()
+                logger.info(f"Successfully read LaTeX file with latin-1 encoding")
+                return content
+            except Exception as e:
+                logger.error(f"Failed to read LaTeX file {latex_file_path} with latin-1: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to read LaTeX file {latex_file_path}: {e}")
+            return None
+
+    def extract_text_from_pdf(self, pdf_content):
+        """
+        Extract text from a PDF content (BytesIO object)
+        """
+        if not pdf_content:
+            return None
+            
+        try:
+            # Try with PyPDF2 first
+            text = ""
+            pdf_content.seek(0)  # Reset file pointer
+            pdf_reader = PyPDF2.PdfReader(pdf_content)
+            
+            for page_num in range(len(pdf_reader.pages)):
+                page = pdf_reader.pages[page_num]
+                text += page.extract_text() + "\n"
+            
+            return text
+        except Exception as e:
+            logger.error(f"Error extracting text with PyPDF2: {str(e)}")
+            
+            try:
+                # Try with pdfplumber as a fallback
+                pdf_content.seek(0)  # Reset file pointer
+                with pdfplumber.open(pdf_content) as pdf:
+                    text = ""
+                    for page in pdf.pages:
+                        text += page.extract_text() + "\n"
+                    return text
+            except Exception as e2:
+                logger.error(f"Error extracting text with pdfplumber: {str(e2)}")
+                return None
+    
+    def find_bibliography_section(self, text):
+        """
+        Find the bibliography section in the text
+        """
+        if not text:
+            logger.warning("No text provided to find_bibliography_section")
+            return None
+        
+        # Log a sample of the text for debugging
+        text_sample = text[:500] + "..." if len(text) > 500 else text
+        logger.debug(f"Text sample: {text_sample}")
+        
+        # Common section titles for bibliography
+        section_patterns = [
+            r'(?i)references\s*\n',
+            r'(?i)bibliography\s*\n',
+            r'(?i)works cited\s*\n',
+            r'(?i)literature cited\s*\n',
+            r'(?i)references\s*$',  # End of document
+            r'(?i)\[\s*references\s*\]',  # [References]
+            r'(?i)^\s*references\s*$',  # References as a standalone line
+            r'(?i)^\s*bibliography\s*$',  # Bibliography as a standalone line
+            r'(?i)^\s*\d+\.\s*references\s*$',  # Numbered section: 7. References
+            r'(?i)references\s*and\s*citations',  # References and Citations
+            r'(?i)cited\s*references',  # Cited References
+            r'(?i)reference\s*list',  # Reference List
+            r'(?i)references\s*cited',  # References Cited
+            r'(?i)sources\s*cited',  # Sources Cited
+            r'(?i)sources',  # Sources
+            r'(?i)references\s*and\s*notes',  # References and Notes
+            r'\\begin\{thebibliography\}',  # LaTeX bibliography environment
+            r'\\bibliography\{[^}]+\}',  # BibTeX \bibliography{} command
+        ]
+        
+        # Try to find the bibliography section
+        bibliography_text = None
+        
+        for pattern in section_patterns:
+            matches = list(re.finditer(pattern, text))
+            if matches:
+                # Get the last match (in case there are multiple sections with similar names)
+                match = matches[-1]
+                start_pos = match.end()
+                
+                logger.debug(f"Found bibliography section with pattern: {pattern}")
+                logger.debug(f"Match: {match.group(0)}")
+                
+                # Find the next section heading or end of document
+                # Look for common section endings that come after references
+                next_section_patterns = [
+                    r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
+                    r'\n\s*\d+\.\s+[A-Z][A-Za-z\s]*\n',  # Numbered section: 8. Appendix
+                    r'\n\s*Appendix\s+[A-Z]',  # Appendix A
+                    r'\n\s*\[\s*[A-Za-z\s]+\s*\]',  # [Next Section]
+                    r'\n\s*[A-Z][A-Za-z\s]*\n\s*[A-Z][A-Za-z\s]*\n',  # Two consecutive capitalized lines
+                    r'\\end\{thebibliography\}',  # LaTeX bibliography environment end
+                    r'\\end\{document\}',  # LaTeX document end
+                ]
+                
+                end_pos = len(text)  # Default to end of document
+                
+                for next_pattern in next_section_patterns:
+                    next_match = re.search(next_pattern, text[start_pos:])
+                    if next_match:
+                        section_end = start_pos + next_match.start()
+                        # Only use this end position if it's reasonable (not too close to start)
+                        if section_end > start_pos + 100 and section_end < end_pos:
+                            end_pos = section_end
+                            logger.debug(f"Found section end with pattern: {next_pattern}")
+                            logger.debug(f"Section end at position: {section_end}")
+                
+                bibliography_text = text[start_pos:end_pos]
+                
+                # Check if we have a reasonable amount of text
+                if len(bibliography_text.strip()) < 50:
+                    logger.warning(f"Bibliography section seems too short ({len(bibliography_text)} chars), trying another pattern")
+                    continue
+                
+                logger.debug(f"Bibliography section length: {len(bibliography_text)} chars")
+                logger.debug(f"Bibliography sample: {bibliography_text[:200]}...")
+                
+                break
+        
+        if bibliography_text is None:
+            logger.warning("Could not find bibliography section with standard patterns")
+            
+            # Last resort: look for patterns that might indicate references
+            reference_indicators = [
+                r'\[\d+\]',  # [1], [2], etc.
+                r'\d+\.\s+[A-Z]',  # 1. Author
+                r'[A-Z][a-z]+,\s+[A-Z]\.',  # Smith, J.
+            ]
+            
+            for indicator in reference_indicators:
+                matches = list(re.finditer(indicator, text))
+                if len(matches) > 5:  # If we find multiple matches, it might be a reference section
+                    # Find the first match
+                    first_match = matches[0]
+                    # Look for the beginning of the line
+                    line_start = text.rfind('\n', 0, first_match.start())
+                    if line_start == -1:
+                        line_start = 0
+                    else:
+                        line_start += 1  # Skip the newline
+                    
+                    # Take from there to the end
+                    bibliography_text = text[line_start:]
+                    logger.info(f"Found potential bibliography section using indicator: {indicator}")
+                    break
+        
+        return bibliography_text
+    
+    def clean_author_name(self, author):
+        """
+        Clean up an individual author name by fixing common formatting issues.
+        
+        Args:
+            author: The author name string to clean
+            
+        Returns:
+            Cleaned author name string or None if the author should be skipped
+        """
+        # Skip URLs
+        if re.match(r'^https?://', author):
+            return None
+            
+        # Normalize whitespace
+        author = re.sub(r'\s+', ' ', author.strip())
+        
+        # Remove "and" prefix/suffix, trailing commas
+        author = re.sub(r'^and\s+', '', author)
+        author = re.sub(r'\s+and$', '', author)
+        author = re.sub(r',\s*$', '', author)
+        
+        # Handle "et al" - skip it
+        if author.lower() == 'et al' or 'et al.' in author.lower():
+            return None
+        
+        # Handle special case for "Firstname Initial. Lastname"
+        name_with_initial_match = re.match(r'^([A-Z][a-z]+)\s+([A-Z])\.?\s+([A-Z][a-z]+)$', author)
+        if name_with_initial_match:
+            firstname = name_with_initial_match.group(1)
+            initial = name_with_initial_match.group(2)
+            lastname = name_with_initial_match.group(3)
+            author = f"{firstname} {initial}. {lastname}"
+        
+        # Fix hyphenated names (e.g., "Herbert-V oss" -> "Herbert-Voss")
+        author = re.sub(r'-\s+([A-Z])', r'-\1', author)
+        
+        # Ensure period after single-letter initial if missing
+        author = re.sub(r'(\s[A-Z])(\s|$)', r'\1.\2', author)
+        
+        # Ensure consistent spacing around periods in initials
+        author = re.sub(r'\.([A-Z])', r'. \1', author)
+        
+        # Fix double initials without proper spacing (e.g., "V.V" -> "V. V.")
+        author = re.sub(r'([A-Z])\.([A-Z])(?!\w)', r'\1. \2.', author)
+        
+        # Fix initials with weird spacing (e.g., "V V" -> "V. V.")
+        author = re.sub(r'(\s[A-Z])\s+([A-Z](?:\s|$))', r'\1. \2.', author)
+        
+        if author and not re.match(r'^https?://', author):
+            return author
+        
+        return None
+    
+    def extract_authors_list(self, authors_text):
+        """
+        Extract a list of authors from text.
+        Handles various formats including names with initials.
+        
+        Args:
+            authors_text: Text containing only the author names
+            
+        Returns:
+            List of author names
+        """
+        # Check if the text is a URL
+        if re.match(r'^https?://', authors_text):
+            # This is a URL, not an author list
+            return [{"is_url_reference": True}]
+        
+        # Normalize whitespace and fix line breaks in names
+        authors_text = re.sub(r'\s+', ' ', authors_text).strip()
+        
+        # Handle cases like "Vinyals & Kaiser" -> "Vinyals, Kaiser"
+        authors_text = re.sub(r'([A-Za-z]+)\s*&\s*([A-Za-z]+)', r'\1, \2', authors_text)
+        
+        # Fix common hyphenation issues from line breaks (e.g., "Fredrik- son" -> "Fredrikson")
+        authors_text = re.sub(r'([a-z])- ([a-z])', r'\1\2', authors_text, flags=re.IGNORECASE)
+        
+        # Normalize spacing around periods
+        authors_text = re.sub(r'([A-Z])\s+\.\s+', r'\1. ', authors_text)
+        
+        # Fix issues with spaces between initials (e.g., "V . Le" -> "V. Le")
+        authors_text = re.sub(r'([A-Z])\s+\.\s*([A-Z])', r'\1. \2', authors_text)
+        authors_text = re.sub(r'([A-Z])\s+\.\s*([a-z])', r'\1. \2', authors_text)
+        
+        # Check if we potentially have a full reference instead of just authors
+        # Look for patterns that indicate this might include the title
+        # Be more specific: look for period followed by what looks like a title (multiple words, starting with capital)
+        # This should match title patterns but not author name patterns like "J. Zico"
+        title_pattern = r'\.\s+([A-Z]\w+(?:\s+\w+){2,})'  # Capital word followed by at least 2 more words
+        if re.search(title_pattern, authors_text) and ',' in authors_text:
+            # This appears to be a complete reference, not just authors
+            # Only take the part before the title
+            match = re.search(title_pattern, authors_text)
+            if match:
+                title_start = match.start()
+                authors_text = authors_text[:title_start].strip()
+        
+        # Check if the author list follows the pattern: "Author1, Author2, and Author3"
+        # This is the most common format in academic citations
+        
+        # First, handle the case where "and" appears before the last author
+        and_parts = re.split(r'\s+and\s+', authors_text, 1)
+        
+        if len(and_parts) > 1:
+            # We have a list with "and" (e.g., "Author1, Author2, and Author3")
+            main_list = and_parts[0].strip()
+            last_author = and_parts[1].strip()
+            
+            # Split the main list by commas
+            authors = [a.strip() for a in main_list.split(',') if a.strip()]
+            
+            # Add the last author
+            if last_author:
+                authors.append(last_author)
+        else:
+            # No "and" found, just split by commas
+            authors = [a.strip() for a in authors_text.split(',') if a.strip()]
+        
+        # Clean up each author name
+        cleaned_authors = []
+        for author in authors:
+            cleaned_author = self.clean_author_name(author)
+            if cleaned_author:
+                cleaned_authors.append(cleaned_author)
+        
+        return cleaned_authors
+    
+    def clean_title(self, title):
+        """
+        Clean up a title by fixing hyphenation and other formatting issues.
+        
+        Args:
+            title: The title string to clean
+            
+        Returns:
+            Cleaned title string
+        """
+        if not title:
+            return ""
+            
+        # Fix hyphenation due to line breaks (remove hyphens at end of words)
+        title = re.sub(r'([a-z])- ([a-z])', r'\1\2', title, flags=re.IGNORECASE)
+        
+        # Additional hyphenation patterns that might appear in academic papers
+        title = re.sub(r'([a-z])-\n([a-z])', r'\1\2', title, flags=re.IGNORECASE) # Hyphen with newline
+        title = re.sub(r'([a-z])-$([a-z])', r'\1\2', title, flags=re.IGNORECASE)  # Hyphen at line end
+        
+        # Normalize whitespace
+        title = re.sub(r'\s+', ' ', title).strip()
+        
+        # Replace common words that sometimes get split across library/document names
+        title = re.sub(r'(?i)ll ms\b', 'llms', title)  # Fix "ll ms" to "llms"
+        
+        title = self.remove_year_from_title(title)
+        title = self.clean_conference_markers_from_title(title)
+        return title
+
+    def clean_conference_markers_from_title(self, title):
+        """
+        Remove conference markers like "In Conference Name" from titles.
+        
+        Args:
+            title: The title string to clean
+                
+        Returns:
+            Cleaned title string without conference markers
+        """
+        # Common conference markers to remove
+        conference_patterns = [
+            r'\s+In\s+(?:Advances|Proceedings|Conference|Journal).*$',
+            r'\s+In\s+NIPS.*$',
+            r'\s+In\s+NeurIPS.*$',
+            r'\s+In\s+ICLR.*$',
+            r'\s+In\s+ICML.*$',
+            r'\s+In\s+ACL.*$',
+            r'\s+In\s+EMNLP.*$',
+        ]
+        
+        # Try each pattern
+        for pattern in conference_patterns:
+            title = re.sub(pattern, '', title, flags=re.IGNORECASE)
+        
+        return title.strip()
+    
+    def remove_year_from_title(self, title):
+        """
+        Remove year (e.g., '2023', '2021') from the beginning or end of a title.
+        
+        Args:
+            title: The title to clean
+            
+        Returns:
+            Title with year removed if it was at the beginning or end
+        """
+        if not title:
+            return ""
+        
+        # Pattern for year at the beginning (e.g., "2024. Title")
+        year_match = re.search(r'^(19|20)\d{2}\.?\s*', title)
+        if year_match:
+            # Remove the year from the beginning
+            title = title[year_match.end():].strip()
+        
+        # Pattern for year format with comma (e.g., ", 2023")
+        year_match = re.search(r',\s*(19|20)\d{2}\.?$', title)
+        if year_match:
+            # Remove the year and any trailing comma
+            title = title[:year_match.start()].strip()
+            return title
+        
+        # Pattern for year at the end without comma (e.g., "2023" or "2023.")
+        year_match = re.search(r'\s+(19|20)\d{2}\.?$', title)
+        if year_match:
+            # Remove the year at the end
+            title = title[:year_match.start()].strip()
+            return title
+        
+        # Remove duplicate years in parentheses like "(2023)" if it appears after a year
+        title = re.sub(r'\.\s*\((19|20)\d{2}\)', '.', title)
+        
+        return title
+    
+    def extract_authors_title_from_academic_format(self, ref_text):
+        """
+        Improved function to extract authors and title from academic paper reference format.
+        Handles various formats including cases with periods in author names.
+        
+        Args:
+            ref_text: The reference text to parse
+            
+        Returns:
+            Tuple of (authors list, title) or None if extraction failed
+        """
+        # First, normalize the text - replace newlines with spaces
+        cleaned_ref = re.sub(r'\s+', ' ', ref_text).strip()
+        
+        # Fix common hyphenation issues from line breaks BEFORE pattern matching
+        # This handles cases like "Fredrik- son" -> "Fredrikson"
+        cleaned_ref = re.sub(r'([a-z])- ([a-z])', r'\1\2', cleaned_ref, flags=re.IGNORECASE)
+        
+        # Remove any leading reference numbers like [1]
+        cleaned_ref = re.sub(r'^\s*\[\d+\]\s*', '', cleaned_ref)
+        
+        # Normalize spacing around periods
+        cleaned_ref = re.sub(r'([A-Z])\s+\.\s+', r'\1. ', cleaned_ref)
+        cleaned_ref = re.sub(r'([A-Z])\s+\.([A-Za-z])', r'\1. \2', cleaned_ref)
+
+        # Check if this is a URL-based reference (common in some papers)
+        if re.match(r'^https?://', cleaned_ref):
+            # This is likely a URL reference, not a standard academic citation
+            url_match = re.search(r'(https?://[^\s]+)', cleaned_ref)
+            if url_match:
+                # Extract the URL
+                url = url_match.group(1).strip()
+                
+                # For URL references, extract any remaining text as title
+                remaining_text = cleaned_ref.replace(url, '').strip()
+                # Remove trailing periods and clean up
+                remaining_text = re.sub(r'^\s*[.\s]*|[.\s]*$', '', remaining_text)
+                
+                # Return a special marker to indicate this is a URL reference
+                return [{"is_url_reference": True}], remaining_text if remaining_text else url
+        
+        # Also check if the reference contains only a URL (possibly with some ID)
+        if re.search(r'^https?://[^\s]+(?:\s+[A-Za-z0-9\-]+)*\s*\.?\s*$', cleaned_ref):
+            # This is likely just a URL with maybe some ID
+            url_match = re.search(r'(https?://[^\s]+)', cleaned_ref)
+            if url_match:
+                url = url_match.group(1).strip()
+                remaining_text = cleaned_ref.replace(url, '').strip()
+                # Remove trailing periods and clean up
+                remaining_text = re.sub(r'^\s*[.\s]*|[.\s]*$', '', remaining_text)
+                
+                return [{"is_url_reference": True}], remaining_text if remaining_text else url
+            
+        # Special case for authors with last names that end right before title
+        # Handle patterns like "... and Quoc V. Le. Multi-task ..." 
+        # Be more careful to avoid splitting names like "Le" from "Quoc V. Le"
+        
+        # Handle references with year between authors and title
+        # Pattern: "Authors. YEAR. Title: Subtitle. URL" - for cases like the Hashimoto reference
+        year_between_authors_title_match = re.search(r'(.*?)\.\s+(19|20)\d{2}\.\s+([^:]+:[^.]*?)\.\s+(https?://[^\s]+)', cleaned_ref)
+        if year_between_authors_title_match:
+            authors_text = year_between_authors_title_match.group(1).strip()
+            title = year_between_authors_title_match.group(3).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # First try: Look for arXiv format specifically - most reliable
+        arxiv_specific_match = re.search(r'(.*?)\.\s+([A-Z][^.]{1,100}?[.!?]?)\s+arXiv\s+preprint\s+arXiv:', cleaned_ref)
+        if arxiv_specific_match:
+            authors_text = arxiv_specific_match.group(1).strip()
+            title = arxiv_specific_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Try to find the pattern for references with years at the end
+        # Pattern: "Authors. Title, YEAR." - but NOT "Authors. Title. Journal, Volume:Pages, YEAR." 
+        # and NOT "Authors. Title. In Conference, pages X-Y, YEAR."
+        # Make sure we don't match references that have journal volume info or conference proceedings
+        year_at_end_match = re.search(r'(.*?)\.\s+([^.]+?),\s+(19|20)\d{2}\.?\s*$', cleaned_ref)
+        if year_at_end_match:
+            # Check if the "title" contains patterns that indicate this is actually venue/journal info
+            potential_title = year_at_end_match.group(2).strip()
+            authors_and_title = year_at_end_match.group(1).strip()
+            
+            # Skip if the "title" looks like journal volume info: "Journal Name , Volume:Pages"
+            if re.search(r'.+\s*,\s*\d+(\(\d+\))?:\d+', potential_title):
+                pass  # Skip this pattern
+            # Skip if the "title" looks like conference proceedings: "In Conference", "InConference", or "In Conference, pages X-Y"
+            elif re.match(r'^In[A-Z]', potential_title) or potential_title.startswith('In '):
+                pass  # Skip this pattern - it's clearly a venue/conference name
+            # Skip if the authors+title part contains obvious venue indicators that suggest wrong parsing
+            elif re.search(r'\.\s+(In\s+.*|Proceedings\s+of|Conference\s+on)\s*$', authors_and_title):
+                pass  # Skip this pattern
+            else:
+                # This looks like a legitimate "Authors. Title, Year." pattern
+                authors_text = authors_and_title
+                title = potential_title
+                
+                # Extract authors
+                authors = self.extract_authors_list(authors_text)
+                
+                # Clean the title
+                title = self.clean_title(title)
+                
+                if authors and title:
+                    return authors, title
+        
+        # Try pattern for references where title ends with period and year is at end
+        # Pattern: "Authors. Title. YEAR." 
+        year_at_end_with_period_match = re.search(r'(.*?)\.\s+([^.]+?)\.\s+(19|20)\d{2}\.?\s*$', cleaned_ref)
+        if year_at_end_with_period_match:
+            authors_text = year_at_end_with_period_match.group(1).strip()
+            title = year_at_end_with_period_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Second try: Look for patterns with common academic reference formats
+        # Pattern 1: Authors ending with initials and common last names before title
+        author_name_patterns = [
+            # Pattern for "... and FirstName LastInitial. LastName. Title."
+            r'(.*\s+and\s+[A-Z][a-z]+\s+[A-Z]\.\s+[A-Z][a-z]{1,10})\.\s+(.*?)(?:\.\s+(?:In|CoRR|arXiv|Journal|Proceedings))',
+            # Pattern for "... and FirstName LastName. Title."
+            r'(.*\s+and\s+[A-Z][a-z]+\s+[A-Z][a-z]+)\.\s+(.*?)(?:\.\s+(?:In|CoRR|arXiv|Journal|Proceedings))',
+        ]
+        
+        for pattern in author_name_patterns:
+            author_name_at_title_match = re.search(pattern, cleaned_ref)
+            if author_name_at_title_match:
+                authors_text = author_name_at_title_match.group(1).strip()
+                title = author_name_at_title_match.group(2).strip()
+                
+                # Extract authors
+                authors = self.extract_authors_list(authors_text)
+                
+                # Clean the title
+                title = self.clean_title(title)
+                
+                if authors and title:
+                    return authors, title
+        
+        # Special cases: check for common patterns where the title is incorrectly extracted
+        # Check for arXiv preprint format that might confuse the parser
+        arxiv_preprint_match = re.search(r'(.*?)\.\s+(.*?[.!?]?)\s+arXiv\s+preprint\s+arXiv:', cleaned_ref)
+        if arxiv_preprint_match:
+            authors_text = arxiv_preprint_match.group(1).strip()
+            title = arxiv_preprint_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Handle conference proceedings format with improved pattern matching
+        # Handle both "In Conference" and cases where "In" is attached to conference name like "InInternational"
+        # Be more careful about author name parsing - look for full name patterns
+        conference_match = re.search(r'(.*?(?:\s+[A-Z][a-z]*\.?\s*)*)\.\s+([^.]+?)\.\s+In(?:\s+|(?=[A-Z]))(.*?)(?:,|\s+\(|\s+\d{4})', cleaned_ref)
+        if conference_match:
+            authors_text = conference_match.group(1).strip()
+            title = conference_match.group(2).strip()
+            
+            # Additional check: if the title starts with what looks like a last name, 
+            # it's probably part of the author list that got misplaced
+            if re.match(r'^[A-Z][a-z]+\.?\s+', title):
+                # Try a different approach - look for common author ending patterns
+                author_ending_patterns = [
+                    r'(.*?\s+and\s+[A-Z][a-z]+\s+[A-Z]\.?\s+[A-Z][a-z]+)\.\s+([^.]+?)\.\s+In(?:\s+|(?=[A-Z]))',
+                    r'(.*?\s+[A-Z][a-z]+\s+[A-Z]\.?\s+[A-Z][a-z]+)\.\s+([^.]+?)\.\s+In(?:\s+|(?=[A-Z]))',
+                ]
+                
+                for pattern in author_ending_patterns:
+                    alt_match = re.search(pattern, cleaned_ref)
+                    if alt_match:
+                        authors_text = alt_match.group(1).strip()
+                        title = alt_match.group(2).strip()
+                        break
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+
+        # Handle CoRR format specifically - very common in CS papers
+        # Pattern: "Authors. Title. CoRR abs/ID, YEAR." - handle titles with question marks
+        corr_match = re.search(r'(.*?)\.\s+([^?]+\?)\s*CoRR\s+abs/([^,\s]+)\s*,?\s+(19|20)\d{2}', cleaned_ref)
+        if not corr_match:
+            # Fallback pattern for titles without question marks
+            corr_match = re.search(r'(.*?)\.\s+([^.]+?)\.\s+CoRR\s+abs/([^,\s]+)\s*,?\s+(19|20)\d{2}', cleaned_ref)
+        
+        if corr_match:
+            authors_text = corr_match.group(1).strip()
+            title = corr_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+
+            if authors and title:
+                return authors, title
+        
+        # Handle references with titles that start with colons and URLs at the end
+        # Pattern: "Authors. Title: Subtitle. URL" - specifically for cases like "Stanford Alpaca: An Instruction-following LLaMA model"
+        colon_title_url_match = re.search(r'(.*?)\.\s+([^:]+:[^.]*?)\.\s+(https?://[^\s]+)', cleaned_ref)
+        if colon_title_url_match:
+            authors_text = colon_title_url_match.group(1).strip()
+            title = colon_title_url_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Handle journal format with volume:pages - Pattern: "Authors. Title. Journal, Volume:Pages, Year"
+        journal_volume_match = re.search(r'(.*?)\.\s+([^.]+?)\.\s+([^,]+)\s*,\s*\d+(\(\d+\))?:\d+[^,]*,\s+(19|20)\d{2}', cleaned_ref)
+        if journal_volume_match:
+            authors_text = journal_volume_match.group(1).strip()
+            title = journal_volume_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Handle journal format with venue information
+        # Pattern: "Authors. Title. Journal/Venue info, Year."
+        journal_match = re.search(r'(.*?)\.\s+([^.]+?)\.\s+([^,]+),\s+(19|20)\d{2}', cleaned_ref)
+        if journal_match:
+            authors_text = journal_match.group(1).strip()
+            title = journal_match.group(2).strip()
+            venue = journal_match.group(3).strip()
+            
+            # Check if the venue contains volume/page info - this is a good sign that we have the right split
+            # Pattern like "Journal Name , Volume:Pages" or "Journal Name, Volume(Issue):Pages"
+            if re.search(r'.+\s*,\s*\d+(\(\d+\))?:\d+', venue):
+                # This looks like "Journal Name , Volume:Pages" - this is correct
+                # Extract authors
+                authors = self.extract_authors_list(authors_text)
+                
+                # Clean the title
+                title = self.clean_title(title)
+                
+                if authors and title:
+                    return authors, title
+            
+            # Check if what we think is the title is actually venue information
+            # Common venue patterns that shouldn't be titles: "CoRR abs/...", but not things like "Nature Machine Intelligence"
+            venue_indicators_in_title = ['CoRR abs/', 'arXiv:', 'IEEE Transactions', 'ACM Transactions']
+            if any(indicator in title for indicator in venue_indicators_in_title):
+                # The "title" is likely venue info, this pattern doesn't apply
+                return None
+            
+            # For normal journal references, the extraction should be correct
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Handle journal format
+        journal_match = re.search(r'(.*?)\.\s+(.*?)\.\s+(?:Journal|Proceedings|IEEE|ACM)', cleaned_ref)
+        if journal_match:
+            authors_text = journal_match.group(1).strip()
+            title = journal_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # Pattern to find title after authors in standard academic format
+        # Authors. Title. Venue, Year.
+        # Improved to handle author names with initials like "J. Zico Kolter"
+        # Look for patterns where authors end and title begins
+        
+        # Strategy: Look for a period that's likely to separate authors from title
+        # This should be after a complete author name, not after an initial
+        author_title_patterns = [
+            # Pattern 1: Look for author lists ending with "and FirstName LastName." followed by title
+            r'(.*\s+and\s+[A-Z][a-z]+\s+[A-Z][a-z]+)\.\s+([A-Z][^.]+?)\.\s+',
+            # Pattern 2: Look for author lists ending with "FirstName LastName." followed by title  
+            r'(.*[A-Z][a-z]+\s+[A-Z][a-z]+)\.\s+([A-Z][^.]+?)\.\s+',
+            # Pattern 3: Look for author lists with initials ending with "Initial LastName." followed by title
+            r'(.*[A-Z]\.\s+[A-Z][a-z]+)\.\s+([A-Z][^.]+?)\.\s+',
+        ]
+        
+        authors_text = None
+        title = None
+        
+        for pattern in author_title_patterns:
+            pattern_match = re.search(pattern, cleaned_ref)
+            if pattern_match:
+                authors_text = pattern_match.group(1).strip()
+                title = pattern_match.group(2).strip()
+                break
+        
+        # If no specific pattern matched, fall back to the original simple pattern but with validation
+        if not authors_text or not title:
+            simple_pattern = re.search(r'([^\.]+)\.([^\.]+)\.', cleaned_ref)
+            if simple_pattern:
+                potential_authors = simple_pattern.group(1).strip()
+                potential_title = simple_pattern.group(2).strip()
+                
+                # Only use this if the potential_title doesn't look like part of author names
+                # Check if potential_title starts with what looks like a continuation of author names
+                if not re.match(r'^\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*(?:,\s*and\s+)?', potential_title):
+                    authors_text = potential_authors
+                    title = potential_title
+        
+        if authors_text and title:
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            # If the title looks like an author name (e.g., "Dauphin"), it's likely a parsing error
+            # Check if the title consists of only names/initials
+            if re.match(r'^([A-Z][a-z]+\s+)+([A-Z]\.?\s*)+$', title):
+                # This looks like author names continued, reject this match
+                authors_text = None
+                title = None
+            elif len(title.split()) <= 2 and not re.search(r'\d{4}', title):
+                # Title is too short and might be incomplete, reject this match
+                authors_text = None
+                title = None
+            else:
+                # This looks like a valid match
+                if authors and title:
+                    return authors, title
+        
+        # Look for patterns that indicate the end of authors and beginning of title
+        title_start_positions = []
+        
+        # Check for standard separator between authors and title (usually a period)
+        period_positions = [m.start() for m in re.finditer(r'\.', cleaned_ref)]
+        
+        # Find potential title start positions (after a period)
+        for pos in period_positions:
+            # Skip if this appears to be within an author's initials
+            before_period = cleaned_ref[:pos].strip()
+            after_period = cleaned_ref[pos+1:].strip()
+            
+            # Skip if it looks like an initial (single capital letter)
+            if re.search(r'[A-Z]\.$', before_period):
+                continue
+                
+            # Skip if it's followed by another initial
+            if re.match(r'^[A-Z]\.\s', after_period):
+                continue
+                
+            # This looks like a good candidate for title start
+            title_start_positions.append(pos + 1)  # +1 to skip the period
+        
+        # If we found potential title positions, use the first one
+        if title_start_positions:
+            first_title_pos = title_start_positions[0]
+            authors_text = cleaned_ref[:first_title_pos-1].strip()  # -1 to exclude the period
+            title_and_rest = cleaned_ref[first_title_pos:].strip()
+            
+            # Extract title - goes until next major period
+            title_parts = re.split(r'\.\s+', title_and_rest, 1)
+            title = title_parts[0].strip()
+            
+            # Process the authors text
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            # If the title has phrases that typically indicate an incomplete extraction
+            # (like a single name or common paper elements), try for a better extraction
+            if len(title.split()) <= 2 or re.match(r'^[A-Z][a-z]+$', title):
+                if len(title_parts) > 1 and title_parts[1]:
+                    # Try the next part instead
+                    better_title_parts = re.split(r'\.\s+', title_parts[1], 1)
+                    if better_title_parts and len(better_title_parts[0].split()) > 1:
+                        title = better_title_parts[0].strip()
+                        title = self.clean_title(title)
+            
+            return authors, title
+        
+        # If we get here, try a manual split
+        # Look for patterns like "Author1, Author2, and Author3. Title."
+        manual_split_match = re.search(r'([A-Z][^\.]+(?:,|and)[^\.]+)\.([^\.]+)', cleaned_ref)
+        if manual_split_match:
+            authors_text = manual_split_match.group(1).strip()
+            title = manual_split_match.group(2).strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            if authors and title:
+                return authors, title
+        
+        # If we get here, we couldn't find a clear author/title split
+        # Just try to extract any author-like patterns from the text
+        authors = self.extract_authors_list(cleaned_ref)
+        
+        # For the title, use the first sentence after what looks like authors
+        if authors:
+            # Check if authors contains URL reference markers
+            if any(isinstance(author, dict) and author.get('is_url_reference', False) for author in authors):
+                return authors, "URL Reference"
+            
+            # Convert authors to strings for processing
+            author_strings = []
+            for author in authors:
+                if isinstance(author, dict) and author.get('is_url_reference', False):
+                    author_strings.append("URL Reference")
+                else:
+                    author_strings.append(str(author))
+            
+            # Try to find where the author list ends
+            authors_text = ", ".join(author_strings)
+            last_author = author_strings[-1]
+            author_end = cleaned_ref.find(last_author) + len(last_author)
+            
+            # Look for a period after the last author
+            period_after = cleaned_ref.find('.', author_end)
+            if period_after > 0:
+                # Take text after the period as title
+                title_start = period_after + 1
+                title_end = cleaned_ref.find('.', title_start)
+                if title_end > 0:
+                    title = cleaned_ref[title_start:title_end].strip()
+                else:
+                    title = cleaned_ref[title_start:].strip()
+                    
+                # Clean the title
+                title = self.clean_title(title)
+                
+                return authors, title
+        
+        # If all else fails, return placeholder values
+        if authors:
+            return authors, "Untitled"
+        
+        # Last resort
+        return ["Unknown Author"], "Untitled"
+
+    
+    def verify_db_reference(self, source_paper, reference, db_conn):
+        """
+        Verify a reference using local database with specific query order
+        
+        Args:
+            source_paper: The paper containing the reference
+            reference: The reference to verify
+            db_conn: Database connection object
+                
+        Returns:
+            List of errors or None if no errors found
+        """
+        import sqlite3
+        import json
+        import time
+        
+        logger.debug(f"DB Verification: Starting verification for reference - Title: '{reference.get('title', '')}', Authors: {reference.get('authors', [])}, Year: {reference.get('year', 0)}")
+        
+        cursor = db_conn.cursor()
+        paper_data = None
+        search_strategy = None
+        
+        # Extract reference data
+        title = reference.get('title', '')
+        authors = reference.get('authors', [])
+        year = reference.get('year', 0)
+        url = reference.get('url', '')
+        doi = None
+        if 'doi' in reference and reference['doi']:
+            doi = reference['doi']
+        elif url and 'doi.org' in url:
+            doi_match = re.search(r'doi\.org/([^/\s]+)', url)
+            if doi_match:
+                doi = doi_match.group(1)
+
+        # Strategy 3: Search by normalized paper title
+        if not paper_data and title:
+            normalized_title = self.non_arxiv_checker.normalize_paper_title(title) if hasattr(self.non_arxiv_checker, 'normalize_paper_title') else title.lower().replace(' ', '').replace('.', '').replace(',', '')
+            
+            logger.debug(f"DB Verification: Trying normalized title search for: '{normalized_title}'")
+            
+            query = "SELECT * FROM papers WHERE normalized_paper_title = ?"
+            params = [normalized_title]
+            
+            logger.debug(f"DB Query [Normalized title search]: {query}")
+            logger.debug(f"DB Params: {params}")
+
+            start_time = time.time()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            execution_time = time.time() - start_time
+
+            logger.debug(f"DB Execution Time: {execution_time:.3f}s")
+            logger.debug(f"DB Result Count: {len(rows)}")
+
+            if len(rows) > 1:
+                for row in rows:
+                    check_paper_data = dict(row)
+                    check_paper_data['authors'] = json.loads(check_paper_data['authors'])
+
+                    # check if the authors match
+                    if authors:
+                        db_authors = [author.get('name', '') for author in check_paper_data['authors']]
+
+                        authors_match, author_error = self.compare_authors(authors, db_authors)
+                        if authors_match:
+                            paper_data = check_paper_data
+                            search_strategy = "Normalized title with author match"
+                            break
+
+            elif len(rows) == 1:
+                row = rows[0]
+                paper_data = dict(row)
+                search_strategy = "Normalized title"
+        
+        # Strategy 4: Search by paper title (exact match)
+        if not paper_data and title:
+            logger.debug(f"DB Verification: Trying exact title search for: '{title}'")
+            query = "SELECT * FROM papers WHERE title = ?"
+            params = [title]
+            
+            logger.debug(f"DB Query [Exact title search]: {query}")
+            logger.debug(f"DB Params: {params}")
+
+            start_time = time.time()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            execution_time = time.time() - start_time
+            
+            logger.debug(f"DB Execution Time: {execution_time:.3f}s")
+            logger.debug(f"DB Result Count: {1 if row else 0}")
+            
+            if row:
+                paper_data = dict(row)
+                search_strategy = "Exact title"
+        
+        #  Search by DOI        
+        if not paper_data and doi:
+            logger.debug(f"DB Verification: Trying DOI search for: {doi}")
+            query = "SELECT * FROM papers WHERE externalIds_DOI = ?"
+            params = [doi]
+            
+            start_time = time.time()
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            execution_time = time.time() - start_time
+            
+            logger.debug(f"DB Query [DOI search]: {query}")
+            logger.debug(f"DB Params: {params}")
+            logger.debug(f"DB Execution Time: {execution_time:.3f}s")
+            logger.debug(f"DB Result Count: {1 if row else 0}")
+            
+            if row:
+                paper_data = dict(row)
+                search_strategy = "DOI"
+        
+        # Strategy 2: Search by ArXiv ID
+        if not paper_data and reference.get('type') == 'arxiv':
+            arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
+            if arxiv_id:
+                logger.debug(f"DB Verification: Trying ArXiv ID search for: {arxiv_id}")
+                query = "SELECT * FROM papers WHERE externalIds_ArXiv = ?"
+                params = [arxiv_id]
+                
+                logger.debug(f"DB Query [ArXiv ID search]: {query}")
+                logger.debug(f"DB Params: {params}")
+
+                start_time = time.time()
+                cursor.execute(query, params)
+                row = cursor.fetchone()
+                execution_time = time.time() - start_time
+
+                logger.debug(f"DB Execution Time: {execution_time:.3f}s")
+                logger.debug(f"DB Result Count: {1 if row else 0}")
+                
+                if row:
+                    paper_data = dict(row)
+                    search_strategy = "ArXiv ID"
+                
+        # If no paper found, return unverified
+        if not paper_data:
+            logger.debug("DB Verification: No matching paper found in database")
+            return [{"error_type": "unverified", "error_details": "Reference could not be found in local database"}]
+        
+        logger.debug(f"DB Verification: Found paper using {search_strategy} - Title: '{paper_data.get('title', '')}', Year: {paper_data.get('year', '')}")
+        
+        # Process the paper data
+        try:
+            # Extract authors from JSON
+            if isinstance(paper_data['authors'], str) and len(paper_data['authors']) > 0:
+                paper_data['authors'] = json.loads(paper_data['authors'])
+            elif not isinstance(paper_data['authors'], list):
+                paper_data['authors'] = []
+            
+            # Reconstruct external IDs from flattened columns
+            external_ids = {}
+            for key, value in paper_data.items():
+                if key.startswith('externalIds_') and value:
+                    external_id_type = key.replace('externalIds_', '')
+                    external_ids[external_id_type] = value
+            paper_data['externalIds'] = external_ids
+            
+        except Exception as e:
+            logger.warning(f"Error processing paper data: {e}")
+            return [{"error_type": "unverified", "error_details": "Error processing paper data from database"}]
+        
+        # Verify the reference
+        errors = []
+
+        # verify title
+        if title and paper_data.get('title'):
+            normalized_title = self.non_arxiv_checker.normalize_paper_title(title) if hasattr(self.non_arxiv_checker, 'normalize_paper_title') else title.lower().replace(' ', '').replace('.', '').replace(',', '')
+            db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
+            
+            if normalized_title != db_title:
+                logger.debug(f"DB Verification: Title mismatch - cited: '{title}', actual: '{paper_data.get('title')}'")
+                errors.append({
+                    'error_type': 'title',
+                    'error_details': f"Title mismatch: cited as '{title}' but actually '{paper_data.get('title')}'",
+                    'ref_title_correct': paper_data.get('title')
+                })
+        
+        # Verify authors
+        if authors and paper_data.get('authors'):
+            # Extract author names from database data
+            correct_names = [author.get('name', '') for author in paper_data['authors']]
+            authors_match, author_error = self.compare_authors(authors, correct_names)
+            
+            if not authors_match:
+                logger.debug(f"DB Verification: Author mismatch - {author_error}")
+                errors.append({
+                    'error_type': 'author',
+                    'error_details': author_error,
+                    'ref_authors_correct': ', '.join(correct_names)
+                })
+        
+        # Verify year
+        paper_year = paper_data.get('year')
+        if year and paper_year and year != paper_year:
+            logger.debug(f"DB Verification: Year mismatch - cited: {year}, actual: {paper_year}")
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'ref_year_correct': paper_year
+            })
+        
+        # Verify DOI
+        if doi and external_ids.get('DOI') and doi.lower() != external_ids['DOI'].lower():
+            logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
+            errors.append({
+                'error_type': 'doi',
+                'error_details': f"DOI mismatch: cited as {doi} but actually {external_ids['DOI']}",
+                'ref_doi_correct': external_ids['DOI']
+            })
+
+        # Verify ArXiv ID
+        if reference.get('type') == 'arxiv':
+            ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
+            db_arxiv_id = external_ids.get('ArXiv', '')
+            
+            if ref_arxiv_id and db_arxiv_id and ref_arxiv_id.lower() != db_arxiv_id.lower():
+                logger.debug(f"DB Verification: ArXiv ID mismatch - cited: {ref_arxiv_id}, actual: {db_arxiv_id}")
+                errors.append({
+                    'error_type': 'arxiv',
+                    'error_details': f"ArXiv ID mismatch: cited as {ref_arxiv_id} but actually {db_arxiv_id}",
+                    'ref_arxiv_correct': db_arxiv_id
+                })
+        
+        if errors:
+            logger.debug(f"DB Verification: Found {len(errors)} errors")
+        else:
+            logger.debug("DB Verification: No errors found")
+        
+        return errors if errors else None
+
+    def verify_reference(self, source_paper, reference):
+        """
+        Verify if a reference is accurate
+        
+        Args:
+            source_paper: The paper containing the reference
+            reference: The reference to verify
+                
+        Returns:
+            List of errors or None if no errors found
+        """
+        # Check if reference authors contains "URL Reference" marker
+        if reference.get('authors') and "URL Reference" in reference.get('authors', []):
+            # Skip verification for URL references
+            return None
+        
+        # If database mode is enabled, use database for all references
+        if self.db_path:
+            # Use the database connection from the non_arxiv_checker
+            if hasattr(self.non_arxiv_checker, 'conn'):
+                db_conn = self.non_arxiv_checker.conn
+                return self.verify_db_reference(source_paper, reference, db_conn)
+            else:
+                logger.warning("Database path specified but no connection available")
+                return [{"error_type": "unverified", "error_details": "Database connection not available"}]
+        
+        # Check if it's an arXiv reference
+        if reference.get('type') == 'arxiv':
+            return self.verify_arxiv_reference(source_paper, reference)
+        else:
+            return self.verify_non_arxiv_reference(source_paper, reference)
+    
+    def verify_arxiv_reference(self, source_paper, reference):
+        """
+        Verify if an arXiv reference is accurate
+        
+        Args:
+            source_paper: The paper containing the reference
+            reference: The reference to verify
+            
+        Returns:
+            List of errors or None if no errors found
+        """
+        # Extract ArXiv ID from reference URL
+        ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
+        
+        if not ref_arxiv_id:
+            # Mark as unverified instead of no errors
+            return [{"error_type": "unverified", "error_details": "Could not extract arXiv ID from URL"}]
+        
+        # Get correct metadata for the reference
+        correct_paper = self.get_paper_metadata(ref_arxiv_id)
+        
+        if not correct_paper:
+            logger.warning(f"Could not fetch metadata for reference {ref_arxiv_id}")
+            # Mark as unverified instead of no errors
+            return [{"error_type": "unverified", "error_details": f"Could not fetch metadata for ArXiv ID: {ref_arxiv_id}"}]
+        
+        errors = []
+        
+        # Check authors
+        authors_match, author_error = self.compare_authors(
+            reference['authors'], 
+            [author.name for author in correct_paper.authors]
+        )
+        
+        if not authors_match:
+            errors.append({
+                'error_type': 'author',
+                'error_details': author_error,
+                'ref_authors_correct': ', '.join([author.name for author in correct_paper.authors])
+            })
+        
+        # Check year
+        paper_year = correct_paper.published.year
+        
+        # Only flag year warnings if the difference is significant (more than 1 year)
+        # This helps with preprints that may have a different publication year
+        if reference['year'] != 0 and abs(reference['year'] - paper_year) > 1:
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year mismatch: cited as {reference['year']} but actually {paper_year}",
+                'ref_year_correct': paper_year
+            })
+        
+        # Check URL
+        correct_url = f"https://arxiv.org/abs/{correct_paper.get_short_id()}"
+        
+        # Extract the base URL (without version) for comparison
+        # For example, from "https://arxiv.org/abs/1234.56789v2" to "https://arxiv.org/abs/1234.56789"
+        ref_id = self.extract_arxiv_id_from_url(reference['url'])
+        correct_id = self.extract_arxiv_id_from_url(correct_url)
+        
+        # Remove version numbers for comparison
+        if ref_id and correct_id:
+            ref_id_base = ref_id.split('v')[0] if 'v' in ref_id else ref_id
+            correct_id_base = correct_id.split('v')[0] if 'v' in correct_id else correct_id
+            
+            # Only flag URL errors if the base IDs are different
+            # This is more lenient with version numbers, which are often omitted in citations
+            if ref_id_base != correct_id_base:
+                errors.append({
+                    'error_type': 'url',
+                    'error_details': f"URL mismatch: cited as {reference['url']} but actually {correct_url}",
+                    'ref_url_correct': correct_url
+                })
+        elif not ref_id:
+            errors.append({
+                'error_type': 'url',
+                'error_details': f"Could not extract arXiv ID from URL: {reference['url']}",
+                'ref_url_correct': correct_url
+            })
+        
+        return errors if errors else None
+
+    def verify_non_arxiv_reference(self, source_paper, reference):
+        """
+        Verify if a non-arXiv reference is accurate using Semantic Scholar
+        
+        Args:
+            source_paper: The paper containing the reference
+            reference: The reference to verify
+            
+        Returns:
+            List of errors or None if no errors found
+        """
+        logger.info(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
+        
+        # Use the Semantic Scholar client to verify the reference
+        verified_data, errors = self.non_arxiv_checker.verify_reference(reference)
+        
+        if not verified_data:
+            logger.warning(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
+            logger.warning(f"Raw text: {reference['raw_text']}")
+            # Mark as unverified instead of no errors
+            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}]
+        
+        # If no errors were found by the Semantic Scholar client, we're done
+        if not errors:
+            return None
+        
+        # Convert the errors to our format
+        formatted_errors = []
+        
+        for error in errors:
+            formatted_error = {}
+            
+            # Handle error_type and warning_type properly
+            if 'error_type' in error:
+                formatted_error['error_type'] = error['error_type']
+                formatted_error['error_details'] = error['error_details']
+            elif 'warning_type' in error:
+                formatted_error['warning_type'] = error['warning_type']
+                formatted_error['warning_details'] = error['warning_details']
+            
+            # Add correct information based on error type
+            if error.get('error_type') == 'author':
+                formatted_error['ref_authors_correct'] = error.get('ref_authors_correct', '')
+            elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
+                formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
+            elif error.get('error_type') == 'doi':
+                formatted_error['ref_url_correct'] = f"https://doi.org/{error.get('ref_doi_correct', '')}"
+            
+            formatted_errors.append(formatted_error)
+        
+        return formatted_errors if formatted_errors else None
+    
+    def add_error_to_dataset(self, source_paper, reference, errors):
+        """
+        Add an error entry to the consolidated dataset
+        """
+        for error in errors:
+            # Determine if this is an error or warning
+            error_type = error.get('error_type') or error.get('warning_type', 'unknown')
+            error_details = error.get('error_details') or error.get('warning_details', '')
+            
+            # Include unverified references in the output
+            error_entry = {
+                # Source paper metadata
+                'source_paper_id': source_paper.get_short_id(),
+                'source_title': source_paper.title,
+                'source_authors': ', '.join([author.name for author in source_paper.authors]),
+                'source_year': source_paper.published.year,
+                'source_url': f"https://arxiv.org/abs/{source_paper.get_short_id()}",
+                
+                # Reference metadata as cited
+                'ref_paper_id': self.extract_arxiv_id_from_url(reference['url']),
+                'ref_title': reference.get('title', ''),
+                'ref_authors_cited': ', '.join(reference['authors']),
+                'ref_year_cited': reference['year'],
+                'ref_url_cited': reference['url'],
+                'ref_raw_text': reference.get('raw_text', ''),
+                
+                # Error information
+                'error_type': error_type,
+                'error_details': error_details
+            }
+            
+            # Add correct information based on error type
+            if error_type == 'author':
+                error_entry['ref_authors_correct'] = error.get('ref_authors_correct', '')
+            elif error_type == 'year':
+                error_entry['ref_year_correct'] = error.get('ref_year_correct', '')
+            elif error_type == 'url':
+                error_entry['ref_url_correct'] = error.get('ref_url_correct', '')
+            
+            # Add standard format using the correct information (only for non-unverified errors)
+            if error_type != 'unverified':
+                error_entry['ref_standard_format'] = self.format_standard_reference(error)
+            else:
+                error_entry['ref_standard_format'] = None
+            
+            # Store error in memory
+            self.errors.append(error_entry)
+            
+            # Write error to file immediately
+            self.write_error_to_file(error_entry)
+                
+    def write_error_to_file(self, error_entry):
+        """
+        Write a single error entry to the output file
+        """
+        try:
+            with open(self.verification_output_file, 'a', encoding='utf-8') as f:
+                # For single paper mode, only write paper info once
+                if self.single_paper_mode and self.current_paper_info:
+                    # Check if this is the first error for this paper
+                    if not hasattr(self, '_paper_info_written'):
+                        f.write(f"\nPAPER: {self.current_paper_info['title']}\n")
+                        f.write(f"ArXiv ID: {self.current_paper_info['id']}\n")
+                        f.write(f"URL: {self.current_paper_info['url']}\n")
+                        f.write(f"Authors: {self.current_paper_info['authors']}\n")
+                        f.write(f"Year: {self.current_paper_info['year']}\n")
+                        f.write("-" * 80 + "\n")
+                        self._paper_info_written = True
+                else:
+                    # Multi-paper mode - write paper info for each error
+                    f.write(f"\nPAPER: {error_entry['source_title']}\n")
+                    f.write(f"ArXiv ID: {error_entry['source_paper_id']}\n")
+                    f.write(f"URL: {error_entry['source_url']}\n")
+                    f.write(f"Authors: {error_entry['source_authors']}\n")
+                    f.write(f"Year: {error_entry['source_year']}\n")
+                    f.write("-" * 80 + "\n")
+                
+                f.write(f"REFERENCE: {error_entry['ref_title']}\n")
+                f.write(f"Type: {error_entry['error_type']}\n")
+                f.write(f"Details: {error_entry['error_details']}\n\n")
+                
+                f.write("AS CITED:\n")
+                f.write(f"  Authors: {error_entry['ref_authors_cited']}\n")
+                f.write(f"  Year: {error_entry['ref_year_cited']}\n")
+                if error_entry['ref_url_cited']:
+                    f.write(f"  URL: {error_entry['ref_url_cited']}\n")
+                
+                # For unverified references, show the raw text as well
+                if error_entry['error_type'] == 'unverified':
+                    f.write(f"  Raw text: {error_entry.get('ref_raw_text', 'N/A')}\n")
+                
+                f.write("\n")
+                
+                # Show correct information if available
+                if error_entry['error_type'] != 'unverified' and any([
+                    error_entry.get('ref_authors_correct'),
+                    error_entry.get('ref_year_correct'),
+                    error_entry.get('ref_url_correct')
+                ]):
+                    f.write("CORRECT INFORMATION:\n")
+                    if error_entry.get('ref_authors_correct'):
+                        f.write(f"  Authors: {error_entry['ref_authors_correct']}\n")
+                    if error_entry.get('ref_year_correct'):
+                        f.write(f"  Year: {error_entry['ref_year_correct']}\n")
+                    if error_entry.get('ref_url_correct'):
+                        f.write(f"  URL: {error_entry['ref_url_correct']}\n")
+                    f.write("\n")
+                
+                # Show standard format if available
+                if error_entry.get('ref_standard_format'):
+                    f.write("STANDARD FORMAT:\n")
+                    f.write(f"  {error_entry['ref_standard_format']}\n")
+                    f.write("\n")
+                
+                f.write("=" * 80 + "\n")
+                
+        except Exception as e:
+            logger.error(f"Error writing to output file: {str(e)}")
+    
+    def run(self, max_papers=50, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
+        """
+        Run the reference checking process
+        
+        Args:
+            max_papers: Maximum number of papers to process
+            debug_mode: If True, use verbose logging; if False, use pretty printing
+            specific_paper_id: If provided, only process this specific paper
+            local_pdf_path: If provided, process this local PDF or LaTeX file instead of fetching from ArXiv
+        """
+        # Reconfigure logger for this run
+        global logger
+        logger = setup_logging(debug_mode=debug_mode)
+        
+        logger.info("Starting ArXiv reference checking process")
+        
+        # Initialize counters for statistics
+        self.total_papers_processed = 0
+        self.total_references_processed = 0
+        self.papers_with_errors = 0
+        self.papers_with_warnings = 0
+        self.total_errors_found = 0
+        self.total_warnings_found = 0
+        self.total_arxiv_refs = 0
+        self.total_non_arxiv_refs = 0
+        self.total_other_refs = 0
+        self.total_unverified_refs = 0
+        
+        try:
+            # Get papers to process
+            if specific_paper_id:
+                # Process a specific paper
+                logger.info(f"Processing specific paper with ID: {specific_paper_id}")
+                paper = self.get_paper_metadata(specific_paper_id)
+                if not paper:
+                    logger.error(f"Could not find paper with ID: {specific_paper_id}")
+                    return None
+                papers = [paper]
+                # Set single paper mode
+                self.single_paper_mode = True
+                self.current_paper_info = {
+                    'title': paper.title,
+                    'id': paper.get_short_id(),
+                    'url': f"https://arxiv.org/abs/{paper.get_short_id()}",
+                    'authors': ', '.join([author.name for author in paper.authors]),
+                    'year': paper.published.year
+                }
+                # Reset paper info written flag
+                if hasattr(self, '_paper_info_written'):
+                    delattr(self, '_paper_info_written')
+            elif local_pdf_path:
+                # Process a local PDF or LaTeX file
+                logger.info(f"Processing local file: {local_pdf_path}")
+                paper = self._create_local_file_paper(local_pdf_path)
+                papers = [paper]
+                # Set single paper mode
+                self.single_paper_mode = True
+                self.current_paper_info = {
+                    'title': paper.title,
+                    'id': paper.get_short_id(),
+                    'url': f"file://{os.path.abspath(local_pdf_path)}",
+                    'authors': ', '.join(paper.authors) if paper.authors else 'Unknown',
+                    'year': paper.published.year
+                }
+                # Reset paper info written flag
+                if hasattr(self, '_paper_info_written'):
+                    delattr(self, '_paper_info_written')
+            else:
+                # Get papers from the specified time period
+                papers = self.get_papers_from_last_year(max_results=max_papers)
+                self.single_paper_mode = False
+            
+            # Process each paper
+            for paper in tqdm(papers, desc="Processing papers"):
+                paper_id = paper.get_short_id()
+                paper_url = f"https://arxiv.org/abs/{paper_id}"
+                
+                
+                # Log paper info
+                logger.info(f"Processing paper: {paper.title} ({paper_id})")
+                
+                # Print paper heading in non-debug mode
+                if not debug_mode:
+                    print(f"\n📄 Processing: {paper.title}")
+                    print(f"   URL: {paper_url}")
+                
+                try:
+                    # Extract bibliography
+                    bibliography = self.extract_bibliography(paper)
+                    
+                    # Update statistics
+                    self.total_papers_processed += 1
+                    self.total_references_processed += len(bibliography)
+                    
+                    # Count references by type
+                    arxiv_refs = [ref for ref in bibliography if ref.get('type') == 'arxiv']
+                    non_arxiv_refs = [ref for ref in bibliography if ref.get('type') == 'non-arxiv']
+                    other_refs = [ref for ref in bibliography if ref.get('type') == 'other']
+                    
+                    self.total_arxiv_refs += len(arxiv_refs)
+                    self.total_non_arxiv_refs += len(non_arxiv_refs)
+                    self.total_other_refs += len(other_refs)
+                    
+                    # Track errors for this paper
+                    paper_errors = []
+                    error_types = {}
+                    unverified_count = 0  # Count unverified references
+                    
+                    # Check each reference
+                    for i, reference in enumerate(bibliography):
+                        ref_id = self.extract_arxiv_id_from_url(reference['url'])
+                        
+                        # Print reference info in non-debug mode (improved formatting)
+                        if not debug_mode:
+                            title = reference.get('title', 'Untitled')
+                            authors = ', '.join(reference.get('authors', []))
+                            year = reference.get('year', '')
+                            print(f"[{i+1}/{len(bibliography)}] {title}")
+                            print(f"       {authors}")
+                            print(f"       {year}")
+                        
+                        # Verify reference accuracy
+                        errors = self.verify_reference(paper, reference)
+                        
+                        # If errors found, add to dataset and print details
+                        if errors:
+                            # Check if the reference is just unverified
+                            if len(errors) == 1 and (errors[0].get('error_type') == 'unverified' or errors[0].get('warning_type') == 'unverified'):
+                                unverified_count += 1
+                                self.total_unverified_refs += 1
+                                # Add unverified reference to dataset
+                                self.add_error_to_dataset(paper, reference, errors)
+                                if not debug_mode:
+                                    # Show full citation details for unverified references
+                                    print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+                                    print(f"         Cited as: {', '.join(reference['authors'])} ({reference['year']})")
+                                    if reference['url']:
+                                        print(f"         URL: {reference['url']}")
+                            else:
+                                # Real errors or warnings found
+                                self.add_error_to_dataset(paper, reference, errors)
+                                paper_errors.extend(errors)
+                                
+                                # Count errors vs warnings
+                                error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
+                                warning_count = sum(1 for e in errors if 'warning_type' in e)
+                                self.total_errors_found += error_count
+                                self.total_warnings_found += warning_count
+                                
+                                if not debug_mode:
+                                    # Always show errors and warnings if they exist
+                                    for error in errors:
+                                        if 'error_type' in error and error['error_type'] != 'unverified':
+                                            print(f"       ❌  {error['error_type']}: {error['error_details']}")
+                                        elif 'warning_type' in error:
+                                            print(f"       ⚠️  {error['warning_type']}: {error['warning_details']}")
+                    if not debug_mode:
+                        # Separate actual errors from warnings for paper classification
+                        actual_errors = [e for e in paper_errors if 'error_type' in e and e['error_type'] != 'unverified']
+                        warnings_only = [e for e in paper_errors if 'warning_type' in e]
+                        
+                        if actual_errors or warnings_only:
+                            summary_parts = []
+                            if actual_errors:
+                                summary_parts.append(f"{len(actual_errors)} errors")
+                                self.papers_with_errors += 1
+                            if warnings_only:
+                                summary_parts.append(f"{len(warnings_only)} warnings")
+                                # Only count as paper with warnings if it doesn't already have errors
+                                if not actual_errors:
+                                    self.papers_with_warnings += 1
+                            print(f"   📊 Paper summary: {', '.join(summary_parts)} found")
+                        else:
+                            print(f"   📊 Paper summary: No errors found")
+                    
+                    
+                except Exception as e:
+                    logger.error(f"Error processing paper {paper_id}: {str(e)}")
+                    if not debug_mode:
+                        print(f"\n  ❌  Error: Failed to process paper")
+                
+                # Sleep to avoid overloading the ArXiv API
+                sleep_time = random.uniform(1, 3)  # Random sleep between 1-3 seconds
+                time.sleep(sleep_time)
+            
+        except KeyboardInterrupt:
+            logger.info("Process interrupted by user.")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during processing: {str(e)}")
+            raise
+        
+        # Print final summary to console
+        if not debug_mode:
+            print(f"\n" + "="*60)
+            print(f"📋 FINAL SUMMARY")
+            print(f"="*60)
+            print(f"📄 Total papers processed: {self.total_papers_processed}")
+            print(f"📚 Total references processed: {self.total_references_processed}")
+            print(f"❌ Papers with errors:   {self.papers_with_errors}")
+            print(f"         Total errors:   {self.total_errors_found}")
+            print(f"⚠️  Papers with warnings: {self.papers_with_warnings}")
+            print(f"         Total warnings: {self.total_warnings_found}")
+            print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+            print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+        
+        return self.verification_output_file
+    
+    def format_standard_reference(self, error):
+        """
+        Format a reference in standard ArXiv format
+        
+        Args:
+            error: Error dictionary containing correct reference information
+            
+        Returns:
+            String in standard ArXiv format
+        """
+        try:
+            # Use correct information if available, otherwise fall back to cited information
+            authors = error.get('ref_authors_correct') or error.get('ref_authors_cited', '')
+            year = error.get('ref_year_correct') or error.get('ref_year_cited', '')
+            title = error.get('ref_title', '')
+            url = error.get('ref_url_correct') or error.get('ref_url_cited', '')
+            
+            # Format in standard academic format
+            formatted = ""
+            
+            if authors:
+                # Limit to first 3 authors for readability
+                author_list = [a.strip() for a in authors.split(',')]
+                if len(author_list) > 3:
+                    formatted += ", ".join(author_list[:3]) + " et al."
+                else:
+                    formatted += authors
+                formatted += ". "
+            
+            if title:
+                formatted += f'"{title}". '
+            
+            if url and 'arxiv.org' in url:
+                # Extract ArXiv ID
+                arxiv_match = re.search(r'(\d+\.\d+(?:v\d+)?)', url)
+                if arxiv_match:
+                    arxiv_id = arxiv_match.group(1)
+                    formatted += f"arXiv preprint arXiv:{arxiv_id}. "
+            
+            if year:
+                formatted += f"({year})"
+            
+            return formatted.strip()
+            
+        except Exception as e:
+            logger.error(f"Error formatting standard reference: {str(e)}")
+            return ""
+    
+    def extract_authors_title_fallback(self, ref_text):
+        """
+        Fallback method to extract authors and title when the main method fails.
+        
+        Args:
+            ref_text: The reference text to parse
+            
+        Returns:
+            Tuple of (authors list, title)
+        """
+        # Normalize the text
+        cleaned_ref = re.sub(r'\s+', ' ', ref_text).strip()
+        
+        # Remove any reference number
+        cleaned_ref = re.sub(r'^\s*\[\d+\]\s*', '', cleaned_ref)
+        
+        # Check if this is a URL reference
+        if re.match(r'^https?://', cleaned_ref):
+            url_match = re.search(r'(https?://[^\s]+)', cleaned_ref)
+            if url_match:
+                url = url_match.group(1).strip()
+                return [{"is_url_reference": True}], cleaned_ref.replace(url, '').strip()
+        
+        # Try to find anything that looks like a title (text between quotes)
+        title_match = re.search(r'[""]([^""]+)[""]', cleaned_ref)
+        if title_match:
+            title = title_match.group(1).strip()
+            # If we found a title in quotes, try to extract authors before it
+            before_title = cleaned_ref[:title_match.start()].strip()
+            # Process authors text
+            authors = self.extract_authors_list(before_title)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            
+            return authors, title
+        
+        # Look for common patterns that indicate the end of authors and beginning of title
+        # This is typically a period followed by a capitalized word
+        
+        # Check for specific keywords that often appear after title
+        title_end_markers = [
+            r'\.\s+arXiv',
+            r'\.\s+In\s+',
+            r'\.\s+CoRR',
+            r'\.\s+Proceedings',
+            r'\.\s+Journal',
+            r'\.\s+IEEE',
+            r'\.\s+ACM',
+        ]
+        
+        for marker in title_end_markers:
+            match = re.search(marker, cleaned_ref)
+            if match:
+                # Found a marker, now find the period before it that separates authors and title
+                text_before_marker = cleaned_ref[:match.start()]
+                period_match = re.search(r'\.', text_before_marker)
+                
+                if period_match:
+                    # We found a period that likely separates authors and title
+                    authors_text = cleaned_ref[:period_match.start()].strip()
+                    title_text = text_before_marker[period_match.end():].strip()
+                    
+                    # Extract authors
+                    authors = self.extract_authors_list(authors_text)
+                    
+                    # Clean the title
+                    title_text = self.clean_title(title_text)                    
+                    return authors, title_text
+        
+        # Look for pattern with publication indicator (e.g., "CoRR abs/...")
+        corr_match = re.search(r'(CoRR\s+abs\/[\d\.]+)', cleaned_ref)
+        if corr_match:
+            corr_pos = corr_match.start()
+            # Now find the periods before this point
+            periods_before = [m.start() for m in re.finditer(r'\.', cleaned_ref[:corr_pos])]
+            
+            if len(periods_before) >= 2:
+                # First period likely separates authors from title
+                first_period = periods_before[0]
+                # Second period likely ends the title
+                second_period = periods_before[1]
+                
+                authors_text = cleaned_ref[:first_period].strip()
+                title_text = cleaned_ref[first_period+1:second_period].strip()
+                
+                # Extract authors
+                authors = self.extract_authors_list(authors_text)
+                
+                # Clean the title
+                title_text = self.clean_title(title_text)
+                return authors, title_text
+        
+        # If we get here, try a simple split by the first period
+        parts = cleaned_ref.split('.', 1)
+        
+        if len(parts) > 1:
+            authors_text = parts[0].strip()
+            title = parts[1].strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)            
+            return authors, title
+        
+        # If nothing else worked, try to find year and use it as a separator
+        year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_ref)
+        if year_match:
+            year_pos = year_match.start()
+            # Everything before the year might be authors
+            authors_text = cleaned_ref[:year_pos].strip()
+            # Everything after could be title
+            title = cleaned_ref[year_pos:].strip()
+            
+            # Extract authors
+            authors = self.extract_authors_list(authors_text)
+            
+            # Clean the title
+            title = self.clean_title(title)
+            return authors, title
+        
+        # If all else fails, return placeholder values
+        return ["Unknown Author"], "Untitled Reference"
+    
+    def parse_references(self, bibliography_text):
+        """
+        Parse references from bibliography text
+        """
+        if not bibliography_text:
+            logger.warning("No bibliography text provided to parse_references")
+            return []
+        
+        # Log a sample of the bibliography text for debugging
+        bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
+        logger.debug(f"Bibliography sample: {bib_sample}")
+        
+        # For numbered references like [1], [2], etc., extract them directly
+        references = []
+        
+        # Find all reference numbers in the bibliography
+        ref_numbers = re.findall(r'\[(\d+)\]', bibliography_text)
+        
+        if ref_numbers:
+            # Convert to integers and find the maximum reference number
+            try:
+                max_ref_num = max(int(num) for num in ref_numbers)
+                
+                # Extract each reference by looking for [n] followed by text until [n+1] or end of text
+                for i in range(1, max_ref_num + 1):
+                    # Look for [i] in the text
+                    start_pattern = f'\\[{i}\\]'
+                    start_match = re.search(start_pattern, bibliography_text)
+                    
+                    if start_match:
+                        start_pos = start_match.start()
+                        
+                        # Find the next reference number or end of text
+                        if i < max_ref_num:
+                            end_pattern = f'\\[{i+1}\\]'
+                            end_match = re.search(end_pattern, bibliography_text)
+                            if end_match:
+                                end_pos = end_match.start()
+                            else:
+                                end_pos = len(bibliography_text)
+                        else:
+                            end_pos = len(bibliography_text)
+                        
+                        # Extract the reference text
+                        ref_text = bibliography_text[start_pos:end_pos].strip()
+                        if ref_text:
+                            references.append(ref_text)
+            except ValueError:
+                # Handle case where reference numbers can't be converted to integers
+                logger.warning("Could not parse reference numbers as integers")
+        
+        # If we couldn't extract references using the direct approach, try splitting strategies
+        if not references:
+            # Try different splitting strategies
+            splitting_strategies = [
+                # Strategy 1: Numbered references like [1], [2], etc. with or without spaces
+                (r'\[\d+\]', lambda x: [r.strip() for r in x if r.strip()]),
+                
+                # Strategy 2: Numbered references like 1., 2., etc.
+                (r'\n\s*\d+\.\s+', lambda x: x[1:] if not x[0].strip() else x),
+                
+                # Strategy 3: Author-year citations like (Smith, 2020)
+                (r'\n\s*\([A-Za-z]+(?:\s+et\s+al\.)?(?:,\s+\d{4})\)\s+', lambda x: x),
+                
+                # Strategy 4: Simple line breaks and empty lines
+                (r'\n\s*\n', lambda x: x),
+            ]
+            
+            for pattern, processor in splitting_strategies:
+                split_refs = re.split(pattern, bibliography_text)
+                
+                if len(split_refs) > 1:
+                    references = processor(split_refs)
+                    logger.debug(f"Split bibliography using pattern: {pattern}")
+                    logger.debug(f"Found {len(references)} potential references")
+                    break
+        
+        # If no splitting strategy worked, try a simple line-by-line approach
+        if not references:
+            references = [line.strip() for line in bibliography_text.split('\n') if line.strip()]
+            logger.debug(f"Using line-by-line splitting, found {len(references)} potential references")
+        
+        # Clean up references
+        references = [ref.strip() for ref in references if ref.strip()]
+        
+        # Extract structured information from each reference
+        arxiv_refs = []
+        non_arxiv_refs = []
+        other_refs = []  # For references without URLs or DOIs
+        
+        # Patterns for finding arXiv identifiers
+        arxiv_patterns = [
+            r'arxiv\.org/[^\s,\)]+',  # Standard arXiv URL
+            r'arxiv\.org/pdf/\d+\.\d+(?:v\d+)?',  # PDF URL
+            r'arxiv\.org/abs/\d+\.\d+(?:v\d+)?',  # Abstract URL
+            r'arxiv:\s*(\d+\.\d+(?:v\d+)?)',  # arXiv: 1234.56789
+            r'arXiv preprint arXiv:(\d+\.\d+(?:v\d+)?)',  # arXiv preprint format
+            r'CoRR abs/(\d+\.\d+(?:v\d+)?)',  # CoRR abs/2307.15043 format
+        ]
+        
+        # Patterns for finding DOI identifiers
+        doi_patterns = [
+            r'doi\.org/([^\s,\)]+)',  # Standard DOI URL
+            r'doi:([^\s,\)]+)',  # doi: prefix
+            r'DOI:([^\s,\)]+)',  # DOI: prefix (uppercase)
+        ]
+        
+        # Patterns for finding other URLs
+        url_patterns = [
+            r'https?://(?!arxiv\.org)[^\s,\)]+(?:\.(?=\s|$))?',  # Any URL that's not arXiv, optionally ending with period
+        ]
+        
+        for i, ref in enumerate(references):
+            # Try to find any arXiv identifier
+            arxiv_id = None
+            arxiv_url = None
+            
+            for pattern in arxiv_patterns:
+                arxiv_match = re.search(pattern, ref, re.IGNORECASE)
+                if arxiv_match:
+                    # Extract URL or ID
+                    if 'arxiv.org' in arxiv_match.group(0).lower():
+                        arxiv_url = arxiv_match.group(0)
+                        if not arxiv_url.startswith('http'):
+                            arxiv_url = 'https://' + arxiv_url
+                    else:
+                        # It's just an ID, construct the URL
+                        try:
+                            arxiv_id = arxiv_match.group(1)
+                            arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                        except IndexError:
+                            # If we can't extract the ID from the match, use the whole match
+                            arxiv_url = f"https://arxiv.org/abs/{arxiv_match.group(0)}"
+                    
+                    break
+            
+            # If it's an arXiv reference, process it
+            if arxiv_url:
+                logger.debug(f"Found arXiv URL in reference {i+1}: {arxiv_url}")
+                
+                # Extract year (look for 4 digits that could be a year)
+                # Avoid extracting year from the ArXiv ID itself
+                # First, remove the ArXiv ID from the reference text for year extraction
+                ref_without_arxiv_id = ref
+                if arxiv_url:
+                    arxiv_id_match = re.search(r'\b\d{4}\.\d{4,5}(?:v\d+)?\b', ref)
+                    if arxiv_id_match:
+                        ref_without_arxiv_id = ref.replace(arxiv_id_match.group(0), '')
+                
+                # Smart year extraction: prefer years at the end or after venue info
+                year = None
+                
+                # First try: look for year at the end (most reliable)
+                end_year_match = re.search(r',\s+((19|20)\d{2})\s*\.?\s*$', ref_without_arxiv_id)
+                if end_year_match:
+                    year = int(end_year_match.group(1))
+                else:
+                    # Second try: look for year after common patterns but avoid page numbers
+                    # Pattern: avoid numbers that look like page ranges (e.g., "15(1):1929–1958")
+                    year_patterns = [
+                        r'(?:preprint|abs/[^,]+),?\s+((19|20)\d{2})',  # After preprint or abs
+                        r'(?:CoRR|arXiv),?\s+[^,]*,?\s+((19|20)\d{2})',  # After venue
+                        r'(?:In|Proceedings)[^,]*,?\s+((19|20)\d{2})',  # After proceedings
+                    ]
+                    
+                    for pattern in year_patterns:
+                        pattern_match = re.search(pattern, ref_without_arxiv_id)
+                        if pattern_match:
+                            year = int(pattern_match.group(1))
+                            break
+                    
+                    # Third try: general year search, but avoid page number patterns
+                    if year is None:
+                        # Find all potential years
+                        all_years = re.findall(r'\b((19|20)\d{2})\b', ref_without_arxiv_id)
+                        if all_years:
+                            # Filter out years that are likely page numbers
+                            valid_years = []
+                            for potential_year, _ in all_years:
+                                # Check if this year is part of a page number pattern
+                                page_pattern = rf'\d+\([^)]*\):\d*{potential_year}'
+                                if not re.search(page_pattern, ref_without_arxiv_id):
+                                    valid_years.append(int(potential_year))
+                            
+                            if valid_years:
+                                # Take the last valid year (usually the publication year)
+                                year = valid_years[-1]
+                
+                # If no year found, try to find it in the original text as a fallback
+                if year is None:
+                    year_match = re.search(r'\b(19|20)\d{2}\b', ref)
+                    year = int(year_match.group(0)) if year_match else None
+                
+                # If still no year found, try to infer from arXiv ID
+                if year is None and arxiv_url:
+                    # Extract arXiv ID from URL or reference text
+                    arxiv_id_match = re.search(r'\b(\d{4})\.\d{4,5}(?:v\d+)?\b', ref)
+                    if arxiv_id_match:
+                        arxiv_year_month = arxiv_id_match.group(1)
+                        # arXiv IDs starting from 2007 use YYMM format, before that it's different
+                        # For IDs like 2307.15043, 23 means 2023, 07 means July
+                        if len(arxiv_year_month) == 4 and arxiv_year_month.startswith(('07', '08', '09')):
+                            # Post-2007 format: YYMM where YY is year - 1992
+                            yy = int(arxiv_year_month[:2])
+                            if yy >= 7:  # 07 corresponds to 2007
+                                year = 1992 + yy
+                        elif len(arxiv_year_month) == 4 and arxiv_year_month.startswith(('10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24')):
+                            # Modern format: YYMM where YY is year - 2000
+                            yy = int(arxiv_year_month[:2])
+                            year = 2000 + yy
+                
+                # Process the reference text to extract authors and title
+                # First, check for common academic paper format
+                extracted_data = self.extract_authors_title_from_academic_format(ref)
+                
+                if extracted_data:
+                    authors, title = extracted_data
+                else:
+                    # If the academic format extraction failed, try fallback method
+                    authors, title = self.extract_authors_title_fallback(ref)
+                
+                # Clean up the authors and title
+                # Clean newlines from title and normalize whitespace
+                title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                
+                # If we couldn't extract authors but have a URL, use placeholder values
+                if not authors and arxiv_url:
+                    authors = ["Unknown Author"]
+                
+                # Filter out URL references
+                final_authors = []
+                for author in authors:
+                    if isinstance(author, dict) and author.get('is_url_reference', False):
+                        final_authors = ["URL Reference"]
+                        break
+                    else:
+                        final_authors.append(author)
+                
+                if not final_authors:
+                    final_authors = ["Unknown Author"]
+                
+                # Add the structured reference
+                structured_ref = {
+                    'url': arxiv_url,
+                    'year': year if year else 0,  # Default to 0 if year not found
+                    'authors': final_authors,
+                    'title': title,
+                    'raw_text': ref,  # Keep the raw text for Semantic Scholar verification
+                    'type': 'arxiv'
+                }
+                
+                logger.info(f"Extracted arXiv reference: {structured_ref['title']}")
+                arxiv_refs.append(structured_ref)
+            else:
+                # Try to find a DOI or other URL
+                doi = None
+                url = None
+                
+                # Check for DOI
+                for pattern in doi_patterns:
+                    doi_match = re.search(pattern, ref, re.IGNORECASE)
+                    if doi_match:
+                        doi = doi_match.group(1)
+                        url = f"https://doi.org/{doi}"
+                        break
+                
+                # If no DOI, check for other URLs
+                if not url:
+                    for pattern in url_patterns:
+                        url_match = re.search(pattern, ref)
+                        if url_match:
+                            url = url_match.group(0)
+                            # Remove trailing period if present
+                            if url.endswith('.'):
+                                url = url[:-1]
+                            break
+                
+                # If we found a URL or DOI, process the non-arXiv reference
+                if url or doi:
+                    logger.debug(f"Found non-arXiv reference {i+1}: {url or doi}")
+                    
+                    # Smart year extraction: prefer years at the end or after venue info
+                    year = None
+                    
+                    # First try: look for year at the end (most reliable)
+                    end_year_match = re.search(r',\s+((19|20)\d{2})\s*\.?\s*$', ref)
+                    if end_year_match:
+                        year = int(end_year_match.group(1))
+                    else:
+                        # Second try: look for year after common patterns but avoid page numbers
+                        year_patterns = [
+                            r'(?:In|Proceedings)[^,]*,?\s+((19|20)\d{2})',  # After proceedings
+                            r'(?:Journal|IEEE|ACM)[^,]*,?\s+((19|20)\d{2})',  # After journal
+                            r'(?:CoRR|abs/)[^,]*,?\s+((19|20)\d{2})',  # After venue
+                        ]
+                        
+                        for pattern in year_patterns:
+                            pattern_match = re.search(pattern, ref)
+                            if pattern_match:
+                                year = int(pattern_match.group(1))
+                                break
+                        
+                        # Third try: general year search, but avoid page number patterns
+                        if year is None:
+                            # Find all potential years
+                            all_years = re.findall(r'\b((19|20)\d{2})\b', ref)
+                            if all_years:
+                                # Filter out years that are likely page numbers
+                                valid_years = []
+                                for potential_year, _ in all_years:
+                                    # Check if this year is part of a page number pattern
+                                    page_pattern = rf'\d+\([^)]*\):\d*{potential_year}'
+                                    if not re.search(page_pattern, ref):
+                                        valid_years.append(int(potential_year))
+                                
+                                if valid_years:
+                                    # Take the last valid year (usually the publication year)
+                                    year = valid_years[-1]
+                    
+                    # Process the reference text to extract authors and title
+                    # First, check for common academic paper format
+                    extracted_data = self.extract_authors_title_from_academic_format(ref)
+                    
+                    if extracted_data:
+                        authors, title = extracted_data
+                    else:
+                        # If the academic format extraction failed, try fallback method
+                        authors, title = self.extract_authors_title_fallback(ref)
+                    
+                    # Clean up the authors and title
+                    # Clean newlines from title and normalize whitespace
+                    title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                    
+                    # Check if we have URL reference markers in authors
+                    is_url_reference = False
+                    for author in authors:
+                        if isinstance(author, dict) and author.get('is_url_reference', False):
+                            is_url_reference = True
+                            break
+                    
+                    # For URL references, use a special placeholder
+                    if is_url_reference:
+                        authors = ["URL Reference"]
+                    elif not authors:
+                        authors = ["Unknown Author"]
+                    
+                    # Add the structured reference
+                    structured_ref = {
+                        'url': url,
+                        'doi': doi,
+                        'year': year if year else 0,  # Default to 0 if year not found
+                        'authors': authors,
+                        'title': title,
+                        'raw_text': ref,  # Keep the raw text for Semantic Scholar verification
+                        'type': 'non-arxiv'
+                    }
+                    
+                    logger.debug(f"Extracted non-arXiv reference: {structured_ref}")
+                    non_arxiv_refs.append(structured_ref)
+                else:
+                    # This is a reference without a URL or DOI
+                    # Process the reference text to extract authors and title
+                    # First, check for common academic paper format
+                    extracted_data = self.extract_authors_title_from_academic_format(ref)
+                    
+                    if extracted_data:
+                        authors, title = extracted_data
+                    else:
+                        # If the academic format extraction failed, try fallback method
+                        authors, title = self.extract_authors_title_fallback(ref)
+                    
+                    # Clean up the authors and title
+                    # Clean newlines from title and normalize whitespace
+                    title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                    
+                    # Smart year extraction: prefer years at the end or after venue info
+                    year = None
+                    
+                    # First try: look for year at the end (most reliable)
+                    end_year_match = re.search(r',\s+((19|20)\d{2})\s*\.?\s*$', ref)
+                    if end_year_match:
+                        year = int(end_year_match.group(1))
+                    else:
+                        # Second try: look for year after common patterns but avoid page numbers
+                        year_patterns = [
+                            r'(?:In|Proceedings)[^,]*,?\s+((19|20)\d{2})',  # After proceedings
+                            r'(?:Journal|IEEE|ACM)[^,]*,?\s+((19|20)\d{2})',  # After journal
+                            r'(?:CoRR|abs/)[^,]*,?\s+((19|20)\d{2})',  # After venue
+                        ]
+                        
+                        for pattern in year_patterns:
+                            pattern_match = re.search(pattern, ref)
+                            if pattern_match:
+                                year = int(pattern_match.group(1))
+                                break
+                        
+                        # Third try: general year search, but avoid page number patterns
+                        if year is None:
+                            # Find all potential years
+                            all_years = re.findall(r'\b((19|20)\d{2})\b', ref)
+                            if all_years:
+                                # Filter out years that are likely page numbers
+                                valid_years = []
+                                for potential_year, _ in all_years:
+                                    # Check if this year is part of a page number pattern
+                                    page_pattern = rf'\d+\([^)]*\):\d*{potential_year}'
+                                    if not re.search(page_pattern, ref):
+                                        valid_years.append(int(potential_year))
+                                
+                                if valid_years:
+                                    # Take the last valid year (usually the publication year)
+                                    year = valid_years[-1]
+                    
+                    # Check if we have URL reference markers in authors
+                    is_url_reference = False
+                    for author in authors:
+                        if isinstance(author, dict) and author.get('is_url_reference', False):
+                            is_url_reference = True
+                            break
+                    
+                    # For URL references, use a special placeholder
+                    if is_url_reference:
+                        authors = ["URL Reference"]
+                    elif not authors:
+                        authors = ["Unknown Author"]
+                    
+                    # Add the structured reference
+                    structured_ref = {
+                        'url': "",  # No URL
+                        'doi': None,
+                        'year': year if year else 0,  # Default to 0 if year not found
+                        'authors': authors,
+                        'title': title,
+                        'raw_text': ref,  # Keep the raw text for Semantic Scholar verification
+                        'type': 'other'  # New type for references without URLs or DOIs
+                    }
+                    
+                    logger.info(f"Extracted other reference: {structured_ref['title']}")
+                    other_refs.append(structured_ref)
+        
+        logger.info(f"Extracted {len(arxiv_refs)} structured references with arXiv links")
+        logger.info(f"Extracted {len(non_arxiv_refs)} structured references without arXiv links")
+        logger.info(f"Extracted {len(other_refs)} structured references without URLs or DOIs")
+        
+        # Combine all types of references
+        all_refs = arxiv_refs + non_arxiv_refs + other_refs
+        return all_refs
+    
+    def extract_bibliography(self, paper):
+        """
+        Extract bibliography from a paper (PDF, LaTeX, or text file)
+        """
+        paper_id = paper.get_short_id()
+        logger.info(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+        
+        # Check if this is a text file containing references
+        if hasattr(paper, 'is_text_refs') and paper.is_text_refs:
+            # Read the text file directly - it should contain references
+            logger.info(f"Processing text file containing references: {paper.file_path}")
+            try:
+                with open(paper.file_path, 'r', encoding='utf-8') as f:
+                    bibliography_text = f.read()
+                
+                # Save the text for debugging
+                debug_dir = "debug"
+                if not os.path.exists(debug_dir):
+                    os.makedirs(debug_dir)
+                
+                with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                    f.write(bibliography_text)
+                
+                logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                
+                # Parse references directly from the text
+                references = self.parse_references(bibliography_text)
+                
+                # Save the extracted references for debugging
+                with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                    json.dump(references, f, indent=2)
+                
+                logger.info(f"Extracted {len(references)} references from text file")
+                
+                return references
+                
+            except Exception as e:
+                logger.error(f"Error reading text file {paper.file_path}: {e}")
+                return []
+        
+        # Check if this is a LaTeX file
+        elif hasattr(paper, 'is_latex') and paper.is_latex:
+            # Extract text from LaTeX file
+            text = self.extract_text_from_latex(paper.file_path)
+        else:
+            # Download the PDF
+            pdf_content = self.download_pdf(paper)
+            
+            if not pdf_content:
+                logger.warning(f"Could not download PDF for {paper_id}")
+                return []
+            
+            # Extract text from PDF
+            text = self.extract_text_from_pdf(pdf_content)
+        
+        if not text:
+            logger.warning(f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} for {paper_id}")
+            return []
+        
+        # Save the extracted text for debugging
+        debug_dir = "debug"
+        if not os.path.exists(debug_dir):
+            os.makedirs(debug_dir)
+        
+        with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
+            f.write(text)
+        
+        logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+        
+        # Find bibliography section
+        bibliography_text = self.find_bibliography_section(text)
+        
+        if not bibliography_text:
+            logger.warning(f"Could not find bibliography section for {paper_id}")
+            return []
+        
+        # Save the bibliography text for debugging
+        with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+            f.write(bibliography_text)
+        
+        logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+        
+        # Parse references
+        references = self.parse_references(bibliography_text)
+        
+        # Save the extracted references for debugging
+        with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+            json.dump(references, f, indent=2)
+        
+        logger.info(f"Extracted {len(references)} references with arxiv links for {paper_id}")
+        
+        return references
+    
+    def compare_authors(self, cited_authors, correct_authors):
+        """
+        Improved function to compare author lists to check if they match
+        Allows for first name abbreviations and common parsing issues
+        """
+        # Clean up author names
+        cleaned_cited = []
+        for author in cited_authors:
+            # Remove reference numbers (e.g., "[1]")
+            author = re.sub(r'^\[\d+\]', '', author)
+            # Remove line breaks
+            author = author.replace('\n', ' ')
+            # Remove "et al" if it's the last author
+            if author.lower() == 'et al' or 'et al' in author.lower():
+                continue
+            cleaned_cited.append(author.strip())
+        
+        # If the cited list has "et al" or similar, it's incomplete
+        # In this case, we only check the authors that are listed
+        has_et_al = any('et al' in a.lower() for a in cited_authors)
+        
+        if len(cleaned_cited) < len(correct_authors) and has_et_al:
+            # Only compare the authors that are listed
+            correct_authors = correct_authors[:len(cleaned_cited)]
+        # If the counts still don't match, but it's a reasonable number of authors, don't flag as an error
+        # This is common in academic citations where not all authors are listed
+        elif len(cleaned_cited) < len(correct_authors):
+            # If we have at least 3 authors and they match, consider it good enough
+            if len(cleaned_cited) >= 3:
+                correct_authors = correct_authors[:len(cleaned_cited)]
+        # If we have more cited authors than correct authors, it's likely an error
+        # But if the difference is just 1 or 2, and the primary authors match, it might be ok
+        elif len(cleaned_cited) > len(correct_authors) and len(correct_authors) >= 3:
+            # Check if the first few authors match
+            # Continue with comparison but only use the available correct authors
+            cleaned_cited = cleaned_cited[:len(correct_authors)]
+        
+        # If there's a big count mismatch and no "et al", it's likely an error
+        if abs(len(cleaned_cited) - len(correct_authors)) > 3 and not has_et_al:
+            return False, "Author count mismatch"
+        
+        # Prepare to check if first authors match
+        first_author_match = False
+        
+        # Compare authors one by one
+        for i, (cited, correct) in enumerate(zip(cleaned_cited, correct_authors)):
+            # Normalize names for comparison
+            # Extract last name (the last word in the name)
+            cited_parts = cited.split()
+            correct_parts = correct.split()
+            
+            if not cited_parts or not correct_parts:
+                continue  # Skip empty names
+            
+            # If there's only one part (likely just the last name), use it as is
+            if len(cited_parts) == 1:
+                cited_last = cited_parts[0].lower()
+            else:
+                cited_last = cited_parts[-1].lower()
+
+            if len(correct_parts) == 1:
+                correct_last = correct_parts[0].lower()
+            else:
+                correct_last = correct_parts[-1].lower()
+            
+            # Check last names, ignoring diacritical marks
+            cited_last = self.normalize_text(cited_last)
+            correct_last = self.normalize_text(correct_last)
+            
+            # If this is the first author, remember if they match
+            if i == 0:
+                first_author_match = (cited_last == correct_last)
+                if not first_author_match:
+                    # If the first author doesn't match, we need to check further
+                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
+            
+            if correct_last != '' and cited_last != correct_last:
+                # Check if one is a substring of the other (for hyphenated names or partial matches)
+                if cited_last in correct_last or correct_last in cited_last:
+                    continue  # Consider it a match
+                # Check if the Levenshtein distance is small (for minor typos)
+                if self.levenshtein_distance(cited_last, correct_last) <= 2:
+                    continue  # Consider it a match
+                
+                # Special case for first author mismatch
+                if i == 0:
+                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
+                
+                # For non-first authors, if we have a good number of authors and the first author matches,
+                # be a bit more lenient
+                if i > 0 and first_author_match and len(cleaned_cited) >= 3:
+                    continue
+                
+                return False, f"Last name mismatch at position {i+1}: '{cited}' vs '{correct}'"
+            
+            # If there's only one part (just the last name), skip first name check
+            if len(cited_parts) == 1 or len(correct_parts) == 1:
+                continue
+                
+            # Check first name/initial
+            cited_first = cited_parts[0].lower()
+            correct_first = correct_parts[0].lower()
+            
+            # Normalize first names
+            cited_first = self.normalize_text(cited_first)
+            correct_first = self.normalize_text(correct_first)
+            
+            # Allow first initial instead of full first name
+            if cited_first != correct_first:
+                # Check if one is an initial of the other
+                if cited_first == correct_first[0] or correct_first == cited_first[0]:
+                    continue  # Consider it a match
+                # Check if one has an initial and the other has the full name
+                if (len(cited_first) == 1 and correct_first.startswith(cited_first)) or \
+                (len(correct_first) == 1 and cited_first.startswith(correct_first)):
+                    continue  # Consider it a match
+                # Check if one is a substring of the other
+                if cited_first.startswith(correct_first) or correct_first.startswith(cited_first):
+                    continue  # Consider it a match
+                # Check if the Levenshtein distance is small (for minor typos)
+                if self.levenshtein_distance(cited_first, correct_first) <= 2:
+                    continue  # Consider it a match
+                    
+                # Special handling for first author
+                if i == 0:
+                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
+                    
+                # For non-first authors, if we have a good number of authors and the first author matches,
+                # be a bit more lenient
+                if i > 0 and first_author_match and len(cleaned_cited) >= 3:
+                    continue
+                    
+                return False, f"First name mismatch at position {i+1}: '{cited}' vs '{correct}'"
+        
+        return True, "Authors match"
+    
+    def levenshtein_distance(self, s1, s2):
+        """
+        Calculate the Levenshtein distance between two strings.
+        This is a measure of the minimum number of single-character edits 
+        (insertions, deletions, or substitutions) required to change one string into the other.
+        """
+        if len(s1) < len(s2):
+            return self.levenshtein_distance(s2, s1)
+        
+        if len(s2) == 0:
+            return len(s1)
+        
+        previous_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+        
+        return previous_row[-1]
+    
+    def normalize_text(self, text):
+        """
+        Normalize text by removing diacritical marks and special characters
+        """
+        if not text:
+            return ""
+            
+        # Replace common special characters with their ASCII equivalents
+        replacements = {
+            'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
+            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+            'à': 'a', 'è': 'e', 'ì': 'i', 'ò': 'o', 'ù': 'u',
+            'â': 'a', 'ê': 'e', 'î': 'i', 'ô': 'o', 'û': 'u',
+            'ç': 'c', 'ñ': 'n', 'ø': 'o', 'å': 'a',
+            'ë': 'e', 'ï': 'i', 'ÿ': 'y',
+            '¨': '', '´': '', '`': '', '^': '', '~': '',
+            '–': '-', '—': '-', '−': '-',
+            '„': '"', '"': '"', '"': '"', ''': "'", ''': "'",
+            '«': '"', '»': '"',
+            '¡': '!', '¿': '?',
+            '°': 'degrees', '©': '(c)', '®': '(r)', '™': '(tm)',
+            '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR',
+            '×': 'x', '÷': '/',
+            '½': '1/2', '¼': '1/4', '¾': '3/4',
+            '\u00A0': ' ',  # Non-breaking space
+            '\u2013': '-',  # En dash
+            '\u2014': '-',  # Em dash
+            '\u2018': "'",  # Left single quotation mark
+            '\u2019': "'",  # Right single quotation mark
+            '\u201C': '"',  # Left double quotation mark
+            '\u201D': '"',  # Right double quotation mark
+            '\u2026': '...',  # Horizontal ellipsis
+            '\u00B7': '.',  # Middle dot
+            '\u2022': '.',  # Bullet
+}
+        
+        for char, replacement in replacements.items():
+            text = text.replace(char, replacement)
+        
+        # Remove any remaining diacritical marks
+        import unicodedata
+        text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+        
+        # Remove special characters
+        text = re.sub(r'[^\w\s]', '', text)
+        
+        # Normalize whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text.lower()
+    
+    def get_arxiv_paper_from_local_db(self, arxiv_id):
+        """
+        Get arXiv paper metadata from local database as fallback
+        
+        Args:
+            arxiv_id: The arXiv ID to search for
+            
+        Returns:
+            Mock paper object with same interface as arxiv.Result, or None if not found
+        """
+        if not self.db_path or not hasattr(self, 'non_arxiv_checker'):
+            return None
+            
+        try:
+            import sqlite3
+            import json
+            from datetime import datetime
+            
+            # Connect to the database
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Search for the paper by arXiv ID
+            query = "SELECT * FROM papers WHERE externalIds_ArXiv = ?"
+            cursor.execute(query, [arxiv_id])
+            row = cursor.fetchone()
+            
+            if not row:
+                conn.close()
+                return None
+                
+            paper_data = dict(row)
+            
+            # Extract authors from JSON
+            if paper_data.get('authors'):
+                authors_data = json.loads(paper_data['authors'])
+            else:
+                authors_data = []
+            
+            # Create a mock paper object that mimics arxiv.Result interface
+            class MockArxivPaper:
+                def __init__(self, data, authors_data, arxiv_id):
+                    self.title = data.get('title', 'Unknown Title')
+                    self.arxiv_id = arxiv_id
+                    
+                    # Set PDF URL (construct from arXiv ID)
+                    self.pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    
+                    # Create mock authors with name attribute
+                    class MockAuthor:
+                        def __init__(self, name):
+                            self.name = name
+                        
+                        def __str__(self):
+                            return self.name
+                        
+                        def __repr__(self):
+                            return f"MockAuthor('{self.name}')"
+                    
+                    self.authors = [MockAuthor(author.get('name', 'Unknown Author')) for author in authors_data]
+                    
+                    # Set publication year - try from year field, fallback to current year
+                    year = data.get('year', datetime.now().year)
+                    
+                    # Create mock published attribute
+                    class MockPublished:
+                        def __init__(self, year):
+                            self.year = year
+                    
+                    self.published = MockPublished(year)
+                    
+                def get_short_id(self):
+                    return self.arxiv_id
+            
+            mock_paper = MockArxivPaper(paper_data, authors_data, arxiv_id)
+            conn.close()
+            
+            logger.info(f"Found arXiv paper {arxiv_id} in local database as fallback")
+            return mock_paper
+            
+        except Exception as e:
+            logger.error(f"Error querying local database for arXiv ID {arxiv_id}: {str(e)}")
+            return None
+
+
+def main():
+    """Main function to parse arguments and run the reference checker"""
+    parser = argparse.ArgumentParser(description="ArXiv Reference Checker - Validate references in ArXiv papers")
+    parser.add_argument("--max-papers", type=int, default=50,
+                        help="Maximum number of papers to process (default: 50)")
+    parser.add_argument("--days", type=int, default=365,
+                        help="Number of days to look back (default: 365)")
+    parser.add_argument("--category", type=str,
+                        help="ArXiv category to filter by (e.g., cs.AI, math.CO)")
+    parser.add_argument("--debug", action="store_true",
+                        help="Run in debug mode with verbose logging")
+    parser.add_argument("--paper", type=str,
+                        help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, or local text file containing references")
+    parser.add_argument("--semantic-scholar-api-key", type=str,
+                        help="API key for Semantic Scholar (optional, increases rate limits)")
+    parser.add_argument("--db-path", type=str,
+                        help="Path to local Semantic Scholar database (automatically enables local DB mode)")
+    
+    args = parser.parse_args()
+    
+    # Set up logging based on debug mode
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
+    # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
+    paper_id = None
+    local_pdf_path = None
+    
+    if args.paper:
+        if args.paper.lower().endswith('.pdf'):
+            # This is a local PDF file
+            if not os.path.exists(args.paper):
+                print(f"Error: Local PDF file does not exist: {args.paper}")
+                return 1
+            local_pdf_path = args.paper
+        elif args.paper.lower().endswith('.tex'):
+            # This is a local LaTeX file
+            if not os.path.exists(args.paper):
+                print(f"Error: Local LaTeX file does not exist: {args.paper}")
+                return 1
+            local_pdf_path = args.paper  # We'll use the same variable but handle it differently
+        elif args.paper.lower().endswith('.txt'):
+            # This is a local text file containing references
+            if not os.path.exists(args.paper):
+                print(f"Error: Local text file does not exist: {args.paper}")
+                return 1
+            local_pdf_path = args.paper  # We'll use the same variable but handle it differently
+        elif args.paper.startswith('http'):
+            # Extract arXiv ID from URL
+            paper_id = extract_arxiv_id_from_url(args.paper)
+            if not paper_id:
+                print(f"Error: Could not extract arXiv ID from URL: {args.paper}")
+                return 1
+        else:
+            # Assume it's an ArXiv ID
+            paper_id = args.paper
+    
+    try:
+        # Initialize the reference checker
+        checker = ArxivReferenceChecker(
+            days_back=args.days,
+            category=args.category,
+            semantic_scholar_api_key=args.semantic_scholar_api_key,
+            db_path=args.db_path
+        )
+        
+        # Run the checker
+        output_file = checker.run(
+            max_papers=args.max_papers,
+            debug_mode=args.debug,
+            specific_paper_id=paper_id,
+            local_pdf_path=local_pdf_path
+        )
+            
+    except KeyboardInterrupt:
+        print("\n✗ Process interrupted by user.")
+        return 1
+    except Exception as e:
+        print(f"\n✗ Error during processing: {str(e)}")
+        logger.error(f"Unexpected error: {str(e)}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
