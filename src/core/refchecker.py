@@ -1662,12 +1662,22 @@ class ArxivReferenceChecker:
         
         # Verify DOI
         if doi and external_ids.get('DOI') and doi.lower() != external_ids['DOI'].lower():
-            logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
-            errors.append({
-                'error_type': 'doi',
-                'error_details': f"DOI mismatch: cited as {doi} but actually {external_ids['DOI']}",
-                'ref_doi_correct': external_ids['DOI']
-            })
+            # Check if the cited DOI is a partial match of the actual DOI
+            # This handles cases like "10.1111/j.2044-8260." vs "10.1111/J.2044-8260.1997.TB01237.X"
+            cited_doi_clean = doi.lower().rstrip('.')
+            actual_doi_clean = external_ids['DOI'].lower().rstrip('.')
+            
+            # If the cited DOI is a prefix of the actual DOI, it's likely a partial citation
+            # Only flag as error if it's not a reasonable partial match
+            if not actual_doi_clean.startswith(cited_doi_clean):
+                logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
+                errors.append({
+                    'error_type': 'doi',
+                    'error_details': f"DOI mismatch: cited as {doi} but actually {external_ids['DOI']}",
+                    'ref_doi_correct': external_ids['DOI']
+                })
+            else:
+                logger.debug(f"DB Verification: DOI partial match - cited: {doi}, actual: {external_ids['DOI']} (acceptable)")
 
         # Verify ArXiv ID
         if reference.get('type') == 'arxiv':
@@ -2147,9 +2157,8 @@ class ArxivReferenceChecker:
                                 self.papers_with_errors += 1
                             if warnings_only:
                                 summary_parts.append(f"{len(warnings_only)} warnings")
-                                # Only count as paper with warnings if it doesn't already have errors
-                                if not actual_errors:
-                                    self.papers_with_warnings += 1
+                                # Count as paper with warnings if it has warnings (regardless of errors)
+                                self.papers_with_warnings += 1
                             print(f"   📊 Paper summary: {', '.join(summary_parts)} found")
                         else:
                             print(f"   📊 Paper summary: No errors found")
