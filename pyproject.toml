@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refchecker"
+version = "1.0.0"
+description = "A comprehensive tool for validating reference accuracy in academic papers"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Mark Russinovich", email = "markrussinovich@hotmail.com"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research", 
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8", 
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.7"
+dependencies = [
+    "requests>=2.25.0",
+    "beautifulsoup4>=4.9.0",
+    "PyPDF2>=3.0.0",
+    "arxiv>=1.4.0",
+    "python-dateutil>=2.8.0",
+    "tqdm>=4.60.0",
+    "colorama>=0.4.4",
+    "fuzzywuzzy>=0.18.0",
+    "python-Levenshtein>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "pytest-cov>=2.0.0", 
+    "black>=21.0.0",
+    "isort>=5.0.0",
+    "flake8>=3.9.0",
+    "mypy>=0.910",
+]
+docs = [
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=0.5.0",
+]
+optional = [
+    "lxml>=4.6.0",
+    "selenium>=4.0.0",
+    "pikepdf>=5.0.0", 
+    "nltk>=3.6.0",
+    "scikit-learn>=1.0.0",
+    "joblib>=1.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/markrussinovich/refchecker"
+Repository = "https://github.com/markrussinovich/refchecker"
+"Bug Tracker" = "https://github.com/markrussinovich/refchecker/issues"
+
+[project.scripts]
+refchecker = "core.refchecker:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.txt", "*.md", "*.conf"]

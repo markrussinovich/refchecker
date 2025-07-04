@@ -1,0 +1,35 @@
+# Include important files
+include README.md
+include LICENSE
+include requirements.txt
+include STRUCTURE.md
+
+# Include configuration files
+recursive-include config *.conf *.py
+
+# Include source code
+recursive-include src *.py
+
+# Exclude development and cache files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .git*
+global-exclude .DS_Store
+global-exclude *.swp
+global-exclude *.swo
+
+# Exclude test and development directories
+prune tests
+prune debug
+prune logs
+prune tmp
+prune output
+prune validation_output
+prune semantic_scholar_db
+prune .vscode
+prune .claude
+
+# Exclude specific files
+exclude .gitignore
+exclude Makefile
+exclude reference_errors.txt

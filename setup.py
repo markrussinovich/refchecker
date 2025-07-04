@@ -19,12 +19,12 @@ def read_requirements():
 setup(
     name="refchecker",
     version="1.0.0",
-    author="RefChecker Team",
-    author_email="refchecker@example.com", 
+    author="Mark Russinovich",
+    author_email="markrussinovich@hotmail.com", 
     description="A comprehensive tool for validating reference accuracy in academic papers",
     long_description=read_readme(),
     long_description_content_type="text/markdown",
-    url="https://github.com/example/refchecker",
+    url="https://github.com/markrussinovich/refchecker",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
     classifiers=[
