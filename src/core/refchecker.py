@@ -845,10 +845,41 @@ class ArxivReferenceChecker:
         # Replace common words that sometimes get split across library/document names
         title = re.sub(r'(?i)ll ms\b', 'llms', title)  # Fix "ll ms" to "llms"
         
+        # Remove URLs and DOIs from titles
+        title = self.remove_urls_from_title(title)
+        
         title = self.remove_year_from_title(title)
         title = self.clean_conference_markers_from_title(title)
         return title
-
+    
+    def remove_urls_from_title(self, title):
+        """
+        Remove URLs and DOIs from titles.
+        
+        Args:
+            title: The title string to clean
+            
+        Returns:
+            Title string with URLs and DOIs removed
+        """
+        if not title:
+            return ""
+        
+        # Remove DOI URLs
+        title = re.sub(r'\s*https?://doi\.org/[^\s]+', '', title, flags=re.IGNORECASE)
+        
+        # Remove other URLs
+        title = re.sub(r'\s*https?://[^\s]+', '', title, flags=re.IGNORECASE)
+        
+        # Remove arXiv IDs that might be in titles
+        title = re.sub(r'\s*arXiv:\d+\.\d+(?:v\d+)?', '', title, flags=re.IGNORECASE)
+        
+        # Clean up any trailing punctuation and whitespace
+        title = re.sub(r'\s*[.,;:]+\s*$', '', title)
+        title = title.strip()
+        
+        return title
+    
     def clean_conference_markers_from_title(self, title):
         """
         Remove conference markers like "In Conference Name" from titles.
@@ -948,6 +979,13 @@ class ArxivReferenceChecker:
         if year_start_match:
             year = year_start_match.group(1)
             title = year_start_match.group(2).strip()
+            return [year], title
+        
+        # Case 3: Legal cases with reference number and year like "[1]1976. Title"
+        legal_case_with_ref_match = re.search(r'^\[\d+\](\d{4})\.\s+([^.]+?)(?:\.\s+https?://|\.\s*$)', cleaned_ref)
+        if legal_case_with_ref_match:
+            year = legal_case_with_ref_match.group(1)
+            title = legal_case_with_ref_match.group(2).strip()
             return [year], title
         
         # Normalize spacing around periods
@@ -1301,148 +1339,42 @@ class ArxivReferenceChecker:
             if simple_pattern:
                 potential_authors = simple_pattern.group(1).strip()
                 potential_title = simple_pattern.group(2).strip()
-                
                 # Only use this if the potential_title doesn't look like part of author names
-                # Check if potential_title starts with what looks like a continuation of author names
                 if not re.match(r'^\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*(?:,\s*and\s+)?', potential_title):
                     authors_text = potential_authors
                     title = potential_title
         
+        # Fallback: if the reference is just a comma-separated list of names, treat as authors
+        if not title and not authors_text:
+            # Try to detect a list of names
+            if re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
+                authors = [a.strip() for a in cleaned_ref.split(',')]
+                return authors, ""
+        
         if authors_text and title:
             # Extract authors
             authors = self.extract_authors_list(authors_text)
-            
             # Clean the title
             title = self.clean_title(title)
-            
-            # If the title looks like an author name (e.g., "Dauphin"), it's likely a parsing error
-            # Check if the title consists of only names/initials
-            if re.match(r'^([A-Z][a-z]+\s+)+([A-Z]\.?\s*)+$', title):
-                # This looks like author names continued, reject this match
-                authors_text = None
-                title = None
-            elif len(title.split()) <= 2 and not re.search(r'\d{4}', title):
-                # Title is too short and might be incomplete, reject this match
-                authors_text = None
-                title = None
-            else:
-                # This looks like a valid match
-                if authors and title:
-                    return authors, title
-        
-        # Look for patterns that indicate the end of authors and beginning of title
-        title_start_positions = []
-        
-        # Check for standard separator between authors and title (usually a period)
-        period_positions = [m.start() for m in re.finditer(r'\.', cleaned_ref)]
-        
-        # Find potential title start positions (after a period)
-        for pos in period_positions:
-            # Skip if this appears to be within an author's initials
-            before_period = cleaned_ref[:pos].strip()
-            after_period = cleaned_ref[pos+1:].strip()
-            
-            # Skip if it looks like an initial (single capital letter)
-            if re.search(r'[A-Z]\.$', before_period):
-                continue
-                
-            # Skip if it's followed by another initial
-            if re.match(r'^[A-Z]\.\s', after_period):
-                continue
-                
-            # This looks like a good candidate for title start
-            title_start_positions.append(pos + 1)  # +1 to skip the period
-        
-        # If we found potential title positions, use the first one
-        if title_start_positions:
-            first_title_pos = title_start_positions[0]
-            authors_text = cleaned_ref[:first_title_pos-1].strip()  # -1 to exclude the period
-            title_and_rest = cleaned_ref[first_title_pos:].strip()
-            
-            # Extract title - goes until next major period
-            title_parts = re.split(r'\.\s+', title_and_rest, 1)
-            title = title_parts[0].strip()
-            
-            # Process the authors text
-            authors = self.extract_authors_list(authors_text)
-            
-            # Clean the title
-            title = self.clean_title(title)
-            
-            # If the title has phrases that typically indicate an incomplete extraction
-            # (like a single name or common paper elements), try for a better extraction
-            if len(title.split()) <= 2 or re.match(r'^[A-Z][a-z]+$', title):
-                if len(title_parts) > 1 and title_parts[1]:
-                    # Try the next part instead
-                    better_title_parts = re.split(r'\.\s+', title_parts[1], 1)
-                    if better_title_parts and len(better_title_parts[0].split()) > 1:
-                        title = better_title_parts[0].strip()
-                        title = self.clean_title(title)
-            
-            return authors, title
-        
-        # If we get here, try a manual split
-        # Look for patterns like "Author1, Author2, and Author3. Title."
-        manual_split_match = re.search(r'([A-Z][^\.]+(?:,|and)[^\.]+)\.([^\.]+)', cleaned_ref)
-        if manual_split_match:
-            authors_text = manual_split_match.group(1).strip()
-            title = manual_split_match.group(2).strip()
-            
-            # Extract authors
-            authors = self.extract_authors_list(authors_text)
-            
-            # Clean the title
-            title = self.clean_title(title)
-            
             if authors and title:
                 return authors, title
         
-        # If we get here, we couldn't find a clear author/title split
-        # Just try to extract any author-like patterns from the text
-        authors = self.extract_authors_list(cleaned_ref)
+        # Final fallback: if the reference is just a list of names, return as authors
+        if not title and cleaned_ref and re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
+            authors = [a.strip() for a in cleaned_ref.split(',')]
+            return authors, ""
         
-        # For the title, use the first sentence after what looks like authors
-        if authors:
-            # Check if authors contains URL reference markers
-            if any(isinstance(author, dict) and author.get('is_url_reference', False) for author in authors):
-                return authors, "URL Reference"
-            
-            # Convert authors to strings for processing
-            author_strings = []
-            for author in authors:
-                if isinstance(author, dict) and author.get('is_url_reference', False):
-                    author_strings.append("URL Reference")
-                else:
-                    author_strings.append(str(author))
-            
-            # Try to find where the author list ends
-            authors_text = ", ".join(author_strings)
-            last_author = author_strings[-1]
-            author_end = cleaned_ref.find(last_author) + len(last_author)
-            
-            # Look for a period after the last author
-            period_after = cleaned_ref.find('.', author_end)
-            if period_after > 0:
-                # Take text after the period as title
-                title_start = period_after + 1
-                title_end = cleaned_ref.find('.', title_start)
-                if title_end > 0:
-                    title = cleaned_ref[title_start:title_end].strip()
-                else:
-                    title = cleaned_ref[title_start:].strip()
-                    
-                # Clean the title
-                title = self.clean_title(title)
-                
-                return authors, title
+        # Fallback: if the reference is just a list of author names (with initials, and 'and' before last author), treat as authors
+        if not title and not authors_text:
+            # Match patterns like 'Tara F. Bishop, Matthew J. Press, Salomeh Keyhani, and Harold Alan Pincus'
+            author_list_pattern = r'^(?:[A-Z][a-zA-Z\-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z\-]+)?(?:,\s+)?)+(?:and\s+[A-Z][a-zA-Z\-]+(?:\s+[A-Z]\.)?(?:\s+[A-Z][a-zA-Z\-]+)?)?$'
+            if re.match(author_list_pattern, cleaned_ref.replace(' and ', ', and ')):
+                # Split on ', ' and ' and ' for the last author
+                authors = re.split(r',\s+|\s+and\s+', cleaned_ref)
+                authors = [a.strip() for a in authors if a.strip()]
+                return authors, ""
         
-        # If all else fails, return placeholder values
-        if authors:
-            return authors, "Untitled"
-        
-        # Last resort
-        return ["Unknown Author"], "Untitled"
-
+        return None
     
     def verify_db_reference(self, source_paper, reference, db_conn):
         """
@@ -2386,6 +2318,19 @@ class ArxivReferenceChecker:
         # First, normalize the bibliography text to ensure proper spacing after reference numbers
         normalized_bib = re.sub(r'(\[\d+\])([A-Za-z])', r'\1 \2', bibliography_text)
         
+        # Handle the case where the last reference might be incomplete
+        # Check if the text ends with a reference number followed by content
+        if re.search(r'\[\d+\][^[]*$', normalized_bib):
+            # The last reference is incomplete, try to find a better ending
+            # Look for the last complete sentence or period
+            last_period = normalized_bib.rfind('.')
+            if last_period > 0:
+                # Find the last reference number before this period
+                last_ref_match = re.search(r'\[\d+\][^[]*?\.', normalized_bib[:last_period+1])
+                if last_ref_match:
+                    # Truncate at the last complete reference
+                    normalized_bib = normalized_bib[:last_period+1]
+        
         numbered_ref_pattern = r'(\[\d+\])'
         numbered_refs = re.split(numbered_ref_pattern, normalized_bib)
         references = []
@@ -2404,6 +2349,9 @@ class ArxivReferenceChecker:
                 references.append(''.join(temp).strip())
             # Remove empty or very short entries
             references = [r for r in references if len(r.strip()) > 5]
+            # Ensure the last chunk is included if not already
+            if numbered_refs[-1].strip() and not any(numbered_refs[-1].strip() in r for r in references):
+                references.append(numbered_refs[-1].strip())
         else:
             # Fallback to original logic if not numbered
             # Try different splitting strategies
@@ -2525,6 +2473,20 @@ class ArxivReferenceChecker:
                         elif len(arxiv_year_month) == 4 and arxiv_year_month.startswith(tuple(str(x).zfill(2) for x in range(10, 25))):
                             yy = int(arxiv_year_month[:2])
                             year = 2000 + yy
+                # Additional year extraction for legal cases and other formats
+                if year is None:
+                    # Look for year right after reference number like "[1]1976."
+                    legal_year_match = re.search(r'^\[\d+\](\d{4})\.', ref)
+                    if legal_year_match:
+                        year = int(legal_year_match.group(1))
+                    else:
+                        # Look for year at the beginning after any reference number
+                        year_start_match = re.search(r'^.*?(\d{4})\.', ref)
+                        if year_start_match:
+                            potential_year = int(year_start_match.group(1))
+                            # Validate that it's a reasonable year
+                            if 1900 <= potential_year <= 2030:
+                                year = potential_year
                 extracted_data = self.extract_authors_title_from_academic_format(ref)
                 if extracted_data:
                     authors, title = extracted_data

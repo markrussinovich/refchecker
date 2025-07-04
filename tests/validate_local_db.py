@@ -18,7 +18,11 @@ import argparse
 import logging
 import os
 import sys
-from download_semantic_scholar_db import SemanticScholarDownloader
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+try:
+    from database.download_semantic_scholar_db import SemanticScholarDownloader
+except ImportError:
+    from download_semantic_scholar_db import SemanticScholarDownloader
 from validate_papers import validate_paper
 
 # Set up logging
