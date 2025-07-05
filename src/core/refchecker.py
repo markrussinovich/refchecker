@@ -62,12 +62,6 @@ from llm.base import ReferenceExtractor, create_llm_provider
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
     """Set up logging configuration"""
-    log_dir = "logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    
     # Configure root logger to control all child loggers
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -80,11 +74,18 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
     file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    # Add file handler with DEBUG level
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(level)
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
+    # Add file handler only in debug mode
+    if debug_mode:
+        log_dir = "logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
     
     # Add console handler with INFO or DEBUG level based on debug_mode
     console_handler = logging.StreamHandler(stream=sys.stdout)
@@ -132,6 +133,9 @@ class ArxivReferenceChecker:
         # Track if we're processing a single paper (for output optimization)
         self.single_paper_mode = False
         self.current_paper_info = None
+        
+        # Debug mode flag - will be set during run() method
+        self.debug_mode = False
         
         # Report service order for arXiv lookups
         if not db_path:
@@ -1967,6 +1971,9 @@ class ArxivReferenceChecker:
         global logger
         logger = setup_logging(debug_mode=debug_mode)
         
+        # Store debug mode for use in other methods
+        self.debug_mode = debug_mode
+        
         logger.info("Starting ArXiv reference checking process")
         
         # Initialize counters for statistics
@@ -2878,22 +2885,28 @@ class ArxivReferenceChecker:
                 with open(paper.file_path, 'r', encoding='utf-8') as f:
                     bibliography_text = f.read()
                 
-                # Save the text for debugging
-                debug_dir = "debug"
-                if not os.path.exists(debug_dir):
-                    os.makedirs(debug_dir)
-                
-                with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                    f.write(bibliography_text)
-                
-                logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                # Save the text for debugging only in debug mode
+                if self.debug_mode:
+                    debug_dir = "debug"
+                    if not os.path.exists(debug_dir):
+                        os.makedirs(debug_dir)
+                    
+                    with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                        f.write(bibliography_text)
+                    
+                    logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
                 
                 # Parse references directly from the text
                 references = self.parse_references(bibliography_text)
                 
-                # Save the extracted references for debugging
-                with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                    json.dump(references, f, indent=2)
+                # Save the extracted references for debugging only in debug mode
+                if self.debug_mode:
+                    debug_dir = "debug"
+                    if not os.path.exists(debug_dir):
+                        os.makedirs(debug_dir)
+                    
+                    with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                        json.dump(references, f, indent=2)
                 
                 logger.info(f"Extracted {len(references)} references from text file")
                 
@@ -2922,15 +2935,16 @@ class ArxivReferenceChecker:
             logger.warning(f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} for {paper_id}")
             return []
         
-        # Save the extracted text for debugging
-        debug_dir = "debug"
-        if not os.path.exists(debug_dir):
-            os.makedirs(debug_dir)
-        
-        with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
-            f.write(text)
-        
-        logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+        # Save the extracted text for debugging only in debug mode
+        if self.debug_mode:
+            debug_dir = "debug"
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+            
+            with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
+                f.write(text)
+            
+            logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
         
         # Find bibliography section
         bibliography_text = self.find_bibliography_section(text)
@@ -2939,18 +2953,28 @@ class ArxivReferenceChecker:
             logger.warning(f"Could not find bibliography section for {paper_id}")
             return []
         
-        # Save the bibliography text for debugging
-        with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-            f.write(bibliography_text)
-        
-        logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+        # Save the bibliography text for debugging only in debug mode
+        if self.debug_mode:
+            debug_dir = "debug"
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+            
+            with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                f.write(bibliography_text)
+            
+            logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
         
         # Parse references
         references = self.parse_references(bibliography_text)
         
-        # Save the extracted references for debugging
-        with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-            json.dump(references, f, indent=2)
+        # Save the extracted references for debugging only in debug mode
+        if self.debug_mode:
+            debug_dir = "debug"
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+            
+            with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                json.dump(references, f, indent=2)
         
         logger.info(f"Extracted {len(references)} references with arxiv links for {paper_id}")
         
