@@ -38,6 +38,9 @@ import random
 import concurrent.futures
 import gzip
 import hashlib
+import re
+import urllib.parse
+import dateutil.parser
 from datetime import datetime, timezone, timedelta
 from tqdm import tqdm
 from functools import lru_cache
@@ -231,10 +234,10 @@ class SemanticScholarDownloader:
             else:
                 logger.info(f"Last update time: {last_update_time}")
             
-            # ALWAYS check for incremental updates first if we have a last update time
-            if last_update_time:
-                logger.info("Checking for incremental updates since last update...")
-                incremental_updates = self.check_incremental_updates(last_update_time)
+            # Check for incremental updates using release IDs instead of timestamps
+            if last_release:
+                logger.info("Checking for incremental updates since last release...")
+                incremental_updates = self.check_incremental_updates(last_release)
                 if incremental_updates:
                     return {
                         'has_updates': True,
@@ -242,12 +245,12 @@ class SemanticScholarDownloader:
                         'last_release': last_release,
                         'is_new_release': False,
                         'incremental_updates': incremental_updates,
-                        'message': f'Incremental updates available since {last_update_time}'
+                        'message': f'Incremental updates available from {last_release} to {latest_release}'
                     }
                 else:
                     logger.info("No incremental updates found")
             else:
-                logger.info("No last update time available, skipping incremental check")
+                logger.info("No last release ID available, skipping incremental check")
             
             # Check for new releases
             if not last_release:
@@ -285,56 +288,99 @@ class SemanticScholarDownloader:
                 'message': f'Error checking for updates: {e}'
             }
     
-    def check_incremental_updates(self, since_timestamp):
+    def check_incremental_updates(self, start_release_id=None):
         """
-        Check for incremental updates since a specific timestamp
+        Check for incremental updates between releases using the correct API
         
         Args:
-            since_timestamp: ISO timestamp string of last update
+            start_release_id: Release ID to start from (if None, uses last processed release)
             
         Returns:
-            list: List of incremental update files available, or None if no updates
+            list: List of incremental update diffs available, or None if no updates
         """
         try:
-            logger.info(f"Checking for incremental updates since {since_timestamp}")
+            # Get the start and end release IDs
+            if start_release_id is None:
+                start_release_id = self.get_last_release_id()
             
-            # Try to get incremental updates from the API
-            # This endpoint may vary based on the actual API structure
-            url = "https://api.semanticscholar.org/datasets/v1/updates"
+            if not start_release_id:
+                logger.info("No start release ID available, cannot check for incremental updates")
+                return None
+            
+            # Get the latest release ID
+            end_release_id = self.get_latest_release_id()
+            
+            # If we're already at the latest release, no updates needed
+            if start_release_id == end_release_id:
+                logger.info(f"Already at latest release {end_release_id}, no incremental updates needed")
+                return None
+            
+            logger.info(f"Checking for incremental updates from {start_release_id} to {end_release_id}")
+            
+            # Use the correct incremental diffs API endpoint
+            url = f"https://api.semanticscholar.org/datasets/v1/diffs/{start_release_id}/to/{end_release_id}/papers"
             headers = {}
             if self.api_key:
                 headers["x-api-key"] = self.api_key
             
-            params = {
-                "since": since_timestamp,
-                "dataset": "papers"
-            }
-            
-            logger.info(f"Requesting incremental updates from: {url}")
-            response = self.session.get(url, headers=headers, params=params, timeout=30)
+            logger.info(f"Requesting incremental diffs from: {url}")
+            response = self.session.get(url, headers=headers, timeout=30)
             
             # If this endpoint doesn't exist, try alternative approaches
             if response.status_code == 404:
-                logger.info("Incremental updates endpoint not available (404), trying alternative methods")
-                return self._check_incremental_alternative(since_timestamp)
+                logger.info("Incremental diffs endpoint not available (404), trying alternative methods")
+                return self._check_incremental_alternative_by_release(start_release_id, end_release_id)
             
             response.raise_for_status()
             data = response.json()
             
-            updates = data.get("updates", [])
-            if updates:
-                logger.info(f"Found {len(updates)} incremental updates since {since_timestamp}")
-                return updates
+            diffs = data.get("diffs", [])
+            if diffs:
+                logger.info(f"Found {len(diffs)} incremental diffs from {start_release_id} to {end_release_id}")
+                return diffs
             else:
-                logger.info("No incremental updates found from API endpoint")
+                logger.info("No incremental diffs found from API endpoint")
             
             return None
             
         except Exception as e:
             logger.info(f"Error checking incremental updates: {e}")
             logger.info("Falling back to alternative incremental check method")
-            return self._check_incremental_alternative(since_timestamp)
+            return self._check_incremental_alternative_by_release(start_release_id or self.get_last_release_id(), end_release_id)
     
+    def _check_incremental_alternative_by_release(self, start_release_id, end_release_id):
+        """
+        Alternative method to check for incremental updates when the diffs API is unavailable
+        This tries to compare release IDs and suggest a full dataset download if needed
+        
+        Args:
+            start_release_id: Starting release ID
+            end_release_id: Target release ID
+            
+        Returns:
+            list: List indicating a full dataset update is needed, or None if no updates
+        """
+        try:
+            if not start_release_id or not end_release_id:
+                return None
+            
+            if start_release_id == end_release_id:
+                return None
+                
+            logger.info(f"Diffs API unavailable, suggesting full dataset download from {start_release_id} to {end_release_id}")
+            
+            # Return a structure indicating that a full dataset download is needed
+            return [{
+                "type": "full_dataset_update",
+                "start_release": start_release_id,
+                "end_release": end_release_id,
+                "message": "Incremental diffs unavailable, full dataset update recommended"
+            }]
+            
+        except Exception as e:
+            logger.debug(f"Error in alternative incremental check by release: {e}")
+            return None
+
     def _check_incremental_alternative(self, since_timestamp):
         """
         Alternative method to check for incremental updates
@@ -396,51 +442,81 @@ class SemanticScholarDownloader:
             logger.debug(f"Error in alternative incremental check: {e}")
             return None
     
-    def download_incremental_updates(self, updates):
+    def download_incremental_updates(self, diffs):
         """
-        Download incremental updates
+        Download and process incremental diffs according to the Semantic Scholar API format
         
         Args:
-            updates: List of incremental update information
+            diffs: List of diff dictionaries from the incremental API
             
         Returns:
             bool: True if successful, False otherwise
         """
         try:
-            logger.info("Downloading incremental updates...")
+            logger.info("Processing incremental diffs...")
             
-            total_downloaded = 0
+            total_updated = 0
+            total_deleted = 0
             
-            for update in updates:
-                if update.get("type") == "recent_papers":
-                    # Handle recent papers update
-                    papers = update.get("papers", [])
+            for diff in diffs:
+                if diff.get("type") == "full_dataset_update":
+                    # Handle full dataset update recommendation
+                    logger.info(f"Full dataset update recommended: {diff.get('message')}")
+                    logger.info("Consider running with --download-dataset --process-local-files")
+                    return False
+                elif diff.get("type") == "recent_papers":
+                    # Handle recent papers update (fallback)
+                    papers = diff.get("papers", [])
                     if papers:
                         logger.info(f"Processing {len(papers)} recent papers")
                         paper_ids = [p.get("paperId") for p in papers if p.get("paperId")]
                         if paper_ids:
                             self.download_papers(paper_ids)
-                            total_downloaded += len(paper_ids)
+                            total_updated += len(paper_ids)
                 else:
-                    # Handle file-based incremental updates
-                    file_url = update.get("url")
-                    if file_url:
+                    # Handle proper incremental diff format
+                    update_files = diff.get("update_files", [])
+                    delete_files = diff.get("delete_files", [])
+                    
+                    # Process update files
+                    for update_url in update_files:
                         try:
-                            path, updated = self.download_file({
-                                "url": file_url,
-                                "path": update.get("path", "incremental_update.jsonl.gz")
-                            })
-                            if updated:
-                                total_downloaded += 1
+                            logger.info(f"Processing update file: {update_url}")
+                            records_updated = self._process_incremental_file(update_url, "update")
+                            total_updated += records_updated
                         except Exception as e:
-                            logger.error(f"Error downloading incremental file: {e}")
+                            logger.error(f"Error processing update file {update_url}: {e}")
+                            continue
+                    
+                    # Process delete files
+                    for delete_url in delete_files:
+                        try:
+                            logger.info(f"Processing delete file: {delete_url}")
+                            records_deleted = self._process_incremental_file(delete_url, "delete")
+                            total_deleted += records_deleted
+                        except Exception as e:
+                            logger.error(f"Error processing delete file {delete_url}: {e}")
                             continue
             
-            logger.info(f"Downloaded {total_downloaded} incremental updates")
-            return total_downloaded > 0
+            logger.info(f"Incremental update complete - Updated: {total_updated}, Deleted: {total_deleted}")
+            
+            # Update metadata after successful incremental update
+            if total_updated > 0 or total_deleted > 0:
+                current_time = datetime.now(timezone.utc).isoformat()
+                self.set_last_update_time(current_time)
+                
+                # Update the last release ID to the latest
+                try:
+                    latest_release = self.get_latest_release_id()
+                    self.set_last_release_id(latest_release)
+                    logger.info(f"Updated metadata - last update: {current_time}, release: {latest_release}")
+                except Exception as e:
+                    logger.warning(f"Could not update release ID: {e}")
+            
+            return total_updated > 0 or total_deleted > 0
             
         except Exception as e:
-            logger.error(f"Error downloading incremental updates: {e}")
+            logger.error(f"Error processing incremental diffs: {e}")
             return False
     
     def get_latest_release_id(self):
@@ -783,7 +859,7 @@ class SemanticScholarDownloader:
             for i in range(0, len(unique_paper_ids), chunk_size):
                 chunk = unique_paper_ids[i:i+chunk_size]
                 placeholders = ','.join(['?'] * len(chunk))
-                cursor.execute(f"SELECT id FROM papers WHERE id IN ({placeholders})", chunk)
+                cursor.execute(f"SELECT paperId FROM papers WHERE paperId IN ({placeholders})", chunk)
                 existing_ids.update(row[0] for row in cursor.fetchall())
         except sqlite3.Error as e:
             logger.error(f"Error checking existing papers: {str(e)}")
@@ -895,7 +971,7 @@ class SemanticScholarDownloader:
             force_reprocess: If True, reprocess all files even if already processed
             incremental: If True, only process new or modified files (set automatically if DB exists)
         """
-        if incremental:
+        if incremental and not force_reprocess:
             logger.info("Running in incremental mode - checking for updates...")
             update_info = self.check_for_updates()
             
@@ -905,15 +981,30 @@ class SemanticScholarDownloader:
             
             logger.info(update_info['message'])
             
-            # Handle incremental updates if available
+            # Handle incremental updates if available, but only if there are no new local files
             if update_info.get('incremental_updates'):
-                logger.info("Processing incremental updates...")
-                success = self.download_incremental_updates(update_info['incremental_updates'])
-                if success:
-                    logger.info("Incremental updates processed successfully")
-                    return
+                # Check if we have any unprocessed .gz files first
+                gz_files = []
+                for root, dirs, files in os.walk(self.output_dir):
+                    for file in files:
+                        if file.endswith('.gz'):
+                            gz_files.append(os.path.join(root, file))
+                
+                unprocessed_files = []
+                for gz_file in gz_files:
+                    if not self._is_file_processed(gz_file) or self._should_process_file(gz_file):
+                        unprocessed_files.append(gz_file)
+                
+                if unprocessed_files:
+                    logger.info(f"Found {len(unprocessed_files)} unprocessed local files, processing those instead of incremental updates")
                 else:
-                    logger.warning("Failed to process incremental updates, falling back to file processing")
+                    logger.info("Processing incremental updates...")
+                    success = self.download_incremental_updates(update_info['incremental_updates'])
+                    if success:
+                        logger.info("Incremental updates processed successfully")
+                        return
+                    else:
+                        logger.warning("Failed to process incremental updates, falling back to file processing")
         
         # Find all .gz files in the output directory
         gz_files = []
@@ -1343,6 +1434,83 @@ class SemanticScholarDownloader:
             i += 1
         
         return f"{size:.1f} {size_names[i]}"
+
+    def _process_incremental_file(self, file_url, operation_type):
+        """
+        Process a single incremental diff file (either updates or deletes)
+        
+        Args:
+            file_url: URL of the diff file to process
+            operation_type: Either "update" or "delete"
+            
+        Returns:
+            int: Number of records processed
+        """
+        try:
+            logger.info(f"Processing {operation_type} file: {file_url}")
+            
+            # Download the file content
+            response = self.session.get(file_url, stream=True, timeout=300)
+            response.raise_for_status()
+            
+            records_processed = 0
+            cursor = self.conn.cursor()
+            
+            # Begin transaction for better performance
+            self.conn.execute("BEGIN TRANSACTION")
+            
+            try:
+                # Process the file line by line
+                for line_num, line in enumerate(response.iter_lines(decode_unicode=True), 1):
+                    if not line.strip():
+                        continue
+                    
+                    try:
+                        record = json.loads(line.strip())
+                        
+                        if operation_type == "update":
+                            # Insert or update the record
+                            self._insert_paper(cursor, record)
+                        elif operation_type == "delete":
+                            # Delete the record by primary key
+                            paper_id = record.get("paperId")
+                            if not paper_id:
+                                # Fallback to corpusId if paperId not available
+                                corpus_id = record.get("corpusid") or record.get("corpusId")
+                                if corpus_id:
+                                    paper_id = str(corpus_id)
+                            
+                            if paper_id:
+                                cursor.execute("DELETE FROM papers WHERE paperId = ?", (paper_id,))
+                        
+                        records_processed += 1
+                        
+                        # Commit periodically for large files
+                        if records_processed % 10000 == 0:
+                            self.conn.commit()
+                            self.conn.execute("BEGIN TRANSACTION")
+                            logger.info(f"Processed {records_processed:,} {operation_type} records")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON on line {line_num} in {operation_type} file: {e}")
+                        continue
+                    except Exception as e:
+                        logger.error(f"Error processing line {line_num} in {operation_type} file: {e}")
+                        continue
+                
+                # Final commit
+                self.conn.commit()
+                logger.info(f"Completed processing {records_processed:,} {operation_type} records")
+                
+            except Exception as e:
+                self.conn.rollback()
+                raise e
+            
+            return records_processed
+            
+        except Exception as e:
+            logger.error(f"Error processing {operation_type} file {file_url}: {e}")
+            return 0
 
 def main():
     """Main function"""
