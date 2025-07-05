@@ -57,6 +57,8 @@ from utils.text_utils import (clean_author_name, clean_title, normalize_text,
                        remove_year_from_title)
 from utils.author_utils import compare_authors, levenshtein_distance, extract_authors_list
 from checkers.hybrid_reference_checker import HybridReferenceChecker
+from config.settings import get_config
+from llm.base import ReferenceExtractor, create_llm_provider
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
     """Set up logging configuration"""
@@ -150,6 +152,10 @@ class ArxivReferenceChecker:
         
         # Create output directory
         self.output_dir = "output"
+        
+        # Initialize LLM-based reference extraction
+        self.config = get_config()
+        self.llm_extractor = self._initialize_llm_extractor()
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
         
@@ -162,6 +168,36 @@ class ArxivReferenceChecker:
             f.write("=" * 50 + "\n\n")
             f.write(f"Service order used: {self.service_order}\n\n")
     
+    def _initialize_llm_extractor(self):
+        """Initialize LLM-based reference extraction if enabled"""
+        if not self.config.get("llm", {}).get("enabled", False):
+            logger.debug("LLM extraction disabled in configuration")
+            return None
+        
+        provider_name = self.config["llm"]["provider"]
+        provider_config = self.config["llm"].get(provider_name, {})
+        
+        logger.debug(f"Attempting to create LLM provider: {provider_name}")
+        
+        # Create LLM provider
+        llm_provider = create_llm_provider(provider_name, provider_config)
+        if not llm_provider:
+            logger.warning(f"Failed to create LLM provider: {provider_name}")
+            return None
+        
+        # Check if provider is available
+        if not llm_provider.is_available():
+            logger.warning(f"LLM provider {provider_name} is not available (missing credentials), will use fallback")
+        
+        # Create reference extractor with fallback
+        fallback_enabled = self.config["llm"].get("fallback_enabled", True)
+        extractor = ReferenceExtractor(
+            llm_provider=llm_provider,
+            fallback_enabled=fallback_enabled
+        )
+        
+        logger.info(f"LLM-based reference extraction configured with {provider_name} (available: {llm_provider.is_available()}, fallback: {fallback_enabled})")
+        return extractor
     
     def get_papers_from_last_year(self, max_results=100):
         """
@@ -2314,6 +2350,29 @@ class ArxivReferenceChecker:
         bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
         logger.debug(f"Bibliography sample: {bib_sample}")
 
+        # Try LLM-based extraction first if available
+        if self.llm_extractor:
+            try:
+                references = self.llm_extractor.extract_references(
+                    bibliography_text, 
+                    fallback_func=self._parse_references_regex
+                )
+                if references:
+                    logger.info(f"Successfully parsed {len(references)} references")
+                    return self._process_extracted_references(references)
+                else:
+                    logger.warning("LLM extraction returned no references, using regex fallback")
+            except Exception as e:
+                logger.error(f"LLM reference extraction failed: {e}")
+        
+        # Fallback to regex-based parsing
+        logger.info("Using regex-based reference parsing")
+        return self._parse_references_regex(bibliography_text)
+    
+    def _parse_references_regex(self, bibliography_text):
+        """
+        Parse references using regex-based approach (original implementation)
+        """
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to ensure proper spacing after reference numbers
         normalized_bib = re.sub(r'(\[\d+\])([A-Za-z])', r'\1 \2', bibliography_text)
@@ -2639,6 +2698,170 @@ class ArxivReferenceChecker:
         logger.info(f"Extracted {len(other_refs)} structured references without URLs or DOIs")
         all_refs = arxiv_refs + non_arxiv_refs + other_refs
         return all_refs
+    
+    def _process_extracted_references(self, references):
+        """
+        Process references extracted by LLM into structured format
+        """
+        processed_refs = []
+        
+        for i, ref in enumerate(references):
+            try:
+                # Log the type and content for debugging
+                logger.debug(f"Processing reference {i+1}: type={type(ref)}, content={str(ref)[:100]}...")
+                
+                # Handle different input types
+                if isinstance(ref, dict):
+                    # If it's already a structured reference, validate and use it
+                    if all(key in ref for key in ['url', 'authors', 'title', 'raw_text']):
+                        logger.debug(f"Reference {i+1} is already structured")
+                        processed_refs.append(ref)
+                        continue
+                    else:
+                        # Convert malformed dict to string and process
+                        ref = str(ref)
+                        logger.warning(f"Reference {i+1} was malformed dict, converting to string")
+                elif not isinstance(ref, str):
+                    # Convert other types to string
+                    ref = str(ref) if ref is not None else ""
+                    logger.debug(f"Reference {i+1} converted from {type(ref)} to string")
+                
+                # Skip empty or too short references
+                if not ref or len(ref.strip()) < 10:
+                    logger.debug(f"Skipping reference {i+1}: too short")
+                    continue
+                
+                # Check if this looks like a serialized dictionary (corruption case)
+                if ref.strip().startswith("{'") and ref.strip().endswith("'}"):
+                    logger.warning(f"Reference {i+1} appears to be a serialized dictionary, attempting to parse")
+                    try:
+                        # Try to safely evaluate the dictionary
+                        import ast
+                        parsed_dict = ast.literal_eval(ref)
+                        if isinstance(parsed_dict, dict) and 'raw_text' in parsed_dict:
+                            # Use the original raw text if available
+                            ref = parsed_dict.get('raw_text', ref)
+                            logger.debug(f"Extracted raw_text from serialized dict for reference {i+1}")
+                    except (ValueError, SyntaxError) as e:
+                        logger.warning(f"Could not parse serialized dict for reference {i+1}: {e}")
+                
+                # Extract structured data from the reference text
+                structured_ref = self._create_structured_reference(ref)
+                if structured_ref:
+                    logger.debug(f"Successfully structured reference {i+1}")
+                    processed_refs.append(structured_ref)
+                else:
+                    logger.warning(f"Failed to structure reference {i+1}")
+                    
+            except Exception as e:
+                logger.error(f"Error processing reference {i+1}: {e}")
+                continue
+        
+        logger.info(f"Processed {len(processed_refs)} out of {len(references)} extracted references")
+        return processed_refs
+    
+    def _create_structured_reference(self, ref_text):
+        """
+        Create structured reference from raw text
+        """
+        # Check for ArXiv references
+        arxiv_patterns = [
+            r'arxiv\.org/[^\s,\)]+',
+            r'arxiv:\s*(\d+\.\d+(?:v\d+)?)',
+            r'arXiv preprint arXiv:(\d+\.\d+(?:v\d+)?)',
+        ]
+        
+        arxiv_url = None
+        for pattern in arxiv_patterns:
+            arxiv_match = re.search(pattern, ref_text, re.IGNORECASE)
+            if arxiv_match:
+                if 'arxiv.org' in arxiv_match.group(0).lower():
+                    arxiv_url = arxiv_match.group(0)
+                    if not arxiv_url.startswith('http'):
+                        arxiv_url = 'https://' + arxiv_url
+                else:
+                    try:
+                        arxiv_id = arxiv_match.group(1)
+                        arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                    except IndexError:
+                        arxiv_url = f"https://arxiv.org/abs/{arxiv_match.group(0)}"
+                break
+        
+        # Extract DOI
+        doi_patterns = [
+            r'doi\.org/([^\s,\)]+)',
+            r'doi:([^\s,\)]+)',
+            r'DOI:([^\s,\)]+)',
+        ]
+        
+        doi = None
+        url = None
+        for pattern in doi_patterns:
+            doi_match = re.search(pattern, ref_text, re.IGNORECASE)
+            if doi_match:
+                doi = doi_match.group(1)
+                url = f"https://doi.org/{doi}"
+                break
+        
+        # Extract other URLs if no DOI found
+        if not url and not arxiv_url:
+            url_match = re.search(r'https?://(?!arxiv\.org)[^\s,\)]+', ref_text)
+            if url_match:
+                url = url_match.group(0)
+        
+        # Extract year
+        year = None
+        year_match = re.search(r'\b(19|20)\d{2}\b', ref_text)
+        if year_match:
+            year = int(year_match.group(0))
+        
+        # Extract authors and title
+        extracted_data = self.extract_authors_title_from_academic_format(ref_text)
+        if extracted_data:
+            authors, title = extracted_data
+        else:
+            authors, title = self.extract_authors_title_fallback(ref_text)
+        
+        # Clean up
+        title = re.sub(r'\s+', ' ', title).strip() if title else ""
+        
+        # Handle special case for URL references and ensure authors is a list of strings
+        if authors:
+            if isinstance(authors[0], dict) and authors[0].get('is_url_reference', False):
+                authors = ["URL Reference"]
+            elif not all(isinstance(author, str) for author in authors):
+                # Convert any non-string authors to strings and filter out invalid ones
+                cleaned_authors = []
+                for author in authors:
+                    if isinstance(author, str):
+                        cleaned_authors.append(author)
+                    elif isinstance(author, dict):
+                        # Handle dict authors (shouldn't normally happen, but safety check)
+                        if author.get('is_url_reference'):
+                            cleaned_authors.append("URL Reference")
+                        else:
+                            logger.warning(f"Found dict in authors list: {author}")
+                            cleaned_authors.append("Unknown Author")
+                    else:
+                        logger.warning(f"Found non-string author: {author} (type: {type(author)})")
+                        cleaned_authors.append(str(author))
+                authors = cleaned_authors
+        
+        if not authors:
+            authors = ["Unknown Author"]
+        
+        # Determine reference type
+        ref_type = 'arxiv' if arxiv_url else ('non-arxiv' if (url or doi) else 'other')
+        
+        return {
+            'url': arxiv_url or url or "",
+            'doi': doi,
+            'year': year or 0,
+            'authors': authors,
+            'title': title,
+            'raw_text': ref_text,
+            'type': ref_type
+        }
     
     def extract_bibliography(self, paper):
         """
