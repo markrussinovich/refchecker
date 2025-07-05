@@ -213,14 +213,14 @@ class SemanticScholarDownloader:
             
             logger.info(f"Latest release: {latest_release}")
             logger.info(f"Last release: {last_release}")
-            logger.info(f"Last update time: {last_update_time}")
             
             # Check if database has records but no update time
             if not last_update_time:
+
+                # does databse have > 1 record?
                 cursor = self.conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM papers")
+                cursor.execute("SELECT EXISTS(SELECT 1 FROM papers LIMIT 1)")
                 record_count = cursor.fetchone()[0]
-                logger.info(f"Database has {record_count} records")
                 
                 if record_count > 0:
                     # Database has records but no update time - create a reasonable timestamp
@@ -228,6 +228,8 @@ class SemanticScholarDownloader:
                     default_update_time = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
                     logger.info(f"Creating default update time: {default_update_time}")
                     last_update_time = default_update_time
+            else:
+                logger.info(f"Last update time: {last_update_time}")
             
             # ALWAYS check for incremental updates first if we have a last update time
             if last_update_time:
