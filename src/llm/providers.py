@@ -11,30 +11,6 @@ from .base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-PROMPT_EXTRACTION_SYSTEM = """You are a bibliography parsing expert. Extract individual references from bibliography text.
-
-Your task is to:
-1. Split the bibliography into individual complete references
-2. Clean up each reference by removing reference numbers like [1], [2], etc.
-3. Fix formatting issues like broken line breaks, extra spaces, and incomplete words
-4. Return each reference as a complete, properly formatted bibliographic entry
-5. Preserve all author names, titles, publication venues, years, URLs, DOIs, and other details
-Note that you should expect the title to precede the publication venue and year, and that URLs/DOIs may appear at the end of the reference.
-6. Do not include any additional text or explanations in your response
-
-Format each reference as a standard academic citation with all available information.
-
-For example, this input:
-[Chen et al. , 2018 ]Ricky TQ Chen, Yulia Rubanova, Jesse
-Bettencourt, and David K Duvenaud. Neural ordinary dif-
-ferential equations. Advances in neural information pro-
-cessing systems , 31, 2018.
-
-
-Should produce this output:
-
-
-"""
 
 
 class LLMProviderMixin:
@@ -48,10 +24,11 @@ Please extract individual references from the following bibliography text. Each 
 Instructions:
 1. Split the bibliography into individual references
 2. Each reference should include authors, title, publication venue, year, and any URLs/DOIs
-3. Return ONLY the references, one per line
-4. Do not include reference numbers like [1], [2], etc.
-5. Each reference should be on its own line
-6. Do not add any additional text or explanations
+3. Place a hashmark (#) rather than period between fields of a reference
+4. Return ONLY the references, one per line
+5. Do not include reference numbers like [1], [2], etc.
+6. Each reference should be on its own line
+7. Do not add any additional text or explanations
 
 Bibliography text:
 {bibliography_text}
@@ -138,7 +115,6 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": PROMPT_EXTRACTION_SYSTEM},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,
@@ -183,7 +159,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 messages=[
-                    {"role": "user", "content": PROMPT_EXTRACTION_SYSTEM + prompt}
+                    {"role": "user", "content": prompt}
                 ]
             )
             
@@ -287,7 +263,6 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o",
                 messages=[
-                    {"role": "system", "content": PROMPT_EXTRACTION_SYSTEM},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,

@@ -2063,8 +2063,11 @@ class ArxivReferenceChecker:
                             title = reference.get('title', 'Untitled')
                             authors = ', '.join(reference.get('authors', []))
                             year = reference.get('year', '')
+                            venue = reference.get('venue', '')
                             print(f"[{i+1}/{len(bibliography)}] {title}")
                             print(f"       {authors}")
+                            if venue:
+                                print(f"       {venue}")
                             print(f"       {year}")
                         # --- DEBUG TIMER ---
                         start_time = time.time()
@@ -2352,7 +2355,7 @@ class ArxivReferenceChecker:
                 )
                 if references:
                     logger.info(f"Successfully parsed {len(references)} references")
-                    return self._process_extracted_references(references)
+                    return self._process_llm_extracted_references(references)
             except Exception as e:
                 logger.error(f"LLM reference extraction failed: {e}")
         
@@ -2699,13 +2702,196 @@ class ArxivReferenceChecker:
             if not ref or len(ref.strip()) < 10:
                 continue
                 
-            # Extract structured data from each reference
-            structured_ref = self._create_structured_reference(ref)
+            # Extract structured data from each reference using LLM-specific function
+            structured_ref = self._create_structured_llm_references(ref)
             if structured_ref:
                 processed_refs.append(structured_ref)
         
         return processed_refs
     
+    def _process_llm_extracted_references(self, references):
+        """
+        Process references extracted by LLM with simplified formatting assumptions
+        """
+        processed_refs = []
+        
+        for ref in references:
+            if not ref or len(ref.strip()) < 10:
+                continue
+                
+            # Use LLM-specific structured reference creation
+            structured_ref = self._create_structured_llm_references(ref)
+            if structured_ref:
+                processed_refs.append(structured_ref)
+        
+        return processed_refs
+    
+    def _create_structured_llm_references(self, ref_text):
+        """
+        Create structured reference from LLM-extracted text (assumes well-formatted input)
+        """
+        # Debug logging
+        logger.debug(f"LLM reference raw text: '{ref_text}'")
+        
+        # LLM outputs are well-formatted, so we can use simpler parsing
+        
+        # Check for ArXiv references
+        arxiv_patterns = [
+            r'arxiv\.org/[^\s,\)]+',
+            r'arxiv:\s*(\d+\.\d+(?:v\d+)?)',
+            r'arXiv preprint arXiv:(\d+\.\d+(?:v\d+)?)',
+        ]
+        
+        arxiv_url = None
+        for pattern in arxiv_patterns:
+            arxiv_match = re.search(pattern, ref_text, re.IGNORECASE)
+            if arxiv_match:
+                if 'arxiv.org' in arxiv_match.group(0).lower():
+                    arxiv_url = arxiv_match.group(0)
+                    if not arxiv_url.startswith('http'):
+                        arxiv_url = 'https://' + arxiv_url
+                else:
+                    try:
+                        arxiv_id = arxiv_match.group(1)
+                        arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                    except IndexError:
+                        arxiv_url = f"https://arxiv.org/abs/{arxiv_match.group(0)}"
+                break
+        
+        # Extract DOI - simpler patterns for well-formatted text
+        doi_patterns = [
+            r'doi\.org/([^\s,\)]+)',
+            r'doi:\s*([^\s,\)]+)',
+            r'DOI:\s*([^\s,\)]+)',
+        ]
+        
+        doi = None
+        url = None
+        for pattern in doi_patterns:
+            doi_match = re.search(pattern, ref_text, re.IGNORECASE)
+            if doi_match:
+                doi = doi_match.group(1)
+                url = f"https://doi.org/{doi}"
+                break
+        
+        # Extract other URLs if no DOI found
+        if not url and not arxiv_url:
+            url_match = re.search(r'https?://(?!arxiv\.org)[^\s,\)]+', ref_text)
+            if url_match:
+                url = url_match.group(0)
+        
+        # Extract year - LLM output should have clear year formatting
+        year = None
+        year_match = re.search(r'\b(19|20)\d{2}\b', ref_text)
+        if year_match:
+            year = int(year_match.group(0))
+        
+        # For LLM-extracted references, use simple parsing since they're well-formatted
+        # LLM now formats as: "Authors # Title # Journal/Venue # Year"
+        
+        authors = []
+        title = ""
+        venue = ""
+        
+        # Split by hashmarks to find components
+        parts = ref_text.split('#')
+        parts = [p.strip() for p in parts]  # Clean up whitespace
+        logger.debug(f"Split by hashmarks: {parts}")
+        
+        if len(parts) >= 2:
+            # First part is typically authors
+            author_text = parts[0].strip()
+            logger.debug(f"Author text: '{author_text}'")
+            if author_text:
+                # Clean up author text and split properly
+                # Handle "and" and comma separators
+                if ' and ' in author_text:
+                    # Split by "and" first
+                    author_parts = author_text.split(' and ')
+                    for part in author_parts:
+                        # Further split by comma if needed
+                        if ',' in part:
+                            sub_parts = [p.strip() for p in part.split(',') if p.strip()]
+                            authors.extend(sub_parts)
+                        else:
+                            authors.append(part.strip())
+                else:
+                    # Split by comma
+                    authors = [a.strip() for a in author_text.split(',') if a.strip()]
+            
+            # Second part is typically the title
+            if len(parts) >= 2:
+                title = parts[1].strip()
+                logger.debug(f"Title: '{title}'")
+                
+            # Third part is typically the venue
+            if len(parts) >= 3:
+                venue = parts[2].strip()
+                logger.debug(f"Venue: '{venue}'")
+                
+            # Fourth part might be year (but we already extract year from the whole text)
+            if len(parts) >= 4:
+                year_part = parts[3].strip()
+                logger.debug(f"Year part: '{year_part}'")
+                # Extract year from this part if we didn't find it earlier
+                if not year:
+                    year_match = re.search(r'\b(19|20)\d{2}\b', year_part)
+                    if year_match:
+                        year = int(year_match.group(0))
+        
+        # Fallback: if no # delimited structure, try to extract what we can
+        if not title and '#' not in ref_text:
+            # Look for quoted titles
+            title_match = re.search(r'"([^"]+)"', ref_text)
+            if title_match:
+                title = title_match.group(1)
+            else:
+                # Try to find title-like text (capitalized words)
+                # Remove URLs, DOIs, years first
+                clean_text = re.sub(r'https?://[^\s]+', '', ref_text)
+                clean_text = re.sub(r'doi:[^\s]+', '', clean_text)
+                clean_text = re.sub(r'arXiv:[^\s]+', '', clean_text)
+                clean_text = re.sub(r'\b(19|20)\d{2}\b', '', clean_text)
+                
+                # Look for capitalized title pattern
+                title_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)*(?:\s+[A-Z][a-z]+)*)', clean_text)
+                if title_match:
+                    title = title_match.group(1)
+        
+        # Clean up authors - remove empty strings and trailing commas
+        authors = [a.rstrip(',').strip() for a in authors if a.strip() and a.strip() != ',']
+        
+        # Clean up title
+        title = re.sub(r'\s+', ' ', title).strip() if title else ""
+        title = title.rstrip(',').strip()
+        
+        # Clean up venue
+        venue = re.sub(r'\s+', ' ', venue).strip() if venue else ""
+        venue = venue.rstrip(',').strip()
+        
+        if not authors:
+            authors = ["Unknown Author"]
+        
+        # Debug logging
+        logger.debug(f"Parsed authors: {authors}")
+        logger.debug(f"Parsed title: '{title}'")
+        logger.debug(f"Parsed venue: '{venue}'")
+        logger.debug(f"Parsed year: {year}")
+        
+        # Determine reference type
+        ref_type = 'arxiv' if arxiv_url else ('non-arxiv' if (url or doi) else 'other')
+        
+        return {
+            'url': arxiv_url or url or "",
+            'doi': doi,
+            'year': year or 0,
+            'authors': authors,
+            'title': title,
+            'venue': venue,
+            'raw_text': ref_text,
+            'type': ref_type
+        }
+
     def _create_structured_reference(self, ref_text):
         """
         Create structured reference from raw text
@@ -2782,6 +2968,7 @@ class ArxivReferenceChecker:
             'year': year or 0,
             'authors': authors,
             'title': title,
+            'venue': "",  # Regular parsing doesn't extract venue yet
             'raw_text': ref_text,
             'type': ref_type
         }
