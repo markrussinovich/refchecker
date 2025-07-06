@@ -62,6 +62,12 @@ from llm.base import ReferenceExtractor, create_llm_provider
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
     """Set up logging configuration"""
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    
     # Configure root logger to control all child loggers
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -74,18 +80,11 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
     file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    # Add file handler only in debug mode
-    if debug_mode:
-        log_dir = "logs"
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        
-        log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-        
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(level)
-        file_handler.setFormatter(file_formatter)
-        root_logger.addHandler(file_handler)
+    # Add file handler with DEBUG level
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(level)
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
     
     # Add console handler with INFO or DEBUG level based on debug_mode
     console_handler = logging.StreamHandler(stream=sys.stdout)
@@ -134,9 +133,6 @@ class ArxivReferenceChecker:
         self.single_paper_mode = False
         self.current_paper_info = None
         
-        # Debug mode flag - will be set during run() method
-        self.debug_mode = False
-        
         # Report service order for arXiv lookups
         if not db_path:
             logger.info(f"Service order for arXiv verification: Local DB → Intelligent API Switching (Semantic Scholar ↔ arXiv)")
@@ -175,23 +171,16 @@ class ArxivReferenceChecker:
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
         if not self.config.get("llm", {}).get("enabled", False):
-            logger.debug("LLM extraction disabled in configuration")
             return None
         
         provider_name = self.config["llm"]["provider"]
         provider_config = self.config["llm"].get(provider_name, {})
-        
-        logger.debug(f"Attempting to create LLM provider: {provider_name}")
         
         # Create LLM provider
         llm_provider = create_llm_provider(provider_name, provider_config)
         if not llm_provider:
             logger.warning(f"Failed to create LLM provider: {provider_name}")
             return None
-        
-        # Check if provider is available
-        if not llm_provider.is_available():
-            logger.warning(f"LLM provider {provider_name} is not available (missing credentials), will use fallback")
         
         # Create reference extractor with fallback
         fallback_enabled = self.config["llm"].get("fallback_enabled", True)
@@ -200,7 +189,7 @@ class ArxivReferenceChecker:
             fallback_enabled=fallback_enabled
         )
         
-        logger.info(f"LLM-based reference extraction configured with {provider_name} (available: {llm_provider.is_available()}, fallback: {fallback_enabled})")
+        logger.info(f"LLM-based reference extraction enabled using {provider_name}")
         return extractor
     
     def get_papers_from_last_year(self, max_results=100):
@@ -1971,9 +1960,6 @@ class ArxivReferenceChecker:
         global logger
         logger = setup_logging(debug_mode=debug_mode)
         
-        # Store debug mode for use in other methods
-        self.debug_mode = debug_mode
-        
         logger.info("Starting ArXiv reference checking process")
         
         # Initialize counters for statistics
@@ -2367,13 +2353,10 @@ class ArxivReferenceChecker:
                 if references:
                     logger.info(f"Successfully parsed {len(references)} references")
                     return self._process_extracted_references(references)
-                else:
-                    logger.warning("LLM extraction returned no references, using regex fallback")
             except Exception as e:
                 logger.error(f"LLM reference extraction failed: {e}")
         
         # Fallback to regex-based parsing
-        logger.info("Using regex-based reference parsing")
         return self._parse_references_regex(bibliography_text)
     
     def _parse_references_regex(self, bibliography_text):
@@ -2712,59 +2695,15 @@ class ArxivReferenceChecker:
         """
         processed_refs = []
         
-        for i, ref in enumerate(references):
-            try:
-                # Log the type and content for debugging
-                logger.debug(f"Processing reference {i+1}: type={type(ref)}, content={str(ref)[:100]}...")
-                
-                # Handle different input types
-                if isinstance(ref, dict):
-                    # If it's already a structured reference, validate and use it
-                    if all(key in ref for key in ['url', 'authors', 'title', 'raw_text']):
-                        logger.debug(f"Reference {i+1} is already structured")
-                        processed_refs.append(ref)
-                        continue
-                    else:
-                        # Convert malformed dict to string and process
-                        ref = str(ref)
-                        logger.warning(f"Reference {i+1} was malformed dict, converting to string")
-                elif not isinstance(ref, str):
-                    # Convert other types to string
-                    ref = str(ref) if ref is not None else ""
-                    logger.debug(f"Reference {i+1} converted from {type(ref)} to string")
-                
-                # Skip empty or too short references
-                if not ref or len(ref.strip()) < 10:
-                    logger.debug(f"Skipping reference {i+1}: too short")
-                    continue
-                
-                # Check if this looks like a serialized dictionary (corruption case)
-                if ref.strip().startswith("{'") and ref.strip().endswith("'}"):
-                    logger.warning(f"Reference {i+1} appears to be a serialized dictionary, attempting to parse")
-                    try:
-                        # Try to safely evaluate the dictionary
-                        import ast
-                        parsed_dict = ast.literal_eval(ref)
-                        if isinstance(parsed_dict, dict) and 'raw_text' in parsed_dict:
-                            # Use the original raw text if available
-                            ref = parsed_dict.get('raw_text', ref)
-                            logger.debug(f"Extracted raw_text from serialized dict for reference {i+1}")
-                    except (ValueError, SyntaxError) as e:
-                        logger.warning(f"Could not parse serialized dict for reference {i+1}: {e}")
-                
-                # Extract structured data from the reference text
-                structured_ref = self._create_structured_reference(ref)
-                if structured_ref:
-                    logger.debug(f"Successfully structured reference {i+1}")
-                    processed_refs.append(structured_ref)
-                else:
-                    logger.warning(f"Failed to structure reference {i+1}")
-                    
-            except Exception as e:
-                logger.error(f"Error processing reference {i+1}: {e}")
+        for ref in references:
+            if not ref or len(ref.strip()) < 10:
                 continue
+                
+            # Extract structured data from each reference
+            structured_ref = self._create_structured_reference(ref)
+            if structured_ref:
+                processed_refs.append(structured_ref)
         
-        logger.info(f"Processed {len(processed_refs)} out of {len(references)} extracted references")
         return processed_refs
     
     def _create_structured_reference(self, ref_text):
@@ -2831,29 +2770,6 @@ class ArxivReferenceChecker:
         
         # Clean up
         title = re.sub(r'\s+', ' ', title).strip() if title else ""
-        
-        # Handle special case for URL references and ensure authors is a list of strings
-        if authors:
-            if isinstance(authors[0], dict) and authors[0].get('is_url_reference', False):
-                authors = ["URL Reference"]
-            elif not all(isinstance(author, str) for author in authors):
-                # Convert any non-string authors to strings and filter out invalid ones
-                cleaned_authors = []
-                for author in authors:
-                    if isinstance(author, str):
-                        cleaned_authors.append(author)
-                    elif isinstance(author, dict):
-                        # Handle dict authors (shouldn't normally happen, but safety check)
-                        if author.get('is_url_reference'):
-                            cleaned_authors.append("URL Reference")
-                        else:
-                            logger.warning(f"Found dict in authors list: {author}")
-                            cleaned_authors.append("Unknown Author")
-                    else:
-                        logger.warning(f"Found non-string author: {author} (type: {type(author)})")
-                        cleaned_authors.append(str(author))
-                authors = cleaned_authors
-        
         if not authors:
             authors = ["Unknown Author"]
         
@@ -2885,28 +2801,22 @@ class ArxivReferenceChecker:
                 with open(paper.file_path, 'r', encoding='utf-8') as f:
                     bibliography_text = f.read()
                 
-                # Save the text for debugging only in debug mode
-                if self.debug_mode:
-                    debug_dir = "debug"
-                    if not os.path.exists(debug_dir):
-                        os.makedirs(debug_dir)
-                    
-                    with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                        f.write(bibliography_text)
-                    
-                    logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                # Save the text for debugging
+                debug_dir = "debug"
+                if not os.path.exists(debug_dir):
+                    os.makedirs(debug_dir)
+                
+                with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                    f.write(bibliography_text)
+                
+                logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
                 
                 # Parse references directly from the text
                 references = self.parse_references(bibliography_text)
                 
-                # Save the extracted references for debugging only in debug mode
-                if self.debug_mode:
-                    debug_dir = "debug"
-                    if not os.path.exists(debug_dir):
-                        os.makedirs(debug_dir)
-                    
-                    with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                        json.dump(references, f, indent=2)
+                # Save the extracted references for debugging
+                with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                    json.dump(references, f, indent=2)
                 
                 logger.info(f"Extracted {len(references)} references from text file")
                 
@@ -2935,16 +2845,15 @@ class ArxivReferenceChecker:
             logger.warning(f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} for {paper_id}")
             return []
         
-        # Save the extracted text for debugging only in debug mode
-        if self.debug_mode:
-            debug_dir = "debug"
-            if not os.path.exists(debug_dir):
-                os.makedirs(debug_dir)
-            
-            with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
-                f.write(text)
-            
-            logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+        # Save the extracted text for debugging
+        debug_dir = "debug"
+        if not os.path.exists(debug_dir):
+            os.makedirs(debug_dir)
+        
+        with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
+            f.write(text)
+        
+        logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
         
         # Find bibliography section
         bibliography_text = self.find_bibliography_section(text)
@@ -2953,28 +2862,18 @@ class ArxivReferenceChecker:
             logger.warning(f"Could not find bibliography section for {paper_id}")
             return []
         
-        # Save the bibliography text for debugging only in debug mode
-        if self.debug_mode:
-            debug_dir = "debug"
-            if not os.path.exists(debug_dir):
-                os.makedirs(debug_dir)
-            
-            with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                f.write(bibliography_text)
-            
-            logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+        # Save the bibliography text for debugging
+        with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+            f.write(bibliography_text)
+        
+        logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
         
         # Parse references
         references = self.parse_references(bibliography_text)
         
-        # Save the extracted references for debugging only in debug mode
-        if self.debug_mode:
-            debug_dir = "debug"
-            if not os.path.exists(debug_dir):
-                os.makedirs(debug_dir)
-            
-            with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                json.dump(references, f, indent=2)
+        # Save the extracted references for debugging
+        with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+            json.dump(references, f, indent=2)
         
         logger.info(f"Extracted {len(references)} references with arxiv links for {paper_id}")
         

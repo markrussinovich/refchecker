@@ -11,6 +11,31 @@ from .base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+PROMPT_EXTRACTION_SYSTEM = """You are a bibliography parsing expert. Extract individual references from bibliography text.
+
+Your task is to:
+1. Split the bibliography into individual complete references
+2. Clean up each reference by removing reference numbers like [1], [2], etc.
+3. Fix formatting issues like broken line breaks, extra spaces, and incomplete words
+4. Return each reference as a complete, properly formatted bibliographic entry
+5. Preserve all author names, titles, publication venues, years, URLs, DOIs, and other details
+Note that you should expect the title to precede the publication venue and year, and that URLs/DOIs may appear at the end of the reference.
+6. Do not include any additional text or explanations in your response
+
+Format each reference as a standard academic citation with all available information.
+
+For example, this input:
+[Chen et al. , 2018 ]Ricky TQ Chen, Yulia Rubanova, Jesse
+Bettencourt, and David K Duvenaud. Neural ordinary dif-
+ferential equations. Advances in neural information pro-
+cessing systems , 31, 2018.
+
+
+Should produce this output:
+
+
+"""
+
 
 class LLMProviderMixin:
     """Common functionality for all LLM providers"""
@@ -41,15 +66,46 @@ Bibliography text:
         if not isinstance(content, str):
             content = str(content)
         
-        # Split by lines and clean up
+        # Clean the content - remove leading/trailing whitespace
+        content = content.strip()
+        
+        # Split by double newlines first to handle paragraph-style formatting
+        # then fall back to single newlines
         references = []
-        for line in content.strip().split('\n'):
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('Reference'):
-                # Remove common prefixes
-                line = line.lstrip('- *')
-                if len(line) > 20:  # Filter out very short lines
-                    references.append(line)
+        
+        # Try double newline splitting first (paragraph style)
+        if '\n\n' in content:
+            potential_refs = content.split('\n\n')
+        else:
+            # Fall back to single newline splitting
+            potential_refs = content.split('\n')
+        
+        for ref in potential_refs:
+            ref = ref.strip()
+            
+            # Skip empty lines, headers, and explanatory text
+            if not ref:
+                continue
+            if ref.lower().startswith(('reference', 'here are', 'below are', 'extracted', 'bibliography')):
+                continue
+            if ref.startswith('#'):
+                continue
+            if 'extracted from the bibliography' in ref.lower():
+                continue
+            if 'formatted as a complete' in ref.lower():
+                continue
+            
+            # Remove common prefixes (bullets, numbers, etc.)
+            ref = ref.lstrip('- *•')
+            ref = ref.strip()
+            
+            # Remove reference numbers like "1.", "[1]", "(1)" from the beginning
+            import re
+            ref = re.sub(r'^(\d+\.|\[\d+\]|\(\d+\))\s*', '', ref)
+            
+            # Filter out very short lines (likely not complete references)
+            if len(ref) > 30:  # Increased minimum length for academic references
+                references.append(ref)
         
         return references
 
@@ -82,7 +138,7 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a bibliography parsing expert. Extract individual references from bibliography text."},
+                    {"role": "system", "content": PROMPT_EXTRACTION_SYSTEM},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,
@@ -127,7 +183,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": PROMPT_EXTRACTION_SYSTEM + prompt}
                 ]
             )
             
@@ -231,7 +287,7 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You are a bibliography parsing expert. Extract individual references from bibliography text."},
+                    {"role": "system", "content": PROMPT_EXTRACTION_SYSTEM},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,
