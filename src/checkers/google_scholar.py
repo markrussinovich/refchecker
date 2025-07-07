@@ -48,10 +48,10 @@ class GoogleScholarReferenceChecker:
             semantic_scholar_api_key: Optional API key for Semantic Scholar fallback
             db_path: Optional path to local Semantic Scholar database for offline fallback
         """
-        # Rate limiting parameters
-        self.request_delay = 5.0  # Initial delay between requests (seconds)
-        self.max_retries = 3
-        self.backoff_factor = 3  # Exponential backoff factor
+        # Rate limiting parameters - optimized for better performance
+        self.request_delay = 2.0  # Reduced initial delay between requests (seconds)
+        self.max_retries = 2  # Reduced max retries
+        self.backoff_factor = 2  # Reduced exponential backoff factor
         
         # Setup proxy generator for scholarly
         self.setup_scholarly()
@@ -81,8 +81,8 @@ class GoogleScholarReferenceChecker:
             # Set up proxy rotation
             scholarly.use_proxy(pg)
             
-            # Configure scholarly to use a longer timeout
-            scholarly.set_timeout(30)
+            # Configure scholarly with optimized timeout
+            scholarly.set_timeout(15)
             
             logger.info("Scholarly setup complete with proxy rotation")
         except Exception as e:
@@ -105,7 +105,7 @@ class GoogleScholarReferenceChecker:
             search_query = f"{query} year:{year}"
         
         # Add some randomization to the delay to avoid detection patterns
-        initial_delay = self.request_delay + random.uniform(1, 3)
+        initial_delay = self.request_delay + random.uniform(0.5, 1.5)
         time.sleep(initial_delay)
         
         # Make the request with retries and backoff
@@ -121,17 +121,17 @@ class GoogleScholarReferenceChecker:
                         result = next(search_query_gen)
                         search_results.append(result)
                         # Add small delay between fetching results
-                        time.sleep(random.uniform(1, 2))
+                        time.sleep(random.uniform(0.5, 1.0))
                     except StopIteration:
                         break
                 
                 # If we got results, add a delay before returning to avoid rapid successive requests
                 if search_results:
-                    time.sleep(random.uniform(2, 4))
+                    time.sleep(random.uniform(1, 2))
                     return search_results
                 
             except Exception as e:
-                wait_time = self.request_delay * (self.backoff_factor ** attempt) + random.uniform(1, 5)
+                wait_time = self.request_delay * (self.backoff_factor ** attempt) + random.uniform(0.5, 2.0)
                 logger.warning(f"Request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
                 time.sleep(wait_time)
                 

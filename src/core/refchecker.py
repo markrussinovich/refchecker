@@ -104,11 +104,12 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", llm_config=None):
+    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", llm_config=None, skip_google_scholar_for_single_paper=False):
         # Initialize the reference checker for non-arXiv references
         # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
         self.db_path = db_path
         self.verification_output_file = output_file
+        self.skip_google_scholar_for_single_paper = skip_google_scholar_for_single_paper
         
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
@@ -125,6 +126,10 @@ class ArxivReferenceChecker:
             logger.info("Using Semantic Scholar API as primary source")
             self.non_arxiv_checker = NonArxivReferenceChecker(semantic_scholar_api_key)
             self.service_order = "Semantic Scholar API"
+        
+        # Store the original checkers for potential switching during single paper mode
+        self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) if not db_path else None
+        self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
         
         # Initialize errors list
         self.errors = []
@@ -209,6 +214,133 @@ class ArxivReferenceChecker:
         logger.info(f"LLM-based reference extraction enabled using {provider_name}")
         return extractor
     
+    def batch_prefetch_arxiv_references(self, bibliography):
+        """Pre-fetch all ArXiv references in batches to improve performance"""
+        if not bibliography:
+            return
+            
+        # Initialize cache if not exists
+        if not hasattr(self, '_metadata_cache'):
+            self._metadata_cache = {}
+        
+        # Collect all ArXiv IDs that need to be fetched
+        arxiv_ids_to_fetch = []
+        for reference in bibliography:
+            if reference.get('type') == 'arxiv':
+                arxiv_id = self.extract_arxiv_id_from_url(reference.get('url', ''))
+                if arxiv_id and arxiv_id not in self._metadata_cache:
+                    arxiv_ids_to_fetch.append(arxiv_id)
+        
+        if not arxiv_ids_to_fetch:
+            return
+            
+        logger.info(f"Pre-fetching {len(arxiv_ids_to_fetch)} ArXiv references in batches...")
+        
+        # Process in batches to avoid overwhelming the APIs
+        batch_size = 10
+        for i in range(0, len(arxiv_ids_to_fetch), batch_size):
+            batch = arxiv_ids_to_fetch[i:i+batch_size]
+            logger.debug(f"Processing batch {i//batch_size + 1}/{(len(arxiv_ids_to_fetch) + batch_size - 1)//batch_size}")
+            
+            # Try to batch fetch from arXiv API (supports multiple IDs)
+            try:
+                batch_results = self.batch_fetch_from_arxiv(batch)
+                for arxiv_id, metadata in batch_results.items():
+                    self._metadata_cache[arxiv_id] = metadata
+            except Exception as e:
+                logger.warning(f"Batch fetch failed, falling back to individual fetches: {e}")
+                # Fallback to individual fetches for this batch
+                for arxiv_id in batch:
+                    try:
+                        metadata = self.get_paper_metadata(arxiv_id)
+                        if metadata:
+                            self._metadata_cache[arxiv_id] = metadata
+                    except Exception as e:
+                        logger.debug(f"Failed to fetch {arxiv_id}: {e}")
+                        
+        logger.info(f"Pre-fetched {len(self._metadata_cache)} ArXiv references")
+    
+    def batch_fetch_from_arxiv(self, arxiv_ids):
+        """Fetch multiple ArXiv papers in a single API call"""
+        if not arxiv_ids:
+            return {}
+            
+        # ArXiv API supports multiple IDs in a single request
+        id_list = ','.join(arxiv_ids)
+        search_query = f"id_list={id_list}"
+        
+        url = f"https://export.arxiv.org/api/query?{search_query}&max_results={len(arxiv_ids)}"
+        
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            # Parse the XML response
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.text)
+            
+            results = {}
+            for entry in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
+                # Extract metadata from each entry
+                metadata = self.parse_arxiv_entry(entry)
+                if metadata and metadata.get('arxiv_id'):
+                    results[metadata['arxiv_id']] = metadata
+                    
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Batch ArXiv fetch failed: {e}")
+            return {}
+    
+    def parse_arxiv_entry(self, entry):
+        """Parse a single ArXiv entry from XML response"""
+        try:
+            # Find the namespace
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            
+            # Extract basic information
+            title_elem = entry.find('.//atom:title', ns)
+            title = title_elem.text.strip() if title_elem is not None else ''
+            
+            # Extract ArXiv ID from the id field
+            id_elem = entry.find('.//atom:id', ns)
+            if id_elem is not None:
+                arxiv_url = id_elem.text.strip()
+                arxiv_id = arxiv_url.split('/')[-1]  # Extract ID from URL
+            else:
+                return None
+            
+            # Extract authors
+            authors = []
+            for author in entry.findall('.//atom:author', ns):
+                name_elem = author.find('.//atom:name', ns)
+                if name_elem is not None:
+                    authors.append(name_elem.text.strip())
+            
+            # Extract year from published date
+            published_elem = entry.find('.//atom:published', ns)
+            year = ''
+            if published_elem is not None:
+                published_date = published_elem.text.strip()
+                year = published_date[:4]  # Extract year
+            
+            # Extract abstract
+            summary_elem = entry.find('.//atom:summary', ns)
+            abstract = summary_elem.text.strip() if summary_elem is not None else ''
+            
+            return {
+                'arxiv_id': arxiv_id,
+                'title': title,
+                'authors': authors,
+                'year': year,
+                'abstract': abstract,
+                'url': arxiv_url
+            }
+            
+        except Exception as e:
+            logger.debug(f"Failed to parse ArXiv entry: {e}")
+            return None
+    
     def get_papers_from_last_year(self, max_results=100):
         """
         Fetch papers from the specified time period from ArXiv
@@ -285,6 +417,11 @@ class ArxivReferenceChecker:
         if local_result:
             logger.info(f"Successfully found {arxiv_id} in local database")
             return local_result
+        
+        # Check cache before making API calls
+        if hasattr(self, '_metadata_cache') and arxiv_id in self._metadata_cache:
+            logger.info(f"Successfully found {arxiv_id} in cache")
+            return self._metadata_cache[arxiv_id]
         
         # If not found in local database and we have a local DB, we're done
         if self.db_path:
@@ -2003,6 +2140,12 @@ class ArxivReferenceChecker:
                 papers = [paper]
                 # Set single paper mode
                 self.single_paper_mode = True
+                
+                # Switch to Semantic Scholar-only mode for better performance
+                if self.skip_google_scholar_for_single_paper and self.semantic_only_checker:
+                    logger.info("Switching to Semantic Scholar-only mode for single paper processing")
+                    self.non_arxiv_checker = self.semantic_only_checker
+                
                 self.current_paper_info = {
                     'title': paper.title,
                     'id': paper.get_short_id(),
@@ -2020,6 +2163,12 @@ class ArxivReferenceChecker:
                 papers = [paper]
                 # Set single paper mode
                 self.single_paper_mode = True
+                
+                # Switch to Semantic Scholar-only mode for better performance
+                if self.skip_google_scholar_for_single_paper and self.semantic_only_checker:
+                    logger.info("Switching to Semantic Scholar-only mode for single paper processing")
+                    self.non_arxiv_checker = self.semantic_only_checker
+                
                 self.current_paper_info = {
                     'title': paper.title,
                     'id': paper.get_short_id(),
@@ -2077,6 +2226,9 @@ class ArxivReferenceChecker:
                     paper_errors = []
                     error_types = {}
                     unverified_count = 0  # Count unverified references
+                    
+                    # Pre-fetch all ArXiv references in batches for better performance
+                    self.batch_prefetch_arxiv_references(bibliography)
                     
                     # Check each reference
                     for i, reference in enumerate(bibliography):
@@ -3468,6 +3620,8 @@ def main():
                         help="API key for the LLM provider (uses environment variable if not provided)")
     parser.add_argument("--llm-endpoint", type=str,
                         help="Endpoint for the LLM provider (overrides default endpoint)")
+    parser.add_argument("--skip-google-scholar-single", action="store_true",
+                        help="Skip Google Scholar fallback when processing single papers for better performance")
     
     args = parser.parse_args()
     
@@ -3527,7 +3681,8 @@ def main():
             category=args.category,
             semantic_scholar_api_key=args.semantic_scholar_api_key,
             db_path=args.db_path,
-            llm_config=llm_config
+            llm_config=llm_config,
+            skip_google_scholar_for_single_paper=args.skip_google_scholar_single
         )
         
         # Run the checker
