@@ -742,7 +742,11 @@ class LocalNonArxivReferenceChecker:
         if external_ids and 'DOI' in external_ids:
             paper_doi = external_ids['DOI']
             
-            if doi and paper_doi and doi.lower() != paper_doi.lower():
+            # Compare DOIs, but strip hash fragments for comparison
+            cited_doi_clean = doi.split('#')[0] if doi else ''
+            paper_doi_clean = paper_doi.split('#')[0] if paper_doi else ''
+            
+            if cited_doi_clean and paper_doi_clean and cited_doi_clean.lower() != paper_doi_clean.lower():
                 logger.debug(f"Local DB: DOI mismatch - cited: {doi}, actual: {paper_doi}")
                 errors.append({
                     'error_type': 'doi',
