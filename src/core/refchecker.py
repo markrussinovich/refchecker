@@ -2036,7 +2036,14 @@ class ArxivReferenceChecker:
                 self.single_paper_mode = False
             
             # Process each paper
-            for paper in tqdm(papers, desc="Processing papers"):
+            if self.single_paper_mode and len(papers) == 1:
+                # No progress bar for single paper
+                paper_iterator = papers
+            else:
+                # Show progress bar for multiple papers
+                paper_iterator = tqdm(papers, desc="Processing papers")
+                
+            for paper in paper_iterator:
                 paper_id = paper.get_short_id()
                 paper_url = f"https://arxiv.org/abs/{paper_id}"
                 
