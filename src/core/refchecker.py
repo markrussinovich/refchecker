@@ -104,7 +104,7 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt"):
+    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", llm_config=None):
         # Initialize the reference checker for non-arXiv references
         # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
         self.db_path = db_path
@@ -155,6 +155,7 @@ class ArxivReferenceChecker:
         
         # Initialize LLM-based reference extraction
         self.config = get_config()
+        self.llm_config_override = llm_config
         self.llm_extractor = self._initialize_llm_extractor()
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -170,11 +171,27 @@ class ArxivReferenceChecker:
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
-        if not self.config.get("llm", {}).get("enabled", False):
+        # Check if LLM is enabled via command line override or config
+        llm_enabled = (self.llm_config_override is not None) or self.config.get("llm", {}).get("enabled", False)
+        
+        if not llm_enabled:
             return None
         
-        provider_name = self.config["llm"]["provider"]
-        provider_config = self.config["llm"].get(provider_name, {})
+        # Use command line overrides if provided, otherwise use config
+        if self.llm_config_override:
+            provider_name = self.llm_config_override['provider']
+            provider_config = self.config["llm"].get(provider_name, {}).copy()
+            
+            # Override with command line parameters
+            if self.llm_config_override.get('model'):
+                provider_config['model'] = self.llm_config_override['model']
+            if self.llm_config_override.get('api_key'):
+                provider_config['api_key'] = self.llm_config_override['api_key']
+            if self.llm_config_override.get('endpoint'):
+                provider_config['endpoint'] = self.llm_config_override['endpoint']
+        else:
+            provider_name = self.config["llm"]["provider"]
+            provider_config = self.config["llm"].get(provider_name, {})
         
         # Create LLM provider
         llm_provider = create_llm_provider(provider_name, provider_config)
@@ -3435,6 +3452,16 @@ def main():
     parser.add_argument("--db-path", type=str,
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     
+    # LLM configuration arguments
+    parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure"],
+                        help="Enable LLM with specified provider (openai, anthropic, google, azure)")
+    parser.add_argument("--llm-model", type=str,
+                        help="LLM model to use (overrides default for the provider)")
+    parser.add_argument("--llm-key", type=str,
+                        help="API key for the LLM provider (uses environment variable if not provided)")
+    parser.add_argument("--llm-endpoint", type=str,
+                        help="Endpoint for the LLM provider (overrides default endpoint)")
+    
     args = parser.parse_args()
     
     # Set up logging based on debug mode
@@ -3476,13 +3503,24 @@ def main():
             # Assume it's an ArXiv ID
             paper_id = args.paper
     
+    # Process LLM configuration overrides
+    llm_config = None
+    if args.llm_provider:
+        llm_config = {
+            'provider': args.llm_provider,
+            'model': args.llm_model,
+            'api_key': args.llm_key,
+            'endpoint': args.llm_endpoint
+        }
+    
     try:
         # Initialize the reference checker
         checker = ArxivReferenceChecker(
             days_back=args.days,
             category=args.category,
             semantic_scholar_api_key=args.semantic_scholar_api_key,
-            db_path=args.db_path
+            db_path=args.db_path,
+            llm_config=llm_config
         )
         
         # Run the checker
