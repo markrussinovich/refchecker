@@ -59,21 +59,25 @@ DEFAULT_CONFIG = {
             "model": "gpt-4o-mini",
             "max_tokens": 4000,
             "temperature": 0.1,
+            "timeout": 30,
         },
         "anthropic": {
             "model": "claude-3-haiku-20240307",
             "max_tokens": 4000,
             "temperature": 0.1,
+            "timeout": 30,
         },
         "google": {
             "model": "gemini-1.5-flash",
             "max_tokens": 4000,
             "temperature": 0.1,
+            "timeout": 30,
         },
         "azure": {
             "model": "gpt-4o",
             "max_tokens": 4000,
             "temperature": 0.1,
+            "timeout": 30,
         }
     }
 }

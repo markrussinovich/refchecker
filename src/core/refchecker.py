@@ -117,7 +117,7 @@ class ArxivReferenceChecker:
             # Force offline mode - don't use Google Scholar which has online fallbacks
             use_google_scholar = False
             self.service_order = "Local Semantic Scholar Database (offline)"
-        elif use_google_scholar:
+        elif use_google_scholar and not skip_google_scholar_for_single_paper:
             logger.info("Using Semantic Scholar API as primary source with Google Scholar as fallback")
             # Create a hybrid checker that prioritizes Semantic Scholar
             self.non_arxiv_checker = HybridReferenceChecker(semantic_scholar_api_key)
@@ -128,7 +128,11 @@ class ArxivReferenceChecker:
             self.service_order = "Semantic Scholar API"
         
         # Store the original checkers for potential switching during single paper mode
-        self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) if not db_path else None
+        # Only create hybrid checker if we might need it
+        if not db_path and use_google_scholar:
+            self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) if not skip_google_scholar_for_single_paper else None
+        else:
+            self.hybrid_checker = None
         self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
         
         # Initialize errors list
@@ -176,6 +180,11 @@ class ArxivReferenceChecker:
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
+        # Check if LLM is explicitly disabled
+        if self.llm_config_override and self.llm_config_override.get('disabled'):
+            logger.info("LLM-based reference extraction disabled via command line")
+            return None
+            
         # Check if LLM is enabled via command line override or config
         llm_enabled = (self.llm_config_override is not None) or self.config.get("llm", {}).get("enabled", False)
         
