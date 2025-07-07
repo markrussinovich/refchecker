@@ -8,6 +8,7 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
+- **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, and Azure
 - **🧠 Smart Reference Parsing**: Handles various academic citation formats and styles (including CoRR format)
 - **✅ Comprehensive Error Detection**: Identifies issues with authors, years, URLs, and DOIs
 - **🔄 Multiple Verification Sources**: Supports arXiv API, Semantic Scholar API, Google Scholar, and local databases
@@ -15,6 +16,7 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 - **⏸️ Resumable Processing**: Can continue from where it left off if interrupted
 - **🚦 Rate Limiting**: Respects API constraints with intelligent backoff strategies
 - **🎛️ Highly Configurable**: Support for offline verification and various input sources
+- **⚡ Performance Optimized**: Batch processing, caching, and concurrent API calls for fast verification
 
 ## Quick Start
 
@@ -39,6 +41,131 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
    python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
    ```
 
+## 🤖 LLM-Enhanced Reference Extraction
+
+RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats.
+
+### Supported LLM Providers
+
+- **OpenAI** (GPT-4, GPT-3.5)
+- **Anthropic** (Claude 3.5, Claude 3)
+- **Google** (Gemini)
+- **Azure OpenAI**
+
+### Quick LLM Setup (Recommended)
+
+1. **Using Environment Variables**:
+   ```bash
+   # Enable LLM with Anthropic Claude
+   export REFCHECKER_USE_LLM=true
+   export REFCHECKER_LLM_PROVIDER=anthropic
+   export REFCHECKER_ANTHROPIC_API_KEY=your_api_key_here
+   
+   python refchecker.py --paper 1706.03762
+   ```
+
+2. **Using Command Line Arguments**:
+   ```bash
+   # Enable LLM with specific provider and model
+   python refchecker.py --paper 1706.03762 \
+     --llm-provider anthropic \
+     --llm-model claude-3-haiku-20240307 \
+     --llm-key your_api_key_here
+   ```
+
+3. **For Maximum Speed (When Needed)**:
+   ```bash
+   # Disable LLM for fastest processing
+   python refchecker.py --paper 1706.03762 \
+     --disable-llm \
+     --skip-google-scholar-single
+   ```
+
+### LLM Configuration Options
+
+#### Environment Variables
+```bash
+# Enable/disable LLM
+export REFCHECKER_USE_LLM=true
+
+# Provider selection
+export REFCHECKER_LLM_PROVIDER=anthropic        # openai, anthropic, google, azure
+
+# Provider-specific API keys
+export REFCHECKER_OPENAI_API_KEY=your_key
+export REFCHECKER_ANTHROPIC_API_KEY=your_key
+export REFCHECKER_GOOGLE_API_KEY=your_key
+export REFCHECKER_AZURE_API_KEY=your_key
+export REFCHECKER_AZURE_ENDPOINT=your_endpoint
+
+# Model configuration
+export REFCHECKER_LLM_MODEL=claude-3-haiku-20240307
+export REFCHECKER_LLM_MAX_TOKENS=4000
+export REFCHECKER_LLM_TEMPERATURE=0.1
+export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
+```
+
+#### Command Line Arguments
+```bash
+# LLM provider and configuration
+--llm-provider {openai,anthropic,google,azure}  # Enable LLM with specified provider
+--llm-model MODEL_NAME                          # Override default model
+--llm-key API_KEY                               # API key (optional if env var set)
+--llm-endpoint ENDPOINT_URL                     # Override default endpoint
+
+# Performance options
+--disable-llm                                   # Disable LLM for faster processing
+--skip-google-scholar-single                    # Skip Google Scholar for single papers
+```
+
+### LLM Examples
+
+#### OpenAI GPT-4
+```bash
+python refchecker.py --paper /path/to/paper.pdf \
+  --llm-provider openai \
+  --llm-model gpt-4 \
+  --llm-key sk-your-openai-key
+```
+
+#### Anthropic Claude
+```bash
+python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
+  --llm-provider anthropic \
+  --llm-model claude-3-sonnet-20240229 \
+  --llm-key your-anthropic-key
+```
+
+#### Google Gemini
+```bash
+python refchecker.py --paper paper.tex \
+  --llm-provider google \
+  --llm-model gemini-1.5-flash \
+  --llm-key your-google-key
+```
+
+#### Azure OpenAI
+```bash
+python refchecker.py --paper paper.txt \
+  --llm-provider azure \
+  --llm-model gpt-4 \
+  --llm-key your-azure-key \
+  --llm-endpoint https://your-resource.openai.azure.com/
+```
+
+### Why Use LLM?
+
+**LLM-enhanced reference extraction is recommended** because academic papers use highly diverse and inconsistent citation formats. Traditional rule-based parsing often fails with:
+
+- Non-standard bibliography formats
+- Mixed citation styles within the same paper
+- Inconsistent author name formatting
+- Irregular venue abbreviations
+- Complex multi-line references
+- Papers with poor OCR quality
+
+**LLMs provide significantly better accuracy** by understanding context and handling format variations that rigid parsing rules cannot accommodate.
+
 ## 🚀 Installation
 
 ### 1. Clone the Repository
@@ -56,9 +183,14 @@ pip install -r requirements.txt
 
 ### 3. (Optional) Install Additional Dependencies
 
-For enhanced performance, you can install optional dependencies:
+For enhanced performance and LLM support, you can install optional dependencies:
 
 ```bash
+# For LLM providers
+pip install openai           # For OpenAI GPT models
+pip install anthropic        # For Anthropic Claude models
+pip install google-generativeai  # For Google Gemini models
+
 # For faster XML/HTML parsing
 pip install lxml
 
@@ -127,8 +259,14 @@ python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_s
 # Use Semantic Scholar API key for higher rate limits
 python refchecker.py --paper 1706.03762 --semantic-scholar-api-key YOUR_API_KEY
 
+# Enable LLM for best accuracy (recommended)
+python refchecker.py --paper 1706.03762 --llm-provider anthropic --llm-key YOUR_API_KEY
+
 # Run in debug mode with verbose logging
 python refchecker.py --paper 1706.03762 --debug
+
+# Optimize for speed when accuracy can be compromised
+python refchecker.py --paper 1706.03762 --disable-llm --skip-google-scholar-single
 ```
 
 ## 🗄️ Database and API Priority
@@ -272,8 +410,50 @@ python validate_attention_paper.py --db-path semantic_scholar_db/semantic_schola
 # Semantic Scholar API key
 export SEMANTIC_SCHOLAR_API_KEY="your_api_key_here"
 
+# LLM Configuration
+export REFCHECKER_USE_LLM=true
+export REFCHECKER_LLM_PROVIDER=anthropic
+export REFCHECKER_ANTHROPIC_API_KEY="your_anthropic_key"
+export REFCHECKER_OPENAI_API_KEY="your_openai_key"
+export REFCHECKER_GOOGLE_API_KEY="your_google_key"
+export REFCHECKER_AZURE_API_KEY="your_azure_key"
+export REFCHECKER_AZURE_ENDPOINT="https://your-resource.openai.azure.com/"
+
+# Advanced LLM Configuration
+export REFCHECKER_LLM_MODEL="claude-3-haiku-20240307"
+export REFCHECKER_LLM_MAX_TOKENS=4000
+export REFCHECKER_LLM_TEMPERATURE=0.1
+export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
+
 # Google Scholar proxy settings (if needed)
 export GOOGLE_SCHOLAR_PROXY="http://proxy:port"
+
+# Performance settings
+export REFCHECKER_DEBUG=false
+export REFCHECKER_OUTPUT_DIR="output"
+```
+
+### Command Line Arguments
+
+```bash
+# Basic options
+--paper PAPER                    # Paper to check (ArXiv ID, URL, or file path)
+--max-papers N                   # Maximum papers to process (default: 50)
+--days N                         # Days to look back (default: 365) 
+--category CATEGORY              # ArXiv category filter
+--debug                          # Enable debug mode
+--semantic-scholar-api-key KEY   # Semantic Scholar API key
+--db-path PATH                   # Local database path
+
+# LLM options
+--llm-provider {openai,anthropic,google,azure}  # Enable LLM with provider
+--llm-model MODEL                # Override default model
+--llm-key KEY                    # API key for LLM provider
+--llm-endpoint URL               # Override endpoint (for Azure)
+--disable-llm                    # Disable LLM for faster processing
+
+# Performance options
+--skip-google-scholar-single     # Skip Google Scholar for single papers
 ```
 
 ### Rate Limiting
@@ -282,6 +462,44 @@ The system automatically handles rate limiting:
 - **ArXiv API**: 3-second delays between requests
 - **Semantic Scholar**: Exponential backoff with 1-5 second delays
 - **Google Scholar**: Random delays to avoid detection
+- **LLM APIs**: 30-second timeout with automatic retry on failure
+
+## ⚡ Performance Considerations
+
+### Speed Optimization
+
+For fastest processing, use these options:
+```bash
+# Maximum speed configuration
+python refchecker.py --paper YOUR_PAPER \
+  --disable-llm \
+  --skip-google-scholar-single \
+  --db-path semantic_scholar_db/semantic_scholar.db
+```
+
+### Processing Time Estimates
+
+| Configuration | Single Paper | 10 Papers | Notes |
+|---------------|--------------|-----------|-------|
+| **Optimized** | ~5-15 seconds | ~1-5 minutes | Local DB + no LLM + no Google Scholar |
+| **Standard** | ~15-30 seconds | ~5-15 minutes | Online APIs + no LLM |
+| **LLM Enabled** | ~30-60 seconds | ~15-30 minutes | With AI-enhanced parsing |
+| **Full Featured** | ~60-120 seconds | ~30-60 minutes | LLM + Google Scholar fallback |
+
+### Performance Tips
+
+1. **Use local database** for offline processing and maximum speed
+2. **Enable LLM** for best accuracy with diverse citation formats (recommended)
+3. **Disable LLM** (`--disable-llm`) only when speed is critical and accuracy can be compromised
+4. **Skip Google Scholar** (`--skip-google-scholar-single`) for single papers
+5. **Use API keys** to get higher rate limits
+6. **Process in batches** rather than one-by-one for multiple papers
+
+### Memory Usage
+
+- **Without LLM**: ~50-100 MB per paper
+- **With LLM**: ~200-500 MB per paper (depending on model)
+- **Local database**: ~1-10 GB disk space (depending on scope)
 
 ## 📄 License
 
