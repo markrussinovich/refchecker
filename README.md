@@ -153,19 +153,6 @@ python refchecker.py --paper paper.txt \
   --llm-endpoint https://your-resource.openai.azure.com/
 ```
 
-### Why Use LLM?
-
-**LLM-enhanced reference extraction is recommended** because academic papers use highly diverse and inconsistent citation formats. Traditional rule-based parsing often fails with:
-
-- Non-standard bibliography formats
-- Mixed citation styles within the same paper
-- Inconsistent author name formatting
-- Irregular venue abbreviations
-- Complex multi-line references
-- Papers with poor OCR quality
-
-**LLMs provide significantly better accuracy** by understanding context and handling format variations that rigid parsing rules cannot accommodate.
-
 ## 🚀 Installation
 
 ### 1. Clone the Repository

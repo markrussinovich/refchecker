@@ -56,6 +56,8 @@ from utils.text_utils import (clean_author_name, clean_title, normalize_text,
                        extract_arxiv_id_from_url, clean_conference_markers_from_title,
                        remove_year_from_title)
 from utils.author_utils import compare_authors, levenshtein_distance, extract_authors_list
+from utils.config_validator import ConfigValidator
+from services.pdf_processor import PDFProcessor, Paper
 from checkers.hybrid_reference_checker import HybridReferenceChecker
 from config.settings import get_config
 from llm.base import ReferenceExtractor, create_llm_provider
@@ -168,6 +170,13 @@ class ArxivReferenceChecker:
         self.llm_extractor = self._initialize_llm_extractor()
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
+        
+        # Initialize new services
+        self.pdf_processor = PDFProcessor(self.config.get('processing', {}))
+        self.config_validator = ConfigValidator()
+        
+        # Initialize metadata cache for improved performance
+        self._metadata_cache = {}
         
         # Initialize consolidated error storage
         self.errors = []
@@ -882,59 +891,6 @@ class ArxivReferenceChecker:
         
         return bibliography_text
     
-    def clean_author_name(self, author):
-        """
-        Clean up an individual author name by fixing common formatting issues.
-        
-        Args:
-            author: The author name string to clean
-            
-        Returns:
-            Cleaned author name string or None if the author should be skipped
-        """
-        # Skip URLs
-        if re.match(r'^https?://', author):
-            return None
-            
-        # Normalize whitespace
-        author = re.sub(r'\s+', ' ', author.strip())
-        
-        # Remove "and" prefix/suffix, trailing commas
-        author = re.sub(r'^and\s+', '', author)
-        author = re.sub(r'\s+and$', '', author)
-        author = re.sub(r',\s*$', '', author)
-        
-        # Handle "et al" - skip it
-        if author.lower() == 'et al' or 'et al.' in author.lower():
-            return None
-        
-        # Handle special case for "Firstname Initial. Lastname"
-        name_with_initial_match = re.match(r'^([A-Z][a-z]+)\s+([A-Z])\.?\s+([A-Z][a-z]+)$', author)
-        if name_with_initial_match:
-            firstname = name_with_initial_match.group(1)
-            initial = name_with_initial_match.group(2)
-            lastname = name_with_initial_match.group(3)
-            author = f"{firstname} {initial}. {lastname}"
-        
-        # Fix hyphenated names (e.g., "Herbert-V oss" -> "Herbert-Voss")
-        author = re.sub(r'-\s+([A-Z])', r'-\1', author)
-        
-        # Ensure period after single-letter initial if missing
-        author = re.sub(r'(\s[A-Z])(\s|$)', r'\1.\2', author)
-        
-        # Ensure consistent spacing around periods in initials
-        author = re.sub(r'\.([A-Z])', r'. \1', author)
-        
-        # Fix double initials without proper spacing (e.g., "V.V" -> "V. V.")
-        author = re.sub(r'([A-Z])\.([A-Z])(?!\w)', r'\1. \2.', author)
-        
-        # Fix initials with weird spacing (e.g., "V V" -> "V. V.")
-        author = re.sub(r'(\s[A-Z])\s+([A-Z](?:\s|$))', r'\1. \2.', author)
-        
-        if author and not re.match(r'^https?://', author):
-            return author
-        
-        return None
     
     def extract_authors_list(self, authors_text):
         """
@@ -1005,44 +961,12 @@ class ArxivReferenceChecker:
         # Clean up each author name
         cleaned_authors = []
         for author in authors:
-            cleaned_author = self.clean_author_name(author)
+            cleaned_author = clean_author_name(author)
             if cleaned_author:
                 cleaned_authors.append(cleaned_author)
         
         return cleaned_authors
     
-    def clean_title(self, title):
-        """
-        Clean up a title by fixing hyphenation and other formatting issues.
-        
-        Args:
-            title: The title string to clean
-            
-        Returns:
-            Cleaned title string
-        """
-        if not title:
-            return ""
-            
-        # Fix hyphenation due to line breaks (remove hyphens at end of words)
-        title = re.sub(r'([a-z])- ([a-z])', r'\1\2', title, flags=re.IGNORECASE)
-        
-        # Additional hyphenation patterns that might appear in academic papers
-        title = re.sub(r'([a-z])-\n([a-z])', r'\1\2', title, flags=re.IGNORECASE) # Hyphen with newline
-        title = re.sub(r'([a-z])-$([a-z])', r'\1\2', title, flags=re.IGNORECASE)  # Hyphen at line end
-        
-        # Normalize whitespace
-        title = re.sub(r'\s+', ' ', title).strip()
-        
-        # Replace common words that sometimes get split across library/document names
-        title = re.sub(r'(?i)ll ms\b', 'llms', title)  # Fix "ll ms" to "llms"
-        
-        # Remove URLs and DOIs from titles
-        title = self.remove_urls_from_title(title)
-        
-        title = self.remove_year_from_title(title)
-        title = self.clean_conference_markers_from_title(title)
-        return title
     
     def remove_urls_from_title(self, title):
         """
@@ -1072,70 +996,6 @@ class ArxivReferenceChecker:
         
         return title
     
-    def clean_conference_markers_from_title(self, title):
-        """
-        Remove conference markers like "In Conference Name" from titles.
-        
-        Args:
-            title: The title string to clean
-                
-        Returns:
-            Cleaned title string without conference markers
-        """
-        # Common conference markers to remove
-        conference_patterns = [
-            r'\s+In\s+(?:Advances|Proceedings|Conference|Journal).*$',
-            r'\s+In\s+NIPS.*$',
-            r'\s+In\s+NeurIPS.*$',
-            r'\s+In\s+ICLR.*$',
-            r'\s+In\s+ICML.*$',
-            r'\s+In\s+ACL.*$',
-            r'\s+In\s+EMNLP.*$',
-        ]
-        
-        # Try each pattern
-        for pattern in conference_patterns:
-            title = re.sub(pattern, '', title, flags=re.IGNORECASE)
-        
-        return title.strip()
-    
-    def remove_year_from_title(self, title):
-        """
-        Remove year (e.g., '2023', '2021') from the beginning or end of a title.
-        
-        Args:
-            title: The title to clean
-            
-        Returns:
-            Title with year removed if it was at the beginning or end
-        """
-        if not title:
-            return ""
-        
-        # Pattern for year at the beginning (e.g., "2024. Title")
-        year_match = re.search(r'^(19|20)\d{2}\.?\s*', title)
-        if year_match:
-            # Remove the year from the beginning
-            title = title[year_match.end():].strip()
-        
-        # Pattern for year format with comma (e.g., ", 2023")
-        year_match = re.search(r',\s*(19|20)\d{2}\.?$', title)
-        if year_match:
-            # Remove the year and any trailing comma
-            title = title[:year_match.start()].strip()
-            return title
-        
-        # Pattern for year at the end without comma (e.g., "2023" or "2023.")
-        year_match = re.search(r'\s+(19|20)\d{2}\.?$', title)
-        if year_match:
-            # Remove the year at the end
-            title = title[:year_match.start()].strip()
-            return title
-        
-        # Remove duplicate years in parentheses like "(2023)" if it appears after a year
-        title = re.sub(r'\.\s*\((19|20)\d{2}\)', '.', title)
-        
-        return title
     
     def extract_authors_title_from_academic_format(self, ref_text):
         """
@@ -1227,7 +1087,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1242,7 +1102,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1275,7 +1135,7 @@ class ArxivReferenceChecker:
                 authors = self.extract_authors_list(authors_text)
                 
                 # Clean the title
-                title = self.clean_title(title)
+                title = clean_title(title)
                 
                 if authors and title:
                     return authors, title
@@ -1291,7 +1151,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1315,7 +1175,7 @@ class ArxivReferenceChecker:
                 authors = self.extract_authors_list(authors_text)
                 
                 # Clean the title
-                title = self.clean_title(title)
+                title = clean_title(title)
                 
                 if authors and title:
                     return authors, title
@@ -1331,7 +1191,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1364,7 +1224,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1410,7 +1270,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
 
             if authors and title:
                 return authors, title
@@ -1426,7 +1286,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1441,7 +1301,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1462,7 +1322,7 @@ class ArxivReferenceChecker:
                 authors = self.extract_authors_list(authors_text)
                 
                 # Clean the title
-                title = self.clean_title(title)
+                title = clean_title(title)
                 
                 if authors and title:
                     return authors, title
@@ -1479,7 +1339,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1494,7 +1354,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             if authors and title:
                 return authors, title
@@ -1547,7 +1407,7 @@ class ArxivReferenceChecker:
             # Extract authors
             authors = self.extract_authors_list(authors_text)
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             if authors and title:
                 return authors, title
         
@@ -2427,7 +2287,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(before_title)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             
             return authors, title
         
@@ -2461,7 +2321,7 @@ class ArxivReferenceChecker:
                     authors = self.extract_authors_list(authors_text)
                     
                     # Clean the title
-                    title_text = self.clean_title(title_text)                    
+                    title_text = clean_title(title_text)                    
                     return authors, title_text
         
         # Look for pattern with publication indicator (e.g., "CoRR abs/...")
@@ -2484,7 +2344,7 @@ class ArxivReferenceChecker:
                 authors = self.extract_authors_list(authors_text)
                 
                 # Clean the title
-                title_text = self.clean_title(title_text)
+                title_text = clean_title(title_text)
                 return authors, title_text
         
         # If we get here, try a simple split by the first period
@@ -2498,7 +2358,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)            
+            title = clean_title(title)            
             return authors, title
         
         # If nothing else worked, try to find year and use it as a separator
@@ -2514,7 +2374,7 @@ class ArxivReferenceChecker:
             authors = self.extract_authors_list(authors_text)
             
             # Clean the title
-            title = self.clean_title(title)
+            title = clean_title(title)
             return authors, title
         
         # If all else fails, return placeholder values

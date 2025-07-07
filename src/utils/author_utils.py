@@ -168,7 +168,7 @@ def extract_authors_list(authors_text):
         authors = new_authors
     
     # Clean each author name
-    from text_utils import clean_author_name
+    from .text_utils import clean_author_name
     cleaned_authors = []
     for author in authors:
         if author.strip():  # Skip empty strings
