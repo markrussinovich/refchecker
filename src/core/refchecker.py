@@ -2034,7 +2034,7 @@ class ArxivReferenceChecker:
                 
                 try:
                     # Extract bibliography
-                    bibliography = self.extract_bibliography(paper)
+                    bibliography = self.extract_bibliography(paper, debug_mode)
                     
                     # Update statistics
                     self.total_papers_processed += 1
@@ -2065,7 +2065,8 @@ class ArxivReferenceChecker:
                             year = reference.get('year', '')
                             venue = reference.get('venue', '')
                             print(f"[{i+1}/{len(bibliography)}] {title}")
-                            print(f"       {authors}")
+                            if authors:
+                                print(f"       {authors}")
                             if venue:
                                 print(f"       {venue}")
                             print(f"       {year}")
@@ -2369,6 +2370,7 @@ class ArxivReferenceChecker:
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to ensure proper spacing after reference numbers
         normalized_bib = re.sub(r'(\[\d+\])([A-Za-z])', r'\1 \2', bibliography_text)
+        
         
         # Handle the case where the last reference might be incomplete
         # Check if the text ends with a reference number followed by content
@@ -2692,23 +2694,6 @@ class ArxivReferenceChecker:
         all_refs = arxiv_refs + non_arxiv_refs + other_refs
         return all_refs
     
-    def _process_extracted_references(self, references):
-        """
-        Process references extracted by LLM into structured format
-        """
-        processed_refs = []
-        
-        for ref in references:
-            if not ref or len(ref.strip()) < 10:
-                continue
-                
-            # Extract structured data from each reference using LLM-specific function
-            structured_ref = self._create_structured_llm_references(ref)
-            if structured_ref:
-                processed_refs.append(structured_ref)
-        
-        return processed_refs
-    
     def _process_llm_extracted_references(self, references):
         """
         Process references extracted by LLM with simplified formatting assumptions
@@ -2726,13 +2711,28 @@ class ArxivReferenceChecker:
         
         return processed_refs
     
+    def _clean_llm_author_text(self, author_text):
+        """
+        Clean author text by removing 'and' and trailing periods
+        """
+        if not author_text:
+            return []
+        
+        # First remove 'and' and trailing periods from the entire text
+        cleaned_text = author_text.replace(' and ', ', ').rstrip('.')
+        
+        # Then split by commas
+        authors = [a.strip() for a in cleaned_text.split(',') if a.strip()]
+        
+        # Remove any remaining trailing periods and clean up
+        authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+        
+        return authors
+
     def _create_structured_llm_references(self, ref_text):
         """
         Create structured reference from LLM-extracted text (assumes well-formatted input)
         """
-        # Debug logging
-        logger.debug(f"LLM reference raw text: '{ref_text}'")
-        
         # LLM outputs are well-formatted, so we can use simpler parsing
         
         # Check for ArXiv references
@@ -2787,7 +2787,7 @@ class ArxivReferenceChecker:
             year = int(year_match.group(0))
         
         # For LLM-extracted references, use simple parsing since they're well-formatted
-        # LLM now formats as: "Authors # Title # Journal/Venue # Year"
+        # LLM now formats as: "Authors # Title # Journal/Venue # Year" or "#Title#Venue#Year#" (no authors)
         
         authors = []
         title = ""
@@ -2795,52 +2795,91 @@ class ArxivReferenceChecker:
         
         # Split by hashmarks to find components
         parts = ref_text.split('#')
-        parts = [p.strip() for p in parts]  # Clean up whitespace
+        parts = [p.strip() for p in parts if p.strip()]  # Clean up whitespace and remove empty parts
         logger.debug(f"Split by hashmarks: {parts}")
         
-        if len(parts) >= 2:
-            # First part is typically authors
+        # Handle different formats based on number of parts
+        if len(parts) == 1:
+            # URL-only or simple title
+            text = parts[0].strip()
+            if text.startswith('http'):
+                # This is a URL reference
+                arxiv_url = text if 'arxiv' in text.lower() else None
+                url = text if not arxiv_url else None
+                title = url
+                authors = ['URL Reference']
+                logger.debug(f"1-part URL format - URL: '{text}'")
+            else:
+                # Simple title
+                title = text
+                authors = 'Unknown Author'
+                logger.debug(f"1-part title format - Title: '{title}'")
+        elif len(parts) == 2:
+            # Format: Authors # Title
             author_text = parts[0].strip()
-            logger.debug(f"Author text: '{author_text}'")
-            if author_text:
-                # Clean up author text and split properly
-                # Handle "and" and comma separators
-                if ' and ' in author_text:
-                    # Split by "and" first
-                    author_parts = author_text.split(' and ')
-                    for part in author_parts:
-                        # Further split by comma if needed
-                        if ',' in part:
-                            sub_parts = [p.strip() for p in part.split(',') if p.strip()]
-                            authors.extend(sub_parts)
-                        else:
-                            authors.append(part.strip())
-                else:
-                    # Split by comma
-                    authors = [a.strip() for a in author_text.split(',') if a.strip()]
+            title = parts[1].strip()
+            logger.debug(f"2-part format - Authors: '{author_text}', Title: '{title}'")
+            # Parse authors
+            authors = self._clean_llm_author_text(author_text)
+        elif len(parts) == 3:
+            # Format: Authors # Title # Year (most common)
+            author_text = parts[0].strip()
+            title = parts[1].strip()
+            year_part = parts[2].strip()
+            logger.debug(f"3-part format - Authors: '{author_text}', Title: '{title}', Year part: '{year_part}'")
+            # Parse authors
+            authors = self._clean_llm_author_text(author_text)
+        elif len(parts) == 4:
+            # Format: Authors # Title # Venue # Year
+            author_text = parts[0].strip()
+            title = parts[1].strip()
+            venue = parts[2].strip()
+            year_part = parts[3].strip()
+            logger.debug(f"4-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year part: '{year_part}'")
             
-            # Second part is typically the title
+            # Parse authors
+            authors = self._clean_llm_author_text(author_text)
+        elif len(parts) == 5:
+            # Format: Authors # Title # Venue # Pages/Details # Publisher/Year
+            author_text = parts[0].strip()
+            title = parts[1].strip()
+            venue = parts[2].strip()
+            pages_details = parts[3].strip()
+            year_part = parts[4].strip()
+            logger.debug(f"5-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Pages: '{pages_details}', Year part: '{year_part}'")
+            
+            # Parse authors
+            authors = self._clean_llm_author_text(author_text)
+            
+            # Combine venue with pages/details for a more complete venue description
+            if pages_details:
+                venue = f"{venue}, {pages_details}" if venue else pages_details
+        else:
+            # Fallback for other formats or malformed input
+            logger.debug(f"Unexpected format with {len(parts)} parts: {parts}")
+            if len(parts) >= 1:
+                author_text = parts[0].strip()
+                authors = self._clean_llm_author_text(author_text)
             if len(parts) >= 2:
                 title = parts[1].strip()
-                logger.debug(f"Title: '{title}'")
-                
-            # Third part is typically the venue
             if len(parts) >= 3:
                 venue = parts[2].strip()
-                logger.debug(f"Venue: '{venue}'")
-                
-            # Fourth part might be year (but we already extract year from the whole text)
             if len(parts) >= 4:
-                year_part = parts[3].strip()
-                logger.debug(f"Year part: '{year_part}'")
-                # Extract year from this part if we didn't find it earlier
-                if not year:
-                    year_match = re.search(r'\b(19|20)\d{2}\b', year_part)
-                    if year_match:
-                        year = int(year_match.group(0))
+                # For cases with more than 5 parts, combine the last parts as year_part
+                year_part = ' '.join(parts[3:]).strip()
         
-        # Fallback: if no # delimited structure, try to extract what we can
-        if not title and '#' not in ref_text:
+        # Extract year from year_part if we have one
+        if 'year_part' in locals() and year_part:
+            year_match = re.search(r'\b(19|20)\d{2}\b', year_part)
+            if year_match:
+                year = int(year_match.group(0))
+            else:
+                # Try to extract year from the year_part itself if it's just a year
+                if year_part.isdigit() and len(year_part) == 4:
+                    year = int(year_part)
+        
+        # Fallback: if no clear structure, extract what we can
+        if not title:
             # Look for quoted titles
             title_match = re.search(r'"([^"]+)"', ref_text)
             if title_match:
@@ -2858,9 +2897,6 @@ class ArxivReferenceChecker:
                 if title_match:
                     title = title_match.group(1)
         
-        # Clean up authors - remove empty strings and trailing commas
-        authors = [a.rstrip(',').strip() for a in authors if a.strip() and a.strip() != ',']
-        
         # Clean up title
         title = re.sub(r'\s+', ' ', title).strip() if title else ""
         title = title.rstrip(',').strip()
@@ -2870,13 +2906,7 @@ class ArxivReferenceChecker:
         venue = venue.rstrip(',').strip()
         
         if not authors:
-            authors = ["Unknown Author"]
-        
-        # Debug logging
-        logger.debug(f"Parsed authors: {authors}")
-        logger.debug(f"Parsed title: '{title}'")
-        logger.debug(f"Parsed venue: '{venue}'")
-        logger.debug(f"Parsed year: {year}")
+            authors = []  # Allow empty authors for references without author information
         
         # Determine reference type
         ref_type = 'arxiv' if arxiv_url else ('non-arxiv' if (url or doi) else 'other')
@@ -2887,7 +2917,6 @@ class ArxivReferenceChecker:
             'year': year or 0,
             'authors': authors,
             'title': title,
-            'venue': venue,
             'raw_text': ref_text,
             'type': ref_type
         }
@@ -2968,14 +2997,17 @@ class ArxivReferenceChecker:
             'year': year or 0,
             'authors': authors,
             'title': title,
-            'venue': "",  # Regular parsing doesn't extract venue yet
             'raw_text': ref_text,
             'type': ref_type
         }
     
-    def extract_bibliography(self, paper):
+    def extract_bibliography(self, paper, debug_mode=False):
         """
         Extract bibliography from a paper (PDF, LaTeX, or text file)
+        
+        Args:
+            paper: Paper object to extract bibliography from
+            debug_mode: If True, save debug files for troubleshooting
         """
         paper_id = paper.get_short_id()
         logger.info(f"Extracting bibliography for paper {paper_id}: {paper.title}")
@@ -2989,21 +3021,23 @@ class ArxivReferenceChecker:
                     bibliography_text = f.read()
                 
                 # Save the text for debugging
-                debug_dir = "debug"
-                if not os.path.exists(debug_dir):
-                    os.makedirs(debug_dir)
-                
-                with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                    f.write(bibliography_text)
-                
-                logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                if debug_mode:
+                    debug_dir = "debug"
+                    if not os.path.exists(debug_dir):
+                        os.makedirs(debug_dir)
+                    
+                    with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                        f.write(bibliography_text)
+                    
+                    logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
                 
                 # Parse references directly from the text
                 references = self.parse_references(bibliography_text)
                 
                 # Save the extracted references for debugging
-                with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                    json.dump(references, f, indent=2)
+                if debug_mode:
+                    with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                        json.dump(references, f, indent=2)
                 
                 logger.info(f"Extracted {len(references)} references from text file")
                 
@@ -3033,14 +3067,15 @@ class ArxivReferenceChecker:
             return []
         
         # Save the extracted text for debugging
-        debug_dir = "debug"
-        if not os.path.exists(debug_dir):
-            os.makedirs(debug_dir)
-        
-        with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
-            f.write(text)
-        
-        logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+        if debug_mode:
+            debug_dir = "debug"
+            if not os.path.exists(debug_dir):
+                os.makedirs(debug_dir)
+            
+            with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
+                f.write(text)
+            
+            logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
         
         # Find bibliography section
         bibliography_text = self.find_bibliography_section(text)
@@ -3050,17 +3085,19 @@ class ArxivReferenceChecker:
             return []
         
         # Save the bibliography text for debugging
-        with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-            f.write(bibliography_text)
-        
-        logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+        if debug_mode:
+            with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
+                f.write(bibliography_text)
+            
+            logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
         
         # Parse references
         references = self.parse_references(bibliography_text)
         
         # Save the extracted references for debugging
-        with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-            json.dump(references, f, indent=2)
+        if debug_mode:
+            with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
+                json.dump(references, f, indent=2)
         
         logger.info(f"Extracted {len(references)} references with arxiv links for {paper_id}")
         
