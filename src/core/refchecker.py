@@ -2,30 +2,29 @@
 """
 ArXiv Reference Checker
 
-This script:
-1. Obtains ArXiv metadata from the last year
-2. Extracts references from the bibliography (both arXiv and non-arXiv references)
-3. Verifies if the references are accurate (author list, year, links)
-4. Creates a dataset of incorrect references
+This script validates references in academic papers by:
+1. Extracting references from the bibliography (both arXiv and non-arXiv references)
+2. Verifying if the references are accurate (author list, year, links)
+3. Creating a detailed report of incorrect references
 
 For arXiv references, it uses the arXiv API to verify metadata.
-For non-arXiv references, it uses the Semantic Scholar API to verify metadata.
+For non-arXiv references, it uses the local Semantic Scholar database for verification.
 
 Usage:
-    python refchecker.py [--max-papers N] [--days N] [--category CATEGORY] [--paper PAPER_SPEC] [--semantic-scholar-api-key KEY] [--db-path PATH]
+    python refchecker.py --paper PAPER_SPEC [--db-path PATH] [--debug]
 
 Options:
-    --max-papers N                Maximum number of papers to process (default: 50)
-    --days N                      Number of days to look back (default: 365)
-    --category CATEGORY           ArXiv category to filter by (e.g., cs.AI, math.CO)
-    --debug                       Run in debug mode with verbose logging
     --paper PAPER_SPEC            Validate a specific paper by:
                                     - ArXiv ID (e.g., 1234.5678)
                                     - ArXiv URL (e.g., https://arxiv.org/abs/1234.5678)
                                     - Local PDF file path (e.g., /path/to/paper.pdf)
                                     - Local LaTeX file path (e.g., /path/to/paper.tex)
+    --db-path PATH                Path to local Semantic Scholar database (recommended for offline verification)
+    --debug                       Run in debug mode with verbose logging
     --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits)
-    --db-path PATH                Path to local Semantic Scholar database (automatically enables local DB mode)
+    --max-papers N                Maximum number of papers to process (default: 50) - for legacy multi-paper mode
+    --days N                      Number of days to look back (default: 365) - for legacy multi-paper mode
+    --category CATEGORY           ArXiv category to filter by (e.g., cs.AI, math.CO) - for legacy multi-paper mode
     --help                        Show this help message
 """
 
@@ -2196,18 +2195,31 @@ class ArxivReferenceChecker:
                         actual_errors = [e for e in paper_errors if 'error_type' in e and e['error_type'] != 'unverified']
                         warnings_only = [e for e in paper_errors if 'warning_type' in e]
                         
-                        if actual_errors or warnings_only:
-                            summary_parts = []
-                            if actual_errors:
-                                summary_parts.append(f"{len(actual_errors)} errors")
-                                self.papers_with_errors += 1
-                            if warnings_only:
-                                summary_parts.append(f"{len(warnings_only)} warnings")
-                                # Count as paper with warnings if it has warnings (regardless of errors)
-                                self.papers_with_warnings += 1
-                            print(f"📊 Paper summary: {', '.join(summary_parts)} found")
+                        if self.single_paper_mode:
+                            # Single paper mode - show simple summary
+                            if actual_errors or warnings_only:
+                                summary_parts = []
+                                if actual_errors:
+                                    summary_parts.append(f"{len(actual_errors)} errors")
+                                if warnings_only:
+                                    summary_parts.append(f"{len(warnings_only)} warnings")
+                                print(f"\n📊 Paper summary: {', '.join(summary_parts)} found")
+                            else:
+                                print(f"\n📊 Paper summary: No errors found")
                         else:
-                            print(f"📊 Paper summary: No errors found")
+                            # Multi-paper mode - track paper statistics
+                            if actual_errors or warnings_only:
+                                summary_parts = []
+                                if actual_errors:
+                                    summary_parts.append(f"{len(actual_errors)} errors")
+                                    self.papers_with_errors += 1
+                                if warnings_only:
+                                    summary_parts.append(f"{len(warnings_only)} warnings")
+                                    # Count as paper with warnings if it has warnings (regardless of errors)
+                                    self.papers_with_warnings += 1
+                                print(f"📊 Paper summary: {', '.join(summary_parts)} found")
+                            else:
+                                print(f"📊 Paper summary: No errors found")
                     
                     
                 except Exception as e:
@@ -2228,17 +2240,34 @@ class ArxivReferenceChecker:
         
         # Print final summary to console
         if not debug_mode:
-            print(f"\n" + "="*60)
-            print(f"📋 FINAL SUMMARY")
-            print(f"="*60)
-            print(f"📄 Total papers processed: {self.total_papers_processed}")
-            print(f"📚 Total references processed: {self.total_references_processed}")
-            print(f"❌ Papers with errors:   {self.papers_with_errors}")
-            print(f"         Total errors:   {self.total_errors_found}")
-            print(f"⚠️  Papers with warnings: {self.papers_with_warnings}")
-            print(f"         Total warnings: {self.total_warnings_found}")
-            print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
-            print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+            if self.single_paper_mode:
+                # Single paper mode - show simplified summary
+                print(f"\n" + "="*60)
+                print(f"📋 SUMMARY")
+                print(f"="*60)
+                print(f"📚 Total references processed: {self.total_references_processed}")
+                if self.total_errors_found > 0:
+                    print(f"❌ Total errors found: {self.total_errors_found}")
+                if self.total_warnings_found > 0:
+                    print(f"⚠️  Total warnings found: {self.total_warnings_found}")
+                if self.total_unverified_refs > 0:
+                    print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                if self.total_errors_found == 0 and self.total_warnings_found == 0:
+                    print(f"✅ All references verified successfully!")
+                print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+            else:
+                # Multi-paper mode - show full summary
+                print(f"\n" + "="*60)
+                print(f"📋 FINAL SUMMARY")
+                print(f"="*60)
+                print(f"📄 Total papers processed: {self.total_papers_processed}")
+                print(f"📚 Total references processed: {self.total_references_processed}")
+                print(f"❌ Papers with errors:   {self.papers_with_errors}")
+                print(f"         Total errors:   {self.total_errors_found}")
+                print(f"⚠️  Papers with warnings: {self.papers_with_warnings}")
+                print(f"         Total warnings: {self.total_warnings_found}")
+                print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
         
         return self.verification_output_file
     
