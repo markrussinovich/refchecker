@@ -63,12 +63,6 @@ from llm.base import ReferenceExtractor, create_llm_provider
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
     """Set up logging configuration"""
-    log_dir = "logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-    
     # Configure root logger to control all child loggers
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
@@ -78,14 +72,21 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
         root_logger.removeHandler(handler)
     
     # Create formatters
-    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
-    # Add file handler with DEBUG level
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(level)
-    file_handler.setFormatter(file_formatter)
-    root_logger.addHandler(file_handler)
+    # Only add file handler if debug mode is enabled
+    if debug_mode:
+        log_dir = "logs"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        
+        log_file = os.path.join(log_dir, f"arxiv_reference_checker_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        
+        file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(level)
+        file_handler.setFormatter(file_formatter)
+        root_logger.addHandler(file_handler)
     
     # Add console handler with INFO or DEBUG level based on debug_mode
     console_handler = logging.StreamHandler(stream=sys.stdout)
@@ -2209,9 +2210,6 @@ class ArxivReferenceChecker:
                                     summary_parts.append(f"{len(actual_errors)} errors")
                                 if warnings_only:
                                     summary_parts.append(f"{len(warnings_only)} warnings")
-                                print(f"\n📊 Paper summary: {', '.join(summary_parts)} found")
-                            else:
-                                print(f"\n📊 Paper summary: No errors found")
                         else:
                             # Multi-paper mode - track paper statistics
                             if actual_errors or warnings_only:
@@ -2223,10 +2221,7 @@ class ArxivReferenceChecker:
                                     summary_parts.append(f"{len(warnings_only)} warnings")
                                     # Count as paper with warnings if it has warnings (regardless of errors)
                                     self.papers_with_warnings += 1
-                                print(f"📊 Paper summary: {', '.join(summary_parts)} found")
-                            else:
-                                print(f"📊 Paper summary: No errors found")
-                    
+
                     
                 except Exception as e:
                     logger.error(f"Error processing paper {paper_id}: {str(e)}")
@@ -3587,12 +3582,6 @@ def main():
                         help="Skip Google Scholar fallback when processing single papers for better performance")
     
     args = parser.parse_args()
-    
-    # Set up logging based on debug mode
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
     
     # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
     paper_id = None
