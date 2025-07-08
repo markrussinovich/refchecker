@@ -273,7 +273,7 @@ class GoogleScholarReferenceChecker:
                     
                     if best_match:
                         paper_data = best_match
-                        logger.info(f"Found paper by title in Google Scholar: {clean_title}")
+                        logger.debug(f"Found paper by title in Google Scholar: {clean_title}")
                         
                         # Verify authors
                         if authors and 'author' in paper_data.get('bib', {}):
@@ -291,8 +291,8 @@ class GoogleScholarReferenceChecker:
                         paper_year = paper_data.get('bib', {}).get('pub_year')
                         if year and paper_year and year != int(paper_year):
                             errors.append({
-                                'error_type': 'year',
-                                'error_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                                'warning_type': 'year',
+                                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
                                 'ref_year_correct': paper_year
                             })
                         

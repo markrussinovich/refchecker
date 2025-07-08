@@ -326,11 +326,11 @@ class NonArxivReferenceChecker:
                 
                 if best_match:
                     paper_data = best_match
-                    logger.info(f"Found paper by title: {clean_title}")
+                    logger.debug(f"Found paper by title: {clean_title}")
                 else:
-                    logger.warning(f"No good match found for title: {clean_title}")
+                    logger.debug(f"No good match found for title: {clean_title}")
             else:
-                logger.warning(f"No papers found for title: {clean_title}")
+                logger.debug(f"No papers found for title: {clean_title}")
         
         # If we still couldn't find the paper, try searching by the raw text
         if not paper_data and raw_text:
@@ -344,13 +344,13 @@ class NonArxivReferenceChecker:
             if search_results:
                 # Take the first result as a best guess
                 paper_data = search_results[0]
-                logger.info(f"Found paper by raw text search")
+                logger.debug(f"Found paper by raw text search")
             else:
-                logger.warning(f"No papers found for raw text search")
+                logger.debug(f"No papers found for raw text search")
         
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
-            logger.warning(f"Could not find matching paper for reference")
+            logger.debug(f"Could not find matching paper for reference")
             return None, []
         
         # Verify authors

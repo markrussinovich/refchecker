@@ -703,9 +703,9 @@ class LocalNonArxivReferenceChecker:
             paper_data = self.find_best_match(title, authors, year)
             
             if paper_data:
-                logger.info(f"Found paper by title/author search")
+                logger.debug(f"Found paper by title/author search")
             else:
-                logger.warning(f"Could not find matching paper for reference")
+                logger.debug(f"Could not find matching paper for reference")
         
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:

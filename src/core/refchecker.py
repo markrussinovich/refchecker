@@ -22,9 +22,6 @@ Options:
     --db-path PATH                Path to local Semantic Scholar database (recommended for offline verification)
     --debug                       Run in debug mode with verbose logging
     --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits)
-    --max-papers N                Maximum number of papers to process (default: 50) - for legacy multi-paper mode
-    --days N                      Number of days to look back (default: 365) - for legacy multi-paper mode
-    --category CATEGORY           ArXiv category to filter by (e.g., cs.AI, math.CO) - for legacy multi-paper mode
     --help                        Show this help message
 """
 
@@ -106,13 +103,12 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", 
-                 llm_config=None, skip_google_scholar_for_single_paper=False, debug_mode=False):
+    def __init__(self, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", 
+                 llm_config=None, debug_mode=False):
         # Initialize the reference checker for non-arXiv references
         # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
         self.db_path = db_path
         self.verification_output_file = output_file
-        self.skip_google_scholar_for_single_paper = skip_google_scholar_for_single_paper
         
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
@@ -120,7 +116,7 @@ class ArxivReferenceChecker:
             # Force offline mode - don't use Google Scholar which has online fallbacks
             use_google_scholar = False
             self.service_order = "Local Semantic Scholar Database (offline)"
-        elif use_google_scholar and not skip_google_scholar_for_single_paper:
+        elif use_google_scholar:
             logger.info("Using Semantic Scholar API as primary source with Google Scholar as fallback")
             # Create a hybrid checker that prioritizes Semantic Scholar
             self.non_arxiv_checker = HybridReferenceChecker(semantic_scholar_api_key)
@@ -133,7 +129,7 @@ class ArxivReferenceChecker:
         # Store the original checkers for potential switching during single paper mode
         # Only create hybrid checker if we might need it
         if not db_path and use_google_scholar:
-            self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) if not skip_google_scholar_for_single_paper else None
+            self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) 
         else:
             self.hybrid_checker = None
         self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
@@ -150,20 +146,18 @@ class ArxivReferenceChecker:
         
         # Report service order for arXiv lookups
         if not db_path:
-            logger.info(f"Service order for arXiv verification: Local DB → Intelligent API Switching (Semantic Scholar ↔ arXiv)")
+            logger.debug(f"Service order for arXiv verification: Local DB → Intelligent API Switching (Semantic Scholar ↔ arXiv)")
         else:
-            logger.info(f"Service order for arXiv verification: Local DB only (offline mode)")
+            logger.debug(f"Service order for arXiv verification: Local DB only (offline mode)")
         
         # Report service order for non-arXiv lookups
         if not db_path:
-            logger.info(f"Service order for reference verification: {self.service_order}")
+            logger.debug(f"Service order for reference verification: {self.service_order}")
         self.client = arxiv.Client(
             page_size=100,
             delay_seconds=3,  # Rate limiting to avoid overloading the API
             num_retries=5
         )
-        self.days_back = days_back
-        self.category = category
         
         # Create output directory
         if self.debug_mode: 
@@ -257,7 +251,7 @@ class ArxivReferenceChecker:
         if not arxiv_ids_to_fetch:
             return
             
-        logger.info(f"Pre-fetching {len(arxiv_ids_to_fetch)} ArXiv references in batches...")
+        logger.debug(f"Pre-fetching {len(arxiv_ids_to_fetch)} ArXiv references in batches...")
         
         # Process in batches to avoid overwhelming the APIs
         batch_size = 10
@@ -281,7 +275,7 @@ class ArxivReferenceChecker:
                     except Exception as e:
                         logger.debug(f"Failed to fetch {arxiv_id}: {e}")
                         
-        logger.info(f"Pre-fetched {len(self._metadata_cache)} ArXiv references")
+        logger.debug(f"Pre-fetched {len(self._metadata_cache)} ArXiv references")
     
     def batch_fetch_from_arxiv(self, arxiv_ids):
         """Fetch multiple ArXiv papers in a single API call"""
@@ -363,39 +357,7 @@ class ArxivReferenceChecker:
         except Exception as e:
             logger.debug(f"Failed to parse ArXiv entry: {e}")
             return None
-    
-    def get_papers_from_last_year(self, max_results=100):
-        """
-        Fetch papers from the specified time period from ArXiv
-        """
-        # Calculate date range
-        end_date = datetime.datetime.now()
-        start_date = end_date - datetime.timedelta(days=self.days_back)
         
-        # Format dates for ArXiv query
-        date_query = f"submittedDate:[{start_date.strftime('%Y%m%d')}000000 TO {end_date.strftime('%Y%m%d')}235959]"
-        
-        # Add category filter if specified
-        query = date_query
-        if self.category:
-            query = f"cat:{self.category} AND {query}"
-        
-        logger.info(f"Fetching papers from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
-        if self.category:
-            logger.info(f"Filtering by category: {self.category}")
-        
-        # Create search query
-        search = arxiv.Search(
-            query=query,
-            max_results=max_results,
-            sort_by=arxiv.SortCriterion.SubmittedDate
-        )
-        
-        # Fetch results
-        results = list(self.client.results(search))
-        logger.info(f"Retrieved {len(results)} papers")
-        return results
-    
     def extract_arxiv_id_from_url(self, url):
         """
         Extract ArXiv ID from a URL
@@ -434,25 +396,24 @@ class ArxivReferenceChecker:
         Priority: Local DB > Semantic Scholar API > arXiv API, with fallback switching.
         """
         # First, try to get the paper from local Semantic Scholar database
-        logger.info(f"Attempting to fetch {arxiv_id} from local database first")
+        logger.debug(f"Attempting to fetch {arxiv_id} from local database first")
         local_result = self.get_arxiv_paper_from_local_db(arxiv_id)
         
         if local_result:
-            logger.info(f"Successfully found {arxiv_id} in local database")
+            logger.debug(f"Successfully found {arxiv_id} in local database")
             return local_result
         
         # Check cache before making API calls
         if hasattr(self, '_metadata_cache') and arxiv_id in self._metadata_cache:
-            logger.info(f"Successfully found {arxiv_id} in cache")
+            logger.debug(f"Successfully found {arxiv_id} in cache")
             return self._metadata_cache[arxiv_id]
         
         # If not found in local database and we have a local DB, we're done
         if self.db_path:
-            logger.warning(f"Paper {arxiv_id} not found in local database")
+            logger.debug(f"Paper {arxiv_id} not found in local database")
             return None
         
         # If no local database, try both APIs with intelligent switching
-        logger.info(f"Paper {arxiv_id} not found in local database, trying online APIs with intelligent switching")
         return self.get_paper_metadata_with_api_switching(arxiv_id)
     
     def get_paper_metadata_with_api_switching(self, arxiv_id):
@@ -473,38 +434,38 @@ class ArxivReferenceChecker:
             }
         
         # Try Semantic Scholar API first (faster)
-        logger.info(f"Trying Semantic Scholar API for {arxiv_id}")
+        logger.debug(f"Trying Semantic Scholar API for {arxiv_id}")
         semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
         
         if semantic_result:
             self._api_performance['semantic_scholar']['success'] += 1
-            logger.info(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
+            logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
             return semantic_result
         
         # If Semantic Scholar failed, try arXiv API
-        logger.info(f"Semantic Scholar API failed for {arxiv_id}, trying arXiv API")
+        logger.debug(f"Semantic Scholar API failed for {arxiv_id}, trying arXiv API")
         arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
         
         if arxiv_result:
             self._api_performance['arxiv']['success'] += 1
-            logger.info(f"Successfully fetched {arxiv_id} from arXiv API")
+            logger.debug(f"Successfully fetched {arxiv_id} from arXiv API")
             return arxiv_result
         
         # If both failed, try reverse order (sometimes one API works when the other doesn't)
-        logger.info(f"Both APIs failed for {arxiv_id}, trying reverse order")
+        logger.debug(f"Both APIs failed for {arxiv_id}, trying reverse order")
         
         # Try arXiv API first this time
         arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
         if arxiv_result:
             self._api_performance['arxiv']['success'] += 1
-            logger.info(f"Successfully fetched {arxiv_id} from arXiv API (reverse order)")
+            logger.debug(f"Successfully fetched {arxiv_id} from arXiv API (reverse order)")
             return arxiv_result
         
         # Try Semantic Scholar API again
         semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
         if semantic_result:
             self._api_performance['semantic_scholar']['success'] += 1
-            logger.info(f"Successfully fetched {arxiv_id} from Semantic Scholar API (reverse order)")
+            logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API (reverse order)")
             return semantic_result
         
         # Both APIs failed
@@ -704,11 +665,11 @@ class ArxivReferenceChecker:
         # Check if paper.pdf_url is available
         if paper.pdf_url:
             pdf_url = paper.pdf_url
-            logger.info(f"Using provided PDF URL: {pdf_url}")
+            logger.debug(f"Using provided PDF URL: {pdf_url}")
         else:
             # Construct the PDF URL manually from the paper ID
             pdf_url = f"https://arxiv.org/pdf/{paper.get_short_id()}.pdf"
-            logger.info(f"PDF URL was None, constructed manually: {pdf_url}")
+            logger.debug(f"PDF URL was None, constructed manually: {pdf_url}")
         
         logger.info(f"Downloading PDF from {pdf_url}")
         
@@ -1851,14 +1812,14 @@ class ArxivReferenceChecker:
         Returns:
             List of errors or None if no errors found
         """
-        logger.info(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
+        logger.debug(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
         
         # Use the Semantic Scholar client to verify the reference
         verified_data, errors = self.non_arxiv_checker.verify_reference(reference)
         
         if not verified_data:
-            logger.warning(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
-            logger.warning(f"Raw text: {reference['raw_text']}")
+            logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
+            logger.debug(f"Raw text: {reference['raw_text']}")
             # Mark as unverified instead of no errors
             return [{"error_type": "unverified", "error_details": "Reference could not be verified"}]
         
@@ -2011,12 +1972,11 @@ class ArxivReferenceChecker:
         except Exception as e:
             logger.error(f"Error writing to output file: {str(e)}")
     
-    def run(self, max_papers=50, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
+    def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
         """
         Run the reference checking process
         
         Args:
-            max_papers: Maximum number of papers to process
             debug_mode: If True, use verbose logging; if False, use pretty printing
             specific_paper_id: If provided, only process this specific paper
             local_pdf_path: If provided, process this local PDF or LaTeX file instead of fetching from ArXiv
@@ -2025,7 +1985,7 @@ class ArxivReferenceChecker:
         global logger
         logger = setup_logging(debug_mode=debug_mode)
         
-        logger.info("Starting ArXiv reference checking process")
+        logger.debug("Starting ArXiv reference checking process")
         
         # Initialize counters for statistics
         self.total_papers_processed = 0
@@ -2043,7 +2003,7 @@ class ArxivReferenceChecker:
             # Get papers to process
             if specific_paper_id:
                 # Process a specific paper
-                logger.info(f"Processing specific paper with ID: {specific_paper_id}")
+                logger.debug(f"Processing specific paper with ID: {specific_paper_id}")
                 paper = self.get_paper_metadata(specific_paper_id)
                 if not paper:
                     logger.error(f"Could not find paper with ID: {specific_paper_id}")
@@ -2051,12 +2011,7 @@ class ArxivReferenceChecker:
                 papers = [paper]
                 # Set single paper mode
                 self.single_paper_mode = True
-                
-                # Switch to Semantic Scholar-only mode for better performance
-                if self.skip_google_scholar_for_single_paper and self.semantic_only_checker:
-                    logger.info("Switching to Semantic Scholar-only mode for single paper processing")
-                    self.non_arxiv_checker = self.semantic_only_checker
-                
+                               
                 self.current_paper_info = {
                     'title': paper.title,
                     'id': paper.get_short_id(),
@@ -2074,12 +2029,7 @@ class ArxivReferenceChecker:
                 papers = [paper]
                 # Set single paper mode
                 self.single_paper_mode = True
-                
-                # Switch to Semantic Scholar-only mode for better performance
-                if self.skip_google_scholar_for_single_paper and self.semantic_only_checker:
-                    logger.info("Switching to Semantic Scholar-only mode for single paper processing")
-                    self.non_arxiv_checker = self.semantic_only_checker
-                
+                                
                 self.current_paper_info = {
                     'title': paper.title,
                     'id': paper.get_short_id(),
@@ -2090,10 +2040,6 @@ class ArxivReferenceChecker:
                 # Reset paper info written flag
                 if hasattr(self, '_paper_info_written'):
                     delattr(self, '_paper_info_written')
-            else:
-                # Get papers from the specified time period
-                papers = self.get_papers_from_last_year(max_results=max_papers)
-                self.single_paper_mode = False
             
             # Process each paper
             if self.single_paper_mode and len(papers) == 1:
@@ -2109,7 +2055,7 @@ class ArxivReferenceChecker:
                 
                 
                 # Log paper info
-                logger.info(f"Processing paper: {paper.title} ({paper_id})")
+                logger.debug(f"Processing paper: {paper.title} ({paper_id})")
                 
                 # Print paper heading in non-debug mode
                 if not debug_mode:
@@ -2119,7 +2065,7 @@ class ArxivReferenceChecker:
                 try:
                     # Extract bibliography
                     bibliography = self.extract_bibliography(paper, debug_mode)
-                    
+                                        
                     # Update statistics
                     self.total_papers_processed += 1
                     self.total_references_processed += len(bibliography)
@@ -2150,6 +2096,8 @@ class ArxivReferenceChecker:
                         authors = ', '.join(reference.get('authors', []))
                         year = reference.get('year', '')
                         venue = reference.get('venue', '')
+                        url = reference.get('url', '')
+                        doi = reference.get('doi', '')
                         print(f"[{i+1}/{len(bibliography)}] {title}")
                         if authors:
                             print(f"       {authors}")
@@ -2157,13 +2105,17 @@ class ArxivReferenceChecker:
                             print(f"       {venue}")
                         if year:
                             print(f"       {year}")
+                        if url:
+                            print(f"       URL: {url}")
+                        if doi:
+                            print(f"       DOI: {doi}")
                         # --- DEBUG TIMER ---
                         start_time = time.time()
                         errors = self.verify_reference(paper, reference)
                         elapsed = time.time() - start_time
                         if elapsed > 5.0:
-                            logger.warning(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
-                            logger.warning(f"Raw text: {reference.get('raw_text', '')}")
+                            logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
+                            logger.debug(f"Raw text: {reference.get('raw_text', '')}")
                         
                         # If errors found, add to dataset and print details
                         if errors:
@@ -3173,8 +3125,7 @@ class ArxivReferenceChecker:
                     with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
                         json.dump(references, f, indent=2)
                 
-                logger.info(f"Extracted {len(references)} references from text file")
-                
+                logger.debug(f"Extracted {len(references)} references from text file")                
                 return references
                 
             except Exception as e:
@@ -3233,7 +3184,7 @@ class ArxivReferenceChecker:
             with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
                 json.dump(references, f, indent=2)
         
-        logger.info(f"Extracted {len(references)} references with arxiv links for {paper_id}")
+        logger.debug(f"Extracted {len(references)} references with arxiv links for {paper_id}")
         
         return references
     
@@ -3450,7 +3401,7 @@ class ArxivReferenceChecker:
     
     def get_arxiv_paper_from_local_db(self, arxiv_id):
         """
-        Get arXiv paper metadata from local database as fallback
+        Get arXiv paper metadata from local database 
         
         Args:
             arxiv_id: The arXiv ID to search for
@@ -3526,7 +3477,7 @@ class ArxivReferenceChecker:
             mock_paper = MockArxivPaper(paper_data, authors_data, arxiv_id)
             conn.close()
             
-            logger.info(f"Found arXiv paper {arxiv_id} in local database as fallback")
+            logger.info(f"Found arXiv paper {arxiv_id} in local database")
             return mock_paper
             
         except Exception as e:
@@ -3554,12 +3505,6 @@ class ArxivReferenceChecker:
 def main():
     """Main function to parse arguments and run the reference checker"""
     parser = argparse.ArgumentParser(description="ArXiv Reference Checker - Validate references in ArXiv papers")
-    parser.add_argument("--max-papers", type=int, default=50,
-                        help="Maximum number of papers to process (default: 50)")
-    parser.add_argument("--days", type=int, default=365,
-                        help="Number of days to look back (default: 365)")
-    parser.add_argument("--category", type=str,
-                        help="ArXiv category to filter by (e.g., cs.AI, math.CO)")
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,
@@ -3570,17 +3515,15 @@ def main():
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     
     # LLM configuration arguments
-    parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure"],
-                        help="Enable LLM with specified provider (openai, anthropic, google, azure)")
+    parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
+                        help="Enable LLM with specified provider (openai, anthropic, google, azure, vllm)")
     parser.add_argument("--llm-model", type=str,
                         help="LLM model to use (overrides default for the provider)")
     parser.add_argument("--llm-key", type=str,
                         help="API key for the LLM provider (uses environment variable if not provided)")
     parser.add_argument("--llm-endpoint", type=str,
                         help="Endpoint for the LLM provider (overrides default endpoint)")
-    parser.add_argument("--skip-google-scholar-single", action="store_true",
-                        help="Skip Google Scholar fallback when processing single papers for better performance")
-    
+
     args = parser.parse_args()
     
     # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
@@ -3629,18 +3572,14 @@ def main():
     try:
         # Initialize the reference checker
         checker = ArxivReferenceChecker(
-            days_back=args.days,
-            category=args.category,
             semantic_scholar_api_key=args.semantic_scholar_api_key,
             db_path=args.db_path,
             llm_config=llm_config,
-            skip_google_scholar_for_single_paper=args.skip_google_scholar_single,
             debug_mode=args.debug
         )
         
         # Run the checker
-        output_file = checker.run(
-            max_papers=args.max_papers,
+        checker.run(
             debug_mode=args.debug,
             specific_paper_id=paper_id,
             local_pdf_path=local_pdf_path
