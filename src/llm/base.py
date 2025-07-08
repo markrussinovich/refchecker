@@ -82,13 +82,14 @@ class ReferenceExtractor:
 
 def create_llm_provider(provider_name: str, config: Dict[str, Any]) -> Optional[LLMProvider]:
     """Factory function to create LLM provider instances"""
-    from .providers import OpenAIProvider, AnthropicProvider, GoogleProvider, AzureProvider
+    from .providers import OpenAIProvider, AnthropicProvider, GoogleProvider, AzureProvider, vLLMProvider
     
     providers = {
         "openai": OpenAIProvider,
         "anthropic": AnthropicProvider,
         "google": GoogleProvider,
         "azure": AzureProvider,
+        "vllm": vLLMProvider,
     }
     
     if provider_name not in providers:

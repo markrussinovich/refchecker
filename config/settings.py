@@ -78,6 +78,15 @@ DEFAULT_CONFIG = {
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
+        },
+        "vllm": {
+            "model": "meta-llama/Llama-3.2-8B-Instruct",
+            "max_tokens": 4000,
+            "temperature": 0.1,
+            "timeout": 30,
+            "server_url": "http://localhost:8000",
+            "download_path": "./models",
+            "auto_download": True,
         }
     }
 }
@@ -121,6 +130,16 @@ def get_config() -> Dict[str, Any]:
     
     if os.getenv("REFCHECKER_AZURE_ENDPOINT"):
         config["llm"]["azure"]["endpoint"] = os.getenv("REFCHECKER_AZURE_ENDPOINT")
+    
+    # vLLM configuration
+    if os.getenv("REFCHECKER_VLLM_SERVER_URL"):
+        config["llm"]["vllm"]["server_url"] = os.getenv("REFCHECKER_VLLM_SERVER_URL")
+    
+    if os.getenv("REFCHECKER_VLLM_DOWNLOAD_PATH"):
+        config["llm"]["vllm"]["download_path"] = os.getenv("REFCHECKER_VLLM_DOWNLOAD_PATH")
+    
+    if os.getenv("REFCHECKER_VLLM_AUTO_DOWNLOAD"):
+        config["llm"]["vllm"]["auto_download"] = os.getenv("REFCHECKER_VLLM_AUTO_DOWNLOAD").lower() == "true"
     
     # Model configuration
     if os.getenv("REFCHECKER_LLM_MODEL"):

@@ -121,6 +121,7 @@ temp/
 tmp/
 *.tmp
 *.temp
+models/
 
 # IDE
 .vscode/

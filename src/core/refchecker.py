@@ -106,7 +106,8 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", llm_config=None, skip_google_scholar_for_single_paper=False):
+    def __init__(self, days_back=365, category=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", 
+                 llm_config=None, skip_google_scholar_for_single_paper=False, debug_mode=False):
         # Initialize the reference checker for non-arXiv references
         # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
         self.db_path = db_path
@@ -137,6 +138,9 @@ class ArxivReferenceChecker:
             self.hybrid_checker = None
         self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
         
+        # debug mode
+        self.debug_mode = debug_mode
+        
         # Initialize errors list
         self.errors = []
         
@@ -162,15 +166,16 @@ class ArxivReferenceChecker:
         self.category = category
         
         # Create output directory
-        self.output_dir = "output"
-        
+        if self.debug_mode: 
+            self.output_dir = "output"
+            if not os.path.exists(self.output_dir):
+                os.makedirs(self.output_dir)
+                
         # Initialize LLM-based reference extraction
         self.config = get_config()
         self.llm_config_override = llm_config
         self.llm_extractor = self._initialize_llm_extractor()
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
-        
+
         # Initialize new services
         self.pdf_processor = PDFProcessor(self.config.get('processing', {}))
         self.config_validator = ConfigValidator()
@@ -3551,7 +3556,8 @@ def main():
             semantic_scholar_api_key=args.semantic_scholar_api_key,
             db_path=args.db_path,
             llm_config=llm_config,
-            skip_google_scholar_for_single_paper=args.skip_google_scholar_single
+            skip_google_scholar_for_single_paper=args.skip_google_scholar_single,
+            debug_mode=args.debug
         )
         
         # Run the checker

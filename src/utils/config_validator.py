@@ -30,7 +30,7 @@ class ConfigValidator:
     
     def __init__(self):
         self.required_sections = ['llm', 'processing', 'apis']
-        self.llm_providers = ['openai', 'anthropic', 'google', 'azure']
+        self.llm_providers = ['openai', 'anthropic', 'google', 'azure', 'vllm']
         
     def validate_config(self, config: Dict[str, Any]) -> ValidationResult:
         """
@@ -119,6 +119,15 @@ class ConfigValidator:
                 errors.append("Azure endpoint must be a string")
             if 'api_version' in config and not isinstance(config['api_version'], str):
                 errors.append("Azure api_version must be a string")
+        elif provider == 'vllm':
+            if 'server_url' in config and not isinstance(config['server_url'], str):
+                errors.append("vLLM server_url must be a string")
+            if 'server_url' in config and not config['server_url'].startswith(('http://', 'https://')):
+                errors.append("vLLM server_url must be a valid URL")
+            if 'download_path' in config and not isinstance(config['download_path'], str):
+                errors.append("vLLM download_path must be a string")
+            if 'auto_download' in config and not isinstance(config['auto_download'], bool):
+                errors.append("vLLM auto_download must be a boolean")
         
         return ValidationResult(len(errors) == 0, errors, warnings)
     

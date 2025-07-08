@@ -58,6 +58,11 @@ optional = [
     "scikit-learn>=1.0.0",
     "joblib>=1.1.0",
 ]
+vllm = [
+    "vllm>=0.3.0",
+    "huggingface_hub>=0.17.0",
+    "requests>=2.25.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/markrussinovich/refchecker"
