@@ -56,6 +56,9 @@ def clean_title(title):
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
+    # Fix hyphenated words broken across lines (e.g., "jailbreak- ing" -> "jailbreaking")
+    title = re.sub(r'([a-z])-\s+([a-z])', r'\1\2', title)
+    
     # Remove extra whitespace
     title = re.sub(r'\s+', ' ', title).strip()
     

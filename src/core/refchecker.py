@@ -1080,15 +1080,19 @@ class ArxivReferenceChecker:
         cleaned_ref = re.sub(r'([A-Z])\s+\.([A-Za-z])', r'\1. \2', cleaned_ref)
 
         # Check if this is a URL-based reference (common in some papers)
-        if re.match(r'^https?://', cleaned_ref):
+        if re.search(r'https?://', cleaned_ref):
             # This is likely a URL reference, not a standard academic citation
-            url_match = re.search(r'(https?://[^\s]+)', cleaned_ref)
+            # Handle multi-line URLs by removing newlines and reconstructing
+            url_pattern = r'(https?://[^\s]*(?:\n[^\s\[\]]*)*)'
+            url_match = re.search(url_pattern, cleaned_ref)
             if url_match:
-                # Extract the URL
-                url = url_match.group(1).strip()
+                # Extract and reconstruct the URL
+                raw_url = url_match.group(1).strip()
+                # Remove newlines and spaces within the URL
+                url = re.sub(r'\s+', '', raw_url)
                 
                 # For URL references, extract any remaining text as title
-                remaining_text = cleaned_ref.replace(url, '').strip()
+                remaining_text = cleaned_ref.replace(raw_url, '').strip()
                 # Remove trailing periods and clean up
                 remaining_text = re.sub(r'^\s*[.\s]*|[.\s]*$', '', remaining_text)
                 
@@ -1096,12 +1100,14 @@ class ArxivReferenceChecker:
                 return [{"is_url_reference": True}], remaining_text if remaining_text else url
         
         # Also check if the reference contains only a URL (possibly with some ID)
-        if re.search(r'^https?://[^\s]+(?:\s+[A-Za-z0-9\-]+)*\s*\.?\s*$', cleaned_ref):
+        if re.search(r'^https?://', cleaned_ref) and not re.search(r'[A-Z][a-z]+ [A-Z][a-z]+', cleaned_ref):
             # This is likely just a URL with maybe some ID
-            url_match = re.search(r'(https?://[^\s]+)', cleaned_ref)
+            url_pattern = r'(https?://[^\s]*(?:\n[^\s\[\]]*)*)'
+            url_match = re.search(url_pattern, cleaned_ref)
             if url_match:
-                url = url_match.group(1).strip()
-                remaining_text = cleaned_ref.replace(url, '').strip()
+                raw_url = url_match.group(1).strip()
+                url = re.sub(r'\s+', '', raw_url)
+                remaining_text = cleaned_ref.replace(raw_url, '').strip()
                 # Remove trailing periods and clean up
                 remaining_text = re.sub(r'^\s*[.\s]*|[.\s]*$', '', remaining_text)
                 
@@ -2511,8 +2517,8 @@ class ArxivReferenceChecker:
                     temp.append(part)
             if temp:
                 references.append(''.join(temp).strip())
-            # Remove empty or very short entries
-            references = [r for r in references if len(r.strip()) > 5]
+            # Remove empty or very short entries, but be less aggressive to preserve order
+            references = [r for r in references if len(r.strip()) > 10 and not re.match(r'^\[\d+\]$', r.strip())]
             # Ensure the last chunk is included if not already
             if numbered_refs[-1].strip() and not any(numbered_refs[-1].strip() in r for r in references):
                 references.append(numbered_refs[-1].strip())
@@ -2564,7 +2570,7 @@ class ArxivReferenceChecker:
             r'arxiv\.org/abs/\d+\.\d+(?:v\d+)?',
             r'arxiv:\s*(\d+\.\d+(?:v\d+)?)',
             r'arXiv preprint arXiv:(\d+\.\d+(?:v\d+)?)',
-            r'CoRR abs/(\d+\.\d+(?:v\d+)?)',
+            r'CoRR\s*,?\s*abs[:/](\d+\.\d+(?:v\d+)?)',  # Fixed to handle "CoRR , abs/1409.0473" format
         ]
         doi_patterns = [
             r'doi\.org/([^\s,\)]+)',
@@ -2575,6 +2581,7 @@ class ArxivReferenceChecker:
             r'https?://(?!arxiv\.org)[^\s,\)]+(?:\.(?=\s|$))?',
         ]
         for i, ref in enumerate(references):
+            logger.debug(f"Processing reference {i+1}: {ref[:100]}...")
             arxiv_id = None
             arxiv_url = None
             for pattern in arxiv_patterns:
@@ -2676,7 +2683,7 @@ class ArxivReferenceChecker:
                     'raw_text': ref,
                     'type': 'arxiv'
                 }
-                logger.info(f"Extracted arXiv reference: {structured_ref['title']}")
+                logger.debug(f"Extracted arXiv reference {i+1}: {structured_ref['title']}")
                 arxiv_refs.append(structured_ref)
             else:
                 doi = None
@@ -2693,6 +2700,24 @@ class ArxivReferenceChecker:
                         if url_match:
                             url = clean_url(url_match.group(0))
                             break
+                    
+                    # Handle multi-line URLs specifically
+                    if not url and re.search(r'https?://', ref):
+                        # Try to reconstruct multi-line URLs
+                        url_start_match = re.search(r'https?://[^\s\n]*', ref)
+                        if url_start_match:
+                            url_start = url_start_match.group(0)
+                            # Look for continuation on the next line(s)
+                            remaining_ref = ref[url_start_match.end():].strip()
+                            # Remove leading whitespace and reference numbers
+                            remaining_ref = re.sub(r'^\s*\[\d+\]?\s*', '', remaining_ref)
+                            
+                            # Check if the remaining part looks like a URL continuation
+                            # (alphanumeric characters, hyphens, slashes, etc.)
+                            if re.match(r'^[a-zA-Z0-9\-_/.=?&%\n\s]+\s*\.?\s*$', remaining_ref):
+                                # Combine the URL parts, removing newlines and spaces
+                                url_continuation = re.sub(r'\s+', '', remaining_ref.rstrip('.'))
+                                url = url_start + url_continuation
                 if url or doi:
                     logger.debug(f"Found non-arXiv reference {i+1}: {url or doi}")
                     year = None
@@ -2733,6 +2758,9 @@ class ArxivReferenceChecker:
                             break
                     if is_url_reference:
                         authors = ["URL Reference"]
+                        # For URL references, use the cleaned URL as title if title looks like URL fragment
+                        if title and (len(title) < 10 or re.match(r'^[a-zA-Z0-9\-_/.=?&%\s]+$', title)):
+                            title = clean_url(url) if url else title
                     elif not authors:
                         authors = ["Unknown Author"]
                     structured_ref = {
@@ -2785,6 +2813,7 @@ class ArxivReferenceChecker:
                             break
                     if is_url_reference:
                         authors = ["URL Reference"]
+                        # For URL references in other category, keep original title since no URL available
                     elif not authors:
                         authors = ["Unknown Author"]
                     structured_ref = {
@@ -2796,11 +2825,11 @@ class ArxivReferenceChecker:
                         'raw_text': ref,
                         'type': 'other'
                     }
-                    logger.info(f"Extracted other reference: {structured_ref['title']}")
+                    logger.debug(f"Extracted other reference {i+1}: {structured_ref['title']}")
                     other_refs.append(structured_ref)
-        logger.info(f"Extracted {len(arxiv_refs)} structured references with arxiv links")
-        logger.info(f"Extracted {len(non_arxiv_refs)} structured references without arxiv links")
-        logger.info(f"Extracted {len(other_refs)} structured references without URLs or DOIs")
+        logger.debug(f"Extracted {len(arxiv_refs)} structured references with arxiv links")
+        logger.debug(f"Extracted {len(non_arxiv_refs)} structured references without arxiv links")
+        logger.debug(f"Extracted {len(other_refs)} structured references without URLs or DOIs")
         all_refs = arxiv_refs + non_arxiv_refs + other_refs
         return all_refs
     
