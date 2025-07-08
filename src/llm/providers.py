@@ -763,9 +763,9 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             raise Exception("vLLM server not available. Make sure vLLM server is running.")
         
         # Get model's max_tokens from configuration
-        from src.utils.config_validator import get_config
+        from config.settings import get_config
         config = get_config()
-        model_max_tokens = config.get('llm_providers', {}).get('vllm', {}).get('max_tokens', 4000)
+        model_max_tokens = config.get('llm', {}).get('vllm', {}).get('max_tokens', 4000)
         
         # Check if bibliography is too long and needs chunking
         estimated_tokens = len(bibliography_text) // 4  # Rough estimate
