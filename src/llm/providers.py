@@ -24,11 +24,12 @@ Please extract individual references from the following bibliography text. Each 
 Instructions:
 1. Split the bibliography into individual references
 2. Each reference should include authors, title, publication venue, year, and any URLs/DOIs
-3. Place a hashmark (#) rather than period between fields of a reference
-4. Return ONLY the references, one per line
-5. Do not include reference numbers like [1], [2], etc.
-6. Each reference should be on its own line
-7. Do not add any additional text or explanations
+3. Include references that are incomplete, like only author names and titles
+4. Place a hashmark (#) rather than period between fields of a reference
+5. Return ONLY the references, one per line
+6. Do not include reference numbers like [1], [2], etc.
+7. Each reference should be on its own line
+8. Do not add any additional text or explanations
 
 Bibliography text:
 {bibliography_text}

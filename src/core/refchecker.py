@@ -1031,11 +1031,42 @@ class ArxivReferenceChecker:
             title = legal_case_match.group(2).strip()
             return [year], title
             
-        # Case 2: References with year at start like "1976. Title"
-        year_start_match = re.search(r'^(\d{4})\.\s+([^.]+?)(?:\.\s+https?://|\.\s*$)', cleaned_ref)
+        # Case 2: References with year at start like "2022. Title AuthorName1, AuthorName2, AuthorName3 2022"
+        # Look for pattern: YEAR. Title followed by authors ending with the same year
+        year_title_authors_match = re.search(r'^(\d{4})\.\s+(.+?)\s+([A-Z][a-z]+.*?)\s+\1\s*$', cleaned_ref)
+        if year_title_authors_match:
+            year = year_title_authors_match.group(1)
+            potential_title = year_title_authors_match.group(2).strip()
+            potential_authors = year_title_authors_match.group(3).strip()
+            
+            # Check if potential_authors looks like a list of authors (contains comma-separated names)
+            # and potential_title looks like a title (longer, has multiple words)
+            if ',' in potential_authors and len(potential_title.split()) > 3:
+                # Extract authors from the authors text
+                authors = self.extract_authors_list(potential_authors)
+                return authors, potential_title
+        
+        # Case 2b: References with year at start like "2021. Title Author1, Author2, Author3"
+        # More flexible pattern to handle various formats
+        year_start_match = re.search(r'^(\d{4})\.\s+(.+?)(?:\s+([A-Z][a-z]+(?:\s+[A-Z]\.?\s*)*[A-Z][a-z]+(?:,\s*[A-Z][a-z]+(?:\s+[A-Z]\.?\s*)*[A-Z][a-z]+)*(?:\s+and\s+[A-Z][a-z]+(?:\s+[A-Z]\.?\s*)*[A-Z][a-z]+)?)\s*(?:\d{4})?\s*$)', cleaned_ref)
         if year_start_match:
             year = year_start_match.group(1)
             title = year_start_match.group(2).strip()
+            authors_text = year_start_match.group(3) if year_start_match.group(3) else None
+            
+            if authors_text:
+                # Extract authors from the authors text
+                authors = self.extract_authors_list(authors_text)
+                return authors, title
+            else:
+                # If we can't extract authors, fall back to using year as author
+                return [year], title
+        
+        # Case 2c: Simple year at start like "1976. Title"
+        simple_year_start_match = re.search(r'^(\d{4})\.\s+([^.]+?)(?:\.\s+https?://|\.\s*$)', cleaned_ref)
+        if simple_year_start_match:
+            year = simple_year_start_match.group(1)
+            title = simple_year_start_match.group(2).strip()
             return [year], title
         
         # Case 3: Legal cases with reference number and year like "[1]1976. Title"
@@ -2109,16 +2140,16 @@ class ArxivReferenceChecker:
                         ref_id = self.extract_arxiv_id_from_url(reference['url'])
                         
                         # Print reference info in non-debug mode (improved formatting)
-                        if not debug_mode:
-                            title = reference.get('title', 'Untitled')
-                            authors = ', '.join(reference.get('authors', []))
-                            year = reference.get('year', '')
-                            venue = reference.get('venue', '')
-                            print(f"[{i+1}/{len(bibliography)}] {title}")
-                            if authors:
-                                print(f"       {authors}")
-                            if venue:
-                                print(f"       {venue}")
+                        title = reference.get('title', 'Untitled')
+                        authors = ', '.join(reference.get('authors', []))
+                        year = reference.get('year', '')
+                        venue = reference.get('venue', '')
+                        print(f"[{i+1}/{len(bibliography)}] {title}")
+                        if authors:
+                            print(f"       {authors}")
+                        if venue:
+                            print(f"       {venue}")
+                        if year:
                             print(f"       {year}")
                         # --- DEBUG TIMER ---
                         start_time = time.time()
@@ -2174,9 +2205,9 @@ class ArxivReferenceChecker:
                                 summary_parts.append(f"{len(warnings_only)} warnings")
                                 # Count as paper with warnings if it has warnings (regardless of errors)
                                 self.papers_with_warnings += 1
-                            print(f"   📊 Paper summary: {', '.join(summary_parts)} found")
+                            print(f"📊 Paper summary: {', '.join(summary_parts)} found")
                         else:
-                            print(f"   📊 Paper summary: No errors found")
+                            print(f"📊 Paper summary: No errors found")
                     
                     
                 except Exception as e:

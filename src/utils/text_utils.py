@@ -65,6 +65,9 @@ def clean_title(title):
     # Remove trailing punctuation except periods
     title = re.sub(r'[,;:!?]+$', '', title)
     
+    # Remove year information from title
+    title = remove_year_from_title(title)
+    
     return title
 
 def normalize_text(text):
@@ -180,8 +183,9 @@ def remove_year_from_title(title):
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
-    # Remove years in parentheses or at the end
+    # Remove years in parentheses, at the beginning, or at the end
     title = re.sub(r'\s*\((19|20)\d{2}\)\s*', ' ', title)
+    title = re.sub(r'^(19|20)\d{2}\.\s*', '', title)
     title = re.sub(r'\s+(19|20)\d{2}\s*$', '', title)
     
     # Clean up extra spaces
