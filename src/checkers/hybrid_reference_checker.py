@@ -14,7 +14,7 @@ class HybridReferenceChecker:
         self.semantic_scholar = NonArxivReferenceChecker(api_key=semantic_scholar_api_key)
         self.google_scholar = GoogleScholarReferenceChecker(semantic_scholar_api_key=semantic_scholar_api_key)
 
-    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using Semantic Scholar API, falling back to Google Scholar if needed.
 
@@ -22,27 +22,27 @@ class HybridReferenceChecker:
             reference: Reference data dictionary
 
         Returns:
-            Tuple of (verified_data, errors)
+            Tuple of (verified_data, errors, url)
         """
         # Try Semantic Scholar API first
         try:
-            verified_data, errors = self.semantic_scholar.verify_reference(reference)
+            verified_data, errors, url = self.semantic_scholar.verify_reference(reference)
             # If Semantic Scholar found a match or errors, return
             if verified_data is not None or errors:
-                return verified_data, errors
+                return verified_data, errors, url
         except Exception as e:
             logger.warning(f"Semantic Scholar API failed: {e}")
 
         # Fallback to Google Scholar
         try:
-            verified_data, errors = self.google_scholar.verify_reference(reference)
-            return verified_data, errors
+            verified_data, errors, url = self.google_scholar.verify_reference(reference)
+            return verified_data, errors, url
         except Exception as e:
             logger.error(f"Google Scholar fallback also failed: {e}")
             return None, [{
                 'error_type': 'unverified',
                 'error_details': f'Could not verify reference using either Semantic Scholar or Google Scholar: {e}'
-            }]
+            }], None
 
     def normalize_paper_title(self, title: str) -> str:
         """

@@ -228,7 +228,7 @@ class GoogleScholarReferenceChecker:
         
         return True
     
-    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using Google Scholar with fallback to Semantic Scholar
         
@@ -236,9 +236,10 @@ class GoogleScholarReferenceChecker:
             reference: Reference data dictionary
             
         Returns:
-            Tuple of (verified_data, errors)
+            Tuple of (verified_data, errors, url)
             - verified_data: Paper data from Google Scholar or None if not found
             - errors: List of error dictionaries
+            - url: URL of the paper if found, None otherwise
         """
         errors = []
         
@@ -296,19 +297,22 @@ class GoogleScholarReferenceChecker:
                                 'ref_year_correct': paper_year
                             })
                         
-                        return paper_data, errors
+                        # Extract URL from Google Scholar paper data
+                        paper_url = paper_data.get('pub_url') or paper_data.get('eprint_url') or None
+                        
+                        return paper_data, errors, paper_url
             
             # If Google Scholar failed or found no results, fall back to Semantic Scholar
             logger.info(f"Falling back to Semantic Scholar for: {title}")
-            verified_data, semantic_errors = self.semantic_scholar.verify_reference(reference)
+            verified_data, semantic_errors, semantic_url = self.semantic_scholar.verify_reference(reference)
             
             if verified_data:
                 logger.info(f"Found paper in Semantic Scholar: {title}")
-                return verified_data, semantic_errors
+                return verified_data, semantic_errors, semantic_url
             
             # If both failed, return empty results
             logger.warning(f"Could not verify reference in either Google Scholar or Semantic Scholar: {title}")
-            return None, []
+            return None, [], None
             
         except Exception as e:
             logger.error(f"Error during verification: {str(e)}")
@@ -319,7 +323,7 @@ class GoogleScholarReferenceChecker:
                 return self.semantic_scholar.verify_reference(reference)
             except Exception as semantic_error:
                 logger.error(f"Semantic Scholar fallback also failed: {str(semantic_error)}")
-                return None, []
+                return None, [], None
 
 if __name__ == "__main__":
     # Set up logging for standalone usage

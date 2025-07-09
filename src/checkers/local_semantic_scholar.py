@@ -655,7 +655,7 @@ class LocalNonArxivReferenceChecker:
         logger.debug("Local DB: No good match found")
         return None
     
-    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using the local database
         
@@ -663,9 +663,10 @@ class LocalNonArxivReferenceChecker:
             reference: Reference data dictionary
             
         Returns:
-            Tuple of (verified_data, errors)
+            Tuple of (verified_data, errors, url)
             - verified_data: Paper data from the database or None if not found
             - errors: List of error dictionaries
+            - url: URL of the paper if found, None otherwise
         """
         errors = []
         
@@ -710,7 +711,7 @@ class LocalNonArxivReferenceChecker:
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
             logger.debug("Local DB: No matching paper found - cannot verify reference")
-            return None, []
+            return None, [], None
         
         logger.debug(f"Local DB: Found matching paper - Title: '{paper_data.get('title', '')}', Year: {paper_data.get('year', '')}")
         
@@ -759,7 +760,10 @@ class LocalNonArxivReferenceChecker:
         else:
             logger.debug("Local DB: Reference verification passed - no errors found")
         
-        return paper_data, errors
+        # Extract URL from paper data
+        paper_url = paper_data.get('url') or None
+        
+        return paper_data, errors, paper_url
     
     def close(self):
         """Close the database connection"""

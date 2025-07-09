@@ -264,7 +264,7 @@ class NonArxivReferenceChecker:
         
         return True
     
-    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using Semantic Scholar
         
@@ -272,9 +272,10 @@ class NonArxivReferenceChecker:
             reference: Reference data dictionary
             
         Returns:
-            Tuple of (verified_data, errors)
+            Tuple of (verified_data, errors, url)
             - verified_data: Paper data from Semantic Scholar or None if not found
             - errors: List of error dictionaries
+            - url: URL of the paper if found, None otherwise
         """
         errors = []
         
@@ -351,7 +352,7 @@ class NonArxivReferenceChecker:
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
             logger.debug(f"Could not find matching paper for reference")
-            return None, []
+            return None, [], None
         
         # Verify authors
         if authors:
@@ -390,7 +391,10 @@ class NonArxivReferenceChecker:
                     'ref_doi_correct': paper_doi
                 })
         
-        return paper_data, errors
+        # Extract URL from paper data
+        paper_url = paper_data.get('url') or None
+        
+        return paper_data, errors, paper_url
 
 if __name__ == "__main__":
     # Example usage
