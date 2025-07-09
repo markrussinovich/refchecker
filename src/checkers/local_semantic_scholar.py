@@ -273,10 +273,6 @@ class LocalNonArxivReferenceChecker:
             if 'normalized_paper_title' in columns and title_normalized:
                 query = "SELECT * FROM papers WHERE normalized_paper_title = ?"
                 params = [title_normalized]
-                
-                if year:
-                    query += " AND year = ?"
-                    params.append(year)
                     
                 start_time = time.time()
                 cursor.execute(query, params)
@@ -290,125 +286,6 @@ class LocalNonArxivReferenceChecker:
                     return self._process_results(results)
         except Exception as e:
             logger.warning(f"Error in normalized title search: {e}")
-        
-        # Strategy 2: Try exact match (for backwards compatibility)
-        try:
-            query = "SELECT * FROM papers WHERE title = ? COLLATE NOCASE"
-            params = [title_cleaned]
-            
-            if year:
-                query += " AND year = ?"
-                params.append(year)
-                
-            start_time = time.time()
-            cursor.execute(query, params)
-            results.extend([dict(row) for row in cursor.fetchall()])
-            execution_time = time.time() - start_time
-            
-            log_query_debug(query, params, execution_time, len(results), "exact title match")
-            
-            if results:
-                logger.debug(f"Found {len(results)} results using exact match")
-                return self._process_results(results)
-        except Exception as e:
-            logger.warning(f"Error in exact match search: {e}")
-        
-        # Strategy 3: Try legacy normalized title match if we have that column
-        try:
-            cursor.execute("PRAGMA table_info(papers)")
-            columns = [row[1] for row in cursor.fetchall()]
-            
-            if 'title_normalized' in columns:
-                query = "SELECT * FROM papers WHERE title_normalized = ?"
-                params = [title_lower]
-                
-                if year:
-                    query += " AND year = ?"
-                    params.append(year)
-                    
-                cursor.execute(query, params)
-                results.extend([dict(row) for row in cursor.fetchall()])
-                
-                if results:
-                    logger.debug(f"Found {len(results)} results using legacy normalized match")
-                    return self._process_results(results)
-        except Exception as e:
-            logger.warning(f"Error in legacy normalized match search: {e}")
-        
-        # Strategy 4: Word-based search (more efficient than LIKE with wildcards)
-        title_words = [word.strip().lower() for word in title_lower.split() if len(word.strip()) > 2]
-        
-        if len(title_words) >= 2:
-            try:
-                # Find papers that contain all significant words
-                # This is more efficient than LIKE %word1% AND LIKE %word2%
-                word_conditions = []
-                params = []
-                
-                for word in title_words[:3]:  # Reduced to 3 words for better performance
-                    # Use a more targeted approach - check if the word exists in title
-                    word_conditions.append("(title LIKE ? OR title LIKE ? OR title LIKE ?)")
-                    # Check word at start, middle, and end positions
-                    params.extend([f"{word}%", f"% {word}%", f"% {word}"])
-                
-                if word_conditions:
-                    query = f"SELECT * FROM papers WHERE {' AND '.join(word_conditions)}"
-                    
-                    if year:
-                        query += " AND year = ?"
-                        params.append(year)
-                    
-                    query += " LIMIT 50"  # Reduced limit for better performance
-                    
-                    start_time = time.time()
-                    cursor.execute(query, params)
-                    candidate_results = [dict(row) for row in cursor.fetchall()]
-                    execution_time = time.time() - start_time
-                    
-                    log_query_debug(query, params, execution_time, len(candidate_results), "word-based title search (candidates)")
-                    
-                    # Post-filter to find best matches
-                    for result in candidate_results:
-                        result_title = result.get('title', '').lower()
-                        
-                        # Check if all words are present
-                        if all(word in result_title for word in title_words):
-                            results.append(result)
-                    
-                    logger.debug(f"Word-based search: filtered {len(candidate_results)} candidates to {len(results)} matches")
-                    
-                    if results:
-                        logger.debug(f"Found {len(results)} results using word-based search")
-                        return self._process_results(results)
-                        
-            except Exception as e:
-                logger.warning(f"Error in word-based search: {e}")
-        
-        # Strategy 5: Fallback to limited LIKE search only if absolutely necessary
-        if not results:
-            try:
-                logger.warning(f"Using fallback LIKE search for: {title_cleaned}")
-                query = "SELECT * FROM papers WHERE title LIKE ? COLLATE NOCASE LIMIT 25"
-                params = [f"%{title_cleaned}%"]
-                
-                if year:
-                    query = query.replace("LIMIT 25", "AND year = ? LIMIT 25")
-                    params.append(year)
-                
-                start_time = time.time()
-                cursor.execute(query, params)
-                fallback_results = [dict(row) for row in cursor.fetchall()]
-                execution_time = time.time() - start_time
-                
-                log_query_debug(query, params, execution_time, len(fallback_results), "fallback LIKE search")
-                
-                results.extend(fallback_results)
-                
-                if results:
-                    logger.debug(f"Found {len(results)} results using fallback LIKE search")
-                    
-            except Exception as e:
-                logger.error(f"Error in fallback search: {e}")
         
         return self._process_results(results)
     
@@ -604,54 +481,6 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold (0.7)")
         
-        # If no good match by title, try searching by first author
-        if authors:
-            logger.debug(f"Local DB: Trying author search for '{authors[0]}'")
-            author_results = self.search_papers_by_author(authors[0], year)
-            
-            logger.debug(f"Local DB: Author search returned {len(author_results)} results")
-            
-            if author_results:
-                # Find the best match by title similarity
-                best_match = None
-                best_score = 0
-                
-                for result in author_results:
-                    result_title = result.get('title', '').lower()
-                    title_lower = title.lower()
-                    
-                    # Calculate a simple similarity score
-                    if title_lower in result_title or result_title in title_lower:
-                        # If one is a substring of the other, it's a good match
-                        score = 0.8
-                    else:
-                        # Calculate word overlap
-                        title_words = set(title_lower.split())
-                        result_words = set(result_title.split())
-                        common_words = title_words.intersection(result_words)
-                        
-                        if not title_words or not result_words:
-                            score = 0
-                        else:
-                            score = len(common_words) / max(len(title_words), len(result_words))
-                    
-                    # Check year match
-                    if year and result.get('year') == year:
-                        score += 0.1
-                    
-                    logger.debug(f"Local DB: Author search candidate score {score:.2f} for '{result_title}'")
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_match = result
-                
-                # If we found a good match, return it
-                if best_score >= 0.6:
-                    logger.debug(f"Local DB: Found good author-based match with score {best_score:.2f}")
-                    return best_match
-                else:
-                    logger.debug(f"Local DB: Best author-based match score {best_score:.2f} below threshold (0.6)")
-        
         logger.debug("Local DB: No good match found")
         return None
     
@@ -732,8 +561,8 @@ class LocalNonArxivReferenceChecker:
         if year and paper_year and year != paper_year:
             logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
             errors.append({
-                'error_type': 'year',
-                'error_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'warning_type': 'year',
+                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
                 'ref_year_correct': paper_year
             })
         
@@ -760,8 +589,26 @@ class LocalNonArxivReferenceChecker:
         else:
             logger.debug("Local DB: Reference verification passed - no errors found")
         
-        # Extract URL from paper data
-        paper_url = paper_data.get('url') or None
+        # Extract URL from paper data - prioritize useful URLs
+        paper_url = None
+        
+        # First, check for open access PDF (stored in local database)
+        if paper_data.get('openAccessPdf'):
+            paper_url = paper_data['openAccessPdf']
+            logger.debug(f"Found open access PDF URL: {paper_url}")
+        
+        # Fallback to general URL field
+        if not paper_url:
+            paper_url = paper_data.get('url')
+            if paper_url:
+                logger.debug(f"Found paper URL: {paper_url}")
+        
+        # Also check externalIds for DOI URL
+        if not paper_url:
+            external_ids = paper_data.get('externalIds', {})
+            if external_ids.get('DOI'):
+                paper_url = f"https://doi.org/{external_ids['DOI']}"
+                logger.debug(f"Generated DOI URL: {paper_url}")
         
         return paper_data, errors, paper_url
     

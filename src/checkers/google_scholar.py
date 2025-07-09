@@ -50,8 +50,11 @@ class GoogleScholarReferenceChecker:
         """
         # Rate limiting parameters - optimized for faster fallback
         self.request_delay = 1.0  # Further reduced initial delay between requests (seconds) 
-        self.max_retries = 2  # Reduced max retries
+        self.max_retries = 1  # Reduced to 1 retry only for our wrapper
         self.backoff_factor = 1.5  # Reduced exponential backoff factor for faster failure
+        
+        # Disable Google Scholar if it's causing too many issues
+        self.google_scholar_enabled = True
         
         # Setup proxy generator for scholarly
         self.setup_scholarly()
@@ -72,7 +75,7 @@ class GoogleScholarReferenceChecker:
             # Create a ProxyGenerator object
             pg = ProxyGenerator()
             
-            # Use free proxies
+            # Use free proxies with reduced retries for faster failure
             success = pg.FreeProxies()
             if not success:
                 # If free proxies fail, try Tor
@@ -81,8 +84,9 @@ class GoogleScholarReferenceChecker:
             # Set up proxy rotation
             scholarly.use_proxy(pg)
             
-            # Configure scholarly with reduced timeout for faster fallback
-            scholarly.set_timeout(10)
+            # Configure scholarly with reduced timeout and retries for faster fallback
+            scholarly.set_timeout(8)  # Reduced from 10 to 8 seconds
+            scholarly.set_retries(2)  # Limit scholarly internal retries to 2
             
             logger.info("Scholarly setup complete with proxy rotation")
         except Exception as e:
@@ -108,41 +112,63 @@ class GoogleScholarReferenceChecker:
         initial_delay = self.request_delay + random.uniform(0.2, 0.8)
         time.sleep(initial_delay)
         
-        # Make the request with retries and backoff
+        # Make the request with timeout and limited retries
         for attempt in range(self.max_retries):
             try:
-                # Search for the paper
-                search_results = []
-                search_query_gen = scholarly.search_pubs(search_query)
+                # Use a timeout to prevent hanging
+                import signal
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Google Scholar search timed out")
                 
-                # Get the first 3 results (reduced from 5 to minimize requests)
-                for _ in range(3):
-                    try:
-                        result = next(search_query_gen)
-                        search_results.append(result)
-                        # Add small delay between fetching results
+                # Set a 20-second timeout for the entire search operation
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(20)
+                
+                try:
+                    # Search for the paper
+                    search_results = []
+                    search_query_gen = scholarly.search_pubs(search_query)
+                    
+                    # Get the first 3 results (reduced from 5 to minimize requests)
+                    for _ in range(3):
+                        try:
+                            result = next(search_query_gen)
+                            search_results.append(result)
+                            # Add small delay between fetching results
+                            time.sleep(random.uniform(0.5, 1.0))
+                        except StopIteration:
+                            break
+                    
+                    # If we got results, add a shorter delay before returning to avoid rapid successive requests
+                    if search_results:
                         time.sleep(random.uniform(0.5, 1.0))
-                    except StopIteration:
-                        break
+                        return search_results
+                finally:
+                    signal.alarm(0)  # Cancel the alarm
                 
-                # If we got results, add a shorter delay before returning to avoid rapid successive requests
-                if search_results:
-                    time.sleep(random.uniform(0.5, 1.0))
-                    return search_results
-                
-            except Exception as e:
+            except (TimeoutError, Exception) as e:
                 error_str = str(e).lower()
                 
+                # Check for timeout - fail immediately
+                if isinstance(e, TimeoutError):
+                    logger.warning(f"Google Scholar search timed out: {str(e)} - skipping to fallback")
+                    break
+                
                 # Check for CAPTCHA or rate limiting indicators - fail fast
-                if any(indicator in error_str for indicator in ['captcha', 'blocked', 'too many requests', 'rate limit']):
+                if any(indicator in error_str for indicator in ['captcha', 'blocked', 'too many requests', 'rate limit', 'access denied', '403', 'forbidden']):
                     logger.warning(f"Google Scholar blocked/rate limited: {str(e)} - skipping to fallback")
                     break
                 
                 # Check for proxy issues - fail fast after first attempt
-                if any(indicator in error_str for indicator in ['proxy', '502', '503', 'bad gateway', 'timeout']):
+                if any(indicator in error_str for indicator in ['proxy', '502', '503', 'bad gateway', 'timeout', 'connection refused', 'cannot fetch']):
                     if attempt >= 1:  # Only retry once for proxy issues
                         logger.warning(f"Google Scholar proxy issues persist: {str(e)} - skipping to fallback")
                         break
+                
+                # Check for specific Google Scholar error messages
+                if any(indicator in error_str for indicator in ['cannot fetch from google scholar', 'peer closed connection', 'remoter protocol error']):
+                    logger.warning(f"Google Scholar connection issues: {str(e)} - skipping to fallback")
+                    break
                 
                 wait_time = self.request_delay * (self.backoff_factor ** attempt) + random.uniform(0.5, 2.0)
                 logger.warning(f"Request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
@@ -155,8 +181,9 @@ class GoogleScholarReferenceChecker:
                     except Exception as setup_error:
                         logger.warning(f"Failed to reset scholarly: {str(setup_error)}")
         
-        # If we get here, all retries failed
-        logger.warning(f"Google Scholar failed after {self.max_retries} attempts - falling back to Semantic Scholar")
+        # If we get here, all retries failed - disable Google Scholar for subsequent requests
+        logger.warning(f"Google Scholar failed after {self.max_retries} attempts - disabling for this session")
+        self.google_scholar_enabled = False
         return []
     
     def normalize_author_name(self, name: str) -> str:
@@ -264,8 +291,8 @@ class GoogleScholarReferenceChecker:
         raw_text = reference.get('raw_text', '')
         
         try:
-            # First try with Google Scholar
-            if title:
+            # First try with Google Scholar (if enabled)
+            if title and self.google_scholar_enabled:
                 # Clean up the title
                 clean_title = title.replace('\n', ' ').strip()
                 clean_title = re.sub(r'\s+', ' ', clean_title)
@@ -321,17 +348,32 @@ class GoogleScholarReferenceChecker:
                                 'ref_year_correct': paper_year
                             })
                         
-                        # Extract URL from Google Scholar paper data
-                        paper_url = paper_data.get('pub_url') or paper_data.get('eprint_url') or None
+                        # Extract URL from Google Scholar paper data - try multiple fields
+                        paper_url = None
+                        
+                        # Priority order: direct PDF URL, publication URL, eprint URL, then other fields
+                        url_fields = ['pub_url', 'eprint_url', 'pdf_url', 'url']
+                        for field in url_fields:
+                            if paper_data.get(field):
+                                paper_url = paper_data[field]
+                                logger.debug(f"Found Google Scholar URL from {field}: {paper_url}")
+                                break
+                        
+                        # If no direct URL found, try to extract from bib data
+                        if not paper_url and 'bib' in paper_data:
+                            bib_data = paper_data['bib']
+                            if bib_data.get('url'):
+                                paper_url = bib_data['url']
+                                logger.debug(f"Found Google Scholar URL from bib: {paper_url}")
                         
                         return paper_data, errors, paper_url
             
             # If Google Scholar failed or found no results, fall back to Semantic Scholar
-            logger.info(f"Falling back to Semantic Scholar for: {title}")
+            logger.debug(f"Falling back to Semantic Scholar for: {title}")
             verified_data, semantic_errors, semantic_url = self.semantic_scholar.verify_reference(reference)
             
             if verified_data:
-                logger.info(f"Found paper in Semantic Scholar: {title}")
+                logger.debug(f"Found paper in Semantic Scholar: {title}")
                 return verified_data, semantic_errors, semantic_url
             
             # If both failed, return empty results
@@ -346,7 +388,7 @@ class GoogleScholarReferenceChecker:
             
             # Try Semantic Scholar as fallback
             try:
-                logger.info(f"Falling back to Semantic Scholar after error: {title}")
+                logger.debug(f"Falling back to Semantic Scholar after error: {title}")
                 return self.semantic_scholar.verify_reference(reference)
             except Exception as semantic_error:
                 logger.error(f"Semantic Scholar fallback also failed: {str(semantic_error)}")

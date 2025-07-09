@@ -1702,9 +1702,37 @@ class ArxivReferenceChecker:
         if self.db_path:
             # Use the database connection from the non_arxiv_checker
             if hasattr(self.non_arxiv_checker, 'conn'):
-                db_conn = self.non_arxiv_checker.conn
-                errors = self.verify_db_reference(source_paper, reference, db_conn)
-                return errors, None  # DB verification doesn't return URL currently
+                # Use the local database checker's verify_reference method which returns URLs
+                verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
+                
+                if not verified_data:
+                    # Mark as unverified but keep the URL if found
+                    return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url
+                
+                # Convert database errors to our format
+                formatted_errors = []
+                for error in errors:
+                    formatted_error = {}
+                    
+                    # Handle error_type and warning_type properly
+                    if 'error_type' in error:
+                        formatted_error['error_type'] = error['error_type']
+                        formatted_error['error_details'] = error['error_details']
+                    elif 'warning_type' in error:
+                        formatted_error['warning_type'] = error['warning_type']
+                        formatted_error['warning_details'] = error['warning_details']
+                    
+                    # Add correct information based on error type
+                    if error.get('error_type') == 'author':
+                        formatted_error['ref_authors_correct'] = error.get('ref_authors_correct', '')
+                    elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
+                        formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
+                    elif error.get('error_type') == 'doi':
+                        formatted_error['ref_url_correct'] = f"https://doi.org/{error.get('ref_doi_correct', '')}"
+                    
+                    formatted_errors.append(formatted_error)
+                
+                return formatted_errors if formatted_errors else None, paper_url
             else:
                 logger.warning("Database path specified but no connection available")
                 return [{"error_type": "unverified", "error_details": "Database connection not available"}], None
@@ -1817,11 +1845,13 @@ class ArxivReferenceChecker:
         # Use the Semantic Scholar client to verify the reference
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
         
+        logger.debug(f"Non-arXiv verification result: verified_data={verified_data is not None}, errors={len(errors) if errors else 0}, paper_url={paper_url}")
+        
         if not verified_data:
             logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
             logger.debug(f"Raw text: {reference['raw_text']}")
-            # Mark as unverified instead of no errors
-            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], None
+            # Mark as unverified but keep the URL if found
+            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url
         
         # If no errors were found by the Semantic Scholar client, we're done
         if not errors:
@@ -2074,9 +2104,8 @@ class ArxivReferenceChecker:
                 logger.debug(f"Processing paper: {paper.title} ({paper_id})")
                 
                 # Print paper heading in non-debug mode
-                if not debug_mode:
-                    print(f"\n📄 Processing: {paper.title}")
-                    print(f"   URL: {paper_url}")
+                print(f"\n📄 Processing: {paper.title}")
+                print(f"   URL: {paper_url}")
                 
                 try:
                     # Extract bibliography
@@ -2121,13 +2150,16 @@ class ArxivReferenceChecker:
                             print(f"       {venue}")
                         if year:
                             print(f"       {year}")
-                        if url:
-                            print(f"       URL: {url}")
                         if doi:
-                            print(f"       DOI: {doi}")
+                            print(f"       {doi}")
+                        if url:
+                            print(f"       {url}")
                         # --- DEBUG TIMER ---
                         start_time = time.time()
                         errors, reference_url = self.verify_reference(paper, reference)
+
+                        if reference_url and not url:
+                            print(f"       {reference_url}")
                         elapsed = time.time() - start_time
                         if elapsed > 5.0:
                             logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
@@ -2146,9 +2178,9 @@ class ArxivReferenceChecker:
                                     print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
                                     print(f"         Cited as: {', '.join(reference['authors'])} ({reference['year']})")
                                     if reference['url']:
-                                        print(f"         URL: {reference['url']}")
-                                    if reference_url:
-                                        print(f"         Verified URL: {reference_url}")
+                                        print(f"          URL: {reference['url']}")
+                                    if reference_url != url:
+                                        print(f"         V erified URL: {reference_url}")
                             else:
                                 # Real errors or warnings found
                                 self.add_error_to_dataset(paper, reference, errors, reference_url)
@@ -2221,12 +2253,12 @@ class ArxivReferenceChecker:
                 print(f"="*60)
                 print(f"📚 Total references processed: {self.total_references_processed}")
                 if self.total_errors_found > 0:
-                    print(f"❌ Total errors found: {self.total_errors_found}")
+                    print(f"❌ Total errors: {self.total_errors_found}")
                 if self.total_warnings_found > 0:
-                    print(f"⚠️  Total warnings found: {self.total_warnings_found}")
+                    print(f"⚠️  Total warnings: {self.total_warnings_found}")
                 if self.total_unverified_refs > 0:
                     print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
-                if self.total_errors_found == 0 and self.total_warnings_found == 0:
+                if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
             else:

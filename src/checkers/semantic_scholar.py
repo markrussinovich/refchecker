@@ -74,7 +74,7 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess"
         }
         
         # Add year filter if provided
@@ -106,7 +106,7 @@ class NonArxivReferenceChecker:
                 time.sleep(wait_time)
         
         # If we get here, all retries failed
-        logger.error(f"Failed to search for paper after {self.max_retries} attempts")
+        logger.debug(f"Failed to search for paper after {self.max_retries} attempts")
         return []
     
     def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
@@ -122,7 +122,7 @@ class NonArxivReferenceChecker:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
         
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess"
         }
         
         # Make the request with retries and backoff
@@ -391,8 +391,33 @@ class NonArxivReferenceChecker:
                     'ref_doi_correct': paper_doi
                 })
         
-        # Extract URL from paper data
-        paper_url = paper_data.get('url') or None
+        # Extract URL from paper data - prioritize PDF URLs over Semantic Scholar page URLs
+        paper_url = paper_data.get('url', None)
+        
+        logger.debug(f"Semantic Scholar - Extracting URL from paper data: {list(paper_data.keys())}")
+        
+        # First, check for open access PDF (most useful for users)
+        open_access_pdf = paper_data.get('openAccessPdf')
+        if open_access_pdf and open_access_pdf.get('url'):
+            paper_url = open_access_pdf['url']
+            logger.debug(f"Found open access PDF URL: {paper_url}")
+        
+        # Fallback to general URL field (typically Semantic Scholar page)
+        if not paper_url:
+            paper_url = paper_data.get('url')
+            if paper_url:
+                logger.debug(f"Found paper URL: {paper_url}")
+        
+        # Also check externalIds for DOI URL
+        if not paper_url:
+            external_ids = paper_data.get('externalIds', {})
+            if external_ids.get('DOI'):
+                paper_url = f"https://doi.org/{external_ids['DOI']}"
+                logger.debug(f"Generated DOI URL: {paper_url}")
+        
+        if not paper_url:
+            logger.debug(f"No URL found in paper data - available fields: {list(paper_data.keys())}")
+            logger.debug(f"Paper data sample: {str(paper_data)[:200]}...")
         
         return paper_data, errors, paper_url
 

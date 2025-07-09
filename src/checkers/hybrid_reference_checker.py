@@ -41,7 +41,7 @@ class HybridReferenceChecker:
                 verified_data, errors, url = self.local_db.verify_reference(reference)
                 # If local database found a match, return immediately
                 if verified_data is not None:
-                    logger.debug(f"HybridReferenceChecker: Found in local database")
+                    logger.debug(f"HybridReferenceChecker: Found in local database, URL: {url}")
                     return verified_data, errors, url
             except Exception as e:
                 logger.warning(f"Local database failed: {e}")
@@ -51,7 +51,7 @@ class HybridReferenceChecker:
             verified_data, errors, url = self.semantic_scholar.verify_reference(reference)
             # If Semantic Scholar found a match or errors, return
             if verified_data is not None or errors:
-                logger.debug(f"HybridReferenceChecker: Found in Semantic Scholar API")
+                logger.debug(f"HybridReferenceChecker: Found in Semantic Scholar API, URL: {url}")
                 return verified_data, errors, url
         except Exception as e:
             logger.warning(f"Semantic Scholar API failed: {e}")
@@ -60,6 +60,7 @@ class HybridReferenceChecker:
         try:
             logger.debug(f"HybridReferenceChecker: Falling back to Google Scholar")
             verified_data, errors, url = self.google_scholar.verify_reference(reference)
+            logger.debug(f"HybridReferenceChecker: Google Scholar result, URL: {url}")
             return verified_data, errors, url
         except Exception as e:
             logger.error(f"Google Scholar fallback also failed: {e}")
