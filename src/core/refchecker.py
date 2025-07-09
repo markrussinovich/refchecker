@@ -402,10 +402,10 @@ class ArxivReferenceChecker:
             logger.debug(f"Successfully found {arxiv_id} in cache")
             return self._metadata_cache[arxiv_id]
         
-        # If not found in local database and we have a local DB, we're done
+        # If not found in local database but we have a local DB, try ArXiv API as fallback
         if self.db_path:
-            logger.debug(f"Paper {arxiv_id} not found in local database")
-            return None
+            logger.debug(f"Paper {arxiv_id} not found in local database, trying ArXiv API fallback")
+            return self.get_paper_metadata_with_api_switching(arxiv_id)
         
         # If no local database, try both APIs with intelligent switching
         return self.get_paper_metadata_with_api_switching(arxiv_id)
@@ -1698,7 +1698,14 @@ class ArxivReferenceChecker:
             # Skip verification for URL references
             return None, None
         
-        # If database mode is enabled, use database for all references
+        # Check if it's an arXiv reference - handle ArXiv references separately even in database mode
+        if reference.get('type') == 'arxiv':
+            errors = self.verify_arxiv_reference(source_paper, reference)
+            # For ArXiv references, construct the URL from the reference
+            arxiv_url = reference.get('url') or f"https://arxiv.org/abs/{self.extract_arxiv_id_from_url(reference['url'])}"
+            return errors, arxiv_url
+        
+        # If database mode is enabled, use database for non-ArXiv references
         if self.db_path:
             # Use the database connection from the non_arxiv_checker
             if hasattr(self.non_arxiv_checker, 'conn'):
@@ -1737,14 +1744,8 @@ class ArxivReferenceChecker:
                 logger.warning("Database path specified but no connection available")
                 return [{"error_type": "unverified", "error_details": "Database connection not available"}], None
         
-        # Check if it's an arXiv reference
-        if reference.get('type') == 'arxiv':
-            errors = self.verify_arxiv_reference(source_paper, reference)
-            # For ArXiv references, construct the URL from the reference
-            arxiv_url = reference.get('url') or f"https://arxiv.org/abs/{self.extract_arxiv_id_from_url(reference['url'])}"
-            return errors, arxiv_url
-        else:
-            return self.verify_non_arxiv_reference(source_paper, reference)
+        # For non-database mode, use the appropriate checker based on reference type
+        return self.verify_non_arxiv_reference(source_paper, reference)
     
     def verify_arxiv_reference(self, source_paper, reference):
         """
@@ -2176,11 +2177,9 @@ class ArxivReferenceChecker:
                                 if not debug_mode:
                                     # Show full citation details for unverified references
                                     print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-                                    print(f"         Cited as: {', '.join(reference['authors'])} ({reference['year']})")
-                                    if reference['url']:
+                                    print(f"          Cited as: {', '.join(reference['authors'])} ({reference['year']})")
+                                    if reference['url'] != url:
                                         print(f"          URL: {reference['url']}")
-                                    if reference_url != url:
-                                        print(f"         V erified URL: {reference_url}")
                             else:
                                 # Real errors or warnings found
                                 self.add_error_to_dataset(paper, reference, errors, reference_url)
@@ -2199,9 +2198,6 @@ class ArxivReferenceChecker:
                                             print(f"       ❌  {error['error_type']}: {error['error_details']}")
                                         elif 'warning_type' in error:
                                             print(f"       ⚠️  {error['warning_type']}: {error['warning_details']}")
-                                    # Show verified URL if available
-                                    if reference_url:
-                                        print(f"         Verified URL: {reference_url}")
                     if not debug_mode:
                         # Separate actual errors from warnings for paper classification
                         actual_errors = [e for e in paper_errors if 'error_type' in e and e['error_type'] != 'unverified']
@@ -2227,7 +2223,6 @@ class ArxivReferenceChecker:
                                     # Count as paper with warnings if it has warnings (regardless of errors)
                                     self.papers_with_warnings += 1
 
-                    
                 except Exception as e:
                     logger.error(f"Error processing paper {paper_id}: {str(e)}")
                     if not debug_mode:
@@ -2484,8 +2479,14 @@ class ArxivReferenceChecker:
         Parse references using regex-based approach (original implementation)
         """
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
-        # First, normalize the bibliography text to ensure proper spacing after reference numbers
-        normalized_bib = re.sub(r'(\[\d+\])([A-Za-z])', r'\1 \2', bibliography_text)
+        # First, normalize the bibliography text to handle multi-line references
+        # This fixes the issue where years appear as separate lines
+        normalized_bib = re.sub(r'\s+', ' ', bibliography_text).strip()
+        
+        # Ensure proper spacing after reference numbers - more comprehensive fix
+        normalized_bib = re.sub(r'(\[\d+\])([A-Za-z])', r'\1 \2', normalized_bib)
+        # Also handle cases where numbers directly follow reference numbers
+        normalized_bib = re.sub(r'(\[\d+\])(\d)', r'\1 \2', normalized_bib)
         
         
         # Handle the case where the last reference might be incomplete
