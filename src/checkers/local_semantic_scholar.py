@@ -345,7 +345,7 @@ class LocalNonArxivReferenceChecker:
                 word_conditions = []
                 params = []
                 
-                for word in title_words[:4]:  # Limit to prevent complex queries
+                for word in title_words[:3]:  # Reduced to 3 words for better performance
                     # Use a more targeted approach - check if the word exists in title
                     word_conditions.append("(title LIKE ? OR title LIKE ? OR title LIKE ?)")
                     # Check word at start, middle, and end positions
@@ -358,7 +358,7 @@ class LocalNonArxivReferenceChecker:
                         query += " AND year = ?"
                         params.append(year)
                     
-                    query += " LIMIT 100"  # Prevent runaway queries
+                    query += " LIMIT 50"  # Reduced limit for better performance
                     
                     start_time = time.time()
                     cursor.execute(query, params)
@@ -388,11 +388,11 @@ class LocalNonArxivReferenceChecker:
         if not results:
             try:
                 logger.warning(f"Using fallback LIKE search for: {title_cleaned}")
-                query = "SELECT * FROM papers WHERE title LIKE ? COLLATE NOCASE LIMIT 50"
+                query = "SELECT * FROM papers WHERE title LIKE ? COLLATE NOCASE LIMIT 25"
                 params = [f"%{title_cleaned}%"]
                 
                 if year:
-                    query = query.replace("LIMIT 50", "AND year = ? LIMIT 50")
+                    query = query.replace("LIMIT 25", "AND year = ? LIMIT 25")
                     params.append(year)
                 
                 start_time = time.time()
