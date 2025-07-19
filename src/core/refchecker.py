@@ -48,9 +48,8 @@ from utils.text_utils import (clean_author_name, clean_title,
                        extract_arxiv_id_from_url)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
-from checkers.hybrid_reference_checker import HybridReferenceChecker
-from config.settings import get_config
-from llm.base import ReferenceExtractor, create_llm_provider
+from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+from llm.base import create_llm_provider, ReferenceExtractor
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
     """Set up logging configuration"""
@@ -111,10 +110,17 @@ class ArxivReferenceChecker:
             use_google_scholar = False
             self.service_order = "Local Semantic Scholar Database (offline)"
         elif use_google_scholar:
-            logger.info("Using Semantic Scholar API as primary source with Google Scholar as fallback")
-            # Create a hybrid checker that prioritizes Semantic Scholar
-            self.non_arxiv_checker = HybridReferenceChecker(semantic_scholar_api_key)
-            self.service_order = "Semantic Scholar API → Google Scholar"
+            logger.info("Using enhanced hybrid checker with multiple API sources")
+            # Create an enhanced hybrid checker with multiple reliable APIs
+            self.non_arxiv_checker = EnhancedHybridReferenceChecker(
+                semantic_scholar_api_key=semantic_scholar_api_key,
+                db_path=None,  # No local DB in this branch
+                contact_email=None,  # Could be added as parameter
+                enable_openalex=True,  # Enable OpenAlex as reliable fallback
+                enable_crossref=True,   # Enable CrossRef for DOI verification
+                debug_mode=debug_mode  # Pass debug mode for conditional logging
+            )
+            self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
         else:
             logger.info("Using Semantic Scholar API as primary source")
             self.non_arxiv_checker = NonArxivReferenceChecker(semantic_scholar_api_key)
@@ -123,7 +129,14 @@ class ArxivReferenceChecker:
         # Store the original checkers for potential switching during single paper mode
         # Only create hybrid checker if we might need it
         if not db_path and use_google_scholar:
-            self.hybrid_checker = HybridReferenceChecker(semantic_scholar_api_key) 
+            self.hybrid_checker = EnhancedHybridReferenceChecker(
+                semantic_scholar_api_key=semantic_scholar_api_key,
+                db_path=None,
+                contact_email=None,
+                enable_openalex=True,
+                enable_crossref=True,
+                debug_mode=debug_mode  # Pass debug mode for conditional logging
+            )
         else:
             self.hybrid_checker = None
         self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
@@ -160,7 +173,12 @@ class ArxivReferenceChecker:
                 os.makedirs(self.output_dir)
                 
         # Initialize LLM-based reference extraction
-        self.config = get_config()
+        try:
+            from config.settings import get_config
+            self.config = get_config()
+        except ImportError:
+            logger.warning("Could not load config settings, using empty config")
+            self.config = {}
         self.llm_config_override = llm_config
         self.llm_extractor = self._initialize_llm_extractor()
 
@@ -643,6 +661,40 @@ class ArxivReferenceChecker:
         }
         
         return summary
+    
+    def log_hybrid_checker_performance_stats(self):
+        """
+        Log performance statistics from the EnhancedHybridReferenceChecker
+        """
+        if hasattr(self.non_arxiv_checker, 'log_performance_summary'):
+            logger.info("Enhanced Hybrid Checker Performance Summary:")
+            self.non_arxiv_checker.log_performance_summary()
+        
+        if hasattr(self.hybrid_checker, 'log_performance_summary') and self.hybrid_checker:
+            logger.info("Backup Hybrid Checker Performance Summary:")
+            self.hybrid_checker.log_performance_summary()
+    
+    def get_comprehensive_performance_stats(self):
+        """
+        Get comprehensive performance stats including hybrid checker data
+        
+        Returns:
+            Dict with complete performance statistics
+        """
+        stats = {
+            'api_performance': self.get_api_performance_summary(),
+            'hybrid_checker_stats': {}
+        }
+        
+        # Get stats from main non-arxiv checker if it's an EnhancedHybridReferenceChecker
+        if hasattr(self.non_arxiv_checker, 'get_performance_stats'):
+            stats['hybrid_checker_stats']['main'] = self.non_arxiv_checker.get_performance_stats()
+        
+        # Get stats from backup hybrid checker if available
+        if hasattr(self.hybrid_checker, 'get_performance_stats') and self.hybrid_checker:
+            stats['hybrid_checker_stats']['backup'] = self.hybrid_checker.get_performance_stats()
+        
+        return stats
     
     def download_pdf(self, paper):
         """Download the PDF of a paper and return the content as bytes."""
@@ -2269,6 +2321,11 @@ class ArxivReferenceChecker:
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
                 print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+        
+        # Log performance statistics at the end (debug mode only)
+        if self.debug_mode:
+            logger.info("Processing complete. API Performance Summary:")
+            self.log_hybrid_checker_performance_stats()
         
         return self.verification_output_file
     

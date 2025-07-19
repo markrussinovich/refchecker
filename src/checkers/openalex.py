@@ -1,0 +1,556 @@
+#!/usr/bin/env python3
+"""
+OpenAlex API Client for Reference Verification
+
+This module provides functionality to verify non-arXiv references using the OpenAlex API.
+It can check if a reference's metadata (authors, year, title) matches what's in the OpenAlex database.
+
+OpenAlex is a comprehensive database of scholarly papers, authors, venues, institutions, and concepts.
+It provides free access to over 240 million research outputs with excellent coverage across all disciplines.
+
+Usage:
+    from openalex import OpenAlexReferenceChecker
+    
+    # Initialize the checker
+    checker = OpenAlexReferenceChecker(email="your@email.com")  # Email for polite pool
+    
+    # Verify a reference
+    reference = {
+        'title': 'Title of the paper',
+        'authors': ['Author 1', 'Author 2'],
+        'year': 2020,
+        'url': 'https://example.com/paper',
+        'raw_text': 'Full citation text'
+    }
+    
+    verified_data, errors, url = checker.verify_reference(reference)
+"""
+
+import requests
+import time
+import logging
+import re
+from typing import Dict, List, Tuple, Optional, Any, Union
+from urllib.parse import quote_plus
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+class OpenAlexReferenceChecker:
+    """
+    A class to verify non-arXiv references using the OpenAlex API
+    """
+    
+    def __init__(self, email: Optional[str] = None):
+        """
+        Initialize the OpenAlex API client
+        
+        Args:
+            email: Optional email for polite pool access (better performance)
+        """
+        self.base_url = "https://api.openalex.org"
+        self.headers = {
+            "Accept": "application/json",
+            "User-Agent": "RefChecker/1.0.0 (https://github.com/markrussinovich/refchecker)"
+        }
+        
+        # Add email to headers for polite pool access
+        if email:
+            self.headers["User-Agent"] += f" mailto:{email}"
+        
+        # Rate limiting parameters - OpenAlex allows 10 requests per second
+        self.request_delay = 0.1  # 100ms between requests (10 req/sec)
+        self.max_retries = 3
+        self.backoff_factor = 2  # Exponential backoff factor
+    
+    def search_works(self, query: str, year: Optional[int] = None, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search for works matching the query
+        
+        Args:
+            query: Search query (title, authors, etc.)
+            year: Publication year to filter by
+            limit: Maximum number of results to return
+            
+        Returns:
+            List of work data dictionaries
+        """
+        endpoint = f"{self.base_url}/works"
+        
+        # Build query parameters - OpenAlex uses a flexible search syntax
+        params = {
+            "search": query,
+            "per_page": min(limit, 25),  # OpenAlex max per page is 200, but we limit for performance
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids"
+        }
+        
+        # Add year filter if provided
+        if year:
+            params["filter"] = f"publication_year:{year}"
+        
+        # Make the request with retries and backoff
+        for attempt in range(self.max_retries):
+            try:
+                # Add delay to respect rate limits
+                time.sleep(self.request_delay)
+                
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+                
+                # Check for rate limiting (OpenAlex returns 429 for rate limits)
+                if response.status_code == 429:
+                    wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
+                    logger.debug(f"OpenAlex rate limit exceeded. Retrying in {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # Check for other errors
+                response.raise_for_status()
+                
+                # Parse the response
+                data = response.json()
+                results = data.get('results', [])
+                
+                logger.debug(f"OpenAlex search returned {len(results)} results for query: {query[:50]}...")
+                return results
+                
+            except requests.exceptions.RequestException as e:
+                wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
+                logger.warning(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+        
+        # If we get here, all retries failed
+        logger.warning(f"Failed to search OpenAlex after {self.max_retries} attempts")
+        return []
+    
+    def get_work_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
+        """
+        Get work data by DOI
+        
+        Args:
+            doi: DOI of the work
+            
+        Returns:
+            Work data dictionary or None if not found
+        """
+        # Clean DOI - remove any prefixes
+        clean_doi = doi
+        if doi.startswith('doi:'):
+            clean_doi = doi[4:]
+        if doi.startswith('https://doi.org/'):
+            clean_doi = doi[16:]
+        if doi.startswith('http://doi.org/'):
+            clean_doi = doi[15:]
+        
+        endpoint = f"{self.base_url}/works/doi:{clean_doi}"
+        
+        params = {
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids"
+        }
+        
+        # Make the request with retries and backoff
+        for attempt in range(self.max_retries):
+            try:
+                # Add delay to respect rate limits
+                time.sleep(self.request_delay)
+                
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+                
+                # Check for rate limiting
+                if response.status_code == 429:
+                    wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
+                    logger.debug(f"OpenAlex rate limit exceeded. Retrying in {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                    continue
+                
+                # If not found, return None
+                if response.status_code == 404:
+                    logger.debug(f"Work with DOI {doi} not found in OpenAlex")
+                    return None
+                
+                # Check for other errors
+                response.raise_for_status()
+                
+                # Parse the response
+                work_data = response.json()
+                logger.debug(f"Found work by DOI in OpenAlex: {doi}")
+                return work_data
+                
+            except requests.exceptions.RequestException as e:
+                wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
+                logger.warning(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+        
+        # If we get here, all retries failed
+        logger.error(f"Failed to get work by DOI from OpenAlex after {self.max_retries} attempts")
+        return None
+    
+    def extract_doi_from_url(self, url: str) -> Optional[str]:
+        """
+        Extract DOI from a URL
+        
+        Args:
+            url: URL that might contain a DOI
+            
+        Returns:
+            Extracted DOI or None if not found
+        """
+        if not url:
+            return None
+        
+        # Check if it's a DOI URL
+        doi_patterns = [
+            r'doi\.org/([^/\s\?#]+(?:/[^/\s\?#]+)*)',  # Full DOI pattern
+            r'doi:([^/\s\?#]+(?:/[^/\s\?#]+)*)',       # doi: prefix
+            r'/([^/\s\?#]+\.[^/\s\?#]+(?:/[^/\s\?#]+)*)'  # DOI-like pattern in URLs
+        ]
+        
+        for pattern in doi_patterns:
+            match = re.search(pattern, url)
+            if match:
+                doi_candidate = match.group(1)
+                # Basic validation - DOIs should have at least one slash
+                if '/' in doi_candidate and len(doi_candidate) > 3:
+                    return doi_candidate
+        
+        return None
+    
+    def normalize_author_name(self, name: str) -> str:
+        """
+        Normalize author name for comparison
+        
+        Args:
+            name: Author name
+            
+        Returns:
+            Normalized name
+        """
+        # Remove reference numbers (e.g., "[1]")
+        name = re.sub(r'^\[\d+\]', '', name)
+        
+        # Remove line breaks and extra spaces
+        name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
+        
+        # Remove special characters but keep hyphens and apostrophes
+        name = re.sub(r'[^\w\s\-\']', '', name)
+        
+        return name.lower()
+    
+    def compare_authors(self, cited_authors: List[str], openalex_authors: List[Dict[str, Any]]) -> Tuple[bool, str]:
+        """
+        Compare author lists to check if they match
+        
+        Args:
+            cited_authors: List of author names as cited
+            openalex_authors: List of authorship data from OpenAlex
+            
+        Returns:
+            Tuple of (match_result, error_message)
+        """
+        # Extract author names from OpenAlex data
+        correct_names = []
+        for authorship in openalex_authors:
+            author = authorship.get('author', {})
+            display_name = author.get('display_name', '')
+            if display_name:
+                correct_names.append(display_name)
+        
+        if not correct_names:
+            logger.debug("No author names found in OpenAlex data")
+            return True, "No author data to compare"
+        
+        # Normalize names for comparison
+        normalized_cited = [self.normalize_author_name(name) for name in cited_authors if name]
+        normalized_correct = [self.normalize_author_name(name) for name in correct_names]
+        
+        if not normalized_cited:
+            logger.debug("No cited authors to compare")
+            return True, "No cited authors to compare"
+        
+        # If the cited list is much shorter, it might be using "et al."
+        # In this case, just check the authors that are listed
+        if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
+            # Only compare the first few authors
+            normalized_correct = normalized_correct[:len(normalized_cited)]
+        
+        # Compare first author (most important)
+        if normalized_cited and normalized_correct:
+            if not self.is_name_match(normalized_cited[0], normalized_correct[0]):
+                return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
+        
+        return True, "Authors match"
+    
+    def is_name_match(self, name1: str, name2: str) -> bool:
+        """
+        Check if two author names match, allowing for variations
+        
+        Args:
+            name1: First author name (normalized)
+            name2: Second author name (normalized)
+            
+        Returns:
+            True if names match, False otherwise
+        """
+        # Exact match
+        if name1 == name2:
+            return True
+        
+        # If one is a substring of the other, consider it a match
+        if name1 in name2 or name2 in name1:
+            return True
+        
+        # Split into parts (first name, last name, etc.)
+        parts1 = name1.split()
+        parts2 = name2.split()
+        
+        if not parts1 or not parts2:
+            return False
+        
+        # If either name has only one part, compare directly
+        if len(parts1) == 1 or len(parts2) == 1:
+            return parts1[-1] == parts2[-1]  # Compare last parts (last names)
+        
+        # Compare last names (last parts)
+        if parts1[-1] != parts2[-1]:
+            return False
+        
+        # Compare first initials
+        if len(parts1[0]) > 0 and len(parts2[0]) > 0 and parts1[0][0] != parts2[0][0]:
+            return False
+        
+        return True
+    
+    def extract_url_from_work(self, work_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract the best URL from OpenAlex work data
+        
+        Args:
+            work_data: Work data from OpenAlex
+            
+        Returns:
+            Best available URL or None
+        """
+        # Priority order: Open access PDF, primary location, DOI
+        
+        # Check for open access PDF
+        open_access = work_data.get('open_access', {})
+        if open_access.get('is_oa') and open_access.get('oa_url'):
+            logger.debug(f"Found open access URL: {open_access['oa_url']}")
+            return open_access['oa_url']
+        
+        # Check primary location
+        primary_location = work_data.get('primary_location', {})
+        if primary_location:
+            # Try landing page URL first
+            if primary_location.get('landing_page_url'):
+                logger.debug(f"Found primary location URL: {primary_location['landing_page_url']}")
+                return primary_location['landing_page_url']
+            
+            # Try PDF URL
+            if primary_location.get('pdf_url'):
+                logger.debug(f"Found primary location PDF: {primary_location['pdf_url']}")
+                return primary_location['pdf_url']
+        
+        # Check other locations for PDFs
+        locations = work_data.get('locations', [])
+        for location in locations:
+            if location.get('pdf_url'):
+                logger.debug(f"Found PDF in location: {location['pdf_url']}")
+                return location['pdf_url']
+            if location.get('landing_page_url'):
+                logger.debug(f"Found landing page in location: {location['landing_page_url']}")
+                return location['landing_page_url']
+        
+        # Fall back to DOI URL
+        doi = work_data.get('doi')
+        if doi:
+            doi_url = f"https://doi.org/{doi.replace('https://doi.org/', '')}"
+            logger.debug(f"Generated DOI URL: {doi_url}")
+            return doi_url
+        
+        # Check ids for other identifiers
+        ids = work_data.get('ids', {})
+        if ids.get('doi'):
+            doi_url = f"https://doi.org/{ids['doi'].replace('https://doi.org/', '')}"
+            logger.debug(f"Generated DOI URL from ids: {doi_url}")
+            return doi_url
+        
+        logger.debug("No URL found in OpenAlex work data")
+        return None
+    
+    def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """
+        Verify a non-arXiv reference using OpenAlex
+        
+        Args:
+            reference: Reference data dictionary
+            
+        Returns:
+            Tuple of (verified_data, errors, url)
+            - verified_data: Work data from OpenAlex or None if not found
+            - errors: List of error dictionaries
+            - url: URL of the work if found, None otherwise
+        """
+        errors = []
+        
+        # Extract reference data
+        title = reference.get('title', '')
+        authors = reference.get('authors', [])
+        year = reference.get('year', 0)
+        url = reference.get('url', '')
+        raw_text = reference.get('raw_text', '')
+        
+        # If we have a DOI, try to get the work directly
+        doi = None
+        if 'doi' in reference and reference['doi']:
+            doi = reference['doi']
+        elif url:
+            doi = self.extract_doi_from_url(url)
+        
+        work_data = None
+        
+        if doi:
+            # Try to get the work by DOI
+            work_data = self.get_work_by_doi(doi)
+            
+            if work_data:
+                logger.debug(f"Found work by DOI in OpenAlex: {doi}")
+            else:
+                logger.debug(f"Could not find work with DOI in OpenAlex: {doi}")
+        
+        # If we couldn't get the work by DOI, try searching by title
+        if not work_data and title:
+            # Clean up the title
+            clean_title = title.replace('\n', ' ').strip()
+            clean_title = re.sub(r'\s+', ' ', clean_title)
+            
+            # Search for the work
+            search_results = self.search_works(clean_title, year)
+            
+            if search_results:
+                # Find the best match
+                best_match = None
+                best_score = 0
+                
+                for result in search_results:
+                    result_title = result.get('title') or result.get('display_name', '')
+                    
+                    # Calculate similarity score
+                    title_lower = clean_title.lower()
+                    result_title_lower = result_title.lower()
+                    
+                    score = 0
+                    if title_lower == result_title_lower:
+                        score = 1.0
+                    elif title_lower in result_title_lower or result_title_lower in title_lower:
+                        score = 0.8
+                    else:
+                        # Simple word overlap
+                        title_words = set(title_lower.split())
+                        result_words = set(result_title_lower.split())
+                        if title_words and result_words:
+                            overlap = len(title_words.intersection(result_words))
+                            score = overlap / max(len(title_words), len(result_words))
+                    
+                    # Bonus for year match
+                    result_year = result.get('publication_year')
+                    if year and result_year and year == result_year:
+                        score += 0.1
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_match = result
+                
+                # Use match if score is good enough
+                if best_match and best_score >= 0.6:
+                    work_data = best_match
+                    logger.debug(f"Found work by title in OpenAlex with score {best_score:.2f}: {clean_title}")
+                else:
+                    logger.debug(f"No good title match found in OpenAlex (best score: {best_score:.2f})")
+            else:
+                logger.debug(f"No works found for title in OpenAlex: {clean_title}")
+        
+        # If we still couldn't find the work, return no verification
+        if not work_data:
+            logger.debug("Could not find matching work in OpenAlex")
+            return None, [], None
+        
+        # Verify authors
+        if authors:
+            authorships = work_data.get('authorships', [])
+            authors_match, author_error = self.compare_authors(authors, authorships)
+            
+            if not authors_match:
+                # Extract correct author names for error reporting
+                correct_author_names = []
+                for authorship in authorships:
+                    author = authorship.get('author', {})
+                    display_name = author.get('display_name', '')
+                    if display_name:
+                        correct_author_names.append(display_name)
+                
+                errors.append({
+                    'error_type': 'author',
+                    'error_details': author_error,
+                    'ref_authors_correct': ', '.join(correct_author_names)
+                })
+        
+        # Verify year
+        work_year = work_data.get('publication_year')
+        if year and work_year and year != work_year:
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year mismatch: cited as {year} but actually {work_year}",
+                'ref_year_correct': work_year
+            })
+        
+        # Verify DOI
+        work_doi = work_data.get('doi')
+        if not work_doi and work_data.get('ids', {}).get('doi'):
+            work_doi = work_data['ids']['doi']
+        
+        if doi and work_doi:
+            # Normalize DOIs for comparison
+            cited_doi_clean = doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip()
+            work_doi_clean = work_doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip()
+            
+            if cited_doi_clean.lower() != work_doi_clean.lower():
+                errors.append({
+                    'error_type': 'doi',
+                    'error_details': f"DOI mismatch: cited as {doi} but actually {work_doi}",
+                    'ref_doi_correct': work_doi
+                })
+        
+        # Extract URL from work data
+        work_url = self.extract_url_from_work(work_data)
+        
+        return work_data, errors, work_url
+
+if __name__ == "__main__":
+    # Example usage
+    checker = OpenAlexReferenceChecker(email="test@example.com")
+    
+    # Example reference
+    reference = {
+        'title': 'Attention is All You Need',
+        'authors': ['Ashish Vaswani', 'Noam Shazeer'],
+        'year': 2017,
+        'url': 'https://example.com/paper',
+        'raw_text': 'Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., ... & Polosukhin, I. (2017). Attention is all you need. Advances in neural information processing systems, 30.'
+    }
+    
+    # Verify the reference
+    verified_data, errors, url = checker.verify_reference(reference)
+    
+    if verified_data:
+        print(f"Found work: {verified_data.get('title') or verified_data.get('display_name')}")
+        print(f"URL: {url}")
+        
+        if errors:
+            print("Errors found:")
+            for error in errors:
+                error_type = error.get('error_type') or error.get('warning_type')
+                print(f"  - {error_type}: {error.get('error_details') or error.get('warning_details')}")
+        else:
+            print("No errors found")
+    else:
+        print("Could not find matching work")

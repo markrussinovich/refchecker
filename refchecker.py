@@ -14,9 +14,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import all modules to ensure they're available
 import checkers.semantic_scholar
-import checkers.google_scholar 
 import checkers.local_semantic_scholar
-import checkers.hybrid_reference_checker
+import checkers.openalex
+import checkers.crossref
+import checkers.enhanced_hybrid_checker
 import utils.text_utils
 import utils.author_utils
 
