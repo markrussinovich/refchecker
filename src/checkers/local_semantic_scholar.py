@@ -30,6 +30,17 @@ import sqlite3
 import time
 from typing import Dict, List, Tuple, Optional, Any, Union
 
+# Import utility functions
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
+from utils.error_utils import create_author_error, create_year_warning, create_doi_error
+from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors
+from utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
+from utils.url_utils import get_best_available_url
+
 # Set up logging
 logger = logging.getLogger(__name__)
 
@@ -61,134 +72,15 @@ class LocalNonArxivReferenceChecker:
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     
-    def extract_doi_from_url(self, url: str) -> Optional[str]:
-        """
-        Extract DOI from a URL
-        
-        Args:
-            url: URL that might contain a DOI
-            
-        Returns:
-            Extracted DOI or None if not found
-        """
-        if not url:
-            return None
-        
-        # Check if it's a DOI URL
-        if 'doi.org' in url:
-            # Extract the DOI part after doi.org/
-            match = re.search(r'doi\.org/([^/\s]+)', url)
-            if match:
-                return match.group(1)
-        
-        return None
+    # DOI extraction now handled by utility function
     
-    def normalize_paper_title(self, title: str) -> str:
-        """
-        Normalize paper title by converting to lowercase and removing whitespace and punctuation
-        
-        Args:
-            title: Original paper title
-            
-        Returns:
-            Normalized title string
-        """
-        if not title:
-            return ""
-        
-        # Convert to lowercase
-        normalized = title.lower()
-        
-        # Remove all non-alphanumeric characters (keeping only letters and numbers)
-        import re
-        normalized = re.sub(r'[^a-z0-9]', '', normalized)
-        
-        return normalized
+    # Title normalization now handled by utility function
     
-    def normalize_author_name(self, name: str) -> str:
-        """
-        Normalize author name for comparison
-        
-        Args:
-            name: Author name
-            
-        Returns:
-            Normalized name
-        """
-        # Remove reference numbers (e.g., "[1]")
-        name = re.sub(r'^\[\d+\]', '', name)
-        
-        # Remove line breaks and extra spaces
-        name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
-        
-        # Remove special characters
-        name = re.sub(r'[^\w\s]', '', name)
-        
-        return name.lower()
+    # Author name normalization now handled by utility function
     
-    def compare_authors(self, cited_authors: List[str], correct_authors: List[Dict[str, str]]) -> Tuple[bool, str]:
-        """
-        Compare author lists to check if they match
-        
-        Args:
-            cited_authors: List of author names as cited
-            correct_authors: List of author data from the database
-            
-        Returns:
-            Tuple of (match_result, error_message)
-        """
-        # Extract author names from database data
-        correct_names = [author.get('name', '') for author in correct_authors]
-        
-        # Normalize names for comparison
-        normalized_cited = [self.normalize_author_name(name) for name in cited_authors]
-        normalized_correct = [self.normalize_author_name(name) for name in correct_names]
-        
-        # If the cited list is much shorter, it might be using "et al."
-        # In this case, just check the authors that are listed
-        if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
-            # Only compare the first few authors
-            normalized_correct = normalized_correct[:len(normalized_cited)]
-        
-        # Compare first author (most important)
-        if normalized_cited and normalized_correct:
-            if not self.is_name_match(normalized_cited[0], normalized_correct[0]):
-                return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
-        
-        return True, "Authors match"
+    # Author comparison now handled by utility function
     
-    def is_name_match(self, name1: str, name2: str) -> bool:
-        """
-        Check if two author names match, allowing for variations
-        
-        Args:
-            name1: First author name
-            name2: Second author name
-            
-        Returns:
-            True if names match, False otherwise
-        """
-        # If one is a substring of the other, consider it a match
-        if name1 in name2 or name2 in name1:
-            return True
-        
-        # Split into parts (first name, last name, etc.)
-        parts1 = name1.split()
-        parts2 = name2.split()
-        
-        # If either name has only one part, compare directly
-        if len(parts1) == 1 or len(parts2) == 1:
-            return parts1[-1] == parts2[-1]  # Compare last parts (last names)
-        
-        # Compare last names (last parts)
-        if parts1[-1] != parts2[-1]:
-            return False
-        
-        # Compare first initials
-        if parts1[0][0] != parts2[0][0]:
-            return False
-        
-        return True
+    # Name matching now handled by utility function
     
     def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
         """
@@ -220,28 +112,8 @@ class LocalNonArxivReferenceChecker:
         if not row:
             return None
         
-        # Convert row to dictionary and reconstruct paper data structure
-        paper_data = dict(row)
-        
-        # Extract authors from JSON
-        if paper_data.get('authors'):
-            paper_data['authors'] = json.loads(paper_data['authors'])
-        else:
-            paper_data['authors'] = []
-        
-        # Reconstruct external IDs from flattened columns
-        external_ids = {}
-        for key, value in paper_data.items():
-            if key.startswith('externalIds_') and value:
-                external_id_type = key.replace('externalIds_', '')
-                external_ids[external_id_type] = value
-        paper_data['externalIds'] = external_ids
-        
-        # Add other JSON fields
-        if paper_data.get('s2FieldsOfStudy'):
-            paper_data['s2FieldsOfStudy'] = json.loads(paper_data['s2FieldsOfStudy'])
-        if paper_data.get('publicationTypes'):
-            paper_data['publicationTypes'] = json.loads(paper_data['publicationTypes'])
+        # Convert row to dictionary and process using utility function
+        paper_data = process_semantic_scholar_result(dict(row))
         
         return paper_data
     
@@ -261,7 +133,7 @@ class LocalNonArxivReferenceChecker:
         # Clean up the title for searching
         title_cleaned = title.replace('%', '').strip()
         title_lower = title_cleaned.lower()
-        title_normalized = self.normalize_paper_title(title_cleaned)
+        title_normalized = normalize_paper_title(title_cleaned)
         
         results = []
         
@@ -283,53 +155,13 @@ class LocalNonArxivReferenceChecker:
                 
                 if results:
                     logger.debug(f"Found {len(results)} results using normalized title match")
-                    return self._process_results(results)
+                    return process_semantic_scholar_results(results)
         except Exception as e:
             logger.warning(f"Error in normalized title search: {e}")
         
-        return self._process_results(results)
+        return process_semantic_scholar_results(results)
     
-    def _process_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Process raw database results into proper paper data structures
-        
-        Args:
-            results: List of raw database row dictionaries
-            
-        Returns:
-            List of processed paper data dictionaries
-        """
-        processed_results = []
-        
-        for paper_data in results:
-            try:
-                # Extract authors from JSON
-                if paper_data.get('authors'):
-                    paper_data['authors'] = json.loads(paper_data['authors'])
-                else:
-                    paper_data['authors'] = []
-                
-                # Reconstruct external IDs from flattened columns
-                external_ids = {}
-                for key, value in paper_data.items():
-                    if key.startswith('externalIds_') and value:
-                        external_id_type = key.replace('externalIds_', '')
-                        external_ids[external_id_type] = value
-                paper_data['externalIds'] = external_ids
-                
-                # Add other JSON fields
-                if paper_data.get('s2FieldsOfStudy'):
-                    paper_data['s2FieldsOfStudy'] = json.loads(paper_data['s2FieldsOfStudy'])
-                if paper_data.get('publicationTypes'):
-                    paper_data['publicationTypes'] = json.loads(paper_data['publicationTypes'])
-                
-                processed_results.append(paper_data)
-                
-            except Exception as e:
-                logger.warning(f"Error processing result: {e}")
-                continue
-        
-        return processed_results
+    # Result processing now handled by utility function
     
     def search_papers_by_author(self, author_name: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -382,8 +214,8 @@ class LocalNonArxivReferenceChecker:
                 # Check if any author actually matches our search
                 author_match = False
                 for author in authors_list:
-                    author_name_normalized = self.normalize_author_name(author.get('name', ''))
-                    search_name_normalized = self.normalize_author_name(author_name)
+                    author_name_normalized = normalize_author_name(author.get('name', ''))
+                    search_name_normalized = normalize_author_name(author_name)
                     if search_name_normalized in author_name_normalized:
                         author_match = True
                         break
@@ -458,10 +290,10 @@ class LocalNonArxivReferenceChecker:
                 # Check author match
                 if authors and result.get('authors'):
                     # Compare first author
-                    first_author = self.normalize_author_name(authors[0])
-                    result_first_author = self.normalize_author_name(result['authors'][0].get('name', ''))
+                    first_author = normalize_author_name(authors[0])
+                    result_first_author = normalize_author_name(result['authors'][0].get('name', ''))
                     
-                    if self.is_name_match(first_author, result_first_author):
+                    if is_name_match(first_author, result_first_author):
                         score += 0.2
                 
                 # Check year match
@@ -513,7 +345,7 @@ class LocalNonArxivReferenceChecker:
         if 'doi' in reference and reference['doi']:
             doi = reference['doi']
         elif url:
-            doi = self.extract_doi_from_url(url)
+            doi = extract_doi_from_url(url)
         
         paper_data = None
         
@@ -546,25 +378,17 @@ class LocalNonArxivReferenceChecker:
         
         # Verify authors
         if authors:
-            authors_match, author_error = self.compare_authors(authors, paper_data.get('authors', []))
+            authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:
                 logger.debug(f"Local DB: Author mismatch - {author_error}")
-                errors.append({
-                    'error_type': 'author',
-                    'error_details': author_error,
-                    'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
-                })
+                errors.append(create_author_error(author_error, paper_data.get('authors', [])))
         
         # Verify year
         paper_year = paper_data.get('year')
         if year and paper_year and year != paper_year:
             logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
-                'ref_year_correct': paper_year
-            })
+            errors.append(create_year_warning(year, paper_year))
         
         # Verify DOI
         paper_doi = None
@@ -572,43 +396,23 @@ class LocalNonArxivReferenceChecker:
         if external_ids and 'DOI' in external_ids:
             paper_doi = external_ids['DOI']
             
-            # Compare DOIs, but strip hash fragments for comparison
-            cited_doi_clean = doi.split('#')[0] if doi else ''
-            paper_doi_clean = paper_doi.split('#')[0] if paper_doi else ''
-            
-            if cited_doi_clean and paper_doi_clean and cited_doi_clean.lower() != paper_doi_clean.lower():
+            # Compare DOIs using utility function
+            if doi and paper_doi and not compare_dois(doi, paper_doi):
                 logger.debug(f"Local DB: DOI mismatch - cited: {doi}, actual: {paper_doi}")
-                errors.append({
-                    'error_type': 'doi',
-                    'error_details': f"DOI mismatch: cited as {doi} but actually {paper_doi}",
-                    'ref_doi_correct': paper_doi
-                })
+                errors.append(create_doi_error(doi, paper_doi))
         
         if errors:
             logger.debug(f"Local DB: Found {len(errors)} errors in reference verification")
         else:
             logger.debug("Local DB: Reference verification passed - no errors found")
         
-        # Extract URL from paper data - prioritize useful URLs
-        paper_url = None
+        # Extract URL using utility function
+        external_ids = paper_data.get('externalIds', {})
+        open_access_pdf = paper_data.get('openAccessPdf')
+        paper_url = get_best_available_url(external_ids, open_access_pdf)
         
-        # First, check for open access PDF (stored in local database)
-        if paper_data.get('openAccessPdf'):
-            paper_url = paper_data['openAccessPdf']
-            logger.debug(f"Found open access PDF URL: {paper_url}")
-        
-        # Fallback to general URL field
-        if not paper_url:
-            paper_url = paper_data.get('url')
-            if paper_url:
-                logger.debug(f"Found paper URL: {paper_url}")
-        
-        # Also check externalIds for DOI URL
-        if not paper_url:
-            external_ids = paper_data.get('externalIds', {})
-            if external_ids.get('DOI'):
-                paper_url = f"https://doi.org/{external_ids['DOI']}"
-                logger.debug(f"Generated DOI URL: {paper_url}")
+        if paper_url:
+            logger.debug(f"Found best available URL: {paper_url}")
         
         return paper_data, errors, paper_url
     

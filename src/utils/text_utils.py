@@ -195,3 +195,130 @@ def remove_year_from_title(title):
     title = re.sub(r'\s+', ' ', title).strip()
     
     return title
+
+
+def normalize_author_name(name: str) -> str:
+    """
+    Normalize author name for comparison.
+    This function is used across multiple checker modules.
+    
+    Args:
+        name: Author name
+        
+    Returns:
+        Normalized name
+    """
+    if not name:
+        return ""
+    
+    # Remove reference numbers (e.g., "[1]")
+    name = re.sub(r'^\[\d+\]', '', name)
+    
+    # Remove line breaks and extra spaces
+    name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
+    
+    # Remove special characters (keep alphanumeric, spaces, hyphens, apostrophes)
+    name = re.sub(r'[^\w\s\'-]', '', name)
+    
+    return name.lower()
+
+
+def normalize_paper_title(title: str) -> str:
+    """
+    Normalize paper title by converting to lowercase and removing whitespace and punctuation.
+    This function is used across multiple checker modules.
+    
+    Args:
+        title: Original paper title
+        
+    Returns:
+        Normalized title string
+    """
+    if not title:
+        return ""
+    
+    # Convert to lowercase
+    normalized = title.lower()
+    
+    # Remove all non-alphanumeric characters (keeping only letters and numbers)
+    normalized = re.sub(r'[^a-z0-9]', '', normalized)
+    
+    return normalized
+
+
+def is_name_match(name1: str, name2: str) -> bool:
+    """
+    Check if two author names match, allowing for variations.
+    This function is used across multiple checker modules.
+    
+    Args:
+        name1: First author name
+        name2: Second author name
+        
+    Returns:
+        True if names match, False otherwise
+    """
+    if not name1 or not name2:
+        return False
+    
+    # If one is a substring of the other, consider it a match
+    if name1 in name2 or name2 in name1:
+        return True
+    
+    # Split into parts (first name, last name, etc.)
+    parts1 = name1.split()
+    parts2 = name2.split()
+    
+    # If either name has only one part, compare directly
+    if len(parts1) == 1 or len(parts2) == 1:
+        return parts1[-1] == parts2[-1]  # Compare last parts (last names)
+    
+    # Compare last names (last parts)
+    if parts1[-1] != parts2[-1]:
+        return False
+    
+    # Compare first initials
+    if parts1[0][0] != parts2[0][0]:
+        return False
+    
+    return True
+
+
+def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
+    """
+    Compare author lists to check if they match.
+    This function is used across multiple checker modules.
+    
+    Args:
+        cited_authors: List of author names as cited
+        correct_authors: List of author data from the database
+        normalize_func: Optional function to normalize author names
+        
+    Returns:
+        Tuple of (match_result, error_message)
+    """
+    if normalize_func is None:
+        normalize_func = normalize_author_name
+    
+    # Extract author names from database data if they're dict objects
+    if correct_authors and isinstance(correct_authors[0], dict):
+        correct_names = [author.get('name', '') for author in correct_authors]
+    else:
+        correct_names = correct_authors
+    
+    # Normalize names for comparison
+    normalized_cited = [normalize_func(name) for name in cited_authors]
+    normalized_correct = [normalize_func(name) for name in correct_names]
+    
+    # If the cited list is much shorter, it might be using "et al."
+    # In this case, just check the authors that are listed
+    if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
+        # Only compare the first few authors
+        normalized_correct = normalized_correct[:len(normalized_cited)]
+    
+    # Compare first author (most important)
+    if normalized_cited and normalized_correct:
+        if not is_name_match(normalized_cited[0], normalized_correct[0]):
+            return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
+    
+    return True, "Authors match"
