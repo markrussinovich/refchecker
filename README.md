@@ -8,15 +8,15 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
-- **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, and Azure
+- **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
 - **🧠 Smart Reference Parsing**: Handles various academic citation formats and styles (including CoRR format)
 - **✅ Comprehensive Error Detection**: Identifies issues with authors, years, URLs, and DOIs
-- **🔄 Multiple Verification Sources**: Supports arXiv API, Semantic Scholar API, Google Scholar, and local databases
+- **🔄 Multi-Tier Verification Sources**: Intelligent fallback system using local databases, Semantic Scholar, OpenAlex, CrossRef, and enhanced hybrid checking
 - **📊 Detailed Reporting**: Generates comprehensive error reports with statistics and icons
-- **⏸️ Resumable Processing**: Can continue from where it left off if interrupted
+- **⚡ Parallel Processing**: Concurrent reference validation for improved performance
 - **🚦 Rate Limiting**: Respects API constraints with intelligent backoff strategies
 - **🎛️ Highly Configurable**: Support for offline verification and various input sources
-- **⚡ Performance Optimized**: Batch processing, caching, and concurrent API calls for fast verification
+- **⚡ Performance Optimized**: Batch processing, caching, parallel validation, and intelligent API selection
 
 ## Quick Start
 
@@ -51,6 +51,7 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
 - **Anthropic** (Claude 3.5, Claude 3)
 - **Google** (Gemini)
 - **Azure OpenAI**
+- **vLLM** (Local Hugging Face models via OpenAI-compatible server)
 
 ### Quick LLM Setup (Recommended)
 
@@ -153,6 +154,15 @@ python refchecker.py --paper paper.txt \
   --llm-endpoint https://your-resource.openai.azure.com/
 ```
 
+#### vLLM (Local Models)
+```bash
+# Start vLLM server first (automatic startup supported)
+python refchecker.py --paper paper.pdf \
+  --llm-provider vllm \
+  --llm-model microsoft/DialoGPT-medium \
+  --llm-endpoint http://localhost:8000
+```
+
 ## 🚀 Installation
 
 ### 1. Clone the Repository
@@ -190,9 +200,7 @@ pip install pikepdf
 
 ## 📖 Usage
 
-### Individual Paper Checking (Recommended)
-
-The primary use case is checking individual papers from various sources:
+Check papers in various formats and online locations:
 
 #### ArXiv Papers
 
@@ -256,30 +264,33 @@ python refchecker.py --paper 1706.03762 --debug
 python refchecker.py --paper 1706.03762 --disable-llm --skip-google-scholar-single
 ```
 
-## 🗄️ Database and API Priority
+## 🗄️ Verification APIs and Current Architecture
 
-The system uses a sophisticated multi-tier approach for reference verification:
+The system uses a simple two-mode approach for reference verification:
 
-### 1. **Local Database (Highest Priority)**
+### **Current Implementation**
+
+#### 1. **Local Database Mode**
 - **When**: `--db-path` is specified
-- **Advantages**: Fastest, no rate limits, works offline
-- **Setup**: Use `download_semantic_scholar_db.py` to create local database
-- **Performance**: ~1000 references/second
+- **Uses**: `LocalNonArxivReferenceChecker` only
+- **Mode**: Completely offline, SQLite database queries only
+- **No API calls**: No fallback to online sources
+- **Performance**: ~1000+ references/second with parallel processing
+- **Coverage**: Limited to papers in your local database
 
-### 2. **Hybrid Mode (Default)**
-- **Primary**: Semantic Scholar API
-- **Fallback**: Google Scholar API
-- **Advantages**: Good coverage, handles rate limits gracefully
-- **Performance**: ~10-50 references/second (depending on rate limits)
+#### 2. **Online Mode (Default)**  
+- **When**: No `--db-path` specified
+- **Uses**: `EnhancedHybridReferenceChecker` with intelligent fallback
+- **API Priority**: Semantic Scholar → OpenAlex → CrossRef (DOI-based sources prioritized)
+- **Rate limits**: Distributed across multiple APIs for better throughput
+- **Performance**: ~10-50 references/second with improved success rate
+- **Coverage**: Combined coverage from Semantic Scholar, OpenAlex, and CrossRef
 
-### 3. **Semantic Scholar Only**
-- **When**: `--semantic-scholar-api-key` provided, no `--db-path`
-- **Advantages**: Most accurate, higher rate limits with API key
-- **Performance**: ~20-100 references/second
+### **ArXiv Reference Handling**
 
-### 4. **ArXiv API Only**
-- **When**: Only arXiv references are being verified
-- **Advantages**: Direct access to arXiv metadata
+ArXiv references are handled via the **ArXiv API** in both modes:
+- **Direct metadata fetching** from ArXiv servers
+- **Batch pre-fetching** for improved performance  
 - **Performance**: ~5-10 references/second
 
 ## 📊 Output and Results
@@ -372,22 +383,35 @@ python download_semantic_scholar_db.py \
 ### Run Validation Tests
 
 ```bash
-# Test with local database
-python validate_refchecker.py --db-path semantic_scholar_db/semantic_scholar.db
+# Test with comprehensive reference validation suite
+python tests/validate_refchecker.py --db-path semantic_scholar_db/semantic_scholar.db
 
-# Test without database (online mode)
-python validate_refchecker.py
+# Test without database (uses enhanced hybrid mode)
+python tests/validate_refchecker.py
 
-# Test specific paper
-python validate_attention_paper.py --db-path semantic_scholar_db/semantic_scholar.db
+# Test specific papers
+python tests/validate_papers.py --paper attention --db-path semantic_scholar_db/semantic_scholar.db
+python tests/validate_papers.py --paper custom --arxiv-id 1706.03762
+
+# Test local database functionality
+python tests/validate_local_db.py --db-path semantic_scholar_db/semantic_scholar.db
+
+# Test with debug mode for detailed output
+python tests/validate_refchecker.py --debug
 ```
 
 ### Validation Scripts
 
-- **`validate_refchecker.py`**: Comprehensive validation suite
-- **`validate_papers.py`**: Paper-specific validation
-- **`validate_local_db.py`**: Database integrity checks
-- **`validate_attention_paper.py`**: Specific paper validation
+- **`tests/validate_refchecker.py`**: Comprehensive validation suite with known good/bad references
+- **`tests/validate_papers.py`**: Tests with specific papers (attention, website references, custom papers)  
+- **`tests/validate_local_db.py`**: Local database functionality and integrity checks
+- **`tests/validate_attention_paper.py`**: Specific validation of "Attention Is All You Need" paper
+
+All validation scripts support:
+- Local database testing (`--db-path`)
+- Enhanced hybrid mode testing (default)
+- Debug output (`--debug`)
+- API key configuration
 
 ## ⚙️ Configuration
 
@@ -399,21 +423,23 @@ export SEMANTIC_SCHOLAR_API_KEY="your_api_key_here"
 
 # LLM Configuration
 export REFCHECKER_USE_LLM=true
-export REFCHECKER_LLM_PROVIDER=anthropic
+export REFCHECKER_LLM_PROVIDER=anthropic  # openai, anthropic, google, azure, vllm
 export REFCHECKER_ANTHROPIC_API_KEY="your_anthropic_key"
 export REFCHECKER_OPENAI_API_KEY="your_openai_key"
 export REFCHECKER_GOOGLE_API_KEY="your_google_key"
 export REFCHECKER_AZURE_API_KEY="your_azure_key"
 export REFCHECKER_AZURE_ENDPOINT="https://your-resource.openai.azure.com/"
 
+# vLLM Configuration (for local models)
+export REFCHECKER_VLLM_SERVER_URL="http://localhost:8000"
+export REFCHECKER_VLLM_AUTO_START="true"
+export REFCHECKER_VLLM_TIMEOUT="300"
+
 # Advanced LLM Configuration
 export REFCHECKER_LLM_MODEL="claude-3-haiku-20240307"
 export REFCHECKER_LLM_MAX_TOKENS=4000
 export REFCHECKER_LLM_TEMPERATURE=0.1
 export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
-
-# Google Scholar proxy settings (if needed)
-export GOOGLE_SCHOLAR_PROXY="http://proxy:port"
 
 # Performance settings
 export REFCHECKER_DEBUG=false
@@ -433,60 +459,11 @@ export REFCHECKER_OUTPUT_DIR="output"
 --db-path PATH                   # Local database path
 
 # LLM options
---llm-provider {openai,anthropic,google,azure}  # Enable LLM with provider
+--llm-provider {openai,anthropic,google,azure,vllm}  # Enable LLM with provider
 --llm-model MODEL                # Override default model
 --llm-key KEY                    # API key for LLM provider
---llm-endpoint URL               # Override endpoint (for Azure)
---disable-llm                    # Disable LLM for faster processing
+--llm-endpoint URL               # Override endpoint (for Azure/vLLM)
 
-# Performance options
---skip-google-scholar-single     # Skip Google Scholar for single papers
-```
-
-### Rate Limiting
-
-The system automatically handles rate limiting:
-- **ArXiv API**: 3-second delays between requests
-- **Semantic Scholar**: Exponential backoff with 1-5 second delays
-- **Google Scholar**: Random delays to avoid detection
-- **LLM APIs**: 30-second timeout with automatic retry on failure
-
-## ⚡ Performance Considerations
-
-### Speed Optimization
-
-For fastest processing, use these options:
-```bash
-# Maximum speed configuration
-python refchecker.py --paper YOUR_PAPER \
-  --disable-llm \
-  --skip-google-scholar-single \
-  --db-path semantic_scholar_db/semantic_scholar.db
-```
-
-### Processing Time Estimates
-
-| Configuration | Single Paper | 10 Papers | Notes |
-|---------------|--------------|-----------|-------|
-| **Optimized** | ~5-15 seconds | ~1-5 minutes | Local DB + no LLM + no Google Scholar |
-| **Standard** | ~15-30 seconds | ~5-15 minutes | Online APIs + no LLM |
-| **LLM Enabled** | ~30-60 seconds | ~15-30 minutes | With AI-enhanced parsing |
-| **Full Featured** | ~60-120 seconds | ~30-60 minutes | LLM + Google Scholar fallback |
-
-### Performance Tips
-
-1. **Use local database** for offline processing and maximum speed
-2. **Enable LLM** for best accuracy with diverse citation formats (recommended)
-3. **Disable LLM** (`--disable-llm`) only when speed is critical and accuracy can be compromised
-4. **Skip Google Scholar** (`--skip-google-scholar-single`) for single papers
-5. **Use API keys** to get higher rate limits
-6. **Process in batches** rather than one-by-one for multiple papers
-
-### Memory Usage
-
-- **Without LLM**: ~50-100 MB per paper
-- **With LLM**: ~200-500 MB per paper (depending on model)
-- **Local database**: ~1-10 GB disk space (depending on scope)
 
 ## 📄 License
 

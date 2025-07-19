@@ -337,7 +337,7 @@ class NonArxivReferenceChecker:
         if not paper_data and raw_text:
             # Extract a reasonable search query from the raw text
             # This is a simple approach - could be improved
-            search_query = raw_text[:100].replace('\n', ' ').strip()
+            search_query = raw_text.replace('\n', ' ').strip()
             
             # Search for the paper
             search_results = self.search_paper(search_query)

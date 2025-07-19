@@ -42,7 +42,6 @@ import argparse
 import sys
 import json
 import random
-from checkers.semantic_scholar import NonArxivReferenceChecker
 from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title,  
                        extract_arxiv_id_from_url)
@@ -96,10 +95,9 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True, output_file="reference_errors.txt", 
-                 llm_config=None, debug_mode=False):
+    def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file="reference_errors.txt", 
+                 llm_config=None, debug_mode=False, enable_parallel=True):
         # Initialize the reference checker for non-arXiv references
-        # Priority: db_path > semantic_scholar API > google_scholar (reversed priority for better performance)
         self.db_path = db_path
         self.verification_output_file = output_file
         
@@ -107,9 +105,8 @@ class ArxivReferenceChecker:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
             self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
             # Force offline mode - don't use Google Scholar which has online fallbacks
-            use_google_scholar = False
             self.service_order = "Local Semantic Scholar Database (offline)"
-        elif use_google_scholar:
+        else:
             logger.info("Using enhanced hybrid checker with multiple API sources")
             # Create an enhanced hybrid checker with multiple reliable APIs
             self.non_arxiv_checker = EnhancedHybridReferenceChecker(
@@ -121,25 +118,6 @@ class ArxivReferenceChecker:
                 debug_mode=debug_mode  # Pass debug mode for conditional logging
             )
             self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
-        else:
-            logger.info("Using Semantic Scholar API as primary source")
-            self.non_arxiv_checker = NonArxivReferenceChecker(semantic_scholar_api_key)
-            self.service_order = "Semantic Scholar API"
-        
-        # Store the original checkers for potential switching during single paper mode
-        # Only create hybrid checker if we might need it
-        if not db_path and use_google_scholar:
-            self.hybrid_checker = EnhancedHybridReferenceChecker(
-                semantic_scholar_api_key=semantic_scholar_api_key,
-                db_path=None,
-                contact_email=None,
-                enable_openalex=True,
-                enable_crossref=True,
-                debug_mode=debug_mode  # Pass debug mode for conditional logging
-            )
-        else:
-            self.hybrid_checker = None
-        self.semantic_only_checker = NonArxivReferenceChecker(semantic_scholar_api_key) if not db_path else None
         
         # debug mode
         self.debug_mode = debug_mode
@@ -670,9 +648,7 @@ class ArxivReferenceChecker:
             logger.info("Enhanced Hybrid Checker Performance Summary:")
             self.non_arxiv_checker.log_performance_summary()
         
-        if hasattr(self.hybrid_checker, 'log_performance_summary') and self.hybrid_checker:
-            logger.info("Backup Hybrid Checker Performance Summary:")
-            self.hybrid_checker.log_performance_summary()
+        # Note: No separate backup hybrid checker anymore since main checker is the hybrid one
     
     def get_comprehensive_performance_stats(self):
         """
@@ -690,9 +666,7 @@ class ArxivReferenceChecker:
         if hasattr(self.non_arxiv_checker, 'get_performance_stats'):
             stats['hybrid_checker_stats']['main'] = self.non_arxiv_checker.get_performance_stats()
         
-        # Get stats from backup hybrid checker if available
-        if hasattr(self.hybrid_checker, 'get_performance_stats') and self.hybrid_checker:
-            stats['hybrid_checker_stats']['backup'] = self.hybrid_checker.get_performance_stats()
+        # Note: No separate backup hybrid checker needed - main checker is now the hybrid one
         
         return stats
     

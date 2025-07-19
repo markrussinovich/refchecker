@@ -16,9 +16,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Import all modules to ensure they're available
 import checkers.semantic_scholar
-import checkers.google_scholar 
 import checkers.local_semantic_scholar
-import checkers.hybrid_reference_checker
+import checkers.enhanced_hybrid_checker
 import utils.text_utils
 import utils.author_utils
 
@@ -27,7 +26,7 @@ from core.refchecker import ArxivReferenceChecker, setup_logging
 # Set up logging
 logger = setup_logging()
 
-def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, db_path=None, use_google_scholar=True):
+def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, db_path=None):
     """
     Validate the reference checker with a specific paper
     
@@ -36,7 +35,6 @@ def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, 
         output_prefix: Prefix for output files (defaults to paper ID)
         semantic_scholar_api_key: Optional API key for Semantic Scholar
         db_path: Path to the local Semantic Scholar database (automatically enables local DB mode)
-        use_google_scholar: Whether to use Google Scholar API instead of Semantic Scholar
     """
     # Create output directory
     output_dir = "validation_output"
@@ -47,7 +45,7 @@ def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, 
     checker = ArxivReferenceChecker(
         semantic_scholar_api_key=semantic_scholar_api_key,
         db_path=db_path,
-        use_google_scholar=use_google_scholar
+        enable_parallel=False  # Disable parallel for validation testing
     )
 
     # Set output prefix if not provided
@@ -112,7 +110,7 @@ def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, 
             print(f"  Title: {reference['title']}")
 
         # Verify the reference
-        errors = checker.verify_reference(paper, reference)
+        errors, reference_url = checker.verify_reference(paper, reference)
 
         if errors:
             error_count += 1
@@ -150,13 +148,13 @@ def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, 
     print(f"\nResults saved to {output_dir}/")
     return bibliography, error_count
 
-def validate_attention_paper(semantic_scholar_api_key=None, db_path=None, use_google_scholar=True):
+def validate_attention_paper(semantic_scholar_api_key=None, db_path=None):
     """Validate the reference checker with the Attention Is All You Need paper"""
-    return validate_paper("1706.03762", "attention_paper", semantic_scholar_api_key, db_path, use_google_scholar)
+    return validate_paper("1706.03762", "attention_paper", semantic_scholar_api_key, db_path)
 
-def validate_website_references_paper(semantic_scholar_api_key=None, db_path=None, use_google_scholar=True):
+def validate_website_references_paper(semantic_scholar_api_key=None, db_path=None):
     """Validate the reference checker with a paper that has website references"""
-    return validate_paper("2404.01833", "website_references_paper", semantic_scholar_api_key, db_path, use_google_scholar)
+    return validate_paper("2404.01833", "website_references_paper", semantic_scholar_api_key, db_path)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Validate the ArXiv Reference Checker with specific papers")
@@ -165,20 +163,19 @@ if __name__ == "__main__":
     parser.add_argument("--arxiv-id", type=str, help="Custom ArXiv ID to validate (used with --paper=custom)")
     parser.add_argument("--semantic-scholar-api-key", type=str, help="API key for Semantic Scholar (optional)")
     parser.add_argument("--db-path", type=str, help="Path to local Semantic Scholar database (automatically enables local DB mode)")
-    parser.add_argument("--use-google-scholar", action="store_true", default=True, help="Use Google Scholar API instead of Semantic Scholar (default: True)")
-    parser.add_argument("--no-google-scholar", action="store_false", dest="use_google_scholar", help="Don't use Google Scholar API")
+    # Note: Enhanced hybrid mode (including Google Scholar) is used by default
     args = parser.parse_args()
 
     if args.paper == "attention":
-        validate_attention_paper(args.semantic_scholar_api_key, args.db_path, args.use_google_scholar)
+        validate_attention_paper(args.semantic_scholar_api_key, args.db_path)
     elif args.paper == "website":
-        validate_website_references_paper(args.semantic_scholar_api_key, args.db_path, args.use_google_scholar)
+        validate_website_references_paper(args.semantic_scholar_api_key, args.db_path)
     elif args.paper == "custom":
         if not args.arxiv_id:
             print("Error: --arxiv-id is required when using --paper=custom")
             sys.exit(1)
         validate_paper(args.arxiv_id, semantic_scholar_api_key=args.semantic_scholar_api_key, 
-                      db_path=args.db_path, use_google_scholar=args.use_google_scholar)
+                      db_path=args.db_path)
     else:
         print(f"Error: Unknown paper type: {args.paper}")
         sys.exit(1)

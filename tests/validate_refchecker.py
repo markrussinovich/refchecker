@@ -15,9 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 # Import all modules to ensure they're available
 import checkers.semantic_scholar
-import checkers.google_scholar 
 import checkers.local_semantic_scholar
-import checkers.hybrid_reference_checker
+import checkers.enhanced_hybrid_checker
 import utils.text_utils
 import utils.author_utils
 
@@ -135,7 +134,7 @@ def create_test_references():
     # Combine both types of references
     return arxiv_references + non_arxiv_references
 
-def validate_reference_checker(db_path=None, use_google_scholar=False):
+def validate_reference_checker(db_path=None):
     """Validate the reference checker logic"""
     # Create output directory
     output_dir = "validation_output"
@@ -157,8 +156,8 @@ def validate_reference_checker(db_path=None, use_google_scholar=False):
     checker = ArxivReferenceChecker(
         semantic_scholar_api_key=None,
         db_path=db_path,
-        use_google_scholar=use_google_scholar,
-        output_file=os.path.join(output_dir, 'validation_verification.txt')
+        output_file=os.path.join(output_dir, 'validation_verification.txt'),
+        enable_parallel=False  # Disable parallel for validation testing
     )
 
     # Database mode is automatically handled by the checker now
@@ -186,7 +185,7 @@ def validate_reference_checker(db_path=None, use_google_scholar=False):
         print(f"  Year: {reference['year']}")
 
         # Verify the reference
-        errors = checker.verify_reference(source_paper, reference)
+        errors, reference_url = checker.verify_reference(source_paper, reference)
 
         if errors:
             print(f"  Errors found: {len(errors)}")
@@ -228,7 +227,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Validate the ArXiv Reference Checker with test references")
     parser.add_argument("--db-path", type=str, help="Path to local Semantic Scholar database (automatically enables local DB mode)")
-    parser.add_argument("--use-google-scholar", action="store_true", help="Use Google Scholar API instead of Semantic Scholar")
+    # Note: Google Scholar API is used by default in enhanced hybrid mode
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
     args = parser.parse_args()
 
@@ -237,4 +236,4 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.INFO)
     
-    validate_reference_checker(db_path=args.db_path, use_google_scholar=args.use_google_scholar)
+    validate_reference_checker(db_path=args.db_path)

@@ -19,11 +19,16 @@ import logging
 import os
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+
+# Import modules needed for validation
+import arxiv
+import json
+from core.refchecker import ArxivReferenceChecker, setup_logging
+
 try:
     from database.download_semantic_scholar_db import SemanticScholarDownloader
 except ImportError:
     from download_semantic_scholar_db import SemanticScholarDownloader
-from validate_papers import validate_paper
 
 # Set up logging
 logging.basicConfig(
@@ -122,6 +127,128 @@ def download_attention_paper_data(api_key=None, db_path=None):
     finally:
         # Close database connection
         downloader.close()
+
+def validate_paper(arxiv_id, output_prefix=None, semantic_scholar_api_key=None, db_path=None):
+    """
+    Validate the reference checker with a specific paper
+    
+    Args:
+        arxiv_id: ArXiv ID of the paper to validate
+        output_prefix: Prefix for output files (defaults to paper ID)
+        semantic_scholar_api_key: Optional API key for Semantic Scholar
+        db_path: Path to the local Semantic Scholar database (automatically enables local DB mode)
+    """
+    # Create output directory
+    output_dir = "validation_output"
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Initialize the reference checker
+    checker = ArxivReferenceChecker(
+        semantic_scholar_api_key=semantic_scholar_api_key,
+        db_path=db_path,
+        enable_parallel=False  # Disable parallel for validation testing
+    )
+
+    # Set output prefix if not provided
+    if not output_prefix:
+        output_prefix = arxiv_id.replace('.', '_')
+
+    # Override the output file
+    checker.output_file = os.path.join(output_dir, f'{output_prefix}_errors.csv')
+
+    # Set debug mode to False for pretty printing
+    debug_mode = False
+
+    # Create output file with headers if it doesn't exist
+    if not os.path.exists(checker.output_file):
+        with open(checker.output_file, 'w', newline='', encoding='utf-8') as f:
+            f.write('paper_id,reference_url,error_type,error_message,cited_info,actual_info\n')
+
+    # Get the paper
+    print(f"Fetching paper with ID {arxiv_id}...")
+
+    # Get the paper metadata
+    client = arxiv.Client()
+    search = arxiv.Search(id_list=[arxiv_id])
+    results = list(client.results(search))
+
+    if not results:
+        print(f"Error: Could not find paper with ID {arxiv_id}")
+        return
+
+    paper = results[0]
+    print(f"Found paper: {paper.title} by {', '.join([author.name for author in paper.authors])}")
+
+    # Process the paper
+    print("\nExtracting bibliography and checking references...")
+
+    # Extract bibliography
+    bibliography = checker.extract_bibliography(paper)
+
+    if not bibliography:
+        print("No bibliography found or no references extracted.")
+        return
+
+    # Count references by type
+    arxiv_refs = [ref for ref in bibliography if ref.get('type') == 'arxiv']
+    non_arxiv_refs = [ref for ref in bibliography if ref.get('type') == 'non-arxiv']
+    
+    print(f"Extracted {len(bibliography)} total references:")
+    print(f"  - {len(arxiv_refs)} arXiv references")
+    print(f"  - {len(non_arxiv_refs)} non-arXiv references")
+
+    # Check each reference
+    error_count = 0
+    for i, reference in enumerate(bibliography):
+        ref_type = reference.get('type', 'unknown')
+        print(f"\nReference {i+1} ({ref_type}):")
+        print(f"  URL: {reference['url']}")
+        if reference.get('doi'):
+            print(f"  DOI: {reference['doi']}")
+        print(f"  Authors: {', '.join(reference['authors'])}")
+        print(f"  Year: {reference['year']}")
+        if reference.get('title'):
+            print(f"  Title: {reference['title']}")
+
+        # Verify the reference
+        errors, reference_url = checker.verify_reference(paper, reference)
+
+        if errors:
+            error_count += 1
+            for error in errors:
+                # Handle both error_type and warning_type
+                if 'error_type' in error:
+                    print(f"    - {error['error_type']}: {error['error_details']}")
+                elif 'warning_type' in error:
+                    print(f"    - {error['warning_type']}: {error['warning_details']}")
+                else:
+                    # Fallback for unexpected error structure
+                    print(f"    - unknown: {error}")
+        else:
+            print("  ✓ No errors found (reference is correct)")
+
+    # Print summary
+    print("\nValidation complete.")
+    print(f"Total references checked: {len(bibliography)}")
+    print(f"References with errors: {error_count}")
+    print(f"References without errors: {len(bibliography) - error_count}")
+
+    # Save results to JSON for inspection
+    with open(os.path.join(output_dir, f'{output_prefix}_results.json'), 'w') as f:
+        json.dump({
+            "paper_id": paper.get_short_id(),
+            "paper_title": paper.title,
+            "paper_authors": [author.name for author in paper.authors],
+            "total_references": len(bibliography),
+            "arxiv_references": len(arxiv_refs),
+            "non_arxiv_references": len(non_arxiv_refs),
+            "references_with_errors": error_count,
+            "references_without_errors": len(bibliography) - error_count
+        }, f, indent=2)
+
+    print(f"\nResults saved to {output_dir}/")
+    return bibliography, error_count
 
 def validate_local_db(db_path=None):
     """
