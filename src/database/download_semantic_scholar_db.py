@@ -350,7 +350,14 @@ class SemanticScholarDownloader:
         except Exception as e:
             logger.info(f"Error checking incremental updates: {e}")
             logger.info("Falling back to alternative incremental check method")
-            return self._check_incremental_alternative_by_release(start_release_id or self.get_last_release_id(), end_release_id)
+            # Try to get end_release_id if it wasn't set yet
+            try:
+                if 'end_release_id' not in locals():
+                    end_release_id = self.get_latest_release_id()
+                return self._check_incremental_alternative_by_release(start_release_id or self.get_last_release_id(), end_release_id)
+            except Exception as fallback_error:
+                logger.debug(f"Error in fallback method: {fallback_error}")
+                return None
     
     def _check_incremental_alternative_by_release(self, start_release_id, end_release_id):
         """
@@ -486,10 +493,36 @@ class SemanticScholarDownloader:
             
             for diff in diffs:
                 if diff.get("type") == "full_dataset_update":
-                    # Handle full dataset update recommendation
+                    # Handle full dataset update recommendation by downloading the full dataset
                     logger.info(f"Full dataset update recommended: {diff.get('message')}")
-                    logger.info("Consider running with --download-dataset --process-local-files")
-                    return False
+                    logger.info("Automatically downloading full dataset...")
+                    
+                    # Download the full dataset
+                    success = self.download_dataset_files()
+                    if success:
+                        logger.info("Full dataset download completed, processing files...")
+                        # Process the downloaded files
+                        self.process_local_files(force_reprocess=False, incremental=False)
+                        
+                        # After processing, check for any remaining incremental updates
+                        logger.info("Checking for additional incremental updates after full dataset processing...")
+                        latest_release = self.get_latest_release_id()
+                        current_release = self.get_last_release_id()
+                        
+                        if current_release and current_release != latest_release:
+                            logger.info(f"Checking for incremental updates from {current_release} to {latest_release}")
+                            additional_updates = self.check_incremental_updates(current_release)
+                            if additional_updates:
+                                # Filter out any full_dataset_update recommendations to avoid infinite recursion
+                                filtered_updates = [u for u in additional_updates if u.get("type") != "full_dataset_update"]
+                                if filtered_updates:
+                                    logger.info(f"Processing {len(filtered_updates)} additional incremental updates")
+                                    self.download_incremental_updates(filtered_updates)
+                        
+                        return True
+                    else:
+                        logger.error("Failed to download full dataset")
+                        return False
                 elif diff.get("type") == "recent_papers":
                     # Handle recent papers update (fallback)
                     papers = diff.get("papers", [])
@@ -1021,8 +1054,19 @@ class SemanticScholarDownloader:
                     if not self._is_file_processed(gz_file) or self._should_process_file(gz_file):
                         unprocessed_files.append(gz_file)
                 
-                if unprocessed_files:
+                # Check if any incremental updates are actually full dataset updates
+                has_full_dataset_update = any(diff.get("type") == "full_dataset_update" for diff in update_info['incremental_updates'])
+                
+                if unprocessed_files and not has_full_dataset_update:
                     logger.info(f"Found {len(unprocessed_files)} unprocessed local files, processing those instead of incremental updates")
+                elif has_full_dataset_update:
+                    logger.info("Full dataset update needed - this will download and process the latest dataset")
+                    success = self.download_incremental_updates(update_info['incremental_updates'])
+                    if success:
+                        logger.info("Full dataset update completed successfully")
+                        return
+                    else:
+                        logger.warning("Failed to process full dataset update, falling back to file processing")
                 else:
                     logger.info("Processing incremental updates...")
                     success = self.download_incremental_updates(update_info['incremental_updates'])
