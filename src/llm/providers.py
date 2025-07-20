@@ -30,6 +30,7 @@ Instructions:
 5. Return ONLY the references, one per line
 6. Do not include reference numbers like [1], [2], etc.
 7. Do not add any additional text or explanations
+8. Ensure that URLs and DOIs are from the specific reference only
 
 Bibliography text:
 {bibliography_text}
