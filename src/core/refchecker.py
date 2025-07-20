@@ -199,7 +199,7 @@ class ArxivReferenceChecker:
         # Use command line overrides if provided, otherwise use config
         if self.llm_config_override:
             provider_name = self.llm_config_override['provider']
-            provider_config = self.config["llm"].get(provider_name, {}).copy()
+            provider_config = self.config.get("llm", {}).get(provider_name, {}).copy()
             
             # Override with command line parameters
             if self.llm_config_override.get('model'):
@@ -209,8 +209,12 @@ class ArxivReferenceChecker:
             if self.llm_config_override.get('endpoint'):
                 provider_config['endpoint'] = self.llm_config_override['endpoint']
         else:
-            provider_name = self.config["llm"]["provider"]
-            provider_config = self.config["llm"].get(provider_name, {})
+            llm_config = self.config.get("llm", {})
+            provider_name = llm_config.get("provider")
+            if not provider_name:
+                logger.error("No LLM provider specified in configuration")
+                return None
+            provider_config = llm_config.get(provider_name, {})
         
         # Create LLM provider
         llm_provider = create_llm_provider(provider_name, provider_config)
@@ -219,7 +223,7 @@ class ArxivReferenceChecker:
             return None
         
         # Create reference extractor with fallback
-        fallback_enabled = self.config["llm"].get("fallback_enabled", True)
+        fallback_enabled = self.config.get("llm", {}).get("fallback_enabled", True)
         extractor = ReferenceExtractor(
             llm_provider=llm_provider,
             fallback_enabled=fallback_enabled
@@ -733,9 +737,7 @@ class ArxivReferenceChecker:
             return None
 
     def download_pdf_from_url(self, url):
-        """Download a PDF from a direct URL and return the content as bytes."""
-        logger.info(f"Downloading PDF from URL: {url}")
-        
+        """Download a PDF from a direct URL and return the content as bytes."""       
         try:
             response = requests.get(url, timeout=30)
             response.raise_for_status()

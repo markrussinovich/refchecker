@@ -147,9 +147,9 @@ class CrossRefReferenceChecker:
         
         endpoint = f"{self.base_url}/works/{clean_doi}"
         
-        params = {
-            "select": "DOI,title,author,published,publisher,container-title,type,URL,link,abstract,subject"
-        }
+        # Note: The individual DOI endpoint does not support the 'select' parameter
+        # It returns all fields by default, which is what we want
+        params = {}
         
         # Make the request with retries and backoff
         for attempt in range(self.max_retries):

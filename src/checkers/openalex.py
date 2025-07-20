@@ -393,7 +393,7 @@ class OpenAlexReferenceChecker:
         errors = []
         
         # Extract reference data
-        title = reference.get('title', '')
+        title = reference.get('title', '') or ''
         authors = reference.get('authors', [])
         year = reference.get('year', 0)
         url = reference.get('url', '')
