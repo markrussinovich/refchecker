@@ -526,6 +526,26 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             if self.server_process and self.server_process.poll() is not None:
                 # Process has terminated
                 stdout, stderr = self.server_process.communicate()
+                error_msg = "vLLM server terminated unexpectedly"
+                
+                # Extract meaningful error information
+                if stderr:
+                    stderr_text = stderr.decode('utf-8') if isinstance(stderr, bytes) else str(stderr)
+                    if "not found" in stderr_text.lower() or "does not exist" in stderr_text.lower():
+                        error_msg += f" - Model not found. Check if '{self.model}' exists and is accessible."
+                    elif "authentication" in stderr_text.lower() or "unauthorized" in stderr_text.lower():
+                        error_msg += f" - Authentication required. Set HF_TOKEN environment variable for gated models."
+                    elif "out of memory" in stderr_text.lower() or "cuda out of memory" in stderr_text.lower():
+                        error_msg += f" - Insufficient GPU memory to load model '{self.model}'."
+                    elif "permission denied" in stderr_text.lower():
+                        error_msg += f" - Permission denied accessing model '{self.model}'."
+                    else:
+                        error_msg += f" - Error: {stderr_text.strip()[:200]}"
+                
+                # Show error to user
+                print(f"\n❌ {error_msg}")
+                
+                # Log full details for debugging
                 logger.error(f"vLLM server terminated unexpectedly:")
                 logger.error(f"STDOUT: {stdout}")
                 logger.error(f"STDERR: {stderr}")

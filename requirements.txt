@@ -28,6 +28,7 @@ scikit-learn>=1.0.0
 joblib>=1.1.0
 
 # vLLM support (for local model inference)
+torch>=2.0.0
 vllm>=0.3.0
 huggingface_hub>=0.17.0
 

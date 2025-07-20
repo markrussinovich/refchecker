@@ -162,7 +162,6 @@ class ArxivReferenceChecker:
             from config.settings import get_config
             self.config = get_config()
         except ImportError:
-            logger.warning("Could not load config settings, using empty config")
             self.config = {}
         self.llm_config_override = llm_config
         self.llm_extractor = self._initialize_llm_extractor()
@@ -3603,7 +3602,7 @@ def main():
     print(f"Refchecker v{__version__} - Validate references in academic papers")
     print(f"By Mark Russinovich and various agentic AI assistants")
 
-    parser = argparse.ArgumentParser(description="ArXiv Reference Checker - Validate references in ArXiv papers")
+    parser = argparse.ArgumentParser(description="Academic paper references checker")
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,
