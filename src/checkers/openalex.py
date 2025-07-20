@@ -32,6 +32,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
+from utils.text_utils import normalize_text
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -197,19 +198,23 @@ class OpenAlexReferenceChecker:
         if not url:
             return None
         
+        # Only extract DOIs from actual DOI URLs, not from other domains
+        # This prevents false positives from URLs like aclanthology.org
+        if 'doi.org' not in url and 'doi:' not in url:
+            return None
+        
         # Check if it's a DOI URL
         doi_patterns = [
             r'doi\.org/([^/\s\?#]+(?:/[^/\s\?#]+)*)',  # Full DOI pattern
             r'doi:([^/\s\?#]+(?:/[^/\s\?#]+)*)',       # doi: prefix
-            r'/([^/\s\?#]+\.[^/\s\?#]+(?:/[^/\s\?#]+)*)'  # DOI-like pattern in URLs
         ]
         
         for pattern in doi_patterns:
             match = re.search(pattern, url)
             if match:
                 doi_candidate = match.group(1)
-                # Basic validation - DOIs should have at least one slash
-                if '/' in doi_candidate and len(doi_candidate) > 3:
+                # DOIs must start with "10." and have at least one slash
+                if doi_candidate.startswith('10.') and '/' in doi_candidate and len(doi_candidate) > 6:
                     return doi_candidate
         
         return None
@@ -227,13 +232,8 @@ class OpenAlexReferenceChecker:
         # Remove reference numbers (e.g., "[1]")
         name = re.sub(r'^\[\d+\]', '', name)
         
-        # Remove line breaks and extra spaces
-        name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
-        
-        # Remove special characters but keep hyphens and apostrophes
-        name = re.sub(r'[^\w\s\-\']', '', name)
-        
-        return name.lower()
+        # Use common normalization function
+        return normalize_text(name)
     
     def compare_authors(self, cited_authors: List[str], openalex_authors: List[Dict[str, Any]]) -> Tuple[bool, str]:
         """

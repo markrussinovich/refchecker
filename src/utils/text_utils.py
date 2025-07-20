@@ -5,8 +5,62 @@ Text processing utilities for ArXiv Reference Checker
 
 import re
 import logging
+import unicodedata
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_text(text):
+    """
+    Normalize text by removing diacritical marks and special characters
+    """
+    if not text:
+        return ""
+        
+    # Replace common special characters with their ASCII equivalents
+    replacements = {
+        'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
+        'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+        'à': 'a', 'è': 'e', 'ì': 'i', 'ò': 'o', 'ù': 'u',
+        'â': 'a', 'ê': 'e', 'î': 'i', 'ô': 'o', 'û': 'u',
+        'ç': 'c', 'ñ': 'n', 'ø': 'o', 'å': 'a',
+        'ë': 'e', 'ï': 'i', 'ÿ': 'y',
+        'Ł': 'L', 'ł': 'l',
+        '¨': '', '´': '', '`': '', '^': '', '~': '',
+        '–': '-', '—': '-', '−': '-',
+        '„': '"', '"': '"', '"': '"', ''': "'", ''': "'",
+        '«': '"', '»': '"',
+        '¡': '!', '¿': '?',
+        '°': 'degrees', '©': '(c)', '®': '(r)', '™': '(tm)',
+        '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR',
+        '×': 'x', '÷': '/',
+        '½': '1/2', '¼': '1/4', '¾': '3/4',
+        '\u00A0': ' ',  # Non-breaking space
+        '\u2013': '-',  # En dash
+        '\u2014': '-',  # Em dash
+        '\u2018': "'",  # Left single quotation mark
+        '\u2019': "'",  # Right single quotation mark
+        '\u201C': '"',  # Left double quotation mark
+        '\u201D': '"',  # Right double quotation mark
+        '\u2026': '...',  # Horizontal ellipsis
+        '\u00B7': '.',  # Middle dot
+        '\u2022': '.',  # Bullet
+}
+    
+    for char, replacement in replacements.items():
+        text = text.replace(char, replacement)
+    
+    # Remove any remaining diacritical marks
+    text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
+    
+    # Remove special characters
+    text = re.sub(r'[^\w\s]', '', text)
+    
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text.lower()
+
 
 def clean_author_name(author):
     """
@@ -73,26 +127,6 @@ def clean_title(title):
     
     return title
 
-def normalize_text(text):
-    """
-    Normalize text for comparison by removing special characters and converting to lowercase
-    
-    Args:
-        text: Text to normalize
-        
-    Returns:
-        Normalized text
-    """
-    if not isinstance(text, str):
-        return str(text).lower() if text is not None else ''
-    
-    # Remove special characters except spaces and alphanumeric
-    text = re.sub(r'[^\w\s]', '', text)
-    
-    # Normalize whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
-    
-    return text.lower()
 
 def extract_arxiv_id_from_url(url):
     """
@@ -214,13 +248,8 @@ def normalize_author_name(name: str) -> str:
     # Remove reference numbers (e.g., "[1]")
     name = re.sub(r'^\[\d+\]', '', name)
     
-    # Remove line breaks and extra spaces
-    name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
-    
-    # Remove special characters (keep alphanumeric, spaces, hyphens, apostrophes)
-    name = re.sub(r'[^\w\s\'-]', '', name)
-    
-    return name.lower()
+    # Use common normalization function
+    return normalize_text(name)
 
 
 def normalize_paper_title(title: str) -> str:

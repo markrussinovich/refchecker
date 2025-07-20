@@ -44,7 +44,7 @@ import json
 import random
 from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title,  
-                       extract_arxiv_id_from_url)
+                       extract_arxiv_id_from_url, normalize_text as common_normalize_text)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -3437,52 +3437,7 @@ class ArxivReferenceChecker:
         """
         Normalize text by removing diacritical marks and special characters
         """
-        if not text:
-            return ""
-            
-        # Replace common special characters with their ASCII equivalents
-        replacements = {
-            'ä': 'a', 'ö': 'o', 'ü': 'u', 'ß': 'ss',
-            'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
-            'à': 'a', 'è': 'e', 'ì': 'i', 'ò': 'o', 'ù': 'u',
-            'â': 'a', 'ê': 'e', 'î': 'i', 'ô': 'o', 'û': 'u',
-            'ç': 'c', 'ñ': 'n', 'ø': 'o', 'å': 'a',
-            'ë': 'e', 'ï': 'i', 'ÿ': 'y',
-            '¨': '', '´': '', '`': '', '^': '', '~': '',
-            '–': '-', '—': '-', '−': '-',
-            '„': '"', '"': '"', '"': '"', ''': "'", ''': "'",
-            '«': '"', '»': '"',
-            '¡': '!', '¿': '?',
-            '°': 'degrees', '©': '(c)', '®': '(r)', '™': '(tm)',
-            '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR',
-            '×': 'x', '÷': '/',
-            '½': '1/2', '¼': '1/4', '¾': '3/4',
-            '\u00A0': ' ',  # Non-breaking space
-            '\u2013': '-',  # En dash
-            '\u2014': '-',  # Em dash
-            '\u2018': "'",  # Left single quotation mark
-            '\u2019': "'",  # Right single quotation mark
-            '\u201C': '"',  # Left double quotation mark
-            '\u201D': '"',  # Right double quotation mark
-            '\u2026': '...',  # Horizontal ellipsis
-            '\u00B7': '.',  # Middle dot
-            '\u2022': '.',  # Bullet
-}
-        
-        for char, replacement in replacements.items():
-            text = text.replace(char, replacement)
-        
-        # Remove any remaining diacritical marks
-        import unicodedata
-        text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
-        
-        # Remove special characters
-        text = re.sub(r'[^\w\s]', '', text)
-        
-        # Normalize whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        return text.lower()
+        return common_normalize_text(text)
     
     def get_arxiv_paper_from_local_db(self, arxiv_id):
         """

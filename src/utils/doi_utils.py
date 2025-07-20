@@ -22,19 +22,23 @@ def extract_doi_from_url(url: str) -> Optional[str]:
     if not url:
         return None
     
+    # Only extract DOIs from actual DOI URLs, not from other domains
+    # This prevents false positives from URLs like aclanthology.org
+    if 'doi.org' not in url and 'doi:' not in url:
+        return None
+    
     # DOI patterns ordered by specificity and reliability
     doi_patterns = [
         r'doi\.org/([^/\s\?#]+(?:/[^/\s\?#]+)*)',  # Full DOI pattern from doi.org
         r'doi:([^/\s\?#]+(?:/[^/\s\?#]+)*)',       # doi: prefix format
-        r'/([^/\s\?#]+\.[^/\s\?#]+(?:/[^/\s\?#]+)*)'  # DOI-like pattern in URLs
     ]
     
     for pattern in doi_patterns:
         match = re.search(pattern, url)
         if match:
             doi_candidate = match.group(1)
-            # Basic validation - DOIs should have at least one slash and proper length
-            if '/' in doi_candidate and len(doi_candidate) > 3:
+            # DOIs must start with "10." and have at least one slash
+            if doi_candidate.startswith('10.') and '/' in doi_candidate and len(doi_candidate) > 6:
                 return doi_candidate
     
     return None

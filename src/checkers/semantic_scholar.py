@@ -28,6 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
+from utils.text_utils import normalize_text
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -192,13 +193,8 @@ class NonArxivReferenceChecker:
         # Remove reference numbers (e.g., "[1]")
         name = re.sub(r'^\[\d+\]', '', name)
         
-        # Remove line breaks and extra spaces
-        name = re.sub(r'\s+', ' ', name.replace('\n', ' ')).strip()
-        
-        # Remove special characters
-        name = re.sub(r'[^\w\s]', '', name)
-        
-        return name.lower()
+        # Use common normalization function
+        return normalize_text(name)
     
     def compare_authors(self, cited_authors: List[str], correct_authors: List[Dict[str, str]]) -> Tuple[bool, str]:
         """
