@@ -1,0 +1,48 @@
+REFERENCE VERIFICATION ERRORS
+==================================================
+
+Service order used: Local Semantic Scholar Database (offline)
+
+
+PAPER: Great, Now Write an Article About That: The Crescendo Multi-Turn LLM Jailbreak Attack
+ArXiv ID: 2404.01833
+URL: https://arxiv.org/abs/2404.01833
+Authors: M. Russinovich, Ahmed Salem, Ronen Eldan
+Year: 2024
+--------------------------------------------------------------------------------
+REFERENCE: Extracting training data from large language models
+Type: year
+Details: Year mismatch: cited as 2021 but actually 2020
+
+AS CITED:
+  Authors: Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-V oss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, Alina Oprea, Colin Raffel
+  Year: 2021
+
+CORRECT INFORMATION:
+  Year: 2020
+
+VERIFIED URL:
+  https://arxiv.org/abs/2012.07805
+
+STANDARD FORMAT:
+  (2020)
+
+================================================================================
+REFERENCE: Defending large language models against jailbreaking attacks through goal prioritization
+Type: year
+Details: Year mismatch: cited as 2024 but actually 2023
+
+AS CITED:
+  Authors: Zhexin Zhang, Junxiao Yang, Pei Ke, Fei Mi, Hongning Wang, Minlie Huang
+  Year: 2024
+
+CORRECT INFORMATION:
+  Year: 2023
+
+VERIFIED URL:
+  https://doi.org/10.48550/arXiv.2311.09096
+
+STANDARD FORMAT:
+  (2023)
+
+================================================================================
