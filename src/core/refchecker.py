@@ -48,6 +48,13 @@ from utils.text_utils import (clean_author_name, clean_title,
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+
+# Import version from package
+try:
+    from .. import __version__
+except ImportError:
+    # Fallback if running as script
+    __version__ = "1.0.0"
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
@@ -3544,6 +3551,9 @@ class ArxivReferenceChecker:
 
 def main():
     """Main function to parse arguments and run the reference checker"""
+    print(f"Refchecker v{__version__} - Validate references in academic papers")
+    print(f"By Mark Russinovich and various agentic AI assistants")
+
     parser = argparse.ArgumentParser(description="ArXiv Reference Checker - Validate references in ArXiv papers")
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
