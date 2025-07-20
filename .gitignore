@@ -112,7 +112,6 @@ output/
 validation_output/
 semantic_scholar_db/
 *.log
-*.txt
 *.csv
 *.json
 
