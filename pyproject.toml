@@ -7,7 +7,7 @@ name = "refchecker"
 version = "1.0.0"
 description = "A comprehensive tool for validating reference accuracy in academic papers"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "MIT"
 authors = [
     {name = "Mark Russinovich", email = "markrussinovich@hotmail.com"}
 ]
@@ -15,7 +15,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research", 
     "Topic :: Scientific/Engineering :: Information Analysis",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8", 
@@ -35,6 +34,8 @@ dependencies = [
     "colorama>=0.4.4",
     "fuzzywuzzy>=0.18.0",
     "python-Levenshtein>=0.12.0",
+    "pandas>=1.3.0",
+    "pdfplumber>=0.6.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +51,11 @@ docs = [
     "sphinx>=4.0.0",
     "sphinx-rtd-theme>=0.5.0",
 ]
+llm = [
+    "openai>=1.0.0",
+    "anthropic>=0.7.0",
+    "google-generativeai>=0.3.0",
+]
 optional = [
     "lxml>=4.6.0",
     "selenium>=4.0.0",
@@ -61,7 +67,6 @@ optional = [
 vllm = [
     "vllm>=0.3.0",
     "huggingface_hub>=0.17.0",
-    "requests>=2.25.0",
 ]
 
 [project.urls]
