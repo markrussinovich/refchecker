@@ -582,26 +582,35 @@ class ArxivReferenceChecker:
     
     def _create_local_file_paper(self, file_path):
         """
-        Create a paper object for local PDF, LaTeX, or text files
+        Create a paper object for local PDF, LaTeX, or text files, or PDF URLs
         
         Args:
-            file_path: Path to the local file
+            file_path: Path to the local file or URL to a PDF
             
         Returns:
             Paper object compatible with ArXiv paper interface
         """
         class LocalFilePaper:
-            def __init__(self, path):
+            def __init__(self, path, is_url=False):
                 self.file_path = path
+                self.is_url = is_url
                 self.is_latex = path.lower().endswith('.tex')
                 self.is_text_refs = path.lower().endswith('.txt')
                 
-                # Extract filename without extension for title
-                filename = os.path.splitext(os.path.basename(path))[0]
-                self.title = filename.replace('_', ' ').title()
+                if is_url:
+                    # Extract filename from URL for title
+                    url_path = urlparse(path).path
+                    filename = os.path.splitext(os.path.basename(url_path))[0]
+                    if not filename:
+                        filename = "downloaded_pdf"
+                    self.title = filename.replace('_', ' ').title()
+                else:
+                    # Extract filename without extension for title
+                    filename = os.path.splitext(os.path.basename(path))[0]
+                    self.title = filename.replace('_', ' ').title()
                     
                 self.authors = []  # Empty list for compatibility
-                self.pdf_url = None
+                self.pdf_url = path if is_url else None
                 
                 class PublishedDate:
                     def __init__(self):
@@ -610,10 +619,19 @@ class ArxivReferenceChecker:
                 self.published = PublishedDate()
                 
             def get_short_id(self):
-                filename = os.path.splitext(os.path.basename(self.file_path))[0]
-                return f"local_{filename}"
+                if self.is_url:
+                    url_path = urlparse(self.file_path).path
+                    filename = os.path.splitext(os.path.basename(url_path))[0]
+                    if not filename:
+                        filename = "downloaded_pdf"
+                    return f"url_{filename}"
+                else:
+                    filename = os.path.splitext(os.path.basename(self.file_path))[0]
+                    return f"local_{filename}"
         
-        return LocalFilePaper(file_path)
+        # Check if it's a URL
+        is_url = file_path.startswith('http')
+        return LocalFilePaper(file_path, is_url=is_url)
 
     def get_api_performance_summary(self):
         """
@@ -679,15 +697,21 @@ class ArxivReferenceChecker:
     
     def download_pdf(self, paper):
         """Download the PDF of a paper and return the content as bytes."""
-        # Check if this is a local file
+        # Check if this is a local file or URL
         if hasattr(paper, 'file_path') and paper.file_path:
-            logger.info(f"Reading local file: {paper.file_path}")
-            try:
-                with open(paper.file_path, 'rb') as f:
-                    return io.BytesIO(f.read())
-            except Exception as e:
-                logger.error(f"Failed to read local file {paper.file_path}: {e}")
-                return None
+            if hasattr(paper, 'is_url') and paper.is_url:
+                # This is a URL, download it
+                logger.info(f"Downloading PDF from URL: {paper.file_path}")
+                return self.download_pdf_from_url(paper.file_path)
+            else:
+                # This is a local file
+                logger.info(f"Reading local file: {paper.file_path}")
+                try:
+                    with open(paper.file_path, 'rb') as f:
+                        return io.BytesIO(f.read())
+                except Exception as e:
+                    logger.error(f"Failed to read local file {paper.file_path}: {e}")
+                    return None
         
         # Check if paper.pdf_url is available
         if paper.pdf_url:
@@ -706,6 +730,24 @@ class ArxivReferenceChecker:
             return io.BytesIO(response.content)
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to download PDF for {paper.get_short_id()}: {e}")
+            return None
+
+    def download_pdf_from_url(self, url):
+        """Download a PDF from a direct URL and return the content as bytes."""
+        logger.info(f"Downloading PDF from URL: {url}")
+        
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            
+            # Check if the response is actually a PDF
+            content_type = response.headers.get('content-type', '').lower()
+            if 'application/pdf' not in content_type and not url.lower().endswith('.pdf'):
+                logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
+            
+            return io.BytesIO(response.content)
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to download PDF from URL {url}: {e}")
             return None
 
     def extract_text_from_latex(self, latex_file_path):
@@ -3586,7 +3628,18 @@ def main():
     local_pdf_path = None
     
     if args.paper:
-        if args.paper.lower().endswith('.pdf'):
+        if args.paper.startswith('http'):
+            # Check if it's a PDF URL first
+            if args.paper.lower().endswith('.pdf') or 'pdf' in args.paper.lower():
+                # This is a PDF URL - we'll download it and process as a local PDF
+                local_pdf_path = args.paper  # Store the URL, we'll handle download later
+            else:
+                # Try to extract arXiv ID from URL
+                paper_id = extract_arxiv_id_from_url(args.paper)
+                if not paper_id:
+                    print(f"Error: Could not extract arXiv ID from URL: {args.paper}")
+                    return 1
+        elif args.paper.lower().endswith('.pdf'):
             # This is a local PDF file
             if not os.path.exists(args.paper):
                 print(f"Error: Local PDF file does not exist: {args.paper}")
@@ -3604,12 +3657,6 @@ def main():
                 print(f"Error: Local text file does not exist: {args.paper}")
                 return 1
             local_pdf_path = args.paper  # We'll use the same variable but handle it differently
-        elif args.paper.startswith('http'):
-            # Extract arXiv ID from URL
-            paper_id = extract_arxiv_id_from_url(args.paper)
-            if not paper_id:
-                print(f"Error: Could not extract arXiv ID from URL: {args.paper}")
-                return 1
         else:
             # Assume it's an ArXiv ID
             paper_id = args.paper
