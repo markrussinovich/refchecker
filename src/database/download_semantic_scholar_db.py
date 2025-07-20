@@ -326,10 +326,14 @@ class SemanticScholarDownloader:
             logger.info(f"Requesting incremental diffs from: {url}")
             response = self.session.get(url, headers=headers, timeout=30)
             
-            # If this endpoint doesn't exist, try alternative approaches
+            # Handle different response codes
             if response.status_code == 404:
-                logger.info("Incremental diffs endpoint not available (404), trying alternative methods")
+                logger.info(f"Incremental diffs not available for {start_release_id} to {end_release_id} (404)")
+                logger.info("This usually means the release gap is too large for incremental updates")
                 return self._check_incremental_alternative_by_release(start_release_id, end_release_id)
+            elif response.status_code == 429:
+                logger.warning("Rate limited on diffs API. Consider waiting or using a higher tier API key")
+                return None
             
             response.raise_for_status()
             data = response.json()
@@ -366,15 +370,37 @@ class SemanticScholarDownloader:
             
             if start_release_id == end_release_id:
                 return None
+            
+            # Try to find intermediate releases that might have diffs available
+            # This could be improved by calling a releases list API if available
+            from datetime import datetime, timedelta
+            
+            try:
+                start_date = datetime.strptime(start_release_id, "%Y-%m-%d")
+                end_date = datetime.strptime(end_release_id, "%Y-%m-%d")
+                days_diff = (end_date - start_date).days
                 
-            logger.info(f"Diffs API unavailable, suggesting full dataset download from {start_release_id} to {end_release_id}")
+                if days_diff <= 7:
+                    logger.info(f"Release gap of {days_diff} days should support diffs, but API returned 404")
+                    logger.info("This might be a temporary API issue or the releases don't exist")
+                    return None
+                elif days_diff <= 30:
+                    logger.info(f"Release gap of {days_diff} days may be too large for diffs API")
+                    logger.info("Consider updating release tracking more frequently")
+                else:
+                    logger.info(f"Release gap of {days_diff} days is too large for incremental updates")
+                    
+            except ValueError:
+                logger.info(f"Cannot parse release dates: {start_release_id}, {end_release_id}")
+                
+            logger.info(f"Recommending full dataset download from {start_release_id} to {end_release_id}")
             
             # Return a structure indicating that a full dataset download is needed
             return [{
                 "type": "full_dataset_update",
                 "start_release": start_release_id,
                 "end_release": end_release_id,
-                "message": "Incremental diffs unavailable, full dataset update recommended"
+                "message": f"Incremental diffs unavailable for gap from {start_release_id} to {end_release_id}, full dataset update recommended"
             }]
             
         except Exception as e:
@@ -1358,7 +1384,7 @@ class SemanticScholarDownloader:
                     # File is already structured
                     structured_files.append(file_item)
                     
-            logger.info(f"Successfully retrieved {len(structured_files)} files from API")
+            logger.info(f"Retrieved {len(structured_files)} files from API")
             return structured_files
             
         except Exception as e:

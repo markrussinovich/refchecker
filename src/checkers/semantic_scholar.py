@@ -78,10 +78,6 @@ class NonArxivReferenceChecker:
             "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess"
         }
         
-        # Add year filter if provided
-        if year:
-            params["year"] = year
-        
         # Make the request with retries and backoff
         for attempt in range(self.max_retries):
             try:

@@ -114,7 +114,7 @@ class ArxivReferenceChecker:
             # Force offline mode - don't use Google Scholar which has online fallbacks
             self.service_order = "Local Semantic Scholar Database (offline)"
         else:
-            logger.info("Using enhanced hybrid checker with multiple API sources")
+            logger.debug("Using enhanced hybrid checker with multiple API sources")
             # Create an enhanced hybrid checker with multiple reliable APIs
             self.non_arxiv_checker = EnhancedHybridReferenceChecker(
                 semantic_scholar_api_key=semantic_scholar_api_key,
@@ -730,7 +730,7 @@ class ArxivReferenceChecker:
                 logger.warning(f"UTF-8 encoding failed for {latex_file_path}, trying latin-1")
                 with open(latex_file_path, 'r', encoding='latin-1') as f:
                     content = f.read()
-                logger.info(f"Successfully read LaTeX file with latin-1 encoding")
+                logger.info(f"Read LaTeX file with latin-1 encoding")
                 return content
             except Exception as e:
                 logger.error(f"Failed to read LaTeX file {latex_file_path} with latin-1: {e}")
@@ -2504,7 +2504,7 @@ class ArxivReferenceChecker:
                     fallback_func=self._parse_references_regex
                 )
                 if references:
-                    logger.info(f"Successfully parsed {len(references)} references")
+                    logger.info(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
             except Exception as e:
                 logger.error(f"LLM reference extraction failed: {e}")
@@ -3080,8 +3080,12 @@ class ArxivReferenceChecker:
         title = title.rstrip(',').strip()
         
         # Clean up venue
-        venue = re.sub(r'\s+', ' ', venue).strip() if venue else ""
-        venue = venue.rstrip(',').strip()
+        # Clean up venue - if venue is just a year, null it
+        if venue and venue.isdigit() and len(venue) == 4 and venue.startswith(('19', '20')):
+            venue = ""
+        else:            
+            venue = re.sub(r'\s+', ' ', venue).strip() if venue else ""
+            venue = venue.rstrip(',').strip()
         
         if not authors:
             authors = []  # Allow empty authors for references without author information
@@ -3094,6 +3098,7 @@ class ArxivReferenceChecker:
             'doi': doi,
             'year': year or 0,
             'authors': authors,
+            'venue': venue,
             'title': title,
             'raw_text': ref_text,
             'type': ref_type

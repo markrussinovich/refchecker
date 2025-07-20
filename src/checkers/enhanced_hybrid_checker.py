@@ -62,7 +62,7 @@ class EnhancedHybridReferenceChecker:
             try:
                 from .local_semantic_scholar import LocalNonArxivReferenceChecker
                 self.local_db = LocalNonArxivReferenceChecker(db_path=db_path)
-                logger.info(f"Enhanced Hybrid: Local database enabled at {db_path}")
+                logger.debug(f"Enhanced Hybrid: Local database enabled at {db_path}")
             except Exception as e:
                 logger.warning(f"Enhanced Hybrid: Failed to initialize local database: {e}")
                 self.local_db = None
@@ -71,7 +71,7 @@ class EnhancedHybridReferenceChecker:
         try:
             from .semantic_scholar import NonArxivReferenceChecker
             self.semantic_scholar = NonArxivReferenceChecker(api_key=semantic_scholar_api_key)
-            logger.info("Enhanced Hybrid: Semantic Scholar API initialized")
+            logger.debug("Enhanced Hybrid: Semantic Scholar API initialized")
         except Exception as e:
             logger.error(f"Enhanced Hybrid: Failed to initialize Semantic Scholar: {e}")
             self.semantic_scholar = None
@@ -82,7 +82,7 @@ class EnhancedHybridReferenceChecker:
             try:
                 from .openalex import OpenAlexReferenceChecker
                 self.openalex = OpenAlexReferenceChecker(email=contact_email)
-                logger.info("Enhanced Hybrid: OpenAlex API initialized")
+                logger.debug("Enhanced Hybrid: OpenAlex API initialized")
             except Exception as e:
                 logger.warning(f"Enhanced Hybrid: Failed to initialize OpenAlex: {e}")
         
@@ -92,7 +92,7 @@ class EnhancedHybridReferenceChecker:
             try:
                 from .crossref import CrossRefReferenceChecker
                 self.crossref = CrossRefReferenceChecker(email=contact_email)
-                logger.info("Enhanced Hybrid: CrossRef API initialized")
+                logger.debug("Enhanced Hybrid: CrossRef API initialized")
             except Exception as e:
                 logger.warning(f"Enhanced Hybrid: Failed to initialize CrossRef: {e}")
         

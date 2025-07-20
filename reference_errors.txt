@@ -1,48 +1,309 @@
 REFERENCE VERIFICATION ERRORS
 ==================================================
 
-Service order used: Local Semantic Scholar Database (offline)
+Service order used: Semantic Scholar API → OpenAlex → CrossRef
 
 
-PAPER: Great, Now Write an Article About That: The Crescendo Multi-Turn LLM Jailbreak Attack
-ArXiv ID: 2404.01833
-URL: https://arxiv.org/abs/2404.01833
-Authors: M. Russinovich, Ahmed Salem, Ronen Eldan
-Year: 2024
+PAPER: Memorization Without Overfitting: Analyzing the Training Dynamics of Large Language Models
+ArXiv ID: 2205.10770
+URL: https://arxiv.org/abs/2205.10770
+Authors: Kushal Tirumala, Aram H. Markosyan, Luke Zettlemoyer, Armen Aghajanyan
+Year: 2022
 --------------------------------------------------------------------------------
-REFERENCE: Extracting training data from large language models
+REFERENCE: Aim
+Type: author
+Details: First author mismatch: 'Gor Arakelyan' vs 'R. Glasgow'
+
+AS CITED:
+  Authors: Gor Arakelyan, Gevorg Soghomonyan, The Aim team
+  Year: 2020
+  URL: https://github.com/aimhubio/aim
+
+CORRECT INFORMATION:
+  Authors: R. Glasgow, T. Vogt, S. Boles
+
+VERIFIED URL:
+  http://ajph.aphapublications.org/doi/pdf/10.2105/AJPH.89.9.1322
+
+STANDARD FORMAT:
+  R. Glasgow, T. Vogt, S. Boles.
+
+================================================================================
+REFERENCE: Aim
+Type: year
+Details: Year mismatch: cited as 2020 but actually 1999
+
+AS CITED:
+  Authors: Gor Arakelyan, Gevorg Soghomonyan, The Aim team
+  Year: 2020
+  URL: https://github.com/aimhubio/aim
+
+CORRECT INFORMATION:
+  Year: 1999
+
+VERIFIED URL:
+  http://ajph.aphapublications.org/doi/pdf/10.2105/AJPH.89.9.1322
+
+STANDARD FORMAT:
+  (1999)
+
+================================================================================
+REFERENCE: Fairscale: A general purpose modular pytorch library for high performance and large scale training
+Type: unverified
+Details: Reference could not be verified
+
+AS CITED:
+  Authors: Mandeep Baines, Shruti Bhosale, Vittorio Caggiano, Naman Goyal, Siddharth Goyal, Myle Ott, Benjamin Lefaudeux, Vitaliy Liptchinsky, Mike Rabbat, Sam Sheiffer, Anjali Sridhar, Min Xu
+  Year: 2021
+  URL: https://github.com/facebookresearch/fairscale
+  Raw text: Mandeep Baines, Shruti Bhosale, Vittorio Caggiano, Naman Goyal, Siddharth Goyal, Myle Ott, Benjamin Lefaudeux, Vitaliy Liptchinsky, Mike Rabbat, Sam Sheiffer, Anjali Sridhar, Min Xu#Fairscale: A general purpose modular pytorch library for high performance and large scale training#2021#https://github.com/facebookresearch/fairscale
+
+================================================================================
+REFERENCE: Machine unlearning
+Type: author
+Details: First author mismatch: 'Lucas Bourtoule' vs 'Weijia Shi'
+
+AS CITED:
+  Authors: Lucas Bourtoule, Varun Chandrasekaran, Christopher A Choquette-Choo, Hengrui Jia, Adelin Travers, Baiwu Zhang, David Lie, Nicolas Papernot
+  Year: 2021
+
+CORRECT INFORMATION:
+  Authors: Weijia Shi, Jaechan Lee, Yangsibo Huang, Sadhika Malladi, Jieyu Zhao, Ari Holtzman, Daogao Liu, Luke S. Zettlemoyer, Noah A. Smith, Chiyuan Zhang
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/c757ae0cbff28b65aba40a92ba0d09b0f65a6c27
+
+STANDARD FORMAT:
+  Weijia Shi, Jaechan Lee, Yangsibo Huang et al..
+
+================================================================================
+REFERENCE: Machine unlearning
+Type: year
+Details: Year mismatch: cited as 2021 but actually 2024
+
+AS CITED:
+  Authors: Lucas Bourtoule, Varun Chandrasekaran, Christopher A Choquette-Choo, Hengrui Jia, Adelin Travers, Baiwu Zhang, David Lie, Nicolas Papernot
+  Year: 2021
+
+CORRECT INFORMATION:
+  Year: 2024
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/c757ae0cbff28b65aba40a92ba0d09b0f65a6c27
+
+STANDARD FORMAT:
+  (2024)
+
+================================================================================
+REFERENCE: When is memorization of irrelevant training data necessary for high-accuracy learning?
 Type: year
 Details: Year mismatch: cited as 2021 but actually 2020
 
 AS CITED:
-  Authors: Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-V oss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, Alina Oprea, Colin Raffel
+  Authors: Gavin Brown, Mark Bun, Vitaly Feldman, Adam Smith, Kunal Talwar
   Year: 2021
 
 CORRECT INFORMATION:
   Year: 2020
 
 VERIFIED URL:
-  https://arxiv.org/abs/2012.07805
+  https://arxiv.org/pdf/2012.06421
 
 STANDARD FORMAT:
   (2020)
 
 ================================================================================
-REFERENCE: Defending large language models against jailbreaking attacks through goal prioritization
+REFERENCE: The secret sharer: Evaluating and testing unintended memorization in neural networks
 Type: year
-Details: Year mismatch: cited as 2024 but actually 2023
+Details: Year mismatch: cited as 2019 but actually 2018
 
 AS CITED:
-  Authors: Zhexin Zhang, Junxiao Yang, Pei Ke, Fei Mi, Hongning Wang, Minlie Huang
-  Year: 2024
+  Authors: Nicholas Carlini, Chang Liu, Úlfar Erlingsson, Jernej Kos, Dawn Song
+  Year: 2019
 
 CORRECT INFORMATION:
-  Year: 2023
+  Year: 2018
 
 VERIFIED URL:
-  https://doi.org/10.48550/arXiv.2311.09096
+  https://www.semanticscholar.org/paper/520ec00dc35475e0554dbb72f27bd2eeb6f4191d
 
 STANDARD FORMAT:
-  (2023)
+  (2018)
+
+================================================================================
+REFERENCE: Extracting training data from large language models
+Type: year
+Details: Year mismatch: cited as 2021 but actually 2020
+
+AS CITED:
+  Authors: Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-Voss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, et al
+  Year: 2021
+
+CORRECT INFORMATION:
+  Year: 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/df7d26339adf4eb0c07160947b9d2973c24911ba
+
+STANDARD FORMAT:
+  (2020)
+
+================================================================================
+REFERENCE: Word acquisition in neural language models
+Type: year
+Details: Year mismatch: cited as 2022 but actually 2021
+
+AS CITED:
+  Authors: Tyler A. Chang, Benjamin K. Bergen
+  Year: 2022
+  URL: https://aclanthology.org/2022.tacl-1.1
+
+CORRECT INFORMATION:
+  Year: 2021
+
+VERIFIED URL:
+  https://direct.mit.edu/tacl/article-pdf/doi/10.1162/tacl_a_00444/1986589/tacl_a_00444.pdf
+
+STANDARD FORMAT:
+  (2021)
+
+================================================================================
+REFERENCE: A continual learning survey: Defying forgetting in classification tasks
+Type: author
+Details: First author mismatch: 'Matthias Delange' vs 'Matthias De Lange'
+
+AS CITED:
+  Authors: Matthias Delange, Rahaf Aljundi, Marc Masana, Sarah Parisot, Xu Jia, Ales Leonardis, Greg Slabaugh, Tinne Tuytelaars
+  Year: 2021
+
+CORRECT INFORMATION:
+  Authors: Matthias De Lange, Rahaf Aljundi, Marc Masana, Sarah Parisot, Xu Jia, A. Leonardis, G. Slabaugh, T. Tuytelaars
+
+VERIFIED URL:
+  https://lirias.kuleuven.be/bitstream/123456789/673901/2/4584_author%20version.pdf
+
+STANDARD FORMAT:
+  Matthias De Lange, Rahaf Aljundi, Marc Masana et al..
+
+================================================================================
+REFERENCE: A continual learning survey: Defying forgetting in classification tasks
+Type: year
+Details: Year mismatch: cited as 2021 but actually 2019
+
+AS CITED:
+  Authors: Matthias Delange, Rahaf Aljundi, Marc Masana, Sarah Parisot, Xu Jia, Ales Leonardis, Greg Slabaugh, Tinne Tuytelaars
+  Year: 2021
+
+CORRECT INFORMATION:
+  Year: 2019
+
+VERIFIED URL:
+  https://lirias.kuleuven.be/bitstream/123456789/673901/2/4584_author%20version.pdf
+
+STANDARD FORMAT:
+  (2019)
+
+================================================================================
+REFERENCE: Does Learning Require Memorization? A Short Tale about a Long Tail
+Type: year
+Details: Year mismatch: cited as 1906 but actually 2019
+
+AS CITED:
+  Authors: Vitaly Feldman
+  Year: 1906
+  URL: https://arxiv.org/abs/1906.05271
+
+CORRECT INFORMATION:
+  Year: 2019
+
+VERIFIED URL:
+  https://arxiv.org/abs/1906.05271
+
+STANDARD FORMAT:
+  (2019)
+
+================================================================================
+REFERENCE: spaCy 3: Natural language understanding with Bloom embeddings, convolutional neural networks and incremental parsing
+Type: unverified
+Details: Reference could not be verified
+
+AS CITED:
+  Authors: Matthew Honnibal, Ines Montani
+  Year: 2022
+  Raw text: Matthew Honnibal, Ines Montani#spaCy 3: Natural language understanding with Bloom embeddings, convolutional neural networks and incremental parsing#To appear#2022
+
+================================================================================
+REFERENCE: Scaling Laws for Neural Language Models
+Type: year
+Details: Year mismatch: cited as 2001 but actually 2020
+
+AS CITED:
+  Authors: Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, Dario Amodei
+  Year: 2001
+  URL: https://arxiv.org/abs/2001.08361
+
+CORRECT INFORMATION:
+  Year: 2020
+
+VERIFIED URL:
+  https://arxiv.org/abs/2001.08361
+
+STANDARD FORMAT:
+  (2020)
+
+================================================================================
+REFERENCE: Overcoming catastrophic forgetting in neural networks
+Type: year
+Details: Year mismatch: cited as 2017 but actually 2016
+
+AS CITED:
+  Authors: James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel Veness, Guillaume Desjardins, Andrei A Rusu, Kieran Milan, John Quan, Tiago Ramalho, Agnieszka Grabska-Barwinska, et al
+  Year: 2017
+
+CORRECT INFORMATION:
+  Year: 2016
+
+VERIFIED URL:
+  https://www.pnas.org/content/pnas/114/13/3521.full.pdf
+
+STANDARD FORMAT:
+  (2016)
+
+================================================================================
+REFERENCE: RoBERTa: A Robustly Optimized BERT Pretraining Approach
+Type: year
+Details: Year mismatch: cited as 1907 but actually 2019
+
+AS CITED:
+  Authors: Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Mandar Joshi, Danqi Chen, Omer Levy, Mike Lewis, Luke Zettlemoyer, Veselin Stoyanov
+  Year: 1907
+  URL: https://arxiv.org/abs/1907.11692v1
+
+CORRECT INFORMATION:
+  Year: 2019
+
+VERIFIED URL:
+  https://arxiv.org/abs/1907.11692v1
+
+STANDARD FORMAT:
+  (2019)
+
+================================================================================
+REFERENCE: Pointer sentinel mixture models
+Type: year
+Details: Year mismatch: cited as 2017 but actually 2016
+
+AS CITED:
+  Authors: Stephen Merity, Caiming Xiong, James Bradbury, Richard Socher
+  Year: 2017
+
+CORRECT INFORMATION:
+  Year: 2016
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/efbd381493bb9636f489b965a2034d529cd56bcd
+
+STANDARD FORMAT:
+  (2016)
 
 ================================================================================
