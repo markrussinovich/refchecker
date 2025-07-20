@@ -256,6 +256,100 @@ class NonArxivReferenceChecker:
         
         return True
     
+    def _calculate_title_similarity(self, title1: str, title2: str) -> float:
+        """
+        Calculate similarity between two titles using multiple approaches
+        
+        Args:
+            title1: First title
+            title2: Second title
+            
+        Returns:
+            Similarity score between 0 and 1
+        """
+        if not title1 or not title2:
+            return 0.0
+        
+        # Normalize titles for comparison
+        t1 = title1.lower().strip()
+        t2 = title2.lower().strip()
+        
+        # Exact match
+        if t1 == t2:
+            return 1.0
+        
+        # Check if one is substring of another (original logic)
+        if t1 in t2 or t2 in t1:
+            return 0.95
+        
+        # Split into words and calculate word overlap
+        words1 = set(t1.split())
+        words2 = set(t2.split())
+        
+        # Remove common stop words that don't add much meaning
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+        words1 = words1 - stop_words
+        words2 = words2 - stop_words
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        # Calculate Jaccard similarity (intersection over union)
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+        jaccard_score = intersection / union if union > 0 else 0.0
+        
+        # Calculate word order similarity for key phrases
+        # This helps catch cases like "BLACKSMITH: Rowhammering in the Frequency Domain"
+        # vs "BLACKSMITH: Scalable Rowhammering in the Frequency Domain"
+        key_phrases1 = self._extract_key_phrases(t1)
+        key_phrases2 = self._extract_key_phrases(t2)
+        
+        phrase_matches = 0
+        for phrase in key_phrases1:
+            if phrase in t2:
+                phrase_matches += 1
+        
+        phrase_score = phrase_matches / len(key_phrases1) if key_phrases1 else 0.0
+        
+        # Combine scores with weights
+        # Jaccard similarity gets more weight for overall content
+        # Phrase matching gets weight for maintaining key concepts
+        final_score = (jaccard_score * 0.7) + (phrase_score * 0.3)
+        
+        return min(final_score, 1.0)
+    
+    def _extract_key_phrases(self, title: str) -> List[str]:
+        """
+        Extract key phrases from a title
+        
+        Args:
+            title: Title to extract phrases from
+            
+        Returns:
+            List of key phrases
+        """
+        # Look for patterns like "WORD:" or distinctive multi-word phrases
+        phrases = []
+        
+        # Extract colon-separated main topics (like "BLACKSMITH:")
+        colon_parts = title.split(':')
+        if len(colon_parts) > 1:
+            main_topic = colon_parts[0].strip()
+            if len(main_topic) > 2:  # Avoid single letters
+                phrases.append(main_topic)
+        
+        # Extract quoted phrases
+        import re
+        quoted = re.findall(r'"([^"]*)"', title)
+        phrases.extend([q for q in quoted if len(q) > 2])
+        
+        # Extract capitalized words/phrases (likely important terms)
+        cap_words = re.findall(r'\b[A-Z][A-Z]+\b', title)  # All caps words
+        phrases.extend([w for w in cap_words if len(w) > 2])
+        
+        return phrases
+    
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using Semantic Scholar
@@ -297,6 +391,7 @@ class NonArxivReferenceChecker:
                 logger.warning(f"Could not find paper with DOI: {doi}")
         
         # If we couldn't get the paper by DOI, try searching by title
+        found_title = ''
         if not paper_data and title:
             # Clean up the title
             clean_title = title.replace('\n', ' ').strip()
@@ -306,20 +401,23 @@ class NonArxivReferenceChecker:
             search_results = self.search_paper(clean_title, year)
             
             if search_results:
-                # Find the best match
+                # Find the best match using improved matching algorithm
                 best_match = None
+                best_score = 0
+                
                 for result in search_results:
                     result_title = result.get('title', '')
+                    score = self._calculate_title_similarity(clean_title, result_title)
                     
-                    # Simple string matching for now
-                    # Could be improved with more sophisticated matching
-                    if clean_title.lower() in result_title.lower() or result_title.lower() in clean_title.lower():
+                    # Consider it a match if similarity is above threshold (0.8)
+                    if score > best_score and score >= 0.8:
                         best_match = result
-                        break
+                        best_score = score
+                        found_title = result['title']
                 
                 if best_match:
                     paper_data = best_match
-                    logger.debug(f"Found paper by title: {clean_title}")
+                    logger.debug(f"Found paper by title with similarity {best_score:.2f}: {clean_title}")
                 else:
                     logger.debug(f"No good match found for title: {clean_title}")
             else:
@@ -345,6 +443,14 @@ class NonArxivReferenceChecker:
         if not paper_data:
             logger.debug(f"Could not find matching paper for reference")
             return None, [], None
+        
+        # Check title for exact case insensitive match between found_title and paper title
+        if found_title and title.lower() != found_title.lower():
+            errors.append({
+                'error_type': 'title',
+                'error_details': f"Title mismatch: cited as '{found_title}' but actually '{paper_data.get('title', '')}'",
+                'ref_title_correct': paper_data.get('title', '')
+            })
         
         # Verify authors
         if authors:
