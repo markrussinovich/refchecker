@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"
         }
         
         # Make the request with retries and backoff
@@ -119,7 +119,7 @@ class NonArxivReferenceChecker:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
         
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"
         }
         
         # Make the request with retries and backoff
@@ -256,138 +256,6 @@ class NonArxivReferenceChecker:
         
         return True
     
-    def _calculate_title_similarity(self, title1: str, title2: str) -> float:
-        """
-        Calculate similarity between two titles using multiple approaches
-        
-        Args:
-            title1: First title
-            title2: Second title
-            
-        Returns:
-            Similarity score between 0 and 1
-        """
-        if not title1 or not title2:
-            return 0.0
-        
-        # Normalize titles for comparison
-        t1 = title1.lower().strip()
-        t2 = title2.lower().strip()
-        
-        # Exact match
-        if t1 == t2:
-            return 1.0
-        
-        # Normalize hyphens to handle hyphenation differences
-        # Replace hyphens with spaces and normalize whitespace
-        t1_dehyphenated = re.sub(r'-', ' ', t1)
-        t1_dehyphenated = re.sub(r'\s+', ' ', t1_dehyphenated).strip()
-        t2_dehyphenated = re.sub(r'-', ' ', t2)
-        t2_dehyphenated = re.sub(r'\s+', ' ', t2_dehyphenated).strip()
-        
-        # Check for match after hyphen normalization
-        if t1_dehyphenated == t2_dehyphenated:
-            return 1.0
-        
-        # Additional normalization: remove punctuation for comparison
-        t1_normalized = re.sub(r'[^\w\s]', ' ', t1_dehyphenated)
-        t1_normalized = re.sub(r'\s+', ' ', t1_normalized).strip()
-        t2_normalized = re.sub(r'[^\w\s]', ' ', t2_dehyphenated)
-        t2_normalized = re.sub(r'\s+', ' ', t2_normalized).strip()
-        
-        # Check for match after full normalization
-        if t1_normalized == t2_normalized:
-            return 1.0
-        
-        # Check if one is substring of another (original logic)
-        if t1 in t2 or t2 in t1:
-            return 0.95
-        
-        # Also check substring match with dehyphenated versions
-        if t1_dehyphenated in t2_dehyphenated or t2_dehyphenated in t1_dehyphenated:
-            return 0.95
-        
-        # Check substring match with fully normalized versions
-        if t1_normalized in t2_normalized or t2_normalized in t1_normalized:
-            return 0.95
-        
-        # Split into words and calculate word overlap using fully normalized versions
-        words1 = set(t1_normalized.split())
-        words2 = set(t2_normalized.split())
-        
-        # Remove common stop words that don't add much meaning
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        words1_filtered = words1 - stop_words
-        words2_filtered = words2 - stop_words
-        
-        # If filtering removed too many words, fall back to unfiltered comparison
-        if not words1_filtered or not words2_filtered:
-            words1_filtered = words1
-            words2_filtered = words2
-        
-        if not words1_filtered or not words2_filtered:
-            return 0.0
-        
-        # Calculate Jaccard similarity (intersection over union)
-        intersection = len(words1_filtered.intersection(words2_filtered))
-        union = len(words1_filtered.union(words2_filtered))
-        jaccard_score = intersection / union if union > 0 else 0.0
-        
-        # For titles with high word overlap, boost the score
-        overlap_ratio = intersection / min(len(words1_filtered), len(words2_filtered))
-        if overlap_ratio >= 0.9 and jaccard_score >= 0.7:
-            # High overlap suggests they are likely the same paper
-            return max(0.85, jaccard_score)
-        
-        # Calculate word order similarity for key phrases
-        # This helps catch cases like "BLACKSMITH: Rowhammering in the Frequency Domain"
-        # vs "BLACKSMITH: Scalable Rowhammering in the Frequency Domain"
-        key_phrases1 = self._extract_key_phrases(t1_normalized)
-        
-        phrase_matches = 0
-        for phrase in key_phrases1:
-            if phrase in t2_normalized:
-                phrase_matches += 1
-        
-        phrase_score = phrase_matches / len(key_phrases1) if key_phrases1 else 0.0
-        
-        # Combine scores with weights
-        # Jaccard similarity gets more weight for overall content
-        # Phrase matching gets weight for maintaining key concepts
-        final_score = (jaccard_score * 0.7) + (phrase_score * 0.3)
-        
-        return min(final_score, 1.0)
-    
-    def _extract_key_phrases(self, title: str) -> List[str]:
-        """
-        Extract key phrases from a title
-        
-        Args:
-            title: Title to extract phrases from
-            
-        Returns:
-            List of key phrases
-        """
-        # Look for patterns like "WORD:" or distinctive multi-word phrases
-        phrases = []
-        
-        # Extract colon-separated main topics (like "BLACKSMITH:")
-        colon_parts = title.split(':')
-        if len(colon_parts) > 1:
-            main_topic = colon_parts[0].strip()
-            if len(main_topic) > 2:  # Avoid single letters
-                phrases.append(main_topic)
-        
-        # Extract quoted phrases
-        import re
-        quoted = re.findall(r'"([^"]*)"', title)
-        phrases.extend([q for q in quoted if len(q) > 2])
-        
-        # Extract capitalized words/phrases (likely important terms)
-        cap_words = re.findall(r'\b[A-Z][A-Z]+\b', title)  # All caps words
-        phrases.extend([w for w in cap_words if len(w) > 2])
-        
-        return phrases
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -439,22 +307,12 @@ class NonArxivReferenceChecker:
             search_results = self.search_paper(cleaned_title, year)
             
             if search_results:
-                # Find the best match using improved matching algorithm
-                best_match = None
-                best_score = 0
+                best_match, best_score = find_best_match(search_results, cleaned_title, year)
                 
-                for result in search_results:
-                    result_title = result.get('title', '')
-                    score = self._calculate_title_similarity(cleaned_title, result_title)
-                    
-                    # Consider it a match if similarity is above threshold (0.8)
-                    if score > best_score and score >= 0.8:
-                        best_match = result
-                        best_score = score
-                        found_title = result['title']
-                
-                if best_match:
+                # Consider it a match if similarity is above threshold (0.8)
+                if best_match and best_score >= 0.8:
                     paper_data = best_match
+                    found_title = best_match['title']
                     logger.debug(f"Found paper by title with similarity {best_score:.2f}: {cleaned_title}")
                 else:
                     logger.debug(f"No good match found for title: {cleaned_title}")
@@ -510,6 +368,70 @@ class NonArxivReferenceChecker:
                 'ref_year_correct': paper_year
             })
         
+        # Verify venue
+        cited_venue = reference.get('journal', '') or reference.get('venue', '')
+        paper_venue = paper_data.get('venue') or paper_data.get('journal')
+        
+        if cited_venue and paper_venue:
+            # Normalize venues for comparison - remove year prefixes and normalize case/punctuation
+            def normalize_venue(venue):
+                # Remove year prefixes (e.g., "2012 Brazilian Symposium" -> "Brazilian Symposium")
+                venue_clean = re.sub(r'^\d{4}\s+', '', venue.strip())
+                # Remove ordinal numbers (e.g., "XVIII Workshop" -> "Workshop") 
+                venue_clean = re.sub(r'\b(XVIII|XVII|XVI|XV|XIV|XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+(?:st|nd|rd|th))\s+', '', venue_clean)
+                # Remove acronyms in parentheses (e.g., "ACM Transactions on Computer Systems (TOCS)" -> "ACM Transactions on Computer Systems")
+                venue_clean = re.sub(r'\s*\([A-Z0-9&]+\)\s*', ' ', venue_clean)
+                # Remove "Proceedings of" prefixes
+                venue_clean = re.sub(r'^proceedings\s+of\s+(the\s+)?', '', venue_clean, flags=re.IGNORECASE)
+                # Normalize case and punctuation
+                venue_clean = venue_clean.lower()
+                # Remove extra punctuation and normalize spaces
+                venue_clean = re.sub(r'[^\w\s]', ' ', venue_clean)
+                venue_clean = re.sub(r'\s+', ' ', venue_clean).strip()
+                return venue_clean
+            
+            cited_normalized = normalize_venue(cited_venue)
+            paper_normalized = normalize_venue(paper_venue)
+            
+            # Check if venues are substantially different (not just minor variations)
+            def venues_substantially_different(venue1, venue2):
+                # If one venue is a subset of the other with high overlap, consider them the same
+                words1 = set(venue1.split())
+                words2 = set(venue2.split())
+                
+                # Calculate Jaccard similarity (intersection over union)
+                intersection = len(words1.intersection(words2))
+                union = len(words1.union(words2))
+                
+                if union == 0:
+                    return venue1 != venue2
+                
+                jaccard_similarity = intersection / union
+                
+                # If venues have high word overlap (80%+), consider them the same
+                # This handles cases like "ACM SIGACT-SIGMOD" vs "ACM SIGACT-SIGMOD-SIGART"
+                return jaccard_similarity < 0.8
+            
+            if cited_normalized != paper_normalized and venues_substantially_different(cited_normalized, paper_normalized):
+                errors.append({
+                    'warning_type': 'venue',
+                    'warning_details': f"Venue mismatch: cited as '{cited_venue}' but actually '{paper_venue}'",
+                    'ref_venue_correct': paper_venue
+                })
+        elif not cited_venue and paper_venue:
+            # Original reference has the venue in raw text but not parsed correctly
+            raw_text = reference.get('raw_text', '')
+            if raw_text and '#' in raw_text:
+                # Check if venue might be in the raw text format (author#title#venue#year#url)
+                parts = raw_text.split('#')
+                if len(parts) >= 3 and parts[2].strip():
+                    # Venue is present in raw text but missing from parsed reference
+                    errors.append({
+                        'warning_type': 'venue',
+                        'warning_details': f"Venue missing: should include '{paper_venue}'",
+                        'ref_venue_correct': paper_venue
+                    })
+
         # Verify DOI
         paper_doi = None
         external_ids = paper_data.get('externalIds', {})

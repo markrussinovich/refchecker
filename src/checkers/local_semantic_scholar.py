@@ -37,7 +37,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
 from utils.error_utils import create_author_error, create_year_warning, create_doi_error
-from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors
+from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity
 from utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from utils.url_utils import get_best_available_url
 
@@ -269,23 +269,10 @@ class LocalNonArxivReferenceChecker:
             best_score = 0
             
             for result in title_results:
-                result_title = result.get('title', '').lower()
-                title_lower = title.lower()
+                result_title = result.get('title', '')
                 
-                # Calculate a simple similarity score
-                if title_lower in result_title or result_title in title_lower:
-                    # If one is a substring of the other, it's a good match
-                    score = 0.8
-                else:
-                    # Calculate word overlap
-                    title_words = set(title_lower.split())
-                    result_words = set(result_title.split())
-                    common_words = title_words.intersection(result_words)
-                    
-                    if not title_words or not result_words:
-                        score = 0
-                    else:
-                        score = len(common_words) / max(len(title_words), len(result_words))
+                # Calculate similarity score using utility function
+                score = calculate_title_similarity(title, result_title)
                 
                 # Check author match
                 if authors and result.get('authors'):
@@ -307,11 +294,11 @@ class LocalNonArxivReferenceChecker:
                     best_match = result
             
             # If we found a good match, return it
-            if best_score >= 0.7:
+            if best_score >= 0.8:
                 logger.debug(f"Local DB: Found good title match with score {best_score:.2f}")
                 return best_match
             else:
-                logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold (0.7)")
+                logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold (0.8)")
         
         logger.debug("Local DB: No good match found")
         return None

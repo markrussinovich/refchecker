@@ -4,7 +4,7 @@ RefChecker - Academic Paper Reference Validation Tool
 A comprehensive tool for validating reference accuracy in academic papers.
 """
 
-__version__ = "1.0.9"
+__version__ = "1.1.0"
 __author__ = "RefChecker Team"
 __email__ = "markrussinovich@hotmail.com"
 

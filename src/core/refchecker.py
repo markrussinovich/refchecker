@@ -58,7 +58,7 @@ try:
     from .. import __version__
 except ImportError:
     # Fallback if running as script
-    __version__ = "1.0.9"
+    __version__ = "1.1.0"
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
@@ -1999,12 +1999,80 @@ class ArxivReferenceChecker:
             reference_url: URL of the verified paper (from verification service)
             verified_data: The verified data from the verification service (for corrected formatting)
         """
-        for error in errors:
-            # Determine if this is an error or warning
+        if not errors:
+            return
+            
+        # Consolidate all errors for this reference into a single entry
+        if len(errors) > 1:
+            # Multiple errors - consolidate them
+            error_types = []
+            error_details = []
+            consolidated_entry = None
+            
+            for error in errors:
+                error_type = error.get('error_type') or error.get('warning_type', 'unknown')
+                error_detail = error.get('error_details') or error.get('warning_details', '')
+                error_types.append(error_type)
+                error_details.append(error_detail)
+                
+                # Use the first error as the base for consolidated entry
+                if consolidated_entry is None:
+                    consolidated_entry = {
+                        # Source paper metadata
+                        'source_paper_id': source_paper.get_short_id(),
+                        'source_title': source_paper.title,
+                        'source_authors': ', '.join([author.name for author in source_paper.authors]),
+                        'source_year': source_paper.published.year,
+                        'source_url': f"https://arxiv.org/abs/{source_paper.get_short_id()}",
+                        
+                        # Reference metadata as cited
+                        'ref_paper_id': self.extract_arxiv_id_from_url(reference['url']),
+                        'ref_title': reference.get('title', ''),
+                        'ref_authors_cited': ', '.join(reference['authors']),
+                        'ref_year_cited': reference['year'],
+                        'ref_url_cited': reference['url'],
+                        'ref_raw_text': reference.get('raw_text', ''),
+                        
+                        # Store original reference for formatting corrections
+                        'original_reference': reference
+                    }
+                
+                # Collect correct information from all errors
+                if error.get('ref_authors_correct'):
+                    consolidated_entry['ref_authors_correct'] = error['ref_authors_correct']
+                if error.get('ref_year_correct'):
+                    consolidated_entry['ref_year_correct'] = error['ref_year_correct']
+                if error.get('ref_title_correct'):
+                    consolidated_entry['ref_title_correct'] = error['ref_title_correct']
+                if error.get('ref_url_correct'):
+                    consolidated_entry['ref_url_correct'] = error['ref_url_correct']
+                if error.get('ref_venue_correct'):
+                    consolidated_entry['ref_venue_correct'] = error['ref_venue_correct']
+            
+            # Set consolidated error information
+            consolidated_entry['error_type'] = 'multiple'
+            consolidated_entry['error_details'] = '\n'.join([f"- {detail}" for detail in error_details])
+            
+            # Add verified URL if available
+            if reference_url:
+                consolidated_entry['ref_verified_url'] = reference_url
+            
+            # Generate corrected reference using all available corrections
+            corrected_data = self._extract_corrected_data_from_error(consolidated_entry, verified_data)
+            corrected_format = format_corrected_reference(reference, corrected_data, consolidated_entry)
+            if corrected_format:
+                consolidated_entry['ref_corrected_format'] = corrected_format
+            
+            # Store and write the consolidated entry
+            self.errors.append(consolidated_entry)
+            self.write_error_to_file(consolidated_entry)
+            
+        else:
+            # Single error - handle as before
+            error = errors[0]
             error_type = error.get('error_type') or error.get('warning_type', 'unknown')
             error_details = error.get('error_details') or error.get('warning_details', '')
             
-            # Include unverified references in the output
             error_entry = {
                 # Source paper metadata
                 'source_paper_id': source_paper.get_short_id(),
@@ -2034,8 +2102,12 @@ class ArxivReferenceChecker:
                 error_entry['ref_authors_correct'] = error.get('ref_authors_correct', '')
             elif error_type == 'year':
                 error_entry['ref_year_correct'] = error.get('ref_year_correct', '')
+            elif error_type == 'title':
+                error_entry['ref_title_correct'] = error.get('ref_title_correct', '')
             elif error_type == 'url':
                 error_entry['ref_url_correct'] = error.get('ref_url_correct', '')
+            elif error_type == 'venue':
+                error_entry['ref_venue_correct'] = error.get('ref_venue_correct', '')
             
             # Add verified URL if available (from verification service)
             if reference_url:
@@ -2155,15 +2227,20 @@ class ArxivReferenceChecker:
         elif verified_data and verified_data.get('url'):
             corrected_data['url'] = verified_data['url']
             
+        # Add venue information
+        if error.get('ref_venue_correct'):
+            corrected_data['venue'] = error['ref_venue_correct']
+        elif verified_data:
+            if verified_data.get('venue'):
+                corrected_data['venue'] = verified_data['venue']
+            elif verified_data.get('journal'):
+                corrected_data['journal'] = verified_data['journal']
+        
         # Add DOI if available from verified data
         if verified_data:
             external_ids = verified_data.get('externalIds', {})
             if external_ids and external_ids.get('DOI'):
                 corrected_data['doi'] = external_ids['DOI']
-                
-            # Add journal information if available
-            if verified_data.get('journal'):
-                corrected_data['journal'] = verified_data['journal']
                 
         return corrected_data
     

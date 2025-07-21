@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "refchecker"
-version = "1.0.9"
+version = "1.1.0"
 description = "A comprehensive tool for validating reference accuracy in academic papers"
 readme = "README.md"
 license = "MIT"

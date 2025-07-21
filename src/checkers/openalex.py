@@ -32,7 +32,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from utils.text_utils import normalize_text, clean_title_basic
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -423,41 +423,10 @@ class OpenAlexReferenceChecker:
             search_results = self.search_works(cleaned_title, year)
             
             if search_results:
-                # Find the best match
-                best_match = None
-                best_score = 0
-                
-                for result in search_results:
-                    result_title = result.get('title') or result.get('display_name', '')
-                    
-                    # Calculate similarity score
-                    title_lower = cleaned_title.lower()
-                    result_title_lower = result_title.lower()
-                    
-                    score = 0
-                    if title_lower == result_title_lower:
-                        score = 1.0
-                    elif title_lower in result_title_lower or result_title_lower in title_lower:
-                        score = 0.8
-                    else:
-                        # Simple word overlap
-                        title_words = set(title_lower.split())
-                        result_words = set(result_title_lower.split())
-                        if title_words and result_words:
-                            overlap = len(title_words.intersection(result_words))
-                            score = overlap / max(len(title_words), len(result_words))
-                    
-                    # Bonus for year match
-                    result_year = result.get('publication_year')
-                    if year and result_year and year == result_year:
-                        score += 0.1
-                    
-                    if score > best_score:
-                        best_score = score
-                        best_match = result
+                best_match, best_score = find_best_match(search_results, cleaned_title, year)
                 
                 # Use match if score is good enough
-                if best_match and best_score >= 0.6:
+                if best_match and best_score >= 0.8:
                     work_data = best_match
                     logger.debug(f"Found work by title in OpenAlex with score {best_score:.2f}: {cleaned_title}")
                 else:

@@ -6,6 +6,7 @@ Text processing utilities for ArXiv Reference Checker
 import re
 import logging
 import unicodedata
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -764,7 +765,7 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     
     # Get the corrected information
     correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
     correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
@@ -789,9 +790,9 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     if correct_title:
         lines.append(f"  title = {{{correct_title}}},")
     
-    # Add journal field - prefer original if available, otherwise use corrected data
-    original_journal = original_reference.get('journal', '')
-    corrected_journal = corrected_data.get('journal', '') if corrected_data else ''
+    # Add journal/venue field - prefer original if available, otherwise use corrected data
+    original_journal = original_reference.get('journal', '') or original_reference.get('booktitle', '')
+    corrected_journal = corrected_data.get('journal', '') or corrected_data.get('venue', '') if corrected_data else ''
     journal_to_use = original_journal or corrected_journal
     
     if journal_to_use and bibtex_type in ['article', 'inproceedings', 'conference']:
@@ -827,9 +828,10 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     
     # Get the corrected information
     correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
+    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
     
     # Get original bibitem details
     bibitem_key = original_reference.get('bibitem_key', 'unknown')
@@ -853,6 +855,9 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     if correct_title:
         citation_parts.append(f"\\textit{{{correct_title}}}")
     
+    if correct_venue:
+        citation_parts.append(f"In \\textit{{{correct_venue}}}")
+    
     if correct_url:
         citation_parts.append(f"\\url{{{correct_url}}}")
     
@@ -866,9 +871,10 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     
     # Get the corrected information
     correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
+    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
     
     # Build a standard citation format
     citation_parts = []
@@ -882,7 +888,205 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     if correct_title:
         citation_parts.append(f'"{correct_title}"')
     
+    if correct_venue:
+        citation_parts.append(f"In {correct_venue}")
+    
     if correct_url:
-        citation_parts.append(f"Available at: {correct_url}")
+        citation_parts.append(f"{correct_url}")
     
     return '. '.join(citation_parts) + '.'
+
+
+def calculate_title_similarity(title1: str, title2: str) -> float:
+    """
+    Calculate similarity between two titles using multiple approaches
+    
+    Args:
+        title1: First title
+        title2: Second title
+        
+    Returns:
+        Similarity score between 0 and 1
+    """
+    if not title1 or not title2:
+        return 0.0
+    
+    # Normalize titles for comparison
+    t1 = title1.lower().strip()
+    t2 = title2.lower().strip()
+    
+    # Exact match
+    if t1 == t2:
+        return 1.0
+    
+    # Normalize hyphens to handle hyphenation differences
+    # Replace hyphens with spaces and normalize whitespace
+    t1_dehyphenated = re.sub(r'-', ' ', t1)
+    t1_dehyphenated = re.sub(r'\s+', ' ', t1_dehyphenated).strip()
+    t2_dehyphenated = re.sub(r'-', ' ', t2)
+    t2_dehyphenated = re.sub(r'\s+', ' ', t2_dehyphenated).strip()
+    
+    # Check for match after hyphen normalization
+    if t1_dehyphenated == t2_dehyphenated:
+        return 1.0
+    
+    # Additional normalization: remove punctuation for comparison
+    t1_normalized = re.sub(r'[^\w\s]', ' ', t1_dehyphenated)
+    t1_normalized = re.sub(r'\s+', ' ', t1_normalized).strip()
+    t2_normalized = re.sub(r'[^\w\s]', ' ', t2_dehyphenated)
+    t2_normalized = re.sub(r'\s+', ' ', t2_normalized).strip()
+    
+    # Check for match after full normalization
+    if t1_normalized == t2_normalized:
+        return 1.0
+    
+    # Check if one is substring of another, but require substantial overlap
+    # to avoid false positives like "Rust programming language" vs "RustBelt: securing..."
+    shorter_title = t1 if len(t1) < len(t2) else t2
+    longer_title = t2 if len(t1) < len(t2) else t1
+    
+    if shorter_title in longer_title:
+        # Calculate what percentage of the shorter title matches
+        overlap_ratio = len(shorter_title) / len(longer_title)
+        # Only return high score if substantial portion of longer title matches
+        if overlap_ratio >= 0.8:  # At least 80% overlap required
+            return 0.95
+        else:
+            # Partial substring match - use lower score
+            return 0.7
+    
+    # Also check substring match with dehyphenated versions
+    shorter_dehyp = t1_dehyphenated if len(t1_dehyphenated) < len(t2_dehyphenated) else t2_dehyphenated
+    longer_dehyp = t2_dehyphenated if len(t1_dehyphenated) < len(t2_dehyphenated) else t1_dehyphenated
+    
+    if shorter_dehyp in longer_dehyp:
+        overlap_ratio = len(shorter_dehyp) / len(longer_dehyp)
+        if overlap_ratio >= 0.8:
+            return 0.95
+        else:
+            return 0.7
+    
+    # Check substring match with fully normalized versions
+    shorter_norm = t1_normalized if len(t1_normalized) < len(t2_normalized) else t2_normalized
+    longer_norm = t2_normalized if len(t1_normalized) < len(t2_normalized) else t1_normalized
+    
+    if shorter_norm in longer_norm:
+        overlap_ratio = len(shorter_norm) / len(longer_norm)
+        if overlap_ratio >= 0.8:
+            return 0.95
+        else:
+            return 0.7
+    
+    # Split into words and calculate word overlap using fully normalized versions
+    words1 = set(t1_normalized.split())
+    words2 = set(t2_normalized.split())
+    
+    # Remove common stop words that don't add much meaning
+    stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+    words1_filtered = words1 - stop_words
+    words2_filtered = words2 - stop_words
+    
+    # If filtering removed too many words, fall back to unfiltered comparison
+    if not words1_filtered or not words2_filtered:
+        words1_filtered = words1
+        words2_filtered = words2
+    
+    if not words1_filtered or not words2_filtered:
+        return 0.0
+    
+    # Calculate Jaccard similarity (intersection over union)
+    intersection = len(words1_filtered.intersection(words2_filtered))
+    union = len(words1_filtered.union(words2_filtered))
+    jaccard_score = intersection / union if union > 0 else 0.0
+    
+    # For titles with high word overlap, boost the score
+    overlap_ratio = intersection / min(len(words1_filtered), len(words2_filtered))
+    if overlap_ratio >= 0.9 and jaccard_score >= 0.7:
+        # High overlap suggests they are likely the same paper
+        return max(0.85, jaccard_score)
+    
+    # Calculate word order similarity for key phrases
+    # This helps catch cases like "BLACKSMITH: Rowhammering in the Frequency Domain"
+    # vs "BLACKSMITH: Scalable Rowhammering in the Frequency Domain"
+    key_phrases1 = _extract_key_phrases(t1_normalized)
+    
+    phrase_matches = 0
+    for phrase in key_phrases1:
+        if phrase in t2_normalized:
+            phrase_matches += 1
+    
+    phrase_score = phrase_matches / len(key_phrases1) if key_phrases1 else 0.0
+    
+    # Combine scores with weights
+    # Jaccard similarity gets more weight for overall content
+    # Phrase matching gets weight for maintaining key concepts
+    final_score = (jaccard_score * 0.7) + (phrase_score * 0.3)
+    
+    return min(final_score, 1.0)
+
+
+def _extract_key_phrases(title: str) -> List[str]:
+    """
+    Extract key phrases from a title
+    
+    Args:
+        title: Title to extract phrases from
+        
+    Returns:
+        List of key phrases
+    """
+    # Look for patterns like "WORD:" or distinctive multi-word phrases
+    phrases = []
+    
+    # Extract colon-separated main topics (like "BLACKSMITH:")
+    colon_parts = title.split(':')
+    if len(colon_parts) > 1:
+        main_topic = colon_parts[0].strip()
+        if len(main_topic) > 2:  # Avoid single letters
+            phrases.append(main_topic)
+    
+    # Extract quoted phrases
+    quoted = re.findall(r'"([^"]*)"', title)
+    phrases.extend([q for q in quoted if len(q) > 2])
+    
+    # Extract capitalized words/phrases (likely important terms)
+    cap_words = re.findall(r'\b[A-Z][A-Z]+\b', title)  # All caps words
+    phrases.extend([w for w in cap_words if len(w) > 2])
+    
+    return phrases
+
+
+def find_best_match(search_results, cleaned_title, year=None):
+    """
+    Find the best match from search results using similarity scoring
+    
+    Args:
+        search_results: List of search result dictionaries
+        cleaned_title: The cleaned title to match against
+        year: Optional year for bonus scoring
+        
+    Returns:
+        Tuple of (best_match, best_score) or (None, 0) if no good match
+    """
+    if not search_results:
+        return None, 0
+    
+    best_match = None
+    best_score = 0
+    
+    for result in search_results:
+        result_title = result.get('title') or result.get('display_name', '')
+        
+        # Calculate similarity score using utility function
+        score = calculate_title_similarity(cleaned_title, result_title)
+        
+        # Bonus for year match
+        result_year = result.get('publication_year')
+        if year and result_year and year == result_year:
+            score += 0.1
+        
+        if score > best_score:
+            best_score = score
+            best_match = result
+    
+    return best_match, best_score
