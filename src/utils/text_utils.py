@@ -97,30 +97,52 @@ def clean_author_name(author):
     
     return author
 
-def clean_title(title):
+def clean_title_basic(title):
     """
-    Clean and normalize a paper title
+    Basic title cleaning: remove newlines, normalize whitespace, and remove trailing punctuation.
+    Used for title extraction where we want to preserve most content.
     
     Args:
         title: Title string
         
     Returns:
-        Cleaned title
+        Cleaned title with basic formatting
     """
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
+    # Clean up newlines and normalize whitespace
+    title = title.replace('\n', ' ').strip()
+    title = re.sub(r'\s+', ' ', title)
+    
+    # Remove trailing punctuation
+    title = re.sub(r'[.,;:!?]+$', '', title)
+    
+    return title
+
+
+def clean_title(title):
+    """
+    Full title cleaning and normalization including quote removal, hyphen fixes, and year removal.
+    Used for final title processing and comparison.
+    
+    Args:
+        title: Title string
+        
+    Returns:
+        Fully cleaned and normalized title
+    """
+    if not isinstance(title, str):
+        return str(title) if title is not None else ''
+    
+    # Start with basic cleaning
+    title = clean_title_basic(title)
+    
     # Fix hyphenated words broken across lines (e.g., "jailbreak- ing" -> "jailbreaking")
     title = re.sub(r'([a-z])-\s+([a-z])', r'\1\2', title)
     
-    # Remove extra whitespace
-    title = re.sub(r'\s+', ' ', title).strip()
-    
     # Remove quotes
     title = title.strip('"\'')
-    
-    # Remove trailing punctuation except periods
-    title = re.sub(r'[,;:!?]+$', '', title)
     
     # Remove year information from title
     title = remove_year_from_title(title)
@@ -273,6 +295,7 @@ def normalize_paper_title(title: str) -> str:
     normalized = re.sub(r'[^a-z0-9]', '', normalized)
     
     return normalized
+
 
 
 def is_name_match(name1: str, name2: str) -> bool:

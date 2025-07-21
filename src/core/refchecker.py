@@ -43,7 +43,7 @@ import sys
 import json
 import random
 from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
-from utils.text_utils import (clean_author_name, clean_title,  
+from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
@@ -564,7 +564,7 @@ class ArxivReferenceChecker:
                 
             elif response.status_code == 429:
                 self._api_performance['semantic_scholar']['rate_limited'] += 1
-                logger.warning(f"Rate limited by Semantic Scholar API for {arxiv_id}")
+                logger.debug(f"Rate limited by Semantic Scholar API for {arxiv_id}")
                 return None
             else:
                 self._api_performance['semantic_scholar']['failed'] += 1
@@ -1082,7 +1082,7 @@ class ArxivReferenceChecker:
         legal_case_match = re.search(r'^(\d{4})\.\s+([^.]+?)\s+https?://', cleaned_ref)
         if legal_case_match:
             year = legal_case_match.group(1)
-            title = legal_case_match.group(2).strip()
+            title = clean_title_basic(legal_case_match.group(2))
             return [year], title
             
         # Case 2: References with year at start like "2022. Title AuthorName1, AuthorName2, AuthorName3 2022"
@@ -1098,7 +1098,7 @@ class ArxivReferenceChecker:
             if ',' in potential_authors and len(potential_title.split()) > 3:
                 # Extract authors from the authors text
                 authors = self.extract_authors_list(potential_authors)
-                return authors, potential_title
+                return authors, clean_title_basic(potential_title)
         
         # Case 2b: References with year at start like "2021. Title Author1, Author2, Author3"
         # More flexible pattern to handle various formats
@@ -1111,23 +1111,23 @@ class ArxivReferenceChecker:
             if authors_text:
                 # Extract authors from the authors text
                 authors = self.extract_authors_list(authors_text)
-                return authors, title
+                return authors, clean_title_basic(title)
             else:
                 # If we can't extract authors, fall back to using year as author
-                return [year], title
+                return [year], clean_title_basic(title)
         
         # Case 2c: Simple year at start like "1976. Title"
         simple_year_start_match = re.search(r'^(\d{4})\.\s+([^.]+?)(?:\.\s+https?://|\.\s*$)', cleaned_ref)
         if simple_year_start_match:
             year = simple_year_start_match.group(1)
-            title = simple_year_start_match.group(2).strip()
+            title = clean_title_basic(simple_year_start_match.group(2))
             return [year], title
         
         # Case 3: Legal cases with reference number and year like "[1]1976. Title"
         legal_case_with_ref_match = re.search(r'^\[\d+\](\d{4})\.\s+([^.]+?)(?:\.\s+https?://|\.\s*$)', cleaned_ref)
         if legal_case_with_ref_match:
             year = legal_case_with_ref_match.group(1)
-            title = legal_case_with_ref_match.group(2).strip()
+            title = clean_title_basic(legal_case_with_ref_match.group(2))
             return [year], title
         
         # Normalize spacing around periods
@@ -1330,7 +1330,7 @@ class ArxivReferenceChecker:
         alexander_street_match = re.search(r'Alexander Street Press \(Ed\.\)\.\s+(\d{4})\.\s+([^.]+?)(?:\.\s+Alexander Street Press|\.\s*$)', cleaned_ref)
         if alexander_street_match:
             year = alexander_street_match.group(1)
-            title = alexander_street_match.group(2).strip()
+            title = clean_title_basic(alexander_street_match.group(2))
             return ["Alexander Street Press (Ed.)"], title
             
         # Case 4: References with incomplete author names like "Alan S." and "Tara F."
@@ -1338,7 +1338,7 @@ class ArxivReferenceChecker:
         if incomplete_author_match:
             author = incomplete_author_match.group(1).strip()
             year = incomplete_author_match.group(2)
-            title = incomplete_author_match.group(3).strip()
+            title = clean_title_basic(incomplete_author_match.group(3))
             return [author], title
             
         # Case 5: References with complete author lists but incomplete titles
@@ -1346,7 +1346,7 @@ class ArxivReferenceChecker:
         if complete_author_incomplete_title_match:
             authors_text = complete_author_incomplete_title_match.group(1).strip()
             year = complete_author_incomplete_title_match.group(2)
-            title = complete_author_incomplete_title_match.group(3).strip()
+            title = clean_title_basic(complete_author_incomplete_title_match.group(3))
             authors = self.extract_authors_list(authors_text)
             if authors and title:
                 return authors, title
@@ -2725,7 +2725,7 @@ class ArxivReferenceChecker:
                     authors, title = extracted_data
                 else:
                     authors, title = self.extract_authors_title_fallback(ref)
-                title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                title = clean_title(title) if title else ""
                 if not authors and arxiv_url:
                     authors = ["Unknown Author"]
                 final_authors = []
@@ -2812,7 +2812,7 @@ class ArxivReferenceChecker:
                         authors, title = extracted_data
                     else:
                         authors, title = self.extract_authors_title_fallback(ref)
-                    title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                    title = clean_title(title) if title else ""
                     is_url_reference = False
                     for author in authors:
                         if isinstance(author, dict) and author.get('is_url_reference', False):
@@ -2842,7 +2842,7 @@ class ArxivReferenceChecker:
                         authors, title = extracted_data
                     else:
                         authors, title = self.extract_authors_title_fallback(ref)
-                    title = re.sub(r'\s+', ' ', title).strip() if title else ""
+                    title = clean_title(title) if title else ""
                     year = None
                     end_year_match = re.search(r',\s+((19|20)\d{2})\s*\.?\s*$', ref)
                     if end_year_match:
@@ -3012,20 +3012,20 @@ class ArxivReferenceChecker:
                 logger.debug(f"1-part URL format - URL: '{text}'")
             else:
                 # Simple title
-                title = text
+                title = clean_title_basic(text)
                 authors = 'Unknown Author'
                 logger.debug(f"1-part title format - Title: '{title}'")
         elif len(parts) == 2:
             # Format: Authors # Title
             author_text = parts[0].strip()
-            title = parts[1].strip()
+            title = clean_title_basic(parts[1].strip())
             logger.debug(f"2-part format - Authors: '{author_text}', Title: '{title}'")
             # Parse authors
             authors = self._clean_llm_author_text(author_text)
         elif len(parts) == 3:
             # Format: Authors # Title # Year (most common)
             author_text = parts[0].strip()
-            title = parts[1].strip()
+            title = clean_title_basic(parts[1].strip())
             year_part = parts[2].strip()
             logger.debug(f"3-part format - Authors: '{author_text}', Title: '{title}', Year part: '{year_part}'")
             # Parse authors
@@ -3033,7 +3033,7 @@ class ArxivReferenceChecker:
         elif len(parts) == 4:
             # Format: Authors # Title # Venue # Year
             author_text = parts[0].strip()
-            title = parts[1].strip()
+            title = clean_title_basic(parts[1].strip())
             venue = parts[2].strip()
             year_part = parts[3].strip()
             logger.debug(f"4-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year part: '{year_part}'")
@@ -3043,7 +3043,7 @@ class ArxivReferenceChecker:
         elif len(parts) == 5:
             # Format: Authors # Title # Venue # Pages/Details # Publisher/Year
             author_text = parts[0].strip()
-            title = parts[1].strip()
+            title = clean_title_basic(parts[1].strip())
             venue = parts[2].strip()
             pages_details = parts[3].strip()
             year_part = parts[4].strip()
@@ -3099,7 +3099,7 @@ class ArxivReferenceChecker:
                     title = title_match.group(1)
         
         # Clean up title
-        title = re.sub(r'\s+', ' ', title).strip() if title else ""
+        title = clean_title(title) if title else ""
         title = title.rstrip(',').strip()
         
         # Clean up venue
@@ -3190,7 +3190,7 @@ class ArxivReferenceChecker:
             authors, title = self.extract_authors_title_fallback(ref_text)
         
         # Clean up
-        title = re.sub(r'\s+', ' ', title).strip() if title else ""
+        title = clean_title(title) if title else ""
         if not authors:
             authors = ["Unknown Author"]
         

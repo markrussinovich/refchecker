@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text
+from utils.text_utils import normalize_text, clean_title_basic
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -394,11 +394,10 @@ class NonArxivReferenceChecker:
         found_title = ''
         if not paper_data and title:
             # Clean up the title
-            clean_title = title.replace('\n', ' ').strip()
-            clean_title = re.sub(r'\s+', ' ', clean_title)
+            cleaned_title = clean_title_basic(title)
             
             # Search for the paper
-            search_results = self.search_paper(clean_title, year)
+            search_results = self.search_paper(cleaned_title, year)
             
             if search_results:
                 # Find the best match using improved matching algorithm
@@ -407,7 +406,7 @@ class NonArxivReferenceChecker:
                 
                 for result in search_results:
                     result_title = result.get('title', '')
-                    score = self._calculate_title_similarity(clean_title, result_title)
+                    score = self._calculate_title_similarity(cleaned_title, result_title)
                     
                     # Consider it a match if similarity is above threshold (0.8)
                     if score > best_score and score >= 0.8:
@@ -417,11 +416,11 @@ class NonArxivReferenceChecker:
                 
                 if best_match:
                     paper_data = best_match
-                    logger.debug(f"Found paper by title with similarity {best_score:.2f}: {clean_title}")
+                    logger.debug(f"Found paper by title with similarity {best_score:.2f}: {cleaned_title}")
                 else:
-                    logger.debug(f"No good match found for title: {clean_title}")
+                    logger.debug(f"No good match found for title: {cleaned_title}")
             else:
-                logger.debug(f"No papers found for title: {clean_title}")
+                logger.debug(f"No papers found for title: {cleaned_title}")
         
         # If we still couldn't find the paper, try searching by the raw text
         if not paper_data and raw_text:

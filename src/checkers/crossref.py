@@ -30,7 +30,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from utils.text_utils import normalize_text
+from utils.text_utils import normalize_text, clean_title_basic
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -429,11 +429,10 @@ class CrossRefReferenceChecker:
         # If we couldn't get the work by DOI, try searching by title
         if not work_data and title:
             # Clean up the title
-            clean_title = title.replace('\n', ' ').strip()
-            clean_title = re.sub(r'\s+', ' ', clean_title)
+            cleaned_title = clean_title_basic(title)
             
             # Search for the work
-            search_results = self.search_works(clean_title, year)
+            search_results = self.search_works(cleaned_title, year)
             
             if search_results:
                 # Find the best match
@@ -449,7 +448,7 @@ class CrossRefReferenceChecker:
                     result_title = result_titles[0] if isinstance(result_titles, list) else str(result_titles)
                     
                     # Calculate similarity score
-                    title_lower = clean_title.lower()
+                    title_lower = cleaned_title.lower()
                     result_title_lower = result_title.lower()
                     
                     score = 0
@@ -477,11 +476,11 @@ class CrossRefReferenceChecker:
                 # Use match if score is good enough
                 if best_match and best_score >= 0.6:
                     work_data = best_match
-                    logger.debug(f"Found work by title in CrossRef with score {best_score:.2f}: {clean_title}")
+                    logger.debug(f"Found work by title in CrossRef with score {best_score:.2f}: {cleaned_title}")
                 else:
                     logger.debug(f"No good title match found in CrossRef (best score: {best_score:.2f})")
             else:
-                logger.debug(f"No works found for title in CrossRef: {clean_title}")
+                logger.debug(f"No works found for title in CrossRef: {cleaned_title}")
         
         # If we still couldn't find the work, return no verification
         if not work_data:
