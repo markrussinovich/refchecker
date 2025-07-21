@@ -540,6 +540,7 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         """Start server using standalone script"""
         import subprocess
         import torch
+        import os
         
         # Find the standalone launcher script - support both development and PyPI installs
         script_path = self._find_vllm_launcher_script()
@@ -549,9 +550,17 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             "python", script_path,
             "--model", self.model_name,
             "--port", "8000",
-            "--tensor-parallel-size", str(tensor_parallel_size),
-            "--daemon"
+            "--tensor-parallel-size", str(tensor_parallel_size)
         ]
+        
+        # Add daemon flag unless explicitly disabled via environment variable or debug mode
+        # Check if we're in debug mode by examining the current logging level
+        import logging
+        current_logger = logging.getLogger()
+        is_debug_mode = current_logger.getEffectiveLevel() <= logging.DEBUG
+        
+        if not (os.getenv('VLLM_NO_DAEMON', '').lower() in ('1', 'true', 'yes') or is_debug_mode):
+            cmd.append("--daemon")
         
         # Add memory optimization for smaller GPUs
         if torch.cuda.is_available():
@@ -564,29 +573,56 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         
         logger.info(f"Starting vLLM server via standalone launcher: {' '.join(cmd)}")
         
-        # Start the launcher (which will start the server as daemon)
-        # Use a longer timeout for model download/loading
-        launcher_timeout = 120  # 2 minutes for launcher to complete
+        # Check if daemon mode is disabled
+        daemon_mode = "--daemon" in cmd
         
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=launcher_timeout)
+        if daemon_mode:
+            # Daemon mode: start launcher and wait for it to complete
+            launcher_timeout = 120  # 2 minutes for launcher to complete
             
-            if result.returncode == 0:
-                logger.info("vLLM server launcher completed successfully")
-                logger.debug(f"Launcher stdout: {result.stdout}")
-                # The actual server process is running as daemon, we don't have direct handle
-                self.server_process = None  # We don't manage the daemon directly
-                return True
-            else:
-                logger.error(f"vLLM server launcher failed with return code {result.returncode}")
-                logger.error(f"Launcher stderr: {result.stderr}")
-                logger.error(f"Launcher stdout: {result.stdout}")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=launcher_timeout)
+                
+                if result.returncode == 0:
+                    logger.info("vLLM server launcher completed successfully")
+                    logger.debug(f"Launcher stdout: {result.stdout}")
+                    # The actual server process is running as daemon, we don't have direct handle
+                    self.server_process = None  # We don't manage the daemon directly
+                    return True
+                else:
+                    logger.error(f"vLLM server launcher failed with return code {result.returncode}")
+                    logger.error(f"Launcher stderr: {result.stderr}")
+                    logger.error(f"Launcher stdout: {result.stdout}")
+                    return False
+                    
+            except subprocess.TimeoutExpired:
+                logger.error(f"vLLM server launcher timed out after {launcher_timeout} seconds")
+                logger.error("This may happen if the model is large and takes time to download/load")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            logger.error(f"vLLM server launcher timed out after {launcher_timeout} seconds")
-            logger.error("This may happen if the model is large and takes time to download/load")
-            return False
+        else:
+            # Non-daemon mode: start launcher and let it stream output
+            logger.info("Starting vLLM server in non-daemon mode (output will be visible)")
+            try:
+                # Start the launcher without capturing output so logs are visible
+                process = subprocess.Popen(cmd, stdout=None, stderr=None)
+                self.server_process = process
+                
+                # Give the server a moment to start
+                import time
+                time.sleep(5)
+                
+                # Check if the process is still running (hasn't crashed immediately)
+                if process.poll() is None:
+                    logger.info("vLLM server launcher started successfully in foreground mode")
+                    return True
+                else:
+                    logger.error(f"vLLM server launcher exited immediately with code {process.returncode}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Failed to start vLLM server launcher: {e}")
+                return False
     
     def _wait_for_server(self, timeout=300):
         """Wait for vLLM server to be ready"""

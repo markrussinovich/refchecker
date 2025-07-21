@@ -116,7 +116,7 @@ class ArxivReferenceChecker:
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
             if enable_parallel:
-                logger.info("Using thread-safe database checker for parallel processing")
+                logger.debug("Using thread-safe database checker for parallel processing")
                 self.non_arxiv_checker = ThreadSafeLocalChecker(db_path=db_path)
             else:
                 self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
@@ -144,7 +144,7 @@ class ArxivReferenceChecker:
         
         # Log parallel configuration
         if self.enable_parallel:
-            logger.info(f"Parallel processing enabled with {self.max_workers} workers")
+            logger.debug(f"Parallel processing enabled with {self.max_workers} workers")
         else:
             logger.info("Sequential processing mode enabled")
         

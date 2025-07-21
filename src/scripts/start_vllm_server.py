@@ -65,7 +65,7 @@ def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_l
             )
         return process
     else:
-        # For non-daemon mode, keep stdout/stderr for monitoring
+        # For non-daemon mode, keep stdout/stderr for monitoring with real-time streaming
         process = subprocess.Popen(
             cmd,
             env=clean_env,
@@ -73,7 +73,8 @@ def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_l
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=0,  # Unbuffered for real-time output
+            universal_newlines=True
         )
         return process
 
@@ -107,9 +108,9 @@ def main():
         print("Press Ctrl+C to stop...")
         
         try:
-            # Stream output
+            # Stream output with immediate flushing
             for line in process.stdout:
-                print(line.rstrip())
+                print(line.rstrip(), flush=True)
         except KeyboardInterrupt:
             print("\nStopping vLLM server...")
             process.terminate()
