@@ -91,10 +91,7 @@ class OpenAlexReferenceChecker:
         
         # Make the request with retries and backoff
         for attempt in range(self.max_retries):
-            try:
-                # Add delay to respect rate limits
-                time.sleep(self.request_delay)
-                
+            try:            
                 response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
                 
                 # Check for rate limiting (OpenAlex returns 429 for rate limits)

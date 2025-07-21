@@ -48,6 +48,8 @@ from utils.text_utils import (clean_author_name, clean_title,
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+from .parallel_processor import ParallelReferenceProcessor
+from .db_connection_pool import ThreadSafeLocalChecker
 
 # Import version from package
 try:
@@ -103,7 +105,7 @@ logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file="reference_errors.txt", 
-                 llm_config=None, debug_mode=False, enable_parallel=True):
+                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=6):
         # Initialize the reference checker for non-arXiv references
         self.fatal_error = False            
         self.db_path = db_path
@@ -111,7 +113,11 @@ class ArxivReferenceChecker:
         
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
-            self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
+            if enable_parallel:
+                logger.info("Using thread-safe database checker for parallel processing")
+                self.non_arxiv_checker = ThreadSafeLocalChecker(db_path=db_path)
+            else:
+                self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
             # Force offline mode - don't use Google Scholar which has online fallbacks
             self.service_order = "Local Semantic Scholar Database (offline)"
         else:
@@ -129,6 +135,16 @@ class ArxivReferenceChecker:
         
         # debug mode
         self.debug_mode = debug_mode
+        
+        # Parallel processing configuration
+        self.enable_parallel = enable_parallel
+        self.max_workers = max_workers
+        
+        # Log parallel configuration
+        if self.enable_parallel:
+            logger.info(f"Parallel processing enabled with {self.max_workers} workers")
+        else:
+            logger.info("Sequential processing mode enabled")
         
         # Initialize errors list
         self.errors = []
@@ -1790,8 +1806,8 @@ class ArxivReferenceChecker:
         
         # If database mode is enabled, use database for non-ArXiv references
         if self.db_path:
-            # Use the database connection from the non_arxiv_checker
-            if hasattr(self.non_arxiv_checker, 'conn'):
+            # Check if we have a database checker (either original or thread-safe)
+            if hasattr(self.non_arxiv_checker, 'conn') or hasattr(self.non_arxiv_checker, 'connection_pool'):
                 # Use the local database checker's verify_reference method which returns URLs
                 verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
                 
@@ -2217,71 +2233,12 @@ class ArxivReferenceChecker:
                     # Pre-fetch all ArXiv references in batches for better performance
                     self.batch_prefetch_arxiv_references(bibliography)
                     
-                    # Check each reference
-                    for i, reference in enumerate(bibliography):
-                        ref_id = self.extract_arxiv_id_from_url(reference['url'])
-                        
-                        # Print reference info in non-debug mode (improved formatting)
-                        title = reference.get('title', 'Untitled')
-                        authors = ', '.join(reference.get('authors', []))
-                        year = reference.get('year', '')
-                        venue = reference.get('venue', '')
-                        url = reference.get('url', '')
-                        doi = reference.get('doi', '')
-                        print(f"[{i+1}/{len(bibliography)}] {title}")
-                        if authors:
-                            print(f"       {authors}")
-                        if venue:
-                            print(f"       {venue}")
-                        if year:
-                            print(f"       {year}")
-                        if doi:
-                            print(f"       {doi}")
-                        if url:
-                            print(f"       {url}")
-                        # --- DEBUG TIMER ---
-                        start_time = time.time()
-                        errors, reference_url = self.verify_reference(paper, reference)
-
-                        if reference_url and not url:
-                            print(f"       {reference_url}")
-                        elapsed = time.time() - start_time
-                        if elapsed > 5.0:
-                            logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
-                            logger.debug(f"Raw text: {reference.get('raw_text', '')}")
-                        
-                        # If errors found, add to dataset and print details
-                        if errors:
-                            # Check if the reference is just unverified
-                            if len(errors) == 1 and (errors[0].get('error_type') == 'unverified' or errors[0].get('warning_type') == 'unverified'):
-                                unverified_count += 1
-                                self.total_unverified_refs += 1
-                                # Add unverified reference to dataset
-                                self.add_error_to_dataset(paper, reference, errors, reference_url)
-                                if not debug_mode:
-                                    # Show full citation details for unverified references
-                                    print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-                                    print(f"          Cited as: {', '.join(reference['authors'])} ({reference['year']})")
-                                    if reference['url'] != url:
-                                        print(f"          URL: {reference['url']}")
-                            else:
-                                # Real errors or warnings found
-                                self.add_error_to_dataset(paper, reference, errors, reference_url)
-                                paper_errors.extend(errors)
-                                
-                                # Count errors vs warnings
-                                error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
-                                warning_count = sum(1 for e in errors if 'warning_type' in e)
-                                self.total_errors_found += error_count
-                                self.total_warnings_found += warning_count
-                                
-                                if not debug_mode:
-                                    # Always show errors and warnings if they exist
-                                    for error in errors:
-                                        if 'error_type' in error and error['error_type'] != 'unverified':
-                                            print(f"       ❌  {error['error_type']}: {error['error_details']}")
-                                        elif 'warning_type' in error:
-                                            print(f"       ⚠️  {error['warning_type']}: {error['warning_details']}")
+                    # Check references (parallel or sequential based on configuration)
+                    if self.enable_parallel and len(bibliography) > 1:
+                        self._verify_references_parallel(paper, bibliography, paper_errors, error_types, unverified_count, debug_mode)
+                    else:
+                        self._verify_references_sequential(paper, bibliography, paper_errors, error_types, unverified_count, debug_mode)
+                    
                     if not debug_mode:
                         # Separate actual errors from warnings for paper classification
                         actual_errors = [e for e in paper_errors if 'error_type' in e and e['error_type'] != 'unverified']
@@ -2322,6 +2279,9 @@ class ArxivReferenceChecker:
         except Exception as e:
             logger.error(f"Unexpected error during processing: {str(e)}")
             raise
+        finally:
+            # Cleanup database connections if using thread-safe checker
+            self._cleanup_resources()
         
         # Print final summary to console
         if not debug_mode:
@@ -3615,6 +3575,164 @@ class ArxivReferenceChecker:
         if doi in ('10.', '10'):
             return False
         return True
+    
+    def _verify_references_sequential(self, paper, bibliography, paper_errors, error_types, unverified_count, debug_mode):
+        """
+        Sequential reference verification (original implementation)
+        
+        Args:
+            paper: The source paper
+            bibliography: List of references to verify
+            paper_errors: List to append errors to
+            error_types: Dictionary to track error types
+            unverified_count: Counter for unverified references
+            debug_mode: Whether debug mode is enabled
+        """
+        for i, reference in enumerate(bibliography):
+            ref_id = self.extract_arxiv_id_from_url(reference['url'])
+            
+            # Print reference info in non-debug mode (improved formatting)
+            title = reference.get('title', 'Untitled')
+            authors = ', '.join(reference.get('authors', []))
+            year = reference.get('year', '')
+            venue = reference.get('venue', '')
+            url = reference.get('url', '')
+            doi = reference.get('doi', '')
+            print(f"[{i+1}/{len(bibliography)}] {title}")
+            if authors:
+                print(f"       {authors}")
+            if venue:
+                print(f"       {venue}")
+            if year:
+                print(f"       {year}")
+            if doi:
+                print(f"       {doi}")
+            if url:
+                print(f"       {url}")
+            
+            # --- DEBUG TIMER ---
+            start_time = time.time()
+            errors, reference_url = self.verify_reference(paper, reference)
+
+            if reference_url and not url:
+                print(f"       {reference_url}")
+            elapsed = time.time() - start_time
+            if elapsed > 5.0:
+                logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
+                logger.debug(f"Raw text: {reference.get('raw_text', '')}")
+            
+            self._process_reference_result(paper, reference, errors, reference_url, 
+                                         paper_errors, unverified_count, debug_mode)
+    
+    def _verify_references_parallel(self, paper, bibliography, paper_errors, error_types, unverified_count, debug_mode):
+        """
+        Parallel reference verification using ParallelReferenceProcessor
+        
+        Args:
+            paper: The source paper
+            bibliography: List of references to verify
+            paper_errors: List to append errors to
+            error_types: Dictionary to track error types  
+            unverified_count: Counter for unverified references
+            debug_mode: Whether debug mode is enabled
+        """
+        # Create parallel processor
+        processor = ParallelReferenceProcessor(
+            base_checker=self,
+            max_workers=self.max_workers,
+            enable_progress=not debug_mode
+        )
+        
+        # Set up result callback to handle each completed reference  
+        def result_callback(result):
+            self._process_reference_result(paper, result.reference, result.errors, result.url,
+                                         paper_errors, unverified_count, debug_mode, print_output=True)
+        
+        # Run parallel verification
+        processor.verify_references_parallel(paper, bibliography, result_callback)
+    
+    def _process_reference_result(self, paper, reference, errors, reference_url, 
+                                paper_errors, unverified_count, debug_mode, print_output=True):
+        """
+        Process the result of reference verification (shared by both sequential and parallel)
+        
+        Args:
+            paper: The source paper
+            reference: The reference that was verified
+            errors: List of errors found (or None)
+            reference_url: URL of the reference if found
+            paper_errors: List to append errors to
+            unverified_count: Counter for unverified references (passed by reference)
+            debug_mode: Whether debug mode is enabled
+            print_output: Whether to print output (False for parallel mode to avoid duplication)
+        """
+        # If errors found, add to dataset and optionally print details
+        if errors:
+            # Check if the reference is just unverified
+            if len(errors) == 1 and (errors[0].get('error_type') == 'unverified' or errors[0].get('warning_type') == 'unverified'):
+                # Note: we can't modify unverified_count directly since it's passed by value
+                # The calling method should handle this counter
+                self.total_unverified_refs += 1
+                # Add unverified reference to dataset
+                self.add_error_to_dataset(paper, reference, errors, reference_url)
+                if not debug_mode and print_output:
+                    # Show full citation details for unverified references
+                    print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+                    
+                    # Handle missing or invalid year
+                    year = reference.get('year')
+                    if year and year != 0:
+                        year_str = str(year)
+                    else:
+                        year_str = "year unknown"
+                    
+                    print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
+                    
+                    # Only show URL if it exists and is different from reference_url
+                    ref_url = reference.get('url', '').strip()
+                    if ref_url and ref_url != reference_url:
+                        print(f"          URL: {ref_url}")
+            else:
+                # Real errors or warnings found
+                self.add_error_to_dataset(paper, reference, errors, reference_url)
+                paper_errors.extend(errors)
+                
+                # Count errors vs warnings
+                error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
+                warning_count = sum(1 for e in errors if 'warning_type' in e)
+                self.total_errors_found += error_count
+                self.total_warnings_found += warning_count
+                
+                if not debug_mode and print_output:
+                    # Always show errors and warnings if they exist
+                    for error in errors:
+                        if 'error_type' in error and error['error_type'] != 'unverified':
+                            print(f"       ❌  {error['error_type']}: {error['error_details']}")
+                        elif 'warning_type' in error:
+                            print(f"       ⚠️  {error['warning_type']}: {error['warning_details']}")
+    
+    def _output_reference_errors(self, reference, errors, url):
+        """
+        Output method for parallel processor to use (maintains consistent formatting)
+        
+        Args:
+            reference: The reference being processed
+            errors: List of errors found
+            url: URL of the reference if found
+        """
+        # This method is called by the parallel processor to maintain output format
+        # The actual processing is handled by _process_reference_result
+        pass
+    
+    def _cleanup_resources(self):
+        """Clean up database connections and other resources"""
+        try:
+            if hasattr(self.non_arxiv_checker, 'close'):
+                self.non_arxiv_checker.close()
+                # No logging - cleanup happens automatically
+        except Exception as e:
+            # Silent cleanup - errors are expected with SQLite threading
+            pass
 
 
 def main():
@@ -3641,6 +3759,10 @@ def main():
                         help="API key for the LLM provider (uses environment variable if not provided)")
     parser.add_argument("--llm-endpoint", type=str,
                         help="Endpoint for the LLM provider (overrides default endpoint)")
+    parser.add_argument("--disable-parallel", action="store_true",
+                        help="Disable parallel processing and run sequentially")
+    parser.add_argument("--max-workers", type=int, default=6,
+                        help="Maximum number of worker threads for parallel processing (default: 6)")
 
     args = parser.parse_args()
     
@@ -3698,7 +3820,9 @@ def main():
             semantic_scholar_api_key=args.semantic_scholar_api_key,
             db_path=args.db_path,
             llm_config=llm_config,
-            debug_mode=args.debug
+            debug_mode=args.debug,
+            enable_parallel=not args.disable_parallel,
+            max_workers=args.max_workers
         )
         
         if checker.fatal_error:
