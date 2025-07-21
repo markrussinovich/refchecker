@@ -648,6 +648,11 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'bibtex_type': entry['type']
             }
             
+            # Preserve all original BibTeX fields for formatting correction
+            for field_name, field_value in fields.items():
+                if field_name not in ref:  # Don't overwrite already processed fields
+                    ref[field_name] = field_value
+            
             # Parse authors
             if 'author' in fields:
                 author_text = fields['author']
@@ -784,12 +789,20 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     if correct_title:
         lines.append(f"  title = {{{correct_title}}},")
     
-    # Add journal or booktitle based on type
-    if bibtex_type in ['article', 'inproceedings', 'conference']:
-        journal = corrected_data.get('journal', '') if corrected_data else ''
-        if journal:
-            field_name = 'journal' if bibtex_type == 'article' else 'booktitle'
-            lines.append(f"  {field_name} = {{{journal}}},")
+    # Add journal field - prefer original if available, otherwise use corrected data
+    original_journal = original_reference.get('journal', '')
+    corrected_journal = corrected_data.get('journal', '') if corrected_data else ''
+    journal_to_use = original_journal or corrected_journal
+    
+    if journal_to_use and bibtex_type in ['article', 'inproceedings', 'conference']:
+        field_name = 'journal' if bibtex_type == 'article' else 'booktitle'
+        lines.append(f"  {field_name} = {{{journal_to_use}}},")
+    
+    # Add other common fields from original reference if present
+    original_fields_to_preserve = ['eprint', 'archiveprefix', 'primaryclass', 'volume', 'number', 'pages', 'publisher', 'note']
+    for field in original_fields_to_preserve:
+        if original_reference.get(field):
+            lines.append(f"  {field} = {{{original_reference[field]}}},")
     
     if correct_year:
         lines.append(f"  year = {{{correct_year}}},")

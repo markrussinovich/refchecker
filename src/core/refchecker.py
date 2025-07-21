@@ -204,8 +204,6 @@ class ArxivReferenceChecker:
         # Create or clear output file and write headers
         with open(self.verification_output_file, 'w', encoding='utf-8') as f:
             f.write("REFERENCE VERIFICATION ERRORS\n")
-            f.write("=" * 50 + "\n\n")
-            f.write(f"Service order used: {self.service_order}\n\n")
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
@@ -2104,7 +2102,7 @@ class ArxivReferenceChecker:
                 
                 # Show corrected reference in original format if available
                 if error_entry.get('ref_corrected_format'):
-                    f.write("CORRECTED REFERENCE (drop-in replacement):\n")
+                    f.write("CORRECTED REFERENCE:\n")
                     f.write(f"{error_entry['ref_corrected_format']}\n\n")
                 
                 f.write("=" * 80 + "\n")
@@ -2126,6 +2124,7 @@ class ArxivReferenceChecker:
         corrected_data = {}
         
         # Extract corrected information from error object
+        # Always try to get title - either the corrected one or from verified_data
         if error.get('ref_title_correct'):
             corrected_data['title'] = error['ref_title_correct']
         elif verified_data and verified_data.get('title'):
