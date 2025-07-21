@@ -278,13 +278,28 @@ class NonArxivReferenceChecker:
         if t1 == t2:
             return 1.0
         
+        # Normalize hyphens to handle hyphenation differences
+        # Replace hyphens with spaces and normalize whitespace
+        t1_dehyphenated = re.sub(r'-', ' ', t1)
+        t1_dehyphenated = re.sub(r'\s+', ' ', t1_dehyphenated).strip()
+        t2_dehyphenated = re.sub(r'-', ' ', t2)
+        t2_dehyphenated = re.sub(r'\s+', ' ', t2_dehyphenated).strip()
+        
+        # Check for match after hyphen normalization
+        if t1_dehyphenated == t2_dehyphenated:
+            return 1.0
+        
         # Check if one is substring of another (original logic)
         if t1 in t2 or t2 in t1:
             return 0.95
         
-        # Split into words and calculate word overlap
-        words1 = set(t1.split())
-        words2 = set(t2.split())
+        # Also check substring match with dehyphenated versions
+        if t1_dehyphenated in t2_dehyphenated or t2_dehyphenated in t1_dehyphenated:
+            return 0.95
+        
+        # Split into words and calculate word overlap using dehyphenated versions
+        words1 = set(t1_dehyphenated.split())
+        words2 = set(t2_dehyphenated.split())
         
         # Remove common stop words that don't add much meaning
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
@@ -302,12 +317,12 @@ class NonArxivReferenceChecker:
         # Calculate word order similarity for key phrases
         # This helps catch cases like "BLACKSMITH: Rowhammering in the Frequency Domain"
         # vs "BLACKSMITH: Scalable Rowhammering in the Frequency Domain"
-        key_phrases1 = self._extract_key_phrases(t1)
-        key_phrases2 = self._extract_key_phrases(t2)
+        key_phrases1 = self._extract_key_phrases(t1_dehyphenated)
+        key_phrases2 = self._extract_key_phrases(t2_dehyphenated)
         
         phrase_matches = 0
         for phrase in key_phrases1:
-            if phrase in t2:
+            if phrase in t2_dehyphenated:
                 phrase_matches += 1
         
         phrase_score = phrase_matches / len(key_phrases1) if key_phrases1 else 0.0
@@ -444,10 +459,10 @@ class NonArxivReferenceChecker:
             return None, [], None
         
         # Check title for exact case insensitive match between found_title and paper title
-        if found_title and title.lower() != found_title.lower():
+        if found_title and title.lower() != clean_title_basic(found_title.lower()):
             errors.append({
                 'error_type': 'title',
-                'error_details': f"Title mismatch: cited as '{found_title}' but actually '{paper_data.get('title', '')}'",
+                'error_details': f"Title mismatch: cited as '{title}' but actually '{found_title}'",
                 'ref_title_correct': paper_data.get('title', '')
             })
         
