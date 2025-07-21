@@ -82,3 +82,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.md", "*.conf"]
+"refchecker" = ["scripts/*.py"]

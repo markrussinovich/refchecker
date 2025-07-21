@@ -4,6 +4,7 @@ LLM provider implementations for reference extraction
 
 import json
 import os
+import subprocess
 from typing import List, Dict, Any, Optional
 import logging
 
@@ -365,23 +366,15 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         """Kill any existing vLLM server processes"""
         try:
             import subprocess
-            subprocess.run(["pkill", "-f", "vllm"], timeout=10, capture_output=True)
+            # Use a more specific pattern to only kill vLLM server processes, not any process containing "vllm"
+            subprocess.run(["pkill", "-f", "vllm.entrypoints.openai.api_server"], timeout=10, capture_output=True)
             import time
             time.sleep(2)  # Wait for cleanup
         except Exception as e:
             logger.debug(f"Error killing existing server: {e}")
     
-    def _is_debugger_environment(self):
-        """Check if running in a debugger environment"""
-        debugger_indicators = [
-            'DEBUGPY_LAUNCHER_PORT',
-            'PYDEVD_LOAD_VALUES_ASYNC',
-            'PYDEVD_USE_FRAME_EVAL'
-        ]
-        return any(var in os.environ for var in debugger_indicators)
-    
     def _start_server(self):
-        """Start vLLM server with optimal configuration"""
+        """Start vLLM server using standalone launcher"""
         try:
             import subprocess
             import torch
@@ -392,25 +385,161 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             # Determine optimal tensor parallel size
             tensor_parallel_size = self._get_optimal_tensor_parallel_size()
             
-            # Check if we're in a debugger environment
-            if self._is_debugger_environment():
-                logger.info("Debugger environment detected, using standalone server launcher")
-                return self._start_server_standalone(tensor_parallel_size)
-            else:
-                return self._start_server_direct(tensor_parallel_size)
+            # Always use standalone server launcher for reliability
+            return self._start_server_standalone(tensor_parallel_size)
             
         except Exception as e:
             logger.error(f"Failed to start vLLM server: {e}")
             return False
     
+    def _find_vllm_launcher_script(self):
+        """Find the vLLM launcher script, supporting both development and PyPI installs"""
+        import pkg_resources
+        
+        # First try to find it as a package resource (for PyPI installs)
+        try:
+            script_path = pkg_resources.resource_filename('refchecker', 'scripts/start_vllm_server.py')
+            if os.path.exists(script_path):
+                logger.debug(f"Found vLLM launcher script via pkg_resources: {script_path}")
+                return script_path
+        except Exception as e:
+            logger.debug(f"Could not find script via pkg_resources: {e}")
+        
+        # Try relative path for development installs
+        current_dir = os.path.dirname(os.path.dirname(__file__))  # src/llm -> src
+        project_root = os.path.dirname(current_dir)  # src -> project root
+        script_path = os.path.join(project_root, "scripts", "start_vllm_server.py")
+        
+        if os.path.exists(script_path):
+            logger.debug(f"Found vLLM launcher script via relative path: {script_path}")
+            return script_path
+        
+        # Try looking in the same directory structure as this file (for src-based installs)
+        src_dir = os.path.dirname(os.path.dirname(__file__))  # src/llm -> src
+        script_path = os.path.join(src_dir, "scripts", "start_vllm_server.py")
+        
+        if os.path.exists(script_path):
+            logger.debug(f"Found vLLM launcher script in src directory: {script_path}")
+            return script_path
+        
+        # If all else fails, try to create a temporary script
+        logger.warning("Could not find standalone vLLM launcher script, creating temporary one")
+        return self._create_temporary_launcher_script()
+    
+    def _create_temporary_launcher_script(self):
+        """Create a temporary launcher script if the packaged one cannot be found"""
+        import tempfile
+        import textwrap
+        
+        # Create a temporary file with the launcher script content
+        fd, temp_script_path = tempfile.mkstemp(suffix='.py', prefix='vllm_launcher_')
+        
+        launcher_code = textwrap.dedent('''
+            #!/usr/bin/env python3
+            """
+            Temporary vLLM server launcher script
+            """
+            
+            import sys
+            import subprocess
+            import os
+            import time
+            import argparse
+            import signal
+            
+            def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_len=None, gpu_memory_util=0.9):
+                """Start vLLM server with specified parameters"""
+                
+                # Kill any existing server on the port
+                try:
+                    subprocess.run(["pkill", "-f", "vllm.entrypoints.openai.api_server"], 
+                                  timeout=10, capture_output=True)
+                    time.sleep(2)
+                except:
+                    pass
+                
+                # Build command
+                cmd = [
+                    sys.executable, "-m", "vllm.entrypoints.openai.api_server",
+                    "--model", model_name,
+                    "--host", "0.0.0.0",
+                    "--port", str(port),
+                    "--tensor-parallel-size", str(tensor_parallel_size),
+                    "--gpu-memory-utilization", str(gpu_memory_util)
+                ]
+                
+                if max_model_len:
+                    cmd.extend(["--max-model-len", str(max_model_len)])
+                
+                print(f"Starting vLLM server: {' '.join(cmd)}")
+                
+                # Create clean environment without debugger variables
+                clean_env = {}
+                for key, value in os.environ.items():
+                    if not any(debug_key in key.upper() for debug_key in ['DEBUGPY', 'PYDEVD']):
+                        clean_env[key] = value
+                
+                # Remove debugger paths from PYTHONPATH if present
+                if 'PYTHONPATH' in clean_env:
+                    pythonpath_parts = clean_env['PYTHONPATH'].split(':')
+                    clean_pythonpath = [p for p in pythonpath_parts if 'debugpy' not in p and 'pydevd' not in p]
+                    if clean_pythonpath:
+                        clean_env['PYTHONPATH'] = ':'.join(clean_pythonpath)
+                    else:
+                        del clean_env['PYTHONPATH']
+                
+                # Start server as daemon if requested
+                if '--daemon' in sys.argv:
+                    # Start server in background
+                    process = subprocess.Popen(cmd, env=clean_env, start_new_session=True,
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    print(f"Started vLLM server as daemon with PID: {process.pid}")
+                else:
+                    # Start server in foreground
+                    subprocess.run(cmd, env=clean_env)
+            
+            if __name__ == "__main__":
+                parser = argparse.ArgumentParser(description="Start vLLM server")
+                parser.add_argument("--model", required=True, help="Model name")
+                parser.add_argument("--port", type=int, default=8000, help="Port number")
+                parser.add_argument("--tensor-parallel-size", type=int, default=1, help="Tensor parallel size")
+                parser.add_argument("--max-model-len", type=int, help="Maximum model length")
+                parser.add_argument("--gpu-memory-util", type=float, default=0.9, help="GPU memory utilization")
+                parser.add_argument("--daemon", action="store_true", help="Run as daemon")
+                
+                args = parser.parse_args()
+                
+                start_vllm_server(
+                    model_name=args.model,
+                    port=args.port,
+                    tensor_parallel_size=args.tensor_parallel_size,
+                    max_model_len=args.max_model_len,
+                    gpu_memory_util=args.gpu_memory_util
+                )
+        ''')
+        
+        try:
+            with os.fdopen(fd, 'w') as f:
+                f.write(launcher_code)
+            
+            # Make the script executable
+            os.chmod(temp_script_path, 0o755)
+            
+            logger.info(f"Created temporary vLLM launcher script: {temp_script_path}")
+            return temp_script_path
+            
+        except Exception as e:
+            os.close(fd)  # Clean up if writing failed
+            os.unlink(temp_script_path)
+            raise Exception(f"Failed to create temporary launcher script: {e}")
+
     def _start_server_standalone(self, tensor_parallel_size):
-        """Start server using standalone script to avoid debugger conflicts"""
+        """Start server using standalone script"""
         import subprocess
         import torch
         
-        # Path to standalone launcher script
-        script_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
-                                  "..", "scripts", "start_vllm_server.py")
+        # Find the standalone launcher script - support both development and PyPI installs
+        script_path = self._find_vllm_launcher_script()
         
         # Build command for standalone launcher
         cmd = [
@@ -433,85 +562,28 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         logger.info(f"Starting vLLM server via standalone launcher: {' '.join(cmd)}")
         
         # Start the launcher (which will start the server as daemon)
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # Use a longer timeout for model download/loading
+        launcher_timeout = 120  # 2 minutes for launcher to complete
         
-        if result.returncode == 0:
-            logger.info("vLLM server launcher completed successfully")
-            # The actual server process is running as daemon, we don't have direct handle
-            self.server_process = None  # We don't manage the daemon directly
-            return True
-        else:
-            logger.error(f"vLLM server launcher failed: {result.stderr}")
-            return False
-    
-    def _start_server_direct(self, tensor_parallel_size):
-        """Start server directly (for non-debugger environments)"""
-        import subprocess
-        import torch
-        
-        # Build command with chat template enabled
-        cmd = [
-            "python", "-m", "vllm.entrypoints.openai.api_server",
-            "--model", self.model_name,
-            "--host", "0.0.0.0",
-            "--port", "8000",
-            "--tensor-parallel-size", str(tensor_parallel_size),
-            "--disable-log-requests"  # Reduce log spam
-        ]
-        
-        # Add memory optimization for smaller GPUs
-        if torch.cuda.is_available():
-            gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)  # GB
-            if gpu_memory < 40:  # Less than 40GB VRAM
-                cmd.extend([
-                    "--gpu-memory-utilization", "0.8",
-                    "--max-model-len", "4096"
-                ])
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=launcher_timeout)
+            
+            if result.returncode == 0:
+                logger.info("vLLM server launcher completed successfully")
+                logger.debug(f"Launcher stdout: {result.stdout}")
+                # The actual server process is running as daemon, we don't have direct handle
+                self.server_process = None  # We don't manage the daemon directly
+                return True
             else:
-                cmd.extend([
-                    "--gpu-memory-utilization", "0.9",
-                    "--max-model-len", "8192"
-                ])
-        
-        logger.info(f"Starting vLLM server: {' '.join(cmd)}")
-        
-        # Create clean environment for vLLM server
-        clean_env = os.environ.copy()
-        
-        # Remove VS Code debugger variables
-        debugger_vars = [
-            'DEBUGPY_LAUNCHER_PORT',
-            'PYDEVD_LOAD_VALUES_ASYNC',
-            'PYDEVD_USE_FRAME_EVAL',
-        ]
-        
-        for var in debugger_vars:
-            clean_env.pop(var, None)
-        
-        # Clean PYTHONPATH of debugger modules
-        if 'PYTHONPATH' in clean_env:
-            pythonpath_parts = clean_env['PYTHONPATH'].split(':')
-            clean_pythonpath = [p for p in pythonpath_parts if 'debugpy' not in p and 'pydevd' not in p]
-            if clean_pythonpath:
-                clean_env['PYTHONPATH'] = ':'.join(clean_pythonpath)
-            else:
-                clean_env.pop('PYTHONPATH', None)
+                logger.error(f"vLLM server launcher failed with return code {result.returncode}")
+                logger.error(f"Launcher stderr: {result.stderr}")
+                logger.error(f"Launcher stdout: {result.stdout}")
+                return False
                 
-        # kill any existing server processes
-        self._kill_existing_server()
-        
-        # Start the server process with clean environment
-        self.server_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=clean_env,
-            start_new_session=True  # Start in new process group
-        )
-        
-        return True
+        except subprocess.TimeoutExpired:
+            logger.error(f"vLLM server launcher timed out after {launcher_timeout} seconds")
+            logger.error("This may happen if the model is large and takes time to download/load")
+            return False
     
     def _wait_for_server(self, timeout=300):
         """Wait for vLLM server to be ready"""
@@ -523,34 +595,6 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         logger.info(f"Waiting for vLLM server to start (timeout: {timeout}s)...")
         
         while (time.time() - start_time) < timeout:
-            if self.server_process and self.server_process.poll() is not None:
-                # Process has terminated
-                stdout, stderr = self.server_process.communicate()
-                error_msg = "vLLM server terminated unexpectedly"
-                
-                # Extract meaningful error information
-                if stderr:
-                    stderr_text = stderr.decode('utf-8') if isinstance(stderr, bytes) else str(stderr)
-                    if "not found" in stderr_text.lower() or "does not exist" in stderr_text.lower():
-                        error_msg += f" - Model not found. Check if '{self.model}' exists and is accessible."
-                    elif "authentication" in stderr_text.lower() or "unauthorized" in stderr_text.lower():
-                        error_msg += f" - Authentication required. Set HF_TOKEN environment variable for gated models."
-                    elif "out of memory" in stderr_text.lower() or "cuda out of memory" in stderr_text.lower():
-                        error_msg += f" - Insufficient GPU memory to load model '{self.model}'."
-                    elif "permission denied" in stderr_text.lower():
-                        error_msg += f" - Permission denied accessing model '{self.model}'."
-                    else:
-                        error_msg += f" - Error: {stderr_text.strip()[:200]}"
-                
-                # Show error to user
-                print(f"\n❌ {error_msg}")
-                
-                # Log full details for debugging
-                logger.error(f"vLLM server terminated unexpectedly:")
-                logger.error(f"STDOUT: {stdout}")
-                logger.error(f"STDERR: {stderr}")
-                return False
-            
             try:
                 # Check health endpoint
                 response = requests.get(f"{self.server_url}/health", timeout=5)
@@ -593,11 +637,7 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
                 return True
         
         # If we get here, server failed to start
-        if self.server_process:
-            logger.error("Server startup failed, cleaning up...")
-            self._kill_existing_server()
-            self.server_process = None
-        
+        logger.error("Server startup failed")
         return False
     
     def _check_server_health(self):
@@ -885,15 +925,11 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
     
     def cleanup(self):
         """Cleanup vLLM server resources"""
-        if self.server_process:
-            logger.info("Shutting down vLLM server...")
-            try:
-                self.server_process.terminate()
-                self._kill_existing_server()
-            except Exception as e:
-                logger.error(f"Error during vLLM server cleanup: {e}")
-            finally:
-                self.server_process = None
+        logger.info("Shutting down vLLM server...")
+        try:
+            self._kill_existing_server()
+        except Exception as e:
+            logger.error(f"Error during vLLM server cleanup: {e}")
     
     def __del__(self):
         """Cleanup on deletion"""

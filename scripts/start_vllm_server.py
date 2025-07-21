@@ -11,12 +11,12 @@ import time
 import argparse
 import signal
 
-def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_len=None, gpu_memory_util=0.9):
+def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_len=None, gpu_memory_util=0.9, daemon=False):
     """Start vLLM server with specified parameters"""
     
     # Kill any existing server on the port
     try:
-        subprocess.run(["pkill", "-f", f"vllm.entrypoints.openai.api_server.*--port {port}"], 
+        subprocess.run(["pkill", "-f", "vllm.entrypoints.openai.api_server"], 
                       timeout=10, capture_output=True)
         time.sleep(2)
     except:
@@ -53,17 +53,29 @@ def start_vllm_server(model_name, port=8000, tensor_parallel_size=1, max_model_l
             clean_env.pop('PYTHONPATH', None)
     
     # Start server
-    process = subprocess.Popen(
-        cmd,
-        env=clean_env,
-        start_new_session=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1
-    )
-    
-    return process
+    if daemon:
+        # For daemon mode, redirect output to /dev/null to avoid blocking
+        with open(os.devnull, 'w') as devnull:
+            process = subprocess.Popen(
+                cmd,
+                env=clean_env,
+                start_new_session=True,
+                stdout=devnull,
+                stderr=devnull
+            )
+        return process
+    else:
+        # For non-daemon mode, keep stdout/stderr for monitoring
+        process = subprocess.Popen(
+            cmd,
+            env=clean_env,
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        return process
 
 def main():
     parser = argparse.ArgumentParser(description="Start vLLM server")
@@ -81,7 +93,8 @@ def main():
         port=args.port,
         tensor_parallel_size=args.tensor_parallel_size,
         max_model_len=args.max_model_len,
-        gpu_memory_util=args.gpu_memory_util
+        gpu_memory_util=args.gpu_memory_util,
+        daemon=args.daemon
     )
     
     if args.daemon:
