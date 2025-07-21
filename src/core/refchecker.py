@@ -3744,7 +3744,7 @@ def main():
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,
-                        help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, or local text file containing references")
+                        help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, local text file containing references, or local BibTeX file")
     parser.add_argument("--semantic-scholar-api-key", type=str,
                         help="API key for Semantic Scholar (optional, increases rate limits)")
     parser.add_argument("--db-path", type=str,
@@ -3782,26 +3782,17 @@ def main():
                 if not paper_id:
                     print(f"Error: Could not extract arXiv ID from URL: {args.paper}")
                     return 1
-        elif args.paper.lower().endswith('.pdf'):
-            # This is a local PDF file
-            if not os.path.exists(args.paper):
-                print(f"Error: Local PDF file does not exist: {args.paper}")
-                return 1
+        elif os.path.exists(args.paper):
+            # This is a local file - check if it exists first, then determine type
             local_pdf_path = args.paper
-        elif args.paper.lower().endswith('.tex'):
-            # This is a local LaTeX file
-            if not os.path.exists(args.paper):
-                print(f"Error: Local LaTeX file does not exist: {args.paper}")
+            if not (args.paper.lower().endswith('.pdf') or 
+                   args.paper.lower().endswith('.tex') or 
+                   args.paper.lower().endswith('.txt') or 
+                   args.paper.lower().endswith('.bib')):
+                print(f"Error: Unsupported file type. Supported formats: .pdf, .tex, .txt, .bib")
                 return 1
-            local_pdf_path = args.paper  # We'll use the same variable but handle it differently
-        elif args.paper.lower().endswith('.txt'):
-            # This is a local text file containing references
-            if not os.path.exists(args.paper):
-                print(f"Error: Local text file does not exist: {args.paper}")
-                return 1
-            local_pdf_path = args.paper  # We'll use the same variable but handle it differently
         else:
-            # Assume it's an ArXiv ID
+            # Assume it's an online paper ID (ArXiv ID, DOI, etc.)
             paper_id = args.paper
     
     # Process LLM configuration overrides
