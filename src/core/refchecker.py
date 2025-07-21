@@ -44,7 +44,9 @@ import json
 import random
 from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
-                       extract_arxiv_id_from_url, normalize_text as common_normalize_text)
+                       extract_arxiv_id_from_url, normalize_text as common_normalize_text,
+                       detect_latex_bibliography_format, extract_latex_references, 
+                       strip_latex_commands)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -622,6 +624,7 @@ class ArxivReferenceChecker:
                 self.is_url = is_url
                 self.is_latex = path.lower().endswith('.tex')
                 self.is_text_refs = path.lower().endswith('.txt')
+                self.is_bibtex = path.lower().endswith('.bib')
                 
                 if is_url:
                     # Extract filename from URL for title
@@ -3256,6 +3259,39 @@ class ArxivReferenceChecker:
         elif hasattr(paper, 'is_latex') and paper.is_latex:
             # Extract text from LaTeX file
             text = self.extract_text_from_latex(paper.file_path)
+            
+            # Try programmatic LaTeX extraction first
+            latex_format = detect_latex_bibliography_format(text)
+            if latex_format['is_latex']:
+                logger.info(f"Detected LaTeX bibliography format: {latex_format['format_type']}")
+                latex_references = extract_latex_references(text, paper.file_path)
+                
+                if latex_references:
+                    logger.info(f"Extracted {len(latex_references)} references using LaTeX parser")
+                    return latex_references
+        
+        # Check if this is a BibTeX file
+        elif hasattr(paper, 'is_bibtex') and paper.is_bibtex:
+            try:
+                # Read BibTeX file content
+                with open(paper.file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    bib_content = f.read()
+                
+                logger.info(f"Processing BibTeX file: {paper.file_path}")
+                
+                # Use programmatic BibTeX extraction
+                bibtex_references = extract_latex_references(bib_content, paper.file_path)
+                
+                if bibtex_references:
+                    logger.info(f"Extracted {len(bibtex_references)} references from BibTeX file")
+                    return bibtex_references
+                else:
+                    logger.warning(f"No references found in BibTeX file: {paper.file_path}")
+                    return []
+                    
+            except Exception as e:
+                logger.error(f"Error reading BibTeX file {paper.file_path}: {e}")
+                return []
         else:
             # Download the PDF
             pdf_content = self.download_pdf(paper)

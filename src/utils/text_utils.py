@@ -116,7 +116,7 @@ def clean_title_basic(title):
     title = re.sub(r'\s+', ' ', title)
     
     # Remove trailing punctuation
-    title = re.sub(r'[.,;:!?]+$', '', title)
+    title = re.sub(r'[.,;:]+$', '', title)
     
     return title
 
@@ -374,3 +374,343 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
     
     return True, "Authors match"
+
+
+def detect_latex_bibliography_format(text):
+    """
+    Detect if the bibliography is in LaTeX format
+    
+    Args:
+        text: Text content to analyze
+        
+    Returns:
+        dict with detection results containing:
+        - is_latex: bool indicating if LaTeX format detected
+        - format_type: str ('bibtex', 'thebibliography', 'bibliography_command', None)
+        - details: dict with specific information about the detected format
+    """
+    if not text:
+        return {
+            'is_latex': False,
+            'format_type': None,
+            'details': {}
+        }
+    
+    details = {}
+    
+    # Check for BibTeX entries (@article, @book, @inproceedings, etc.)
+    bibtex_pattern = r'@(article|book|inproceedings|incollection|conference|proceedings|techreport|mastersthesis|phdthesis|misc|unpublished)\s*\{'
+    bibtex_matches = re.findall(bibtex_pattern, text, re.IGNORECASE)
+    
+    if bibtex_matches:
+        details['bibtex_entries'] = len(bibtex_matches)
+        details['entry_types'] = list(set(bibtex_matches))
+        return {
+            'is_latex': True,
+            'format_type': 'bibtex',
+            'details': details
+        }
+    
+    # Check for LaTeX bibliography environment
+    thebib_pattern = r'\\begin\{thebibliography\}.*?\\end\{thebibliography\}'
+    thebib_match = re.search(thebib_pattern, text, re.DOTALL | re.IGNORECASE)
+    
+    if thebib_match:
+        # Count \bibitem entries
+        bibitem_matches = re.findall(r'\\bibitem(?:\[[^\]]*\])?\{[^}]+\}', text)
+        details['bibitem_count'] = len(bibitem_matches)
+        return {
+            'is_latex': True,
+            'format_type': 'thebibliography',
+            'details': details
+        }
+    
+    # Check for \bibliography{} command
+    bibcommand_pattern = r'\\bibliography\{([^}]+)\}'
+    bibcommand_match = re.search(bibcommand_pattern, text, re.IGNORECASE)
+    
+    if bibcommand_match:
+        bib_files = bibcommand_match.group(1).split(',')
+        details['bibliography_files'] = [f.strip() for f in bib_files]
+        return {
+            'is_latex': True,
+            'format_type': 'bibliography_command',
+            'details': details
+        }
+    
+    return {
+        'is_latex': False,
+        'format_type': None,
+        'details': {}
+    }
+
+
+def strip_latex_commands(text):
+    """
+    Strip LaTeX commands and markup from text
+    
+    Args:
+        text: Text containing LaTeX markup
+        
+    Returns:
+        Cleaned text with LaTeX commands removed
+    """
+    if not text:
+        return ""
+    
+    # Remove comments
+    text = re.sub(r'%.*', '', text)
+    
+    # Remove common text formatting commands
+    text = re.sub(r'\\(textbf|textit|emph|underline|textsc|texttt)\{([^{}]*)\}', r'\2', text)
+    
+    # Remove font size commands
+    text = re.sub(r'\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)\b', '', text)
+    
+    # Remove math mode delimiters
+    text = re.sub(r'\$([^$]*)\$', r'\1', text)
+    text = re.sub(r'\\begin\{equation\}.*?\\end\{equation\}', '', text, flags=re.DOTALL)
+    text = re.sub(r'\\begin\{align\}.*?\\end\{align\}', '', text, flags=re.DOTALL)
+    
+    # Remove section commands but keep the text
+    text = re.sub(r'\\(section|subsection|subsubsection|paragraph|subparagraph)\*?\{([^{}]*)\}', r'\2', text)
+    
+    # Remove citation commands but keep the keys
+    text = re.sub(r'\\cite[pt]?\*?\{([^}]+)\}', r'[\1]', text)
+    
+    # Remove common commands
+    text = re.sub(r'\\(newline|linebreak|pagebreak|clearpage|newpage)\b', ' ', text)
+    
+    # Remove escaped characters
+    text = re.sub(r'\\([&%$#_{}~^\\])', r'\1', text)
+    
+    # Remove remaining commands with arguments
+    text = re.sub(r'\\[a-zA-Z]+\{[^{}]*\}', '', text)
+    
+    # Remove remaining commands without arguments
+    text = re.sub(r'\\[a-zA-Z]+\b', '', text)
+    
+    # Clean up whitespace
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    return text
+
+
+def parse_bibtex_entries(bib_content):
+    """
+    Parse BibTeX entries from text content
+    
+    Args:
+        bib_content: String containing BibTeX entries
+        
+    Returns:
+        List of dictionaries, each containing a parsed BibTeX entry
+    """
+    if not bib_content:
+        return []
+    
+    entries = []
+    
+    # Pattern to match BibTeX entries
+    entry_pattern = r'@(\w+)\s*\{\s*([^,]+)\s*,\s*(.*?)\n\s*\}'
+    
+    # Find all entries
+    matches = re.finditer(entry_pattern, bib_content, re.DOTALL | re.IGNORECASE)
+    
+    for match in matches:
+        entry_type = match.group(1).lower()
+        entry_key = match.group(2).strip()
+        fields_text = match.group(3)
+        
+        # Parse fields using a more robust approach
+        fields = {}
+        
+        # Split fields by looking for field = pattern
+        field_starts = []
+        field_pattern = r'(\w+)\s*='
+        for match in re.finditer(field_pattern, fields_text):
+            field_starts.append((match.group(1), match.start(), match.end()))
+        
+        for i, (field_name, _, end) in enumerate(field_starts):
+            # Find the value part after the =
+            value_start = end
+            
+            # Find where this field ends (either next field or end of text)
+            if i + 1 < len(field_starts):
+                value_end = field_starts[i + 1][1]
+            else:
+                value_end = len(fields_text)
+            
+            value_text = fields_text[value_start:value_end].strip()
+            
+            # Remove leading/trailing comma and whitespace
+            value_text = value_text.strip(' ,\n\t')
+            
+            # Extract the value within braces
+            if value_text.startswith('{'):
+                # Find matching closing brace using proper brace counting
+                brace_count = 0
+                for j, char in enumerate(value_text):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            field_value = value_text[1:j]  # Remove outer braces
+                            break
+                else:
+                    # If we couldn't find matching brace, take the whole thing
+                    field_value = value_text[1:] if value_text.startswith('{') else value_text
+            else:
+                field_value = value_text
+            
+            # Remove surrounding braces (common in BibTeX for preserving capitalization)
+            # Handle both single braces {Title} and double braces {{Title}}
+            # Also handle cases like {{GPTFUZZER:} Rest of title}
+            while field_value.startswith('{') and field_value.endswith('}'):
+                # Check if removing braces would leave a balanced string
+                inner_value = field_value[1:-1].strip()
+                if inner_value:
+                    field_value = inner_value
+                else:
+                    break
+            
+            # Handle partial braces like {GPTFUZZER:} Rest of title
+            # Replace individual brace-protected words/phrases with just their content
+            field_value = re.sub(r'\{([^}]+)\}', r'\1', field_value)
+            
+            # Clean up the field value
+            field_value = strip_latex_commands(field_value)
+            fields[field_name.lower()] = field_value
+        
+        entries.append({
+            'type': entry_type,
+            'key': entry_key,
+            'fields': fields
+        })
+    
+    return entries
+
+
+def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
+    """
+    Extract references from LaTeX content programmatically
+    
+    Args:
+        text: LaTeX text content
+        file_path: Optional path to the file (for .bib file resolution)
+        
+    Returns:
+        List of reference dictionaries with extracted metadata
+    """
+    references = []
+    
+    # Detect the bibliography format
+    format_info = detect_latex_bibliography_format(text)
+    
+    if not format_info['is_latex']:
+        return references
+    
+    if format_info['format_type'] == 'bibtex':
+        # Parse BibTeX entries directly from text
+        entries = parse_bibtex_entries(text)
+        
+        for entry in entries:
+            fields = entry['fields']
+            
+            # Skip entries without essential fields (title or author)
+            # These are typically URL-only entries like @misc{key, howpublished={\url{...}}}
+            if not fields.get('title') and not fields.get('author'):
+                continue
+            
+            # Extract common reference information
+            ref = {
+                'raw_text': f"@{entry['type']}{{{entry['key']}, ...}}",
+                'title': fields.get('title', ''),
+                'authors': [],
+                'year': None,
+                'journal': fields.get('journal', ''),
+                'url': fields.get('url', ''),
+                'doi': fields.get('doi', ''),
+                'bibtex_key': entry['key'],
+                'bibtex_type': entry['type']
+            }
+            
+            # Parse authors
+            if 'author' in fields:
+                author_text = fields['author']
+                # Split by 'and' and clean up
+                authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
+                ref['authors'] = authors
+            
+            # Extract year
+            if 'year' in fields:
+                year_match = re.search(r'\d{4}', fields['year'])
+                if year_match:
+                    ref['year'] = int(year_match.group())
+            
+            references.append(ref)
+    
+    elif format_info['format_type'] == 'thebibliography':
+        # Parse \bibitem entries
+        bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\})'
+        
+        matches = re.finditer(bibitem_pattern, text, re.DOTALL | re.IGNORECASE)
+        
+        for match in matches:
+            label = match.group(1) if match.group(1) else match.group(2)
+            key = match.group(2)
+            content = match.group(3).strip()
+            
+            # Clean LaTeX commands from content
+            cleaned_content = strip_latex_commands(content)
+            
+            ref = {
+                'raw_text': cleaned_content,
+                'title': '',
+                'authors': [],
+                'year': None,
+                'journal': '',
+                'url': '',
+                'doi': '',
+                'bibitem_key': key,
+                'bibitem_label': label
+            }
+            
+            # Try to extract structured information from cleaned content
+            # This is a basic implementation - could be enhanced
+            
+            # Extract year
+            year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_content)
+            if year_match:
+                ref['year'] = int(year_match.group())
+            
+            # Extract potential title (often in quotes or italics)
+            title_match = re.search(r'["""]([^"""]+)["""]', cleaned_content)
+            if not title_match:
+                title_match = re.search(r'\*([^*]+)\*', cleaned_content)
+            if title_match:
+                ref['title'] = title_match.group(1).strip()
+            
+            # Simple author extraction (names before year or title)
+            author_part = cleaned_content
+            if ref['year']:
+                author_part = cleaned_content.split(str(ref['year']))[0]
+            elif ref['title']:
+                author_part = cleaned_content.split(ref['title'])[0]
+            
+            # Extract names (very basic approach)
+            potential_authors = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]*\.?)?\s+[A-Z][a-z]+\b', author_part)
+            if potential_authors:
+                ref['authors'] = potential_authors[:5]  # Limit to first 5 matches
+            
+            references.append(ref)
+    
+    elif format_info['format_type'] == 'bibliography_command':
+        # Handle \bibliography{} command - would need to read .bib files
+        # For now, return empty list as we can't read external files here
+        # This could be enhanced to read the referenced .bib files
+        pass
+    
+    return references

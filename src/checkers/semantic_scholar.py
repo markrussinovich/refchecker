@@ -289,6 +289,16 @@ class NonArxivReferenceChecker:
         if t1_dehyphenated == t2_dehyphenated:
             return 1.0
         
+        # Additional normalization: remove punctuation for comparison
+        t1_normalized = re.sub(r'[^\w\s]', ' ', t1_dehyphenated)
+        t1_normalized = re.sub(r'\s+', ' ', t1_normalized).strip()
+        t2_normalized = re.sub(r'[^\w\s]', ' ', t2_dehyphenated)
+        t2_normalized = re.sub(r'\s+', ' ', t2_normalized).strip()
+        
+        # Check for match after full normalization
+        if t1_normalized == t2_normalized:
+            return 1.0
+        
         # Check if one is substring of another (original logic)
         if t1 in t2 or t2 in t1:
             return 0.95
@@ -297,32 +307,46 @@ class NonArxivReferenceChecker:
         if t1_dehyphenated in t2_dehyphenated or t2_dehyphenated in t1_dehyphenated:
             return 0.95
         
-        # Split into words and calculate word overlap using dehyphenated versions
-        words1 = set(t1_dehyphenated.split())
-        words2 = set(t2_dehyphenated.split())
+        # Check substring match with fully normalized versions
+        if t1_normalized in t2_normalized or t2_normalized in t1_normalized:
+            return 0.95
+        
+        # Split into words and calculate word overlap using fully normalized versions
+        words1 = set(t1_normalized.split())
+        words2 = set(t2_normalized.split())
         
         # Remove common stop words that don't add much meaning
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
-        words1 = words1 - stop_words
-        words2 = words2 - stop_words
+        words1_filtered = words1 - stop_words
+        words2_filtered = words2 - stop_words
         
-        if not words1 or not words2:
+        # If filtering removed too many words, fall back to unfiltered comparison
+        if not words1_filtered or not words2_filtered:
+            words1_filtered = words1
+            words2_filtered = words2
+        
+        if not words1_filtered or not words2_filtered:
             return 0.0
         
         # Calculate Jaccard similarity (intersection over union)
-        intersection = len(words1.intersection(words2))
-        union = len(words1.union(words2))
+        intersection = len(words1_filtered.intersection(words2_filtered))
+        union = len(words1_filtered.union(words2_filtered))
         jaccard_score = intersection / union if union > 0 else 0.0
+        
+        # For titles with high word overlap, boost the score
+        overlap_ratio = intersection / min(len(words1_filtered), len(words2_filtered))
+        if overlap_ratio >= 0.9 and jaccard_score >= 0.7:
+            # High overlap suggests they are likely the same paper
+            return max(0.85, jaccard_score)
         
         # Calculate word order similarity for key phrases
         # This helps catch cases like "BLACKSMITH: Rowhammering in the Frequency Domain"
         # vs "BLACKSMITH: Scalable Rowhammering in the Frequency Domain"
-        key_phrases1 = self._extract_key_phrases(t1_dehyphenated)
-        key_phrases2 = self._extract_key_phrases(t2_dehyphenated)
+        key_phrases1 = self._extract_key_phrases(t1_normalized)
         
         phrase_matches = 0
         for phrase in key_phrases1:
-            if phrase in t2_dehyphenated:
+            if phrase in t2_normalized:
                 phrase_matches += 1
         
         phrase_score = phrase_matches / len(key_phrases1) if key_phrases1 else 0.0
