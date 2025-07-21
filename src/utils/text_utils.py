@@ -624,9 +624,20 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             if not fields.get('title') and not fields.get('author'):
                 continue
             
+            # Reconstruct the full BibTeX entry for raw_text
+            bibtex_lines = [f"@{entry['type']}{{{entry['key']},"]
+            for field_name, field_value in fields.items():
+                # Keep the original field value with proper BibTeX formatting
+                bibtex_lines.append(f"  {field_name} = {{{field_value}}},")
+            # Remove trailing comma from last field and close the entry
+            if bibtex_lines[-1].endswith(','):
+                bibtex_lines[-1] = bibtex_lines[-1][:-1]
+            bibtex_lines.append("}")
+            full_bibtex = '\n'.join(bibtex_lines)
+            
             # Extract common reference information
             ref = {
-                'raw_text': f"@{entry['type']}{{{entry['key']}, ...}}",
+                'raw_text': full_bibtex,
                 'title': fields.get('title', ''),
                 'authors': [],
                 'year': None,
@@ -714,3 +725,151 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
         pass
     
     return references
+
+
+def format_corrected_reference(original_reference, corrected_data, error_entry):
+    """
+    Format a corrected reference in the same format as the original
+    
+    Args:
+        original_reference: The original reference dict with format info
+        corrected_data: The correct data from the verification service
+        error_entry: The error entry with correction details
+        
+    Returns:
+        Formatted corrected reference string
+    """
+    if not original_reference or not corrected_data:
+        return None
+    
+    # Check if this is a BibTeX reference
+    if original_reference.get('bibtex_key'):
+        return format_corrected_bibtex(original_reference, corrected_data, error_entry)
+    
+    # Check if this is a bibitem reference
+    if original_reference.get('bibitem_key'):
+        return format_corrected_bibitem(original_reference, corrected_data, error_entry)
+    
+    # Default: format as plain text citation
+    return format_corrected_plaintext(original_reference, corrected_data, error_entry)
+
+
+def format_corrected_bibtex(original_reference, corrected_data, error_entry):
+    """Format a corrected BibTeX entry in the same style as the original"""
+    
+    # Get the corrected information
+    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
+    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
+    correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
+    
+    # Get original BibTeX details
+    bibtex_key = original_reference.get('bibtex_key', 'unknown')
+    bibtex_type = original_reference.get('bibtex_type', 'article')
+    
+    # Build the corrected BibTeX entry
+    lines = [f"@{bibtex_type}{{{bibtex_key},"]
+    
+    # Add fields in typical BibTeX order
+    if correct_authors:
+        # Format authors for BibTeX (replace commas with ' and ')
+        if ', ' in correct_authors:
+            authors = correct_authors.split(', ')
+            bibtex_authors = ' and '.join(authors)
+        else:
+            bibtex_authors = correct_authors
+        lines.append(f"  author = {{{bibtex_authors}}},")
+    
+    if correct_title:
+        lines.append(f"  title = {{{correct_title}}},")
+    
+    # Add journal or booktitle based on type
+    if bibtex_type in ['article', 'inproceedings', 'conference']:
+        journal = corrected_data.get('journal', '') if corrected_data else ''
+        if journal:
+            field_name = 'journal' if bibtex_type == 'article' else 'booktitle'
+            lines.append(f"  {field_name} = {{{journal}}},")
+    
+    if correct_year:
+        lines.append(f"  year = {{{correct_year}}},")
+    
+    if correct_url:
+        lines.append(f"  url = {{{correct_url}}},")
+    
+    if correct_doi:
+        lines.append(f"  doi = {{{correct_doi}}},")
+    
+    # Remove trailing comma from last field
+    if lines[-1].endswith(','):
+        lines[-1] = lines[-1][:-1]
+    
+    lines.append("}")
+    
+    return '\n'.join(lines)
+
+
+def format_corrected_bibitem(original_reference, corrected_data, error_entry):
+    """Format a corrected \\bibitem entry"""
+    
+    # Get the corrected information
+    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
+    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
+    
+    # Get original bibitem details
+    bibitem_key = original_reference.get('bibitem_key', 'unknown')
+    bibitem_label = original_reference.get('bibitem_label', bibitem_key)
+    
+    # Build the corrected bibitem entry
+    if bibitem_label != bibitem_key:
+        bibitem_line = f"\\bibitem[{bibitem_label}]{{{bibitem_key}}}"
+    else:
+        bibitem_line = f"\\bibitem{{{bibitem_key}}}"
+    
+    # Format the citation text
+    citation_parts = []
+    
+    if correct_authors:
+        citation_parts.append(correct_authors)
+    
+    if correct_year:
+        citation_parts.append(f"({correct_year})")
+    
+    if correct_title:
+        citation_parts.append(f"\\textit{{{correct_title}}}")
+    
+    if correct_url:
+        citation_parts.append(f"\\url{{{correct_url}}}")
+    
+    citation_text = '. '.join(citation_parts) + '.'
+    
+    return f"{bibitem_line}\n{citation_text}"
+
+
+def format_corrected_plaintext(original_reference, corrected_data, error_entry):
+    """Format a corrected plaintext citation"""
+    
+    # Get the corrected information
+    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
+    correct_authors = error_entry.get('ref_authors_correct') or ''
+    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
+    
+    # Build a standard citation format
+    citation_parts = []
+    
+    if correct_authors:
+        citation_parts.append(correct_authors)
+    
+    if correct_year:
+        citation_parts.append(f"({correct_year})")
+    
+    if correct_title:
+        citation_parts.append(f'"{correct_title}"')
+    
+    if correct_url:
+        citation_parts.append(f"Available at: {correct_url}")
+    
+    return '. '.join(citation_parts) + '.'

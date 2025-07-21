@@ -46,7 +46,7 @@ from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
-                       strip_latex_commands)
+                       strip_latex_commands, format_corrected_reference)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -1791,21 +1791,22 @@ class ArxivReferenceChecker:
             reference: The reference to verify
                 
         Returns:
-            Tuple of (errors, url) where:
+            Tuple of (errors, url, verified_data) where:
             - errors: List of errors or None if no errors found
             - url: URL of the paper if found, None otherwise
+            - verified_data: The verified paper data from the verification service, None if not found
         """
         # Check if reference authors contains "URL Reference" marker
         if reference.get('authors') and "URL Reference" in reference.get('authors', []):
             # Skip verification for URL references
-            return None, None
+            return None, None, None
         
         # Check if it's an arXiv reference - handle ArXiv references separately even in database mode
         if reference.get('type') == 'arxiv':
             errors = self.verify_arxiv_reference(source_paper, reference)
             # For ArXiv references, construct the URL from the reference
             arxiv_url = reference.get('url') or f"https://arxiv.org/abs/{self.extract_arxiv_id_from_url(reference['url'])}"
-            return errors, arxiv_url
+            return errors, arxiv_url, None
         
         # If database mode is enabled, use database for non-ArXiv references
         if self.db_path:
@@ -1816,7 +1817,7 @@ class ArxivReferenceChecker:
                 
                 if not verified_data:
                     # Mark as unverified but keep the URL if found
-                    return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url
+                    return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url, None
                 
                 # Convert database errors to our format
                 formatted_errors = []
@@ -1841,10 +1842,10 @@ class ArxivReferenceChecker:
                     
                     formatted_errors.append(formatted_error)
                 
-                return formatted_errors if formatted_errors else None, paper_url
+                return formatted_errors if formatted_errors else None, paper_url, verified_data
             else:
                 logger.warning("Database path specified but no connection available")
-                return [{"error_type": "unverified", "error_details": "Database connection not available"}], None
+                return [{"error_type": "unverified", "error_details": "Database connection not available"}], None, None
         
         # For non-database mode, use the appropriate checker based on reference type
         return self.verify_non_arxiv_reference(source_paper, reference)
@@ -1941,7 +1942,10 @@ class ArxivReferenceChecker:
             reference: The reference to verify
             
         Returns:
-            List of errors or None if no errors found
+            Tuple of (errors, url, verified_data) where:
+            - errors: List of errors or None if no errors found
+            - url: URL of the paper if found, None otherwise
+            - verified_data: The verified paper data from the verification service, None if not found
         """
         logger.debug(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
         
@@ -1954,11 +1958,11 @@ class ArxivReferenceChecker:
             logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
             logger.debug(f"Raw text: {reference['raw_text']}")
             # Mark as unverified but keep the URL if found
-            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url
+            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
         
         # If no errors were found by the Semantic Scholar client, we're done
         if not errors:
-            return None, paper_url
+            return None, paper_url, verified_data
         
         # Convert the errors to our format
         formatted_errors = []
@@ -1984,9 +1988,9 @@ class ArxivReferenceChecker:
             
             formatted_errors.append(formatted_error)
         
-        return formatted_errors if formatted_errors else None, paper_url
+        return formatted_errors if formatted_errors else None, paper_url, verified_data
     
-    def add_error_to_dataset(self, source_paper, reference, errors, reference_url=None):
+    def add_error_to_dataset(self, source_paper, reference, errors, reference_url=None, verified_data=None):
         """
         Add an error entry to the consolidated dataset
         
@@ -1995,6 +1999,7 @@ class ArxivReferenceChecker:
             reference: The reference object
             errors: List of error dictionaries
             reference_url: URL of the verified paper (from verification service)
+            verified_data: The verified data from the verification service (for corrected formatting)
         """
         for error in errors:
             # Determine if this is an error or warning
@@ -2020,7 +2025,10 @@ class ArxivReferenceChecker:
                 
                 # Error information
                 'error_type': error_type,
-                'error_details': error_details
+                'error_details': error_details,
+                
+                # Store original reference for formatting corrections
+                'original_reference': reference
             }
             
             # Add correct information based on error type
@@ -2038,6 +2046,12 @@ class ArxivReferenceChecker:
             # Add standard format using the correct information (only for non-unverified errors)
             if error_type != 'unverified':
                 error_entry['ref_standard_format'] = self.format_standard_reference(error)
+                
+                # Generate corrected reference in original format
+                corrected_data = self._extract_corrected_data_from_error(error, verified_data)
+                corrected_format = format_corrected_reference(reference, corrected_data, error_entry)
+                if corrected_format:
+                    error_entry['ref_corrected_format'] = corrected_format
             else:
                 error_entry['ref_standard_format'] = None
             
@@ -2077,32 +2091,10 @@ class ArxivReferenceChecker:
                 f.write(f"Type: {error_entry['error_type']}\n")
                 f.write(f"Details: {error_entry['error_details']}\n\n")
                 
-                f.write("AS CITED:\n")
-                f.write(f"  Authors: {error_entry['ref_authors_cited']}\n")
-                f.write(f"  Year: {error_entry['ref_year_cited']}\n")
-                if error_entry['ref_url_cited']:
-                    f.write(f"  URL: {error_entry['ref_url_cited']}\n")
-                
-                # For unverified references, show the raw text as well
-                if error_entry['error_type'] == 'unverified':
-                    f.write(f"  Raw text: {error_entry.get('ref_raw_text', 'N/A')}\n")
-                
-                f.write("\n")
-                
-                # Show correct information if available
-                if error_entry['error_type'] != 'unverified' and any([
-                    error_entry.get('ref_authors_correct'),
-                    error_entry.get('ref_year_correct'),
-                    error_entry.get('ref_url_correct')
-                ]):
-                    f.write("CORRECT INFORMATION:\n")
-                    if error_entry.get('ref_authors_correct'):
-                        f.write(f"  Authors: {error_entry['ref_authors_correct']}\n")
-                    if error_entry.get('ref_year_correct'):
-                        f.write(f"  Year: {error_entry['ref_year_correct']}\n")
-                    if error_entry.get('ref_url_correct'):
-                        f.write(f"  URL: {error_entry['ref_url_correct']}\n")
-                    f.write("\n")
+                # Show raw text of the original reference
+                if error_entry.get('ref_raw_text'):
+                    f.write("RAW REFERENCE TEXT:\n")
+                    f.write(f"{error_entry['ref_raw_text']}\n\n")
                 
                 # Show verified URL if available (even for unverified references)
                 if error_entry.get('ref_verified_url'):
@@ -2110,16 +2102,71 @@ class ArxivReferenceChecker:
                     f.write(f"  {error_entry['ref_verified_url']}\n")
                     f.write("\n")
                 
-                # Show standard format if available
-                if error_entry.get('ref_standard_format'):
-                    f.write("STANDARD FORMAT:\n")
-                    f.write(f"  {error_entry['ref_standard_format']}\n")
-                    f.write("\n")
+                # Show corrected reference in original format if available
+                if error_entry.get('ref_corrected_format'):
+                    f.write("CORRECTED REFERENCE (drop-in replacement):\n")
+                    f.write(f"{error_entry['ref_corrected_format']}\n\n")
                 
                 f.write("=" * 80 + "\n")
                 
         except Exception as e:
             logger.error(f"Error writing to output file: {str(e)}")
+    
+    def _extract_corrected_data_from_error(self, error, verified_data):
+        """
+        Extract corrected data from error object and verified data
+        
+        Args:
+            error: Error dictionary containing correction information
+            verified_data: Verified data from the verification service
+            
+        Returns:
+            Dictionary with corrected data fields
+        """
+        corrected_data = {}
+        
+        # Extract corrected information from error object
+        if error.get('ref_title_correct'):
+            corrected_data['title'] = error['ref_title_correct']
+        elif verified_data and verified_data.get('title'):
+            corrected_data['title'] = verified_data['title']
+            
+        if error.get('ref_authors_correct'):
+            corrected_data['authors'] = error['ref_authors_correct']
+        elif verified_data and verified_data.get('authors'):
+            # Format authors from verified data
+            if isinstance(verified_data['authors'], list):
+                if verified_data['authors'] and isinstance(verified_data['authors'][0], dict):
+                    # Semantic Scholar format: [{'name': 'Author Name'}, ...]
+                    author_names = [author.get('name', '') for author in verified_data['authors']]
+                    corrected_data['authors'] = ', '.join(author_names)
+                else:
+                    # Simple list of names
+                    corrected_data['authors'] = ', '.join(verified_data['authors'])
+            else:
+                corrected_data['authors'] = str(verified_data['authors'])
+                
+        if error.get('ref_year_correct'):
+            corrected_data['year'] = error['ref_year_correct']
+        elif verified_data and verified_data.get('year'):
+            corrected_data['year'] = verified_data['year']
+            
+        if error.get('ref_url_correct'):
+            corrected_data['url'] = error['ref_url_correct']
+        elif verified_data and verified_data.get('url'):
+            corrected_data['url'] = verified_data['url']
+            
+        # Add DOI if available from verified data
+        if verified_data:
+            external_ids = verified_data.get('externalIds', {})
+            if external_ids and external_ids.get('DOI'):
+                corrected_data['doi'] = external_ids['DOI']
+                
+            # Add journal information if available
+            if verified_data.get('journal'):
+                corrected_data['journal'] = verified_data['journal']
+                
+        return corrected_data
     
     def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
         """
@@ -3648,7 +3695,7 @@ class ArxivReferenceChecker:
             
             # --- DEBUG TIMER ---
             start_time = time.time()
-            errors, reference_url = self.verify_reference(paper, reference)
+            errors, reference_url, verified_data = self.verify_reference(paper, reference)
 
             if reference_url and not url:
                 print(f"       {reference_url}")
@@ -3658,7 +3705,7 @@ class ArxivReferenceChecker:
                 logger.debug(f"Raw text: {reference.get('raw_text', '')}")
             
             self._process_reference_result(paper, reference, errors, reference_url, 
-                                         paper_errors, unverified_count, debug_mode)
+                                         paper_errors, unverified_count, debug_mode, verified_data=verified_data)
     
     def _verify_references_parallel(self, paper, bibliography, paper_errors, error_types, unverified_count, debug_mode):
         """
@@ -3682,13 +3729,13 @@ class ArxivReferenceChecker:
         # Set up result callback to handle each completed reference  
         def result_callback(result):
             self._process_reference_result(paper, result.reference, result.errors, result.url,
-                                         paper_errors, unverified_count, debug_mode, print_output=True)
+                                         paper_errors, unverified_count, debug_mode, print_output=True, verified_data=result.verified_data)
         
         # Run parallel verification
         processor.verify_references_parallel(paper, bibliography, result_callback)
     
     def _process_reference_result(self, paper, reference, errors, reference_url, 
-                                paper_errors, unverified_count, debug_mode, print_output=True):
+                                paper_errors, unverified_count, debug_mode, print_output=True, verified_data=None):
         """
         Process the result of reference verification (shared by both sequential and parallel)
         
@@ -3710,7 +3757,7 @@ class ArxivReferenceChecker:
                 # The calling method should handle this counter
                 self.total_unverified_refs += 1
                 # Add unverified reference to dataset
-                self.add_error_to_dataset(paper, reference, errors, reference_url)
+                self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
                 if not debug_mode and print_output:
                     # Show full citation details for unverified references
                     print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
@@ -3730,7 +3777,7 @@ class ArxivReferenceChecker:
                         print(f"          URL: {ref_url}")
             else:
                 # Real errors or warnings found
-                self.add_error_to_dataset(paper, reference, errors, reference_url)
+                self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
                 paper_errors.extend(errors)
                 
                 # Count errors vs warnings

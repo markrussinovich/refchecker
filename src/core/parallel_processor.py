@@ -34,6 +34,7 @@ class ReferenceResult:
     url: Optional[str]
     processing_time: float
     reference: Dict[str, Any]
+    verified_data: Optional[Dict[str, Any]] = None
 
 
 class ParallelReferenceProcessor:
@@ -169,7 +170,7 @@ class ParallelReferenceProcessor:
                 try:
                     # Perform reference verification using base checker
                     start_time = time.time()
-                    errors, url = self.base_checker.verify_reference(
+                    errors, url, verified_data = self.base_checker.verify_reference(
                         work_item.source_paper,
                         work_item.reference
                     )
@@ -181,7 +182,8 @@ class ParallelReferenceProcessor:
                         errors=errors,
                         url=url,
                         processing_time=processing_time,
-                        reference=work_item.reference
+                        reference=work_item.reference,
+                        verified_data=verified_data
                     )
                     
                     # Put result in queue
