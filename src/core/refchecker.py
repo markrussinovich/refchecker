@@ -105,6 +105,7 @@ class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file="reference_errors.txt", 
                  llm_config=None, debug_mode=False, enable_parallel=True):
         # Initialize the reference checker for non-arXiv references
+        self.fatal_error = False            
         self.db_path = db_path
         self.verification_output_file = output_file
         
@@ -165,6 +166,12 @@ class ArxivReferenceChecker:
             self.config = {}
         self.llm_config_override = llm_config
         self.llm_extractor = self._initialize_llm_extractor()
+        
+        # if we were supposed to create an llm extractor but failed, we should not continue
+        if self.llm_enabled and not self.llm_extractor:
+            logger.error("LLM-based reference extraction is required but could not be initialized. Exiting.")
+            self.fatal_error = True
+            return
 
         # Initialize new services
         self.pdf_processor = PDFProcessor(self.config.get('processing', {}))
@@ -190,9 +197,9 @@ class ArxivReferenceChecker:
             return None
             
         # Check if LLM is enabled via command line override or config
-        llm_enabled = (self.llm_config_override is not None) or self.config.get("llm", {}).get("enabled", False)
+        self.llm_enabled = (self.llm_config_override is not None) or self.config.get("llm", {}).get("enabled", False)
         
-        if not llm_enabled:
+        if not self.llm_enabled:
             return None
         
         # Use command line overrides if provided, otherwise use config
@@ -3693,6 +3700,9 @@ def main():
             llm_config=llm_config,
             debug_mode=args.debug
         )
+        
+        if checker.fatal_error:
+            return 1
         
         # Run the checker
         checker.run(

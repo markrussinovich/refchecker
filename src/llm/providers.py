@@ -310,7 +310,10 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             self._clean_debugger_environment()
             
             if self.auto_start_server:
-                self._ensure_server_running()
+                if self._ensure_server_running() == False:
+                    logger.error("Failed to start vLLM server, provider will not be available")
+                    # this is a fatal error that shouldn't create the object
+                    raise Exception("vLLM server failed to start")
             
             try:
                 import openai
