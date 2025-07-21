@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "refchecker"
-version = "1.0.0"
+version = "1.0.8"
 description = "A comprehensive tool for validating reference accuracy in academic papers"
 readme = "README.md"
 license = "MIT"
@@ -67,6 +67,7 @@ optional = [
 vllm = [
     "vllm>=0.3.0",
     "huggingface_hub>=0.17.0",
+    "torch>=2.0.0",
 ]
 
 [project.urls]
@@ -81,5 +82,5 @@ refchecker = "core.refchecker:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"*" = ["*.txt", "*.md", "*.conf"]
-"refchecker" = ["scripts/*.py"]
+"*" = ["*.txt", "*.md", "*.conf", "*.py"]
+"scripts" = ["*.py"]
