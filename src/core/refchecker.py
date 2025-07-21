@@ -54,7 +54,7 @@ try:
     from .. import __version__
 except ImportError:
     # Fallback if running as script
-    __version__ = "1.0.8"
+    __version__ = "1.0.9"
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def setup_logging(debug_mode=False, level=logging.DEBUG):
@@ -222,7 +222,7 @@ class ArxivReferenceChecker:
             return None
         
         # Create reference extractor with fallback
-        fallback_enabled = self.config.get("llm", {}).get("fallback_enabled", True)
+        fallback_enabled = self.config.get("llm", {}).get("fallback_enabled", False)
         extractor = ReferenceExtractor(
             llm_provider=llm_provider,
             fallback_enabled=fallback_enabled
@@ -2121,6 +2121,7 @@ class ArxivReferenceChecker:
         self.total_non_arxiv_refs = 0
         self.total_other_refs = 0
         self.total_unverified_refs = 0
+        self.used_regex_extraction = False
         
         try:
             # Get papers to process
@@ -2331,6 +2332,11 @@ class ArxivReferenceChecker:
                     print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
+                
+                # Show warning if regex extraction was used and there are many errors
+                if self.used_regex_extraction and self.total_errors_found > 5:
+                    print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
+                
                 print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
             else:
                 # Multi-paper mode - show full summary
@@ -2344,6 +2350,11 @@ class ArxivReferenceChecker:
                 print(f"⚠️  Papers with warnings: {self.papers_with_warnings}")
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                
+                # Show warning if regex extraction was used and there are many errors
+                if self.used_regex_extraction and self.total_errors_found > 5:
+                    print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
+                
                 print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
         
         # Log performance statistics at the end (debug mode only)
@@ -2553,12 +2564,14 @@ class ArxivReferenceChecker:
                 logger.error(f"LLM reference extraction failed: {e}")
         
         # Fallback to regex-based parsing
+        self.used_regex_extraction = True
         return self._parse_references_regex(bibliography_text)
     
     def _parse_references_regex(self, bibliography_text):
         """
         Parse references using regex-based approach (original implementation)
         """
+        self.used_regex_extraction = True
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
         # This fixes the issue where years appear as separate lines
