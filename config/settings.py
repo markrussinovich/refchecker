@@ -115,21 +115,21 @@ def get_config() -> Dict[str, Any]:
     if os.getenv("REFCHECKER_LLM_FALLBACK_ON_ERROR"):
         config["llm"]["fallback_enabled"] = os.getenv("REFCHECKER_LLM_FALLBACK_ON_ERROR").lower() == "true"
     
-    # Provider-specific API keys
-    if os.getenv("REFCHECKER_OPENAI_API_KEY"):
-        config["llm"]["openai"]["api_key"] = os.getenv("REFCHECKER_OPENAI_API_KEY")
+    # Provider-specific API keys - check native variables first, then fallback to refchecker-prefixed
+    if os.getenv("OPENAI_API_KEY") or os.getenv("REFCHECKER_OPENAI_API_KEY"):
+        config["llm"]["openai"]["api_key"] = os.getenv("OPENAI_API_KEY") or os.getenv("REFCHECKER_OPENAI_API_KEY")
     
-    if os.getenv("REFCHECKER_ANTHROPIC_API_KEY"):
-        config["llm"]["anthropic"]["api_key"] = os.getenv("REFCHECKER_ANTHROPIC_API_KEY")
+    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("REFCHECKER_ANTHROPIC_API_KEY"):
+        config["llm"]["anthropic"]["api_key"] = os.getenv("ANTHROPIC_API_KEY") or os.getenv("REFCHECKER_ANTHROPIC_API_KEY")
     
-    if os.getenv("REFCHECKER_GOOGLE_API_KEY"):
-        config["llm"]["google"]["api_key"] = os.getenv("REFCHECKER_GOOGLE_API_KEY")
+    if os.getenv("GOOGLE_API_KEY") or os.getenv("REFCHECKER_GOOGLE_API_KEY"):
+        config["llm"]["google"]["api_key"] = os.getenv("GOOGLE_API_KEY") or os.getenv("REFCHECKER_GOOGLE_API_KEY")
     
-    if os.getenv("REFCHECKER_AZURE_API_KEY"):
-        config["llm"]["azure"]["api_key"] = os.getenv("REFCHECKER_AZURE_API_KEY")
+    if os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("REFCHECKER_AZURE_API_KEY"):
+        config["llm"]["azure"]["api_key"] = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("REFCHECKER_AZURE_API_KEY")
     
-    if os.getenv("REFCHECKER_AZURE_ENDPOINT"):
-        config["llm"]["azure"]["endpoint"] = os.getenv("REFCHECKER_AZURE_ENDPOINT")
+    if os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("REFCHECKER_AZURE_ENDPOINT"):
+        config["llm"]["azure"]["endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("REFCHECKER_AZURE_ENDPOINT")
     
     # vLLM configuration
     if os.getenv("REFCHECKER_VLLM_SERVER_URL"):

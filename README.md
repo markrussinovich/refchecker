@@ -9,14 +9,9 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
 - **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
-- **🧠 Smart Reference Parsing**: Handles various academic citation formats and styles (including CoRR format)
 - **✅ Comprehensive Error Detection**: Identifies issues with authors, years, URLs, and DOIs
 - **🔄 Multi-Tier Verification Sources**: Intelligent fallback system using local databases, Semantic Scholar, OpenAlex, CrossRef, and enhanced hybrid checking
 - **📊 Detailed Reporting**: Generates comprehensive error reports with statistics and icons
-- **⚡ Parallel Processing**: Concurrent reference validation for improved performance
-- **🚦 Rate Limiting**: Respects API constraints with intelligent backoff strategies
-- **🎛️ Highly Configurable**: Support for offline verification and various input sources
-- **⚡ Performance Optimized**: Batch processing, caching, parallel validation, and intelligent API selection
 
 ## Quick Start
 
@@ -32,12 +27,8 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
    python refchecker.py --paper /path/to/your/paper.pdf
    ```
 
-3. **For faster processing, set up local database:**
+3. **For faster processing with local database** (see [Local Database Setup](#local-database-setup)):
    ```bash
-   # Download database (optional but recommended)
-   python download_semantic_scholar_db.py --field "computer science" --start-year 2020
-
-   # Use offline verification
    python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
    ```
 
@@ -47,11 +38,11 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
 
 ### Supported LLM Providers
 
-- **OpenAI** (GPT-4, GPT-3.5)
-- **Anthropic** (Claude 3.5, Claude 3)
-- **Google** (Gemini)
+- **OpenAI** e.g., GPT-4o, o3
+- **Anthropic** e.g., Claude Sonnet 4
+- **Google** e.g., Gemini 2.5
 - **Azure OpenAI**
-- **vLLM** (Local Hugging Face models via OpenAI-compatible server)
+- **vLLM** e.g., Local Hugging Face models via OpenAI-compatible server
 
 ### Quick LLM Setup (Recommended)
 
@@ -60,7 +51,7 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
    # Enable LLM with Anthropic Claude
    export REFCHECKER_USE_LLM=true
    export REFCHECKER_LLM_PROVIDER=anthropic
-   export REFCHECKER_ANTHROPIC_API_KEY=your_api_key_here
+   export ANTHROPIC_API_KEY=your_api_key_here
    
    python refchecker.py --paper 1706.03762
    ```
@@ -74,14 +65,6 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
      --llm-key your_api_key_here
    ```
 
-3. **For Maximum Speed (When Needed)**:
-   ```bash
-   # Disable LLM for fastest processing
-   python refchecker.py --paper 1706.03762 \
-     --disable-llm \
-     --skip-google-scholar-single
-   ```
-
 ### LLM Configuration Options
 
 #### Environment Variables
@@ -92,12 +75,12 @@ export REFCHECKER_USE_LLM=true
 # Provider selection
 export REFCHECKER_LLM_PROVIDER=anthropic        # openai, anthropic, google, azure
 
-# Provider-specific API keys
-export REFCHECKER_OPENAI_API_KEY=your_key
-export REFCHECKER_ANTHROPIC_API_KEY=your_key
-export REFCHECKER_GOOGLE_API_KEY=your_key
-export REFCHECKER_AZURE_API_KEY=your_key
-export REFCHECKER_AZURE_ENDPOINT=your_endpoint
+# Provider-specific API keys (native environment variables preferred)
+export OPENAI_API_KEY=your_key                    # or REFCHECKER_OPENAI_API_KEY
+export ANTHROPIC_API_KEY=your_key                 # or REFCHECKER_ANTHROPIC_API_KEY
+export GOOGLE_API_KEY=your_key                    # or REFCHECKER_GOOGLE_API_KEY
+export AZURE_OPENAI_API_KEY=your_key              # or REFCHECKER_AZURE_API_KEY
+export AZURE_OPENAI_ENDPOINT=your_endpoint        # or REFCHECKER_AZURE_ENDPOINT
 
 # Model configuration
 export REFCHECKER_LLM_MODEL=claude-3-haiku-20240307
@@ -125,7 +108,7 @@ export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
 ```bash
 python refchecker.py --paper /path/to/paper.pdf \
   --llm-provider openai \
-  --llm-model gpt-4 \
+  --llm-model gpt-4o \
   --llm-key sk-your-openai-key
 ```
 
@@ -133,7 +116,7 @@ python refchecker.py --paper /path/to/paper.pdf \
 ```bash
 python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
   --llm-provider anthropic \
-  --llm-model claude-3-sonnet-20240229 \
+  --llm-model claude-sonnet-4-20250514 \
   --llm-key your-anthropic-key
 ```
 
@@ -141,7 +124,7 @@ python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
 ```bash
 python refchecker.py --paper paper.tex \
   --llm-provider google \
-  --llm-model gemini-1.5-flash \
+  --llm-model gemini-2.5-flash \
   --llm-key your-google-key
 ```
 
@@ -159,8 +142,7 @@ python refchecker.py --paper paper.txt \
 # Start vLLM server first (automatic startup supported)
 python refchecker.py --paper paper.pdf \
   --llm-provider vllm \
-  --llm-model microsoft/DialoGPT-medium \
-  --llm-endpoint http://localhost:8000
+  --llm-model meta-llama/Llama-3.2-8B-Instruct 
 ```
 
 ## 🚀 Installation
@@ -245,54 +227,6 @@ python refchecker.py --paper /path/to/your/paper.txt
 python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
-### Verification Options
-
-```bash
-# Use local database for fastest offline verification
-python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
-
-# Use Semantic Scholar API key for higher rate limits
-python refchecker.py --paper 1706.03762 --semantic-scholar-api-key YOUR_API_KEY
-
-# Enable LLM for best accuracy (recommended)
-python refchecker.py --paper 1706.03762 --llm-provider anthropic --llm-key YOUR_API_KEY
-
-# Run in debug mode with verbose logging
-python refchecker.py --paper 1706.03762 --debug
-
-# Optimize for speed when accuracy can be compromised
-python refchecker.py --paper 1706.03762 --disable-llm --skip-google-scholar-single
-```
-
-## 🗄️ Verification APIs and Current Architecture
-
-The system uses a simple two-mode approach for reference verification:
-
-### **Current Implementation**
-
-#### 1. **Local Database Mode**
-- **When**: `--db-path` is specified
-- **Uses**: `LocalNonArxivReferenceChecker` only
-- **Mode**: Completely offline, SQLite database queries only
-- **No API calls**: No fallback to online sources
-- **Performance**: ~1000+ references/second with parallel processing
-- **Coverage**: Limited to papers in your local database
-
-#### 2. **Online Mode (Default)**  
-- **When**: No `--db-path` specified
-- **Uses**: `EnhancedHybridReferenceChecker` with intelligent fallback
-- **API Priority**: Semantic Scholar → OpenAlex → CrossRef (DOI-based sources prioritized)
-- **Rate limits**: Distributed across multiple APIs for better throughput
-- **Performance**: ~10-50 references/second with improved success rate
-- **Coverage**: Combined coverage from Semantic Scholar, OpenAlex, and CrossRef
-
-### **ArXiv Reference Handling**
-
-ArXiv references are handled via the **ArXiv API** in both modes:
-- **Direct metadata fetching** from ArXiv servers
-- **Batch pre-fetching** for improved performance  
-- **Performance**: ~5-10 references/second
-
 ## 📊 Output and Results
 
 ### Generated Files
@@ -343,40 +277,6 @@ ArXiv references are handled via the **ArXiv API** in both modes:
 💾 Detailed results saved to: reference_errors.txt
 ```
 
-## Local Database Setup
-
-### Downloading the Database
-
-Create a local database for offline verification:
-
-```bash
-# Download recent computer science papers
-python download_semantic_scholar_db.py \
-  --field "computer science" \
-  --start-year 2020 \
-  --end-year 2024 \
-  --batch-size 100
-
-# Download papers matching a specific query
-python download_semantic_scholar_db.py \
-  --query "attention is all you need" \
-  --batch-size 50
-
-# Download with API key for higher rate limits
-python download_semantic_scholar_db.py \
-  --api-key YOUR_API_KEY \
-  --field "machine learning" \
-  --start-year 2023
-```
-
-### Database Options
-
-- **`--output-dir`**: Directory to store database (default: `semantic_scholar_db`)
-- **`--batch-size`**: Papers per batch (default: 100)
-- **`--api-key`**: Semantic Scholar API key for higher limits
-- **`--fields`**: Metadata fields to include
-- **`--query`**: Search query for specific papers
-- **`--start-year`/`--end-year`**: Year range filter
 
 ## 🧪 Testing and Validation
 
@@ -415,45 +315,12 @@ All validation scripts support:
 
 ## ⚙️ Configuration
 
-### Environment Variables
-
-```bash
-# Semantic Scholar API key
-export SEMANTIC_SCHOLAR_API_KEY="your_api_key_here"
-
-# LLM Configuration
-export REFCHECKER_USE_LLM=true
-export REFCHECKER_LLM_PROVIDER=anthropic  # openai, anthropic, google, azure, vllm
-export REFCHECKER_ANTHROPIC_API_KEY="your_anthropic_key"
-export REFCHECKER_OPENAI_API_KEY="your_openai_key"
-export REFCHECKER_GOOGLE_API_KEY="your_google_key"
-export REFCHECKER_AZURE_API_KEY="your_azure_key"
-export REFCHECKER_AZURE_ENDPOINT="https://your-resource.openai.azure.com/"
-
-# vLLM Configuration (for local models)
-export REFCHECKER_VLLM_SERVER_URL="http://localhost:8000"
-export REFCHECKER_VLLM_AUTO_START="true"
-export REFCHECKER_VLLM_TIMEOUT="300"
-
-# Advanced LLM Configuration
-export REFCHECKER_LLM_MODEL="claude-3-haiku-20240307"
-export REFCHECKER_LLM_MAX_TOKENS=4000
-export REFCHECKER_LLM_TEMPERATURE=0.1
-export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
-
-# Performance settings
-export REFCHECKER_DEBUG=false
-export REFCHECKER_OUTPUT_DIR="output"
-```
 
 ### Command Line Arguments
 
 ```bash
 # Basic options
 --paper PAPER                    # Paper to check (ArXiv ID, URL, or file path)
---max-papers N                   # Maximum papers to process (default: 50)
---days N                         # Days to look back (default: 365) 
---category CATEGORY              # ArXiv category filter
 --debug                          # Enable debug mode
 --semantic-scholar-api-key KEY   # Semantic Scholar API key
 --db-path PATH                   # Local database path
@@ -464,6 +331,41 @@ export REFCHECKER_OUTPUT_DIR="output"
 --llm-key KEY                    # API key for LLM provider
 --llm-endpoint URL               # Override endpoint (for Azure/vLLM)
 
+
+## 🗄️ Local Database Setup
+
+### Downloading the Database
+
+Create a local database for offline verification:
+
+```bash
+# Download recent computer science papers
+python download_semantic_scholar_db.py \
+  --field "computer science" \
+  --start-year 2020 \
+  --end-year 2024 \
+  --batch-size 100
+
+# Download papers matching a specific query
+python download_semantic_scholar_db.py \
+  --query "attention is all you need" \
+  --batch-size 50
+
+# Download with API key for higher rate limits
+python download_semantic_scholar_db.py \
+  --api-key YOUR_API_KEY \
+  --field "machine learning" \
+  --start-year 2023
+```
+
+### Database Options
+
+- **`--output-dir`**: Directory to store database (default: `semantic_scholar_db`)
+- **`--batch-size`**: Papers per batch (default: 100)
+- **`--api-key`**: Semantic Scholar API key for higher limits
+- **`--fields`**: Metadata fields to include
+- **`--query`**: Search query for specific papers
+- **`--start-year`/`--end-year`**: Year range filter
 
 ## 📄 License
 
