@@ -892,25 +892,34 @@ class ArxivReferenceChecker:
                     r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
                     r'\n\s*\d+\.\s+[A-Z][A-Za-z\s]*\n',  # Numbered section: 8. Appendix
                     r'\n\s*Appendix\s+[A-Z]',  # Appendix A
-                    r'\n\s*\[\s*[A-Za-z\s]+\s*\]',  # [Next Section]
-                    r'\n\s*[A-Z][A-Za-z\s]*\n\s*[A-Z][A-Za-z\s]*\n',  # Two consecutive capitalized lines
+                    # More restrictive pattern for bracketed sections - only match actual section headers
+                    # like [APPENDIX], [CONCLUSIONS] but not reference metadata like [Online], [cs], [PDF]
+                    r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM)\s*\]',
+                    # Pattern for consecutive capitalized lines that are clearly section headers (short and uppercase)
+                    r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',  # All caps sections like "APPENDIX\nALGORITHM"
                     r'\\end\{thebibliography\}',  # LaTeX bibliography environment end
                     r'\\end\{document\}',  # LaTeX document end
                 ]
                 
                 end_pos = len(text)  # Default to end of document
                 
-                for next_pattern in next_section_patterns:
+                for i, next_pattern in enumerate(next_section_patterns, 1):
                     next_match = re.search(next_pattern, text[start_pos:])
                     if next_match:
                         section_end = start_pos + next_match.start()
+                        logger.debug(f"PATTERN {i} MATCHED: {next_pattern}")
+                        logger.debug(f"MATCHED TEXT: {repr(next_match.group(0))}")
+                        logger.debug(f"CONTEXT: {repr(text[section_end-30:section_end+30])}")
                         # Only use this end position if it's reasonable (not too close to start)
                         if section_end > start_pos + 100 and section_end < end_pos:
                             end_pos = section_end
-                            logger.debug(f"Found section end with pattern: {next_pattern}")
-                            logger.debug(f"Section end at position: {section_end}")
+                            logger.debug(f"ACCEPTED: End position set to {section_end}")
+                            break
+                        else:
+                            logger.debug(f"REJECTED: section_end={section_end}, start_pos={start_pos}, current_end={end_pos}")
                 
                 bibliography_text = text[start_pos:end_pos]
+                logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
                 
                 # Check if we have a reasonable amount of text
                 if len(bibliography_text.strip()) < 50:
