@@ -1298,6 +1298,126 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
     
+    # Case 0: Handle specific IEEE journal abbreviation patterns first
+    def normalize_ieee_journal(venue):
+        """Normalize IEEE journal names to handle standard abbreviations"""
+        venue_lower = venue.lower().strip()
+        
+        # IEEE journal abbreviation mappings
+        ieee_mappings = {
+            'ieee trans. commun.': 'ieee transactions on communications',
+            'ieee trans. wireless commun.': 'ieee transactions on wireless communications', 
+            'ieee trans. netw. sci. eng.': 'ieee transactions on network science and engineering',
+            'ieee trans. cogn. commun. netw.': 'ieee transactions on cognitive communications and networking',
+            'ieee j. sel. topics signal process.': 'ieee journal on selected topics in signal processing',
+            'ieee netw. lett.': 'ieee networking letters',
+            'ieee commun. lett.': 'ieee communications letters',
+            'ieee commun. mag.': 'ieee communications magazine',
+            'ieee veh. technol. mag.': 'ieee vehicular technology magazine',
+            'ieee commun. surveys tuts.': 'ieee communications surveys and tutorials',
+            'nat. mach. intell.': 'nature machine intelligence',
+            # Common conference abbreviations
+            'proc. ieee int. conf. commun. (icc)': 'ieee international conference on communications',
+            'proc. ieee wireless commun. and netw. conf. (wcnc)': 'ieee wireless communications and networking conference', 
+            'proc. ieee global commun. conf. (globecom)': 'global communications conference',
+            'proc. int. conf. mach. learn. (icml)': 'international conference on machine learning',
+            'adv. neural inf. process. syst.': 'neural information processing systems',
+            'proc. ieee.': 'proceedings of the ieee',
+            # Add reverse mappings for when the full name is cited and abbreviation is correct
+            'ieee transactions on communications': 'ieee trans. commun.',
+            'ieee transactions on wireless communications': 'ieee trans. wireless commun.',
+            'ieee transactions on network science and engineering': 'ieee trans. netw. sci. eng.',
+            'ieee transactions on cognitive communications and networking': 'ieee trans. cogn. commun. netw.',
+            'ieee journal on selected topics in signal processing': 'ieee j. sel. topics signal process.',
+            'ieee networking letters': 'ieee netw. lett.',
+            'ieee communications letters': 'ieee commun. lett.',
+            'ieee communications magazine': 'ieee commun. mag.',
+            'ieee vehicular technology magazine': 'ieee veh. technol. mag.',
+            'ieee communications surveys and tutorials': 'ieee commun. surveys tuts.',
+            'nature machine intelligence': 'nat. mach. intell.',
+            # Reverse conference mappings
+            'ieee international conference on communications': 'proc. ieee int. conf. commun. (icc)',
+            'ieee wireless communications and networking conference': 'proc. ieee wireless commun. and netw. conf. (wcnc)',
+            'global communications conference': 'proc. ieee global commun. conf. (globecom)',
+            'international conference on machine learning': 'proc. int. conf. mach. learn. (icml)',
+            'neural information processing systems': 'adv. neural inf. process. syst.',
+            'proceedings of the ieee': 'proc. ieee.',
+        }
+        
+        # Normalize for comparison - handle common variations
+        # Remove year prefixes/suffixes and normalize separators
+        normalized = re.sub(r'^\d{4}\s+', '', venue_lower)  # Remove year prefix like "2024 "
+        normalized = re.sub(r'\s+\d{4}$', '', normalized)   # Remove year suffix like " 2024"
+        normalized = normalized.replace(' & ', ' and ')     # Normalize & to "and"
+        normalized = normalized.replace('&', 'and')         # Handle &amp; etc
+        
+        # Try exact mapping first (with original)
+        if venue_lower in ieee_mappings:
+            return ieee_mappings[venue_lower]
+            
+        # Try exact mapping with normalized version
+        if normalized in ieee_mappings:
+            return ieee_mappings[normalized]
+        
+        # Try pattern-based matching for variations
+        # Handle "Trans." vs "Transactions", "Commun." vs "Communications", etc.
+        patterns = [
+            (r'\btrans\.\s*', 'transactions '),
+            (r'\bcommun\.\s*', 'communications '),
+            (r'\bnetw\.\s*', 'network '),
+            (r'\bwireless\s+commun\.\s*', 'wireless communications '),
+            (r'\bsci\.\s*', 'science '),
+            (r'\beng\.\s*', 'engineering '),
+            (r'\bcogn\.\s*', 'cognitive '),
+            (r'\bj\.\s*', 'journal '),
+            (r'\bsel\.\s*', 'selected '),
+            (r'\bsignal\s+process\.\s*', 'signal processing '),
+            (r'\blett\.\s*', 'letters '),
+            (r'\bmag\.\s*', 'magazine '),
+            (r'\bveh\.\s*', 'vehicular '),
+            (r'\btechnol\.\s*', 'technology '),
+            (r'\bsurveys\s+tuts\.\s*', 'surveys and tutorials '),
+            (r'\bmach\.\s*', 'machine '),
+            (r'\bintell\.\s*', 'intelligence '),
+            # Reverse patterns
+            (r'\btransactions\s+', 'trans. '),
+            (r'\bcommunications\s+', 'commun. '),
+            (r'\bnetwork\s+', 'netw. '),
+            (r'\bwireless\s+communications\s+', 'wireless commun. '),
+            (r'\bscience\s+', 'sci. '),
+            (r'\bengineering\s+', 'eng. '),
+            (r'\bcognitive\s+', 'cogn. '),
+            (r'\bjournal\s+', 'j. '),
+            (r'\bselected\s+', 'sel. '),
+            (r'\bsignal\s+processing\s+', 'signal process. '),
+            (r'\bletters\s+', 'lett. '),
+            (r'\bmagazine\s+', 'mag. '),
+            (r'\bvehicular\s+', 'veh. '),
+            (r'\btechnology\s+', 'technol. '),
+            (r'\bsurveys\s+and\s+tutorials\s+', 'surveys tuts. '),
+            (r'\bmachine\s+', 'mach. '),
+            (r'\bintelligence\s+', 'intell. '),
+        ]
+        
+        for pattern, replacement in patterns:
+            normalized = re.sub(pattern, replacement, normalized)
+        
+        # Clean up extra spaces
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized
+    
+    # Check if venues match after IEEE journal normalization
+    norm_venue1_ieee = normalize_ieee_journal(venue1)
+    norm_venue2_ieee = normalize_ieee_journal(venue2)
+    
+    if norm_venue1_ieee == norm_venue2_ieee:
+        return False  # They match - not substantially different
+    
+    # Also check cross-mapping (abbreviated vs full)
+    if (normalize_ieee_journal(norm_venue1_ieee) == norm_venue2_ieee or
+        normalize_ieee_journal(norm_venue2_ieee) == norm_venue1_ieee):
+        return False  # They match - not substantially different
+
     # Case 1: Check if one is an acronym of the other
     def extract_acronym(full_name):
         """Extract potential acronym from full conference name"""
