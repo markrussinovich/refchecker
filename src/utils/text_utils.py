@@ -959,6 +959,29 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     if t1_normalized == t2_normalized:
         return 1.0
     
+    # Handle edition differences - check if one title is the same as the other but with edition info
+    # Common edition patterns: "Second Edition", "2nd Edition", "Revised Edition", etc.
+    edition_patterns = [
+        r'\s+second\s+edition\s*$',
+        r'\s+third\s+edition\s*$',
+        r'\s+fourth\s+edition\s*$',
+        r'\s+fifth\s+edition\s*$',
+        r'\s+\d+(?:st|nd|rd|th)\s+edition\s*$',
+        r'\s+revised\s+edition\s*$',
+        r'\s+updated\s+edition\s*$',
+        r'\s+new\s+edition\s*$',
+        r'\s+latest\s+edition\s*$',
+    ]
+    
+    # Check if removing edition info from one title makes them match
+    for pattern in edition_patterns:
+        t1_no_edition = re.sub(pattern, '', t1_normalized, flags=re.IGNORECASE).strip()
+        t2_no_edition = re.sub(pattern, '', t2_normalized, flags=re.IGNORECASE).strip()
+        
+        # If removing edition info from either title makes them equal, they're the same work
+        if (t1_no_edition == t2_normalized) or (t2_no_edition == t1_normalized) or (t1_no_edition == t2_no_edition):
+            return 1.0
+    
     # Check if one is substring of another, but require substantial overlap
     # to avoid false positives like "Rust programming language" vs "RustBelt: securing..."
     shorter_title = t1 if len(t1) < len(t2) else t2

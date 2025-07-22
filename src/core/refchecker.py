@@ -854,6 +854,11 @@ class ArxivReferenceChecker:
         
         # Common section titles for bibliography
         section_patterns = [
+            # Patterns for numbered sections with potential spacing issues from PDF extraction
+            r'(?i)\d+\s*ref\s*er\s*ences\s*\n',  # "12 Refer ences" with spaces
+            r'(?i)\d+\s*references\s*\n',  # "12References" or "12 References"
+            r'(?i)^\s*\d+\.\s*references\s*$',  # Numbered section: "7. References"
+            # Standard reference patterns
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
             r'(?i)works cited\s*\n',
@@ -862,16 +867,16 @@ class ArxivReferenceChecker:
             r'(?i)\[\s*references\s*\]',  # [References]
             r'(?i)^\s*references\s*$',  # References as a standalone line
             r'(?i)^\s*bibliography\s*$',  # Bibliography as a standalone line
-            r'(?i)^\s*\d+\.\s*references\s*$',  # Numbered section: 7. References
             r'(?i)references\s*and\s*citations',  # References and Citations
             r'(?i)cited\s*references',  # Cited References
             r'(?i)reference\s*list',  # Reference List
             r'(?i)references\s*cited',  # References Cited
             r'(?i)sources\s*cited',  # Sources Cited
-            r'(?i)sources',  # Sources
             r'(?i)references\s*and\s*notes',  # References and Notes
             r'\\begin\{thebibliography\}',  # LaTeX bibliography environment
             r'\\bibliography\{[^}]+\}',  # BibTeX \bibliography{} command
+            # Generic patterns that might match false positives - put at end
+            r'(?i)sources',  # Sources (too generic, moved to end)
         ]
         
         # Try to find the bibliography section
@@ -891,7 +896,9 @@ class ArxivReferenceChecker:
                 # Look for common section endings that come after references
                 next_section_patterns = [
                     r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
-                    r'\n\s*\d+\.\s+[A-Z][A-Za-z\s]*\n',  # Numbered section: 8. Appendix
+                    # More specific pattern for numbered sections - only match section headers, not bibliography entries
+                    # Look for common section headers like "8. Appendix", "9. Conclusion" but not "8. Smith, J."
+                    r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS)\b[A-Za-z\s]*\n',
                     r'\n\s*Appendix\s+[A-Z]',  # Appendix A
                     # More restrictive pattern for bracketed sections - only match actual section headers
                     # like [APPENDIX], [CONCLUSIONS] but not reference metadata like [Online], [cs], [PDF]
