@@ -1316,6 +1316,15 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'ieee veh. technol. mag.': 'ieee vehicular technology magazine',
             'ieee commun. surveys tuts.': 'ieee communications surveys and tutorials',
             'nat. mach. intell.': 'nature machine intelligence',
+            # ACM Transactions abbreviations
+            'acm trans. inf. syst.': 'acm transactions on information systems',
+            'acm transactions on information systems (tois)': 'acm transactions on information systems',
+            'acm trans. comput. syst.': 'acm transactions on computer systems',
+            'acm transactions on computer systems (tocs)': 'acm transactions on computer systems',
+            'acm trans. database syst.': 'acm transactions on database systems',
+            'acm transactions on database systems (tods)': 'acm transactions on database systems',
+            'acm trans. softw. eng. methodol.': 'acm transactions on software engineering and methodology',
+            'acm transactions on software engineering and methodology (tosem)': 'acm transactions on software engineering and methodology',
             # Common conference abbreviations
             'proc. ieee int. conf. commun. (icc)': 'ieee international conference on communications',
             'proc. ieee wireless commun. and netw. conf. (wcnc)': 'ieee wireless communications and networking conference', 
@@ -1335,6 +1344,11 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'ieee vehicular technology magazine': 'ieee veh. technol. mag.',
             'ieee communications surveys and tutorials': 'ieee commun. surveys tuts.',
             'nature machine intelligence': 'nat. mach. intell.',
+            # ACM Transactions reverse mappings
+            'acm transactions on information systems': 'acm trans. inf. syst.',
+            'acm transactions on computer systems': 'acm trans. comput. syst.',
+            'acm transactions on database systems': 'acm trans. database syst.',
+            'acm transactions on software engineering and methodology': 'acm trans. softw. eng. methodol.',
             # Reverse conference mappings
             'ieee international conference on communications': 'proc. ieee int. conf. commun. (icc)',
             'ieee wireless communications and networking conference': 'proc. ieee wireless commun. and netw. conf. (wcnc)',
@@ -1350,6 +1364,53 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         normalized = re.sub(r'\s+\d{4}$', '', normalized)   # Remove year suffix like " 2024"
         normalized = normalized.replace(' & ', ' and ')     # Normalize & to "and"
         normalized = normalized.replace('&', 'and')         # Handle &amp; etc
+        
+        # Remove common procedural prefixes and publisher information
+        # Handle "Proceedings of the [ordinal] [publisher]" patterns with careful conference name preservation
+        
+        # Special handling for ACM proceedings with ordinal numbers - preserve conference name
+        # Pattern: "proceedings of the 31st acm international conference..." -> "international conference..."
+        acm_ordinal_match = re.search(r'^proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+acm\s+(.*)', normalized)
+        if acm_ordinal_match:
+            # Preserve everything after "ACM" as the actual conference name
+            conference_name = acm_ordinal_match.group(3).strip()
+            normalized = conference_name
+        else:
+            # Handle companion proceedings pattern: "companion proceedings of the acm on web conference 2024"
+            companion_match = re.search(r'^companion\s+proceedings\s+of\s+(the\s+)?acm\s+on\s+(.*)', normalized)
+            if companion_match:
+                # Extract conference name and normalize it
+                conference_name = companion_match.group(2).strip()
+                # Remove year if present
+                conference_name = re.sub(r'\s+\d{4}$', '', conference_name)
+                # Convert "web conference" -> "the web conference"
+                if conference_name == 'web conference':
+                    conference_name = 'the web conference'
+                normalized = conference_name
+            else:
+                # Apply other prefix removal patterns
+                prefixes_to_remove = [
+                    r'^proceedings\s+of\s+(the\s+)?acm\s+',
+                    r'^proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+',
+                    r'^proceedings\s+of\s+(the\s+)?',
+                    r'^companion\s+proceedings\s+of\s+(the\s+)?acm\s+on\s+',
+                    r'^companion\s+proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+acm\s+',
+                    r'^in\s+proceedings\s+of\s+(the\s+)?',
+                    r'^advances\s+in\s+',
+                    r'^\d+(st|nd|rd|th)\s+',  # Remove ordinal numbers at start
+                ]
+                
+                for prefix_pattern in prefixes_to_remove:
+                    normalized = re.sub(prefix_pattern, '', normalized)
+        
+        # Remove publisher names and year suffixes from conference names
+        publisher_patterns = [
+            r'\s+\d{4}(,\s*\d{4})?$',  # Remove trailing years like " 2024" or " 2024, 2024"
+            r'\s*,\s*\d{4}$',          # Remove ", 2024" suffix
+        ]
+        
+        for pattern in publisher_patterns:
+            normalized = re.sub(pattern, '', normalized)
         
         # Try exact mapping first (with original)
         if venue_lower in ieee_mappings:
