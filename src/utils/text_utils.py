@@ -1102,11 +1102,32 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     if t1 == t2:
         return 1.0
     
+    # Handle common technical term variations before other processing
+    # This helps with terms like "mmWave" vs "mm wave", "AI-driven" vs "AI driven", etc.
+    tech_patterns = [
+        (r'\bmmwave\b', 'mm wave'),  # mmWave -> mm wave
+        (r'\bmm\s+wave\b', 'mmwave'),  # mm wave -> mmWave (for reverse check)
+        (r'\bai\s*-?\s*driven\b', 'ai driven'),  # AI-driven/AI-Driven -> ai driven
+        (r'\bml\s*-?\s*based\b', 'ml based'),  # ML-based -> ml based
+        (r'\b6g\s+networks?\b', '6g network'),  # 6G networks -> 6g network
+        (r'\b5g\s+networks?\b', '5g network'),  # 5G networks -> 5g network
+    ]
+    
+    t1_tech_normalized = t1
+    t2_tech_normalized = t2
+    for pattern, replacement in tech_patterns:
+        t1_tech_normalized = re.sub(pattern, replacement, t1_tech_normalized)
+        t2_tech_normalized = re.sub(pattern, replacement, t2_tech_normalized)
+    
+    # Check for match after tech term normalization
+    if t1_tech_normalized == t2_tech_normalized:
+        return 1.0
+    
     # Normalize hyphens to handle hyphenation differences
     # Replace hyphens with spaces and normalize whitespace
-    t1_dehyphenated = re.sub(r'-', ' ', t1)
+    t1_dehyphenated = re.sub(r'-', ' ', t1_tech_normalized)
     t1_dehyphenated = re.sub(r'\s+', ' ', t1_dehyphenated).strip()
-    t2_dehyphenated = re.sub(r'-', ' ', t2)
+    t2_dehyphenated = re.sub(r'-', ' ', t2_tech_normalized)
     t2_dehyphenated = re.sub(r'\s+', ' ', t2_dehyphenated).strip()
     
     # Check for match after hyphen normalization

@@ -335,7 +335,8 @@ class NonArxivReferenceChecker:
             return None, [], None
         
         # Check title using similarity function to handle formatting differences
-        if found_title and calculate_title_similarity(title, found_title) < 1.0:
+        title_similarity = calculate_title_similarity(title, found_title) if found_title else 0.0
+        if found_title and title_similarity < SIMILARITY_THRESHOLD:
             errors.append({
                 'error_type': 'title',
                 'error_details': f"Title mismatch: cited as '{title}' but actually '{found_title}'",
