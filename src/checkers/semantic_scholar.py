@@ -28,10 +28,15 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different
+from config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Get configuration
+config = get_config()
+SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 
 class NonArxivReferenceChecker:
     """
@@ -309,8 +314,8 @@ class NonArxivReferenceChecker:
             if search_results:
                 best_match, best_score = find_best_match(search_results, cleaned_title, year)
                 
-                # Consider it a match if similarity is above threshold (0.8)
-                if best_match and best_score >= 0.8:
+                # Consider it a match if similarity is above threshold
+                if best_match and best_score >= SIMILARITY_THRESHOLD:
                     paper_data = best_match
                     found_title = best_match['title']
                     logger.debug(f"Found paper by title with similarity {best_score:.2f}: {cleaned_title}")
@@ -330,8 +335,15 @@ class NonArxivReferenceChecker:
             
             if search_results:
                 # Take the first result as a best guess
-                paper_data = search_results[0]
-                logger.debug(f"Found paper by raw text search")
+                best_match, best_score = find_best_match(search_results, cleaned_title, year)
+                
+                # Consider it a match if similarity is above threshold
+                if best_match and best_score >= SIMILARITY_THRESHOLD:
+                    paper_data = best_match
+                    found_title = best_match['title']
+                    logger.debug(f"Found paper by raw text search")
+                else:
+                    logger.debug(f"No good match found for raw text search: {search_query}")
             else:
                 logger.debug(f"No papers found for raw text search")
         
@@ -408,71 +420,8 @@ class NonArxivReferenceChecker:
             cited_normalized = normalize_venue(cited_venue)
             paper_normalized = normalize_venue(paper_venue)
             
-            # Check if venues are substantially different (not just minor variations)
-            def venues_substantially_different(venue1, venue2):
-                # Handle special cases first
-                
-                # Case 1: Check if one is an acronym of the other
-                def extract_acronym(full_name):
-                    """Extract potential acronym from full conference name"""
-                    # Split by common separators and take first letter of each significant word
-                    words = re.split(r'[\s:,\-/]+', full_name)
-                    # Filter out common words that don't contribute to acronyms
-                    significant_words = [w for w in words if w.lower() not in 
-                                       ['and', 'or', 'of', 'on', 'in', 'for', 'the', 'a', 'an', 'to', 'with']]
-                    if len(significant_words) >= 2:
-                        return ''.join(word[0].upper() for word in significant_words if word)
-                    return None
-                
-                def clean_venue_for_acronym_check(venue):
-                    """Clean venue name for acronym matching"""
-                    # Remove years, ordinal numbers, and special characters
-                    cleaned = re.sub(r"'?\d{2,4}$", '', venue)  # Remove trailing years like '95, 2017
-                    cleaned = re.sub(r'\s+\d+$', '', cleaned)   # Remove trailing numbers like " 26"
-                    cleaned = cleaned.strip()
-                    return cleaned
-                
-                # Clean venues for comparison
-                clean_venue1 = clean_venue_for_acronym_check(venue1)
-                clean_venue2 = clean_venue_for_acronym_check(venue2)
-                
-                # Check if one is short (likely acronym) and other is long (likely full name)
-                short_venue, long_venue = (clean_venue1, clean_venue2) if len(clean_venue1) <= len(clean_venue2) else (clean_venue2, clean_venue1)
-                
-                # If short venue looks like an acronym (all caps, <= 8 chars)
-                if len(short_venue) <= 8 and short_venue.isupper():
-                    # Try to match as acronym
-                    potential_acronym = extract_acronym(long_venue)
-                    if potential_acronym and potential_acronym.lower() == short_venue.lower():
-                        return False  # They match - not substantially different
-                    
-                    # Also check if short venue is contained in long venue as word
-                    if short_venue.lower() in long_venue.lower():
-                        return False
-                
-                # Case 2: One venue contains the other (after removing numbers)
-                if clean_venue1 in clean_venue2 or clean_venue2 in clean_venue1:
-                    return False
-                
-                # Case 3: Standard word-based similarity check
-                words1 = set(venue1.split())
-                words2 = set(venue2.split())
-                
-                # Calculate Jaccard similarity (intersection over union)
-                intersection = len(words1.intersection(words2))
-                union = len(words1.union(words2))
-                
-                if union == 0:
-                    return venue1 != venue2
-                
-                jaccard_similarity = intersection / union
-                
-                # If venues have high word overlap (80%+), consider them the same
-                # This handles cases like "ACM SIGACT-SIGMOD" vs "ACM SIGACT-SIGMOD-SIGART"
-                return jaccard_similarity < 0.8
-            
-            # Use original venue names for acronym checking, normalized for word similarity
-            if cited_normalized != paper_normalized and venues_substantially_different(cited_venue, paper_venue):
+            # Use the utility function to check if venues are substantially different
+            if cited_normalized != paper_normalized and are_venues_substantially_different(cited_venue, paper_venue):
                 errors.append({
                     'warning_type': 'venue',
                     'warning_details': f"Venue mismatch: cited as '{cited_venue}' but actually '{paper_venue}'",

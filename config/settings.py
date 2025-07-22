@@ -45,6 +45,7 @@ DEFAULT_CONFIG = {
     
     # Text Processing Settings
     "text_processing": {
+        "similarity_threshold": 0.8,
         "max_title_similarity": 0.8,
         "max_author_similarity": 0.7,
         "year_tolerance": 1,

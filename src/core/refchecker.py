@@ -107,7 +107,7 @@ logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file="reference_errors.txt", 
-                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=6):
+                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4):
         # Initialize the reference checker for non-arXiv references
         self.fatal_error = False            
         self.db_path = db_path
@@ -120,7 +120,6 @@ class ArxivReferenceChecker:
                 self.non_arxiv_checker = ThreadSafeLocalChecker(db_path=db_path)
             else:
                 self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
-            # Force offline mode - don't use Google Scholar which has online fallbacks
             self.service_order = "Local Semantic Scholar Database (offline)"
         else:
             logger.debug("Using enhanced hybrid checker with multiple API sources")

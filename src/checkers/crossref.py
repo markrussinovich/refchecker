@@ -31,9 +31,14 @@ import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
 from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match
+from config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Get configuration
+config = get_config()
+SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 
 class CrossRefReferenceChecker:
     """
@@ -451,7 +456,7 @@ class CrossRefReferenceChecker:
                 best_match, best_score = find_best_match(processed_results, cleaned_title, year)
                 
                 # Use match if score is good enough
-                if best_match and best_score >= 0.8:
+                if best_match and best_score >= SIMILARITY_THRESHOLD:
                     work_data = best_match
                     logger.debug(f"Found work by title in CrossRef with score {best_score:.2f}: {cleaned_title}")
                 else:

@@ -793,6 +793,13 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     # Add journal/venue field - prefer original if available, otherwise use corrected data
     original_journal = original_reference.get('journal', '') or original_reference.get('booktitle', '')
     corrected_journal = corrected_data.get('journal', '') or corrected_data.get('venue', '') if corrected_data else ''
+    
+    # Ensure corrected_journal is a string (sometimes it can be a dict)
+    if isinstance(corrected_journal, dict):
+        corrected_journal = corrected_journal.get('name', '') if corrected_journal else ''
+    elif corrected_journal and not isinstance(corrected_journal, str):
+        corrected_journal = str(corrected_journal)
+    
     journal_to_use = original_journal or corrected_journal
     
     if journal_to_use and bibtex_type in ['article', 'inproceedings', 'conference']:
@@ -832,6 +839,12 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
     correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    
+    # Ensure venue is a string (sometimes it can be a dict)
+    if isinstance(correct_venue, dict):
+        correct_venue = correct_venue.get('name', '') if correct_venue else ''
+    elif correct_venue and not isinstance(correct_venue, str):
+        correct_venue = str(correct_venue)
     
     # Get original bibitem details
     bibitem_key = original_reference.get('bibitem_key', 'unknown')
@@ -875,6 +888,12 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
     correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    
+    # Ensure venue is a string (sometimes it can be a dict)
+    if isinstance(correct_venue, dict):
+        correct_venue = correct_venue.get('name', '') if correct_venue else ''
+    elif correct_venue and not isinstance(correct_venue, str):
+        correct_venue = str(correct_venue)
     
     # Build a standard citation format
     citation_parts = []
@@ -1054,6 +1073,95 @@ def _extract_key_phrases(title: str) -> List[str]:
     phrases.extend([w for w in cap_words if len(w) > 2])
     
     return phrases
+
+
+def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
+    """
+    Check if two venue names are substantially different (not just minor variations).
+    This function handles various venue name formats, acronyms, and overlaps.
+    
+    Args:
+        venue1: First venue name
+        venue2: Second venue name
+        
+    Returns:
+        True if venues are substantially different, False if they match/overlap
+    """
+    if not venue1 or not venue2:
+        return bool(venue1 != venue2)
+    
+    # Case 1: Check if one is an acronym of the other
+    def extract_acronym(full_name):
+        """Extract potential acronym from full conference name"""
+        # Split by common separators and take first letter of each significant word
+        words = re.split(r'[\s:,\-/]+', full_name)
+        # Filter out common words that don't contribute to acronyms
+        significant_words = [w for w in words if w.lower() not in 
+                           ['and', 'or', 'of', 'on', 'in', 'for', 'the', 'a', 'an', 'to', 'with']]
+        if len(significant_words) >= 2:
+            return ''.join(word[0].upper() for word in significant_words if word)
+        return None
+    
+    def clean_venue_for_acronym_check(venue):
+        """Clean venue name for acronym matching"""
+        # Remove years, ordinal numbers, and special characters
+        cleaned = re.sub(r"'?\d{2,4}$", '', venue)  # Remove trailing years like '95, 2017
+        cleaned = re.sub(r'\s+\d+$', '', cleaned)   # Remove trailing numbers like " 26"
+        cleaned = cleaned.strip()
+        return cleaned
+    
+    # Clean venues for comparison
+    clean_venue1 = clean_venue_for_acronym_check(venue1)
+    clean_venue2 = clean_venue_for_acronym_check(venue2)
+    
+    # Check if one is short (likely acronym) and other is long (likely full name)
+    short_venue, long_venue = (clean_venue1, clean_venue2) if len(clean_venue1) <= len(clean_venue2) else (clean_venue2, clean_venue1)
+    
+    # If short venue looks like an acronym (all caps, <= 8 chars)
+    if len(short_venue) <= 8 and short_venue.isupper():
+        # Try to match as acronym
+        potential_acronym = extract_acronym(long_venue)
+        if potential_acronym and potential_acronym.lower() == short_venue.lower():
+            return False  # They match - not substantially different
+        
+        # Also check if short venue is contained in long venue as word
+        if short_venue.lower() in long_venue.lower():
+            return False
+    
+    # Case 2: Check for overlap in normalized venues
+    # Normalize both venues for better overlap detection
+    def normalize_for_overlap(venue):
+        normalized = venue.lower()
+        # Remove common prefixes
+        normalized = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', normalized)
+        # Remove punctuation and normalize spaces
+        normalized = re.sub(r'[^\w\s]', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        return normalized
+    
+    norm_venue1 = normalize_for_overlap(clean_venue1)
+    norm_venue2 = normalize_for_overlap(clean_venue2)
+    
+    # One venue contains the other (after removing numbers and normalization)
+    if norm_venue1 in norm_venue2 or norm_venue2 in norm_venue1:
+        return False
+    
+    # Case 3: Standard word-based similarity check
+    words1 = set(venue1.split())
+    words2 = set(venue2.split())
+    
+    # Calculate Jaccard similarity (intersection over union)
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    
+    if union == 0:
+        return venue1 != venue2
+    
+    jaccard_similarity = intersection / union
+    
+    # If venues have high word overlap (80%+), consider them the same
+    # This handles cases like "ACM SIGACT-SIGMOD" vs "ACM SIGACT-SIGMOD-SIGART"
+    return jaccard_similarity < 0.8
 
 
 def find_best_match(search_results, cleaned_title, year=None):

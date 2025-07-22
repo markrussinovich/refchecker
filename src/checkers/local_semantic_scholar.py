@@ -40,9 +40,14 @@ from utils.error_utils import create_author_error, create_year_warning, create_d
 from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity
 from utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from utils.url_utils import get_best_available_url
+from config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
+
+# Get configuration
+config = get_config()
+SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 
 def log_query_debug(query: str, params: list, execution_time: float, result_count: int, strategy: str):
     """Log database query details in debug mode"""
@@ -294,11 +299,11 @@ class LocalNonArxivReferenceChecker:
                     best_match = result
             
             # If we found a good match, return it
-            if best_score >= 0.8:
+            if best_score >= SIMILARITY_THRESHOLD:
                 logger.debug(f"Local DB: Found good title match with score {best_score:.2f}")
                 return best_match
             else:
-                logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold (0.8)")
+                logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold ({SIMILARITY_THRESHOLD})")
         
         logger.debug("Local DB: No good match found")
         return None
