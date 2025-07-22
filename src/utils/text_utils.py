@@ -1147,6 +1147,31 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         if potential_acronym and potential_acronym.lower() == short_venue.lower():
             return False  # They match - not substantially different
         
+        # Try partial acronym matching (for cases like NDSS vs NDSSS)
+        # Check if the short venue is a prefix of the potential acronym
+        if potential_acronym and len(short_venue) < len(potential_acronym):
+            if potential_acronym.lower().startswith(short_venue.lower()):
+                # Additional check: make sure we're not matching too loosely
+                # Require at least 75% of the acronym to match
+                if len(short_venue) >= len(potential_acronym) * 0.75:
+                    return False  # They match - not substantially different
+        
+        # Try alternative acronym extraction for common patterns
+        # Handle cases where final words like "Symposium", "Conference", "Workshop" might be omitted
+        words = re.split(r'[\s:,\-/]+', long_venue)
+        significant_words = [w for w in words if w.lower() not in 
+                           ['and', 'or', 'of', 'on', 'in', 'for', 'the', 'a', 'an', 'to', 'with']]
+        
+        # Try acronym without common conference/symposium endings
+        endings_to_try = ['symposium', 'conference', 'workshop', 'meeting', 'proceedings']
+        for ending in endings_to_try:
+            if significant_words and significant_words[-1].lower() == ending:
+                alt_words = significant_words[:-1]  # Remove the ending word
+                if len(alt_words) >= 2:
+                    alt_acronym = ''.join(word[0].upper() for word in alt_words if word)
+                    if alt_acronym and alt_acronym.lower() == short_venue.lower():
+                        return False  # They match - not substantially different
+        
         # Also check if short venue is contained in long venue as word
         if short_venue.lower() in long_venue.lower():
             return False

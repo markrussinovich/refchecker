@@ -2429,7 +2429,6 @@ class ArxivReferenceChecker:
             # If fatal error occurred, remove the output file to avoid confusion
             if self.fatal_error:
                 try:
-                    import os
                     if os.path.exists(self.verification_output_file):
                         os.remove(self.verification_output_file)
                         logger.debug(f"Removed output file due to fatal error: {self.verification_output_file}")
