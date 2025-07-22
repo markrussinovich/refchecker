@@ -61,7 +61,7 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
    # Enable LLM with specific provider and model
    python refchecker.py --paper 1706.03762 \
      --llm-provider anthropic \
-     --llm-model claude-3-haiku-20240307 \
+     --llm-model claude-sonnet-4-20250514 \
      --llm-key your_api_key_here
    ```
 

@@ -203,10 +203,6 @@ class ArxivReferenceChecker:
         
         # Initialize consolidated error storage
         self.errors = []
-        
-        # Create or clear output file and write headers
-        with open(self.verification_output_file, 'w', encoding='utf-8') as f:
-            f.write("REFERENCE VERIFICATION ERRORS\n")
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
@@ -2080,9 +2076,8 @@ class ArxivReferenceChecker:
             if corrected_format:
                 consolidated_entry['ref_corrected_format'] = corrected_format
             
-            # Store and write the consolidated entry
+            # Store the consolidated entry (write to file at end of run)
             self.errors.append(consolidated_entry)
-            self.write_error_to_file(consolidated_entry)
             
         else:
             # Single error - handle as before
@@ -2142,62 +2137,70 @@ class ArxivReferenceChecker:
             else:
                 error_entry['ref_standard_format'] = None
             
-            # Store error in memory
+            # Store error in memory (write to file at end of run)
             self.errors.append(error_entry)
+                
+    def write_all_errors_to_file(self):
+        """
+        Write all accumulated errors to the output file at the end of the run
+        """
+        if not self.errors:
+            logger.debug("No errors to write to output file")
+            return
             
-            # Write error to file immediately
-            self.write_error_to_file(error_entry)
-                
-    def write_error_to_file(self, error_entry):
-        """
-        Write a single error entry to the output file
-        """
         try:
-            with open(self.verification_output_file, 'a', encoding='utf-8') as f:
-                # For single paper mode, only write paper info once
-                if self.single_paper_mode and self.current_paper_info:
-                    # Check if this is the first error for this paper
-                    if not hasattr(self, '_paper_info_written'):
-                        f.write(f"\nPAPER: {self.current_paper_info['title']}\n")
-                        f.write(f"ArXiv ID: {self.current_paper_info['id']}\n")
-                        f.write(f"URL: {self.current_paper_info['url']}\n")
-                        f.write(f"Authors: {self.current_paper_info['authors']}\n")
-                        f.write(f"Year: {self.current_paper_info['year']}\n")
+            with open(self.verification_output_file, 'w', encoding='utf-8') as f:
+                f.write("REFERENCE VERIFICATION ERRORS\n")
+                
+                # Track paper info to avoid duplicates in single paper mode
+                paper_info_written = False
+                
+                for error_entry in self.errors:
+                    # For single paper mode, only write paper info once
+                    if self.single_paper_mode and self.current_paper_info:
+                        # Check if this is the first error for this paper
+                        if not paper_info_written:
+                            f.write(f"\nPAPER: {self.current_paper_info['title']}\n")
+                            f.write(f"ArXiv ID: {self.current_paper_info['id']}\n")
+                            f.write(f"URL: {self.current_paper_info['url']}\n")
+                            f.write(f"Authors: {self.current_paper_info['authors']}\n")
+                            f.write(f"Year: {self.current_paper_info['year']}\n")
+                            f.write("-" * 80 + "\n")
+                            paper_info_written = True
+                    else:
+                        # Multi-paper mode - write paper info for each error
+                        f.write(f"\nPAPER: {error_entry['source_title']}\n")
+                        f.write(f"ArXiv ID: {error_entry['source_paper_id']}\n")
+                        f.write(f"URL: {error_entry['source_url']}\n")
+                        f.write(f"Authors: {error_entry['source_authors']}\n")
+                        f.write(f"Year: {error_entry['source_year']}\n")
                         f.write("-" * 80 + "\n")
-                        self._paper_info_written = True
-                else:
-                    # Multi-paper mode - write paper info for each error
-                    f.write(f"\nPAPER: {error_entry['source_title']}\n")
-                    f.write(f"ArXiv ID: {error_entry['source_paper_id']}\n")
-                    f.write(f"URL: {error_entry['source_url']}\n")
-                    f.write(f"Authors: {error_entry['source_authors']}\n")
-                    f.write(f"Year: {error_entry['source_year']}\n")
-                    f.write("-" * 80 + "\n")
-                
-                f.write(f"REFERENCE: {error_entry['ref_title']}\n")
-                f.write(f"Type: {error_entry['error_type']}\n")
-                f.write(f"Details: {error_entry['error_details']}\n\n")
-                
-                # Show raw text of the original reference
-                if error_entry.get('ref_raw_text'):
-                    f.write("RAW REFERENCE TEXT:\n")
-                    f.write(f"{error_entry['ref_raw_text']}\n\n")
-                
-                # Show verified URL if available (even for unverified references)
-                if error_entry.get('ref_verified_url'):
-                    f.write("VERIFIED URL:\n")
-                    f.write(f"  {error_entry['ref_verified_url']}\n")
-                    f.write("\n")
-                
-                # Show corrected reference in original format if available
-                if error_entry.get('ref_corrected_format'):
-                    f.write("CORRECTED REFERENCE:\n")
-                    f.write(f"{error_entry['ref_corrected_format']}\n\n")
-                
-                f.write("=" * 80 + "\n")
-                
+                    
+                    f.write(f"REFERENCE: {error_entry['ref_title']}\n")
+                    f.write(f"Type: {error_entry['error_type']}\n")
+                    f.write(f"Details: {error_entry['error_details']}\n\n")
+                    
+                    # Show raw text of the original reference
+                    if error_entry.get('ref_raw_text'):
+                        f.write("RAW REFERENCE TEXT:\n")
+                        f.write(f"{error_entry['ref_raw_text']}\n\n")
+                    
+                    # Show verified URL if available (even for unverified references)
+                    if error_entry.get('ref_verified_url'):
+                        f.write("VERIFIED URL:\n")
+                        f.write(f"  {error_entry['ref_verified_url']}\n")
+                        f.write("\n")
+                    
+                    # Show corrected reference in original format if available
+                    if error_entry.get('ref_corrected_format'):
+                        f.write("CORRECTED REFERENCE:\n")
+                        f.write(f"{error_entry['ref_corrected_format']}\n\n")
+                    
+                    f.write("=" * 80 + "\n")
+                    
         except Exception as e:
-            logger.error(f"Error writing to output file: {str(e)}")
+            logger.error(f"Failed to write errors to file: {e}")
+            # Continue without failing the entire process
     
     def _extract_corrected_data_from_error(self, error, verified_data):
         """
@@ -2475,6 +2478,9 @@ class ArxivReferenceChecker:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
                 print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+        
+        # Write all accumulated errors to file at the end of the run
+        self.write_all_errors_to_file()
         
         # Log performance statistics at the end (debug mode only)
         if self.debug_mode:

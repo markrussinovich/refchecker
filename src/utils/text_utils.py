@@ -1308,6 +1308,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'ieee trans. commun.': 'ieee transactions on communications',
             'ieee trans. wireless commun.': 'ieee transactions on wireless communications', 
             'ieee trans. netw. sci. eng.': 'ieee transactions on network science and engineering',
+            'ieee trans. pattern anal. mach. intell.': 'ieee transactions on pattern analysis and machine intelligence',
+            'ieee trans. image process.': 'ieee transactions on image processing',
+            'ieee trans. signal process.': 'ieee transactions on signal processing',
             'ieee trans. cogn. commun. netw.': 'ieee transactions on cognitive communications and networking',
             'ieee j. sel. topics signal process.': 'ieee journal on selected topics in signal processing',
             'ieee netw. lett.': 'ieee networking letters',
@@ -1325,17 +1328,53 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'acm transactions on database systems (tods)': 'acm transactions on database systems',
             'acm trans. softw. eng. methodol.': 'acm transactions on software engineering and methodology',
             'acm transactions on software engineering and methodology (tosem)': 'acm transactions on software engineering and methodology',
-            # Common conference abbreviations
+            # Common conference abbreviations - major ML/CV/AI conferences
             'proc. ieee int. conf. commun. (icc)': 'ieee international conference on communications',
             'proc. ieee wireless commun. and netw. conf. (wcnc)': 'ieee wireless communications and networking conference', 
             'proc. ieee global commun. conf. (globecom)': 'global communications conference',
             'proc. int. conf. mach. learn. (icml)': 'international conference on machine learning',
             'adv. neural inf. process. syst.': 'neural information processing systems',
+            'adv. neural inform. process. syst.': 'neural information processing systems', # Alternative NeurIPS abbreviation
             'proc. ieee.': 'proceedings of the ieee',
+            
+            # Journal abbreviations
+            'j. mach. learn. res.': 'journal of machine learning research',
+            'jmlr': 'journal of machine learning research',
+            
+            # Machine Learning conferences
+            'int. conf. mach. learn.': 'international conference on machine learning',
+            'icml': 'international conference on machine learning',
+            'int. conf. learn. represent.': 'international conference on learning representations',
+            'iclr': 'international conference on learning representations',
+            
+            # Computer Vision conferences  
+            'int. conf. comput. vis.': 'ieee international conference on computer vision',
+            'iccv': 'ieee international conference on computer vision',
+            # Also map to the version without IEEE prefix
+            'international conference on computer vision': 'int. conf. comput. vis.',
+            'ieee conf. comput. vis. pattern recog.': 'computer vision and pattern recognition',
+            'cvpr': 'computer vision and pattern recognition',
+            'eur. conf. comput. vis.': 'european conference on computer vision',
+            'eccv': 'european conference on computer vision',
+            
+            # AI conferences
+            'aaai conf. artif. intell.': 'aaai conference on artificial intelligence',
+            'aaai': 'aaai conference on artificial intelligence',
+            'int. joint conf. artif. intell.': 'international joint conference on artificial intelligence',
+            'ijcai': 'international joint conference on artificial intelligence',
+            
+            # NLP conferences
+            'annu. meet. assoc. comput. linguist.': 'annual meeting of the association for computational linguistics',
+            'acl': 'annual meeting of the association for computational linguistics',
+            'conf. empir. methods nat. lang. process.': 'conference on empirical methods in natural language processing',
+            'emnlp': 'conference on empirical methods in natural language processing',
             # Add reverse mappings for when the full name is cited and abbreviation is correct
             'ieee transactions on communications': 'ieee trans. commun.',
             'ieee transactions on wireless communications': 'ieee trans. wireless commun.',
             'ieee transactions on network science and engineering': 'ieee trans. netw. sci. eng.',
+            'ieee transactions on pattern analysis and machine intelligence': 'ieee trans. pattern anal. mach. intell.',
+            'ieee transactions on image processing': 'ieee trans. image process.',
+            'ieee transactions on signal processing': 'ieee trans. signal process.',
             'ieee transactions on cognitive communications and networking': 'ieee trans. cogn. commun. netw.',
             'ieee journal on selected topics in signal processing': 'ieee j. sel. topics signal process.',
             'ieee networking letters': 'ieee netw. lett.',
@@ -1353,9 +1392,28 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'ieee international conference on communications': 'proc. ieee int. conf. commun. (icc)',
             'ieee wireless communications and networking conference': 'proc. ieee wireless commun. and netw. conf. (wcnc)',
             'global communications conference': 'proc. ieee global commun. conf. (globecom)',
-            'international conference on machine learning': 'proc. int. conf. mach. learn. (icml)',
+            'international conference on machine learning': 'int. conf. mach. learn.',
             'neural information processing systems': 'adv. neural inf. process. syst.',
             'proceedings of the ieee': 'proc. ieee.',
+            
+            # Journal reverse mappings
+            'journal of machine learning research': 'j. mach. learn. res.',
+            
+            # Reverse ML conference mappings
+            'international conference on learning representations': 'int. conf. learn. represent.',
+            
+            # Reverse CV conference mappings
+            'ieee international conference on computer vision': 'int. conf. comput. vis.',
+            'computer vision and pattern recognition': 'ieee conf. comput. vis. pattern recog.',
+            'european conference on computer vision': 'eur. conf. comput. vis.',
+            
+            # Reverse AI conference mappings
+            'aaai conference on artificial intelligence': 'aaai conf. artif. intell.',
+            'international joint conference on artificial intelligence': 'int. joint conf. artif. intell.',
+            
+            # Reverse NLP conference mappings
+            'annual meeting of the association for computational linguistics': 'annu. meet. assoc. comput. linguist.',
+            'conference on empirical methods in natural language processing': 'conf. empir. methods nat. lang. process.',
         }
         
         # Normalize for comparison - handle common variations
@@ -1440,6 +1498,26 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bsurveys\s+tuts\.\s*', 'surveys and tutorials '),
             (r'\bmach\.\s*', 'machine '),
             (r'\bintell\.\s*', 'intelligence '),
+            
+            # Conference abbreviations
+            (r'\bconf\.\s*', 'conference '),
+            (r'\bint\.\s*', 'international '),
+            (r'\beur\.\s*', 'european '),
+            (r'\bcomput\.\s*', 'computer '),
+            (r'\bvis\.\s*', 'vision '),
+            (r'\blearn\.\s*', 'learning '),
+            (r'\brepresent\.\s*', 'representations '),
+            (r'\bartif\.\s*', 'artificial '),
+            (r'\blinguist\.\s*', 'linguistics '),
+            (r'\bprocess\.\s*', 'processing '),
+            (r'\binform\.\s*', 'information '),
+            (r'\banal\.\s*', 'analysis '),
+            (r'\bpattern\s+recog\.\s*', 'pattern recognition '),
+            (r'\bmeet\.\s*', 'meeting '),
+            (r'\bannu\.\s*', 'annual '),
+            (r'\bassoc\.\s*', 'association '),
+            (r'\bempir\.\s*', 'empirical '),
+            (r'\bmethods\s+nat\.\s+lang\.\s*', 'methods in natural language '),
             # Reverse patterns
             (r'\btransactions\s+', 'trans. '),
             (r'\bcommunications\s+', 'commun. '),
@@ -1458,6 +1536,26 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bsurveys\s+and\s+tutorials\s+', 'surveys tuts. '),
             (r'\bmachine\s+', 'mach. '),
             (r'\bintelligence\s+', 'intell. '),
+            
+            # Reverse conference patterns
+            (r'\bconference\s+', 'conf. '),
+            (r'\binternational\s+', 'int. '),
+            (r'\beuropean\s+', 'eur. '),
+            (r'\bcomputer\s+', 'comput. '),
+            (r'\bvision\s+', 'vis. '),
+            (r'\blearning\s+', 'learn. '),
+            (r'\brepresentations\s+', 'represent. '),
+            (r'\bartificial\s+', 'artif. '),
+            (r'\blinguistics\s+', 'linguist. '),
+            (r'\bprocessing\s+', 'process. '),
+            (r'\binformation\s+', 'inform. '),
+            (r'\banalysis\s+', 'anal. '),
+            (r'\bpattern\s+recognition\s+', 'pattern recog. '),
+            (r'\bmeeting\s+', 'meet. '),
+            (r'\bannual\s+', 'annu. '),
+            (r'\bassociation\s+', 'assoc. '),
+            (r'\bempirical\s+', 'empir. '),
+            (r'\bmethods\s+in\s+natural\s+language\s+', 'methods nat. lang. '),
         ]
         
         for pattern, replacement in patterns:
@@ -1478,6 +1576,56 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if (normalize_ieee_journal(norm_venue1_ieee) == norm_venue2_ieee or
         normalize_ieee_journal(norm_venue2_ieee) == norm_venue1_ieee):
         return False  # They match - not substantially different
+    
+    # Special handling for IEEE prefix variations in computer vision conferences
+    # Check if one has "ieee" prefix and the other doesn't, but otherwise they match
+    def remove_ieee_prefix(venue_name):
+        return re.sub(r'^ieee\s+', '', venue_name.lower().strip())
+    
+    venue1_no_ieee = remove_ieee_prefix(norm_venue1_ieee)
+    venue2_no_ieee = remove_ieee_prefix(norm_venue2_ieee)
+    
+    if venue1_no_ieee == venue2_no_ieee:
+        return False  # They match except for IEEE prefix - not substantially different
+    
+    # General abbreviation matching - check if one venue is an abbreviation of the other
+    def is_abbreviation_match(full_venue, abbrev_venue):
+        """
+        Check if abbrev_venue is an abbreviation of full_venue.
+        Returns True if words in abbrev_venue are abbreviations of words in full_venue.
+        
+        Example: "Nat. Mac. Intell." matches "Nature Machine Intelligence"
+        """
+        # Clean and split venues into words
+        full_words = re.split(r'[\s,\-/]+', full_venue.lower().strip())
+        abbrev_words = re.split(r'[\s,\-/]+', abbrev_venue.lower().strip())
+        
+        # Remove empty words and common stop words
+        stop_words = {'the', 'of', 'on', 'in', 'for', 'and', 'or', 'to', 'a', 'an'}
+        full_words = [w for w in full_words if w and w not in stop_words]
+        abbrev_words = [w for w in abbrev_words if w and w not in stop_words]
+        
+        # If different number of significant words, less likely to be abbreviation
+        if len(abbrev_words) != len(full_words):
+            return False
+            
+        # Check each word pair
+        for full_word, abbrev_word in zip(full_words, abbrev_words):
+            # Remove trailing period from abbreviation
+            abbrev_clean = abbrev_word.rstrip('.')
+            
+            # Check if abbreviation matches:
+            # 1. Same word (exact match)
+            # 2. First few letters match (abbreviation)
+            if not (full_word == abbrev_clean or 
+                   full_word.startswith(abbrev_clean)):
+                return False
+                
+        return True
+    
+    # Test abbreviation matching in both directions
+    if is_abbreviation_match(venue1, venue2) or is_abbreviation_match(venue2, venue1):
+        return False  # They match as abbreviation - not substantially different
 
     # Case 1: Check if one is an acronym of the other
     def extract_acronym(full_name):

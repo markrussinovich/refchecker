@@ -158,7 +158,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
         
         try:
             response = self.client.messages.create(
-                model=self.model or "claude-3-haiku-20240307",
+                model=self.model or "laude-sonnet-4-20250514",
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 messages=[
