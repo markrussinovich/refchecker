@@ -97,6 +97,10 @@ def setup_logging(debug_mode=False, level=logging.DEBUG):
     console_handler.setFormatter(console_formatter)
     root_logger.addHandler(console_handler)
     
+    # Suppress ArXiv library logging to stdout
+    arxiv_logger = logging.getLogger('arxiv')
+    arxiv_logger.setLevel(logging.WARNING)  # Only show warnings and errors
+    
     # Get logger for this module
     logger = logging.getLogger(__name__)
     
@@ -243,14 +247,12 @@ class ArxivReferenceChecker:
             logger.warning(f"Failed to create LLM provider: {provider_name}")
             return None
         
-        # Create reference extractor with fallback
-        fallback_enabled = self.config.get("llm", {}).get("fallback_enabled", False)
+        # When LLM is explicitly requested, disable fallback to make failures terminal
+        fallback_enabled = False
         extractor = ReferenceExtractor(
             llm_provider=llm_provider,
             fallback_enabled=fallback_enabled
         )
-        
-        logger.info(f"LLM-based reference extraction enabled using {provider_name}")
         return extractor
     
     def batch_prefetch_arxiv_references(self, bibliography):
@@ -2416,9 +2418,19 @@ class ArxivReferenceChecker:
         finally:
             # Cleanup database connections if using thread-safe checker
             self._cleanup_resources()
+            
+            # If fatal error occurred, remove the output file to avoid confusion
+            if self.fatal_error:
+                try:
+                    import os
+                    if os.path.exists(self.verification_output_file):
+                        os.remove(self.verification_output_file)
+                        logger.debug(f"Removed output file due to fatal error: {self.verification_output_file}")
+                except Exception as e:
+                    logger.warning(f"Could not remove output file: {e}")
         
-        # Print final summary to console
-        if not debug_mode:
+        # Print final summary to console (only if no fatal error occurred)
+        if not debug_mode and not self.fatal_error:
             if self.single_paper_mode:
                 # Single paper mode - show simplified summary
                 print(f"\n" + "="*60)
@@ -2654,17 +2666,21 @@ class ArxivReferenceChecker:
         # Try LLM-based extraction first if available
         if self.llm_extractor:
             try:
-                references = self.llm_extractor.extract_references(
-                    bibliography_text, 
-                    fallback_func=self._parse_references_regex
-                )
+                references = self.llm_extractor.extract_references(bibliography_text)
                 if references:
                     logger.info(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
+                else:
+                    # LLM was specified but failed - this is terminal
+                    logger.error("LLM reference extraction returned no results. Terminating.")
+                    self.fatal_error = True
+                    return []
             except Exception as e:
                 logger.error(f"LLM reference extraction failed: {e}")
+                self.fatal_error = True
+                return []
         
-        # Fallback to regex-based parsing
+        # Fallback to regex-based parsing only if LLM was not specified
         self.used_regex_extraction = True
         return self._parse_references_regex(bibliography_text)
     
@@ -3036,11 +3052,21 @@ class ArxivReferenceChecker:
         processed_refs = []
         
         for ref in references:
-            if not ref or len(ref.strip()) < 10:
+            # Handle case where ref might be a dict or other object
+            if isinstance(ref, dict):
+                # Convert dict to string representation or extract relevant field
+                ref_text = str(ref)
+            elif isinstance(ref, str):
+                ref_text = ref
+            else:
+                # Skip non-string, non-dict objects
+                continue
+                
+            if not ref_text or len(ref_text.strip()) < 10:
                 continue
                 
             # Use LLM-specific structured reference creation
-            structured_ref = self._create_structured_llm_references(ref)
+            structured_ref = self._create_structured_llm_references(ref_text)
             if structured_ref:
                 processed_refs.append(structured_ref)
         
@@ -3901,6 +3927,10 @@ def main():
             specific_paper_id=paper_id,
             local_pdf_path=local_pdf_path
         )
+        
+        # Check for fatal errors that occurred during runtime
+        if checker.fatal_error:
+            return 1
             
     except KeyboardInterrupt:
         print("\n✗ Process interrupted by user.")

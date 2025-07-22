@@ -1134,6 +1134,10 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         normalized = venue.lower()
         # Remove common prefixes
         normalized = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', normalized)
+        # Normalize IEEE variations (IEEE/CVF → IEEE, IEEE/ACM → IEEE, etc.)
+        normalized = re.sub(r'\bieee/[a-z]+\b', 'ieee', normalized)
+        # Normalize workshop/conference variations
+        normalized = re.sub(r'\bworkshop/winter\b', 'winter', normalized)
         # Remove punctuation and normalize spaces
         normalized = re.sub(r'[^\w\s]', ' ', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()

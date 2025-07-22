@@ -73,11 +73,8 @@ class ReferenceExtractor:
             except Exception as e:
                 self.logger.error(f"LLM reference extraction failed: {e}")
         
-        # Fallback to regex approach
-        if self.fallback_enabled and fallback_func:
-            self.logger.info("Falling back to regex-based reference extraction")
-            return fallback_func(bibliography_text)
-        
+        # If LLM was specified but failed, don't fallback - that's terminal
+        self.logger.error("LLM-based reference extraction failed and fallback is disabled")
         return []
 
 

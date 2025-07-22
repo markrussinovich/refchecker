@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity
 from config.settings import get_config
 
 # Set up logging
@@ -352,8 +352,8 @@ class NonArxivReferenceChecker:
             logger.debug(f"Could not find matching paper for reference")
             return None, [], None
         
-        # Check title for exact case insensitive match between found_title and paper title
-        if found_title and title.lower() != clean_title_basic(found_title.lower()):
+        # Check title using similarity function to handle formatting differences
+        if found_title and calculate_title_similarity(title, found_title) < 1.0:
             errors.append({
                 'error_type': 'title',
                 'error_details': f"Title mismatch: cited as '{title}' but actually '{found_title}'",
@@ -391,37 +391,8 @@ class NonArxivReferenceChecker:
             paper_venue = str(paper_venue)
         
         if cited_venue and paper_venue:
-            # Normalize venues for comparison - remove year prefixes and normalize case/punctuation
-            def normalize_venue(venue):
-                # Ensure venue is a string
-                if isinstance(venue, dict):
-                    venue = venue.get('name', '') if venue else ''
-                elif venue and not isinstance(venue, str):
-                    venue = str(venue)
-                
-                if not venue:
-                    return ''
-                    
-                # Remove year prefixes (e.g., "2012 Brazilian Symposium" -> "Brazilian Symposium")
-                venue_clean = re.sub(r'^\d{4}\s+', '', venue.strip())
-                # Remove ordinal numbers (e.g., "XVIII Workshop" -> "Workshop") 
-                venue_clean = re.sub(r'\b(XVIII|XVII|XVI|XV|XIV|XIII|XII|XI|X|IX|VIII|VII|VI|V|IV|III|II|I|\d+(?:st|nd|rd|th))\s+', '', venue_clean)
-                # Remove acronyms in parentheses (e.g., "ACM Transactions on Computer Systems (TOCS)" -> "ACM Transactions on Computer Systems")
-                venue_clean = re.sub(r'\s*\([A-Z0-9&]+\)\s*', ' ', venue_clean)
-                # Remove "Proceedings of" prefixes
-                venue_clean = re.sub(r'^proceedings\s+of\s+(the\s+)?', '', venue_clean, flags=re.IGNORECASE)
-                # Normalize case and punctuation
-                venue_clean = venue_clean.lower()
-                # Remove extra punctuation and normalize spaces
-                venue_clean = re.sub(r'[^\w\s]', ' ', venue_clean)
-                venue_clean = re.sub(r'\s+', ' ', venue_clean).strip()
-                return venue_clean
-            
-            cited_normalized = normalize_venue(cited_venue)
-            paper_normalized = normalize_venue(paper_venue)
-            
             # Use the utility function to check if venues are substantially different
-            if cited_normalized != paper_normalized and are_venues_substantially_different(cited_venue, paper_venue):
+            if are_venues_substantially_different(cited_venue, paper_venue):
                 errors.append({
                     'warning_type': 'venue',
                     'warning_details': f"Venue mismatch: cited as '{cited_venue}' but actually '{paper_venue}'",
