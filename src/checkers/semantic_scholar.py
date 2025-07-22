@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors
 from config.settings import get_config
 
 # Set up logging
@@ -199,7 +199,7 @@ class NonArxivReferenceChecker:
     
     def compare_authors(self, cited_authors: List[str], correct_authors: List[Dict[str, str]]) -> Tuple[bool, str]:
         """
-        Compare author lists to check if they match
+        Compare author lists to check if they match (delegates to shared utility)
         
         Args:
             cited_authors: List of author names as cited
@@ -208,25 +208,7 @@ class NonArxivReferenceChecker:
         Returns:
             Tuple of (match_result, error_message)
         """
-        # Extract author names from Semantic Scholar data
-        correct_names = [author.get('name', '') for author in correct_authors]
-        
-        # Normalize names for comparison
-        normalized_cited = [self.normalize_author_name(name) for name in cited_authors]
-        normalized_correct = [self.normalize_author_name(name) for name in correct_names]
-        
-        # If the cited list is much shorter, it might be using "et al."
-        # In this case, just check the authors that are listed
-        if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
-            # Only compare the first few authors
-            normalized_correct = normalized_correct[:len(normalized_cited)]
-        
-        # Compare first author (most important) using the improved utility function
-        if normalized_cited and normalized_correct:
-            if not is_name_match(normalized_cited[0], normalized_correct[0]):
-                return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
-        
-        return True, "Authors match"
+        return compare_authors(cited_authors, correct_authors)
     
     def is_name_match(self, name1: str, name2: str) -> bool:
         """

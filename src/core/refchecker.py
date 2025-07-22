@@ -2722,7 +2722,11 @@ class ArxivReferenceChecker:
         numbered_ref_pattern = r'(\[\d+\])'
         numbered_refs = re.split(numbered_ref_pattern, normalized_bib)
         references = []
-        if len(numbered_refs) > 1:
+        
+        # Only process as numbered references if we actually have numbered patterns in the text
+        has_numbered_refs = bool(re.search(r'\[\d+\]', normalized_bib))
+        
+        if len(numbered_refs) > 1 and has_numbered_refs:
             # Reconstruct references, as split removes the delimiter
             temp = []
             for part in numbered_refs:
@@ -2740,6 +2744,7 @@ class ArxivReferenceChecker:
             # Ensure the last chunk is included if not already
             if numbered_refs[-1].strip() and not any(numbered_refs[-1].strip() in r for r in references):
                 references.append(numbered_refs[-1].strip())
+            logger.debug(f"Found {len(references)} numbered references")
         else:
             # Fallback to original logic if not numbered
             # Try different splitting strategies
@@ -2756,6 +2761,31 @@ class ArxivReferenceChecker:
                     logger.debug(f"Split bibliography using pattern: {pattern}")
                     logger.debug(f"Found {len(references)} potential references")
                     break
+            
+            # If no splitting strategy worked, try author-year format detection
+            if not references:
+                logger.debug("Attempting author-year format detection...")
+                
+                # For author-year format, use original bibliography_text (with newlines intact)
+                # Enhanced pattern to detect author-year format
+                # Look for year endings followed by new reference starts
+                # Pattern: year (like 2024.) followed by newline and capital letter start
+                year_boundary_pattern = r'(?<=\d{4}\.)\n(?=[A-Z])'
+                split_refs = re.split(year_boundary_pattern, bibliography_text.strip())
+                logger.debug(f"Year boundary pattern split resulted in {len(split_refs)} parts")
+                
+                if len(split_refs) > 1:
+                    references = [ref.strip() for ref in split_refs if ref.strip() and len(ref.strip()) > 20]
+                    logger.debug(f"Found {len(references)} potential references with year boundary pattern")
+                else:
+                    # Fallback: simpler pattern - split on newlines followed by any capital letter
+                    simple_pattern = r'\n(?=[A-Z])'
+                    split_refs = re.split(simple_pattern, bibliography_text.strip())
+                    logger.debug(f"Simple pattern split resulted in {len(split_refs)} parts")
+                    
+                    if len(split_refs) > 1:
+                        references = [ref.strip() for ref in split_refs if ref.strip() and len(ref.strip()) > 20]
+                        logger.debug(f"Found {len(references)} potential references with simple pattern")
         if not references:
             references = [line.strip() for line in normalized_bib.split('\n') if line.strip()]
             logger.debug(f"Using line-by-line splitting, found {len(references)} potential references")
@@ -3519,10 +3549,19 @@ class ArxivReferenceChecker:
             author = re.sub(r'^\[\d+\]', '', author)
             # Remove line breaks
             author = author.replace('\n', ' ')
-            # Remove "et al" if it's the last author
-            if author.lower() == 'et al' or 'et al' in author.lower():
+            
+            # Handle "et al" cases properly
+            author_clean = author.strip()
+            if author_clean.lower() == 'et al':
+                # Skip pure "et al" entries
                 continue
-            cleaned_cited.append(author.strip())
+            elif 'et al' in author_clean.lower():
+                # Remove "et al" from the author name (e.g., "S. M. Lundberg et al" -> "S. M. Lundberg")
+                author_clean = re.sub(r'\s+et\s+al\.?', '', author_clean, flags=re.IGNORECASE).strip()
+                if author_clean:  # Only add if something remains
+                    cleaned_cited.append(author_clean)
+            else:
+                cleaned_cited.append(author_clean)
         
         if not cleaned_cited:
             return True, "No authors to compare"
@@ -3543,12 +3582,12 @@ class ArxivReferenceChecker:
         
         # Compare first author (most important) using the improved utility function
         if cleaned_cited and correct_authors:
-            # Normalize names for comparison
-            cited_first = self.normalize_text(cleaned_cited[0])
-            correct_first = self.normalize_text(correct_authors[0])
+            # Use raw names for comparison (is_name_match handles normalization internally)
+            cited_first = cleaned_cited[0]
+            correct_first = correct_authors[0]
             
             if not is_name_match(cited_first, correct_first):
-                return False, f"First author mismatch: '{cleaned_cited[0]}' vs '{correct_authors[0]}'"
+                return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
         
         return True, "Authors match"
     

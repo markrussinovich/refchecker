@@ -292,6 +292,23 @@ def normalize_paper_title(title: str) -> str:
     # Convert to lowercase
     normalized = title.lower()
     
+    # Remove common prefixes that don't affect the actual title content
+    prefixes_to_remove = [
+        'original contribution:',
+        'original article:',
+        'research article:',
+        'technical note:',
+        'brief communication:',
+        'review:',
+        'editorial:',
+        'commentary:'
+    ]
+    
+    for prefix in prefixes_to_remove:
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix):].strip()
+            break
+    
     # Remove all non-alphanumeric characters (keeping only letters and numbers)
     normalized = re.sub(r'[^a-z0-9]', '', normalized)
     
@@ -314,6 +331,10 @@ def is_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
     
+    # Normalize case for comparison
+    name1 = name1.strip().lower()
+    name2 = name2.strip().lower()
+    
     # If one is a substring of the other, consider it a match
     if name1 in name2 or name2 in name1:
         return True
@@ -326,11 +347,122 @@ def is_name_match(name1: str, name2: str) -> bool:
     if len(parts1) == 1 or len(parts2) == 1:
         return parts1[-1] == parts2[-1]  # Compare last parts (last names)
     
-    # Compare last names (last parts)
+    # Compare last names (last parts) - they must match
     if parts1[-1] != parts2[-1]:
         return False
     
-    # Compare first initials
+    def _matches_name_part(abbrev, full):
+        """Check if abbreviated name part matches full name part"""
+        # Handle cases like "S." vs "Scott", "A.-D." vs "Alexandru-Daniel", "I. J." vs "I."
+        abbrev_clean = abbrev.rstrip('.')
+        full_clean = full.rstrip('.')
+        
+        # If abbrev is single letter, check if it matches first letter of full name
+        if len(abbrev_clean) == 1:
+            return abbrev_clean == full_clean[0] if full_clean else False
+        
+        # If abbrev has hyphens/dashes, check each part FIRST (before general multiple initials)
+        if '-' in abbrev_clean:
+            abbrev_letters = [p.strip().rstrip('.') for p in abbrev_clean.split('-')]
+            if '-' in full:
+                # Full name also has hyphens - match part by part
+                full_parts_split = [p.strip() for p in full.split('-')]
+                if len(abbrev_letters) == len(full_parts_split):
+                    for al, fp in zip(abbrev_letters, full_parts_split):
+                        if len(al) == 1 and al != fp[0]:
+                            return False
+                        elif len(al) > 1 and al != fp:
+                            return False
+                    return True
+                else:
+                    return False
+            else:
+                # Full name doesn't have hyphens, but abbrev does
+                # Try to match by treating the full name as space-separated parts
+                # e.g., "A.-D." vs "Alexandru Daniel" 
+                full_space_parts = full.split()
+                if len(abbrev_letters) == len(full_space_parts):
+                    for al, fp in zip(abbrev_letters, full_space_parts):
+                        if len(al) == 1 and al != fp[0]:
+                            return False
+                        elif len(al) > 1 and al != fp:
+                            return False
+                    return True
+                else:
+                    return False
+        
+        # Handle multiple initials case: "I. J." should match "I."
+        # Split by spaces, dots, and hyphens to get individual initials
+        abbrev_initials = [p.strip().rstrip('.').lstrip('-') for p in re.split(r'[\s.\-]+', abbrev_clean) if p.strip()]
+        full_initials = [p.strip().rstrip('.').lstrip('-') for p in re.split(r'[\s.\-]+', full_clean) if p.strip()]
+        
+        # If both are multiple initials, check if first matches
+        if len(abbrev_initials) > 1 and len(full_initials) >= 1:
+            # "I J" should match "I" - first initial should match
+            return abbrev_initials[0] == full_initials[0] if abbrev_initials[0] and full_initials[0] else False
+        
+        # Otherwise, abbrev should be contained in full name
+        return full.startswith(abbrev_clean)
+
+    # Handle abbreviated vs full names
+    def matches_abbreviated(abbrev_parts, full_parts):
+        """Check if abbreviated name matches full name"""
+        # Note: abbrev_parts can have more parts than full_parts in cases like:
+        # "I. J. Smith" (3 parts) vs "I. Smith" (2 parts) where "I. J." should match "I."
+        
+        # Special case: single part abbreviated name vs single part full name
+        # e.g., "A.-D." vs "Alexandru-Daniel"
+        if len(abbrev_parts) == 1 and len(full_parts) == 1:
+            return _matches_name_part(abbrev_parts[0], full_parts[0])
+        
+        # Last names must match exactly
+        if abbrev_parts[-1] != full_parts[-1]:
+            return False
+        
+        # Handle different scenarios based on number of parts
+        if len(abbrev_parts) == len(full_parts):
+            # Same number of parts - match each part except last (already checked)
+            for i in range(len(abbrev_parts) - 1):
+                if not _matches_name_part(abbrev_parts[i], full_parts[i]):
+                    return False
+        elif len(abbrev_parts) < len(full_parts):
+            # Fewer abbreviated parts - match first parts
+            # e.g., "Q." (1 part) vs "Qing Xue" (2 parts) - no first names to check
+            # e.g., "A. Smith" (2 parts) vs "Alexander John Smith" (3 parts) - check "A." vs "Alexander"
+            num_first_names = len(abbrev_parts) - 1  # All but last part
+            for i in range(num_first_names):
+                if not _matches_name_part(abbrev_parts[i], full_parts[i]):
+                    return False
+        elif len(abbrev_parts) > len(full_parts):
+            # More abbreviated parts than full parts
+            # e.g., "I. J. Smith" (3 parts) vs "I. Smith" (2 parts)
+            # Check if the first parts of abbrev match the first parts of full
+            num_full_first_names = len(full_parts) - 1  # All but last part of full
+            
+            # Build a combined abbreviated first name from multiple parts
+            # "I. J." should be treated as one first name unit
+            if num_full_first_names == 1:
+                # full has one first name, abbrev has multiple first name parts
+                combined_abbrev_first = ' '.join(abbrev_parts[:-1])  # All but last
+                if not _matches_name_part(combined_abbrev_first, full_parts[0]):
+                    return False
+            else:
+                # More complex case - match part by part for available positions
+                for i in range(min(num_full_first_names, len(abbrev_parts) - 1)):
+                    if not _matches_name_part(abbrev_parts[i], full_parts[i]):
+                        return False
+        
+        return True
+    
+    # Check if name1 is abbreviated form of name2
+    if any('.' in part for part in parts1):
+        return matches_abbreviated(parts1, parts2)
+    
+    # Check if name2 is abbreviated form of name1
+    if any('.' in part for part in parts2):
+        return matches_abbreviated(parts2, parts1)
+    
+    # For non-abbreviated names, compare first initials and last names
     if parts1[0][0] != parts2[0][0]:
         return False
     
@@ -340,39 +472,71 @@ def is_name_match(name1: str, name2: str) -> bool:
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
     """
     Compare author lists to check if they match.
-    This function is used across multiple checker modules.
+    This is the centralized, shared method used across all checker modules.
     
     Args:
-        cited_authors: List of author names as cited
-        correct_authors: List of author data from the database
-        normalize_func: Optional function to normalize author names
+        cited_authors: List of author names as cited (may contain "et al")
+        correct_authors: List of correct author data (can be strings or dict objects)
+        normalize_func: Optional function to normalize author names (deprecated)
         
     Returns:
         Tuple of (match_result, error_message)
     """
-    if normalize_func is None:
-        normalize_func = normalize_author_name
-    
     # Extract author names from database data if they're dict objects
     if correct_authors and isinstance(correct_authors[0], dict):
         correct_names = [author.get('name', '') for author in correct_authors]
     else:
-        correct_names = correct_authors
+        correct_names = correct_authors[:]  # Make a copy to avoid modifying original
     
-    # Normalize names for comparison
-    normalized_cited = [normalize_func(name) for name in cited_authors]
-    normalized_correct = [normalize_func(name) for name in correct_names]
+    # Clean up cited author names - remove "et al" and normalize
+    cleaned_cited = []
+    for author in cited_authors:
+        # Remove reference numbers (e.g., "[1]")
+        author = re.sub(r'^\[\d+\]', '', str(author))
+        # Remove line breaks
+        author = author.replace('\n', ' ')
+        
+        # Handle "et al" cases properly
+        author_clean = author.strip()
+        if author_clean.lower() == 'et al':
+            # Skip pure "et al" entries
+            continue
+        elif 'et al' in author_clean.lower():
+            # Remove "et al" from the author name (e.g., "S. M. Lundberg et al" -> "S. M. Lundberg")
+            author_clean = re.sub(r'\s+et\s+al\.?', '', author_clean, flags=re.IGNORECASE).strip()
+            if author_clean:  # Only add if something remains
+                cleaned_cited.append(author_clean)
+        else:
+            cleaned_cited.append(author_clean)
     
-    # If the cited list is much shorter, it might be using "et al."
-    # In this case, just check the authors that are listed
-    if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
-        # Only compare the first few authors
-        normalized_correct = normalized_correct[:len(normalized_cited)]
+    if not cleaned_cited:
+        return True, "No authors to compare"
     
-    # Compare first author (most important)
-    if normalized_cited and normalized_correct:
-        if not is_name_match(normalized_cited[0], normalized_correct[0]):
-            return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
+    if not correct_names:
+        return False, "No correct authors provided"
+    
+    # Handle "et al" cases and length mismatches
+    has_et_al = any('et al' in str(a).lower() for a in cited_authors)
+    
+    if len(cleaned_cited) < len(correct_names) and (has_et_al or len(cleaned_cited) <= 3):
+        # Only compare the authors that are listed
+        correct_names = correct_names[:len(cleaned_cited)]
+    elif len(cleaned_cited) > len(correct_names) and len(correct_names) >= 3:
+        # Use available correct authors
+        cleaned_cited = cleaned_cited[:len(correct_names)]
+    
+    # If there's a big count mismatch and no "et al", it's likely an error
+    if abs(len(cleaned_cited) - len(correct_names)) > 3 and not has_et_al:
+        return False, "Author count mismatch"
+    
+    # Compare first author (most important) using the enhanced name matching
+    if cleaned_cited and correct_names:
+        # Use raw names for comparison (is_name_match handles normalization internally)
+        cited_first = cleaned_cited[0]
+        correct_first = correct_names[0]
+        
+        if not is_name_match(cited_first, correct_first):
+            return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
     
     return True, "Authors match"
 
@@ -1197,6 +1361,36 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     # One venue contains the other (after removing numbers and normalization)
     if norm_venue1 in norm_venue2 or norm_venue2 in norm_venue1:
         return False
+    
+    # Case 2.5: Check if venues are the same but with year in different positions
+    # Extract years and compare venues without years
+    def extract_year_and_venue(venue):
+        # Find 4-digit years
+        year_match = re.search(r'\b(19|20)\d{2}\b', venue)
+        if year_match:
+            year = year_match.group()
+            venue_without_year = re.sub(r'\b(19|20)\d{2}\b', '', venue).strip()
+            # Clean up extra spaces and punctuation
+            venue_without_year = re.sub(r'[,\s]+', ' ', venue_without_year).strip()
+            return year, venue_without_year
+        return None, venue
+    
+    year1, venue1_no_year = extract_year_and_venue(venue1)
+    year2, venue2_no_year = extract_year_and_venue(venue2)
+    
+    # If both have years and years match, compare venues without years
+    if year1 and year2 and year1 == year2:
+        # Normalize venues without years for comparison
+        norm_venue1_no_year = normalize_for_overlap(venue1_no_year)
+        norm_venue2_no_year = normalize_for_overlap(venue2_no_year)
+        
+        # Remove common prefixes like "in", "proceedings of"
+        norm_venue1_no_year = re.sub(r'^(in\s+|proceedings\s+of\s+)', '', norm_venue1_no_year)
+        norm_venue2_no_year = re.sub(r'^(in\s+|proceedings\s+of\s+)', '', norm_venue2_no_year)
+        
+        # Check if they're the same after removing years and normalizing
+        if norm_venue1_no_year == norm_venue2_no_year:
+            return False  # Same venue, just year in different position
     
     # Case 3: Standard word-based similarity check
     words1 = set(venue1.split())

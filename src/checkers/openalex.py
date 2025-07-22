@@ -32,7 +32,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors
 from config.settings import get_config
 
 # Set up logging
@@ -239,7 +239,7 @@ class OpenAlexReferenceChecker:
     
     def compare_authors(self, cited_authors: List[str], openalex_authors: List[Dict[str, Any]]) -> Tuple[bool, str]:
         """
-        Compare author lists to check if they match
+        Compare author lists to check if they match (delegates to shared utility)
         
         Args:
             cited_authors: List of author names as cited
@@ -248,38 +248,15 @@ class OpenAlexReferenceChecker:
         Returns:
             Tuple of (match_result, error_message)
         """
-        # Extract author names from OpenAlex data
-        correct_names = []
+        # Extract author names from OpenAlex data for the shared utility
+        author_dicts = []
         for authorship in openalex_authors:
             author = authorship.get('author', {})
             display_name = author.get('display_name', '')
             if display_name:
-                correct_names.append(display_name)
+                author_dicts.append({'name': display_name})
         
-        if not correct_names:
-            logger.debug("No author names found in OpenAlex data")
-            return True, "No author data to compare"
-        
-        # Normalize names for comparison
-        normalized_cited = [self.normalize_author_name(name) for name in cited_authors if name]
-        normalized_correct = [self.normalize_author_name(name) for name in correct_names]
-        
-        if not normalized_cited:
-            logger.debug("No cited authors to compare")
-            return True, "No cited authors to compare"
-        
-        # If the cited list is much shorter, it might be using "et al."
-        # In this case, just check the authors that are listed
-        if len(normalized_cited) < len(normalized_correct) and len(normalized_cited) <= 3:
-            # Only compare the first few authors
-            normalized_correct = normalized_correct[:len(normalized_cited)]
-        
-        # Compare first author (most important)
-        if normalized_cited and normalized_correct:
-            if not is_name_match(normalized_cited[0], normalized_correct[0]):
-                return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
-        
-        return True, "Authors match"
+        return compare_authors(cited_authors, author_dicts)
     
     def is_name_match(self, name1: str, name2: str) -> bool:
         """

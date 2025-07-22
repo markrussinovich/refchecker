@@ -265,13 +265,10 @@ class EnhancedHybridReferenceChecker:
     
     def compare_authors(self, cited_authors: List[str], correct_authors: List[Any]) -> Tuple[bool, str]:
         """
-        Compare author lists (delegates to Semantic Scholar checker)
+        Compare author lists (delegates to shared utility)
         """
-        if self.semantic_scholar:
-            return self.semantic_scholar.compare_authors(cited_authors, correct_authors)
-        else:
-            # Basic comparison if Semantic Scholar is not available
-            return True, "Author comparison not available"
+        from utils.text_utils import compare_authors
+        return compare_authors(cited_authors, correct_authors)
 
 # Backward compatibility alias
 HybridReferenceChecker = EnhancedHybridReferenceChecker
