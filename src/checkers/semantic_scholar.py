@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -216,9 +216,9 @@ class NonArxivReferenceChecker:
             # Only compare the first few authors
             normalized_correct = normalized_correct[:len(normalized_cited)]
         
-        # Compare first author (most important)
+        # Compare first author (most important) using the improved utility function
         if normalized_cited and normalized_correct:
-            if not self.is_name_match(normalized_cited[0], normalized_correct[0]):
+            if not is_name_match(normalized_cited[0], normalized_correct[0]):
                 return False, f"First author mismatch: '{cited_authors[0]}' vs '{correct_names[0]}'"
         
         return True, "Authors match"

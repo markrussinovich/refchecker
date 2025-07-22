@@ -46,7 +46,7 @@ from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
-                       strip_latex_commands, format_corrected_reference)
+                       strip_latex_commands, format_corrected_reference, is_name_match)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -3469,8 +3469,8 @@ class ArxivReferenceChecker:
     
     def compare_authors(self, cited_authors, correct_authors):
         """
-        Improved function to compare author lists to check if they match
-        Allows for first name abbreviations and common parsing issues
+        Compare author lists to check if they match using improved name matching.
+        Uses the utility function is_name_match for robust author name comparison.
         """
         # Clean up author names
         cleaned_cited = []
@@ -3484,122 +3484,31 @@ class ArxivReferenceChecker:
                 continue
             cleaned_cited.append(author.strip())
         
-        # If the cited list has "et al" or similar, it's incomplete
-        # In this case, we only check the authors that are listed
+        if not cleaned_cited:
+            return True, "No authors to compare"
+        
+        # Handle "et al" cases and length mismatches
         has_et_al = any('et al' in a.lower() for a in cited_authors)
         
-        if len(cleaned_cited) < len(correct_authors) and has_et_al:
+        if len(cleaned_cited) < len(correct_authors) and (has_et_al or len(cleaned_cited) <= 3):
             # Only compare the authors that are listed
             correct_authors = correct_authors[:len(cleaned_cited)]
-        # If the counts still don't match, but it's a reasonable number of authors, don't flag as an error
-        # This is common in academic citations where not all authors are listed
-        elif len(cleaned_cited) < len(correct_authors):
-            # If we have at least 3 authors and they match, consider it good enough
-            if len(cleaned_cited) >= 3:
-                correct_authors = correct_authors[:len(cleaned_cited)]
-        # If we have more cited authors than correct authors, it's likely an error
-        # But if the difference is just 1 or 2, and the primary authors match, it might be ok
         elif len(cleaned_cited) > len(correct_authors) and len(correct_authors) >= 3:
-            # Check if the first few authors match
-            # Continue with comparison but only use the available correct authors
+            # Use available correct authors
             cleaned_cited = cleaned_cited[:len(correct_authors)]
         
         # If there's a big count mismatch and no "et al", it's likely an error
         if abs(len(cleaned_cited) - len(correct_authors)) > 3 and not has_et_al:
             return False, "Author count mismatch"
         
-        # Prepare to check if first authors match
-        first_author_match = False
-        
-        # Compare authors one by one
-        for i, (cited, correct) in enumerate(zip(cleaned_cited, correct_authors)):
+        # Compare first author (most important) using the improved utility function
+        if cleaned_cited and correct_authors:
             # Normalize names for comparison
-            # Extract last name (the last word in the name)
-            cited_parts = cited.split()
-            correct_parts = correct.split()
+            cited_first = self.normalize_text(cleaned_cited[0])
+            correct_first = self.normalize_text(correct_authors[0])
             
-            if not cited_parts or not correct_parts:
-                continue  # Skip empty names
-            
-            # If there's only one part (likely just the last name), use it as is
-            if len(cited_parts) == 1:
-                cited_last = cited_parts[0].lower()
-            else:
-                cited_last = cited_parts[-1].lower()
-
-            if len(correct_parts) == 1:
-                correct_last = correct_parts[0].lower()
-            else:
-                correct_last = correct_parts[-1].lower()
-            
-            # Check last names, ignoring diacritical marks
-            cited_last = self.normalize_text(cited_last)
-            correct_last = self.normalize_text(correct_last)
-            
-            # If this is the first author, remember if they match
-            if i == 0:
-                first_author_match = (cited_last == correct_last)
-                if not first_author_match:
-                    # If the first author doesn't match, we need to check further
-                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
-            
-            if correct_last != '' and cited_last != correct_last:
-                # Check if one is a substring of the other (for hyphenated names or partial matches)
-                if cited_last in correct_last or correct_last in cited_last:
-                    continue  # Consider it a match
-                # Check if the Levenshtein distance is small (for minor typos)
-                if self.levenshtein_distance(cited_last, correct_last) <= 2:
-                    continue  # Consider it a match
-                
-                # Special case for first author mismatch
-                if i == 0:
-                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
-                
-                # For non-first authors, if we have a good number of authors and the first author matches,
-                # be a bit more lenient
-                if i > 0 and first_author_match and len(cleaned_cited) >= 3:
-                    continue
-                
-                return False, f"Last name mismatch at position {i+1}: '{cited}' vs '{correct}'"
-            
-            # If there's only one part (just the last name), skip first name check
-            if len(cited_parts) == 1 or len(correct_parts) == 1:
-                continue
-                
-            # Check first name/initial
-            cited_first = cited_parts[0].lower()
-            correct_first = correct_parts[0].lower()
-            
-            # Normalize first names
-            cited_first = self.normalize_text(cited_first)
-            correct_first = self.normalize_text(correct_first)
-            
-            # Allow first initial instead of full first name
-            if cited_first != correct_first:
-                # Check if one is an initial of the other
-                if cited_first == correct_first[0] or correct_first == cited_first[0]:
-                    continue  # Consider it a match
-                # Check if one has an initial and the other has the full name
-                if (len(cited_first) == 1 and correct_first.startswith(cited_first)) or \
-                (len(correct_first) == 1 and cited_first.startswith(correct_first)):
-                    continue  # Consider it a match
-                # Check if one is a substring of the other
-                if cited_first.startswith(correct_first) or correct_first.startswith(cited_first):
-                    continue  # Consider it a match
-                # Check if the Levenshtein distance is small (for minor typos)
-                if self.levenshtein_distance(cited_first, correct_first) <= 2:
-                    continue  # Consider it a match
-                    
-                # Special handling for first author
-                if i == 0:
-                    return False, f"First author mismatch: '{cited}' vs '{correct}'"
-                    
-                # For non-first authors, if we have a good number of authors and the first author matches,
-                # be a bit more lenient
-                if i > 0 and first_author_match and len(cleaned_cited) >= 3:
-                    continue
-                    
-                return False, f"First name mismatch at position {i+1}: '{cited}' vs '{correct}'"
+            if not is_name_match(cited_first, correct_first):
+                return False, f"First author mismatch: '{cleaned_cited[0]}' vs '{correct_authors[0]}'"
         
         return True, "Authors match"
     
