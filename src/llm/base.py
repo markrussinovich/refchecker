@@ -62,7 +62,8 @@ class ReferenceExtractor:
         # Try LLM extraction first
         if self.llm_provider and self.llm_provider.is_available():
             try:
-                self.logger.info("Attempting LLM-based reference extraction")
+                model_name = self.llm_provider.model or "unknown"
+                self.logger.info(f"Attempting LLM-based reference extraction using {model_name}")
                 references = self.llm_provider.extract_references(bibliography_text)
                 if references:
                     self.logger.info(f"Extracted {len(references)} references using LLM")
