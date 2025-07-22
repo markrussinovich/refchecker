@@ -2680,7 +2680,7 @@ class ArxivReferenceChecker:
             try:
                 references = self.llm_extractor.extract_references(bibliography_text)
                 if references:
-                    logger.info(f"Parsed {len(references)} references")
+                    logger.debug(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
                 else:
                     # LLM was specified but failed - this is terminal

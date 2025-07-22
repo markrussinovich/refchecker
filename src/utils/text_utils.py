@@ -316,6 +316,43 @@ def normalize_paper_title(title: str) -> str:
 
 
 
+def normalize_diacritics(text: str) -> str:
+    """
+    Normalize diacritics in text by removing accent marks and converting to ASCII equivalent.
+    
+    Args:
+        text: Input text with possible diacritics
+        
+    Returns:
+        Text with diacritics normalized
+        
+    Examples:
+        'Horkỳ' -> 'horky'
+        'Vojtěch' -> 'vojtech'
+        'José' -> 'jose'
+        'Łukasz' -> 'lukasz'
+    """
+    # First handle special characters that don't decompose properly
+    special_chars = {
+        'ł': 'l', 'Ł': 'L',
+        'đ': 'd', 'Đ': 'D', 
+        'ħ': 'h', 'Ħ': 'H',
+        'ø': 'o', 'Ø': 'O',
+        'þ': 'th', 'Þ': 'TH',
+        'ß': 'ss',
+        'æ': 'ae', 'Æ': 'AE',
+        'œ': 'oe', 'Œ': 'OE',
+    }
+    
+    for special, replacement in special_chars.items():
+        text = text.replace(special, replacement)
+    
+    # Decompose characters into base + combining characters (NFD normalization)
+    normalized = unicodedata.normalize('NFD', text)
+    # Remove all combining characters (accents, diacritics)
+    ascii_text = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    return ascii_text
+
 def is_name_match(name1: str, name2: str) -> bool:
     """
     Check if two author names match, allowing for variations.
@@ -331,9 +368,9 @@ def is_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
     
-    # Normalize case for comparison
-    name1 = name1.strip().lower()
-    name2 = name2.strip().lower()
+    # Normalize case and diacritics for comparison
+    name1 = normalize_diacritics(name1.strip().lower())
+    name2 = normalize_diacritics(name2.strip().lower())
     
     # If one is a substring of the other, consider it a match
     if name1 in name2 or name2 in name1:
@@ -1594,11 +1631,13 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         Check if abbrev_venue is an abbreviation of full_venue.
         Returns True if words in abbrev_venue are abbreviations of words in full_venue.
         
-        Example: "Nat. Mac. Intell." matches "Nature Machine Intelligence"
+        Examples: 
+        - "Nat. Mac. Intell." matches "Nature Machine Intelligence"
+        - "Comput. Educ." matches "Computers & Education"
         """
-        # Clean and split venues into words
-        full_words = re.split(r'[\s,\-/]+', full_venue.lower().strip())
-        abbrev_words = re.split(r'[\s,\-/]+', abbrev_venue.lower().strip())
+        # Clean and split venues into words, including & as separator
+        full_words = re.split(r'[\s,\-/&]+', full_venue.lower().strip())
+        abbrev_words = re.split(r'[\s,\-/&]+', abbrev_venue.lower().strip())
         
         # Remove empty words and common stop words
         stop_words = {'the', 'of', 'on', 'in', 'for', 'and', 'or', 'to', 'a', 'an'}
@@ -1617,6 +1656,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             # Check if abbreviation matches:
             # 1. Same word (exact match)
             # 2. First few letters match (abbreviation)
+            # 3. Single letter abbreviations are allowed for common words like "journal" -> "j"
             if not (full_word == abbrev_clean or 
                    full_word.startswith(abbrev_clean)):
                 return False
