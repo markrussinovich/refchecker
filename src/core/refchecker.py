@@ -2323,7 +2323,19 @@ class ArxivReferenceChecker:
                     delattr(self, '_paper_info_written')
             elif local_pdf_path:
                 # Process a local PDF or LaTeX file
-                logger.info(f"Processing pdf: {local_pdf_path}")
+                # Determine file type for logging
+                file_ext = os.path.splitext(local_pdf_path)[1].lower()
+                if file_ext == '.pdf':
+                    file_type = "PDF"
+                elif file_ext == '.tex':
+                    file_type = "LaTeX file"
+                elif file_ext == '.bib':
+                    file_type = "BibTeX file"
+                elif file_ext == '.txt':
+                    file_type = "text file"
+                else:
+                    file_type = "file"
+                logger.info(f"Processing {file_type}: {local_pdf_path}")
                 paper = self._create_local_file_paper(local_pdf_path)
                 papers = [paper]
                 # Set single paper mode
@@ -2350,7 +2362,17 @@ class ArxivReferenceChecker:
                 
             for paper in paper_iterator:
                 paper_id = paper.get_short_id()
-                paper_url = f"https://arxiv.org/abs/{paper_id}"
+                
+                # Set appropriate URL based on paper type
+                if hasattr(paper, 'file_path') and not paper_id.startswith('local_') and not paper_id.startswith('url_'):
+                    # Regular ArXiv paper
+                    paper_url = f"https://arxiv.org/abs/{paper_id}"
+                elif hasattr(paper, 'file_path'):
+                    # Local file or URL - use the current_paper_info URL if available
+                    paper_url = self.current_paper_info.get('url', f"file://{os.path.abspath(paper.file_path)}")
+                else:
+                    # Fallback to ArXiv URL
+                    paper_url = f"https://arxiv.org/abs/{paper_id}"
                 
                 
                 # Log paper info
@@ -3877,9 +3899,17 @@ class ArxivReferenceChecker:
                     # Always show errors and warnings if they exist
                     for error in errors:
                         if 'error_type' in error and error['error_type'] != 'unverified':
-                            print(f"       ❌  {error['error_type']}: {error['error_details']}")
+                            # Clean up error details to remove unwanted line breaks
+                            error_details = error['error_details'].replace('\n', ' ').replace('\r', ' ')
+                            # Ensure proper spacing
+                            error_details = ' '.join(error_details.split())
+                            print(f"       ❌  {error['error_type']}: {error_details}")
                         elif 'warning_type' in error:
-                            print(f"       ⚠️  {error['warning_type']}: {error['warning_details']}")
+                            # Clean up warning details to remove unwanted line breaks  
+                            warning_details = error['warning_details'].replace('\n', ' ').replace('\r', ' ')
+                            # Ensure proper spacing
+                            warning_details = ' '.join(warning_details.split())
+                            print(f"       ⚠️  {error['warning_type']}: {warning_details}")
     
     def _output_reference_errors(self, reference, errors, url):
         """
