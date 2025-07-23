@@ -401,7 +401,9 @@ class NonArxivReferenceChecker:
         if not paper_url:
             external_ids = paper_data.get('externalIds', {})
             if external_ids.get('DOI'):
-                paper_url = f"https://doi.org/{external_ids['DOI']}"
+                # Normalize DOI to lowercase to avoid duplicates with different cases
+                normalized_doi = external_ids['DOI'].lower()
+                paper_url = f"https://doi.org/{normalized_doi}"
                 logger.debug(f"Generated DOI URL: {paper_url}")
         
         if not paper_url:
