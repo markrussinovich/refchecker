@@ -3769,6 +3769,11 @@ class ArxivReferenceChecker:
 
             if reference_url and not url:
                 print(f"       {reference_url}")
+            # Print verified URL if it's different from what we already showed
+            if verified_data and verified_data.get('url'):
+                verified_url = verified_data['url']
+                if verified_url != reference_url and verified_url != url:
+                    print(f"       Verified: {verified_url}")
             elapsed = time.time() - start_time
             if elapsed > 5.0:
                 logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")

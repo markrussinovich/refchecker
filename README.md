@@ -2,17 +2,16 @@
 
 *Vibe coded by Mark Russinovich and Github Copilot Agent with Sonnet 4*
 
-A comprehensive tool for validating reference accuracy in academic papers. This tool can check individual papers from various sources including ArXiv, local PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
+A comprehensive tool for validating reference accuracy in academic papers useful both for authors checking their bibliography and for conference reviewers checking to ensure that a paper's references are authentic and accurate. This tool can papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
 
 ## 🎯 Features
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
 - **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
-- **✅ Comprehensive Error Detection**: Identifies issues with authors, years, URLs, and DOIs
-- **🔄 Multi-Tier Verification Sources**: Intelligent fallback system using local databases, Semantic Scholar, OpenAlex, CrossRef, and enhanced hybrid checking
-- **📊 Detailed Reporting**: Generates comprehensive error reports with statistics and icons
-
+- **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venus, URLs, and DOIs
+- **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef 
+- **📊 Detailed Reporting**: Generates comprehensive error reports with drop-in corrected references
 ## Quick Start
 
 ### Check Your First Paper
@@ -34,17 +33,17 @@ A comprehensive tool for validating reference accuracy in academic papers. This 
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
-RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats.
+RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.2-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.  
 
 ### Supported LLM Providers
 
 - **OpenAI** e.g., GPT-4o, o3
 - **Anthropic** e.g., Claude Sonnet 4
 - **Google** e.g., Gemini 2.5
-- **Azure OpenAI**
+- **Azure OpenAI** e.g., GPT-4o, o3
 - **vLLM** e.g., Local Hugging Face models via OpenAI-compatible server
 
-### Quick LLM Setup (Recommended)
+### Quick LLM Setup 
 
 1. **Using Environment Variables**:
    ```bash
@@ -62,8 +61,8 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
    python refchecker.py --paper 1706.03762 \
      --llm-provider anthropic \
      --llm-model claude-sonnet-4-20250514 \
-     --llm-key your_api_key_here
    ```
+   The command line supports an --llm-key parameter, but recommended usage is to set the environment variable API key setting for the provider you select. 
 
 ### LLM Configuration Options
 
@@ -83,10 +82,9 @@ export AZURE_OPENAI_API_KEY=your_key              # or REFCHECKER_AZURE_API_KEY
 export AZURE_OPENAI_ENDPOINT=your_endpoint        # or REFCHECKER_AZURE_ENDPOINT
 
 # Model configuration
-export REFCHECKER_LLM_MODEL=claude-3-haiku-20240307
+export REFCHECKER_LLM_MODEL=claude-sonnet-4-20250514
 export REFCHECKER_LLM_MAX_TOKENS=4000
 export REFCHECKER_LLM_TEMPERATURE=0.1
-export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
 ```
 
 #### Command Line Arguments
@@ -96,10 +94,6 @@ export REFCHECKER_LLM_FALLBACK_ON_ERROR=true
 --llm-model MODEL_NAME                          # Override default model
 --llm-key API_KEY                               # API key (optional if env var set)
 --llm-endpoint ENDPOINT_URL                     # Override default endpoint
-
-# Performance options
---disable-llm                                   # Disable LLM for faster processing
---skip-google-scholar-single                    # Skip Google Scholar for single papers
 ```
 
 ### LLM Examples
@@ -264,15 +258,12 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 📊 Paper summary: 1 errors, 1 warnings found
 
 ============================================================
-📋 FINAL SUMMARY
+📋 SUMMARY
 ============================================================
-📄 Total papers processed: 1
-📚 Total references processed: 45
-❌ Papers with errors: 1
-⚠️  Papers with warnings: 1
-❌ Total errors found: 1
-⚠️  Total warnings found: 1
-❓ References that couldn't be verified: 2
+📚 Total references processed: 68
+❌ Total errors: 55
+⚠️  Total warnings: 16
+❓ References that couldn't be verified: 15
 
 💾 Detailed results saved to: reference_errors.txt
 ```

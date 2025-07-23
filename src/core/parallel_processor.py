@@ -296,6 +296,12 @@ class ParallelReferenceProcessor:
         if result.url and result.url != url:
             print(f"       {result.url}")
             
+        # Print verified URL if it's different from what we already showed
+        if result.verified_data and result.verified_data.get('url'):
+            verified_url = result.verified_data['url']
+            if verified_url != result.url and verified_url != url:
+                print(f"       {verified_url}")
+            
         # Show timing info for slow references
         if result.processing_time > 5.0:
             logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {title}")

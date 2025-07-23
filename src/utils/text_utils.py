@@ -1597,6 +1597,17 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             # Journal reverse mappings
             'journal of machine learning research': 'j. mach. learn. res.',
             
+            # VLDB and database conferences
+            'proc. vldb endow.': 'proceedings of the vldb endowment',
+            'proceedings of the vldb endowment': 'proc. vldb endow.',
+            'vldb endowment': 'proceedings of the vldb endowment',
+            
+            # Semantic Web conferences
+            'iswc': 'international semantic web conference',
+            'international semantic web conference': 'iswc',
+            'the semantic web - iswc': 'international semantic web conference',
+            'international workshop on the semantic web': 'international semantic web conference',
+            
             # Reverse ML conference mappings
             'international conference on learning representations': 'int. conf. learn. represent.',
             
