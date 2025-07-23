@@ -1562,6 +1562,10 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         """Normalize IEEE journal names to handle standard abbreviations"""
         venue_lower = venue.lower().strip()
         
+        # Remove years and trailing punctuation first
+        venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 1991" or " 2024"
+        venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
+        
         # IEEE journal abbreviation mappings
         ieee_mappings = {
             'ieee trans. commun.': 'ieee transactions on communications',
@@ -1807,6 +1811,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bcogn\.\s*', 'cognitive '),
             (r'\bj\.\s*', 'journal '),
             (r'\bsel\.\s*', 'selected '),
+            (r'\bcomput\.\s*', 'computing '),
             (r'\bsignal\s+process\.\s*', 'signal processing '),
             (r'\blett\.\s*', 'letters '),
             (r'\bmag\.\s*', 'magazine '),
@@ -1837,14 +1842,15 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bmethods\s+nat\.\s+lang\.\s*', 'methods in natural language '),
             # Reverse patterns
             (r'\btransactions\s+', 'trans. '),
-            (r'\bcommunications\s+', 'commun. '),
+            (r'\bcommunications(\s+|$)', r'commun.\1'),
             (r'\bnetwork\s+', 'netw. '),
             (r'\bwireless\s+communications\s+', 'wireless commun. '),
             (r'\bscience\s+', 'sci. '),
             (r'\bengineering\s+', 'eng. '),
             (r'\bcognitive\s+', 'cogn. '),
-            (r'\bjournal\s+', 'j. '),
-            (r'\bselected\s+', 'sel. '),
+            (r'\bjournal(\s+|$)', r'j.\1'),
+            (r'\bselected(\s+|$)', r'sel.\1'),
+            (r'\bcomputing(\s+|$)', r'comput.\1'),
             (r'\bsignal\s+processing\s+', 'signal process. '),
             (r'\bletters\s+', 'lett. '),
             (r'\bmagazine\s+', 'mag. '),
@@ -1877,6 +1883,15 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         
         for pattern, replacement in patterns:
             normalized = re.sub(pattern, replacement, normalized)
+        
+        # Remove common prepositions that may be inconsistent
+        normalized = re.sub(r'\s+on\s+', ' ', normalized)
+        normalized = re.sub(r'\s+in\s+', ' ', normalized)
+        normalized = re.sub(r'\s+of\s+', ' ', normalized)
+        
+        # Handle singular/plural variations
+        normalized = re.sub(r'\bgeneration\b', 'generations', normalized)
+        normalized = re.sub(r'\bsystem\b', 'systems', normalized)
         
         # Clean up extra spaces
         normalized = re.sub(r'\s+', ' ', normalized).strip()
