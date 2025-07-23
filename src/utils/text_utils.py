@@ -1666,6 +1666,42 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     # Test abbreviation matching in both directions
     if is_abbreviation_match(venue1, venue2) or is_abbreviation_match(venue2, venue1):
         return False  # They match as abbreviation - not substantially different
+    
+    # Special case: Check if one venue is a full acronym of the other (like "CLICIT" vs "Computational Linguistics")
+    def is_full_acronym_match(full_venue, acronym_venue):
+        """Check if acronym_venue is an acronym formed from the words of full_venue"""
+        if len(acronym_venue) < 3:  # Too short to be meaningful acronym
+            return False
+            
+        # Clean the full venue first - remove proceedings, ordinals, parentheses
+        cleaned_venue = full_venue.lower()
+        # Remove procedural prefixes
+        cleaned_venue = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', cleaned_venue)
+        # Remove ordinals
+        cleaned_venue = re.sub(r'\b(the\s+)?\d+(st|nd|rd|th)\s+', '', cleaned_venue)
+        # Remove parenthetical content (often contains existing acronyms)
+        cleaned_venue = re.sub(r'\s*\([^)]*\)', '', cleaned_venue)
+        
+        # Split into significant words
+        full_words = re.split(r'[\s,\-/&]+', cleaned_venue.strip())
+        stop_words = {'the', 'of', 'on', 'in', 'for', 'and', 'or', 'to', 'a', 'an', 'at'}
+        significant_words = [w for w in full_words if w and w not in stop_words and len(w) > 1 and not w.isdigit()]
+        
+        # Extract first letters to form potential acronym
+        if len(significant_words) < 2:  # Need at least 2 words for acronym
+            return False
+            
+        potential_acronym = ''.join(word[0].upper() for word in significant_words)
+        actual_acronym = acronym_venue.upper().strip()
+        
+        # Check various acronym patterns
+        return (potential_acronym == actual_acronym or 
+                potential_acronym.startswith(actual_acronym) or
+                actual_acronym.startswith(potential_acronym))
+    
+    # Test full acronym matching in both directions
+    if is_full_acronym_match(venue1, venue2) or is_full_acronym_match(venue2, venue1):
+        return False  # They match as full acronym - not substantially different
 
     # Case 1: Check if one is an acronym of the other
     def extract_acronym(full_name):
@@ -1736,10 +1772,24 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         normalized = venue.lower()
         # Remove common prefixes
         normalized = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', normalized)
+        
+        # Remove ordinal numbers (1st, 2nd, 3rd, 4th, etc.) and their preceding "the"
+        normalized = re.sub(r'\b(the\s+)?\d+(st|nd|rd|th)\s+', '', normalized)
+        
+        # Remove acronyms in parentheses (like "(RDSM)", "(CLiC-it 2024)", etc.)
+        normalized = re.sub(r'\s*\([^)]*\)', '', normalized)
+        
         # Normalize IEEE variations (IEEE/CVF → IEEE, IEEE/ACM → IEEE, etc.)
         normalized = re.sub(r'\bieee/[a-z]+\b', 'ieee', normalized)
         # Normalize workshop/conference variations
         normalized = re.sub(r'\bworkshop/winter\b', 'winter', normalized)
+        
+        # Remove common stop words from conference titles
+        stop_words = ['of', 'the', 'on', 'in', 'for', 'and', 'a', 'an']
+        words = normalized.split()
+        filtered_words = [w for w in words if w not in stop_words]
+        normalized = ' '.join(filtered_words)
+        
         # Remove punctuation and normalize spaces
         normalized = re.sub(r'[^\w\s]', ' ', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()

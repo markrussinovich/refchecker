@@ -347,7 +347,7 @@ class LocalNonArxivReferenceChecker:
             paper_data = self.get_paper_by_doi(doi)
             
             if paper_data:
-                logger.info(f"Found paper by DOI: {doi}")
+                logger.debug(f"Found paper by DOI: {doi}")
             else:
                 logger.warning(f"Could not find paper with DOI: {doi}")
         

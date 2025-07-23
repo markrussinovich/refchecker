@@ -3215,7 +3215,7 @@ class ArxivReferenceChecker:
             else:
                 # Simple title
                 title = clean_title_basic(text)
-                authors = 'Unknown Author'
+                authors = ['Unknown Author']
                 logger.debug(f"1-part title format - Title: '{title}'")
         elif len(parts) == 2:
             # Format: Authors # Title
