@@ -294,6 +294,15 @@ class NonArxivReferenceChecker:
                             found_title = result['title']
                             logger.debug(f"Found paper by ArXiv ID: {arxiv_id}")
                             break
+                
+                # If still not found after ArXiv ID search, try ArXiv API directly
+                if not paper_data:
+                    logger.debug(f"Paper not found in Semantic Scholar by ArXiv ID, trying ArXiv API directly for: {arxiv_id}")
+                    arxiv_paper = self._get_paper_from_arxiv_api(arxiv_id)
+                    if arxiv_paper:
+                        paper_data = arxiv_paper
+                        found_title = arxiv_paper['title']
+                        logger.debug(f"Found paper in ArXiv API: {arxiv_id}")
         
         # If we still couldn't find the paper, try searching by the raw text
         if not paper_data and raw_text:
@@ -320,7 +329,8 @@ class NonArxivReferenceChecker:
         
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
-            logger.debug(f"Could not find matching paper for reference")
+            logger.debug(f"Could not find matching paper for reference: {title}")
+            logger.debug(f"Tried: DOI search, title search, ArXiv ID search, ArXiv API fallback, raw text search")
             return None, [], None
         
         # Check title using similarity function to handle formatting differences
@@ -432,6 +442,76 @@ class NonArxivReferenceChecker:
             logger.debug(f"Paper data sample: {str(paper_data)[:200]}...")
         
         return paper_data, errors, paper_url
+    
+    def _get_paper_from_arxiv_api(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get paper metadata directly from ArXiv API for very recent papers not yet in Semantic Scholar.
+        
+        Args:
+            arxiv_id: ArXiv ID (e.g., "2507.08846")
+            
+        Returns:
+            Paper data dictionary in Semantic Scholar format, or None if not found
+        """
+        try:
+            import xml.etree.ElementTree as ET
+            
+            arxiv_url = f"https://export.arxiv.org/api/query?id_list={arxiv_id}"
+            logger.debug(f"Querying ArXiv API: {arxiv_url}")
+            
+            response = requests.get(arxiv_url, timeout=30)
+            response.raise_for_status()
+            
+            # Parse XML response
+            root = ET.fromstring(response.text)
+            
+            # Check if any entries were found
+            entries = root.findall('{http://www.w3.org/2005/Atom}entry')
+            if not entries:
+                logger.debug(f"No entries found for ArXiv ID: {arxiv_id}")
+                return None
+            
+            entry = entries[0]  # Take the first entry
+            
+            # Extract title
+            title_elem = entry.find('{http://www.w3.org/2005/Atom}title')
+            title = title_elem.text.strip() if title_elem is not None else ""
+            
+            # Extract authors
+            authors = []
+            for author_elem in entry.findall('{http://www.w3.org/2005/Atom}author'):
+                name_elem = author_elem.find('{http://www.w3.org/2005/Atom}name')
+                if name_elem is not None:
+                    authors.append({"name": name_elem.text.strip()})
+            
+            # Extract published date
+            published_elem = entry.find('{http://www.w3.org/2005/Atom}published')
+            year = None
+            if published_elem is not None:
+                published_date = published_elem.text
+                try:
+                    year = int(published_date[:4])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Create Semantic Scholar-compatible data structure
+            paper_data = {
+                'title': title,
+                'authors': authors,
+                'year': year,
+                'externalIds': {'ArXiv': arxiv_id},
+                'url': f"https://arxiv.org/abs/{arxiv_id}",
+                'venue': 'arXiv',
+                'isOpenAccess': True,
+                'openAccessPdf': {'url': f"https://arxiv.org/pdf/{arxiv_id}.pdf"}
+            }
+            
+            logger.debug(f"Successfully retrieved ArXiv paper: {title}")
+            return paper_data
+            
+        except Exception as e:
+            logger.debug(f"Failed to get paper from ArXiv API: {str(e)}")
+            return None
 
 if __name__ == "__main__":
     # Example usage
