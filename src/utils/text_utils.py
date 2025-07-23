@@ -1613,6 +1613,14 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'annual meeting of the association for computational linguistics': 'annu. meet. assoc. comput. linguist.',
             'conference on empirical methods in natural language processing': 'conf. empir. methods nat. lang. process.',
             
+            # ACL Findings and related venues
+            'findings of the association for computational linguistics': 'annual meeting of the association for computational linguistics',
+            'findings of the association for computational linguistics: acl': 'annual meeting of the association for computational linguistics',
+            'findings of the association for computational linguistics: acl 2024': 'annual meeting of the association for computational linguistics',
+            'findings of the association for computational linguistics: acl 2023': 'annual meeting of the association for computational linguistics',
+            'findings of the association for computational linguistics: acl 2022': 'annual meeting of the association for computational linguistics',
+            'findings of acl': 'annual meeting of the association for computational linguistics',
+            
             # Database and Information Management conferences
             'international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
             'international conference on statistical and scientific database management': 'international conference on scientific and statistical database management',

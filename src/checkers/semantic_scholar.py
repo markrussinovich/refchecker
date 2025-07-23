@@ -141,7 +141,7 @@ class NonArxivReferenceChecker:
                 
                 # If not found, return None
                 if response.status_code == 404:
-                    logger.warning(f"Paper with DOI {doi} not found")
+                    logger.debug(f"Paper with DOI {doi} not found")
                     return None
                 
                 # Check for other errors
