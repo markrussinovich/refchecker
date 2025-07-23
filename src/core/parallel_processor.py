@@ -13,6 +13,7 @@ from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple, Callable
+from utils.text_utils import deduplicate_urls
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +264,7 @@ class ParallelReferenceProcessor:
         
         logger.debug("Result printer finished")
     
+    
     def _print_reference_result(self, result: ReferenceResult) -> None:
         """
         Print a single reference result using the base checker's format.
@@ -289,18 +291,21 @@ class ParallelReferenceProcessor:
             print(f"       {year}")
         if doi:
             print(f"       {doi}")
+        # Collect all URLs and deduplicate them
+        all_urls = []
         if url:
-            print(f"       {url}")
-        
-        # Show found URL if different from cited URL
+            all_urls.append(url)
         if result.url and result.url != url:
-            print(f"       {result.url}")
-            
-        # Print verified URL if it's different from what we already showed
+            all_urls.append(result.url)
         if result.verified_data and result.verified_data.get('url'):
             verified_url = result.verified_data['url']
             if verified_url != result.url and verified_url != url:
-                print(f"       {verified_url}")
+                all_urls.append(verified_url)
+        
+        # Show deduplicated URLs
+        final_urls = deduplicate_urls(all_urls)
+        for final_url in final_urls:
+            print(f"       {final_url}")
             
         # Show timing info for slow references
         if result.processing_time > 5.0:

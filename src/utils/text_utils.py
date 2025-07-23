@@ -2179,3 +2179,61 @@ def find_best_match(search_results, cleaned_title, year=None):
             best_match = result
     
     return best_match, best_score
+
+
+def normalize_arxiv_url(url: str) -> str:
+    """
+    Normalize ArXiv URLs to a standard format for comparison.
+    
+    Args:
+        url: The URL to normalize
+        
+    Returns:
+        Normalized URL (abs format for ArXiv URLs, original for others)
+    """
+    if not url or 'arxiv.org' not in url:
+        return url
+    
+    # Extract ArXiv ID from URL
+    arxiv_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^\s/?#]+?)(?:\.pdf|v\d+)?(?:[?\#]|$)', url)
+    if arxiv_match:
+        arxiv_id = arxiv_match.group(1)
+        return f"https://arxiv.org/abs/{arxiv_id}"
+    
+    return url
+
+
+def deduplicate_urls(urls: List[str]) -> List[str]:
+    """
+    Deduplicate URLs by normalizing ArXiv URLs, removing equivalent ones.
+    
+    Args:
+        urls: List of URLs to deduplicate
+        
+    Returns:
+        List of unique URLs (with ArXiv URLs normalized to abs format)
+    """
+    if not urls:
+        return []
+    
+    # Filter out empty URLs
+    valid_urls = [url for url in urls if url]
+    if not valid_urls:
+        return []
+    
+    if len(valid_urls) == 1:
+        return [valid_urls[0]]
+    
+    # Normalize all URLs for comparison and keep the preferred format
+    normalized_urls = {}
+    for url in valid_urls:
+        normalized = normalize_arxiv_url(url)
+        if normalized not in normalized_urls:
+            # For ArXiv URLs, prefer the normalized (abs) format
+            if 'arxiv.org' in normalized and normalized != url:
+                normalized_urls[normalized] = normalized
+            else:
+                normalized_urls[normalized] = url
+    
+    # Return all unique URLs
+    return list(normalized_urls.values())

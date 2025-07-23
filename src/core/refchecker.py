@@ -47,7 +47,7 @@ from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
                        strip_latex_commands, format_corrected_reference, is_name_match,
-                       calculate_title_similarity)
+                       calculate_title_similarity, normalize_arxiv_url, deduplicate_urls)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -2006,6 +2006,7 @@ class ArxivReferenceChecker:
         
         return None
     
+    
     def add_error_to_dataset(self, source_paper, reference, errors, reference_url=None, verified_data=None):
         """
         Add an error entry to the consolidated dataset
@@ -3766,20 +3767,25 @@ class ArxivReferenceChecker:
                 print(f"       {year}")
             if doi:
                 print(f"       {doi}")
-            if url:
-                print(f"       {url}")
-            
             # --- DEBUG TIMER ---
             start_time = time.time()
             errors, reference_url, verified_data = self.verify_reference(paper, reference)
 
-            if reference_url and not url:
-                print(f"       {reference_url}")
-            # Print verified URL if it's different from what we already showed
+            # Collect all URLs and deduplicate them
+            all_urls = []
+            if url:
+                all_urls.append(url)
+            if reference_url and reference_url != url:
+                all_urls.append(reference_url)
             if verified_data and verified_data.get('url'):
                 verified_url = verified_data['url']
                 if verified_url != reference_url and verified_url != url:
-                    print(f"       Verified: {verified_url}")
+                    all_urls.append(verified_url)
+            
+            # Show deduplicated URLs
+            final_urls = deduplicate_urls(all_urls)
+            for final_url in final_urls:
+                print(f"       {final_url}")
             elapsed = time.time() - start_time
             if elapsed > 5.0:
                 logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
