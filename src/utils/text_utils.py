@@ -1565,15 +1565,16 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         if not re.search(r'arxiv:\d+\.\d+', venue_lower):  # Don't remove years if it's an arXiv ID
             venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 2024" or " 2024" 
             venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
-        venue_lower = re.sub(r'^\d{4}\s+', '', venue_lower)  # Remove "2024 " prefix
         
-        # Remove common procedural prefixes
+        # Remove common procedural prefixes and conference edition patterns
         prefixes_to_remove = [
             r'^in\s+proc\.\s+(of\s+)?(the\s+)?',      # "In Proc. of the"
             r'^proceedings\s+(of\s+)?(the\s+)?',       # "Proceedings of the"
             r'^proc\.\s+(of\s+)?(the\s+)?',           # "Proc. of the"
             r'^in\s+',                                 # "In"
-            r'^\d+(st|nd|rd|th)\s+',                  # Ordinal numbers
+            r'^\d{4}\s+\d+(st|nd|rd|th)\s+',          # "2022 17th " - year + edition number
+            r'^\d{4}\s+',                             # "2024 " - year prefix
+            r'^\d+(st|nd|rd|th)\s+',                  # "17th " - ordinal numbers
         ]
         
         for prefix_pattern in prefixes_to_remove:
@@ -1585,7 +1586,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\btrans\.\s*on\s+', 'transactions on '),
             (r'\btrans\.\s+', 'transactions '),
             
-            # Common words
+            # Common words and journal abbreviations
             (r'\bintl\.\s+', 'international '),
             (r'\bint\.\s+', 'international '),
             (r'\bconf\.\s+', 'conference '),
@@ -1595,6 +1596,31 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bartif\.\s+', 'artificial '),
             (r'\bpattern\s+recog\.\s*', 'pattern recognition '),
             (r'\bbiometrics,?\s+behavior,?\s+(and|&)\s+identity science', 'biometrics behavior and identity science'),
+            (r'\bsci\.\s*', 'science '),
+            (r'\bres\.\s*', 'research '),
+            (r'\bstud\.\s*', 'studies '),
+            (r'\bhum\.\s*', 'human '),
+            (r'\bsoc\.\s*', 'social '),
+            (r'\brobot\.\s*', 'robotics '),
+            (r'\bfound\.\s*', 'foundations '),
+            (r'\btrends\s+', 'trends '),
+            (r'\banal\.\s*', 'analysis '),
+            (r'\bmach\.\s*', 'machine '),
+            (r'\bintell\.\s*', 'intelligence '),
+            
+            # Remove common filler words that don't affect journal identity
+            (r'\bof\s+', ''),
+            (r'\ban\s+', ''),
+            (r'\bthe\s+', ''),
+            (r':\s*.*$', ''),  # Remove subtitle after colon like ": An International Journal"
+            (r'®', ''),  # Remove trademark symbols
+            (r'-', ' '),  # Replace hyphens with spaces for better word matching
+            
+            # Remove publisher suffixes and normalize organization order
+            (r',\s*ieee\s*$', ''),  # Remove ", IEEE" suffix
+            (r',\s*acm\s*$', ''),   # Remove ", ACM" suffix
+            (r'\bacm/ieee\b', 'ieee acm'),  # Normalize ACM/IEEE to IEEE ACM
+            (r'\bieee/acm\b', 'ieee acm'),  # Normalize IEEE/ACM to IEEE ACM
             
             # Handle acronyms in parentheses
             (r'\s*\([^)]*\)\s*', ' '),  # Remove parenthetical acronyms like "(TBIOM)", "(CVPR)"
@@ -1632,8 +1658,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\bneurips\b', 'neural information processing systems'),
             
             # WCACV variations - handle workshop/winter conference equivalence
-            (r'\bieee workshop/winter conference on applications of computer vision\b', 'winter conference on applications of computer vision'),
-            (r'\bwinter conference on applications of computer vision\b', 'winter conference on applications of computer vision'),
+            (r'\bieee workshop/winter conference on applications of computer vision\b', 'winter conference applications computer vision'),
+            (r'\bwinter conference on applications of computer vision\b', 'winter conference applications computer vision'),
             
             # ICCV workshop variations - normalize both main conference and workshops
             (r'\b\d{4}\s+ieee/cvf international conference on computer vision workshops?\s*\(iccvw?\)?\b', 'international conference on computer vision'),
