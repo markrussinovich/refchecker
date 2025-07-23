@@ -1666,10 +1666,12 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\binternational conference on computer vision workshops?\b', 'international conference on computer vision'),
             (r'\binternational conference on computer vision\b', 'international conference on computer vision'),
             
-            # arXiv preprint handling - normalize all arXiv preprint formats
-            (r'arxiv preprint arxiv:\d+\.\d+', 'arxiv.org'),
-            (r'arxiv preprint arxiv:\d+\.\d+.*', 'arxiv.org'),  # Handle cases with extra text after ID
-            (r'arxiv preprint', 'arxiv.org'),
+            # arXiv preprint handling - normalize all arXiv preprint formats to a consistent form
+            (r'arxiv preprint arxiv:\d+\.\d+', 'arxiv'),
+            (r'arxiv preprint arxiv:\d+\.\d+.*', 'arxiv'),  # Handle cases with extra text after ID  
+            (r'arxiv preprint', 'arxiv'),
+            (r'arxiv\.org', 'arxiv'),  # Normalize arxiv.org to just arxiv
+            (r'\barxiv\b', 'arxiv'),  # Ensure consistent casing
         ]
         
         for pattern, replacement in abbreviations:
