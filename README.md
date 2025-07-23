@@ -255,8 +255,6 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
        2015
          ❌  author: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
 
-📊 Paper summary: 1 errors, 1 warnings found
-
 ============================================================
 📋 SUMMARY
 ============================================================
@@ -267,7 +265,6 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 
 💾 Detailed results saved to: reference_errors.txt
 ```
-
 
 ## 🧪 Testing and Validation
 

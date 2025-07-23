@@ -1,0 +1,862 @@
+REFERENCE VERIFICATION ERRORS
+
+PAPER: "It looks sexy but it's wrong." Tensions in creativity and accuracy using genAI for biomedical visualization
+ArXiv ID: 2507.14494v1
+URL: https://arxiv.org/abs/2507.14494v1
+Authors: Roxanne Ziman, Shehryar Saharan, Gaël McGill, Laura Garrison
+Year: 2025
+--------------------------------------------------------------------------------
+REFERENCE: Two heads are better than one: Pair-interviews for visualization
+Type: doi
+Details: DOI mismatch: cited as 10/gtcpv3 but actually 10.31219/osf.io/h793u
+
+RAW REFERENCE TEXT:
+D. Akbaba, M. Meyer#Two heads are better than one: Pair-interviews for visualization#IEEE Trans Vis Comput Graph#2023#doi: 10/gtcpv3
+
+VERIFIED URL:
+  https://doi.org/10.31219/osf.io/h793u
+
+CORRECTED REFERENCE:
+""Two Heads are Better than One": Pair-Interviews for Visualization". https://doi.org/10.31219/osf.io/h793u.
+
+================================================================================
+REFERENCE: Generative AI in education and research: Opportunities, concerns, and solutions
+Type: doi
+Details: DOI mismatch: cited as 10/g9j389 but actually 10.1021/acs.jchemed.3c00323
+
+RAW REFERENCE TEXT:
+E. A. Alasadi, C. R. Baiz#Generative AI in education and research: Opportunities, concerns, and solutions#J Chem Educ#2023#doi: 10/g9j389
+
+VERIFIED URL:
+  https://doi.org/10.1021/acs.jchemed.3c00323
+
+CORRECTED REFERENCE:
+"Generative AI in Education and Research: Opportunities, Concerns, and Solutions". https://doi.org/10.1021/acs.jchemed.3c00323.
+
+================================================================================
+REFERENCE: AMI Diversity Fellowship
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Assoc. of Medical Illustrators#AMI Diversity Fellowship#AMI.org#2023#ami.org/diversity-fellowship
+
+================================================================================
+REFERENCE: Learn about medical illustration
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Assoc. of Medical Illustrators#Learn about medical illustration#AMI.org#2025#ami.org/learn-about
+
+================================================================================
+REFERENCE: Illustrate Change
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Assoc. of Medical Illustrators, Johnson & Johnson#Illustrate Change#2023#illustratechange.com
+
+================================================================================
+REFERENCE: Generative AI for visualization: Opportunities and challenges
+Type: doi
+Details: DOI mismatch: cited as 10/nm2j but actually 10.1109/mcg.2024.3362168
+
+RAW REFERENCE TEXT:
+R. C. Basole, T. Major#Generative AI for visualization: Opportunities and challenges#IEEE Comput Graph Appl#2024#doi: 10/nm2j
+
+VERIFIED URL:
+  https://doi.org/10.1109/mcg.2024.3362168
+
+CORRECTED REFERENCE:
+"Generative AI for Visualization: Opportunities and Challenges". https://doi.org/10.1109/mcg.2024.3362168.
+
+================================================================================
+REFERENCE: Artists and AI: Creative interactions and tensions
+Type: doi
+Details: DOI mismatch: cited as 10/ps65 but actually 10.1145/3613905.3651041
+
+RAW REFERENCE TEXT:
+C. Bird#Artists and AI: Creative interactions and tensions#Proc ACM Hum-Comput Interact#2024#doi: 10/ps65
+
+VERIFIED URL:
+  https://doi.org/10.1145/3613905.3651041
+
+CORRECTED REFERENCE:
+"Artists and AI: Creative Interactions and Tensions". https://doi.org/10.1145/3613905.3651041.
+
+================================================================================
+REFERENCE: Protecting scientific integrity in an age of generative AI
+Type: multiple
+Details: - Author count mismatch
+- DOI mismatch: cited as 10/gtwtkr but actually 10.9783/9781512827491-010
+
+RAW REFERENCE TEXT:
+W. Blau, V. G. Cerf, J. Enriquez, J. S. Francisco, U. Gasser, M. L. Gray, M. Greaves, B. J. Grosz, K. H. Jamieson, G. H. Haug#Protecting scientific integrity in an age of generative AI#Pro Natl Acad Sci USA#2024#doi: 10/gtwtkr
+
+VERIFIED URL:
+  https://doi.org/10.9783/9781512827491-010
+
+CORRECTED REFERENCE:
+Wolfgang Blau, Vinton G. Cerf, Juan Enriquez, Joseph S. Francisco, Urs Gasser, Mary L. Gray, Mark Greaves, Barbara J. Grosz, Kathleen Hall Jamieson, Gerald H. Haug, John L. Hennessy, Eric Horvitz, David I. Kaiser, Alex John London, Robin Lovell-Badge, Marcia K. McNutt, Martha Minow, Tom M. Mitchell, Susan Ness, Shobita Parthasarathy, Saul Perlmutter, William H. Press, Jeannette M. Wing, Michael Witherell. "CHAPTER 10 Protecting Scientific Integrity in an Age of Generative AI". https://doi.org/10.9783/9781512827491-010.
+
+================================================================================
+REFERENCE: Thematic Analysis: A Practical Guide
+Type: multiple
+Details: - First author mismatch: 'V. Braun' vs 'Melissa Forbes'
+- Venue mismatch: cited as 'SAGE, 2021' but actually 'Evaluation Journal of Australasia'
+
+RAW REFERENCE TEXT:
+V. Braun, V. Clarke#Thematic Analysis: A Practical Guide#SAGE#2021#urn:oclc:record:1287006175
+
+VERIFIED URL:
+  http://eprints.usq.edu.au/45660/1/draft_Proof_hi%281%29.pdf
+
+CORRECTED REFERENCE:
+Melissa Forbes. (2021). "Thematic analysis: A practical guide". In Evaluation Journal of Australasia. https://www.semanticscholar.org/paper/20e567a89fbea3933dd2cc327160040ee39a64f2.
+
+================================================================================
+REFERENCE: The promise and pitfalls of AI-generated anatomical images: Evaluating Midjourney for aesthetic surgery applications
+Type: doi
+Details: DOI mismatch: cited as 10/ps69 but actually 10.1007/s00266-023-03826-w
+
+RAW REFERENCE TEXT:
+G. Buzzaccarini, R. S. Degliuomini, M. Borin, A. Fidanza, N. Salmeri, L. Schiraldi, P. G. Di Summa, F. Vercesi, V. S. Vanni, M. Candiani, L. Pagliardini#The promise and pitfalls of AI-generated anatomical images: Evaluating Midjourney for aesthetic surgery applications#Aesthetic Plast Surg#2024#doi: 10/ps69
+
+VERIFIED URL:
+  https://doi.org/10.1007/s00266-023-03826-w
+
+CORRECTED REFERENCE:
+"The Promise and Pitfalls of AI-Generated Anatomical Images: Evaluating Midjourney for Aesthetic Surgery Applications". https://doi.org/10.1007/s00266-023-03826-w.
+
+================================================================================
+REFERENCE: Eleven years of gender data visualization: A step towards more inclusive gender representation
+Type: multiple
+Details: - Year mismatch: cited as 2024 but actually 2023
+- Venue mismatch: cited as 'IEEE Trans Vis Comput Graph, 2024' but actually 'IEEE Transactions on Visualization and Computer Graphics'
+- DOI mismatch: cited as 10/nkkr but actually 10.1109/TVCG.2023.3327369
+
+RAW REFERENCE TEXT:
+F. Cabric, M. V. Bjarnadóttir, M. Ling, G. L. Rafnsdóttir, P. Isenberg#Eleven years of gender data visualization: A step towards more inclusive gender representation#IEEE Trans Vis Comput Graph#2024#doi: 10/nkkr
+
+VERIFIED URL:
+  https://inria.hal.science/hal-04179018v1/file/%5Bfinal%5DVIS23__camera_version_Gendered_data_visualisation__11_year_analysis.pdf
+
+CORRECTED REFERENCE:
+Florent Cabric, M. Bjarnadóttir, Meng-Ying Ling, Guðbjörg Linda Rafnsdóttir, Petra Isenberg. (2023). "Eleven Years of Gender Data Visualization: A Step Towards More Inclusive Gender Representation". In IEEE Transactions on Visualization and Computer Graphics. https://doi.org/10.1109/TVCG.2023.3327369.
+
+================================================================================
+REFERENCE: The CLeAR documentation framework for AI transparency
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+K. Chmielinski, S. Newman, C. N. Kranzinger, M. Hind, J. W. Vaughan, M. Mitchell, J. Stoyanovich, A. McMillan-Major, E. McReynolds, K. Esfahany#The CLeAR documentation framework for AI transparency#The Shorenstein Center on Media, Politics and Public Policy#2024#shorensteincenter.org/clear-documentation-framework-ai
+
+================================================================================
+REFERENCE: Building Science Graphics: An Illustrated Guide to Communicating Science through Diagrams and Visualizations
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+J. Christiansen#Building Science Graphics: An Illustrated Guide to Communicating Science through Diagrams and Visualizations#AK Peters/CRC Press#2022#doi: 10/gtmvqj
+
+================================================================================
+REFERENCE: When the body became data: Historical data cultures and anatomical illustration
+Type: doi
+Details: DOI mismatch: cited as 10/ptgw but actually 10.1145/3613904.3642056
+
+RAW REFERENCE TEXT:
+M. Correll, L. A. Garrison#When the body became data: Historical data cultures and anatomical illustration#Proc ACM Hum-Comput Interact#2024#doi: 10/ptgw
+
+VERIFIED URL:
+  https://doi.org/10.1145/3613904.3642056
+
+CORRECTED REFERENCE:
+"When the Body Became Data: Historical Data Cultures and Anatomical Illustration". https://doi.org/10.1145/3613904.3642056.
+
+================================================================================
+REFERENCE: The Atlas of AI: Power, Politics, and the Planetary Costs of Artificial Intelligence
+Type: multiple
+Details: - First author mismatch: 'K. Crawford' vs 'A. Barros'
+- Year mismatch: cited as 2021 but actually 2025
+- Venue mismatch: cited as 'Yale University Press, 2021' but actually 'Academy of Management Learning &amp; Education'
+- DOI mismatch: cited as 10/gt6h6c but actually 10.5465/amle.2025.0053
+
+RAW REFERENCE TEXT:
+K. Crawford#The Atlas of AI: Power, Politics, and the Planetary Costs of Artificial Intelligence#Yale University Press#2021#doi: 10/gt6h6c
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/353eb71b101aaf435db598ef001f58872b569a14
+
+CORRECTED REFERENCE:
+A. Barros. (2025). "The Atlas of AI: Power, Politics, and the Planetary Costs of Artificial Intelligence". In Academy of Management Learning &amp; Education. https://doi.org/10.5465/amle.2025.0053.
+
+================================================================================
+REFERENCE: The image of objectivity
+Type: doi
+Details: DOI mismatch: cited as 10/gs8dsj but actually 10.2307/2928741
+
+RAW REFERENCE TEXT:
+L. Daston, P. Galison#The image of objectivity#Zone Books#1992#doi: 10/gs8dsj
+
+VERIFIED URL:
+  https://doi.org/10.2307/2928741
+
+CORRECTED REFERENCE:
+"The Image of Objectivity". https://doi.org/10.2307/2928741.
+
+================================================================================
+REFERENCE: We are the data: Challenges and opportunities for creating demographically diverse anthropographics
+Type: doi
+Details: DOI mismatch: cited as 10/ptmp but actually 10.1145/3544548.3581086
+
+RAW REFERENCE TEXT:
+P. Dhawka, H. A. He, W. Willett#We are the data: Challenges and opportunities for creating demographically diverse anthropographics#Proc ACM Hum-Comput Interact#2023#doi: 10/ptmp
+
+VERIFIED URL:
+  https://doi.org/10.1145/3544548.3581086
+
+CORRECTED REFERENCE:
+"We are the Data: Challenges and Opportunities for Creating Demographically Diverse Anthropographics". https://doi.org/10.1145/3544548.3581086.
+
+================================================================================
+REFERENCE: Better little people pictures: Generative creation of demographically diverse anthropographics
+Type: doi
+Details: DOI mismatch: cited as 10/ptmq but actually 10.1145/3613904.3641957
+
+RAW REFERENCE TEXT:
+P. Dhawka, L. Perera, W. Willett#Better little people pictures: Generative creation of demographically diverse anthropographics#Proc ACM Hum-Comput Interact#2024#doi: 10/ptmq
+
+VERIFIED URL:
+  https://doi.org/10.1145/3613904.3641957
+
+CORRECTED REFERENCE:
+"Better Little People Pictures: Generative Creation of Demographically Diverse Anthropographics". https://doi.org/10.1145/3613904.3641957.
+
+================================================================================
+REFERENCE: Gaining understanding of multivariate and multidimensional data through visualization
+Type: doi
+Details: DOI mismatch: cited as 10/cttwpw but actually 10.1016/j.cag.2004.03.013
+
+RAW REFERENCE TEXT:
+S. dos Santos, K. Brodlie#Gaining understanding of multivariate and multidimensional data through visualization#Comput Graph#2004#doi: 10/cttwpw
+
+VERIFIED URL:
+  https://doi.org/10.1016/j.cag.2004.03.013
+
+CORRECTED REFERENCE:
+"Gaining understanding of multivariate and multidimensional data through visualization". https://doi.org/10.1016/j.cag.2004.03.013.
+
+================================================================================
+REFERENCE: Dovetail
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Dovetail#Dovetail#Dovetail#2024#dovetail.com
+
+================================================================================
+REFERENCE: EG Symposium on Visual Computing for Biology and Medicine
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+EuroGraphics Association#EG Symposium on Visual Computing for Biology and Medicine#EuroGraphics#2024#conferences.eg.org/vcbm2024
+
+================================================================================
+REFERENCE: Skin color does not equal diversity
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+T. Fung#Skin color does not equal diversity#Medium#2024#medium.com/skin-tone-does-not-equal-diversity
+
+================================================================================
+REFERENCE: Biomedical Visualization: Past Work, Current Trends, and Open Challenges
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+K. Furmanová, B. Kozlikova, T. Höllt, M. E. Gröller, B. Preim, R. Raidou#Biomedical Visualization: Past Work, Current Trends, and Open Challenges#Springer Nature#2024#doi: 10/ptr8
+
+================================================================================
+REFERENCE: The New Industrial State
+Type: doi
+Details: DOI mismatch: cited as 10/ptmr but actually 10.1515/9781400873180
+
+RAW REFERENCE TEXT:
+J. Galbraith, Kenneth#The New Industrial State#Princeton University Press#2007#doi: 10/ptmr
+
+VERIFIED URL:
+  https://doi.org/10.1515/9781400873180
+
+CORRECTED REFERENCE:
+"The New Industrial State". https://doi.org/10.1515/9781400873180.
+
+================================================================================
+REFERENCE: Trends & opportunities in visualization for physiology: A multiscale overview
+Type: doi
+Details: DOI mismatch: cited as 10/gtmk6z but actually 10.1111/cgf.14575
+
+RAW REFERENCE TEXT:
+L. A. Garrison, I. Kolesar, I. Viola, H. Hauser, S. Bruckner#Trends & opportunities in visualization for physiology: A multiscale overview#Comput Graph Forum#2022#doi: 10/gtmk6z
+
+VERIFIED URL:
+  https://doi.org/10.1111/cgf.14575
+
+CORRECTED REFERENCE:
+"Trends &amp; Opportunities in Visualization for Physiology: A Multiscale Overview". https://doi.org/10.1111/cgf.14575.
+
+================================================================================
+REFERENCE: An exploration of practice and preferences for the visual communication of biomedical processes
+Type: multiple
+Details: - Venue mismatch: cited as 'Proc EG VCBM, 2021' but actually 'Eurographics Workshop on Visual Computing for Biomedicine'
+- DOI mismatch: cited as 10/n94j but actually 10.2312/vcbm.20211339
+
+RAW REFERENCE TEXT:
+L. A. Garrison, M. Meuschke, J. Fairman, N. N. Smit, B. Preim, S. Bruckner#An exploration of practice and preferences for the visual communication of biomedical processes#Proc EG VCBM#2021#doi: 10/n94j
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/a2de4fec4fa48ec582b2c67876a365db3a5a24ef
+
+CORRECTED REFERENCE:
+L. Garrison, M. Meuschke, J. Fairman, N. Smit, B. Preim, S. Bruckner. (2021). "An Exploration of Practice and Preferences for the Visual Communication of Biomedical Processes". In Eurographics Workshop on Visual Computing for Biomedicine. https://doi.org/10.2312/vcbm.20211339.
+
+================================================================================
+REFERENCE: Better: A Surgeon's Notes on Performance
+Type: multiple
+Details: - First author mismatch: 'A. Gawande' vs 'F. Scheele'
+- Year mismatch: cited as 2008 but actually 2007
+
+RAW REFERENCE TEXT:
+A. Gawande#Better: A Surgeon's Notes on Performance#Picador#2008#doi: 10/dw8xg9
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/210c565f33409b834f509b306da7d161d27d8b5d
+
+CORRECTED REFERENCE:
+F. Scheele. (2007). "Better: A Surgeon's Notes on Performance". https://www.semanticscholar.org/paper/210c565f33409b834f509b306da7d161d27d8b5d.
+
+================================================================================
+REFERENCE: Best practices for using GitHub Copilot
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Github#Best practices for using GitHub Copilot#GitHub Docs#2024#docs.github.com/copilot/best-practices
+
+================================================================================
+REFERENCE: Filling in the gaps: Artistic license in education and outreach
+Type: doi
+Details: DOI mismatch: cited as 10/bjqwrv but actually 10.1371/journal.pbio.0050308
+
+RAW REFERENCE TEXT:
+D. S. Goodsell, G. T. Johnson#Filling in the gaps: Artistic license in education and outreach#PLoS Biol#2007#doi: 10/bjqwrv
+
+VERIFIED URL:
+  https://doi.org/10.1371/journal.pbio.0050308
+
+CORRECTED REFERENCE:
+"Filling in the Gaps: Artistic License in Education and Outreach". https://doi.org/10.1371/journal.pbio.0050308.
+
+================================================================================
+REFERENCE: Establishing a multi-society generative AI task force within radiology
+Type: doi
+Details: DOI mismatch: cited as 10/ptms but actually 10.7759/cureus.64475
+
+RAW REFERENCE TEXT:
+S. K. Hsiao, R. M. Treat, R. Javan#Establishing a multi-society generative AI task force within radiology#Cureus#2024#doi: 10/ptms
+
+VERIFIED URL:
+  https://doi.org/10.7759/cureus.64475
+
+CORRECTED REFERENCE:
+"Establishing a Multi-Society Generative AI Task Force Within Radiology". https://doi.org/10.7759/cureus.64475.
+
+================================================================================
+REFERENCE: Generative AI for synthetic data across multiple medical modalities: A systematic review of recent developments and challenges
+Type: doi
+Details: DOI mismatch: cited as 10/ptmv but actually 10.1016/j.compbiomed.2025.109834
+
+RAW REFERENCE TEXT:
+M. Ibrahim, Y. A. Khalil, S. Amirrajab, C. Sun, M. Breeuwer, J. Pluim, B. Elen, G. Ertaylan, M. Dumontier#Generative AI for synthetic data across multiple medical modalities: A systematic review of recent developments and challenges#Comput Biol Med#2025#doi: 10/ptmv
+
+VERIFIED URL:
+  https://doi.org/10.1016/j.compbiomed.2025.109834
+
+CORRECTED REFERENCE:
+"Generative AI for synthetic data across multiple medical modalities: A systematic review of recent developments and challenges". https://doi.org/10.1016/j.compbiomed.2025.109834.
+
+================================================================================
+REFERENCE: Transparency in film: Increasing credibility of scientific animation using citation
+Type: doi
+Details: DOI mismatch: cited as 10/ptvx but actually 10.1038/nmeth.3334
+
+RAW REFERENCE TEXT:
+S. G. Jantzen, J. Jenkinson, G. McGill#Transparency in film: Increasing credibility of scientific animation using citation#Nat Methods#2015#doi: 10/ptvx
+
+VERIFIED URL:
+  https://doi.org/10.1038/nmeth.3334
+
+CORRECTED REFERENCE:
+"Transparency in film: increasing credibility of scientific animation using citation". https://doi.org/10.1038/nmeth.3334.
+
+================================================================================
+REFERENCE: Design principles for molecular animation
+Type: doi
+Details: DOI mismatch: cited as 10/ptmw but actually 10.3389/fbinf.2024.1353807
+
+RAW REFERENCE TEXT:
+S. G. Jantzen, G. McGill, J. Jenkinson#Design principles for molecular animation#Front Bioinform#2024#doi: 10/ptmw
+
+VERIFIED URL:
+  https://doi.org/10.3389/fbinf.2024.1353807
+
+CORRECTED REFERENCE:
+"Design principles for molecular animation". https://doi.org/10.3389/fbinf.2024.1353807.
+
+================================================================================
+REFERENCE: Molecular biology meets the learning sciences: Visualizations in education and outreach
+Type: doi
+Details: DOI mismatch: cited as 10/gfk7ts but actually 10.1016/j.jmb.2018.08.020
+
+RAW REFERENCE TEXT:
+J. Jenkinson#Molecular biology meets the learning sciences: Visualizations in education and outreach#J Mol Bol#2018#doi: 10/gfk7ts
+
+VERIFIED URL:
+  https://doi.org/10.1016/j.jmb.2018.08.020
+
+CORRECTED REFERENCE:
+"Molecular Biology Meets the Learning Sciences: Visualizations in Education and Outreach". https://doi.org/10.1016/j.jmb.2018.08.020.
+
+================================================================================
+REFERENCE: Overview of visualization in biology and medicine
+Type: doi
+Details: DOI mismatch: cited as 10/ptmx but actually 10.1007/978-1-4471-6497-5_20
+
+RAW REFERENCE TEXT:
+A. E. Kaufman, G. Scheuermann, J. B. T. M. Roerdink#Overview of visualization in biology and medicine#Scientific Visualization: Uncertainty, Multifield, Biomedical, and Scalable Visualization#2014#doi: 10/ptmx
+
+VERIFIED URL:
+  https://doi.org/10.1007/978-1-4471-6497-5_20
+
+CORRECTED REFERENCE:
+"Overview of Visualization in Biology and Medicine". https://doi.org/10.1007/978-1-4471-6497-5_20.
+
+================================================================================
+REFERENCE: Visual analytics: Definition, process, and challenges
+Type: doi
+Details: DOI mismatch: cited as 10/frdgkj but actually 10.1007/978-3-540-70956-5_7
+
+RAW REFERENCE TEXT:
+D. Keim, G. Andrienko, J.-D. Fekete, C. Görg, J. Kohlhammer, G. Melançon#Visual analytics: Definition, process, and challenges#Information Visualization#2008#doi: 10/frdgkj
+
+VERIFIED URL:
+  https://hal-lirmm.ccsd.cnrs.fr/lirmm-00272779/file/VAChapter_final.pdf
+
+CORRECTED REFERENCE:
+D. Keim, G. Andrienko, Jean-Daniel Fekete, C. Görg, J. Kohlhammer, G. Melançon. (2008). "Visual Analytics: Definition, Process, and Challenges". In Information Visualization. https://doi.org/10.1007/978-3-540-70956-5_7.
+
+================================================================================
+REFERENCE: Generative AI can fabricate advanced scientific visualizations: Ethical implications and strategic mitigation framework
+Type: doi
+Details: DOI mismatch: cited as 10/ptmk but actually 10.1007/s43681-024-00439-0
+
+RAW REFERENCE TEXT:
+J. J. H. Kim, R. S. Um, J. W. Y. Lee, O. Ajilore#Generative AI can fabricate advanced scientific visualizations: Ethical implications and strategic mitigation framework#AI and Ethics#2024#doi: 10/ptmk
+
+VERIFIED URL:
+  https://doi.org/10.1007/s43681-024-00439-0
+
+CORRECTED REFERENCE:
+"Generative AI can fabricate advanced scientific visualizations: ethical implications and strategic mitigation framework". https://doi.org/10.1007/s43681-024-00439-0.
+
+================================================================================
+REFERENCE: How to make sense of generative AI as a science communication researcher? A conceptual framework in the context of critical engagement with scientific information
+Type: doi
+Details: DOI mismatch: cited as 10/ptmz but actually 10.22323/2.23060205
+
+RAW REFERENCE TEXT:
+I. Klein-Avraham, E. Greussing, M. Taddicken, S. Dabran-Zivan, E. Jonas, A. Baram-Tsabari#How to make sense of generative AI as a science communication researcher? A conceptual framework in the context of critical engagement with scientific information#JCOM#2024#doi: 10/ptmz
+
+VERIFIED URL:
+  https://doi.org/10.22323/2.23060205
+
+CORRECTED REFERENCE:
+"How to make sense of generative AI as a science communication researcher? A conceptual framework in the context of critical engagement with scientific information". https://doi.org/10.22323/2.23060205.
+
+================================================================================
+REFERENCE: AI-generated nonsense about rat with giant penis published by leading scientific journal
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+S. Knapton#AI-generated nonsense about rat with giant penis published by leading scientific journal#The Telegraph#2024#telegraph.co.uk/news/2024/02/16/journal-published-graphic-rat-with-giant-penis-asking-ai/
+
+================================================================================
+REFERENCE: Rethinking science communication in a changing landscape
+Type: multiple
+Details: - First author mismatch: 'J. F. H. Kupper' vs 'Frank Kupper'
+- DOI mismatch: cited as 10/gphqpz but actually 10.22323/2.20030501
+
+RAW REFERENCE TEXT:
+J. F. H. Kupper, C. Moreno, A. Fornetti#Rethinking science communication in a changing landscape#JCOM#2021#doi: 10/gphqpz
+
+VERIFIED URL:
+  https://doi.org/10.22323/2.20030501
+
+CORRECTED REFERENCE:
+Frank Kupper, Carolina Moreno-Castro, Alessandra Fornetti. "Rethinking science communication in a changing landscape". https://doi.org/10.22323/2.20030501.
+
+================================================================================
+REFERENCE: Visualization in biology and medicine
+Type: doi
+Details: DOI mismatch: cited as 10/ptm2 but actually 10.1007/978-1-4471-6497-5_22
+
+RAW REFERENCE TEXT:
+H. Leitte, M. Meyer#Visualization in biology and medicine#Scientific Visualization: Uncertainty, Multifield, Biomedical, and Scalable Visualization#2014#doi: 10/ptm2
+
+VERIFIED URL:
+  https://doi.org/10.1007/978-1-4471-6497-5_22
+
+CORRECTED REFERENCE:
+"Visualization in Biology and Medicine". https://doi.org/10.1007/978-1-4471-6497-5_22.
+
+================================================================================
+REFERENCE: User experience design professionals' perceptions of generative artificial intelligence
+Type: doi
+Details: DOI mismatch: cited as 10/ptm3 but actually 10.1145/3613904.3642114
+
+RAW REFERENCE TEXT:
+J. Li, H. Cao, L. Lin, Y. Hou, R. Zhu, A. El Ali#User experience design professionals' perceptions of generative artificial intelligence#Proc ACM Hum-Comput Interact#2024#doi: 10/ptm3
+
+VERIFIED URL:
+  https://doi.org/10.1145/3613904.3642114
+
+CORRECTED REFERENCE:
+"User Experience Design Professionals’ Perceptions of Generative Artificial Intelligence". https://doi.org/10.1145/3613904.3642114.
+
+================================================================================
+REFERENCE: Digital Photogrammetry: A Practical Course
+Type: multiple
+Details: - Year mismatch: cited as 2009 but actually 2016
+- Venue mismatch: cited as 'Springer Berlin, 2009' but actually 'Digital Photogrammetry'
+- DOI mismatch: cited as 10/c4h8dv but actually 10.1007/978-3-662-50463-5
+
+RAW REFERENCE TEXT:
+W. Linder#Digital Photogrammetry: A Practical Course#Springer Berlin#2009#doi: 10/c4h8dv
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/28efc953070c8101a6ec5eba1048c1f14d1cbfc5
+
+CORRECTED REFERENCE:
+W. Linder. (2016). "Digital Photogrammetry: A Practical Course". In Digital Photogrammetry. https://doi.org/10.1007/978-3-662-50463-5.
+
+================================================================================
+REFERENCE: A new tool for annotating scientific animations and supporting scientific dialogue
+Type: doi
+Details: DOI mismatch: cited as 10/grzhct but actually 10.1371/journal.pbio.3001731
+
+RAW REFERENCE TEXT:
+H. Liu, M. Riggi, J. Rogers, M. Meyer, J. H. Iwasa#A new tool for annotating scientific animations and supporting scientific dialogue#PLoS Biol#2022#doi: 10/grzhct
+
+VERIFIED URL:
+  https://doi.org/10.1371/journal.pbio.3001731
+
+CORRECTED REFERENCE:
+"A new tool for annotating scientific animations and supporting scientific dialogue". https://doi.org/10.1371/journal.pbio.3001731.
+
+================================================================================
+REFERENCE: Health disinformation use case highlighting the urgent need for artificial intelligence vigilance: Weapons of mass disinformation
+Type: multiple
+Details: - Year mismatch: cited as 2024 but actually 2023
+- Venue mismatch: cited as 'JAMA Intern Med, 2024' but actually 'JAMA Internal Medicine'
+- DOI mismatch: cited as 10/gs4qmb but actually 10.1001/jamainternmed.2023.5947
+
+RAW REFERENCE TEXT:
+B. D. Menz, N. D. Modi, M. J. Sorich, A. M. Hopkins#Health disinformation use case highlighting the urgent need for artificial intelligence vigilance: Weapons of mass disinformation#JAMA Intern Med#2024#doi: 10/gs4qmb
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/95b56abc2f23b1332af11daf5e074232a6aabbe5
+
+CORRECTED REFERENCE:
+B. Menz, N. Modi, M. Sorich, A. Hopkins. (2023). "Health Disinformation Use Case Highlighting the Urgent Need for Artificial Intelligence Vigilance: Weapons of Mass Disinformation.". In JAMA Internal Medicine. https://doi.org/10.1001/jamainternmed.2023.5947.
+
+================================================================================
+REFERENCE: Narrative medical visualization to communicate disease data
+Type: doi
+Details: DOI mismatch: cited as 10/gt25bm but actually 10.1016/j.cag.2022.07.017
+
+RAW REFERENCE TEXT:
+M. Meuschke, L. A. Garrison, N. N. Smit, B. Bach, S. Mittenentzwei, V. Weiß, S. Bruckner, K. Lawonn, B. Preim#Narrative medical visualization to communicate disease data#Comput Graph#2022#doi: 10/gt25bm
+
+VERIFIED URL:
+  https://doi.org/10.1016/j.cag.2022.07.017
+
+CORRECTED REFERENCE:
+"Narrative medical visualization to communicate disease data". https://doi.org/10.1016/j.cag.2022.07.017.
+
+================================================================================
+REFERENCE: Visualization multi-pipeline for communicating biology
+Type: doi
+Details: DOI mismatch: cited as 10/gcp92n but actually 10.1109/tvcg.2017.2744518
+
+RAW REFERENCE TEXT:
+P. Mindek, D. Kouřil, J. Sorger, D. Toloudis, B. Lyons, G. Johnson, M. E. Gröller, I. Viola#Visualization multi-pipeline for communicating biology#IEEE Trans Vis Comput Graph#2018#doi: 10/gcp92n
+
+VERIFIED URL:
+  https://doi.org/10.1109/tvcg.2017.2744518
+
+CORRECTED REFERENCE:
+"Visualization Multi-Pipeline for Communicating Biology". https://doi.org/10.1109/tvcg.2017.2744518.
+
+================================================================================
+REFERENCE: AI-assisted character design in medical storytelling with Stable Diffusion
+Type: doi
+Details: DOI mismatch: cited as 10/ps62 but actually 10.2139/ssrn.4772811
+
+RAW REFERENCE TEXT:
+S. Mittenentzwei, L. A. Garrison, B. Budich, K. Lawonn, A. Dockhorn, B. Preim, M. Meuschke#AI-assisted character design in medical storytelling with Stable Diffusion#Comput Graph#2024#doi: 10/ps62
+
+VERIFIED URL:
+  https://doi.org/10.2139/ssrn.4772811
+
+CORRECTED REFERENCE:
+"Ai-Assisted Character Design in Medical Storytelling with Stable Diffusion". https://doi.org/10.2139/ssrn.4772811.
+
+================================================================================
+REFERENCE: Assessment of generative artificial intelligence (AI) models in creating medical illustrations for various corneal transplant procedures
+Type: doi
+Details: DOI mismatch: cited as 10/ptpj but actually 10.7759/cureus.67833
+
+RAW REFERENCE TEXT:
+K. A. Moin, A. A. Nasir, D. J. Petroff, B. A. Loveless, O. A. Moshirfar, P. C. Hoopes, M. Moshirfar#Assessment of generative artificial intelligence (AI) models in creating medical illustrations for various corneal transplant procedures#Cureus#2024#doi: 10/ptpj
+
+VERIFIED URL:
+  https://doi.org/10.7759/cureus.67833
+
+CORRECTED REFERENCE:
+"Assessment of Generative Artificial Intelligence (AI) Models in Creating Medical Illustrations for Various Corneal Transplant Procedures". https://doi.org/10.7759/cureus.67833.
+
+================================================================================
+REFERENCE: The TAC Toolkit: Supporting design for user acceptance of health technologies from a macro-temporal perspective
+Type: doi
+Details: DOI mismatch: cited as 10/ptpk but actually 10.1145/3491102.3502039
+
+RAW REFERENCE TEXT:
+C. Nadal, S. McCully, K. Doherty, C. Sas, G. Doherty#The TAC Toolkit: Supporting design for user acceptance of health technologies from a macro-temporal perspective#Proc ACM Hum-Comput Interact#2022#doi: 10/ptpk
+
+VERIFIED URL:
+  https://doi.org/10.1145/3491102.3502039
+
+CORRECTED REFERENCE:
+"The TAC Toolkit: Supporting Design for User Acceptance of Health Technologies from a Macro-Temporal Perspective". https://doi.org/10.1145/3491102.3502039.
+
+================================================================================
+REFERENCE: Cascadeur
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Nekki#Cascadeur#2025#cascadeur.com
+
+================================================================================
+REFERENCE: Visualization of Biomedical Data
+Type: multiple
+Details: - First author mismatch: 'S. I. O'Donoghue' vs 'S. O’Donoghue'
+- Venue mismatch: cited as 'Annu Rev Biomed Data Sci, 2018' but actually 'Annual Review of Biomedical Data Science'
+- DOI mismatch: cited as 10/gdvpf4 but actually 10.1146/ANNUREV-BIODATASCI-080917-013424
+
+RAW REFERENCE TEXT:
+S. I. O'Donoghue, B. F. Baldi, S. J. Clark, A. E. Darling, J. M. Hogan, S. Kaur, L. Maier-Hein, D. J. McCarthy, W. J. Moore, E. Stenau#Visualization of Biomedical Data#Annu Rev Biomed Data Sci#2018#doi: 10/gdvpf4
+
+VERIFIED URL:
+  https://www.annualreviews.org/doi/pdf/10.1146/annurev-biodatasci-080917-013424
+
+CORRECTED REFERENCE:
+S. O’Donoghue, B. Baldi, S. Clark, A. Darling, J. Hogan, Sandeep Kaur, L. Maier-Hein, Davis J. McCarthy, W. Moore, Esther Stenau, J. Swedlow, Jenny Vuong, J. Procter. (2018). "Visualization of Biomedical Data". In Annual Review of Biomedical Data Science. https://doi.org/10.1146/ANNUREV-BIODATASCI-080917-013424.
+
+================================================================================
+REFERENCE: Large language models propagate race-based medicine
+Type: doi
+Details: DOI mismatch: cited as 10/gswm8g but actually 10.1038/s41746-023-00939-z
+
+RAW REFERENCE TEXT:
+J. A. Omiye, J. C. Lester, S. Spichak, V. Rotemberg, R. Daneshjou#Large language models propagate race-based medicine#NPJ Digit Med#2023#doi: 10/gswm8g
+
+VERIFIED URL:
+  https://doi.org/10.1038/s41746-023-00939-z
+
+CORRECTED REFERENCE:
+"Large language models propagate race-based medicine". https://doi.org/10.1038/s41746-023-00939-z.
+
+================================================================================
+REFERENCE: Introducing ChatGPT
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+OpenAI#Introducing ChatGPT#2022#openai.com/chatgpt/
+
+================================================================================
+REFERENCE: ChatGPT, DALL-E 2
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+OpenAI#ChatGPT, DALL-E 2#2024#chatgpt.com/-med-illu-master
+
+================================================================================
+REFERENCE: Introducing 4o image generation
+Type: unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+OpenAI#Introducing 4o image generation#2025#openai.com/index/introducing-4o-image-generation/
+
+================================================================================
+REFERENCE: Evolving roles and workflows of creative practitioners in the age of generative AI
+Type: doi
+Details: DOI mismatch: cited as 10/ptpr but actually 10.1145/3635636.3656190
+
+RAW REFERENCE TEXT:
+S. Palani, G. Ramos#Evolving roles and workflows of creative practitioners in the age of generative AI#ACM Creativity and Cognition#2024#doi: 10/ptpr
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/ee532afb014f01bce3be3f16c60b6574c87a2600
+
+CORRECTED REFERENCE:
+Srishti Palani, Gonzalo A. Ramos. (2024). "Evolving Roles and Workflows of Creative Practitioners in the Age of Generative AI". In Creativity & Cognition. https://doi.org/10.1145/3635636.3656190.
+
+================================================================================
+REFERENCE: Synthetic data and its utility in pathology and laboratory medicine
+Type: doi
+Details: DOI mismatch: cited as 10/ptps but actually 10.1016/j.labinv.2024.102095
+
+RAW REFERENCE TEXT:
+J. Pantanowitz, C. D. Manko, L. Pantanowitz, H. H. Rashidi#Synthetic data and its utility in pathology and laboratory medicine#Lab Invest#2024#doi: 10/ptps
+
+VERIFIED URL:
+  https://doi.org/10.1016/j.labinv.2024.102095
+
+CORRECTED REFERENCE:
+"Synthetic Data and Its Utility in Pathology and Laboratory Medicine". https://doi.org/10.1016/j.labinv.2024.102095.
+
+================================================================================
+REFERENCE: Illustrative visualization: new technology or useless tautology?
+Type: multiple
+Details: - Venue mismatch: cited as 'SIGGRAPH Comput Graph, 2008' but actually 'COMG'
+- DOI mismatch: cited as 10/fmjcxt but actually 10.1145/1408626.1408633
+
+RAW REFERENCE TEXT:
+P. Rautek, S. Bruckner, M. E. Gröller, I. Viola#Illustrative visualization: new technology or useless tautology?#SIGGRAPH Comput Graph#2008#doi: 10/fmjcxt
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/4bb2e8915512571266a86a752effb04f76589854
+
+CORRECTED REFERENCE:
+P. Rautek, S. Bruckner, E. Gröller, I. Viola. (2008). "Illustrative visualization: new technology or useless tautology?". In COMG. https://doi.org/10.1145/1408626.1408633.
+
+================================================================================
+REFERENCE: Doom or deliciousness: Challenges and opportunities for visualization in the age of generative models
+Type: doi
+Details: DOI mismatch: cited as 10/pdf9 but actually 10.31219/osf.io/3jrcm_v1
+
+RAW REFERENCE TEXT:
+V. Schetinger, S. Di Bartolomeo, M. El-Assady, A. McNutt, M. Miller, J. P. A. Passos, J. L. Adams#Doom or deliciousness: Challenges and opportunities for visualization in the age of generative models#Comput Graph Forum#2023#doi: 10/pdf9
+
+VERIFIED URL:
+  https://doi.org/10.31219/osf.io/3jrcm_v1
+
+CORRECTED REFERENCE:
+"Doom or Deliciousness: Challenges and Opportunities for Visualization in the Age of Generative Models". https://doi.org/10.31219/osf.io/3jrcm_v1.
+
+================================================================================
+REFERENCE: Products of positionality: How tech workers shape identity concepts in computer vision
+Type: doi
+Details: DOI mismatch: cited as 10/ptpw but actually 10.1145/3613904.3641890
+
+RAW REFERENCE TEXT:
+M. K. Scheuerman, J. R. Brubaker#Products of positionality: How tech workers shape identity concepts in computer vision#Proc ACM Hum-Comput Interact#2024#doi: 10/ptpw
+
+VERIFIED URL:
+  https://doi.org/10.1145/3613904.3641890
+
+CORRECTED REFERENCE:
+"Products of Positionality: How Tech Workers Shape Identity Concepts in Computer Vision". https://doi.org/10.1145/3613904.3641890.
+
+================================================================================
+REFERENCE: Empirical assessment of ChatGPT's answering capabilities in natural science and engineering
+Type: doi
+Details: DOI mismatch: cited as 10/ptp2 but actually 10.1038/s41598-024-54936-7
+
+RAW REFERENCE TEXT:
+L. Schulze Balhorn, J. M. Weber, S. Buijsman, J. R. Hildebrandt, M. Ziefle, A. M. Schweidtmann#Empirical assessment of ChatGPT's answering capabilities in natural science and engineering#Sci Rep#2024#doi: 10/ptp2
+
+VERIFIED URL:
+  https://doi.org/10.1038/s41598-024-54936-7
+
+CORRECTED REFERENCE:
+"Empirical assessment of ChatGPT’s answering capabilities in natural science and engineering". https://doi.org/10.1038/s41598-024-54936-7.
+
+================================================================================
+REFERENCE: Design study methodology: Reflections from the trenches and the stacks
+Type: doi
+Details: DOI mismatch: cited as 10/f4fv7x but actually 10.1109/tvcg.2012.213
+
+RAW REFERENCE TEXT:
+M. Sedlmair, M. Meyer, T. Munzner#Design study methodology: Reflections from the trenches and the stacks#IEEE Trans Vis Comput Graph#2012#doi: 10/f4fv7x
+
+VERIFIED URL:
+  https://doi.org/10.1109/tvcg.2012.213
+
+CORRECTED REFERENCE:
+"Design Study Methodology: Reflections from the Trenches and the Stacks". https://doi.org/10.1109/tvcg.2012.213.
+
+================================================================================
+REFERENCE: Narrative visualization: Telling stories with data
+Type: doi
+Details: DOI mismatch: cited as 10/dnqx5m but actually 10.1109/tvcg.2010.179
+
+RAW REFERENCE TEXT:
+E. Segel, J. Heer#Narrative visualization: Telling stories with data#IEEE Trans Vis Comput Graph#2010#doi: 10/dnqx5m
+
+VERIFIED URL:
+  https://doi.org/10.1109/tvcg.2010.179
+
+CORRECTED REFERENCE:
+"Narrative Visualization: Telling Stories with Data". https://doi.org/10.1109/tvcg.2010.179.
+
+================================================================================
+REFERENCE: Memento: Localized time-warping for spatio-temporal selection
+Type: multiple
+Details: - Year mismatch: cited as 2020 but actually 2019
+- Venue mismatch: cited as 'Comput Graph Forum, 2020' but actually 'Computer graphics forum (Print)'
+- DOI mismatch: cited as 10/ptp3 but actually 10.1111/cgf.13763
+
+RAW REFERENCE TEXT:
+V. Solteszova, N. N. Smit, S. Stoppel, R. Grüner, S. Bruckner#Memento: Localized time-warping for spatio-temporal selection#Comput Graph Forum#2020#doi: 10/ptp3
+
+VERIFIED URL:
+  https://onlinelibrary.wiley.com/doi/pdfdirect/10.1111/cgf.13763
+
+CORRECTED REFERENCE:
+Veronika Soltészová, N. Smit, Sergej Stoppel, Renate Grüner, S. Bruckner. (2019). "Memento: Localized Time‐Warping for Spatio‐Temporal Selection". In Computer graphics forum (Print). https://doi.org/10.1111/cgf.13763.
+
+================================================================================
+REFERENCE: Illustrative scientific visualization framework
+Type: multiple
+Details: - Venue mismatch: cited as 'Proc Computational Aesthetics, 2005' but actually 'International Symposium on Computational Aesthetics in Graphics, Visualization, and Imaging'
+- DOI mismatch: cited as 10/ps7f but actually 10.2312/COMPAESTH/COMPAESTH05/057-065
+
+RAW REFERENCE TEXT:
+M. C. Sousa, A. A. Gooch, B. Gooch#Illustrative scientific visualization framework#Proc Computational Aesthetics#2005#doi: 10/ps7f
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/6b4b6bcdd1381243e401e7fa634fb0d9d9ab0743
+
+CORRECTED REFERENCE:
+M. Sousa, A. Gooch, B. Gooch. (2005). "Illustrative Scientific Visualization Framework". In International Symposium on Computational Aesthetics in Graphics, Visualization, and Imaging. https://doi.org/10.2312/COMPAESTH/COMPAESTH05/057-065.
+
+================================================================================
