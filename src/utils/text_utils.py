@@ -372,9 +372,10 @@ def is_name_match(name1: str, name2: str) -> bool:
     name1 = normalize_diacritics(name1.strip().lower())
     name2 = normalize_diacritics(name2.strip().lower())
     
-    # If one is a substring of the other, consider it a match
-    if name1 in name2 or name2 in name1:
-        return True
+    # Only consider substring match if they are very similar (e.g., identical with/without punctuation)
+    # Remove this overly broad check that causes false positives like "marie k. johnson" matching "k. johnson"
+    # if name1 in name2 or name2 in name1:
+    #     return True
     
     # Split into parts (first name, last name, etc.)
     parts1 = name1.split()
@@ -594,10 +595,45 @@ def is_name_match(name1: str, name2: str) -> bool:
         abbrev_initials = [p.strip().rstrip('.').lstrip('-') for p in re.split(r'[\s.\-]+', abbrev_clean) if p.strip()]
         full_initials = [p.strip().rstrip('.').lstrip('-') for p in re.split(r'[\s.\-]+', full_clean) if p.strip()]
         
-        # If both are multiple initials, check if first matches
+        # If both are multiple initials, check if they match appropriately
         if len(abbrev_initials) > 1 and len(full_initials) >= 1:
-            # "I J" should match "I" - first initial should match
-            return abbrev_initials[0] == full_initials[0] if abbrev_initials[0] and full_initials[0] else False
+            # Handle cases like "l.g" vs "leslie g" or "i j" vs "i"
+            # Also handle reverse case like "leslie g" vs "l.g"
+            
+            # Determine which one has the initials and which has full names
+            if all(len(p) == 1 for p in abbrev_initials) and any(len(p) > 1 for p in full_initials):
+                # abbrev has initials, full has names: "l g" vs "leslie g"
+                # Must have same number of parts or fewer initials than full names
+                if len(abbrev_initials) > len(full_initials):
+                    return False
+                for i, abbrev_initial in enumerate(abbrev_initials):
+                    if i < len(full_initials):
+                        if abbrev_initial != full_initials[i][0]:
+                            return False
+                return True
+            elif any(len(p) > 1 for p in abbrev_initials) and all(len(p) == 1 for p in full_initials):
+                # abbrev has names, full has initials: "leslie g" vs "l g"  
+                # But only match if they have the same number of parts
+                if len(abbrev_initials) != len(full_initials):
+                    return False
+                for i, full_initial in enumerate(full_initials):
+                    if full_initial != abbrev_initials[i][0]:
+                        return False
+                return True
+            else:
+                # Mixed case or both same type, use original logic
+                for i, abbrev_initial in enumerate(abbrev_initials):
+                    if i < len(full_initials):
+                        full_part = full_initials[i]
+                        # If abbrev_initial is single letter and full_part is longer, compare with first letter
+                        if len(abbrev_initial) == 1 and len(full_part) > 1:
+                            if abbrev_initial != full_part[0]:
+                                return False
+                        # If both are single letters or same length, compare directly
+                        elif abbrev_initial != full_part:
+                            return False
+                    # If abbrev has more initials than full, that's OK (extra initials ignored)
+                return True
         
         # Otherwise, abbrev should be contained in full name
         return full.startswith(abbrev_clean)
@@ -627,10 +663,25 @@ def is_name_match(name1: str, name2: str) -> bool:
             # Fewer abbreviated parts - match first parts
             # e.g., "Q." (1 part) vs "Qing Xue" (2 parts) - no first names to check
             # e.g., "A. Smith" (2 parts) vs "Alexander John Smith" (3 parts) - check "A." vs "Alexander"
+            # e.g., "L.G. Valiant" (2 parts) vs "Leslie G. Valiant" (3 parts) - check "L.G." vs "Leslie G."
             num_first_names = len(abbrev_parts) - 1  # All but last part
             for i in range(num_first_names):
-                if not _matches_name_part(abbrev_parts[i], full_parts[i]):
-                    return False
+                # Special handling for concatenated initials like "L.G." vs multiple full names
+                abbrev_part = abbrev_parts[i]
+                if ('.' in abbrev_part and len(abbrev_part.rstrip('.')) > 1 and 
+                    all(len(c) == 1 for c in abbrev_part.rstrip('.').replace('.', ''))):
+                    # This looks like concatenated initials (e.g., "L.G.")
+                    # Match against combined full parts
+                    remaining_full_parts_count = len(full_parts) - len(abbrev_parts) + 1
+                    combined_full = ' '.join(full_parts[i:i + remaining_full_parts_count])
+                    if not _matches_name_part(abbrev_part, combined_full):
+                        return False
+                    # Skip the matched full parts
+                    continue
+                else:
+                    # Regular single initial matching
+                    if not _matches_name_part(abbrev_part, full_parts[i]):
+                        return False
         elif len(abbrev_parts) > len(full_parts):
             # More abbreviated parts than full parts
             # e.g., "I. J. Smith" (3 parts) vs "I. Smith" (2 parts)
@@ -641,6 +692,16 @@ def is_name_match(name1: str, name2: str) -> bool:
             # "I. J." should be treated as one first name unit
             if num_full_first_names == 1:
                 # full has one first name, abbrev has multiple first name parts
+                
+                # Special case: Handle "Nitin J." vs "N." - check if first name initial matches
+                # e.g., abbrev_parts = ['nitin', 'j.', 'sanket'], full_parts = ['n.', 'sanket']
+                if (len(abbrev_parts) >= 2 and 
+                    len(full_parts[0].rstrip('.')) == 1 and 
+                    len(abbrev_parts[0]) > 1):
+                    # Check if first letter of full first name matches first letter of abbreviated first name
+                    if abbrev_parts[0][0] == full_parts[0].rstrip('.'):
+                        return True
+                
                 combined_abbrev_first = ' '.join(abbrev_parts[:-1])  # All but last
                 if not _matches_name_part(combined_abbrev_first, full_parts[0]):
                     return False

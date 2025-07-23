@@ -64,8 +64,11 @@ def normalize_doi(doi: str) -> str:
     # Remove hash fragments and query parameters
     normalized = normalized.split('#')[0].split('?')[0]
     
-    # Clean whitespace
+    # Clean whitespace and trailing punctuation
     normalized = normalized.strip()
+    
+    # Remove trailing punctuation that might be included in extraction
+    normalized = normalized.rstrip('.,;:)')
     
     return normalized
 

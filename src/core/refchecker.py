@@ -3162,10 +3162,11 @@ class ArxivReferenceChecker:
                 break
         
         # Extract DOI - simpler patterns for well-formatted text
+        # Note: DOIs can contain parentheses, so we shouldn't exclude them
         doi_patterns = [
-            r'doi\.org/([^\s,\)]+)',
-            r'doi:\s*([^\s,\)]+)',
-            r'DOI:\s*([^\s,\)]+)',
+            r'doi\.org/([^\s,]+)',
+            r'doi:\s*([^\s,]+)',
+            r'DOI:\s*([^\s,]+)',
         ]
         
         doi = None
@@ -3179,7 +3180,7 @@ class ArxivReferenceChecker:
         
         # Extract other URLs if no DOI found
         if not url and not arxiv_url:
-            url_match = re.search(r'https?://(?!arxiv\.org)[^\s,\)]+', ref_text)
+            url_match = re.search(r'https?://(?!arxiv\.org)[^\s,]+', ref_text)
             if url_match:
                 url = url_match.group(0)
         
