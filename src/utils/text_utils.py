@@ -380,6 +380,167 @@ def is_name_match(name1: str, name2: str) -> bool:
     parts1 = name1.split()
     parts2 = name2.split()
     
+    # Special case: Handle "Last F" vs "First Last" patterns
+    # e.g., "Husain W" vs "Waqar Husain", "Rammstedt B" vs "Beatrice Rammstedt"
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "Last F" format, parts2 is "First Last" format
+        last_name1 = parts1[0]  # "Husain"
+        first_initial1 = parts1[1]  # "W"
+        first_name2 = parts2[0]  # "Waqar" 
+        last_name2 = parts2[1]  # "Husain"
+        
+        if (last_name1 == last_name2 and 
+            first_initial1 == first_name2[0]):
+            return True
+    
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts2[1]) == 1):
+        # parts1 is "First Last" format, parts2 is "Last F" format  
+        first_name1 = parts1[0]  # "Waqar"
+        last_name1 = parts1[1]  # "Husain"
+        last_name2 = parts2[0]  # "Husain"
+        first_initial2 = parts2[1]  # "W"
+        
+        if (last_name1 == last_name2 and 
+            first_name1[0] == first_initial2):
+            return True
+    
+    # Special case: Handle hyphenated first names vs initials
+    # e.g., "Stein JP" vs "Jan-Philipp Stein"
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[1]) == 2 and '-' in parts2[0] and len(parts2[1]) > 1):
+        # parts1 is "Last FI" format, parts2 is "First-Second Last" format
+        last_name1 = parts1[0]  # "Stein"
+        initials1 = parts1[1]  # "JP"
+        hyphenated_first2 = parts2[0]  # "Jan-Philipp" 
+        last_name2 = parts2[1]  # "Stein"
+        
+        # Split hyphenated name
+        first_parts = hyphenated_first2.split('-')
+        if (last_name1 == last_name2 and 
+            len(initials1) >= 2 and len(first_parts) >= 2 and
+            initials1[0] == first_parts[0][0] and
+            initials1[1] == first_parts[1][0]):
+            return True
+    
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        '-' in parts1[0] and len(parts1[1]) > 1 and len(parts2[1]) == 2):
+        # parts1 is "First-Second Last" format, parts2 is "Last FI" format  
+        hyphenated_first1 = parts1[0]  # "Jan-Philipp"
+        last_name1 = parts1[1]  # "Stein"
+        last_name2 = parts2[0]  # "Stein"
+        initials2 = parts2[1]  # "JP"
+        
+        # Split hyphenated name
+        first_parts = hyphenated_first1.split('-')
+        if (last_name1 == last_name2 and 
+            len(initials2) >= 2 and len(first_parts) >= 2 and
+            first_parts[0][0] == initials2[0] and
+            first_parts[1][0] == initials2[1]):
+            return True
+
+    # Special case: Handle "Last FI" vs "F. I. Last" patterns (with periods)
+    # e.g., "Digman JM" vs "J. M. Digman", "Soto CJ" vs "C. Soto" 
+    if (len(parts1) == 2 and len(parts2) >= 2 and 
+        len(parts1[1]) >= 2 and all(len(p.rstrip('.')) == 1 for p in parts2[:-1]) and len(parts2[-1]) > 1):
+        # parts1 is "Last FI" format, parts2 is "F. I. Last" format
+        last_name1 = parts1[0]  # "Digman"
+        initials1 = parts1[1]  # "JM"
+        last_name2 = parts2[-1]  # "Digman"
+        initials2 = [p.rstrip('.') for p in parts2[:-1]]  # ["J", "M"]
+        
+        if (last_name1 == last_name2 and 
+            len(initials1) == len(initials2) and
+            all(initials1[i] == initials2[i] for i in range(len(initials1)))):
+            return True
+    
+    if (len(parts1) >= 2 and len(parts2) == 2 and 
+        all(len(p.rstrip('.')) == 1 for p in parts1[:-1]) and len(parts1[-1]) > 1 and len(parts2[1]) >= 2):
+        # parts1 is "F. I. Last" format, parts2 is "Last FI" format  
+        last_name1 = parts1[-1]  # "Digman"
+        initials1 = [p.rstrip('.') for p in parts1[:-1]]  # ["J", "M"]
+        last_name2 = parts2[0]  # "Digman"
+        initials2 = parts2[1]  # "JM"
+        
+        if (last_name1 == last_name2 and 
+            len(initials1) == len(initials2) and
+            all(initials1[i] == initials2[i] for i in range(len(initials1)))):
+            return True
+
+    # Special case: Handle "LastName FM" vs "FirstName MiddleInitial. LastName" patterns
+    # e.g., "Kostick-Quenet KM" vs "Kristin M. Kostick-Quenet"
+    # e.g., "McCrae RR" vs "Robert R. McCrae" 
+    # e.g., "Beaver KM" vs "Kevin M. Beaver"
+    if (len(parts1) == 2 and len(parts2) == 3 and 
+        len(parts1[1]) >= 2 and len(parts2[0]) > 1 and len(parts2[1].rstrip('.')) == 1 and len(parts2[2]) > 1):
+        # parts1 is "LastName FM" format, parts2 is "FirstName M. LastName" format
+        last_name1 = parts1[0]  # "Kostick-Quenet"
+        initials1 = parts1[1]  # "KM"
+        first_name2 = parts2[0]  # "Kristin" 
+        middle_initial2 = parts2[1].rstrip('.')  # "M"
+        last_name2 = parts2[2]  # "Kostick-Quenet"
+        
+        if (last_name1 == last_name2 and 
+            len(initials1) >= 2 and
+            initials1[0] == first_name2[0] and
+            initials1[1] == middle_initial2):
+            return True
+    
+    if (len(parts1) == 3 and len(parts2) == 2 and 
+        len(parts1[0]) > 1 and len(parts1[1].rstrip('.')) == 1 and len(parts1[2]) > 1 and len(parts2[1]) >= 2):
+        # parts1 is "FirstName M. LastName" format, parts2 is "LastName FM" format  
+        first_name1 = parts1[0]  # "Kristin"
+        middle_initial1 = parts1[1].rstrip('.')  # "M"
+        last_name1 = parts1[2]  # "Kostick-Quenet"
+        last_name2 = parts2[0]  # "Kostick-Quenet"
+        initials2 = parts2[1]  # "KM"
+        
+        if (last_name1 == last_name2 and 
+            len(initials2) >= 2 and
+            first_name1[0] == initials2[0] and
+            middle_initial1 == initials2[1]):
+            return True
+
+    # Special case: Handle "Last FM" vs "First M Last" patterns (with middle initial, no periods)
+    # e.g., "Cardamone NC" vs "Nicholas C Cardamone"
+    if (len(parts1) == 2 and len(parts2) == 3 and 
+        len(parts1[1]) == 2 and len(parts2[0]) > 1 and len(parts2[1]) == 1 and len(parts2[2]) > 1):
+        # parts1 is "Last FM" format, parts2 is "First M Last" format
+        last_name1 = parts1[0]  # "Cardamone"
+        initials1 = parts1[1]  # "NC"
+        first_name2 = parts2[0]  # "Nicholas" 
+        middle_initial2 = parts2[1]  # "C"
+        last_name2 = parts2[2]  # "Cardamone"
+        
+        if (last_name1 == last_name2 and 
+            len(initials1) >= 2 and
+            initials1[0] == first_name2[0] and
+            initials1[1] == middle_initial2):
+            return True
+    
+    if (len(parts1) == 3 and len(parts2) == 2 and 
+        len(parts1[0]) > 1 and len(parts1[1]) == 1 and len(parts1[2]) > 1 and len(parts2[1]) == 2):
+        # parts1 is "First M Last" format, parts2 is "Last FM" format  
+        first_name1 = parts1[0]  # "Nicholas"
+        middle_initial1 = parts1[1]  # "C"
+        last_name1 = parts1[2]  # "Cardamone"
+        last_name2 = parts2[0]  # "Cardamone"
+        initials2 = parts2[1]  # "NC"
+        
+        if (last_name1 == last_name2 and 
+            len(initials2) >= 2 and
+            first_name1[0] == initials2[0] and
+            middle_initial1 == initials2[1]):
+            return True
+
+    # Special case: Handle single letter first name variations like "S. Jeong" vs "S Jeong"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0]) == 1 and len(parts2[0]) == 1):
+        # Both have single letter first names, compare directly
+        if parts1[0] == parts2[0] and parts1[1] == parts2[1]:
+            return True
+    
     # If either name has only one part, compare directly
     if len(parts1) == 1 or len(parts2) == 1:
         return parts1[-1] == parts2[-1]  # Compare last parts (last names)
@@ -1451,6 +1612,45 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             # Reverse NLP conference mappings
             'annual meeting of the association for computational linguistics': 'annu. meet. assoc. comput. linguist.',
             'conference on empirical methods in natural language processing': 'conf. empir. methods nat. lang. process.',
+            
+            # Database and Information Management conferences
+            'international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
+            'international conference on statistical and scientific database management': 'international conference on scientific and statistical database management',
+            '29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
+            'in proceedings of the 29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
+            'proceedings of the 29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
+            
+            # Information and Knowledge Management conferences  
+            'international conference on information and knowledge management': 'acm international conference on information and knowledge management',
+            'acm international conference on information and knowledge management': 'international conference on information and knowledge management',
+            'conference on information and knowledge management': 'international conference on information and knowledge management',
+            'acm on conference on information and knowledge management': 'international conference on information and knowledge management',
+            '2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
+            'in proceedings of the 2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
+            'proceedings of the 2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
+            
+            # SIGIR conferences
+            'annual international acm sigir conference on research and development in information retrieval': 'international acm sigir conference on research and development in information retrieval',
+            'international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            'acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            'sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            '45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            'in proceedings of the 45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            'proceedings of the 45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
+            
+            # Knowledge and Systems Engineering conferences
+            'international conference on knowledge and systems engineering': 'kse',
+            'kse': 'international conference on knowledge and systems engineering',
+            '15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
+            'in 2023 15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
+            '2023 15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
+            
+            # ECML/PKDD conferences
+            'joint european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
+            'ecml/pkdd': 'joint european conference on machine learning and knowledge discovery in databases',
+            'european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
+            'ecml pkdd': 'joint european conference on machine learning and knowledge discovery in databases',
+            'in joint european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
         }
         
         # Normalize for comparison - handle common variations

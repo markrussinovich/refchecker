@@ -210,38 +210,6 @@ class NonArxivReferenceChecker:
         """
         return compare_authors(cited_authors, correct_authors)
     
-    def is_name_match(self, name1: str, name2: str) -> bool:
-        """
-        Check if two author names match, allowing for variations
-        
-        Args:
-            name1: First author name
-            name2: Second author name
-            
-        Returns:
-            True if names match, False otherwise
-        """
-        # If one is a substring of the other, consider it a match
-        if name1 in name2 or name2 in name1:
-            return True
-        
-        # Split into parts (first name, last name, etc.)
-        parts1 = name1.split()
-        parts2 = name2.split()
-        
-        # If either name has only one part, compare directly
-        if len(parts1) == 1 or len(parts2) == 1:
-            return parts1[-1] == parts2[-1]  # Compare last parts (last names)
-        
-        # Compare last names (last parts)
-        if parts1[-1] != parts2[-1]:
-            return False
-        
-        # Compare first initials
-        if parts1[0][0] != parts2[0][0]:
-            return False
-        
-        return True
     
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
