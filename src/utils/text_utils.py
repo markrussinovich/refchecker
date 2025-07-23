@@ -1545,7 +1545,7 @@ def _extract_key_phrases(title: str) -> List[str]:
 def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     """
     Check if two venue names are substantially different (not just minor variations).
-    This function handles various venue name formats, acronyms, and overlaps.
+    This function handles common academic venue abbreviations and formats.
     
     Args:
         venue1: First venue name
@@ -1557,591 +1557,135 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
     
-    # Case 0: Handle specific IEEE journal abbreviation patterns first
-    def normalize_ieee_journal(venue):
-        """Normalize IEEE journal names to handle standard abbreviations"""
+    def normalize_venue(venue):
+        """Normalize venue names by expanding common abbreviations and cleaning format"""
         venue_lower = venue.lower().strip()
         
-        # Remove years and trailing punctuation first
-        venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 1991" or " 2024"
-        venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
+        # Remove years first - but be careful not to remove arXiv IDs
+        if not re.search(r'arxiv:\d+\.\d+', venue_lower):  # Don't remove years if it's an arXiv ID
+            venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 2024" or " 2024" 
+            venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
+        venue_lower = re.sub(r'^\d{4}\s+', '', venue_lower)  # Remove "2024 " prefix
         
-        # IEEE journal abbreviation mappings
-        ieee_mappings = {
-            'ieee trans. commun.': 'ieee transactions on communications',
-            'ieee trans. wireless commun.': 'ieee transactions on wireless communications', 
-            'ieee trans. netw. sci. eng.': 'ieee transactions on network science and engineering',
-            'ieee trans. pattern anal. mach. intell.': 'ieee transactions on pattern analysis and machine intelligence',
-            'ieee trans. image process.': 'ieee transactions on image processing',
-            'ieee trans. signal process.': 'ieee transactions on signal processing',
-            'ieee trans. cogn. commun. netw.': 'ieee transactions on cognitive communications and networking',
-            'ieee j. sel. topics signal process.': 'ieee journal on selected topics in signal processing',
-            'ieee netw. lett.': 'ieee networking letters',
-            'ieee commun. lett.': 'ieee communications letters',
-            'ieee commun. mag.': 'ieee communications magazine',
-            'ieee veh. technol. mag.': 'ieee vehicular technology magazine',
-            'ieee commun. surveys tuts.': 'ieee communications surveys and tutorials',
-            'nat. mach. intell.': 'nature machine intelligence',
-            # ACM Transactions abbreviations
-            'acm trans. inf. syst.': 'acm transactions on information systems',
-            'acm transactions on information systems (tois)': 'acm transactions on information systems',
-            'acm trans. comput. syst.': 'acm transactions on computer systems',
-            'acm transactions on computer systems (tocs)': 'acm transactions on computer systems',
-            'acm trans. database syst.': 'acm transactions on database systems',
-            'acm transactions on database systems (tods)': 'acm transactions on database systems',
-            'acm trans. softw. eng. methodol.': 'acm transactions on software engineering and methodology',
-            'acm transactions on software engineering and methodology (tosem)': 'acm transactions on software engineering and methodology',
-            # Common conference abbreviations - major ML/CV/AI conferences
-            'proc. ieee int. conf. commun. (icc)': 'ieee international conference on communications',
-            'proc. ieee wireless commun. and netw. conf. (wcnc)': 'ieee wireless communications and networking conference', 
-            'proc. ieee global commun. conf. (globecom)': 'global communications conference',
-            'proc. int. conf. mach. learn. (icml)': 'international conference on machine learning',
-            'adv. neural inf. process. syst.': 'neural information processing systems',
-            'adv. neural inform. process. syst.': 'neural information processing systems', # Alternative NeurIPS abbreviation
-            'proc. ieee.': 'proceedings of the ieee',
-            
-            # Journal abbreviations
-            'j. mach. learn. res.': 'journal of machine learning research',
-            'jmlr': 'journal of machine learning research',
-            
-            # Machine Learning conferences
-            'int. conf. mach. learn.': 'international conference on machine learning',
-            'icml': 'international conference on machine learning',
-            'int. conf. learn. represent.': 'international conference on learning representations',
-            'iclr': 'international conference on learning representations',
-            
-            # Computer Vision conferences  
-            'int. conf. comput. vis.': 'ieee international conference on computer vision',
-            'iccv': 'ieee international conference on computer vision',
-            # Also map to the version without IEEE prefix
-            'international conference on computer vision': 'int. conf. comput. vis.',
-            'ieee conf. comput. vis. pattern recog.': 'computer vision and pattern recognition',
-            'cvpr': 'computer vision and pattern recognition',
-            'eur. conf. comput. vis.': 'european conference on computer vision',
-            'eccv': 'european conference on computer vision',
-            
-            # AI conferences
-            'aaai conf. artif. intell.': 'aaai conference on artificial intelligence',
-            'aaai': 'aaai conference on artificial intelligence',
-            'int. joint conf. artif. intell.': 'international joint conference on artificial intelligence',
-            'ijcai': 'international joint conference on artificial intelligence',
-            
-            # NLP conferences
-            'annu. meet. assoc. comput. linguist.': 'annual meeting of the association for computational linguistics',
-            'acl': 'annual meeting of the association for computational linguistics',
-            'conf. empir. methods nat. lang. process.': 'conference on empirical methods in natural language processing',
-            'emnlp': 'conference on empirical methods in natural language processing',
-            # Add reverse mappings for when the full name is cited and abbreviation is correct
-            'ieee transactions on communications': 'ieee trans. commun.',
-            'ieee transactions on wireless communications': 'ieee trans. wireless commun.',
-            'ieee transactions on network science and engineering': 'ieee trans. netw. sci. eng.',
-            'ieee transactions on pattern analysis and machine intelligence': 'ieee trans. pattern anal. mach. intell.',
-            'ieee transactions on image processing': 'ieee trans. image process.',
-            'ieee transactions on signal processing': 'ieee trans. signal process.',
-            'ieee transactions on cognitive communications and networking': 'ieee trans. cogn. commun. netw.',
-            'ieee journal on selected topics in signal processing': 'ieee j. sel. topics signal process.',
-            'ieee networking letters': 'ieee netw. lett.',
-            'ieee communications letters': 'ieee commun. lett.',
-            'ieee communications magazine': 'ieee commun. mag.',
-            'ieee vehicular technology magazine': 'ieee veh. technol. mag.',
-            'ieee communications surveys and tutorials': 'ieee commun. surveys tuts.',
-            'nature machine intelligence': 'nat. mach. intell.',
-            # ACM Transactions reverse mappings
-            'acm transactions on information systems': 'acm trans. inf. syst.',
-            'acm transactions on computer systems': 'acm trans. comput. syst.',
-            'acm transactions on database systems': 'acm trans. database syst.',
-            'acm transactions on software engineering and methodology': 'acm trans. softw. eng. methodol.',
-            # Reverse conference mappings
-            'ieee international conference on communications': 'proc. ieee int. conf. commun. (icc)',
-            'ieee wireless communications and networking conference': 'proc. ieee wireless commun. and netw. conf. (wcnc)',
-            'global communications conference': 'proc. ieee global commun. conf. (globecom)',
-            'international conference on machine learning': 'int. conf. mach. learn.',
-            'neural information processing systems': 'adv. neural inf. process. syst.',
-            'proceedings of the ieee': 'proc. ieee.',
-            
-            # Journal reverse mappings
-            'journal of machine learning research': 'j. mach. learn. res.',
-            
-            # VLDB and database conferences
-            'proc. vldb endow.': 'proceedings of the vldb endowment',
-            'proceedings of the vldb endowment': 'proc. vldb endow.',
-            'vldb endowment': 'proceedings of the vldb endowment',
-            
-            # Semantic Web conferences
-            'iswc': 'international semantic web conference',
-            'international semantic web conference': 'iswc',
-            'the semantic web - iswc': 'international semantic web conference',
-            'international workshop on the semantic web': 'international semantic web conference',
-            
-            # Reverse ML conference mappings
-            'international conference on learning representations': 'int. conf. learn. represent.',
-            
-            # Reverse CV conference mappings
-            'ieee international conference on computer vision': 'int. conf. comput. vis.',
-            'computer vision and pattern recognition': 'ieee conf. comput. vis. pattern recog.',
-            'european conference on computer vision': 'eur. conf. comput. vis.',
-            
-            # Reverse AI conference mappings
-            'aaai conference on artificial intelligence': 'aaai conf. artif. intell.',
-            'international joint conference on artificial intelligence': 'int. joint conf. artif. intell.',
-            
-            # Reverse NLP conference mappings
-            'annual meeting of the association for computational linguistics': 'annu. meet. assoc. comput. linguist.',
-            'conference on empirical methods in natural language processing': 'conf. empir. methods nat. lang. process.',
-            
-            # ACL Findings and related venues
-            'findings of the association for computational linguistics': 'annual meeting of the association for computational linguistics',
-            'findings of the association for computational linguistics: acl': 'annual meeting of the association for computational linguistics',
-            'findings of the association for computational linguistics: acl 2024': 'annual meeting of the association for computational linguistics',
-            'findings of the association for computational linguistics: acl 2023': 'annual meeting of the association for computational linguistics',
-            'findings of the association for computational linguistics: acl 2022': 'annual meeting of the association for computational linguistics',
-            'findings of acl': 'annual meeting of the association for computational linguistics',
-            
-            # Database and Information Management conferences
-            'international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
-            'international conference on statistical and scientific database management': 'international conference on scientific and statistical database management',
-            '29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
-            'in proceedings of the 29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
-            'proceedings of the 29th international conference on scientific and statistical database management': 'international conference on statistical and scientific database management',
-            
-            # Information and Knowledge Management conferences  
-            'international conference on information and knowledge management': 'acm international conference on information and knowledge management',
-            'acm international conference on information and knowledge management': 'international conference on information and knowledge management',
-            'conference on information and knowledge management': 'international conference on information and knowledge management',
-            'acm on conference on information and knowledge management': 'international conference on information and knowledge management',
-            '2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
-            'in proceedings of the 2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
-            'proceedings of the 2017 acm on conference on information and knowledge management': 'international conference on information and knowledge management',
-            
-            # SIGIR conferences
-            'annual international acm sigir conference on research and development in information retrieval': 'international acm sigir conference on research and development in information retrieval',
-            'international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            'acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            'sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            '45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            'in proceedings of the 45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            'proceedings of the 45th international acm sigir conference on research and development in information retrieval': 'annual international acm sigir conference on research and development in information retrieval',
-            
-            # Knowledge and Systems Engineering conferences
-            'international conference on knowledge and systems engineering': 'kse',
-            'kse': 'international conference on knowledge and systems engineering',
-            '15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
-            'in 2023 15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
-            '2023 15th international conference on knowledge and systems engineering': 'international conference on knowledge and systems engineering',
-            
-            # ECML/PKDD conferences
-            'joint european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
-            'ecml/pkdd': 'joint european conference on machine learning and knowledge discovery in databases',
-            'european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
-            'ecml pkdd': 'joint european conference on machine learning and knowledge discovery in databases',
-            'in joint european conference on machine learning and knowledge discovery in databases': 'ecml/pkdd',
-        }
-        
-        # Normalize for comparison - handle common variations
-        # Remove year prefixes/suffixes and normalize separators
-        normalized = re.sub(r'^\d{4}\s+', '', venue_lower)  # Remove year prefix like "2024 "
-        normalized = re.sub(r'\s+\d{4}$', '', normalized)   # Remove year suffix like " 2024"
-        normalized = normalized.replace(' & ', ' and ')     # Normalize & to "and"
-        normalized = normalized.replace('&', 'and')         # Handle &amp; etc
-        
-        # Remove common procedural prefixes and publisher information
-        # Handle "Proceedings of the [ordinal] [publisher]" patterns with careful conference name preservation
-        
-        # Special handling for ACM proceedings with ordinal numbers - preserve conference name
-        # Pattern: "proceedings of the 31st acm international conference..." -> "international conference..."
-        acm_ordinal_match = re.search(r'^proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+acm\s+(.*)', normalized)
-        if acm_ordinal_match:
-            # Preserve everything after "ACM" as the actual conference name
-            conference_name = acm_ordinal_match.group(3).strip()
-            normalized = conference_name
-        else:
-            # Handle companion proceedings pattern: "companion proceedings of the acm on web conference 2024"
-            companion_match = re.search(r'^companion\s+proceedings\s+of\s+(the\s+)?acm\s+on\s+(.*)', normalized)
-            if companion_match:
-                # Extract conference name and normalize it
-                conference_name = companion_match.group(2).strip()
-                # Remove year if present
-                conference_name = re.sub(r'\s+\d{4}$', '', conference_name)
-                # Convert "web conference" -> "the web conference"
-                if conference_name == 'web conference':
-                    conference_name = 'the web conference'
-                normalized = conference_name
-            else:
-                # Apply other prefix removal patterns
-                prefixes_to_remove = [
-                    r'^proceedings\s+of\s+(the\s+)?acm\s+',
-                    r'^proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+',
-                    r'^proceedings\s+of\s+(the\s+)?',
-                    r'^companion\s+proceedings\s+of\s+(the\s+)?acm\s+on\s+',
-                    r'^companion\s+proceedings\s+of\s+(the\s+)?\d+(st|nd|rd|th)\s+acm\s+',
-                    r'^in\s+proceedings\s+of\s+(the\s+)?',
-                    r'^advances\s+in\s+',
-                    r'^\d+(st|nd|rd|th)\s+',  # Remove ordinal numbers at start
-                ]
-                
-                for prefix_pattern in prefixes_to_remove:
-                    normalized = re.sub(prefix_pattern, '', normalized)
-        
-        # Remove publisher names and year suffixes from conference names
-        publisher_patterns = [
-            r'\s+\d{4}(,\s*\d{4})?$',  # Remove trailing years like " 2024" or " 2024, 2024"
-            r'\s*,\s*\d{4}$',          # Remove ", 2024" suffix
+        # Remove common procedural prefixes
+        prefixes_to_remove = [
+            r'^in\s+proc\.\s+(of\s+)?(the\s+)?',      # "In Proc. of the"
+            r'^proceedings\s+(of\s+)?(the\s+)?',       # "Proceedings of the"
+            r'^proc\.\s+(of\s+)?(the\s+)?',           # "Proc. of the"
+            r'^in\s+',                                 # "In"
+            r'^\d+(st|nd|rd|th)\s+',                  # Ordinal numbers
         ]
         
-        for pattern in publisher_patterns:
-            normalized = re.sub(pattern, '', normalized)
+        for prefix_pattern in prefixes_to_remove:
+            venue_lower = re.sub(prefix_pattern, '', venue_lower)
         
-        # Try exact mapping first (with original)
-        if venue_lower in ieee_mappings:
-            return ieee_mappings[venue_lower]
+        # Expand common abbreviations - order matters!
+        abbreviations = [
+            # IEEE Transactions
+            (r'\btrans\.\s*on\s+', 'transactions on '),
+            (r'\btrans\.\s+', 'transactions '),
             
-        # Try exact mapping with normalized version
-        if normalized in ieee_mappings:
-            return ieee_mappings[normalized]
-        
-        # Try pattern-based matching for variations
-        # Handle "Trans." vs "Transactions", "Commun." vs "Communications", etc.
-        patterns = [
-            (r'\btrans\.\s*', 'transactions '),
-            (r'\bcommun\.\s*', 'communications '),
-            (r'\bnetw\.\s*', 'network '),
-            (r'\bwireless\s+commun\.\s*', 'wireless communications '),
-            (r'\bsci\.\s*', 'science '),
-            (r'\beng\.\s*', 'engineering '),
-            (r'\bcogn\.\s*', 'cognitive '),
-            (r'\bj\.\s*', 'journal '),
-            (r'\bsel\.\s*', 'selected '),
-            (r'\bcomput\.\s*', 'computing '),
-            (r'\bsignal\s+process\.\s*', 'signal processing '),
-            (r'\blett\.\s*', 'letters '),
-            (r'\bmag\.\s*', 'magazine '),
-            (r'\bveh\.\s*', 'vehicular '),
-            (r'\btechnol\.\s*', 'technology '),
-            (r'\bsurveys\s+tuts\.\s*', 'surveys and tutorials '),
-            (r'\bmach\.\s*', 'machine '),
-            (r'\bintell\.\s*', 'intelligence '),
-            
-            # Conference abbreviations
-            (r'\bconf\.\s*', 'conference '),
-            (r'\bint\.\s*', 'international '),
-            (r'\beur\.\s*', 'european '),
-            (r'\bcomput\.\s*', 'computer '),
-            (r'\bvis\.\s*', 'vision '),
-            (r'\blearn\.\s*', 'learning '),
-            (r'\brepresent\.\s*', 'representations '),
-            (r'\bartif\.\s*', 'artificial '),
-            (r'\blinguist\.\s*', 'linguistics '),
-            (r'\bprocess\.\s*', 'processing '),
-            (r'\binform\.\s*', 'information '),
-            (r'\banal\.\s*', 'analysis '),
+            # Common words
+            (r'\bintl\.\s+', 'international '),
+            (r'\bint\.\s+', 'international '),
+            (r'\bconf\.\s+', 'conference '),
+            (r'\bj\.\s+', 'journal '),
+            (r'\bassoc\.\s+', 'association '),
+            (r'\bcomput\.\s+', 'computer '),
+            (r'\bartif\.\s+', 'artificial '),
             (r'\bpattern\s+recog\.\s*', 'pattern recognition '),
-            (r'\bmeet\.\s*', 'meeting '),
-            (r'\bannu\.\s*', 'annual '),
-            (r'\bassoc\.\s*', 'association '),
-            (r'\bempir\.\s*', 'empirical '),
-            (r'\bmethods\s+nat\.\s+lang\.\s*', 'methods in natural language '),
-            # Reverse patterns
-            (r'\btransactions\s+', 'trans. '),
-            (r'\bcommunications(\s+|$)', r'commun.\1'),
-            (r'\bnetwork\s+', 'netw. '),
-            (r'\bwireless\s+communications\s+', 'wireless commun. '),
-            (r'\bscience\s+', 'sci. '),
-            (r'\bengineering\s+', 'eng. '),
-            (r'\bcognitive\s+', 'cogn. '),
-            (r'\bjournal(\s+|$)', r'j.\1'),
-            (r'\bselected(\s+|$)', r'sel.\1'),
-            (r'\bcomputing(\s+|$)', r'comput.\1'),
-            (r'\bsignal\s+processing\s+', 'signal process. '),
-            (r'\bletters\s+', 'lett. '),
-            (r'\bmagazine\s+', 'mag. '),
-            (r'\bvehicular\s+', 'veh. '),
-            (r'\btechnology\s+', 'technol. '),
-            (r'\bsurveys\s+and\s+tutorials\s+', 'surveys tuts. '),
-            (r'\bmachine\s+', 'mach. '),
-            (r'\bintelligence\s+', 'intell. '),
+            (r'\bbiometrics,?\s+behavior,?\s+(and|&)\s+identity science', 'biometrics behavior and identity science'),
             
-            # Reverse conference patterns
-            (r'\bconference\s+', 'conf. '),
-            (r'\binternational\s+', 'int. '),
-            (r'\beuropean\s+', 'eur. '),
-            (r'\bcomputer\s+', 'comput. '),
-            (r'\bvision\s+', 'vis. '),
-            (r'\blearning\s+', 'learn. '),
-            (r'\brepresentations\s+', 'represent. '),
-            (r'\bartificial\s+', 'artif. '),
-            (r'\blinguistics\s+', 'linguist. '),
-            (r'\bprocessing\s+', 'process. '),
-            (r'\binformation\s+', 'inform. '),
-            (r'\banalysis\s+', 'anal. '),
-            (r'\bpattern\s+recognition\s+', 'pattern recog. '),
-            (r'\bmeeting\s+', 'meet. '),
-            (r'\bannual\s+', 'annu. '),
-            (r'\bassociation\s+', 'assoc. '),
-            (r'\bempirical\s+', 'empir. '),
-            (r'\bmethods\s+in\s+natural\s+language\s+', 'methods nat. lang. '),
+            # Handle acronyms in parentheses
+            (r'\s*\([^)]*\)\s*', ' '),  # Remove parenthetical acronyms like "(TBIOM)", "(CVPR)"
+            
+            # Common venue abbreviations and normalizations - normalize CVPR variants
+            (r'\b.*?conference on computer vision and pattern recognition\b', 'computer vision and pattern recognition'),
+            (r'\binternational conference on computer vision and pattern recognition\b', 'computer vision and pattern recognition'),
+            
+            # Venue-specific mappings
+            (r'\baaai\b', 'aaai conference on artificial intelligence'),
+            (r'\bcvpr\b', 'computer vision and pattern recognition'),
+            (r'\biccv\b', 'international conference on computer vision'),
+            (r'\biclr\b', 'international conference on learning representations'),
+            (r'\bicml\b', 'international conference on machine learning'),
+            (r'\beccv\b', 'european conference on computer vision'),
+            (r'\bijcai\b', 'international joint conference on artificial intelligence'),
+            (r'\bacpr\b', 'asian conference on pattern recognition'),
+            (r'\bicb\b', 'international conference on biometrics'),
+            (r'\bijcb\b', 'international joint conference on biometrics'),
+            (r'\bwcacv\b', 'winter conference on applications of computer vision'),
+            (r'\bai4i\b', 'international conference on artificial intelligence for industries'),
+            (r'\bicpr\b', 'international conference on pattern recognition'),
+            (r'\bbmvc\b', 'british machine vision conference'),
+            (r'\biwbf\b', 'international workshop on biometrics and forensics'),
+            (r'\bbiosig\b', 'biometrics and electronic signatures'),
+            
+            # Handle specific venue variations identified in error cases
+            # ICML variations
+            (r'\binternational conference on machine learning\b', 'international conference on machine learning'),
+            (r'\bmachine learning\b', 'international conference on machine learning'),
+            
+            # NeurIPS variations - normalize "Advances in Neural Information Processing Systems"
+            (r'\badvances in neural information processing systems\s*\d*\b', 'neural information processing systems'),
+            (r'\bneural information processing systems\b', 'neural information processing systems'),
+            (r'\bneurips\b', 'neural information processing systems'),
+            
+            # WCACV variations - handle workshop/winter conference equivalence
+            (r'\bieee workshop/winter conference on applications of computer vision\b', 'winter conference on applications of computer vision'),
+            (r'\bwinter conference on applications of computer vision\b', 'winter conference on applications of computer vision'),
+            
+            # ICCV workshop variations - normalize both main conference and workshops
+            (r'\b\d{4}\s+ieee/cvf international conference on computer vision workshops?\s*\(iccvw?\)?\b', 'international conference on computer vision'),
+            (r'\binternational conference on computer vision workshops?\b', 'international conference on computer vision'),
+            (r'\binternational conference on computer vision\b', 'international conference on computer vision'),
+            
+            # arXiv preprint handling - normalize all arXiv preprint formats
+            (r'arxiv preprint arxiv:\d+\.\d+', 'arxiv.org'),
+            (r'arxiv preprint arxiv:\d+\.\d+.*', 'arxiv.org'),  # Handle cases with extra text after ID
+            (r'arxiv preprint', 'arxiv.org'),
         ]
         
-        for pattern, replacement in patterns:
-            normalized = re.sub(pattern, replacement, normalized)
+        for pattern, replacement in abbreviations:
+            venue_lower = re.sub(pattern, replacement, venue_lower)
         
-        # Remove common prepositions that may be inconsistent
-        normalized = re.sub(r'\s+on\s+', ' ', normalized)
-        normalized = re.sub(r'\s+in\s+', ' ', normalized)
-        normalized = re.sub(r'\s+of\s+', ' ', normalized)
+        # Clean up spaces and punctuation
+        venue_lower = re.sub(r'\s+', ' ', venue_lower)
+        venue_lower = venue_lower.strip()
         
-        # Handle singular/plural variations
-        normalized = re.sub(r'\bgeneration\b', 'generations', normalized)
-        normalized = re.sub(r'\bsystem\b', 'systems', normalized)
-        
-        # Clean up extra spaces
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-        return normalized
+        return venue_lower
     
-    # Check if venues match after IEEE journal normalization
-    norm_venue1_ieee = normalize_ieee_journal(venue1)
-    norm_venue2_ieee = normalize_ieee_journal(venue2)
+    # Normalize both venues
+    norm1 = normalize_venue(venue1)
+    norm2 = normalize_venue(venue2)
     
-    if norm_venue1_ieee == norm_venue2_ieee:
-        return False  # They match - not substantially different
-    
-    # Also check cross-mapping (abbreviated vs full)
-    if (normalize_ieee_journal(norm_venue1_ieee) == norm_venue2_ieee or
-        normalize_ieee_journal(norm_venue2_ieee) == norm_venue1_ieee):
-        return False  # They match - not substantially different
-    
-    # Special handling for IEEE prefix variations in computer vision conferences
-    # Check if one has "ieee" prefix and the other doesn't, but otherwise they match
-    def remove_ieee_prefix(venue_name):
-        return re.sub(r'^ieee\s+', '', venue_name.lower().strip())
-    
-    venue1_no_ieee = remove_ieee_prefix(norm_venue1_ieee)
-    venue2_no_ieee = remove_ieee_prefix(norm_venue2_ieee)
-    
-    if venue1_no_ieee == venue2_no_ieee:
-        return False  # They match except for IEEE prefix - not substantially different
-    
-    # General abbreviation matching - check if one venue is an abbreviation of the other
-    def is_abbreviation_match(full_venue, abbrev_venue):
-        """
-        Check if abbrev_venue is an abbreviation of full_venue.
-        Returns True if words in abbrev_venue are abbreviations of words in full_venue.
-        
-        Examples: 
-        - "Nat. Mac. Intell." matches "Nature Machine Intelligence"
-        - "Comput. Educ." matches "Computers & Education"
-        """
-        # Clean and split venues into words, including & as separator
-        full_words = re.split(r'[\s,\-/&]+', full_venue.lower().strip())
-        abbrev_words = re.split(r'[\s,\-/&]+', abbrev_venue.lower().strip())
-        
-        # Remove empty words and common stop words
-        stop_words = {'the', 'of', 'on', 'in', 'for', 'and', 'or', 'to', 'a', 'an'}
-        full_words = [w for w in full_words if w and w not in stop_words]
-        abbrev_words = [w for w in abbrev_words if w and w not in stop_words]
-        
-        # If different number of significant words, less likely to be abbreviation
-        if len(abbrev_words) != len(full_words):
-            return False
-            
-        # Check each word pair
-        for full_word, abbrev_word in zip(full_words, abbrev_words):
-            # Remove trailing period from abbreviation
-            abbrev_clean = abbrev_word.rstrip('.')
-            
-            # Check if abbreviation matches:
-            # 1. Same word (exact match)
-            # 2. First few letters match (abbreviation)
-            # 3. Single letter abbreviations are allowed for common words like "journal" -> "j"
-            if not (full_word == abbrev_clean or 
-                   full_word.startswith(abbrev_clean)):
-                return False
-                
-        return True
-    
-    # Test abbreviation matching in both directions
-    if is_abbreviation_match(venue1, venue2) or is_abbreviation_match(venue2, venue1):
-        return False  # They match as abbreviation - not substantially different
-    
-    # Special case: Check if one venue is a full acronym of the other (like "CLICIT" vs "Computational Linguistics")
-    def is_full_acronym_match(full_venue, acronym_venue):
-        """Check if acronym_venue is an acronym formed from the words of full_venue"""
-        if len(acronym_venue) < 3:  # Too short to be meaningful acronym
-            return False
-            
-        # Clean the full venue first - remove proceedings, ordinals, parentheses
-        cleaned_venue = full_venue.lower()
-        # Remove procedural prefixes
-        cleaned_venue = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', cleaned_venue)
-        # Remove ordinals
-        cleaned_venue = re.sub(r'\b(the\s+)?\d+(st|nd|rd|th)\s+', '', cleaned_venue)
-        # Remove parenthetical content (often contains existing acronyms)
-        cleaned_venue = re.sub(r'\s*\([^)]*\)', '', cleaned_venue)
-        
-        # Split into significant words
-        full_words = re.split(r'[\s,\-/&]+', cleaned_venue.strip())
-        stop_words = {'the', 'of', 'on', 'in', 'for', 'and', 'or', 'to', 'a', 'an', 'at'}
-        significant_words = [w for w in full_words if w and w not in stop_words and len(w) > 1 and not w.isdigit()]
-        
-        # Extract first letters to form potential acronym
-        if len(significant_words) < 2:  # Need at least 2 words for acronym
-            return False
-            
-        potential_acronym = ''.join(word[0].upper() for word in significant_words)
-        actual_acronym = acronym_venue.upper().strip()
-        
-        # Check various acronym patterns
-        return (potential_acronym == actual_acronym or 
-                potential_acronym.startswith(actual_acronym) or
-                actual_acronym.startswith(potential_acronym))
-    
-    # Test full acronym matching in both directions
-    if is_full_acronym_match(venue1, venue2) or is_full_acronym_match(venue2, venue1):
-        return False  # They match as full acronym - not substantially different
-
-    # Case 1: Check if one is an acronym of the other
-    def extract_acronym(full_name):
-        """Extract potential acronym from full conference name"""
-        # Split by common separators and take first letter of each significant word
-        words = re.split(r'[\s:,\-/]+', full_name)
-        # Filter out common words that don't contribute to acronyms
-        significant_words = [w for w in words if w.lower() not in 
-                           ['and', 'or', 'of', 'on', 'in', 'for', 'the', 'a', 'an', 'to', 'with']]
-        if len(significant_words) >= 2:
-            return ''.join(word[0].upper() for word in significant_words if word)
-        return None
-    
-    def clean_venue_for_acronym_check(venue):
-        """Clean venue name for acronym matching"""
-        # Remove years, ordinal numbers, and special characters
-        cleaned = re.sub(r"'?\d{2,4}$", '', venue)  # Remove trailing years like '95, 2017
-        cleaned = re.sub(r'\s+\d+$', '', cleaned)   # Remove trailing numbers like " 26"
-        cleaned = cleaned.strip()
-        return cleaned
-    
-    # Clean venues for comparison
-    clean_venue1 = clean_venue_for_acronym_check(venue1)
-    clean_venue2 = clean_venue_for_acronym_check(venue2)
-    
-    # Check if one is short (likely acronym) and other is long (likely full name)
-    short_venue, long_venue = (clean_venue1, clean_venue2) if len(clean_venue1) <= len(clean_venue2) else (clean_venue2, clean_venue1)
-    
-    # If short venue looks like an acronym (all caps, <= 8 chars)
-    if len(short_venue) <= 8 and short_venue.isupper():
-        # Try to match as acronym
-        potential_acronym = extract_acronym(long_venue)
-        if potential_acronym and potential_acronym.lower() == short_venue.lower():
-            return False  # They match - not substantially different
-        
-        # Try partial acronym matching (for cases like NDSS vs NDSSS)
-        # Check if the short venue is a prefix of the potential acronym
-        if potential_acronym and len(short_venue) < len(potential_acronym):
-            if potential_acronym.lower().startswith(short_venue.lower()):
-                # Additional check: make sure we're not matching too loosely
-                # Require at least 75% of the acronym to match
-                if len(short_venue) >= len(potential_acronym) * 0.75:
-                    return False  # They match - not substantially different
-        
-        # Try alternative acronym extraction for common patterns
-        # Handle cases where final words like "Symposium", "Conference", "Workshop" might be omitted
-        words = re.split(r'[\s:,\-/]+', long_venue)
-        significant_words = [w for w in words if w.lower() not in 
-                           ['and', 'or', 'of', 'on', 'in', 'for', 'the', 'a', 'an', 'to', 'with']]
-        
-        # Try acronym without common conference/symposium endings
-        endings_to_try = ['symposium', 'conference', 'workshop', 'meeting', 'proceedings']
-        for ending in endings_to_try:
-            if significant_words and significant_words[-1].lower() == ending:
-                alt_words = significant_words[:-1]  # Remove the ending word
-                if len(alt_words) >= 2:
-                    alt_acronym = ''.join(word[0].upper() for word in alt_words if word)
-                    if alt_acronym and alt_acronym.lower() == short_venue.lower():
-                        return False  # They match - not substantially different
-        
-        # Also check if short venue is contained in long venue as word
-        if short_venue.lower() in long_venue.lower():
-            return False
-    
-    # Case 2: Check for overlap in normalized venues
-    # Normalize both venues for better overlap detection
-    def normalize_for_overlap(venue):
-        normalized = venue.lower()
-        # Remove common prefixes
-        normalized = re.sub(r'^(proceedings\s+of\s+(the\s+)?|advances\s+in\s+)', '', normalized)
-        
-        # Remove ordinal numbers (1st, 2nd, 3rd, 4th, etc.) and their preceding "the"
-        normalized = re.sub(r'\b(the\s+)?\d+(st|nd|rd|th)\s+', '', normalized)
-        
-        # Remove acronyms in parentheses (like "(RDSM)", "(CLiC-it 2024)", etc.)
-        normalized = re.sub(r'\s*\([^)]*\)', '', normalized)
-        
-        # Normalize IEEE variations (IEEE/CVF → IEEE, IEEE/ACM → IEEE, etc.)
-        normalized = re.sub(r'\bieee/[a-z]+\b', 'ieee', normalized)
-        # Normalize workshop/conference variations
-        normalized = re.sub(r'\bworkshop/winter\b', 'winter', normalized)
-        
-        # Remove common stop words from conference titles
-        stop_words = ['of', 'the', 'on', 'in', 'for', 'and', 'a', 'an']
-        words = normalized.split()
-        filtered_words = [w for w in words if w not in stop_words]
-        normalized = ' '.join(filtered_words)
-        
-        # Remove punctuation and normalize spaces
-        normalized = re.sub(r'[^\w\s]', ' ', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-        return normalized
-    
-    norm_venue1 = normalize_for_overlap(clean_venue1)
-    norm_venue2 = normalize_for_overlap(clean_venue2)
-    
-    # One venue contains the other (after removing numbers and normalization)
-    if norm_venue1 in norm_venue2 or norm_venue2 in norm_venue1:
+    # Direct match
+    if norm1 == norm2:
         return False
     
-    # Case 2.5: Check if venues are the same but with year in different positions
-    # Extract years and compare venues without years
-    def extract_year_and_venue(venue):
-        # Find 4-digit years
-        year_match = re.search(r'\b(19|20)\d{2}\b', venue)
-        if year_match:
-            year = year_match.group()
-            venue_without_year = re.sub(r'\b(19|20)\d{2}\b', '', venue).strip()
-            # Clean up extra spaces and punctuation
-            venue_without_year = re.sub(r'[,\s]+', ' ', venue_without_year).strip()
-            return year, venue_without_year
-        return None, venue
+    # Calculate word-level similarity
+    words1 = set(norm1.split())
+    words2 = set(norm2.split())
     
-    year1, venue1_no_year = extract_year_and_venue(venue1)
-    year2, venue2_no_year = extract_year_and_venue(venue2)
+    # Remove common stop words that don't affect venue identity
+    stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'print'}
+    words1 = words1 - stop_words
+    words2 = words2 - stop_words
     
-    # If both have years and years match, compare venues without years
-    if year1 and year2 and year1 == year2:
-        # Normalize venues without years for comparison
-        norm_venue1_no_year = normalize_for_overlap(venue1_no_year)
-        norm_venue2_no_year = normalize_for_overlap(venue2_no_year)
-        
-        # Remove common prefixes like "in", "proceedings of"
-        norm_venue1_no_year = re.sub(r'^(in\s+|proceedings\s+of\s+)', '', norm_venue1_no_year)
-        norm_venue2_no_year = re.sub(r'^(in\s+|proceedings\s+of\s+)', '', norm_venue2_no_year)
-        
-        # Check if they're the same after removing years and normalizing
-        if norm_venue1_no_year == norm_venue2_no_year:
-            return False  # Same venue, just year in different position
+    # If either venue has no meaningful words, consider them different
+    if not words1 or not words2:
+        return True
     
-    # Case 3: Standard word-based similarity check
-    words1 = set(venue1.split())
-    words2 = set(venue2.split())
-    
-    # Calculate Jaccard similarity (intersection over union)
-    intersection = len(words1.intersection(words2))
-    union = len(words1.union(words2))
+    # Calculate Jaccard similarity
+    intersection = len(words1 & words2)
+    union = len(words1 | words2)
     
     if union == 0:
-        return venue1 != venue2
+        return True
     
     jaccard_similarity = intersection / union
     
-    # If venues have high word overlap (80%+), consider them the same
-    # This handles cases like "ACM SIGACT-SIGMOD" vs "ACM SIGACT-SIGMOD-SIGART"
+    # Consider venues the same if they have 80%+ word overlap
     return jaccard_similarity < 0.8
 
 
