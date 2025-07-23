@@ -46,7 +46,8 @@ from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
-                       strip_latex_commands, format_corrected_reference, is_name_match)
+                       strip_latex_commands, format_corrected_reference, is_name_match,
+                       calculate_title_similarity)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -452,17 +453,8 @@ class ArxivReferenceChecker:
                 'semantic_scholar': {'success': 0, 'rate_limited': 0, 'failed': 0},
                 'arxiv': {'success': 0, 'rate_limited': 0, 'failed': 0}
             }
-        
-        # Try Semantic Scholar API first (faster)
-        logger.debug(f"Trying Semantic Scholar API for {arxiv_id}")
-        semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
-        
-        if semantic_result:
-            self._api_performance['semantic_scholar']['success'] += 1
-            logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
-            return semantic_result
-        
-        # If Semantic Scholar failed, try arXiv API
+
+        # Try arXiv API
         logger.debug(f"Semantic Scholar API failed for {arxiv_id}, trying arXiv API")
         arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
         
@@ -470,6 +462,15 @@ class ArxivReferenceChecker:
             self._api_performance['arxiv']['success'] += 1
             logger.debug(f"Successfully fetched {arxiv_id} from arXiv API")
             return arxiv_result
+        
+        # Try Semantic Scholar API 
+        logger.debug(f"Trying Semantic Scholar API for {arxiv_id}")
+        semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
+        
+        if semantic_result:
+            self._api_performance['semantic_scholar']['success'] += 1
+            logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
+            return semantic_result
         
         # If both failed, try reverse order (sometimes one API works when the other doesn't)
         logger.debug(f"Both APIs failed for {arxiv_id}, trying reverse order")
@@ -1812,12 +1813,7 @@ class ArxivReferenceChecker:
             # Skip verification for URL references
             return None, None, None
         
-        # Check if it's an arXiv reference - handle ArXiv references separately even in database mode
-        if reference.get('type') == 'arxiv':
-            errors = self.verify_arxiv_reference(source_paper, reference)
-            # For ArXiv references, construct the URL from the reference
-            arxiv_url = reference.get('url') or f"https://arxiv.org/abs/{self.extract_arxiv_id_from_url(reference['url'])}"
-            return errors, arxiv_url, None
+        # Route all references through the same non-arxiv path for consistent verification
         
         # If database mode is enabled, use database for non-ArXiv references
         if self.db_path:
@@ -1858,95 +1854,13 @@ class ArxivReferenceChecker:
                 logger.warning("Database path specified but no connection available")
                 return [{"error_type": "unverified", "error_details": "Database connection not available"}], None, None
         
-        # For non-database mode, use the appropriate checker based on reference type
-        return self.verify_non_arxiv_reference(source_paper, reference)
+        # For non-database mode, use the standard reference verification
+        return self.verify_reference_standard(source_paper, reference)
     
-    def verify_arxiv_reference(self, source_paper, reference):
-        """
-        Verify if an arXiv reference is accurate
-        
-        Args:
-            source_paper: The paper containing the reference
-            reference: The reference to verify
-            
-        Returns:
-            List of errors or None if no errors found
-        """
-        # Extract ArXiv ID from reference URL
-        ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
-        
-        if not ref_arxiv_id:
-            # Mark as unverified instead of no errors
-            return [{"error_type": "unverified", "error_details": "Could not extract arXiv ID from URL"}]
-        
-        # Get correct metadata for the reference
-        correct_paper = self.get_paper_metadata(ref_arxiv_id)
-        
-        if not correct_paper:
-            logger.warning(f"Could not fetch metadata for reference {ref_arxiv_id}")
-            # Mark as unverified instead of no errors
-            return [{"error_type": "unverified", "error_details": f"Could not fetch metadata for ArXiv ID: {ref_arxiv_id}"}]
-        
-        errors = []
-        
-        # Check authors
-        authors_match, author_error = self.compare_authors(
-            reference['authors'], 
-            [author.name for author in correct_paper.authors]
-        )
-        
-        if not authors_match:
-            errors.append({
-                'error_type': 'author',
-                'error_details': author_error,
-                'ref_authors_correct': ', '.join([author.name for author in correct_paper.authors])
-            })
-        
-        # Check year
-        paper_year = correct_paper.published.year
-        
-        # Only flag year warnings if the difference is significant (more than 1 year)
-        # This helps with preprints that may have a different publication year
-        if reference['year'] != 0 and abs(reference['year'] - paper_year) > 1:
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {reference['year']} but actually {paper_year}",
-                'ref_year_correct': paper_year
-            })
-        
-        # Check URL
-        correct_url = f"https://arxiv.org/abs/{correct_paper.get_short_id()}"
-        
-        # Extract the base URL (without version) for comparison
-        # For example, from "https://arxiv.org/abs/1234.56789v2" to "https://arxiv.org/abs/1234.56789"
-        ref_id = self.extract_arxiv_id_from_url(reference['url'])
-        correct_id = self.extract_arxiv_id_from_url(correct_url)
-        
-        # Remove version numbers for comparison
-        if ref_id and correct_id:
-            ref_id_base = ref_id.split('v')[0] if 'v' in ref_id else ref_id
-            correct_id_base = correct_id.split('v')[0] if 'v' in correct_id else correct_id
-            
-            # Only flag URL errors if the base IDs are different
-            # This is more lenient with version numbers, which are often omitted in citations
-            if ref_id_base != correct_id_base:
-                errors.append({
-                    'error_type': 'url',
-                    'error_details': f"URL mismatch: cited as {reference['url']} but actually {correct_url}",
-                    'ref_url_correct': correct_url
-                })
-        elif not ref_id:
-            errors.append({
-                'error_type': 'url',
-                'error_details': f"Could not extract arXiv ID from URL: {reference['url']}",
-                'ref_url_correct': correct_url
-            })
-        
-        return errors if errors else None
 
-    def verify_non_arxiv_reference(self, source_paper, reference):
+    def verify_reference_standard(self, source_paper, reference):
         """
-        Verify if a non-arXiv reference is accurate using Semantic Scholar
+        Verify if a reference is accurate using Semantic Scholar
         
         Args:
             source_paper: The paper containing the reference
@@ -1970,6 +1884,15 @@ class ArxivReferenceChecker:
             logger.debug(f"Raw text: {reference['raw_text']}")
             # Mark as unverified but keep the URL if found
             return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
+        
+        # Check for ArXiv URL mismatch if reference has an ArXiv URL
+        if reference.get('url') and 'arxiv.org/abs/' in reference['url']:
+            arxiv_errors = self.check_arxiv_url_mismatch(reference, verified_data)
+            if arxiv_errors:
+                if errors:
+                    errors.extend(arxiv_errors)
+                else:
+                    errors = arxiv_errors
         
         # If no errors were found by the Semantic Scholar client, we're done
         if not errors:
@@ -2000,6 +1923,88 @@ class ArxivReferenceChecker:
             formatted_errors.append(formatted_error)
         
         return formatted_errors if formatted_errors else None, paper_url, verified_data
+    
+    def check_arxiv_url_mismatch(self, reference, verified_data):
+        """
+        Check if an ArXiv URL in the reference points to a different paper than the verified data.
+        
+        Args:
+            reference: The reference with an ArXiv URL
+            verified_data: The verified paper data from Semantic Scholar
+            
+        Returns:
+            List of errors if ArXiv URL points to wrong paper, empty list otherwise
+        """
+        if not verified_data or not reference.get('url'):
+            return []
+        
+        # Extract ArXiv ID from the reference URL
+        ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
+        if not ref_arxiv_id:
+            return []
+        
+        # Get metadata for the ArXiv paper from the URL
+        arxiv_paper = self.get_paper_metadata(ref_arxiv_id)
+        if not arxiv_paper:
+            return []
+        
+        # Compare the ArXiv paper with the verified paper data
+        # Check if they represent different papers by comparing titles and authors
+        arxiv_title = arxiv_paper.title.lower().strip()
+        verified_title = verified_data.get('title', '').lower().strip()
+        
+        # Calculate title similarity
+        title_similarity = calculate_title_similarity(arxiv_title, verified_title)
+        
+        # If titles are very different (less than 40% similarity), flag as URL error
+        if title_similarity < 0.4:
+            # Try to find the correct ArXiv URL for the actual paper
+            correct_arxiv_url = self.find_correct_arxiv_url(verified_data)
+            correct_url = correct_arxiv_url if correct_arxiv_url else verified_data.get('url', '')
+            
+            return [{
+                'error_type': 'url',
+                'error_details': f"ArXiv URL points to different paper: cited ArXiv paper is '{arxiv_title}' but reference is actually '{verified_title}'",
+                'ref_url_correct': correct_url
+            }]
+        
+        return []
+    
+    def find_correct_arxiv_url(self, verified_data):
+        """
+        Try to find the correct ArXiv URL for a paper based on verified data.
+        
+        Args:
+            verified_data: The verified paper data from Semantic Scholar
+            
+        Returns:
+            ArXiv URL string if found, None otherwise
+        """
+        if not verified_data:
+            return None
+        
+        # Check if the verified paper has external IDs that include ArXiv
+        external_ids = verified_data.get('externalIds', {})
+        if external_ids and 'ArXiv' in external_ids:
+            arxiv_id = external_ids['ArXiv']
+            return f"https://arxiv.org/abs/{arxiv_id}"
+        
+        # Check if any of the URLs in the paper data point to ArXiv
+        paper_url = verified_data.get('url', '')
+        if paper_url and 'arxiv.org' in paper_url:
+            return paper_url
+        
+        # Check openAccessPdf for ArXiv links
+        open_access_pdf = verified_data.get('openAccessPdf')
+        if open_access_pdf and open_access_pdf.get('url'):
+            pdf_url = open_access_pdf['url']
+            if 'arxiv.org' in pdf_url:
+                # Convert PDF URL to abs URL
+                if '/pdf/' in pdf_url:
+                    return pdf_url.replace('/pdf/', '/abs/').replace('.pdf', '')
+                return pdf_url
+        
+        return None
     
     def add_error_to_dataset(self, source_paper, reference, errors, reference_url=None, verified_data=None):
         """
@@ -2317,7 +2322,7 @@ class ArxivReferenceChecker:
                     delattr(self, '_paper_info_written')
             elif local_pdf_path:
                 # Process a local PDF or LaTeX file
-                logger.info(f"Processing local file: {local_pdf_path}")
+                logger.info(f"Processing pdf: {local_pdf_path}")
                 paper = self._create_local_file_paper(local_pdf_path)
                 papers = [paper]
                 # Set single paper mode

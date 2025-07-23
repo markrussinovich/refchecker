@@ -274,6 +274,27 @@ class NonArxivReferenceChecker:
             else:
                 logger.debug(f"No papers found for title: {cleaned_title}")
         
+        # If we still couldn't find the paper, try searching by ArXiv ID if available
+        if not paper_data and url and 'arxiv.org/abs/' in url:
+            # Extract ArXiv ID from URL
+            arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
+            if arxiv_match:
+                arxiv_id = arxiv_match.group(1)
+                logger.debug(f"Trying to find paper by ArXiv ID: {arxiv_id}")
+                
+                # Search using ArXiv ID
+                search_results = self.search_paper(f"arXiv:{arxiv_id}")
+                
+                if search_results:
+                    # For ArXiv searches, be more lenient with matching
+                    for result in search_results:
+                        external_ids = result.get('externalIds', {})
+                        if external_ids and external_ids.get('ArXiv') == arxiv_id:
+                            paper_data = result
+                            found_title = result['title']
+                            logger.debug(f"Found paper by ArXiv ID: {arxiv_id}")
+                            break
+        
         # If we still couldn't find the paper, try searching by the raw text
         if not paper_data and raw_text:
             # Extract a reasonable search query from the raw text
