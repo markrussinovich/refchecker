@@ -1,18 +1,36 @@
-# Academic Paper Reference Checker
+# 📚 Academic Paper Reference Checker
 
-*Vibe coded by Mark Russinovich and Github Copilot Agent with Sonnet 4*
+*Developed by Mark Russinovich with GitHub Copilot and Claude Sonnet 4*
 
-A comprehensive tool for validating reference accuracy in academic papers useful both for authors checking their bibliography and for conference reviewers checking to ensure that a paper's references are authentic and accurate. This tool can papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
+A comprehensive tool for validating reference accuracy in academic papers, useful for both authors checking their bibliography and conference reviewers ensuring that paper references are authentic and accurate. This tool processes papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
+
+> **✨ Enhanced Reliability**: Recent improvements include intelligent API retry logic, advanced title similarity matching for technical terms, and comprehensive venue normalization to minimize false positives while maintaining high accuracy.
+
+## 📋 Table of Contents
+
+- [🎯 Features](#-features)
+- [🚀 Quick Start](#-quick-start)
+- [🤖 LLM-Enhanced Reference Extraction](#-llm-enhanced-reference-extraction)
+- [📦 Installation](#-installation)
+- [📖 Usage](#-usage)
+- [📊 Output and Results](#-output-and-results)
+- [⚙️ Configuration](#-configuration)
+- [🗄️ Local Database Setup](#-local-database-setup)
+- [🧪 Testing and Validation](#-testing-and-validation)
+- [📄 License](#-license)
 
 ## 🎯 Features
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
-- **🤖 LLM-Enhanced Reference Extraction**: Optional AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
-- **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venus, URLs, and DOIs
-- **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef 
+- **🤖 LLM-Enhanced Reference Extraction**: Recommended AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
+- **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venues, URLs, and DOIs
+- **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef with intelligent retry logic
+- **🧠 Smart Title Matching**: Advanced similarity algorithms handle common academic formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
+- **🏢 Venue Normalization**: Recognizes common journal and conference abbreviation patterns
 - **📊 Detailed Reporting**: Generates comprehensive error reports with drop-in corrected references
-## Quick Start
+
+## 🚀 Quick Start
 
 ### Check Your First Paper
 
@@ -33,7 +51,7 @@ A comprehensive tool for validating reference accuracy in academic papers useful
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
-RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.2-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.  
+RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.2-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.
 
 ### Supported LLM Providers
 
@@ -62,59 +80,32 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
      --llm-provider anthropic \
      --llm-model claude-sonnet-4-20250514 \
    ```
-   The command line supports an --llm-key parameter, but recommended usage is to set the environment variable API key setting for the provider you select. 
-
-### LLM Configuration Options
-
-#### Environment Variables
-```bash
-# Enable/disable LLM
-export REFCHECKER_USE_LLM=true
-
-# Provider selection
-export REFCHECKER_LLM_PROVIDER=anthropic        # openai, anthropic, google, azure
-
-# Provider-specific API keys (native environment variables preferred)
-export OPENAI_API_KEY=your_key                    # or REFCHECKER_OPENAI_API_KEY
-export ANTHROPIC_API_KEY=your_key                 # or REFCHECKER_ANTHROPIC_API_KEY
-export GOOGLE_API_KEY=your_key                    # or REFCHECKER_GOOGLE_API_KEY
-export AZURE_OPENAI_API_KEY=your_key              # or REFCHECKER_AZURE_API_KEY
-export AZURE_OPENAI_ENDPOINT=your_endpoint        # or REFCHECKER_AZURE_ENDPOINT
-
-# Model configuration
-export REFCHECKER_LLM_MODEL=claude-sonnet-4-20250514
-export REFCHECKER_LLM_MAX_TOKENS=4000
-export REFCHECKER_LLM_TEMPERATURE=0.1
-```
-
-#### Command Line Arguments
-```bash
-# LLM provider and configuration
---llm-provider {openai,anthropic,google,azure}  # Enable LLM with specified provider
---llm-model MODEL_NAME                          # Override default model
---llm-key API_KEY                               # API key (optional if env var set)
---llm-endpoint ENDPOINT_URL                     # Override default endpoint
-```
+   The command line supports an `--llm-key` parameter, but recommended usage is to set the environment variable API key setting for the provider you select.
 
 ### LLM Examples
 
 #### OpenAI GPT-4
+
+With `OPENAI_API_KEY` environment variable: 
+
 ```bash
 python refchecker.py --paper /path/to/paper.pdf \
   --llm-provider openai \
   --llm-model gpt-4o \
-  --llm-key sk-your-openai-key
 ```
 
 #### Anthropic Claude
+
+With `ANTHROPIC_API_KEY` environment variable: 
+
 ```bash
 python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
   --llm-provider anthropic \
   --llm-model claude-sonnet-4-20250514 \
-  --llm-key your-anthropic-key
 ```
 
 #### Google Gemini
+
 ```bash
 python refchecker.py --paper paper.tex \
   --llm-provider google \
@@ -123,6 +114,7 @@ python refchecker.py --paper paper.tex \
 ```
 
 #### Azure OpenAI
+
 ```bash
 python refchecker.py --paper paper.txt \
   --llm-provider azure \
@@ -132,14 +124,17 @@ python refchecker.py --paper paper.txt \
 ```
 
 #### vLLM (Local Models)
+
+For running models locally:
+
 ```bash
-# Start vLLM server first (automatic startup supported)
+# automatic Huggingface model download with VLLM server launch 
 python refchecker.py --paper paper.pdf \
   --llm-provider vllm \
   --llm-model meta-llama/Llama-3.2-8B-Instruct 
 ```
 
-## 🚀 Installation
+## 📦 Installation
 
 ### 1. Clone the Repository
 
@@ -225,19 +220,22 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 
 ### Generated Files
 
-- **`reference_errors.txt`**: Detailed error report with full context
+- **`reference_errors.txt`**: Detailed report of references with errors and warnings, including corrected references
 
 ### Error Types
 
 - **❌ Errors**: Critical issues that need correction
   - `author`: Author name mismatches
   - `title`: Title discrepancies
+  - `venue`: Venue discrepancies or missing venue
   - `url`: Incorrect URLs or arXiv IDs
   - `doi`: DOI mismatches
 
 - **⚠️ Warnings**: Minor issues that may need attention
   - `year`: Publication year differences
-  - `unverified`: References that couldn't be verified
+  - `venue`: Venue format variations
+
+- **❓ Unverified**: References that couldn't be verified against any database
 
 ### Sample Output
 
@@ -266,43 +264,7 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 💾 Detailed results saved to: reference_errors.txt
 ```
 
-## 🧪 Testing and Validation
-
-### Run Validation Tests
-
-```bash
-# Test with comprehensive reference validation suite
-python tests/validate_refchecker.py --db-path semantic_scholar_db/semantic_scholar.db
-
-# Test without database (uses enhanced hybrid mode)
-python tests/validate_refchecker.py
-
-# Test specific papers
-python tests/validate_papers.py --paper attention --db-path semantic_scholar_db/semantic_scholar.db
-python tests/validate_papers.py --paper custom --arxiv-id 1706.03762
-
-# Test local database functionality
-python tests/validate_local_db.py --db-path semantic_scholar_db/semantic_scholar.db
-
-# Test with debug mode for detailed output
-python tests/validate_refchecker.py --debug
-```
-
-### Validation Scripts
-
-- **`tests/validate_refchecker.py`**: Comprehensive validation suite with known good/bad references
-- **`tests/validate_papers.py`**: Tests with specific papers (attention, website references, custom papers)  
-- **`tests/validate_local_db.py`**: Local database functionality and integrity checks
-- **`tests/validate_attention_paper.py`**: Specific validation of "Attention Is All You Need" paper
-
-All validation scripts support:
-- Local database testing (`--db-path`)
-- Enhanced hybrid mode testing (default)
-- Debug output (`--debug`)
-- API key configuration
-
 ## ⚙️ Configuration
-
 
 ### Command Line Arguments
 
@@ -316,8 +278,31 @@ All validation scripts support:
 # LLM options
 --llm-provider {openai,anthropic,google,azure,vllm}  # Enable LLM with provider
 --llm-model MODEL                # Override default model
---llm-key KEY                    # API key for LLM provider
+--llm-key KEY                    # Optional API key for LLM provider (environment variable recommended)
 --llm-endpoint URL               # Override endpoint (for Azure/vLLM)
+```
+
+### Environment Variables
+
+```bash
+# Enable/disable LLM
+export REFCHECKER_USE_LLM=true
+
+# Provider selection
+export REFCHECKER_LLM_PROVIDER=anthropic        # openai, anthropic, google, azure
+
+# Provider-specific API keys (native environment variables preferred)
+export OPENAI_API_KEY=your_key                    # or REFCHECKER_OPENAI_API_KEY
+export ANTHROPIC_API_KEY=your_key                 # or REFCHECKER_ANTHROPIC_API_KEY
+export GOOGLE_API_KEY=your_key                    # or REFCHECKER_GOOGLE_API_KEY
+export AZURE_OPENAI_API_KEY=your_key              # or REFCHECKER_AZURE_API_KEY
+export AZURE_OPENAI_ENDPOINT=your_endpoint        # or REFCHECKER_AZURE_ENDPOINT
+
+# Model configuration
+export REFCHECKER_LLM_MODEL=claude-sonnet-4-20250514
+export REFCHECKER_LLM_MAX_TOKENS=4000
+export REFCHECKER_LLM_TEMPERATURE=0.1
+```
 
 
 ## 🗄️ Local Database Setup
@@ -354,6 +339,42 @@ python download_semantic_scholar_db.py \
 - **`--fields`**: Metadata fields to include
 - **`--query`**: Search query for specific papers
 - **`--start-year`/`--end-year`**: Year range filter
+
+
+## 🧪 Testing and Validation
+
+### Run Validation Tests
+
+```bash
+# Test with comprehensive reference validation suite
+python tests/validate_refchecker.py --db-path semantic_scholar_db/semantic_scholar.db
+
+# Test without database (uses enhanced hybrid mode)
+python tests/validate_refchecker.py
+
+# Test specific papers
+python tests/validate_papers.py --paper attention --db-path semantic_scholar_db/semantic_scholar.db
+python tests/validate_papers.py --paper custom --arxiv-id 1706.03762
+
+# Test local database functionality
+python tests/validate_local_db.py --db-path semantic_scholar_db/semantic_scholar.db
+
+# Test with debug mode for detailed output
+python tests/validate_refchecker.py --debug
+```
+
+### Validation Scripts
+
+- **`tests/validate_refchecker.py`**: Comprehensive validation suite with known good/bad references
+- **`tests/validate_papers.py`**: Tests with specific papers (attention, website references, custom papers)  
+- **`tests/validate_local_db.py`**: Local database functionality and integrity checks
+- **`tests/validate_attention_paper.py`**: Specific validation of "Attention Is All You Need" paper
+
+All validation scripts support:
+- Local database testing (`--db-path`)
+- Enhanced hybrid mode testing (default)
+- Debug output (`--debug`)
+- API key configuration
 
 ## 📄 License
 
