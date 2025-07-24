@@ -1889,10 +1889,13 @@ class ArxivReferenceChecker:
         # whether Semantic Scholar verification succeeded or failed
         arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
         if arxiv_errors:
-            if errors:
-                errors.extend(arxiv_errors)
-            else:
-                errors = arxiv_errors
+            # If we found an ArXiv ID mismatch, ONLY report that error
+            # Don't report title/author mismatches because the reference itself is correct
+            logger.debug("ArXiv ID mismatch detected - replacing other errors with ArXiv ID error only")
+            errors = arxiv_errors
+        elif errors:
+            # Only keep other errors if there's no ArXiv ID mismatch
+            pass
         
         # If no errors were found by the Semantic Scholar client, we're done
         if not errors:
@@ -1985,7 +1988,7 @@ class ArxivReferenceChecker:
             
             return [{
                 'error_type': 'arxiv_id',
-                'error_details': f"ArXiv ID points to different paper: cited ArXiv ID {ref_arxiv_id} points to '{actual_title}' but reference is actually '{expected_title}'",
+                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}' but should reference '{expected_title}'",
                 'ref_url_correct': correct_arxiv_url or ''
             }]
         

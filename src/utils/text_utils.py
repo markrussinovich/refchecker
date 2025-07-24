@@ -1393,10 +1393,53 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     if t1_dehyphenated == t2_dehyphenated:
         return 1.0
     
+    # Handle compound word variations - normalize common academic compound words
+    # This fixes cases like "pre trained" vs "pretrained", "multi modal" vs "multimodal"
+    compound_patterns = [
+        (r'\bpre\s+trained\b', 'pretrained'),
+        (r'\bpretrained\b', 'pre trained'),  # reverse mapping
+        (r'\bmulti\s+modal\b', 'multimodal'),
+        (r'\bmultimodal\b', 'multi modal'),
+        (r'\bmulti\s+task\b', 'multitask'),
+        (r'\bmultitask\b', 'multi task'),
+        (r'\bmulti\s+agent\b', 'multiagent'),
+        (r'\bmultiagent\b', 'multi agent'),
+        (r'\bmulti\s+class\b', 'multiclass'),
+        (r'\bmulticlass\b', 'multi class'),
+        (r'\bmulti\s+layer\b', 'multilayer'),
+        (r'\bmultilayer\b', 'multi layer'),
+        (r'\bco\s+training\b', 'cotraining'),
+        (r'\bcotraining\b', 'co training'),
+        (r'\bfew\s+shot\b', 'fewshot'),
+        (r'\bfewshot\b', 'few shot'),
+        (r'\bzero\s+shot\b', 'zeroshot'),
+        (r'\bzeroshot\b', 'zero shot'),
+        (r'\bone\s+shot\b', 'oneshot'),
+        (r'\boneshot\b', 'one shot'),
+        (r'\breal\s+time\b', 'realtime'),
+        (r'\brealtime\b', 'real time'),
+        (r'\breal\s+world\b', 'realworld'),
+        (r'\brealworld\b', 'real world'),
+        (r'\bon\s+line\b', 'online'),
+        (r'\bonline\b', 'on line'),
+        (r'\boff\s+line\b', 'offline'),
+        (r'\boffline\b', 'off line'),
+    ]
+    
+    t1_compound_normalized = t1_dehyphenated
+    t2_compound_normalized = t2_dehyphenated
+    for pattern, replacement in compound_patterns:
+        t1_compound_normalized = re.sub(pattern, replacement, t1_compound_normalized)
+        t2_compound_normalized = re.sub(pattern, replacement, t2_compound_normalized)
+    
+    # Check for match after compound word normalization
+    if t1_compound_normalized == t2_compound_normalized:
+        return 1.0
+    
     # Additional normalization: remove punctuation for comparison
-    t1_normalized = re.sub(r'[^\w\s]', ' ', t1_dehyphenated)
+    t1_normalized = re.sub(r'[^\w\s]', ' ', t1_compound_normalized)
     t1_normalized = re.sub(r'\s+', ' ', t1_normalized).strip()
-    t2_normalized = re.sub(r'[^\w\s]', ' ', t2_dehyphenated)
+    t2_normalized = re.sub(r'[^\w\s]', ' ', t2_compound_normalized)
     t2_normalized = re.sub(r'\s+', ' ', t2_normalized).strip()
     
     # Check for match after full normalization
@@ -1565,6 +1608,18 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         if not re.search(r'arxiv:\d+\.\d+', venue_lower):  # Don't remove years if it's an arXiv ID
             venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 2024" or " 2024" 
             venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
+        
+        # Remove journal volume/issue/page numbers like ", 15(2):207" or ", vol. 10, no. 3, pp. 123-456"
+        # Handle various journal citation formats
+        venue_lower = re.sub(r',?\s*\d+\(\d+\):\d+.*$', '', venue_lower)  # ", 15(2):207"
+        venue_lower = re.sub(r',?\s*vol\.\s*\d+.*$', '', venue_lower)  # ", vol. 10..."
+        venue_lower = re.sub(r',?\s*volume\s*\d+.*$', '', venue_lower)  # ", volume 10..."
+        venue_lower = re.sub(r',?\s*no\.\s*\d+.*$', '', venue_lower)  # ", no. 3..."
+        venue_lower = re.sub(r',?\s*number\s*\d+.*$', '', venue_lower)  # ", number 3..."
+        venue_lower = re.sub(r',?\s*pp\.\s*\d+.*$', '', venue_lower)  # ", pp. 123-456"
+        venue_lower = re.sub(r',?\s*pages\s*\d+.*$', '', venue_lower)  # ", pages 123-456"
+        venue_lower = re.sub(r',?\s*p\.\s*\d+.*$', '', venue_lower)  # ", p. 123"
+        venue_lower = re.sub(r',?\s*\d+:\d+.*$', '', venue_lower)  # ", 10:123-456"
         
         # Remove common procedural prefixes and conference edition patterns
         prefixes_to_remove = [
