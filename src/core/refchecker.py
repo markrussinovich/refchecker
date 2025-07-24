@@ -1885,14 +1885,14 @@ class ArxivReferenceChecker:
             # Mark as unverified but keep the URL if found
             return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
         
-        # Check for ArXiv URL mismatch if reference has an ArXiv URL
-        if reference.get('url') and 'arxiv.org/abs/' in reference['url']:
-            arxiv_errors = self.check_arxiv_url_mismatch(reference, verified_data)
-            if arxiv_errors:
-                if errors:
-                    errors.extend(arxiv_errors)
-                else:
-                    errors = arxiv_errors
+        # Check for ArXiv ID mismatch independently - this should happen regardless of 
+        # whether Semantic Scholar verification succeeded or failed
+        arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
+        if arxiv_errors:
+            if errors:
+                errors.extend(arxiv_errors)
+            else:
+                errors = arxiv_errors
         
         # If no errors were found by the Semantic Scholar client, we're done
         if not errors:
@@ -1924,9 +1924,123 @@ class ArxivReferenceChecker:
         
         return formatted_errors if formatted_errors else None, paper_url, verified_data
     
+    def check_independent_arxiv_id_mismatch(self, reference, verified_data):
+        """
+        Check for ArXiv ID mismatch by comparing the cited paper's metadata 
+        with what the ArXiv ID actually points to, independent of verification success.
+        
+        Args:
+            reference: The reference dictionary
+            verified_data: The verified paper data (may be None)
+            
+        Returns:
+            List of errors if ArXiv ID points to wrong paper, empty list otherwise
+        """
+        # Extract ArXiv ID from URL or venue field
+        ref_arxiv_id = None
+        
+        # Check for ArXiv ID in URL
+        if reference.get('url') and 'arxiv.org/abs/' in reference['url']:
+            ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
+        
+        # Check for ArXiv ID in venue field (e.g., "arXiv preprint arXiv:1234.5678")
+        if not ref_arxiv_id and reference.get('venue'):
+            venue_text = reference['venue']
+            ref_arxiv_id = self.extract_arxiv_id_from_url(venue_text)
+        
+        if not ref_arxiv_id:
+            return []  # No ArXiv ID to check
+        
+        # Get what the ArXiv ID actually points to
+        actual_arxiv_paper = self.get_paper_metadata(ref_arxiv_id)
+        if not actual_arxiv_paper:
+            logger.debug(f"Could not fetch ArXiv paper metadata for ID: {ref_arxiv_id}")
+            return []
+        
+        # Get the expected paper metadata from the reference
+        expected_title = reference.get('title', '').strip()
+        expected_authors = reference.get('authors', [])
+        
+        if not expected_title:
+            return []  # Can't check without expected title
+        
+        # Compare expected vs actual
+        actual_title = actual_arxiv_paper.title.strip()
+        actual_authors = getattr(actual_arxiv_paper, 'authors', [])
+        
+        # Calculate title similarity
+        title_similarity = calculate_title_similarity(expected_title.lower(), actual_title.lower())
+        
+        logger.debug(f"ArXiv ID {ref_arxiv_id} independent check:")
+        logger.debug(f"  Expected title: '{expected_title}'")
+        logger.debug(f"  Actual ArXiv title: '{actual_title}'")
+        logger.debug(f"  Title similarity: {title_similarity:.3f}")
+        
+        # If titles are very different (less than 40% similarity), flag as ArXiv ID error
+        if title_similarity < 0.4:
+            # Try to find the correct ArXiv URL for the expected paper
+            correct_arxiv_url = None
+            if verified_data:
+                correct_arxiv_url = self.find_correct_arxiv_url(verified_data)
+            
+            return [{
+                'error_type': 'arxiv_id',
+                'error_details': f"ArXiv ID points to different paper: cited ArXiv ID {ref_arxiv_id} points to '{actual_title}' but reference is actually '{expected_title}'",
+                'ref_url_correct': correct_arxiv_url or ''
+            }]
+        
+        return []
+
+    def check_arxiv_id_mismatch(self, reference, verified_data, ref_arxiv_id):
+        """
+        Check if an ArXiv ID in the reference points to a different paper than the verified data.
+        
+        Args:
+            reference: The reference with an ArXiv ID
+            verified_data: The verified paper data from Semantic Scholar
+            ref_arxiv_id: The ArXiv ID found in the reference
+            
+        Returns:
+            List of errors if ArXiv ID points to wrong paper, empty list otherwise
+        """
+        if not verified_data or not ref_arxiv_id:
+            return []
+        
+        # Get metadata for the ArXiv paper from the ID
+        arxiv_paper = self.get_paper_metadata(ref_arxiv_id)
+        if not arxiv_paper:
+            logger.debug(f"Could not fetch ArXiv paper metadata for ID: {ref_arxiv_id}")
+            return []
+        
+        # Compare the ArXiv paper with the verified paper data
+        # Check if they represent different papers by comparing titles and authors
+        arxiv_title = arxiv_paper.title.strip()
+        verified_title = verified_data.get('title', '').strip()
+        
+        # Calculate title similarity
+        title_similarity = calculate_title_similarity(arxiv_title.lower(), verified_title.lower())
+        
+        logger.debug(f"ArXiv ID {ref_arxiv_id} title similarity: {title_similarity:.3f}")
+        logger.debug(f"ArXiv paper title: '{arxiv_title}'")
+        logger.debug(f"Verified paper title: '{verified_title}'")
+        
+        # If titles are very different (less than 40% similarity), flag as ArXiv ID error
+        if title_similarity < 0.4:
+            # Try to find the correct ArXiv URL for the actual paper
+            correct_arxiv_url = self.find_correct_arxiv_url(verified_data)
+            correct_url = correct_arxiv_url if correct_arxiv_url else verified_data.get('url', '')
+            
+            return [{
+                'error_type': 'arxiv_id',
+                'error_details': f"ArXiv ID points to different paper: cited ArXiv ID {ref_arxiv_id} points to '{arxiv_title}' but reference is actually '{verified_title}'",
+                'ref_url_correct': correct_url
+            }]
+        
+        return []
+
     def check_arxiv_url_mismatch(self, reference, verified_data):
         """
-        Check if an ArXiv URL in the reference points to a different paper than the verified data.
+        Legacy function - now redirects to check_arxiv_id_mismatch
         
         Args:
             reference: The reference with an ArXiv URL
@@ -1942,33 +2056,8 @@ class ArxivReferenceChecker:
         ref_arxiv_id = self.extract_arxiv_id_from_url(reference['url'])
         if not ref_arxiv_id:
             return []
-        
-        # Get metadata for the ArXiv paper from the URL
-        arxiv_paper = self.get_paper_metadata(ref_arxiv_id)
-        if not arxiv_paper:
-            return []
-        
-        # Compare the ArXiv paper with the verified paper data
-        # Check if they represent different papers by comparing titles and authors
-        arxiv_title = arxiv_paper.title.lower().strip()
-        verified_title = verified_data.get('title', '').lower().strip()
-        
-        # Calculate title similarity
-        title_similarity = calculate_title_similarity(arxiv_title, verified_title)
-        
-        # If titles are very different (less than 40% similarity), flag as URL error
-        if title_similarity < 0.4:
-            # Try to find the correct ArXiv URL for the actual paper
-            correct_arxiv_url = self.find_correct_arxiv_url(verified_data)
-            correct_url = correct_arxiv_url if correct_arxiv_url else verified_data.get('url', '')
             
-            return [{
-                'error_type': 'url',
-                'error_details': f"ArXiv URL points to different paper: cited ArXiv paper is '{arxiv_title}' but reference is actually '{verified_title}'",
-                'ref_url_correct': correct_url
-            }]
-        
-        return []
+        return self.check_arxiv_id_mismatch(reference, verified_data, ref_arxiv_id)
     
     def find_correct_arxiv_url(self, verified_data):
         """
@@ -2123,6 +2212,8 @@ class ArxivReferenceChecker:
             elif error_type == 'title':
                 error_entry['ref_title_correct'] = error.get('ref_title_correct', '')
             elif error_type == 'url':
+                error_entry['ref_url_correct'] = error.get('ref_url_correct', '')
+            elif error_type == 'arxiv_id':
                 error_entry['ref_url_correct'] = error.get('ref_url_correct', '')
             elif error_type == 'venue':
                 error_entry['ref_venue_correct'] = error.get('ref_venue_correct', '')
