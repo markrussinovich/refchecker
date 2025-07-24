@@ -26,6 +26,8 @@ Usage:
 """
 
 import logging
+import random
+import requests
 import time
 from typing import Dict, List, Tuple, Optional, Any
 
@@ -100,11 +102,16 @@ class EnhancedHybridReferenceChecker:
         
         # Track API performance for adaptive selection
         self.api_stats = {
-            'local_db': {'success': 0, 'failure': 0, 'avg_time': 0},
-            'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0},
-            'openalex': {'success': 0, 'failure': 0, 'avg_time': 0},
-            'crossref': {'success': 0, 'failure': 0, 'avg_time': 0}
+            'local_db': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'openalex': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0}
         }
+        
+        # Track failed API calls for retry logic
+        self.retry_base_delay = 2  # Base delay for retrying throttled APIs (seconds)
+        self.retry_backoff_factor = 2  # Exponential backoff multiplier
+        self.max_retry_delay = 30  # Maximum delay cap in seconds
     
     def _update_api_stats(self, api_name: str, success: bool, duration: float):
         """Update API performance statistics"""
@@ -119,17 +126,20 @@ class EnhancedHybridReferenceChecker:
             total_calls = stats['success'] + stats['failure']
             stats['avg_time'] = ((stats['avg_time'] * (total_calls - 1)) + duration) / total_calls
     
-    def _try_api(self, api_name: str, api_instance: Any, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool]:
+    def _try_api(self, api_name: str, api_instance: Any, reference: Dict[str, Any], is_retry: bool = False) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
         """
         Try to verify reference with a specific API and track performance
         
         Returns:
-            Tuple of (verified_data, errors, url, success)
+            Tuple of (verified_data, errors, url, success, failure_type)
+            failure_type can be: 'none', 'not_found', 'throttled', 'timeout', 'other'
         """
         if not api_instance:
-            return None, [], None, False
+            return None, [], None, False, 'none'
         
         start_time = time.time()
+        failure_type = 'none'
+        
         try:
             verified_data, errors, url = api_instance.verify_reference(reference)
             duration = time.time() - start_time
@@ -139,17 +149,40 @@ class EnhancedHybridReferenceChecker:
             self._update_api_stats(api_name, success, duration)
             
             if success:
-                logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s, URL: {url}")
-                return verified_data, errors, url, True
+                retry_info = " (retry)" if is_retry else ""
+                logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s{retry_info}, URL: {url}")
+                return verified_data, errors, url, True, 'none'
             else:
                 logger.debug(f"Enhanced Hybrid: {api_name} found no results in {duration:.2f}s")
-                return None, [], None, False
+                return None, [], None, False, 'not_found'
                 
+        except requests.exceptions.Timeout as e:
+            duration = time.time() - start_time
+            self._update_api_stats(api_name, False, duration)
+            failure_type = 'timeout'
+            logger.warning(f"Enhanced Hybrid: {api_name} timed out in {duration:.2f}s: {e}")
+            return None, [], None, False, failure_type
+            
+        except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            self._update_api_stats(api_name, False, duration)
+            
+            # Check if it's a rate limiting error
+            if (hasattr(e, 'response') and e.response and e.response.status_code == 429) or "429" in str(e) or "rate limit" in str(e).lower():
+                failure_type = 'throttled'
+                self.api_stats[api_name]['throttled'] += 1
+                logger.warning(f"Enhanced Hybrid: {api_name} rate limited in {duration:.2f}s: {e}")
+            else:
+                failure_type = 'other'
+                logger.warning(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
+            return None, [], None, False, failure_type
+            
         except Exception as e:
             duration = time.time() - start_time
             self._update_api_stats(api_name, False, duration)
+            failure_type = 'other'
             logger.warning(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
-            return None, [], None, False
+            return None, [], None, False, failure_type
     
     def _should_try_doi_apis_first(self, reference: Dict[str, Any]) -> bool:
         """
@@ -171,38 +204,80 @@ class EnhancedHybridReferenceChecker:
         Returns:
             Tuple of (verified_data, errors, url)
         """
+        # Track failed APIs for potential retry
+        failed_apis = []
+        
         # Strategy 1: Always try local database first (fastest)
         if self.local_db:
-            verified_data, errors, url, success = self._try_api('local_db', self.local_db, reference)
+            verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
             if success:
                 return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout']:
+                failed_apis.append(('local_db', self.local_db, failure_type))
         
         # Strategy 2: If reference has DOI, prioritize CrossRef
         if self._should_try_doi_apis_first(reference) and self.crossref:
-            verified_data, errors, url, success = self._try_api('crossref', self.crossref, reference)
+            verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
                 return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout']:
+                failed_apis.append(('crossref', self.crossref, failure_type))
         
         # Strategy 3: Try Semantic Scholar API (reliable, good coverage)
         if self.semantic_scholar:
-            verified_data, errors, url, success = self._try_api('semantic_scholar', self.semantic_scholar, reference)
+            verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
                 return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout']:
+                failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
         
         # Strategy 4: Try OpenAlex API (excellent reliability, replaces Google Scholar)
         if self.openalex:
-            verified_data, errors, url, success = self._try_api('openalex', self.openalex, reference)
+            verified_data, errors, url, success, failure_type = self._try_api('openalex', self.openalex, reference)
             if success:
                 return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout']:
+                failed_apis.append(('openalex', self.openalex, failure_type))
         
         # Strategy 5: Try CrossRef if we haven't already (for non-DOI references)
         if not self._should_try_doi_apis_first(reference) and self.crossref:
-            verified_data, errors, url, success = self._try_api('crossref', self.crossref, reference)
+            verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
                 return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout']:
+                failed_apis.append(('crossref', self.crossref, failure_type))
+        
+        # Strategy 6: Retry failed APIs with jittered delays if they failed due to throttling/timeout
+        if failed_apis:
+            logger.debug(f"Enhanced Hybrid: Retrying {len(failed_apis)} failed APIs with jittered delays")
+            
+            # Retry APIs that failed due to throttling or timeout with per-API delays
+            for api_name, api_instance, failure_type in failed_apis:
+                # Use base delay for first retry of each API (not cumulative across APIs)
+                delay = min(self.retry_base_delay, self.max_retry_delay)
+                
+                # Add jitter to prevent thundering herd (±25% randomization)
+                jitter = delay * 0.25 * (2 * random.random() - 1)
+                final_delay = max(0.5, delay + jitter)
+                
+                logger.debug(f"Enhanced Hybrid: Waiting {final_delay:.1f}s before retrying {api_name} after {failure_type} failure")
+                time.sleep(final_delay)
+                
+                logger.debug(f"Enhanced Hybrid: Retrying {api_name}")
+                verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
+                if success:
+                    logger.info(f"Enhanced Hybrid: {api_name} succeeded on retry after {failure_type} (delay: {final_delay:.1f}s)")
+                    return verified_data, errors, url
         
         # If all APIs failed, return unverified
-        logger.debug("Enhanced Hybrid: All available APIs failed to verify reference")
+        failed_count = len(failed_apis)
+        total_attempted = failed_count + (1 if self.local_db else 0) + (1 if self.semantic_scholar else 0) + (1 if self.openalex else 0) + (1 if self.crossref else 0)
+        
+        if failed_count > 0:
+            logger.debug(f"Enhanced Hybrid: All {total_attempted} APIs failed to verify reference ({failed_count} retried)")
+        else:
+            logger.debug("Enhanced Hybrid: All available APIs failed to verify reference")
+            
         return None, [{
             'error_type': 'unverified',
             'error_details': 'Could not verify reference using any available API'

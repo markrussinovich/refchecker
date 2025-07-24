@@ -60,7 +60,7 @@ class NonArxivReferenceChecker:
         
         # Rate limiting parameters
         self.request_delay = 1.0  # Initial delay between requests (seconds)
-        self.max_retries = 5
+        self.max_retries = 5  # Sufficient for individual API calls
         self.backoff_factor = 2  # Exponential backoff factor
     
     def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
