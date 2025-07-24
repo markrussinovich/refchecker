@@ -79,7 +79,7 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
-RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.2-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.
+RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.1-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.
 
 ### Supported LLM Providers
 
@@ -159,7 +159,7 @@ For running models locally:
 # automatic Huggingface model download with VLLM server launch 
 python refchecker.py --paper paper.pdf \
   --llm-provider vllm \
-  --llm-model meta-llama/Llama-3.2-8B-Instruct 
+  --llm-model meta-llama/Llama-3.1-8B-Instruct 
 ```
 
 You can debug vllm server issues by running refchecker with the `--debug` flag. 
