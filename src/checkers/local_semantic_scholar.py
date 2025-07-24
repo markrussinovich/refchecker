@@ -37,7 +37,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
 from utils.error_utils import create_author_error, create_year_warning, create_doi_error
-from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity
+from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, extract_arxiv_id_from_url
 from utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from utils.url_utils import get_best_available_url
 from config.settings import get_config
@@ -113,6 +113,41 @@ class LocalNonArxivReferenceChecker:
         
         result_count = 1 if row else 0
         log_query_debug(query, list(params), execution_time, result_count, "DOI lookup")
+        
+        if not row:
+            return None
+        
+        # Convert row to dictionary and process using utility function
+        paper_data = process_semantic_scholar_result(dict(row))
+        
+        return paper_data
+    
+    def get_paper_by_arxiv_id(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get paper data by arXiv ID from the local database
+        
+        Args:
+            arxiv_id: arXiv ID of the paper
+            
+        Returns:
+            Paper data dictionary or None if not found
+        """
+        cursor = self.conn.cursor()
+        
+        # Query the database for the paper with the given arXiv ID using the column-based schema
+        query = '''
+        SELECT * FROM papers
+        WHERE externalIds_ArXiv = ?
+        '''
+        params = (arxiv_id,)
+        
+        start_time = time.time()
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        execution_time = time.time() - start_time
+        
+        result_count = 1 if row else 0
+        log_query_debug(query, list(params), execution_time, result_count, "arXiv ID lookup")
         
         if not row:
             return None
@@ -335,18 +370,34 @@ class LocalNonArxivReferenceChecker:
         
         logger.debug(f"Local DB: Verifying reference - Title: '{title}', Authors: {authors}, Year: {year}")
         
-        # If we have a DOI, try to get the paper directly
+        # Try to get the paper by DOI or arXiv ID first
         doi = None
+        arxiv_id = None
+        
         if 'doi' in reference and reference['doi']:
             doi = reference['doi']
         elif url:
-            doi = extract_doi_from_url(url)
+            # Check if it's an arXiv URL first
+            arxiv_id = extract_arxiv_id_from_url(url)
+            if not arxiv_id:
+                # If not arXiv, try extracting DOI
+                doi = extract_doi_from_url(url)
         
         paper_data = None
         
-        if doi:
+        # Try arXiv ID first if available
+        if arxiv_id:
+            logger.debug(f"Local DB: Searching by arXiv ID: {arxiv_id}")
+            paper_data = self.get_paper_by_arxiv_id(arxiv_id)
+            
+            if paper_data:
+                logger.debug(f"Found paper by arXiv ID: {arxiv_id}")
+            else:
+                logger.warning(f"Could not find paper with arXiv ID: {arxiv_id}")
+        
+        # Try DOI if we haven't found the paper yet
+        if not paper_data and doi:
             logger.debug(f"Local DB: Searching by DOI: {doi}")
-            # Try to get the paper by DOI
             paper_data = self.get_paper_by_doi(doi)
             
             if paper_data:
@@ -354,7 +405,7 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.warning(f"Could not find paper with DOI: {doi}")
         
-        # If we couldn't get the paper by DOI, try searching by title and authors
+        # If we couldn't get the paper by DOI or arXiv ID, try searching by title and authors
         if not paper_data and (title or authors):
             logger.debug(f"Local DB: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
             paper_data = self.find_best_match(title, authors, year)

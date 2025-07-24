@@ -164,6 +164,8 @@ python refchecker.py --paper paper.pdf \
   --llm-model meta-llama/Llama-3.2-8B-Instruct 
 ```
 
+You can debug vllm server issues by running refchecker with the `--debug` flag. 
+
 ## 📦 Installation
 
 ### 1. Clone the Repository
