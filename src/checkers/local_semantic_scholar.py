@@ -269,9 +269,8 @@ class LocalNonArxivReferenceChecker:
         logger.debug(f"Local DB: Title search returned {len(title_results)} results")
         
         if title_results:
-            # Find the best match by title similarity
-            best_match = None
-            best_score = 0
+            # Find the best match by title similarity with stable sorting
+            scored_results = []
             
             for result in title_results:
                 result_title = result.get('title', '')
@@ -294,9 +293,13 @@ class LocalNonArxivReferenceChecker:
                 
                 logger.debug(f"Local DB: Candidate match score {score:.2f} for '{result_title}'")
                 
-                if score > best_score:
-                    best_score = score
-                    best_match = result
+                scored_results.append((score, result))
+            
+            # Sort by score (descending), then by title for stable ordering when scores are equal
+            scored_results.sort(key=lambda x: (-x[0], x[1].get('title', '')))
+            
+            if scored_results:
+                best_score, best_match = scored_results[0]
             
             # If we found a good match, return it
             if best_score >= SIMILARITY_THRESHOLD:

@@ -1566,7 +1566,7 @@ class ArxivReferenceChecker:
         elif url and 'doi.org' in url:
             doi_match = re.search(r'doi\.org/([^/\s]+)', url)
             if doi_match:
-                doi = doi_match.group(1)
+                doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
 
         # VALIDATION: Skip empty or invalid searches that could cause hanging queries
         if not title or len(title) < 3:
@@ -2183,7 +2183,17 @@ class ArxivReferenceChecker:
                         f.write("-" * 80 + "\n")
                     
                     f.write(f"REFERENCE: {error_entry['ref_title']}\n")
-                    f.write(f"Type: {error_entry['error_type']}\n")
+                    
+                    # Add emoji based on error type
+                    error_type = error_entry['error_type']
+                    if error_type == 'unverified':
+                        emoji = "❓"
+                    elif error_type in ['year', 'venue']:  # Warning types
+                        emoji = "⚠️"
+                    else:  # Error types (title, author, doi, url, multiple, etc.)
+                        emoji = "❌"
+                    
+                    f.write(f"Type: {emoji} {error_entry['error_type']}\n")
                     f.write(f"Details: {error_entry['error_details']}\n\n")
                     
                     # Show raw text of the original reference
@@ -2841,6 +2851,8 @@ class ArxivReferenceChecker:
         def clean_doi(doi):
             if not doi or doi == '10.':
                 return None
+            # Strip URL fragments (everything after #) from DOI
+            doi = doi.split('#')[0]
             return doi
 
         arxiv_refs = []
@@ -3202,7 +3214,7 @@ class ArxivReferenceChecker:
         for pattern in doi_patterns:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
-                doi = doi_match.group(1)
+                doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
                 url = f"https://doi.org/{doi}"
                 break
         
@@ -3397,7 +3409,7 @@ class ArxivReferenceChecker:
         for pattern in doi_patterns:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
-                doi = doi_match.group(1)
+                doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
                 url = f"https://doi.org/{doi}"
                 break
         

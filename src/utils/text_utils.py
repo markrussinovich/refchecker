@@ -1733,8 +1733,8 @@ def find_best_match(search_results, cleaned_title, year=None, authors=None):
     if not search_results:
         return None, 0
     
-    best_match = None
-    best_score = 0
+    # Collect all results with their scores for stable sorting
+    scored_results = []
     
     for result in search_results:
         result_title = result.get('title') or result.get('display_name', '')
@@ -1764,11 +1764,16 @@ def find_best_match(search_results, cleaned_title, year=None, authors=None):
                 if is_name_match(cited_first_author, result_first_author_name):
                     score += 0.2  # Significant bonus for first author match
         
-        if score > best_score:
-            best_score = score
-            best_match = result
+        scored_results.append((score, result))
     
-    return best_match, best_score
+    # Sort by score (descending), then by title for stable ordering when scores are equal
+    scored_results.sort(key=lambda x: (-x[0], x[1].get('title', '')))
+    
+    if scored_results:
+        best_score, best_match = scored_results[0]
+        return best_match, best_score
+    
+    return None, 0
 
 
 def normalize_arxiv_url(url: str) -> str:

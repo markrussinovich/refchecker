@@ -80,7 +80,8 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal",
+            "sort": "relevance"  # Ensure consistent ordering
         }
         
         # Make the request with retries and backoff
@@ -255,11 +256,12 @@ class NonArxivReferenceChecker:
         # If we couldn't get the paper by DOI, try searching by title
         found_title = ''
         if not paper_data and title:
-            # Clean up the title
+            # Clean up the title and normalize it for consistent search
             cleaned_title = clean_title_basic(title)
+            normalized_search_query = normalize_text(cleaned_title).lower().strip()
             
-            # Search for the paper
-            search_results = self.search_paper(cleaned_title, year)
+            # Search for the paper using normalized query
+            search_results = self.search_paper(normalized_search_query, year)
             
             if search_results:
                 best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
@@ -306,12 +308,12 @@ class NonArxivReferenceChecker:
         
         # If we still couldn't find the paper, try searching by the raw text
         if not paper_data and raw_text:
-            # Extract a reasonable search query from the raw text
-            # This is a simple approach - could be improved
+            # Extract and normalize a reasonable search query from the raw text
             search_query = raw_text.replace('\n', ' ').strip()
+            normalized_raw_query = normalize_text(search_query).lower().strip()
             
-            # Search for the paper
-            search_results = self.search_paper(search_query)
+            # Search for the paper using normalized query
+            search_results = self.search_paper(normalized_raw_query)
             
             if search_results:
                 # Take the first result as a best guess
@@ -381,18 +383,31 @@ class NonArxivReferenceChecker:
                     'ref_venue_correct': paper_venue
                 })
         elif not cited_venue and paper_venue:
-            # Original reference has the venue in raw text but not parsed correctly
-            raw_text = reference.get('raw_text', '')
-            if raw_text and '#' in raw_text:
-                # Check if venue might be in the raw text format (author#title#venue#year#url)
-                parts = raw_text.split('#')
-                if len(parts) >= 3 and parts[2].strip():
-                    # Venue is present in raw text but missing from parsed reference
-                    errors.append({
-                        'warning_type': 'venue',
-                        'warning_details': f"Venue missing: should include '{paper_venue}'",
-                        'ref_venue_correct': paper_venue
-                    })
+            # Check if this is an arXiv paper first
+            external_ids = paper_data.get('externalIds', {})
+            arxiv_id = external_ids.get('ArXiv') if external_ids else None
+            
+            if arxiv_id:
+                # For arXiv papers, suggest including the arXiv URL instead of venue
+                arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                errors.append({
+                    'warning_type': 'venue',
+                    'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
+                    'ref_url_correct': arxiv_url
+                })
+            else:
+                # Original reference has the venue in raw text but not parsed correctly
+                raw_text = reference.get('raw_text', '')
+                if raw_text and '#' in raw_text:
+                    # Check if venue might be in the raw text format (author#title#venue#year#url)
+                    parts = raw_text.split('#')
+                    if len(parts) >= 3 and parts[2].strip():
+                        # Venue is present in raw text but missing from parsed reference
+                        errors.append({
+                            'warning_type': 'venue',
+                            'warning_details': f"Venue missing: should include '{paper_venue}'",
+                            'ref_venue_correct': paper_venue
+                        })
 
         # Verify DOI
         paper_doi = None
@@ -411,26 +426,32 @@ class NonArxivReferenceChecker:
                     'ref_doi_correct': paper_doi
                 })
         
-        # Extract URL from paper data - prioritize PDF URLs over Semantic Scholar page URLs
-        paper_url = paper_data.get('url', None)
+        # Extract URL from paper data - prioritize arXiv URLs when available
+        paper_url = None
         
         logger.debug(f"Semantic Scholar - Extracting URL from paper data: {list(paper_data.keys())}")
         
-        # First, check for open access PDF (most useful for users)
-        open_access_pdf = paper_data.get('openAccessPdf')
-        if open_access_pdf and open_access_pdf.get('url'):
-            paper_url = open_access_pdf['url']
-            logger.debug(f"Found open access PDF URL: {paper_url}")
+        # First priority: arXiv URL if available (most canonical for arXiv papers)
+        if external_ids.get('ArXiv'):
+            arxiv_id = external_ids['ArXiv']
+            paper_url = f"https://arxiv.org/abs/{arxiv_id}"
+            logger.debug(f"Found arXiv URL: {paper_url}")
         
-        # Fallback to general URL field (typically Semantic Scholar page)
+        # Second priority: open access PDF (most useful for non-arXiv papers)
+        if not paper_url:
+            open_access_pdf = paper_data.get('openAccessPdf')
+            if open_access_pdf and open_access_pdf.get('url'):
+                paper_url = open_access_pdf['url']
+                logger.debug(f"Found open access PDF URL: {paper_url}")
+        
+        # Third priority: general URL field (typically Semantic Scholar page)
         if not paper_url:
             paper_url = paper_data.get('url')
             if paper_url:
                 logger.debug(f"Found paper URL: {paper_url}")
         
-        # Also check externalIds for DOI URL
+        # Fourth priority: DOI URL
         if not paper_url:
-            external_ids = paper_data.get('externalIds', {})
             if external_ids.get('DOI'):
                 # Normalize DOI to lowercase to avoid duplicates with different cases
                 normalized_doi = external_ids['DOI'].lower()
