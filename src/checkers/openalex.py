@@ -405,7 +405,7 @@ class OpenAlexReferenceChecker:
             search_results = self.search_works(cleaned_title, year)
             
             if search_results:
-                best_match, best_score = find_best_match(search_results, cleaned_title, year)
+                best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
                 
                 # Use match if score is good enough
                 if best_match and best_score >= SIMILARITY_THRESHOLD:

@@ -262,7 +262,7 @@ class NonArxivReferenceChecker:
             search_results = self.search_paper(cleaned_title, year)
             
             if search_results:
-                best_match, best_score = find_best_match(search_results, cleaned_title, year)
+                best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
                 
                 # Consider it a match if similarity is above threshold
                 if best_match and best_score >= SIMILARITY_THRESHOLD:
@@ -315,7 +315,7 @@ class NonArxivReferenceChecker:
             
             if search_results:
                 # Take the first result as a best guess
-                best_match, best_score = find_best_match(search_results, cleaned_title, year)
+                best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
                 
                 # Consider it a match if similarity is above threshold
                 if best_match and best_score >= SIMILARITY_THRESHOLD:

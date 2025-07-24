@@ -433,7 +433,7 @@ class CrossRefReferenceChecker:
                     processed_results.append(processed_result)
             
             if processed_results:
-                best_match, best_score = find_best_match(processed_results, cleaned_title, year)
+                best_match, best_score = find_best_match(processed_results, cleaned_title, year, authors)
                 
                 # Use match if score is good enough
                 if best_match and best_score >= SIMILARITY_THRESHOLD:

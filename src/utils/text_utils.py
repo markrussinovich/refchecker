@@ -1717,7 +1717,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     return jaccard_similarity < 0.8
 
 
-def find_best_match(search_results, cleaned_title, year=None):
+def find_best_match(search_results, cleaned_title, year=None, authors=None):
     """
     Find the best match from search results using similarity scoring
     
@@ -1725,6 +1725,7 @@ def find_best_match(search_results, cleaned_title, year=None):
         search_results: List of search result dictionaries
         cleaned_title: The cleaned title to match against
         year: Optional year for bonus scoring
+        authors: Optional list of author names for additional scoring
         
     Returns:
         Tuple of (best_match, best_score) or (None, 0) if no good match
@@ -1742,9 +1743,26 @@ def find_best_match(search_results, cleaned_title, year=None):
         score = calculate_title_similarity(cleaned_title, result_title)
         
         # Bonus for year match
-        result_year = result.get('publication_year')
+        result_year = result.get('publication_year') or result.get('year')
         if year and result_year and year == result_year:
             score += 0.1
+        
+        # Bonus for first author match when multiple papers have same/similar titles
+        if authors and len(authors) > 0:
+            result_authors = result.get('authors', [])
+            if result_authors and len(result_authors) > 0:
+                cited_first_author = authors[0]
+                result_first_author = result_authors[0]
+                
+                # Extract author name from different formats
+                if isinstance(result_first_author, dict):
+                    result_first_author_name = result_first_author.get('name', '')
+                else:
+                    result_first_author_name = str(result_first_author)
+                
+                # Check if first authors match using existing name matching logic
+                if is_name_match(cited_first_author, result_first_author_name):
+                    score += 0.2  # Significant bonus for first author match
         
         if score > best_score:
             best_score = score
