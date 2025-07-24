@@ -21,7 +21,8 @@ Options:
                                     - Local LaTeX file path (e.g., /path/to/paper.tex)
     --db-path PATH                Path to local Semantic Scholar database (recommended for offline verification)
     --debug                       Run in debug mode with verbose logging
-    --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits)
+    --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits).
+                                    Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable
     --help                        Show this help message
 """
 
@@ -4060,7 +4061,7 @@ def main():
     parser.add_argument("--paper", type=str,
                         help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, local text file containing references, or local BibTeX file")
     parser.add_argument("--semantic-scholar-api-key", type=str,
-                        help="API key for Semantic Scholar (optional, increases rate limits)")
+                        help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     
@@ -4119,10 +4120,13 @@ def main():
             'endpoint': args.llm_endpoint
         }
     
+    # Get Semantic Scholar API key from command line or environment variable
+    semantic_scholar_api_key = args.semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+    
     try:
         # Initialize the reference checker
         checker = ArxivReferenceChecker(
-            semantic_scholar_api_key=args.semantic_scholar_api_key,
+            semantic_scholar_api_key=semantic_scholar_api_key,
             db_path=args.db_path,
             llm_config=llm_config,
             debug_mode=args.debug,

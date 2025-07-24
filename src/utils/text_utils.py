@@ -338,6 +338,12 @@ def normalize_paper_title(title: str) -> str:
             normalized = normalized[len(prefix):].strip()
             break
     
+    # Remove common abbreviation/system name prefixes followed by colons
+    # This handles cases like "HuRef: title", "GPT-4: title", "BERT: title", etc.
+    # Match any sequence of letters, digits, or hyphens followed by colon and space
+    prefix_pattern = r'^[a-z0-9\-]+:\s+'
+    normalized = re.sub(prefix_pattern, '', normalized)
+    
     # Remove all non-alphanumeric characters (keeping only letters and numbers)
     normalized = re.sub(r'[^a-z0-9]', '', normalized)
     

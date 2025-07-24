@@ -6,8 +6,36 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 > **✨ Enhanced Reliability**: Recent improvements include intelligent API retry logic, advanced title similarity matching for technical terms, and comprehensive venue normalization to minimize false positives while maintaining high accuracy.
 
+## 📊 Sample Output
+
+```
+📄 Processing: Attention Is All You Need
+   URL: https://arxiv.org/abs/1706.03762
+
+[1/45] Neural machine translation in linear time
+       Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van den Oord, Alex Graves, Koray Kavukcuoglu
+       2017
+         ⚠️  year: Year mismatch: cited as 2017 but actually 2016
+
+[2/45] Effective approaches to attention-based neural machine translation
+       Minh-Thang Luong, Hieu Pham, Christopher D. Manning
+       2015
+         ❌  author: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
+
+============================================================
+📋 SUMMARY
+============================================================
+📚 Total references processed: 68
+❌ Total errors: 55
+⚠️  Total warnings: 16
+❓ References that couldn't be verified: 15
+
+💾 Detailed results saved to: reference_errors.txt
+```
+
 ## 📋 Table of Contents
 
+- [📊 Sample Output](#-sample-output)
 - [🎯 Features](#-features)
 - [🚀 Quick Start](#-quick-start)
 - [🤖 LLM-Enhanced Reference Extraction](#-llm-enhanced-reference-extraction)
@@ -48,6 +76,8 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
    ```bash
    python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
    ```
+
+> **⚡ Performance Tip**: Reference verification takes 5-10 seconds per reference without a Semantic Scholar API key due to rate limiting. With an API key, verification speeds up to 1-2 seconds per reference. Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--semantic-scholar-api-key` for faster processing.
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
@@ -237,32 +267,6 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 
 - **❓ Unverified**: References that couldn't be verified against any database
 
-### Sample Output
-
-```
-📄 Processing: Attention Is All You Need
-   URL: https://arxiv.org/abs/1706.03762
-
-[1/45] Neural machine translation in linear time
-       Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van den Oord, Alex Graves, Koray Kavukcuoglu
-       2017
-         ⚠️  year: Year mismatch: cited as 2017 but actually 2016
-
-[2/45] Effective approaches to attention-based neural machine translation
-       Minh-Thang Luong, Hieu Pham, Christopher D. Manning
-       2015
-         ❌  author: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
-
-============================================================
-📋 SUMMARY
-============================================================
-📚 Total references processed: 68
-❌ Total errors: 55
-⚠️  Total warnings: 16
-❓ References that couldn't be verified: 15
-
-💾 Detailed results saved to: reference_errors.txt
-```
 
 ## ⚙️ Configuration
 
@@ -272,7 +276,7 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 # Basic options
 --paper PAPER                    # Paper to check (ArXiv ID, URL, or file path)
 --debug                          # Enable debug mode
---semantic-scholar-api-key KEY   # Semantic Scholar API key
+--semantic-scholar-api-key KEY   # Semantic Scholar API key (1-2s vs 5-10s without key; can also use SEMANTIC_SCHOLAR_API_KEY env var) 
 --db-path PATH                   # Local database path
 
 # LLM options
@@ -290,6 +294,9 @@ export REFCHECKER_USE_LLM=true
 
 # Provider selection
 export REFCHECKER_LLM_PROVIDER=anthropic        # openai, anthropic, google, azure
+
+# Semantic Scholar API key (for higher rate limits and faster verification: 1-2s vs 5-10s without key)
+export SEMANTIC_SCHOLAR_API_KEY=your_key
 
 # Provider-specific API keys (native environment variables preferred)
 export OPENAI_API_KEY=your_key                    # or REFCHECKER_OPENAI_API_KEY

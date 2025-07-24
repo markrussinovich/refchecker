@@ -91,7 +91,7 @@ def validate_attention_paper(semantic_scholar_api_key=None, db_path=None):
         print(f"  Year: {reference['year']}")
 
         # Verify the reference
-        errors, reference_url = checker.verify_reference(paper, reference)
+        errors, reference_url, verified_data = checker.verify_reference(paper, reference)
 
         if errors:
             error_count += 1
