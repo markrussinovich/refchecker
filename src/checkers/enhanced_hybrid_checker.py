@@ -108,10 +108,10 @@ class EnhancedHybridReferenceChecker:
             'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0}
         }
         
-        # Track failed API calls for retry logic
-        self.retry_base_delay = 2  # Base delay for retrying throttled APIs (seconds)
-        self.retry_backoff_factor = 2  # Exponential backoff multiplier
-        self.max_retry_delay = 30  # Maximum delay cap in seconds
+        # Track failed API calls for retry logic - OPTIMIZED CONFIGURATION
+        self.retry_base_delay = 1  # Base delay for retrying throttled APIs (seconds)
+        self.retry_backoff_factor = 1.5  # Exponential backoff multiplier
+        self.max_retry_delay = 20  # Maximum delay cap in seconds
     
     def _update_api_stats(self, api_name: str, success: bool, duration: float):
         """Update API performance statistics"""
