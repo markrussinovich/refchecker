@@ -1823,6 +1823,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'des.': 'design',
             'manuf.': 'manufacturing',
             'syst.': 'systems',
+            'inf.': 'information',
+            'process.': 'processing',
             
             # Common venue name patterns
             'iros': 'international conference on intelligent robots and systems',
@@ -1840,14 +1842,19 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         expanded_words = []
         
         for word in words:
-            # Remove punctuation for lookup but preserve it
-            clean_word = re.sub(r'[.,;:]$', '', word.lower())
-            punct = word[-1] if word and word[-1] in '.,;:' else ''
+            word_lower = word.lower()
             
-            if clean_word in common_abbrevs:
-                expanded_words.append(common_abbrevs[clean_word])
+            # First try exact match with the word as-is (including periods)
+            if word_lower in common_abbrevs:
+                expanded_words.append(common_abbrevs[word_lower])
             else:
-                expanded_words.append(word)
+                # Try without punctuation + period (for cases like "int" -> "int.")
+                clean_word = re.sub(r'[.,;:]$', '', word_lower)
+                abbrev_with_period = clean_word + '.'
+                if abbrev_with_period in common_abbrevs:
+                    expanded_words.append(common_abbrevs[abbrev_with_period])
+                else:
+                    expanded_words.append(word)
         
         return ' '.join(expanded_words)
     
