@@ -81,7 +81,7 @@ DEFAULT_CONFIG = {
             "timeout": 30,
         },
         "vllm": {
-            "model": "meta-llama/Llama-3.2-8B-Instruct",
+            "model": "meta-llama/Llama-3.1-8B-Instruct",
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,

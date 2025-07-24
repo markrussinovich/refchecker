@@ -63,10 +63,13 @@ except ImportError:
     __version__ = "1.1.0"
 from llm.base import create_llm_provider, ReferenceExtractor
 
-def setup_logging(debug_mode=False, level=logging.DEBUG):
+def setup_logging(debug_mode=False, level=None):
     """Set up logging configuration"""
     # Configure root logger to control all child loggers
     root_logger = logging.getLogger()
+    # Set level based on debug_mode if not explicitly provided
+    if level is None:
+        level = logging.DEBUG if debug_mode else logging.INFO
     root_logger.setLevel(level)
     
     # Remove any existing handlers from root logger
