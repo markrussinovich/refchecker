@@ -46,13 +46,16 @@ def extract_doi_from_url(url: str) -> Optional[str]:
 
 def normalize_doi(doi: str) -> str:
     """
-    Normalize a DOI by removing common prefixes and cleaning whitespace.
+    Normalize a DOI by removing common prefixes, cleaning whitespace, and converting to lowercase.
+    
+    DOI suffixes are case-insensitive according to the DOI specification, so we normalize 
+    to lowercase to ensure consistent URL generation across all checkers.
     
     Args:
         doi: DOI string to normalize
         
     Returns:
-        Normalized DOI string
+        Normalized DOI string in lowercase
     """
     if not doi:
         return ""
@@ -70,7 +73,8 @@ def normalize_doi(doi: str) -> str:
     # Remove trailing punctuation that might be included in extraction
     normalized = normalized.rstrip('.,;:)')
     
-    return normalized
+    # Convert to lowercase for consistency (DOI suffixes are case-insensitive)
+    return normalized.lower()
 
 
 def is_valid_doi_format(doi: str) -> bool:
@@ -105,9 +109,9 @@ def compare_dois(doi1: str, doi2: str) -> bool:
     if not doi1 or not doi2:
         return False
     
-    # Normalize both DOIs
-    norm_doi1 = normalize_doi(doi1).lower()
-    norm_doi2 = normalize_doi(doi2).lower()
+    # Normalize both DOIs (already converted to lowercase)
+    norm_doi1 = normalize_doi(doi1)
+    norm_doi2 = normalize_doi(doi2)
 
     # If DOIs are identical, they match
     if norm_doi1 == norm_doi2:

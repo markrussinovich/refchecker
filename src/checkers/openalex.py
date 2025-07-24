@@ -32,7 +32,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
 from config.settings import get_config
 
 # Set up logging
@@ -342,14 +342,16 @@ class OpenAlexReferenceChecker:
         # Fall back to DOI URL
         doi = work_data.get('doi')
         if doi:
-            doi_url = f"https://doi.org/{doi.replace('https://doi.org/', '')}"
+            from utils.doi_utils import construct_doi_url
+            doi_url = construct_doi_url(doi)
             logger.debug(f"Generated DOI URL: {doi_url}")
             return doi_url
         
         # Check ids for other identifiers
         ids = work_data.get('ids', {})
         if ids.get('doi'):
-            doi_url = f"https://doi.org/{ids['doi'].replace('https://doi.org/', '')}"
+            from utils.doi_utils import construct_doi_url
+            doi_url = construct_doi_url(ids['doi'])
             logger.debug(f"Generated DOI URL from ids: {doi_url}")
             return doi_url
         
@@ -398,8 +400,8 @@ class OpenAlexReferenceChecker:
         
         # If we couldn't get the work by DOI, try searching by title
         if not work_data and title:
-            # Clean up the title
-            cleaned_title = clean_title_basic(title)
+            # Clean up the title for search using centralized utility function
+            cleaned_title = clean_title_for_search(title)
             
             # Search for the work
             search_results = self.search_works(cleaned_title, year)

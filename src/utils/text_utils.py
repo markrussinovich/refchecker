@@ -122,6 +122,35 @@ def clean_title_basic(title):
     return title
 
 
+def clean_title_for_search(title):
+    """
+    Clean title for API search queries while preserving important structural elements.
+    
+    This function strikes a balance between cleaning up problematic characters
+    and preserving structure that helps APIs find the exact paper (e.g., colons,
+    capitalization, meaningful punctuation).
+    
+    Args:
+        title: Title string to clean for search
+        
+    Returns:
+        Cleaned title optimized for search queries
+    """
+    if not isinstance(title, str):
+        return str(title) if title is not None else ''
+    
+    # Clean up newlines and normalize whitespace (but preserve other structure)
+    title = title.replace('\n', ' ').strip()
+    title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
+    
+    # Note: We intentionally preserve:
+    # - Capitalization (helps with exact matching)
+    # - Colons and other meaningful punctuation (structural markers)
+    # - Special characters that might be part of proper names or technical terms
+    
+    return title
+
+
 def clean_title(title):
     """
     Full title cleaning and normalization including quote removal, hyphen fixes, and year removal.
@@ -1420,6 +1449,16 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
         (r'\brealtime\b', 'real time'),
         (r'\breal\s+world\b', 'realworld'),
         (r'\brealworld\b', 'real world'),
+        
+        # Handle BERT variants and technical terms with hyphens/spaces
+        (r'\bscib\s+ert\b', 'scibert'),  # SciB ERT -> SciBERT
+        (r'\bscibert\b', 'scib ert'),    # SciBERT -> SciB ERT (reverse mapping)
+        (r'\bbio\s+bert\b', 'biobert'),  # Bio BERT -> BioBERT
+        (r'\bbiobert\b', 'bio bert'),    # BioBERT -> Bio BERT
+        (r'\brob\s+erta\b', 'roberta'),  # Rob ERTa -> RoBERTa
+        (r'\broberta\b', 'rob erta'),    # RoBERTa -> Rob ERTa
+        (r'\bdeb\s+erta\b', 'deberta'),  # Deb ERTa -> DeBERTa
+        (r'\bdeberta\b', 'deb erta'),    # DeBERTa -> Deb ERTa
         (r'\bon\s+line\b', 'online'),
         (r'\bonline\b', 'on line'),
         (r'\boff\s+line\b', 'offline'),
@@ -1662,6 +1701,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\banal\.\s*', 'analysis '),
             (r'\bmach\.\s*', 'machine '),
             (r'\bintell\.\s*', 'intelligence '),
+            (r'\bmethods\s+', 'methods '),
+            (r'\beng\.\s*', 'engineering '),
+            (r'\bengineer\.\s*', 'engineering '),
             
             # Remove common filler words that don't affect journal identity
             (r'\bof\s+', ''),
@@ -1720,6 +1762,15 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             (r'\b\d{4}\s+ieee/cvf international conference on computer vision workshops?\s*\(iccvw?\)?\b', 'international conference on computer vision'),
             (r'\binternational conference on computer vision workshops?\b', 'international conference on computer vision'),
             (r'\binternational conference on computer vision\b', 'international conference on computer vision'),
+            
+            # Specific journal mappings for known aliases and abbreviations
+            (r'\bjournal computational methods science engineering\b', 'computational methods science engineering'),
+            (r'\bcomputational methods science engineering\b', 'computational methods science engineering'),
+            (r'\bjournal educational computing research\b', 'educational computing research'),
+            (r'\beducational computing research\b', 'educational computing research'),
+            
+            # Handle common journal abbreviation patterns like "J. Something"
+            (r'\bj\.\s*comput\.\s*methods\s*sci\.\s*eng\.\s*', 'journal computational methods science engineering'),
             
             # arXiv preprint handling - normalize all arXiv preprint formats to a consistent form
             (r'arxiv preprint arxiv:\d+\.\d+', 'arxiv'),

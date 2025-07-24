@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search
 from config.settings import get_config
 
 # Set up logging
@@ -268,12 +268,11 @@ class NonArxivReferenceChecker:
         # If we couldn't get the paper by DOI, try searching by title
         found_title = ''
         if not paper_data and title:
-            # Clean up the title and normalize it for consistent search
-            cleaned_title = clean_title_basic(title)
-            normalized_search_query = normalize_text(cleaned_title).lower().strip()
+            # Clean up the title for search using centralized utility function
+            cleaned_title = clean_title_for_search(title)
             
-            # Search for the paper using normalized query
-            search_results = self.search_paper(normalized_search_query, year)
+            # Search for the paper using cleaned query
+            search_results = self.search_paper(cleaned_title, year)
             
             if search_results:
                 best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
@@ -471,9 +470,9 @@ class NonArxivReferenceChecker:
         # Fourth priority: DOI URL
         if not paper_url:
             if external_ids.get('DOI'):
-                # Normalize DOI to lowercase to avoid duplicates with different cases
-                normalized_doi = external_ids['DOI'].lower()
-                paper_url = f"https://doi.org/{normalized_doi}"
+                # Use the utility function to construct consistent DOI URLs
+                from utils.doi_utils import construct_doi_url
+                paper_url = construct_doi_url(external_ids['DOI'])
                 logger.debug(f"Generated DOI URL: {paper_url}")
         
         if not paper_url:

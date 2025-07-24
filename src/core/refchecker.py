@@ -1845,7 +1845,8 @@ class ArxivReferenceChecker:
                     elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
                         formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
                     elif error.get('error_type') == 'doi':
-                        formatted_error['ref_url_correct'] = f"https://doi.org/{error.get('ref_doi_correct', '')}"
+                        from utils.doi_utils import construct_doi_url
+                        formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
                     
                     formatted_errors.append(formatted_error)
                 
@@ -1921,7 +1922,8 @@ class ArxivReferenceChecker:
             elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
                 formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
             elif error.get('error_type') == 'doi':
-                formatted_error['ref_url_correct'] = f"https://doi.org/{error.get('ref_doi_correct', '')}"
+                from utils.doi_utils import construct_doi_url
+                formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
             
             formatted_errors.append(formatted_error)
         
@@ -3080,7 +3082,11 @@ class ArxivReferenceChecker:
                     doi_match = re.search(pattern, ref, re.IGNORECASE)
                     if doi_match:
                         doi = clean_doi(doi_match.group(1))
-                        url = f"https://doi.org/{doi}" if doi else ''
+                        if doi:
+                            from utils.doi_utils import construct_doi_url
+                            url = construct_doi_url(doi)
+                        else:
+                            url = ''
                         break
                 if not url:
                     for pattern in url_patterns:
@@ -3309,7 +3315,8 @@ class ArxivReferenceChecker:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
                 doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
-                url = f"https://doi.org/{doi}"
+                from utils.doi_utils import construct_doi_url
+                url = construct_doi_url(doi)
                 break
         
         # Extract other URLs if no DOI found
@@ -3504,7 +3511,8 @@ class ArxivReferenceChecker:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
                 doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
-                url = f"https://doi.org/{doi}"
+                from utils.doi_utils import construct_doi_url
+                url = construct_doi_url(doi)
                 break
         
         # Extract other URLs if no DOI found
