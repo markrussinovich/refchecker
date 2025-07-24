@@ -416,31 +416,6 @@ def is_name_match(name1: str, name2: str) -> bool:
     parts1 = name1.split()
     parts2 = name2.split()
     
-    # Special case: Handle "Last F" vs "First Last" patterns
-    # e.g., "Husain W" vs "Waqar Husain", "Rammstedt B" vs "Beatrice Rammstedt"
-    if (len(parts1) == 2 and len(parts2) == 2 and 
-        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1]) > 1):
-        # parts1 is "Last F" format, parts2 is "First Last" format
-        last_name1 = parts1[0]  # "Husain"
-        first_initial1 = parts1[1]  # "W"
-        first_name2 = parts2[0]  # "Waqar" 
-        last_name2 = parts2[1]  # "Husain"
-        
-        if (last_name1 == last_name2 and 
-            first_initial1 == first_name2[0]):
-            return True
-    
-    if (len(parts1) == 2 and len(parts2) == 2 and 
-        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts2[1]) == 1):
-        # parts1 is "First Last" format, parts2 is "Last F" format  
-        first_name1 = parts1[0]  # "Waqar"
-        last_name1 = parts1[1]  # "Husain"
-        last_name2 = parts2[0]  # "Husain"
-        first_initial2 = parts2[1]  # "W"
-        
-        if (last_name1 == last_name2 and 
-            first_name1[0] == first_initial2):
-            return True
     
     # Special case: Handle hyphenated first names vs initials
     # e.g., "Stein JP" vs "Jan-Philipp Stein"
@@ -476,33 +451,49 @@ def is_name_match(name1: str, name2: str) -> bool:
             first_parts[1][0] == initials2[1]):
             return True
 
-    # Special case: Handle "Last FI" vs "F. I. Last" patterns (with periods)
-    # e.g., "Digman JM" vs "J. M. Digman", "Soto CJ" vs "C. Soto" 
+    # Special case: Handle "Last I/FI" vs "F. I. Last" patterns (with periods)
+    # e.g., "Fang G" vs "G. Fang", "Digman JM" vs "J. M. Digman", "Kaelbling LP" vs "L. Kaelbling"
     if (len(parts1) == 2 and len(parts2) >= 2 and 
-        len(parts1[1]) >= 2 and all(len(p.rstrip('.')) == 1 for p in parts2[:-1]) and len(parts2[-1]) > 1):
-        # parts1 is "Last FI" format, parts2 is "F. I. Last" format
-        last_name1 = parts1[0]  # "Digman"
-        initials1 = parts1[1]  # "JM"
-        last_name2 = parts2[-1]  # "Digman"
-        initials2 = [p.rstrip('.') for p in parts2[:-1]]  # ["J", "M"]
+        len(parts1[1]) >= 1 and all(len(p.rstrip('.')) == 1 for p in parts2[:-1]) and len(parts2[-1]) > 1):
+        # parts1 is "Last I/FI" format, parts2 is "F. I. Last" format
+        last_name1 = parts1[0]  # "Fang" or "Digman"
+        initials1 = parts1[1]  # "G" or "JM"
+        last_name2 = parts2[-1]  # "Fang" or "Digman"
+        initials2 = [p.rstrip('.') for p in parts2[:-1]]  # ["G"] or ["J", "M"]
         
-        if (last_name1 == last_name2 and 
-            len(initials1) == len(initials2) and
-            all(initials1[i] == initials2[i] for i in range(len(initials1)))):
-            return True
+        if last_name1 == last_name2:
+            # Handle both single initials and multiple initials with middle initial omission
+            if len(initials1) == 1:
+                # Single initial case: "Fang G" vs "G. Fang"
+                if len(initials2) == 1 and initials1 == initials2[0]:
+                    return True
+            else:
+                # Multiple initials case: allow middle initial omission
+                if (len(initials2) >= 1 and initials1[0] == initials2[0] and
+                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
+                     len(initials2) == 1)):  # Middle initial omitted in parts2
+                    return True
     
     if (len(parts1) >= 2 and len(parts2) == 2 and 
-        all(len(p.rstrip('.')) == 1 for p in parts1[:-1]) and len(parts1[-1]) > 1 and len(parts2[1]) >= 2):
-        # parts1 is "F. I. Last" format, parts2 is "Last FI" format  
-        last_name1 = parts1[-1]  # "Digman"
-        initials1 = [p.rstrip('.') for p in parts1[:-1]]  # ["J", "M"]
-        last_name2 = parts2[0]  # "Digman"
-        initials2 = parts2[1]  # "JM"
+        all(len(p.rstrip('.')) == 1 for p in parts1[:-1]) and len(parts1[-1]) > 1 and len(parts2[1]) >= 1):
+        # parts1 is "F. I. Last" format, parts2 is "Last I/FI" format  
+        last_name1 = parts1[-1]  # "Fang" or "Digman"
+        initials1 = [p.rstrip('.') for p in parts1[:-1]]  # ["G"] or ["J", "M"]
+        last_name2 = parts2[0]  # "Fang" or "Digman"
+        initials2 = parts2[1]  # "G" or "JM"
         
-        if (last_name1 == last_name2 and 
-            len(initials1) == len(initials2) and
-            all(initials1[i] == initials2[i] for i in range(len(initials1)))):
-            return True
+        if last_name1 == last_name2:
+            # Handle both single initials and multiple initials with middle initial omission
+            if len(initials2) == 1:
+                # Single initial case: "G. Fang" vs "Fang G"
+                if len(initials1) == 1 and initials1[0] == initials2:
+                    return True
+            else:
+                # Multiple initials case: allow middle initial omission
+                if (len(initials1) >= 1 and initials1[0] == initials2[0] and
+                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
+                     len(initials1) == 1)):  # Middle initial omitted in parts1
+                    return True
 
     # Special case: Handle "LastName FM" vs "FirstName MiddleInitial. LastName" patterns
     # e.g., "Kostick-Quenet KM" vs "Kristin M. Kostick-Quenet"
@@ -581,7 +572,148 @@ def is_name_match(name1: str, name2: str) -> bool:
     if len(parts1) == 1 or len(parts2) == 1:
         return parts1[-1] == parts2[-1]  # Compare last parts (last names)
     
-    # Compare last names (last parts) - they must match
+    # IMPORTANT: Check special cases BEFORE the general last name comparison
+    # because some cases like compound last names don't follow the standard pattern
+    
+    # Special case: Handle compound last names with first names/initials
+    # e.g., "Della Santina C" vs "Cosimo Della Santina"
+    if (len(parts1) == 3 and len(parts2) == 3 and 
+        len(parts1[2]) == 1 and len(parts2[0]) > 1):
+        # Check if parts1[0] + parts1[1] matches parts2[1] + parts2[2] (compound last names)
+        compound_last1 = f"{parts1[0]} {parts1[1]}"  # "Della Santina"
+        compound_last2 = f"{parts2[1]} {parts2[2]}"  # "Della Santina"
+        first_initial1 = parts1[2]  # "C"
+        first_name2 = parts2[0]  # "Cosimo"
+        
+        if (compound_last1 == compound_last2 and 
+            first_initial1 == first_name2[0]):
+            return True
+    
+    if (len(parts1) == 3 and len(parts2) == 3 and 
+        len(parts1[0]) > 1 and len(parts2[2]) == 1):
+        # Reverse case: "Cosimo Della Santina" vs "Della Santina C"
+        first_name1 = parts1[0]  # "Cosimo"
+        compound_last1 = f"{parts1[1]} {parts1[2]}"  # "Della Santina"
+        compound_last2 = f"{parts2[0]} {parts2[1]}"  # "Della Santina" 
+        first_initial2 = parts2[2]  # "C"
+        
+        if (compound_last1 == compound_last2 and 
+            first_name1[0] == first_initial2):
+            return True
+
+    # Special case: Handle "Last M" vs "First M. Last" patterns where M could be middle initial
+    # e.g., "Jitosho R" vs "Rianna M. Jitosho" - R could be middle initial or other
+    if (len(parts1) == 2 and len(parts2) == 3 and 
+        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1].rstrip('.')) == 1 and len(parts2[2]) > 1):
+        # parts1 is "Last I" format, parts2 is "First M. Last" format
+        last_name1 = parts1[0]  # "Jitosho"
+        initial1 = parts1[1]  # "R"
+        first_name2 = parts2[0]  # "Rianna"
+        middle_initial2 = parts2[1].rstrip('.')  # "M"
+        last_name2 = parts2[2]  # "Jitosho"
+        
+        # Check if they could be the same person (same last name, and initial could be middle or other)
+        if (last_name1 == last_name2 and 
+            (initial1 == first_name2[0] or initial1 == middle_initial2)):
+            return True
+    
+    if (len(parts1) == 3 and len(parts2) == 2 and 
+        len(parts1[0]) > 1 and len(parts1[1].rstrip('.')) == 1 and len(parts1[2]) > 1 and len(parts2[1]) == 1):
+        # parts1 is "First M. Last" format, parts2 is "Last I" format  
+        first_name1 = parts1[0]  # "Rianna"
+        middle_initial1 = parts1[1].rstrip('.')  # "M"
+        last_name1 = parts1[2]  # "Jitosho"
+        last_name2 = parts2[0]  # "Jitosho"
+        initial2 = parts2[1]  # "R"
+        
+        # Same logic - if last names match and any initial matches, consider it a match
+        if (last_name1 == last_name2 and 
+            (first_name1[0] == initial2 or middle_initial1 == initial2)):
+            return True
+
+    # Special case: Handle "Last FM" vs "F. Last" patterns (middle initial can be omitted)
+    # e.g., "Kaelbling LP" vs "L. Kaelbling" (P middle initial is omitted)
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[1]) == 2 and len(parts2[0].rstrip('.')) == 1 and len(parts2[1]) > 1):
+        # parts1 is "Last FM" format, parts2 is "F. Last" format
+        last_name1 = parts1[0]  # "Kaelbling"
+        initials1 = parts1[1]  # "LP"
+        first_initial2 = parts2[0].rstrip('.')  # "L"
+        last_name2 = parts2[1]  # "Kaelbling"
+        
+        if (last_name1 == last_name2 and 
+            initials1[0] == first_initial2):  # Only check first initial, allow middle to be omitted
+            return True
+    
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[0].rstrip('.')) == 1 and len(parts1[1]) > 1 and len(parts2[1]) == 2):
+        # parts1 is "F. Last" format, parts2 is "Last FM" format  
+        first_initial1 = parts1[0].rstrip('.')  # "L"
+        last_name1 = parts1[1]  # "Kaelbling"
+        last_name2 = parts2[0]  # "Kaelbling"
+        initials2 = parts2[1]  # "LP"
+        
+        if (last_name1 == last_name2 and 
+            first_initial1 == initials2[0]):  # Only check first initial, allow middle to be omitted
+            return True
+    
+    # Special case: Handle "Last I" vs "First Last" patterns 
+    # e.g., "Alessi C" vs "Carlo Alessi", "Fang G" vs "Guoxin Fang"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "Last I" format, parts2 is "First Last" format
+        last_name1 = parts1[0]  # "Alessi"
+        initial1 = parts1[1]  # "C"
+        first_name2 = parts2[0]  # "Carlo"
+        last_name2 = parts2[1]  # "Alessi"
+        
+        if last_name1 == last_name2 and initial1 == first_name2[0]:
+            return True
+    
+    # Special case: Handle "First Last" vs "Last I" patterns 
+    # e.g., "Carlo Alessi" vs "Alessi C", "Guoxin Fang" vs "Fang G"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts2[1]) == 1):
+        # parts1 is "First Last" format, parts2 is "Last I" format
+        first_name1 = parts1[0]  # "Carlo"
+        last_name1 = parts1[1]  # "Alessi"
+        last_name2 = parts2[0]  # "Alessi"
+        initial2 = parts2[1]  # "C"
+        
+        if last_name1 == last_name2 and first_name1[0] == initial2:
+            return True
+
+    # Special case: Handle "Last II" vs "First Second Last" patterns 
+    # e.g., "Nazeer MS" vs "Muhammad Sunny Nazeer", "Thuruthel TG" vs "Thomas George Thuruthel"
+    if (len(parts1) == 2 and len(parts2) == 3 and
+        len(parts1[1]) == 2 and len(parts2[0]) > 1 and len(parts2[1]) > 1 and len(parts2[2]) > 1):
+        # parts1 is "Last II" format, parts2 is "First Second Last" format
+        last_name1 = parts1[0]  # "Nazeer"
+        initials1 = parts1[1]  # "MS"
+        first_name2 = parts2[0]  # "Muhammad"
+        second_name2 = parts2[1]  # "Sunny"
+        last_name2 = parts2[2]  # "Nazeer"
+        
+        if (last_name1 == last_name2 and 
+            initials1[0] == first_name2[0] and initials1[1] == second_name2[0]):
+            return True
+    
+    # Special case: Handle "First Second Last" vs "Last II" patterns 
+    # e.g., "Muhammad Sunny Nazeer" vs "Nazeer MS", "Thomas George Thuruthel" vs "Thuruthel TG"
+    if (len(parts1) == 3 and len(parts2) == 2 and
+        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts1[2]) > 1 and len(parts2[1]) == 2):
+        # parts1 is "First Second Last" format, parts2 is "Last II" format
+        first_name1 = parts1[0]  # "Muhammad"
+        second_name1 = parts1[1]  # "Sunny"
+        last_name1 = parts1[2]  # "Nazeer"
+        last_name2 = parts2[0]  # "Nazeer"
+        initials2 = parts2[1]  # "MS"
+        
+        if (last_name1 == last_name2 and 
+            first_name1[0] == initials2[0] and second_name1[0] == initials2[1]):
+            return True
+
+    # Compare last names (last parts) - they must match (for standard cases)
     if parts1[-1] != parts2[-1]:
         return False
     
@@ -1633,7 +1765,7 @@ def _extract_key_phrases(title: str) -> List[str]:
 def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     """
     Check if two venue names are substantially different (not just minor variations).
-    This function handles common academic venue abbreviations and formats.
+    This function uses a generic approach to handle academic venue abbreviations and formats.
     
     Args:
         venue1: First venue name
@@ -1645,170 +1777,192 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
     
+    def expand_abbreviations(text):
+        """Generic abbreviation expansion using common academic patterns"""
+        # Common academic abbreviations mapping
+        common_abbrevs = {
+            # IEEE specific abbreviations (only expand with periods, not full words)
+            'robot.': 'robotics',
+            'autom.': 'automation',
+            'lett.': 'letters',
+            'trans.': 'transactions',
+            'syst.': 'systems',
+            'netw.': 'networks',
+            'learn.': 'learning',
+            'ind.': 'industrial',
+            'electron.': 'electronics',
+            'mechatron.': 'mechatronics',
+            'intell.': 'intelligent',
+            'transp.': 'transportation',
+            'contr.': 'control',
+            'mag.': 'magazine',
+            
+            # General academic abbreviations (only expand with periods)
+            'int.': 'international',
+            'intl.': 'international', 
+            'conf.': 'conference',
+            'j.': 'journal',
+            'proc.': 'proceedings',
+            'assoc.': 'association',
+            'comput.': 'computer',
+            'sci.': 'science',
+            'eng.': 'engineering',
+            'res.': 'research',
+            'dev.': 'development',
+            'technol.': 'technology',
+            'adv.': 'advanced',
+            'artif.': 'artificial',
+            'mach.': 'machine',
+            'anal.': 'analysis',
+            'appl.': 'applications',
+            'theor.': 'theoretical',
+            'pract.': 'practical',
+            'found.': 'foundations',
+            'princ.': 'principles',
+            'mech.': 'mechanical',
+            'des.': 'design',
+            'manuf.': 'manufacturing',
+            'syst.': 'systems',
+            
+            # Common venue name patterns
+            'iros': 'international conference on intelligent robots and systems',
+            'icra': 'international conference on robotics and automation',
+            'corl': 'conference on robot learning',
+            'rss': 'robotics science and systems',
+            'humanoids': 'ieee international conference on humanoid robots',
+            'iser': 'international symposium on experimental robotics',
+            'case': 'ieee international conference on automation science and engineering',
+            'ddcls': 'data driven control and learning systems conference',
+        }
+        
+        # Apply abbreviation expansion
+        words = text.split()
+        expanded_words = []
+        
+        for word in words:
+            # Remove punctuation for lookup but preserve it
+            clean_word = re.sub(r'[.,;:]$', '', word.lower())
+            punct = word[-1] if word and word[-1] in '.,;:' else ''
+            
+            if clean_word in common_abbrevs:
+                expanded_words.append(common_abbrevs[clean_word])
+            else:
+                expanded_words.append(word)
+        
+        return ' '.join(expanded_words)
+    
+    def create_acronym_from_title(title):
+        """Generate potential acronyms from full titles"""
+        # Remove common words that don't contribute to acronyms
+        stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
+        words = [w for w in title.lower().split() if w not in stop_words and len(w) > 2]
+        
+        # Create acronym from first letters
+        if len(words) >= 2:
+            return ''.join(word[0] for word in words[:6])  # Limit to 6 chars for reasonable acronyms
+        return None
+    
+    def extract_conference_acronyms(text):
+        """Extract potential conference acronyms from text"""
+        # Look for patterns like "IROS, 2012" or "CoRL, 2023" 
+        acronym_matches = re.findall(r'\b([A-Z]{3,8})\s*,?\s*\d{4}', text)
+        
+        # Also look for standalone acronyms at the beginning
+        start_acronym = re.match(r'^([A-Z]{3,8})\b', text.strip())
+        if start_acronym:
+            acronym_matches.append(start_acronym.group(1))
+            
+        return [a.lower() for a in acronym_matches]
+    
     def normalize_venue(venue):
-        """Normalize venue names by expanding common abbreviations and cleaning format"""
+        """Normalize venue names with generic abbreviation handling"""
         venue_lower = venue.lower().strip()
         
-        # Remove years first - but be careful not to remove arXiv IDs
-        if not re.search(r'arxiv:\d+\.\d+', venue_lower):  # Don't remove years if it's an arXiv ID
-            venue_lower = re.sub(r',?\s*\d{4}$', '', venue_lower)  # Remove ", 2024" or " 2024" 
-            venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Remove " (2024)"
+        # Remove years, volumes, pages, and other citation metadata
+        venue_lower = re.sub(r',?\s*\d{4}[a-z]?\s*$', '', venue_lower)  # Years like "2024" or "2024b"
+        venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Years in parentheses
+        venue_lower = re.sub(r',?\s*vol\.\s*\d+.*$', '', venue_lower)  # Volume info
+        venue_lower = re.sub(r',?\s*\d+\(\d+\).*$', '', venue_lower)  # Issue info
+        venue_lower = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_lower)  # Page info
+        venue_lower = re.sub(r'\s*\(print\).*$', '', venue_lower)  # Print designation
+        venue_lower = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_lower)  # Year.Print
         
-        # Remove journal volume/issue/page numbers like ", 15(2):207" or ", vol. 10, no. 3, pp. 123-456"
-        # Handle various journal citation formats
-        venue_lower = re.sub(r',?\s*\d+\(\d+\):\d+.*$', '', venue_lower)  # ", 15(2):207"
-        venue_lower = re.sub(r',?\s*vol\.\s*\d+.*$', '', venue_lower)  # ", vol. 10..."
-        venue_lower = re.sub(r',?\s*volume\s*\d+.*$', '', venue_lower)  # ", volume 10..."
-        venue_lower = re.sub(r',?\s*no\.\s*\d+.*$', '', venue_lower)  # ", no. 3..."
-        venue_lower = re.sub(r',?\s*number\s*\d+.*$', '', venue_lower)  # ", number 3..."
-        venue_lower = re.sub(r',?\s*pp\.\s*\d+.*$', '', venue_lower)  # ", pp. 123-456"
-        venue_lower = re.sub(r',?\s*pages\s*\d+.*$', '', venue_lower)  # ", pages 123-456"
-        venue_lower = re.sub(r',?\s*p\.\s*\d+.*$', '', venue_lower)  # ", p. 123"
-        venue_lower = re.sub(r',?\s*\d+:\d+.*$', '', venue_lower)  # ", 10:123-456"
-        
-        # Remove common procedural prefixes and conference edition patterns
+        # Remove procedural prefixes
         prefixes_to_remove = [
-            r'^in\s+proc\.\s+(of\s+)?(the\s+)?',      # "In Proc. of the"
-            r'^proceedings\s+(of\s+)?(the\s+)?',       # "Proceedings of the"
-            r'^proc\.\s+(of\s+)?(the\s+)?',           # "Proc. of the"
-            r'^in\s+',                                 # "In"
-            r'^\d{4}\s+\d+(st|nd|rd|th)\s+',          # "2022 17th " - year + edition number
-            r'^\d{4}\s+',                             # "2024 " - year prefix
-            r'^\d+(st|nd|rd|th)\s+',                  # "17th " - ordinal numbers
+            r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
+            r'^\d{4}\s+',                     # "2024 "
+            r'^proceedings\s+(of\s+)?(the\s+)?',
+            r'^proc\.\s+(of\s+)?(the\s+)?',
+            r'^in\s+',
         ]
         
         for prefix_pattern in prefixes_to_remove:
             venue_lower = re.sub(prefix_pattern, '', venue_lower)
         
-        # Expand common abbreviations - order matters!
-        abbreviations = [
-            # IEEE Transactions
-            (r'\btrans\.\s*on\s+', 'transactions on '),
-            (r'\btrans\.\s+', 'transactions '),
-            
-            # Common words and journal abbreviations
-            (r'\bintl\.\s+', 'international '),
-            (r'\bint\.\s+', 'international '),
-            (r'\bconf\.\s+', 'conference '),
-            (r'\bj\.\s+', 'journal '),
-            (r'\bassoc\.\s+', 'association '),
-            (r'\bcomput\.\s+', 'computer '),
-            (r'\bartif\.\s+', 'artificial '),
-            (r'\bpattern\s+recog\.\s*', 'pattern recognition '),
-            (r'\bbiometrics,?\s+behavior,?\s+(and|&)\s+identity science', 'biometrics behavior and identity science'),
-            (r'\bsci\.\s*', 'science '),
-            (r'\bres\.\s*', 'research '),
-            (r'\bstud\.\s*', 'studies '),
-            (r'\bhum\.\s*', 'human '),
-            (r'\bsoc\.\s*', 'social '),
-            (r'\brobot\.\s*', 'robotics '),
-            (r'\bfound\.\s*', 'foundations '),
-            (r'\btrends\s+', 'trends '),
-            (r'\banal\.\s*', 'analysis '),
-            (r'\bmach\.\s*', 'machine '),
-            (r'\bintell\.\s*', 'intelligence '),
-            (r'\bmethods\s+', 'methods '),
-            (r'\beng\.\s*', 'engineering '),
-            (r'\bengineer\.\s*', 'engineering '),
-            
-            # Remove common filler words that don't affect journal identity
-            (r'\bof\s+', ''),
-            (r'\ban\s+', ''),
-            (r'\bthe\s+', ''),
-            (r':\s*.*$', ''),  # Remove subtitle after colon like ": An International Journal"
-            (r'®', ''),  # Remove trademark symbols
-            (r'-', ' '),  # Replace hyphens with spaces for better word matching
-            
-            # Remove publisher suffixes and normalize organization order
-            (r',\s*ieee\s*$', ''),  # Remove ", IEEE" suffix
-            (r',\s*acm\s*$', ''),   # Remove ", ACM" suffix
-            (r'\bacm/ieee\b', 'ieee acm'),  # Normalize ACM/IEEE to IEEE ACM
-            (r'\bieee/acm\b', 'ieee acm'),  # Normalize IEEE/ACM to IEEE ACM
-            
-            # Handle acronyms in parentheses
-            (r'\s*\([^)]*\)\s*', ' '),  # Remove parenthetical acronyms like "(TBIOM)", "(CVPR)"
-            
-            # Common venue abbreviations and normalizations - normalize CVPR variants
-            (r'\b.*?conference on computer vision and pattern recognition\b', 'computer vision and pattern recognition'),
-            (r'\binternational conference on computer vision and pattern recognition\b', 'computer vision and pattern recognition'),
-            
-            # Venue-specific mappings
-            (r'\baaai\b', 'aaai conference on artificial intelligence'),
-            (r'\bcvpr\b', 'computer vision and pattern recognition'),
-            (r'\biccv\b', 'international conference on computer vision'),
-            (r'\biclr\b', 'international conference on learning representations'),
-            (r'\bicml\b', 'international conference on machine learning'),
-            (r'\beccv\b', 'european conference on computer vision'),
-            (r'\bijcai\b', 'international joint conference on artificial intelligence'),
-            (r'\bacpr\b', 'asian conference on pattern recognition'),
-            (r'\bicb\b', 'international conference on biometrics'),
-            (r'\bijcb\b', 'international joint conference on biometrics'),
-            (r'\bwcacv\b', 'winter conference on applications of computer vision'),
-            (r'\bai4i\b', 'international conference on artificial intelligence for industries'),
-            (r'\bicpr\b', 'international conference on pattern recognition'),
-            (r'\bbmvc\b', 'british machine vision conference'),
-            (r'\biwbf\b', 'international workshop on biometrics and forensics'),
-            (r'\bbiosig\b', 'biometrics and electronic signatures'),
-            
-            # Handle specific venue variations identified in error cases
-            # ICML variations
-            (r'\binternational conference on machine learning\b', 'international conference on machine learning'),
-            (r'\bmachine learning\b', 'international conference on machine learning'),
-            
-            # NeurIPS variations - normalize "Advances in Neural Information Processing Systems"
-            (r'\badvances in neural information processing systems\s*\d*\b', 'neural information processing systems'),
-            (r'\bneural information processing systems\b', 'neural information processing systems'),
-            (r'\bneurips\b', 'neural information processing systems'),
-            
-            # WCACV variations - handle workshop/winter conference equivalence
-            (r'\bieee workshop/winter conference on applications of computer vision\b', 'winter conference applications computer vision'),
-            (r'\bwinter conference on applications of computer vision\b', 'winter conference applications computer vision'),
-            
-            # ICCV workshop variations - normalize both main conference and workshops
-            (r'\b\d{4}\s+ieee/cvf international conference on computer vision workshops?\s*\(iccvw?\)?\b', 'international conference on computer vision'),
-            (r'\binternational conference on computer vision workshops?\b', 'international conference on computer vision'),
-            (r'\binternational conference on computer vision\b', 'international conference on computer vision'),
-            
-            # Specific journal mappings for known aliases and abbreviations
-            (r'\bjournal computational methods science engineering\b', 'computational methods science engineering'),
-            (r'\bcomputational methods science engineering\b', 'computational methods science engineering'),
-            (r'\bjournal educational computing research\b', 'educational computing research'),
-            (r'\beducational computing research\b', 'educational computing research'),
-            
-            # Handle common journal abbreviation patterns like "J. Something"
-            (r'\bj\.\s*comput\.\s*methods\s*sci\.\s*eng\.\s*', 'journal computational methods science engineering'),
-            
-            # arXiv preprint handling - normalize all arXiv preprint formats to a consistent form
-            (r'arxiv preprint arxiv:\d+\.\d+', 'arxiv'),
-            (r'arxiv preprint arxiv:\d+\.\d+.*', 'arxiv'),  # Handle cases with extra text after ID  
-            (r'arxiv preprint', 'arxiv'),
-            (r'arxiv\.org', 'arxiv'),  # Normalize arxiv.org to just arxiv
-            (r'\barxiv\b', 'arxiv'),  # Ensure consistent casing
-        ]
+        # Expand abbreviations generically
+        venue_lower = expand_abbreviations(venue_lower)
         
-        for pattern, replacement in abbreviations:
-            venue_lower = re.sub(pattern, replacement, venue_lower)
+        # Remove organization prefixes/suffixes that don't affect identity
+        venue_lower = re.sub(r'^ieee\s+', '', venue_lower)  # Remove IEEE prefix
+        venue_lower = re.sub(r'^ieee/\w+\s+', '', venue_lower)  # Remove "IEEE/RSJ " etc
+        venue_lower = re.sub(r'\s+ieee\s*$', '', venue_lower)  # Remove IEEE suffix
+        venue_lower = re.sub(r'/\w+\s+', ' ', venue_lower)  # Remove "/ACM " style org separators
         
-        # Clean up spaces and punctuation
-        venue_lower = re.sub(r'\s+', ' ', venue_lower)
+        # Clean up punctuation and spacing
+        venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation
+        venue_lower = re.sub(r'\s+', ' ', venue_lower)     # Normalize whitespace
         venue_lower = venue_lower.strip()
         
         return venue_lower
     
-    # Normalize both venues
+    def check_acronym_match(venue1, venue2):
+        """Check if one venue is an acronym of the other"""
+        # Extract acronyms from both venues
+        acronyms1 = extract_conference_acronyms(venue1)
+        acronyms2 = extract_conference_acronyms(venue2)
+        
+        # Check if either venue contains known acronyms
+        norm1 = normalize_venue(venue1)
+        norm2 = normalize_venue(venue2)
+        
+        # Generate potential acronyms from full names
+        potential_acronym1 = create_acronym_from_title(norm1)
+        potential_acronym2 = create_acronym_from_title(norm2)
+        
+        # Check various acronym matching scenarios
+        if acronyms1 and potential_acronym2:
+            if any(acr == potential_acronym2 for acr in acronyms1):
+                return True
+                
+        if acronyms2 and potential_acronym1:
+            if any(acr == potential_acronym1 for acr in acronyms2):
+                return True
+        
+        # Check direct acronym matches
+        if acronyms1 and acronyms2:
+            if any(a1 == a2 for a1 in acronyms1 for a2 in acronyms2):
+                return True
+        
+        return False
+    
+    # Normalize both venues first
     norm1 = normalize_venue(venue1)
     norm2 = normalize_venue(venue2)
     
-    # Direct match
+    # Direct match after normalization (highest priority)
     if norm1 == norm2:
         return False
     
-    # Calculate word-level similarity
+    # Check if one venue is likely an acronym of the other
+    if check_acronym_match(venue1, venue2):
+        return False
+    
+    # Calculate word-level similarity with fuzzy matching
     words1 = set(norm1.split())
     words2 = set(norm2.split())
     
     # Remove common stop words that don't affect venue identity
-    stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'print'}
+    stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
     words1 = words1 - stop_words
     words2 = words2 - stop_words
     
@@ -1816,17 +1970,93 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if not words1 or not words2:
         return True
     
-    # Calculate Jaccard similarity
-    intersection = len(words1 & words2)
-    union = len(words1 | words2)
+    def words_are_similar(word1, word2):
+        """Check if two words are similar (roots, abbreviations, etc.)"""
+        # Exact match
+        if word1 == word2:
+            return True
+            
+        # Check if one is an abbreviation of the other
+        # Remove periods for comparison
+        clean1 = word1.rstrip('.')
+        clean2 = word2.rstrip('.')
+        
+        # Short word is prefix of longer word (like "sci" -> "science")
+        if len(clean1) >= 3 and len(clean2) >= 3:
+            if clean1.startswith(clean2) or clean2.startswith(clean1):
+                return True
+        
+        # Check common word root patterns
+        word_roots = {
+            'robot': 'robotics', 'robotics': 'robot',
+            'sci': 'science', 'science': 'sci',
+            'adv': 'advanced', 'advanced': 'adv', 
+            'intell': 'intelligent', 'intelligent': 'intell',
+            'syst': 'systems', 'systems': 'syst',
+            'int': 'international', 'international': 'int',
+            'res': 'research', 'research': 'res',
+            'autom': 'automation', 'automation': 'autom',
+            'lett': 'letters', 'letters': 'lett',
+            'trans': 'transactions', 'transactions': 'trans',
+            'electron': 'electronics', 'electronics': 'electron',
+            'mech': 'mechanical', 'mechanical': 'mech',
+            'eng': 'engineering', 'engineering': 'eng',
+            'comput': 'computer', 'computer': 'comput',
+            'j': 'journal', 'journal': 'j',
+            'des': 'design', 'design': 'des',
+            'soft': 'soft',  # Keep soft as is
+        }
+        
+        # Check if words are related through root mappings
+        if clean1 in word_roots and word_roots[clean1] == clean2:
+            return True
+        if clean2 in word_roots and word_roots[clean2] == clean1:
+            return True
+            
+        return False
     
-    if union == 0:
-        return True
+    # Order-aware fuzzy matching - words should match in sequence
+    words1_list = list(words1)
+    words2_list = list(words2)
     
-    jaccard_similarity = intersection / union
+    # If word counts are very different, they're likely different venues
+    if len(words1) > 0 and len(words2) > 0:
+        ratio = max(len(words1), len(words2)) / min(len(words1), len(words2))
+        if ratio > 2.0:  # One has more than twice as many words
+            return True
     
-    # Consider venues the same if they have 80%+ word overlap
-    return jaccard_similarity < 0.8
+    # Try to match words in order, allowing for some flexibility
+    matched_pairs = 0
+    
+    # Use dynamic programming-like approach to find best alignment
+    if len(words1_list) <= len(words2_list):
+        shorter, longer = words1_list, words2_list
+    else:
+        shorter, longer = words2_list, words1_list
+    
+    # For each word in shorter list, find best match in remaining longer list
+    used_indices = set()
+    for i, short_word in enumerate(shorter):
+        best_match_idx = None
+        
+        # Look for matches starting from current position with some flexibility
+        search_start = max(0, i - 1)  # Allow some reordering
+        search_end = min(len(longer), i + 3)  # But not too much
+        
+        for j in range(search_start, search_end):
+            if j not in used_indices and words_are_similar(short_word, longer[j]):
+                best_match_idx = j
+                break
+        
+        if best_match_idx is not None:
+            matched_pairs += 1
+            used_indices.add(best_match_idx)
+    
+    # Calculate similarity based on how well shorter list is covered
+    coverage = matched_pairs / len(shorter) if shorter else 0
+    
+    # Consider venues the same if they have 80%+ coverage of shorter list
+    return coverage < 0.8
 
 
 def find_best_match(search_results, cleaned_title, year=None, authors=None):

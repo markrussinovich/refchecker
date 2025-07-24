@@ -79,7 +79,7 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
-RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.1-8B are fairly reliable at reference extraction, Claude Sonnet 4 has shown the best performance on large, complex bibliographies.
+RefChecker supports AI-powered bibliography parsing using Large Language Models (LLMs) for improved accuracy with complex citation formats. While models as small as Llama 3.1-8B are fairly reliable at reference extraction, they can struggle with non-standard bibliographies. GPT-4o frequently hallucinates DOIsClaude while Sonnet 4 has shown the best performance on large, complex bibliographies.
 
 ### Supported LLM Providers
 
@@ -263,10 +263,10 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 
 - **⚠️ Warnings**: Minor issues that may need attention
   - `year`: Publication year differences
+  - `year`: Publication year differences (common due to multiple paper versions)
   - `venue`: Venue format variations
 
-- **❓ Unverified**: References that couldn't be verified against any database
-
+- **❓ Unverified**: References that couldn't be verified with any of the checker APIs
 
 ## ⚙️ Configuration
 
