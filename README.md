@@ -4,8 +4,6 @@
 
 A comprehensive tool for validating reference accuracy in academic papers, useful for both authors checking their bibliography and conference reviewers ensuring that paper references are authentic and accurate. This tool processes papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
 
-> **✨ Enhanced Reliability**: Recent improvements include intelligent API retry logic, advanced title similarity matching for technical terms, and comprehensive venue normalization to minimize false positives while maintaining high accuracy.
-
 ## 📊 Sample Output
 
 ```
