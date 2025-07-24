@@ -62,6 +62,10 @@ class NonArxivReferenceChecker:
         self.request_delay = 1.0  # Initial delay between requests (seconds)
         self.max_retries = 5  # Sufficient for individual API calls
         self.backoff_factor = 2  # Exponential backoff factor
+        
+        # Track API failures for Enhanced Hybrid Checker
+        self._api_failed = False
+        self._failure_reason = None
     
     def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -110,6 +114,8 @@ class NonArxivReferenceChecker:
         
         # If we get here, all retries failed
         logger.debug(f"Failed to search for paper after {self.max_retries} attempts")
+        self._api_failed = True
+        self._failure_reason = "rate_limited_or_timeout"
         return []
     
     def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
@@ -158,6 +164,8 @@ class NonArxivReferenceChecker:
         
         # If we get here, all retries failed
         logger.error(f"Failed to get paper by DOI after {self.max_retries} attempts")
+        self._api_failed = True
+        self._failure_reason = "rate_limited_or_timeout"
         return None
     
     def extract_doi_from_url(self, url: str) -> Optional[str]:
@@ -226,6 +234,10 @@ class NonArxivReferenceChecker:
             - errors: List of error dictionaries
             - url: URL of the paper if found, None otherwise
         """
+        # Reset API failure tracking for this verification attempt
+        self._api_failed = False
+        self._failure_reason = None
+        
         errors = []
         
         # Extract reference data
@@ -329,11 +341,17 @@ class NonArxivReferenceChecker:
             else:
                 logger.debug(f"No papers found for raw text search")
         
-        # If we couldn't find the paper, return no errors (can't verify)
+        # If we couldn't find the paper, check if API failed or genuinely not found
         if not paper_data:
             logger.debug(f"Could not find matching paper for reference: {title}")
             logger.debug(f"Tried: DOI search, title search, ArXiv ID search, ArXiv API fallback, raw text search")
-            return None, [], None
+            
+            # If API failed during search, return error indicating retryable failure
+            if self._api_failed:
+                return None, [{"error_type": "api_failure", "error_details": f"Semantic Scholar API failed: {self._failure_reason}"}], None
+            else:
+                # Paper genuinely not found in database
+                return None, [], None
         
         # Check title using similarity function to handle formatting differences
         title_similarity = calculate_title_similarity(title, found_title) if found_title else 0.0

@@ -1988,7 +1988,7 @@ class ArxivReferenceChecker:
             
             return [{
                 'error_type': 'arxiv_id',
-                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}' but should reference '{expected_title}'",
+                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'",
                 'ref_url_correct': correct_arxiv_url or ''
             }]
         
