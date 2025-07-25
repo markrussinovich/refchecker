@@ -48,137 +48,60 @@ class LLMProvider(ABC):
         raise NotImplementedError("Subclasses must implement _call_llm")
     
     def _chunk_bibliography(self, bibliography_text: str, max_tokens: int = 2000) -> List[str]:
-        """Split bibliography into chunks without cutting references in the middle, prioritizing natural boundaries"""
+        """Split bibliography into equal-sized chunks for balanced parallel processing"""
         
-        # First, try to split by natural boundaries (newlines) and common reference patterns
-        # Look for numbered references like [1], (1), 1., etc.
+        # Calculate target chunk size in characters (rough estimate: 1 token ≈ 4 characters)
+        target_chunk_size = max_tokens * 4
+        total_length = len(bibliography_text)
         
-        # Split on common reference number patterns at the start of lines
-        reference_patterns = [
-            r'\n\s*\[\d+\]',  # [1], [2], etc.
-            r'\n\s*\(\d+\)',  # (1), (2), etc. 
-            r'\n\s*\d+\.',    # 1., 2., etc.
-            r'\n\s*\d+\)',    # 1), 2), etc.
-        ]
+        # Calculate number of chunks needed
+        num_chunks = max(1, (total_length + target_chunk_size - 1) // target_chunk_size)
         
-        # Try each pattern to find the best way to split
-        potential_references = []
-        for pattern in reference_patterns:
-            splits = re.split(pattern, bibliography_text)
-            if len(splits) > 1:
-                # Reconstruct references with their numbers
-                refs = []
-                matches = re.findall(pattern, bibliography_text)
-                
-                if splits[0].strip():  # First part before any numbered reference
-                    refs.append(splits[0].strip())
-                
-                for i, match in enumerate(matches):
-                    if i + 1 < len(splits):
-                        ref_text = match.strip() + splits[i + 1]
-                        refs.append(ref_text.strip())
-                
-                if len(refs) > len(potential_references):
-                    potential_references = refs
-                break
+        # Calculate actual chunk size to distribute content evenly
+        actual_chunk_size = total_length // num_chunks
         
-        # If no clear reference pattern found, prioritize natural boundaries
-        if not potential_references:
-            # First try double newlines (paragraph breaks)
-            paragraphs = [ref.strip() for ref in bibliography_text.split('\n\n') if ref.strip()]
-            if len(paragraphs) > 1:
-                potential_references = paragraphs
-            else:
-                # Then try single newlines as natural boundaries
-                lines = [line.strip() for line in bibliography_text.split('\n') if line.strip()]
-                if len(lines) > 1:
-                    potential_references = lines
+        logger.debug(f"Bibliography length: {total_length} chars, creating {num_chunks} chunks of ~{actual_chunk_size} chars each")
         
-        # If still no good splits, split by single newlines but be more careful
-        if len(potential_references) <= 1:
-            lines = bibliography_text.split('\n')
-            potential_references = []
-            current_ref = ""
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Check if this line starts a new reference (has typical reference indicators)
-                if (re.match(r'^\[\d+\]|^\(\d+\)|^\d+\.|^\d+\)', line) or 
-                    (current_ref and len(line) > 50 and any(indicator in line.lower() for indicator in ['journal', 'proceedings', 'conference', 'arxiv', 'doi']))):
-                    if current_ref:
-                        potential_references.append(current_ref.strip())
-                    current_ref = line
-                else:
-                    current_ref += " " + line
-            
-            if current_ref:
-                potential_references.append(current_ref.strip())
-        
-        # Now group references into chunks that fit within token limit
         chunks = []
-        current_chunk = ""
+        start = 0
         
-        for ref in potential_references:
-            # Rough estimate: 1 token ≈ 4 characters (conservative estimate)
-            estimated_tokens = len(current_chunk + "\n" + ref) // 4
+        for i in range(num_chunks):
+            if i == num_chunks - 1:
+                # Last chunk gets all remaining content
+                chunk = bibliography_text[start:].strip()
+            else:
+                # Calculate end position for this chunk
+                end = start + actual_chunk_size
+                
+                # Try to find a good breaking point near the target end position
+                # Look for line breaks within ±10% of the target position
+                search_window = actual_chunk_size // 10
+                search_start = max(start, end - search_window)
+                search_end = min(total_length, end + search_window)
+                
+                # Find the best line break within the search window
+                best_break = end
+                text_section = bibliography_text[search_start:search_end]
+                
+                # Look for line breaks (prioritize double newlines, then single)
+                double_newline_pos = text_section.rfind('\n\n')
+                single_newline_pos = text_section.rfind('\n')
+                
+                if double_newline_pos != -1:
+                    best_break = search_start + double_newline_pos + 2
+                elif single_newline_pos != -1:
+                    best_break = search_start + single_newline_pos + 1
+                
+                # Extract chunk and clean it up
+                chunk = bibliography_text[start:best_break].strip()
+                start = best_break
             
-            if estimated_tokens > max_tokens and current_chunk:
-                # Current chunk is getting too large, start a new one
-                chunks.append(current_chunk.strip())
-                current_chunk = ref
-            else:
-                if current_chunk:
-                    current_chunk += "\n" + ref
-                else:
-                    current_chunk = ref
+            if chunk:  # Only add non-empty chunks
+                chunks.append(chunk)
+                logger.debug(f"Chunk {i+1}: {len(chunk)} characters")
         
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        
-        # If we still have chunks that are too large, split them more aggressively
-        # but still prioritize natural boundaries
-        final_chunks = []
-        for chunk in chunks:
-            chunk_tokens = len(chunk) // 4
-            if chunk_tokens > max_tokens:
-                logger.warning(f"Chunk still too large ({chunk_tokens} tokens), splitting more aggressively")
-                # First try splitting by newlines within the chunk
-                lines = chunk.split('\n')
-                if len(lines) > 1:
-                    sub_chunk = ""
-                    for line in lines:
-                        test_chunk = sub_chunk + "\n" + line if sub_chunk else line
-                        if len(test_chunk) // 4 > max_tokens and sub_chunk:
-                            final_chunks.append(sub_chunk.strip())
-                            sub_chunk = line
-                        else:
-                            sub_chunk = test_chunk
-                    
-                    if sub_chunk:
-                        final_chunks.append(sub_chunk.strip())
-                else:
-                    # Only as last resort, split by sentences or semicolons
-                    sentences = re.split(r'[.;]\s+', chunk)
-                    sub_chunk = ""
-                    
-                    for sentence in sentences:
-                        test_chunk = sub_chunk + sentence + ". " if sub_chunk else sentence
-                        if len(test_chunk) // 4 > max_tokens and sub_chunk:
-                            final_chunks.append(sub_chunk.strip())
-                            sub_chunk = sentence + ". "
-                        else:
-                            sub_chunk = test_chunk
-                    
-                    if sub_chunk:
-                        final_chunks.append(sub_chunk.strip())
-            else:
-                final_chunks.append(chunk)
-        
-        logger.debug(f"Split bibliography into {len(final_chunks)} chunks (max {max_tokens} tokens each)")
-        return final_chunks
+        logger.debug(f"Created {len(chunks)} balanced chunks for parallel processing")
+        return chunks
     
     def _parse_llm_response(self, response_text: str) -> List[str]:
         """Parse LLM response and extract individual references"""
