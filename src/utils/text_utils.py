@@ -1901,6 +1901,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             r'^proceedings\s+(of\s+)?(the\s+)?',
             r'^proc\.\s+(of\s+)?(the\s+)?',
             r'^in\s+',
+            r'^advances\s+in\s+',             # "Advances in Neural Information Processing Systems"
+            r'^adv\.\s+',                     # "Adv. Neural Information Processing Systems"
         ]
         
         for prefix_pattern in prefixes_to_remove:
