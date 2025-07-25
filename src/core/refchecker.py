@@ -60,7 +60,7 @@ try:
     from .. import __version__
 except ImportError:
     # Fallback if running as script
-    __version__ = "1.1.0"
+    __version__ = "1.2.0"
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def setup_logging(debug_mode=False, level=None):
