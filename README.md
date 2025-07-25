@@ -20,6 +20,13 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
        2015
          ❌  author: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
 
+[3/45] Deep Residual Learning for Image Recognition
+       Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun
+       Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition
+       2016
+       https://doi.org/10.1109/CVPR.2016.91
+         ❌  doi: DOI mismatch: cited as '10.1109/CVPR.2016.91' but actually '10.1109/CVPR.2016.90'
+
 ============================================================
 📋 SUMMARY
 ============================================================
