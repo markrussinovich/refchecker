@@ -2263,7 +2263,7 @@ class ArxivReferenceChecker:
             return
             
         try:
-            with open(self.verification_output_file, 'w', encoding='utf-8') as f:
+            with open(self.verification_output_file, 'w', encoding='utf-8', errors='replace') as f:
                 f.write("REFERENCE VERIFICATION ERRORS\n")
                 
                 # Track paper info to avoid duplicates in single paper mode
@@ -3589,18 +3589,23 @@ class ArxivReferenceChecker:
                     if not os.path.exists(debug_dir):
                         os.makedirs(debug_dir)
                     
-                    with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                        f.write(bibliography_text)
-                    
-                    logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                    try:
+                        with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8', errors='replace') as f:
+                            f.write(bibliography_text)
+                        logger.info(f"Saved reference text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                    except Exception as e:
+                        logger.warning(f"Could not save debug bibliography file for {paper_id}: {e}")
                 
                 # Parse references directly from the text
                 references = self.parse_references(bibliography_text)
                 
                 # Save the extracted references for debugging
                 if debug_mode:
-                    with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                        json.dump(references, f, indent=2)
+                    try:
+                        with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8', errors='replace') as f:
+                            json.dump(references, f, indent=2)
+                    except Exception as e:
+                        logger.warning(f"Could not save debug references file for {paper_id}: {e}")
                 
                 logger.debug(f"Extracted {len(references)} references from text file")                
                 return references
@@ -3667,10 +3672,13 @@ class ArxivReferenceChecker:
             if not os.path.exists(debug_dir):
                 os.makedirs(debug_dir)
             
-            with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8') as f:
-                f.write(text)
-            
-            logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+            try:
+                with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8', errors='replace') as f:
+                    f.write(text)
+                logger.info(f"Saved extracted text to {os.path.join(debug_dir, f'{paper_id}_text.txt')}")
+            except Exception as e:
+                logger.warning(f"Could not save debug text file for {paper_id}: {e}")
+                # Continue processing even if debug file writing fails
         
         # Find bibliography section
         bibliography_text = self.find_bibliography_section(text)
@@ -3681,18 +3689,23 @@ class ArxivReferenceChecker:
         
         # Save the bibliography text for debugging
         if debug_mode:
-            with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8') as f:
-                f.write(bibliography_text)
-            
-            logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+            try:
+                with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8', errors='replace') as f:
+                    f.write(bibliography_text)
+                logger.info(f"Saved bibliography text to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+            except Exception as e:
+                logger.warning(f"Could not save debug bibliography file for {paper_id}: {e}")
         
         # Parse references
         references = self.parse_references(bibliography_text)
         
         # Save the extracted references for debugging
         if debug_mode:
-            with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8') as f:
-                json.dump(references, f, indent=2)
+            try:
+                with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8', errors='replace') as f:
+                    json.dump(references, f, indent=2)
+            except Exception as e:
+                logger.warning(f"Could not save debug references file for {paper_id}: {e}")
         
         logger.debug(f"Extracted {len(references)} references with arxiv links for {paper_id}")
         
