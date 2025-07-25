@@ -256,17 +256,47 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 
 - **❌ Errors**: Critical issues that need correction
   - `author`: Author name mismatches
+    ```
+    [16/19] Bag of tricks: Benchmarking of jailbreak attacks on llms
+           T. Xie, X. Qi, Y. Zeng, Y. Huang, U. M. Sehwag, K. Huang, L. He, B. Wei, D. Li, Y. Sheng et al
+           ❌  author: First author mismatch: 'T. Xie' vs 'Zhao Xu'
+    ```
   - `title`: Title discrepancies
-  - `venue`: Venue discrepancies or missing venue
+    ```
+    [8/19] BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
+           J. Devlin, M.-W. Chang, K. Lee, K. Toutanova
+           ❌  title: Title mismatch: cited as 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding' but actually 'BERT: Pre-training of Deep Bidirectional Transformers for Language Comprehension'
+    ```
   - `url`: Incorrect URLs or arXiv IDs
+    ```
+    [5/19] Jbshield: Neural representation-level defense against adversarial prompts in large language models
+           W. Zhang, M. Li, H. Wang
+           ❌  arxiv_id: Incorrect ArXiv ID: ArXiv ID 2503.01234 points to 'Self-Adaptive Gamma Context-Aware SSM-based Model for Metal Defect Detection'
+    ```
   - `doi`: DOI mismatches
 
 - **⚠️ Warnings**: Minor issues that may need attention
-  - `year`: Publication year differences
   - `year`: Publication year differences (common due to multiple paper versions)
+    ```
+    [14/19] Smoothllm: Defending large language models against jailbreaking attacks
+           A. Robey, E. Wong, H. Hassani, G. J. Pappas
+           ⚠️  year: Year mismatch: cited as 2024 but actually 2023
+    ```
   - `venue`: Venue format variations
+    ```
+    [2/19] Gradient cuff: Detecting jailbreak attacks on large language models by exploring refusal loss landscapes
+           X. Hu, P.-Y. Chen, T.-Y. Ho
+           ⚠️  venue: Venue mismatch: cited as 'arXiv, 2024' but actually 'Neural Information Processing Systems'
+    ```
 
 - **❓ Unverified**: References that couldn't be verified with any of the checker APIs
+  ```
+  [15/19] Llama guard: A fine-tuned safety model for prompt moderation
+         M. A. Research
+         ❓ Could not verify: Llama guard: A fine-tuned safety model for prompt moderation
+            Cited as: M. A. Research (2024)
+            URL: https://research.meta.com/publications/llama-guard-a-fine-tuned-safety-model-for-prompt-moderation/
+  ```
 
 ## ⚙️ Configuration
 
