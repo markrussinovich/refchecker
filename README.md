@@ -1,6 +1,6 @@
 # 📚 Academic Paper Reference Checker
 
-*Developed by Mark Russinovich with GitHub Copilot and Claude Sonnet 4*
+*Developed by Mark Russinovich with various AI assistants, including Cursor, GitHub Copilot and Claude Code*
 
 A comprehensive tool for validating reference accuracy in academic papers, useful for both authors checking their bibliography and conference reviewers ensuring that paper references are authentic and accurate. This tool processes papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
 
