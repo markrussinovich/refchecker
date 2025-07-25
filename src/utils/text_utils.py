@@ -1987,8 +1987,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         prefixes_to_remove = [
             r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
             r'^\d{4}\s+',                     # "2024 "
-            r'^proceedings\s+(of\s+)?(the\s+)?',
-            r'^proc\.\s+(of\s+)?(the\s+)?',
+            r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',  # "Proceedings of the 41st"
+            r'^proc\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',        # "Proc. of the 41st"
             r'^in\s+',
             r'^advances\s+in\s+',             # "Advances in Neural Information Processing Systems"
             r'^adv\.\s+',                     # "Adv. Neural Information Processing Systems"
@@ -2119,15 +2119,30 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     
     # Special handling for arXiv venues
     def normalize_arxiv_venue(venue):
-        """Normalize arXiv venue names to a common format"""
+        """Normalize arXiv venue names to proper URL format when arXiv ID is present"""
         venue_lower = venue.lower().strip()
         
-        # If it contains arxiv, normalize to just "arxiv"
+        # If it contains arxiv, try to extract arXiv ID and convert to proper URL
         if 'arxiv' in venue_lower:
-            # Remove common arXiv patterns
+            # First try to extract arXiv ID from the venue string
+            arxiv_id = extract_arxiv_id_from_url(venue)
+            if arxiv_id:
+                # Return the proper arXiv URL format
+                return f"https://arxiv.org/abs/{arxiv_id}"
+            
+            # If no arXiv ID found, normalize to just "arxiv"
+            # Remove common arXiv patterns - more comprehensive matching
             venue_lower = re.sub(r'arxiv\s+preprint\s+arxiv:\d+\.\d+.*?$', 'arxiv', venue_lower)
+            venue_lower = re.sub(r'arxiv\s+preprint\s+arxiv:\d+\.\d+.*?[,\s].*?$', 'arxiv', venue_lower)
             venue_lower = re.sub(r'arxiv\.org.*?$', 'arxiv', venue_lower)
             venue_lower = re.sub(r'arxiv\s+preprint.*?$', 'arxiv', venue_lower)
+            venue_lower = re.sub(r'arxiv:\d+\.\d+.*?$', 'arxiv', venue_lower)  # arxiv:1234.5678
+            venue_lower = re.sub(r'arxiv,?\s*\d{4}.*?$', 'arxiv', venue_lower)  # arxiv, 2024
+            venue_lower = re.sub(r'arxiv\s*$', 'arxiv', venue_lower)  # just "arxiv"
+            
+            # Remove any remaining years, versions, or extra text after arxiv
+            venue_lower = re.sub(r'arxiv[,\s]+.*$', 'arxiv', venue_lower)
+            
             return venue_lower.strip()
         
         return venue_lower
@@ -2136,8 +2151,14 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     arxiv1 = normalize_arxiv_venue(venue1)
     arxiv2 = normalize_arxiv_venue(venue2)
     
-    if 'arxiv' in arxiv1 and 'arxiv' in arxiv2:
-        if arxiv1 == arxiv2:  # Both normalize to "arxiv"
+    # If both are arXiv-related, check for matches
+    if ('arxiv' in arxiv1 or arxiv1.startswith('https://arxiv.org')) and ('arxiv' in arxiv2 or arxiv2.startswith('https://arxiv.org')):
+        # Both normalize to same arXiv format (either both "arxiv" or both same URL)
+        if arxiv1 == arxiv2:  
+            return False
+        
+        # Check if one is a general "arxiv" and the other is a specific URL (these should match)
+        if (arxiv1 == 'arxiv' and arxiv2.startswith('https://arxiv.org')) or (arxiv2 == 'arxiv' and arxiv1.startswith('https://arxiv.org')):
             return False
     
     # Normalize both venues first
