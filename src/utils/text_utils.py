@@ -412,9 +412,55 @@ def is_name_match(name1: str, name2: str) -> bool:
     # if name1 in name2 or name2 in name1:
     #     return True
     
+    # Handle surname particles/prefixes before splitting
+    def normalize_surname_particles(name_parts):
+        """Group surname particles with the following surname component"""
+        surname_particles = {
+            'von', 'van', 'de', 'del', 'della', 'di', 'da', 'dos', 'du', 'le', 'la', 'las', 'los',
+            'mc', 'mac', 'o', 'ibn', 'bin', 'ben', 'af', 'av', 'zu', 'zur', 'zum', 'ter', 'ten',
+            'der', 'den', 'des'  # Articles that often follow 'van', 'von', etc.
+        }
+        
+        if len(name_parts) < 2:
+            return name_parts
+            
+        normalized_parts = []
+        i = 0
+        while i < len(name_parts):
+            current_part = name_parts[i]
+            
+            # Check if current part is a surname particle
+            if (current_part.lower() in surname_particles and 
+                i + 1 < len(name_parts)):  # Not the last part
+                
+                # Collect all consecutive particles
+                compound_parts = [current_part]
+                j = i + 1
+                
+                # Look for additional particles (like "van der" or "von dem")
+                while (j < len(name_parts) - 1 and  # Not the last part
+                       name_parts[j].lower() in surname_particles):
+                    compound_parts.append(name_parts[j])
+                    j += 1
+                
+                # Add the actual surname part
+                if j < len(name_parts):
+                    compound_parts.append(name_parts[j])
+                    j += 1
+                
+                # Create compound surname
+                compound_surname = " ".join(compound_parts)
+                normalized_parts.append(compound_surname)
+                i = j  # Skip all processed parts
+            else:
+                normalized_parts.append(current_part)
+                i += 1
+                
+        return normalized_parts
+    
     # Split into parts (first name, last name, etc.)
-    parts1 = name1.split()
-    parts2 = name2.split()
+    parts1 = normalize_surname_particles(name1.split())
+    parts2 = normalize_surname_particles(name2.split())
     
     
     # Special case: Handle hyphenated first names vs initials
@@ -1953,6 +1999,29 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 return True
         
         return False
+    
+    # Special handling for arXiv venues
+    def normalize_arxiv_venue(venue):
+        """Normalize arXiv venue names to a common format"""
+        venue_lower = venue.lower().strip()
+        
+        # If it contains arxiv, normalize to just "arxiv"
+        if 'arxiv' in venue_lower:
+            # Remove common arXiv patterns
+            venue_lower = re.sub(r'arxiv\s+preprint\s+arxiv:\d+\.\d+.*?$', 'arxiv', venue_lower)
+            venue_lower = re.sub(r'arxiv\.org.*?$', 'arxiv', venue_lower)
+            venue_lower = re.sub(r'arxiv\s+preprint.*?$', 'arxiv', venue_lower)
+            return venue_lower.strip()
+        
+        return venue_lower
+    
+    # Check for arXiv venue matches first
+    arxiv1 = normalize_arxiv_venue(venue1)
+    arxiv2 = normalize_arxiv_venue(venue2)
+    
+    if 'arxiv' in arxiv1 and 'arxiv' in arxiv2:
+        if arxiv1 == arxiv2:  # Both normalize to "arxiv"
+            return False
     
     # Normalize both venues first
     norm1 = normalize_venue(venue1)
