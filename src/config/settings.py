@@ -56,6 +56,8 @@ DEFAULT_CONFIG = {
         "enabled": False,
         "provider": "openai",
         "fallback_enabled": True,
+        "parallel_chunks": True,  # Enable parallel chunk processing
+        "max_chunk_workers": 4,   # Maximum number of parallel workers for chunk processing
         "openai": {
             "model": "gpt-4o-mini",
             "max_tokens": 4000,
@@ -141,6 +143,13 @@ def get_config() -> Dict[str, Any]:
     
     if os.getenv("REFCHECKER_VLLM_AUTO_DOWNLOAD"):
         config["llm"]["vllm"]["auto_download"] = os.getenv("REFCHECKER_VLLM_AUTO_DOWNLOAD").lower() == "true"
+    
+    # Parallel processing configuration
+    if os.getenv("REFCHECKER_LLM_PARALLEL_CHUNKS"):
+        config["llm"]["parallel_chunks"] = os.getenv("REFCHECKER_LLM_PARALLEL_CHUNKS").lower() == "true"
+    
+    if os.getenv("REFCHECKER_LLM_MAX_CHUNK_WORKERS"):
+        config["llm"]["max_chunk_workers"] = int(os.getenv("REFCHECKER_LLM_MAX_CHUNK_WORKERS"))
     
     # Model configuration
     if os.getenv("REFCHECKER_LLM_MODEL"):

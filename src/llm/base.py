@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -222,14 +224,8 @@ class LLMProvider(ABC):
             logger.info(f"Bibliography too long ({estimated_tokens} estimated tokens), splitting into chunks")
             chunks = self._chunk_bibliography(bibliography_text, max_input_tokens)
             
-            all_references = []
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-                prompt = self._create_extraction_prompt(chunk)
-                
-                response_text = self._call_llm(prompt)
-                chunk_references = self._parse_llm_response(response_text)
-                all_references.extend(chunk_references)
+            # Process chunks in parallel
+            all_references = self._process_chunks_parallel(chunks)
             
             # Remove duplicates while preserving order
             seen = set()
@@ -247,6 +243,116 @@ class LLMProvider(ABC):
             prompt = self._create_extraction_prompt(bibliography_text)
             response_text = self._call_llm(prompt)
             return self._parse_llm_response(response_text)
+    
+    def _process_chunks_parallel(self, chunks: List[str]) -> List[str]:
+        """
+        Process chunks in parallel using ThreadPoolExecutor
+        
+        Args:
+            chunks: List of bibliography text chunks to process
+            
+        Returns:
+            List of all extracted references from all chunks
+        """
+        # Get configuration for parallel processing
+        from config.settings import get_config
+        config = get_config()
+        
+        # Check if parallel processing is enabled
+        llm_config = config.get('llm', {})
+        parallel_enabled = llm_config.get('parallel_chunks', True)
+        max_workers = llm_config.get('max_chunk_workers', 4)
+        
+        # If parallel processing is disabled, fall back to sequential
+        if not parallel_enabled:
+            logger.info("Parallel chunk processing disabled, using sequential processing")
+            return self._process_chunks_sequential(chunks)
+        
+        # Limit max_workers based on number of chunks
+        effective_workers = min(max_workers, len(chunks))
+        logger.info(f"Processing {len(chunks)} chunks in parallel with {effective_workers} workers")
+        
+        start_time = time.time()
+        all_references = []
+        
+        def process_single_chunk(chunk_data):
+            """Process a single chunk and return results"""
+            chunk_index, chunk_text = chunk_data
+            try:
+                logger.debug(f"Processing chunk {chunk_index + 1}/{len(chunks)}")
+                prompt = self._create_extraction_prompt(chunk_text)
+                response_text = self._call_llm(prompt)
+                chunk_references = self._parse_llm_response(response_text)
+                logger.debug(f"Chunk {chunk_index + 1} extracted {len(chunk_references)} references")
+                return chunk_index, chunk_references
+            except Exception as e:
+                logger.error(f"Failed to process chunk {chunk_index + 1}: {e}")
+                return chunk_index, []
+        
+        # Create indexed chunks for processing
+        indexed_chunks = [(i, chunk) for i, chunk in enumerate(chunks)]
+        
+        # Process chunks in parallel
+        with ThreadPoolExecutor(max_workers=effective_workers, thread_name_prefix="LLMChunk") as executor:
+            # Submit all chunks for processing
+            future_to_chunk = {
+                executor.submit(process_single_chunk, chunk_data): chunk_data[0] 
+                for chunk_data in indexed_chunks
+            }
+            
+            # Collect results as they complete
+            chunk_results = {}
+            for future in as_completed(future_to_chunk):
+                chunk_index = future_to_chunk[future]
+                try:
+                    result_index, references = future.result()
+                    chunk_results[result_index] = references
+                    logger.debug(f"Completed chunk {result_index + 1}/{len(chunks)}")
+                except Exception as e:
+                    logger.error(f"Chunk {chunk_index + 1} processing failed: {e}")
+                    chunk_results[chunk_index] = []
+        
+        # Combine results in original order
+        for i in range(len(chunks)):
+            if i in chunk_results:
+                all_references.extend(chunk_results[i])
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Parallel chunk processing completed in {processing_time:.2f}s, "
+                   f"extracted {len(all_references)} total references")
+        
+        return all_references
+    
+    def _process_chunks_sequential(self, chunks: List[str]) -> List[str]:
+        """
+        Process chunks sequentially (fallback method)
+        
+        Args:
+            chunks: List of bibliography text chunks to process
+            
+        Returns:
+            List of all extracted references from all chunks
+        """
+        logger.info(f"Processing {len(chunks)} chunks sequentially")
+        start_time = time.time()
+        
+        all_references = []
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            try:
+                prompt = self._create_extraction_prompt(chunk)
+                response_text = self._call_llm(prompt)
+                chunk_references = self._parse_llm_response(response_text)
+                all_references.extend(chunk_references)
+                logger.debug(f"Chunk {i+1} extracted {len(chunk_references)} references")
+            except Exception as e:
+                logger.error(f"Failed to process chunk {i+1}: {e}")
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Sequential chunk processing completed in {processing_time:.2f}s, "
+                   f"extracted {len(all_references)} total references")
+        
+        return all_references
 
 
 class ReferenceExtractor:

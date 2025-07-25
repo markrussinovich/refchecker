@@ -234,6 +234,12 @@ class ArxivReferenceChecker:
                 provider_config['api_key'] = self.llm_config_override['api_key']
             if self.llm_config_override.get('endpoint'):
                 provider_config['endpoint'] = self.llm_config_override['endpoint']
+                
+            # Update global LLM config with parallel processing overrides
+            if 'parallel_chunks' in self.llm_config_override:
+                self.config.setdefault("llm", {})['parallel_chunks'] = self.llm_config_override['parallel_chunks']
+            if 'max_chunk_workers' in self.llm_config_override:
+                self.config.setdefault("llm", {})['max_chunk_workers'] = self.llm_config_override['max_chunk_workers']
         else:
             llm_config = self.config.get("llm", {})
             provider_name = llm_config.get("provider")
@@ -4079,6 +4085,12 @@ def main():
                         help="API key for the LLM provider (uses environment variable if not provided)")
     parser.add_argument("--llm-endpoint", type=str,
                         help="Endpoint for the LLM provider (overrides default endpoint)")
+    parser.add_argument("--llm-parallel-chunks", action="store_true", default=None,
+                        help="Enable parallel processing of LLM chunks (default: enabled)")
+    parser.add_argument("--llm-no-parallel-chunks", action="store_true",
+                        help="Disable parallel processing of LLM chunks")
+    parser.add_argument("--llm-max-chunk-workers", type=int,
+                        help="Maximum number of workers for parallel LLM chunk processing (default: 4)")
     parser.add_argument("--disable-parallel", action="store_true",
                         help="Disable parallel processing and run sequentially")
     parser.add_argument("--max-workers", type=int, default=6,
@@ -4124,6 +4136,15 @@ def main():
             'api_key': args.llm_key,
             'endpoint': args.llm_endpoint
         }
+        
+        # Handle parallel chunk processing arguments
+        if args.llm_parallel_chunks is not None:
+            llm_config['parallel_chunks'] = True
+        elif args.llm_no_parallel_chunks:
+            llm_config['parallel_chunks'] = False
+            
+        if args.llm_max_chunk_workers is not None:
+            llm_config['max_chunk_workers'] = args.llm_max_chunk_workers
     
     # Get Semantic Scholar API key from command line or environment variable
     semantic_scholar_api_key = args.semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
