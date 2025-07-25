@@ -166,20 +166,40 @@ You can debug vllm server issues by running refchecker with the `--debug` flag.
 
 ## 📦 Installation
 
-### 1. Clone the Repository
+### Option 1: Install from Test PyPI (Recommended for Testing)
+
+For the latest development version with all features:
+
+```bash
+pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ refchecker[llm,dev,optional]
+```
+
+This installs RefChecker with:
+- **llm**: Support for OpenAI, Anthropic, Google, Azure, and vLLM providers
+- **dev**: Development tools (pytest, black, flake8, mypy)
+- **optional**: Enhanced features (lxml, selenium, pikepdf, nltk, scikit-learn)
+
+For a minimal installation:
+```bash
+pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ refchecker
+```
+
+### Option 2: Install from Source
+
+#### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/markrussinovich/refchecker.git
 cd refchecker
 ```
 
-### 2. Install Dependencies
+#### 2. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. (Optional) Install Additional Dependencies
+#### 3. (Optional) Install Additional Dependencies
 
 For enhanced performance and LLM support, you can install optional dependencies:
 

@@ -177,7 +177,7 @@ class LLMProvider(ABC):
             else:
                 final_chunks.append(chunk)
         
-        logger.info(f"Split bibliography into {len(final_chunks)} chunks (max {max_tokens} tokens each)")
+        logger.debug(f"Split bibliography into {len(final_chunks)} chunks (max {max_tokens} tokens each)")
         return final_chunks
     
     def _parse_llm_response(self, response_text: str) -> List[str]:
@@ -218,10 +218,10 @@ class LLMProvider(ABC):
         # Ensure prompt is < 1/2 the model's total token limit to leave room for response
         max_input_tokens = (model_max_tokens // 2) - prompt_overhead
         
-        logger.info(f"Using model max_tokens: {model_max_tokens}, max_input_tokens: {max_input_tokens}")
+        logger.debug(f"Using model max_tokens: {model_max_tokens}, max_input_tokens: {max_input_tokens}")
         
         if estimated_tokens > max_input_tokens:
-            logger.info(f"Bibliography too long ({estimated_tokens} estimated tokens), splitting into chunks")
+            logger.debug(f"Bibliography too long ({estimated_tokens} estimated tokens), splitting into chunks")
             chunks = self._chunk_bibliography(bibliography_text, max_input_tokens)
             
             # Process chunks in parallel

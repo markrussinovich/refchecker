@@ -1872,7 +1872,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'inf.': 'information',
             'process.': 'processing',
             
-            # Common venue name patterns
+            # Common venue name patterns (only keep special cases that can't be auto-detected)
             'iros': 'international conference on intelligent robots and systems',
             'icra': 'international conference on robotics and automation',
             'corl': 'conference on robot learning',
@@ -1881,6 +1881,10 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'iser': 'international symposium on experimental robotics',
             'case': 'ieee international conference on automation science and engineering',
             'ddcls': 'data driven control and learning systems conference',
+            
+            # Special cases that don't follow standard acronym patterns
+            'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
+            'nips': 'neural information processing systems',     # old name for neurips
         }
         
         # Apply abbreviation expansion
@@ -1905,15 +1909,54 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         return ' '.join(expanded_words)
     
     def create_acronym_from_title(title):
-        """Generate potential acronyms from full titles"""
+        """Generate potential acronyms from full titles using intelligent word selection"""
+        if not title:
+            return None
+            
         # Remove common words that don't contribute to acronyms
-        stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
-        words = [w for w in title.lower().split() if w not in stop_words and len(w) > 2]
+        stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'but', 'as', 'from'}
         
-        # Create acronym from first letters
+        # Split and clean words
+        words = []
+        for word in title.lower().split():
+            # Remove punctuation
+            clean_word = re.sub(r'[^\w]', '', word)
+            if clean_word and clean_word not in stop_words and len(clean_word) > 1:
+                words.append(clean_word)
+        
+        if len(words) < 2:
+            return None
+        
+        # Generate different acronym patterns
+        acronyms = []
+        
+        # Standard acronym: first letter of each significant word
         if len(words) >= 2:
-            return ''.join(word[0] for word in words[:6])  # Limit to 6 chars for reasonable acronyms
-        return None
+            standard_acronym = ''.join(word[0] for word in words[:8])  # Limit to 8 chars
+            acronyms.append(standard_acronym)
+        
+        # Skip certain connector words even if not in stop_words for acronym generation
+        connector_words = {'meeting', 'conference', 'workshop', 'symposium', 'proceedings', 'international', 'annual', 'ieee', 'acm'}
+        important_words = [w for w in words if w not in connector_words]
+        
+        if len(important_words) >= 2 and important_words != words:
+            focused_acronym = ''.join(word[0] for word in important_words[:6])
+            acronyms.append(focused_acronym)
+        
+        # For compound concepts, try taking more letters from key words
+        if len(words) <= 4:
+            # For shorter titles, might use first 2 letters of each word
+            extended_acronym = ''.join(word[:2] for word in words[:4])
+            if 4 <= len(extended_acronym) <= 8:
+                acronyms.append(extended_acronym)
+        
+        # Return the most reasonable acronym (prefer standard length 3-6 chars)
+        for acronym in acronyms:
+            if 3 <= len(acronym) <= 6:
+                return acronym
+        
+        # Fallback to first acronym if no ideal length found
+        return acronyms[0] if acronyms else None
     
     def extract_conference_acronyms(text):
         """Extract potential conference acronyms from text"""
@@ -1971,32 +2014,106 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         return venue_lower
     
     def check_acronym_match(venue1, venue2):
-        """Check if one venue is an acronym of the other"""
-        # Extract acronyms from both venues
-        acronyms1 = extract_conference_acronyms(venue1)
-        acronyms2 = extract_conference_acronyms(venue2)
+        """Check if one venue is an acronym of the other using intelligent matching"""
         
-        # Check if either venue contains known acronyms
-        norm1 = normalize_venue(venue1)
-        norm2 = normalize_venue(venue2)
+        def is_likely_acronym(text):
+            """Check if text looks like an acronym"""
+            text = text.strip()
+            # Looks like acronym if it's all caps and 2-8 chars, or mixed case but short
+            return (text.isupper() and 2 <= len(text) <= 8) or (len(text) <= 6 and any(c.isupper() for c in text))
         
-        # Generate potential acronyms from full names
-        potential_acronym1 = create_acronym_from_title(norm1)
-        potential_acronym2 = create_acronym_from_title(norm2)
+        def extract_potential_acronyms(text):
+            """Extract potential acronyms from text"""
+            acronyms = []
+            
+            # Look for standalone acronyms at the beginning of text
+            words = text.strip().split()
+            if words and is_likely_acronym(words[0]):
+                acronyms.append(words[0].lower())
+            
+            # Look for acronyms in patterns like "EMNLP 2024" or "NeurIPS, 2023"
+            acronym_matches = re.findall(r'\b([A-Z]{2,8})\s*[,\s]\s*\d{4}', text)
+            acronyms.extend([acr.lower() for acr in acronym_matches])
+            
+            # Look for acronyms in parentheses like "Conference (ACRONYM)"
+            paren_matches = re.findall(r'\(([A-Z]{2,8})\)', text)
+            acronyms.extend([acr.lower() for acr in paren_matches])
+            
+            return list(set(acronyms))  # Remove duplicates
         
-        # Check various acronym matching scenarios
-        if acronyms1 and potential_acronym2:
-            if any(acr == potential_acronym2 for acr in acronyms1):
-                return True
+        def check_acronym_against_full_name(acronym, full_text):
+            """Check if acronym could be derived from full text"""
+            if not acronym or not full_text:
+                return False
+            
+            # Normalize the full text
+            normalized_full = normalize_venue(full_text)
+            
+            # Generate all possible acronyms from the full text
+            possible_acronyms = []
+            
+            # Method 1: Standard acronym generation
+            standard_acronym = create_acronym_from_title(normalized_full)
+            if standard_acronym:
+                possible_acronyms.append(standard_acronym)
+            
+            # Method 2: Try generating acronyms with different word filtering
+            words = normalized_full.split()
+            if len(words) >= 2:
+                # All words
+                all_words_acronym = ''.join(w[0] for w in words if len(w) > 0)[:8]
+                possible_acronyms.append(all_words_acronym)
                 
-        if acronyms2 and potential_acronym1:
-            if any(acr == potential_acronym1 for acr in acronyms2):
+                # Skip very common words
+                skip_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
+                filtered_words = [w for w in words if w not in skip_words]
+                if len(filtered_words) >= 2:
+                    filtered_acronym = ''.join(w[0] for w in filtered_words)[:8]
+                    possible_acronyms.append(filtered_acronym)
+                
+                # Important words only (skip connectors)
+                important_words = [w for w in words if w not in skip_words and 
+                                 w not in {'international', 'conference', 'meeting', 'workshop', 'symposium', 'proceedings', 'annual'}]
+                if len(important_words) >= 2:
+                    important_acronym = ''.join(w[0] for w in important_words)[:8]
+                    possible_acronyms.append(important_acronym)
+            
+            # Check if the provided acronym matches any of our generated possibilities
+            acronym_lower = acronym.lower()
+            return any(acronym_lower == possible.lower() for possible in possible_acronyms if possible)
+        
+        # Extract potential acronyms from both venues
+        acronyms1 = extract_potential_acronyms(venue1)
+        acronyms2 = extract_potential_acronyms(venue2)
+        
+        # Case 1: venue1 has acronym, venue2 is full form
+        for acronym in acronyms1:
+            if check_acronym_against_full_name(acronym, venue2):
                 return True
         
-        # Check direct acronym matches
-        if acronyms1 and acronyms2:
-            if any(a1 == a2 for a1 in acronyms1 for a2 in acronyms2):
+        # Case 2: venue2 has acronym, venue1 is full form  
+        for acronym in acronyms2:
+            if check_acronym_against_full_name(acronym, venue1):
                 return True
+        
+        # Case 3: Both might be acronyms of same venue
+        if acronyms1 and acronyms2:
+            # Check if any acronyms match directly
+            for acr1 in acronyms1:
+                for acr2 in acronyms2:
+                    if acr1.lower() == acr2.lower():
+                        return True
+        
+        # Case 4: Check if one entire venue name is an acronym of the other
+        # This handles cases where the venue is just "EMNLP" vs "Conference on Empirical Methods..."
+        venue1_clean = venue1.strip()
+        venue2_clean = venue2.strip()
+        
+        if is_likely_acronym(venue1_clean) and not is_likely_acronym(venue2_clean):
+            return check_acronym_against_full_name(venue1_clean, venue2_clean)
+        
+        if is_likely_acronym(venue2_clean) and not is_likely_acronym(venue1_clean):
+            return check_acronym_against_full_name(venue2_clean, venue1_clean)
         
         return False
     
