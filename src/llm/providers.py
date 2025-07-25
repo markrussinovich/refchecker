@@ -109,11 +109,14 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
         return self.client is not None and self.api_key is not None
     
     def extract_references(self, bibliography_text: str) -> List[str]:
-        if not self.is_available():
-            raise Exception("OpenAI provider not available")
-        
-        prompt = self._create_extraction_prompt(bibliography_text)
-        
+        return self.extract_references_with_chunking(bibliography_text)
+    
+    def _create_extraction_prompt(self, bibliography_text: str) -> str:
+        """Create prompt for reference extraction"""
+        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
+    
+    def _call_llm(self, prompt: str) -> str:
+        """Make the actual OpenAI API call and return the response text"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o-mini",
@@ -124,8 +127,7 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
                 temperature=self.temperature
             )
             
-            content = response.choices[0].message.content
-            return self._parse_llm_response(content)
+            return response.choices[0].message.content or ""
             
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
@@ -151,14 +153,17 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
         return self.client is not None and self.api_key is not None
     
     def extract_references(self, bibliography_text: str) -> List[str]:
-        if not self.is_available():
-            raise Exception("Anthropic provider not available")
-        
-        prompt = self._create_extraction_prompt(bibliography_text)
-        
+        return self.extract_references_with_chunking(bibliography_text)
+    
+    def _create_extraction_prompt(self, bibliography_text: str) -> str:
+        """Create prompt for reference extraction"""
+        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
+    
+    def _call_llm(self, prompt: str) -> str:
+        """Make the actual Anthropic API call and return the response text"""
         try:
             response = self.client.messages.create(
-                model=self.model or "laude-sonnet-4-20250514",
+                model=self.model or "claude-sonnet-4-20250514",
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 messages=[
@@ -183,7 +188,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
             if not isinstance(content, str):
                 content = str(content)
             
-            return self._parse_llm_response(content)
+            return content
             
         except Exception as e:
             logger.error(f"Anthropic API call failed: {e}")
@@ -210,11 +215,14 @@ class GoogleProvider(LLMProvider, LLMProviderMixin):
         return self.client is not None and self.api_key is not None
     
     def extract_references(self, bibliography_text: str) -> List[str]:
-        if not self.is_available():
-            raise Exception("Google provider not available")
-        
-        prompt = self._create_extraction_prompt(bibliography_text)
-        
+        return self.extract_references_with_chunking(bibliography_text)
+    
+    def _create_extraction_prompt(self, bibliography_text: str) -> str:
+        """Create prompt for reference extraction"""
+        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
+    
+    def _call_llm(self, prompt: str) -> str:
+        """Make the actual Google API call and return the response text"""
         try:
             response = self.client.generate_content(
                 prompt,
@@ -224,8 +232,7 @@ class GoogleProvider(LLMProvider, LLMProviderMixin):
                 }
             )
             
-            content = response.text
-            return self._parse_llm_response(content)
+            return response.text or ""
             
         except Exception as e:
             logger.error(f"Google API call failed: {e}")
@@ -264,11 +271,14 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
         return available
     
     def extract_references(self, bibliography_text: str) -> List[str]:
-        if not self.is_available():
-            raise Exception("Azure provider not available")
-        
-        prompt = self._create_extraction_prompt(bibliography_text)
-        
+        return self.extract_references_with_chunking(bibliography_text)
+    
+    def _create_extraction_prompt(self, bibliography_text: str) -> str:
+        """Create prompt for reference extraction"""
+        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
+    
+    def _call_llm(self, prompt: str) -> str:
+        """Make the actual Azure OpenAI API call and return the response text"""
         try:
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4o",
@@ -279,8 +289,7 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
                 temperature=self.temperature
             )
             
-            content = response.choices[0].message.content
-            return self._parse_llm_response(content)
+            return response.choices[0].message.content or ""
             
         except Exception as e:
             logger.error(f"Azure API call failed: {e}")
@@ -724,190 +733,15 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
         
         return False
 
-    def _chunk_bibliography(self, bibliography_text: str, max_tokens: int = 2000) -> List[str]:
-        """Split bibliography into chunks without cutting references in the middle, prioritizing natural boundaries"""
-        
-        # First, try to split by natural boundaries (newlines) and common reference patterns
-        # Look for numbered references like [1], (1), 1., etc.
-        import re
-        
-        # Split on common reference number patterns at the start of lines
-        reference_patterns = [
-            r'\n\s*\[\d+\]',  # [1], [2], etc.
-            r'\n\s*\(\d+\)',  # (1), (2), etc. 
-            r'\n\s*\d+\.',    # 1., 2., etc.
-            r'\n\s*\d+\)',    # 1), 2), etc.
-        ]
-        
-        # Try each pattern to find the best way to split
-        potential_references = []
-        for pattern in reference_patterns:
-            splits = re.split(pattern, bibliography_text)
-            if len(splits) > 1:
-                # Reconstruct references with their numbers
-                refs = []
-                matches = re.findall(pattern, bibliography_text)
-                
-                if splits[0].strip():  # First part before any numbered reference
-                    refs.append(splits[0].strip())
-                
-                for i, match in enumerate(matches):
-                    if i + 1 < len(splits):
-                        ref_text = match.strip() + splits[i + 1]
-                        refs.append(ref_text.strip())
-                
-                if len(refs) > len(potential_references):
-                    potential_references = refs
-                break
-        
-        # If no clear reference pattern found, prioritize natural boundaries
-        if not potential_references:
-            # First try double newlines (paragraph breaks)
-            paragraphs = [ref.strip() for ref in bibliography_text.split('\n\n') if ref.strip()]
-            if len(paragraphs) > 1:
-                potential_references = paragraphs
-            else:
-                # Then try single newlines as natural boundaries
-                lines = [line.strip() for line in bibliography_text.split('\n') if line.strip()]
-                if len(lines) > 1:
-                    potential_references = lines
-        
-        # If still no good splits, split by single newlines but be more careful
-        if len(potential_references) <= 1:
-            lines = bibliography_text.split('\n')
-            potential_references = []
-            current_ref = ""
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Check if this line starts a new reference (has typical reference indicators)
-                if (re.match(r'^\[\d+\]|^\(\d+\)|^\d+\.|^\d+\)', line) or 
-                    (current_ref and len(line) > 50 and any(indicator in line.lower() for indicator in ['journal', 'proceedings', 'conference', 'arxiv', 'doi']))):
-                    if current_ref:
-                        potential_references.append(current_ref.strip())
-                    current_ref = line
-                else:
-                    current_ref += " " + line
-            
-            if current_ref:
-                potential_references.append(current_ref.strip())
-        
-        # Now group references into chunks that fit within token limit
-        chunks = []
-        current_chunk = ""
-        
-        for ref in potential_references:
-            # Rough estimate: 1 token ≈ 4 characters (conservative estimate)
-            estimated_tokens = len(current_chunk + "\n" + ref) // 4
-            
-            if estimated_tokens > max_tokens and current_chunk:
-                # Current chunk is getting too large, start a new one
-                chunks.append(current_chunk.strip())
-                current_chunk = ref
-            else:
-                if current_chunk:
-                    current_chunk += "\n" + ref
-                else:
-                    current_chunk = ref
-        
-        if current_chunk:
-            chunks.append(current_chunk.strip())
-        
-        # If we still have chunks that are too large, split them more aggressively
-        # but still prioritize natural boundaries
-        final_chunks = []
-        for chunk in chunks:
-            chunk_tokens = len(chunk) // 4
-            if chunk_tokens > max_tokens:
-                logger.warning(f"Chunk still too large ({chunk_tokens} tokens), splitting more aggressively")
-                # First try splitting by newlines within the chunk
-                lines = chunk.split('\n')
-                if len(lines) > 1:
-                    sub_chunk = ""
-                    for line in lines:
-                        test_chunk = sub_chunk + "\n" + line if sub_chunk else line
-                        if len(test_chunk) // 4 > max_tokens and sub_chunk:
-                            final_chunks.append(sub_chunk.strip())
-                            sub_chunk = line
-                        else:
-                            sub_chunk = test_chunk
-                    
-                    if sub_chunk:
-                        final_chunks.append(sub_chunk.strip())
-                else:
-                    # Only as last resort, split by sentences or semicolons
-                    sentences = re.split(r'[.;]\s+', chunk)
-                    sub_chunk = ""
-                    
-                    for sentence in sentences:
-                        test_chunk = sub_chunk + sentence + ". " if sub_chunk else sentence
-                        if len(test_chunk) // 4 > max_tokens and sub_chunk:
-                            final_chunks.append(sub_chunk.strip())
-                            sub_chunk = sentence + ". "
-                        else:
-                            sub_chunk = test_chunk
-                    
-                    if sub_chunk:
-                        final_chunks.append(sub_chunk.strip())
-            else:
-                final_chunks.append(chunk)
-        
-        logger.info(f"Split bibliography into {len(final_chunks)} chunks (max {max_tokens} tokens each)")
-        return final_chunks
-
     def extract_references(self, bibliography_text: str) -> List[str]:
-        """Extract references using vLLM server (OpenAI-compatible API)"""
-        if not self.is_available():
-            raise Exception("vLLM server not available. Make sure vLLM server is running.")
-        
-        # Get model's max_tokens from configuration
-        from config.settings import get_config
-        config = get_config()
-        model_max_tokens = config.get('llm', {}).get('vllm', {}).get('max_tokens', 4000)
-        
-        # Check if bibliography is too long and needs chunking
-        estimated_tokens = len(bibliography_text) // 4  # Rough estimate
-        
-        # Account for prompt overhead - server mode handles chat templates automatically
-        prompt_overhead = 300  # Conservative estimate for prompt template and system messages
-        # Ensure prompt is < 1/2 the model's total token limit
-        max_input_tokens = (model_max_tokens // 2) - prompt_overhead
-        
-        logger.info(f"Using model max_tokens: {model_max_tokens}, max_input_tokens: {max_input_tokens}")
-        
-        if estimated_tokens > max_input_tokens:
-            logger.info(f"Bibliography too long ({estimated_tokens} estimated tokens), splitting into chunks")
-            chunks = self._chunk_bibliography(bibliography_text, max_input_tokens)
-            
-            all_references = []
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Processing chunk {i+1}/{len(chunks)}")
-                prompt = self._create_extraction_prompt(chunk)
-                
-                chunk_references = self._extract_references_from_server(prompt)
-                all_references.extend(chunk_references)
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_references = []
-            for ref in all_references:
-                ref_normalized = ref.strip().lower()
-                if ref_normalized not in seen:
-                    seen.add(ref_normalized)
-                    unique_references.append(ref)
-            
-            logger.info(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
-            return unique_references
-        else:
-            # Process normally for short bibliographies
-            prompt = self._create_extraction_prompt(bibliography_text)
-            return self._extract_references_from_server(prompt)
+        return self.extract_references_with_chunking(bibliography_text)
     
-    def _extract_references_from_server(self, prompt: str) -> List[str]:
-        """Extract references using vLLM server API"""
+    def _create_extraction_prompt(self, bibliography_text: str) -> str:
+        """Create prompt for reference extraction"""
+        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
+    
+    def _call_llm(self, prompt: str) -> str:
+        """Make the actual vLLM API call and return the response text"""
         try:
             logger.debug(f"Sending prompt to vLLM server (length: {len(prompt)})")
             
@@ -929,7 +763,7 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
             logger.debug(f"  First 200 chars: {content[:200]}...")
             logger.debug(f"  Finish reason: {response.choices[0].finish_reason}")
             
-            return self._parse_llm_response(content)
+            return content or ""
             
         except Exception as e:
             logger.error(f"vLLM server API call failed: {e}")
