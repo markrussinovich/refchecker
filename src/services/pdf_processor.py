@@ -170,13 +170,68 @@ class PDFProcessor:
         for header in bib_headers:
             match = re.search(header, text, re.IGNORECASE)
             if match:
-                # Extract from bibliography header to end of text
+                # Extract from bibliography header
                 bib_start = match.end()
-                bib_text = text[bib_start:].strip()
+                full_bib_text = text[bib_start:].strip()
                 
-                # Optionally limit to reasonable length
+                # Find the end of the bibliography section by looking for common section headers
+                # that typically follow references
+                end_markers = [
+                    r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
+                    r'\n\s*Appendix\s*[A-Z]?\s*\n',
+                    r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
+                    r'\n\s*Supplementary\s+Material\s*\n',  
+                    r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
+                    r'\n\s*Supplemental\s+Material\s*\n',
+                    r'\n\s*ACKNOWLEDGMENTS?\s*\n',
+                    r'\n\s*Acknowledgments?\s*\n',
+                    r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
+                    r'\n\s*Author\s+Contributions?\s*\n',
+                    r'\n\s*FUNDING\s*\n',
+                    r'\n\s*Funding\s*\n',
+                    r'\n\s*ETHICS\s+STATEMENT\s*\n',
+                    r'\n\s*Ethics\s+Statement\s*\n',
+                    r'\n\s*CONFLICT\s+OF\s+INTEREST\s*\n',
+                    r'\n\s*Conflict\s+of\s+Interest\s*\n',
+                    r'\n\s*DATA\s+AVAILABILITY\s*\n',
+                    r'\n\s*Data\s+Availability\s*\n'
+                ]
+                
+                bib_text = full_bib_text
+                bib_end = len(full_bib_text)
+                
+                # Look for section markers that indicate end of bibliography
+                for end_marker in end_markers:
+                    end_match = re.search(end_marker, full_bib_text, re.IGNORECASE)
+                    if end_match and end_match.start() < bib_end:
+                        bib_end = end_match.start()
+                
+                # If we found an end marker, truncate there
+                if bib_end < len(full_bib_text):
+                    bib_text = full_bib_text[:bib_end].strip()
+                    logger.debug(f"Bibliography section truncated at position {bib_end}")
+                
+                # Also try to detect bibliography end by finding the last numbered reference
+                # Look for the highest numbered reference in the text
+                ref_numbers = re.findall(r'\[(\d+)\]', bib_text)
+                if ref_numbers:
+                    max_ref_num = max(int(num) for num in ref_numbers)
+                    logger.debug(f"Found references up to [{max_ref_num}]")
+                    
+                    # Look for the end of the last numbered reference
+                    last_ref_pattern = rf'\[{max_ref_num}\][^[]*?(?=\n\s*[A-Z]{{2,}}|\n\s*\w+\s*\n\s*[A-Z]|\Z)'
+                    last_ref_match = re.search(last_ref_pattern, bib_text, re.DOTALL)
+                    if last_ref_match:
+                        potential_end = last_ref_match.end()
+                        # Only use this if it's before our section marker end
+                        if potential_end < bib_end:
+                            bib_text = bib_text[:potential_end].strip()
+                            logger.debug(f"Bibliography truncated after reference [{max_ref_num}]")
+                
+                # Final fallback: limit to reasonable length
                 if len(bib_text) > 50000:  # Limit to ~50KB
                     bib_text = bib_text[:50000]
+                    logger.debug("Bibliography section truncated to 50KB limit")
                 
                 logger.debug(f"Found bibliography section: {len(bib_text)} characters")
                 return bib_text

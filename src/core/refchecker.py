@@ -902,6 +902,18 @@ class ArxivReferenceChecker:
                 # Find the next section heading or end of document
                 # Look for common section endings that come after references
                 next_section_patterns = [
+                    # High priority: Common supplementary material patterns
+                    r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
+                    r'\n\s*Supplementary\s+Material\s*\n',  
+                    r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
+                    r'\n\s*Supplemental\s+Material\s*\n',
+                    r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
+                    r'\n\s*Appendix\s*[A-Z]?\s*\n',
+                    r'\n\s*ACKNOWLEDGMENTS?\s*\n',
+                    r'\n\s*Acknowledgments?\s*\n',
+                    r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
+                    r'\n\s*Author\s+Contributions?\s*\n',
+                    # Original patterns
                     r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
                     r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
                     r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|APPENDIX|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE|SURVEY|REVIEW|FUTURE|LIMITATION|CONTRIBUTION|INNOVATION|TECHNICAL|DETAILED|COMPLETE|EXTENDED)\b',  # Other section patterns

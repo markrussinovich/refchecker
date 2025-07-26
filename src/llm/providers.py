@@ -23,15 +23,17 @@ class LLMProviderMixin:
 Please extract individual references from the following bibliography text. Each reference should be a complete bibliographic entry.
 
 Instructions:
-1. Split the bibliography into individual references
-2. Each reference should include authors, title, publication venue, year, and any URLs/DOIs
-3. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
-4. Place a hashmark (#) rather than period between fields of a reference, but commas between authors
+1. Split the bibliography into individual references based on numbered markers like [1], [2], etc.
+2. IMPORTANT: References may span multiple lines. A single reference includes everything from one number marker (e.g., [37]) until the next number marker (e.g., [38])
+3. For each reference, extract: authors, title, publication venue, year, and any URLs/DOIs
+4. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
+5. Place a hashmark (#) rather than period between fields of a reference, but commas between authors
    e.g. Author1, Author2#Title#Venue#Year#URL
-5. Return ONLY the references, one per line
-6. Do not include reference numbers like [1], [2], etc.
-7. Do not add any additional text or explanations
-8. Ensure that URLs and DOIs are from the specific reference only
+6. Return ONLY the references, one per line
+7. Do not include reference numbers like [1], [2], etc. in your output
+8. Do not add any additional text or explanations
+9. Ensure that URLs and DOIs are from the specific reference only
+10. When parsing multi-line references, combine all authors from all lines before the title
 
 Bibliography text:
 {bibliography_text}
