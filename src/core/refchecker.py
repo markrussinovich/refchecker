@@ -944,7 +944,7 @@ class ArxivReferenceChecker:
             r'(?i)^\s*[IVX]+\.\s*references\s*$',  # "IX. References"
             r'(?i)^\s*[IVX]+\s*references\s*$',   # "IX References"
             # Generic patterns that might match false positives - put at end
-            r'(?i)sources',  # Sources (too generic, moved to end)
+            r'(?i)^\s*sources\s*$',  # Sources as section header only
         ]
         
         # Try to find the bibliography section
