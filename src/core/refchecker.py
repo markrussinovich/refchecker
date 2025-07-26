@@ -913,6 +913,8 @@ class ArxivReferenceChecker:
                     r'\n\s*Acknowledgments?\s*\n',
                     r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
                     r'\n\s*Author\s+Contributions?\s*\n',
+                    # Pattern for "A Additional...", "B Supplementary...", etc.
+                    r'\n\s*[A-Z]\s+(?:Additional|Supplementary|Appendix|Extended|Extra|Further)\b[A-Za-z\s\-]*',
                     # Original patterns
                     r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
                     r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
@@ -3585,7 +3587,7 @@ class ArxivReferenceChecker:
             debug_mode: If True, save debug files for troubleshooting
         """
         paper_id = paper.get_short_id()
-        logger.info(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+        logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
         
         # Check if this is a text file containing references
         if hasattr(paper, 'is_text_refs') and paper.is_text_refs:

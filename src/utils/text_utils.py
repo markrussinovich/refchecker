@@ -607,6 +607,40 @@ def is_name_match(name1: str, name2: str) -> bool:
             middle_initial1 == initials2[1]):
             return True
 
+    # Special case: Handle "G. V. Horn" vs "Grant Van Horn" - initials with middle name
+    if (len(parts1) == 3 and len(parts2) == 3 and
+        len(parts1[0]) == 1 and len(parts1[1]) == 1 and len(parts1[2]) > 1 and
+        len(parts2[0]) > 1 and len(parts2[1]) > 1 and len(parts2[2]) > 1):
+        # parts1 is "F. M. Last" format, parts2 is "First Middle Last" format
+        first_initial1 = parts1[0]  # "G"
+        middle_initial1 = parts1[1]  # "V"  
+        last_name1 = parts1[2]  # "Horn"
+        first_name2 = parts2[0]  # "Grant"
+        middle_name2 = parts2[1]  # "Van"
+        last_name2 = parts2[2]  # "Horn"
+        
+        if (last_name1 == last_name2 and 
+            first_initial1 == first_name2[0] and
+            middle_initial1 == middle_name2[0]):
+            return True
+    
+    # Reverse case: "Grant Van Horn" vs "G. V. Horn"
+    if (len(parts1) == 3 and len(parts2) == 3 and
+        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts1[2]) > 1 and
+        len(parts2[0]) == 1 and len(parts2[1]) == 1 and len(parts2[2]) > 1):
+        # parts1 is "First Middle Last" format, parts2 is "F. M. Last" format
+        first_name1 = parts1[0]  # "Grant"
+        middle_name1 = parts1[1]  # "Van"
+        last_name1 = parts1[2]  # "Horn"
+        first_initial2 = parts2[0]  # "G"
+        middle_initial2 = parts2[1]  # "V"
+        last_name2 = parts2[2]  # "Horn"
+        
+        if (last_name1 == last_name2 and 
+            first_name1[0] == first_initial2 and
+            middle_name1[0] == middle_initial2):
+            return True
+
     # Special case: Handle single letter first name variations like "S. Jeong" vs "S Jeong"
     if (len(parts1) == 2 and len(parts2) == 2 and
         len(parts1[0]) == 1 and len(parts2[0]) == 1):
@@ -614,9 +648,14 @@ def is_name_match(name1: str, name2: str) -> bool:
         if parts1[0] == parts2[0] and parts1[1] == parts2[1]:
             return True
     
-    # If either name has only one part, compare directly
+    # If either name has only one part, check if it matches any part of the other name
     if len(parts1) == 1 or len(parts2) == 1:
-        return parts1[-1] == parts2[-1]  # Compare last parts (last names)
+        if len(parts1) == 1:
+            single_part = parts1[0]
+            return single_part in parts2
+        else:
+            single_part = parts2[0]
+            return single_part in parts1
     
     # IMPORTANT: Check special cases BEFORE the general last name comparison
     # because some cases like compound last names don't follow the standard pattern
@@ -1977,6 +2016,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         # Remove years, volumes, pages, and other citation metadata
         venue_lower = re.sub(r',?\s*\d{4}[a-z]?\s*$', '', venue_lower)  # Years like "2024" or "2024b"
         venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Years in parentheses
+        venue_lower = re.sub(r"'\d{2}$", '', venue_lower)  # Year suffixes like 'CVPR'16'
         venue_lower = re.sub(r',?\s*vol\.\s*\d+.*$', '', venue_lower)  # Volume info
         venue_lower = re.sub(r',?\s*\d+\(\d+\).*$', '', venue_lower)  # Issue info
         venue_lower = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_lower)  # Page info
@@ -1989,6 +2029,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             r'^\d{4}\s+',                     # "2024 "
             r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',  # "Proceedings of the 41st"
             r'^proc\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',        # "Proc. of the 41st"
+            r'^procs\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',       # "Procs. of the"
             r'^in\s+',
             r'^advances\s+in\s+',             # "Advances in Neural Information Processing Systems"
             r'^adv\.\s+',                     # "Adv. Neural Information Processing Systems"
