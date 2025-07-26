@@ -973,6 +973,8 @@ class ArxivReferenceChecker:
                     r'\n\s*Author\s+Contributions?\s*\n',
                     # Pattern for "A Additional...", "B Supplementary...", etc.
                     r'\n\s*[A-Z]\s+(?:Additional|Supplementary|Appendix|Extended|Extra|Further)\b[A-Za-z\s\-]*',
+                    # Pattern for appendix sections like "A Proofs for Section 2", "B Details", etc.
+                    r'\n\s*[A-Z]\s+(?:Proofs?|Details?|Derivations?|Calculations?|Algorithms?|Examples?|Experiments?|Implementation|Results?)\b[A-Za-z\s\-\d]*',
                     # Original patterns
                     r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
                     r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
