@@ -182,11 +182,23 @@ class LLMProvider(ABC):
                     else:
                         logger.debug(f"Skipping duplicate reference [{ref_num}]: {ref[:100]}...")
                 else:
-                    # Fallback to text-based deduplication for references without numbers
-                    ref_normalized = ref.strip().lower()
-                    if ref_normalized not in seen_ref_nums:
-                        seen_ref_nums.add(ref_normalized)
-                        unique_references.append(ref)
+                    # Fallback to segment-based deduplication for references without numbers
+                    # Split into segments separated by '#' and compare first two (author list and title)
+                    segments = ref.split('#')
+                    if len(segments) >= 2:
+                        # Use first two segments (author list and title) for deduplication
+                        author_title_key = (segments[0].strip().lower(), segments[1].strip().lower())
+                        if author_title_key not in seen_ref_nums:
+                            seen_ref_nums.add(author_title_key)
+                            unique_references.append(ref)
+                        else:
+                            logger.debug(f"Skipping duplicate reference (same author+title): {ref[:100]}...")
+                    else:
+                        # No segments, fallback to full text deduplication
+                        ref_normalized = ref.strip().lower()
+                        if ref_normalized not in seen_ref_nums:
+                            seen_ref_nums.add(ref_normalized)
+                            unique_references.append(ref)
             
             logger.debug(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
             return unique_references
