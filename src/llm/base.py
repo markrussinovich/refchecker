@@ -159,7 +159,7 @@ class LLMProvider(ABC):
                     seen.add(ref_normalized)
                     unique_references.append(ref)
             
-            logger.info(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
+            logger.debug(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
             return unique_references
         else:
             # Process normally for short bibliographies
@@ -241,7 +241,7 @@ class LLMProvider(ABC):
                 all_references.extend(chunk_results[i])
         
         processing_time = time.time() - start_time
-        logger.info(f"Parallel chunk processing completed in {processing_time:.2f}s, "
+        logger.debug(f"Parallel chunk processing completed in {processing_time:.2f}s, "
                    f"extracted {len(all_references)} total references")
         
         return all_references
