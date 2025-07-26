@@ -382,6 +382,19 @@ def normalize_diacritics(text: str) -> str:
     for special, replacement in special_chars.items():
         text = text.replace(special, replacement)
     
+    # Normalize different hyphen-like characters to standard hyphen
+    # Common hyphen variants that appear in academic papers
+    hyphen_variants = {
+        '‐': '-',  # Unicode hyphen (U+2010)
+        '‑': '-',  # Non-breaking hyphen (U+2011)  
+        '–': '-',  # En dash (U+2013)
+        '—': '-',  # Em dash (U+2014)
+        '−': '-',  # Minus sign (U+2212)
+    }
+    
+    for variant, replacement in hyphen_variants.items():
+        text = text.replace(variant, replacement)
+    
     # Decompose characters into base + combining characters (NFD normalization)
     normalized = unicodedata.normalize('NFD', text)
     # Remove all combining characters (accents, diacritics)
@@ -607,39 +620,54 @@ def is_name_match(name1: str, name2: str) -> bool:
             middle_initial1 == initials2[1]):
             return True
 
-    # Special case: Handle "G. V. Horn" vs "Grant Van Horn" - initials with middle name
-    if (len(parts1) == 3 and len(parts2) == 3 and
-        len(parts1[0]) == 1 and len(parts1[1]) == 1 and len(parts1[2]) > 1 and
-        len(parts2[0]) > 1 and len(parts2[1]) > 1 and len(parts2[2]) > 1):
-        # parts1 is "F. M. Last" format, parts2 is "First Middle Last" format
-        first_initial1 = parts1[0]  # "G"
-        middle_initial1 = parts1[1]  # "V"  
-        last_name1 = parts1[2]  # "Horn"
-        first_name2 = parts2[0]  # "Grant"
-        middle_name2 = parts2[1]  # "Van"
-        last_name2 = parts2[2]  # "Horn"
+    # Special case: Handle "G. V. Horn" vs "Grant Van Horn" patterns
+    # This handles both surname particle normalization effects and standard 3-part names
+    def match_initials_with_names(init_parts, name_parts):
+        """Helper function to match initials against full names"""
+        if len(init_parts) == 3 and len(name_parts) == 2:
+            # After surname particle normalization: ['g.', 'v.', 'horn'] vs ['grant', 'van horn']
+            if (len(init_parts[0].rstrip('.')) == 1 and len(init_parts[1].rstrip('.')) == 1 and len(init_parts[2]) > 1 and
+                len(name_parts[0]) > 1 and len(name_parts[1]) > 1):
+                
+                first_initial = init_parts[0].rstrip('.')
+                middle_initial = init_parts[1].rstrip('.')
+                last_name = init_parts[2]
+                first_name = name_parts[0]
+                compound_last = name_parts[1]
+                
+                # Extract middle and last parts from compound lastname
+                compound_parts = compound_last.split()
+                if len(compound_parts) >= 2:
+                    middle_name = compound_parts[0]
+                    actual_last = compound_parts[-1]
+                    
+                    if (last_name == actual_last and 
+                        first_initial == first_name[0] and
+                        middle_initial == middle_name[0]):
+                        return True
         
-        if (last_name1 == last_name2 and 
-            first_initial1 == first_name2[0] and
-            middle_initial1 == middle_name2[0]):
-            return True
+        elif len(init_parts) == 3 and len(name_parts) == 3:
+            # Standard 3-part case: ['g.', 'v.', 'horn'] vs ['grant', 'van', 'horn']
+            if (len(init_parts[0].rstrip('.')) == 1 and len(init_parts[1].rstrip('.')) == 1 and len(init_parts[2]) > 1 and
+                len(name_parts[0]) > 1 and len(name_parts[1]) > 1 and len(name_parts[2]) > 1):
+                
+                first_initial = init_parts[0].rstrip('.')
+                middle_initial = init_parts[1].rstrip('.')
+                last_name = init_parts[2]
+                first_name = name_parts[0]
+                middle_name = name_parts[1]
+                actual_last = name_parts[2]
+                
+                if (last_name == actual_last and 
+                    first_initial == first_name[0] and
+                    middle_initial == middle_name[0]):
+                    return True
+        
+        return False
     
-    # Reverse case: "Grant Van Horn" vs "G. V. Horn"
-    if (len(parts1) == 3 and len(parts2) == 3 and
-        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts1[2]) > 1 and
-        len(parts2[0]) == 1 and len(parts2[1]) == 1 and len(parts2[2]) > 1):
-        # parts1 is "First Middle Last" format, parts2 is "F. M. Last" format
-        first_name1 = parts1[0]  # "Grant"
-        middle_name1 = parts1[1]  # "Van"
-        last_name1 = parts1[2]  # "Horn"
-        first_initial2 = parts2[0]  # "G"
-        middle_initial2 = parts2[1]  # "V"
-        last_name2 = parts2[2]  # "Horn"
-        
-        if (last_name1 == last_name2 and 
-            first_name1[0] == first_initial2 and
-            middle_name1[0] == middle_initial2):
-            return True
+    # Try both directions
+    if match_initials_with_names(parts1, parts2) or match_initials_with_names(parts2, parts1):
+        return True
 
     # Special case: Handle single letter first name variations like "S. Jeong" vs "S Jeong"
     if (len(parts1) == 2 and len(parts2) == 2 and
@@ -1877,7 +1905,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'ind.': 'industrial',
             'electron.': 'electronics',
             'mechatron.': 'mechatronics',
-            'intell.': 'intelligent',
+            'intell.': 'intelligence',
             'transp.': 'transportation',
             'contr.': 'control',
             'mag.': 'magazine',
@@ -1909,6 +1937,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'manuf.': 'manufacturing',
             'syst.': 'systems',
             'inf.': 'information',
+            'softw.': 'software',
             'process.': 'processing',
             
             # Common venue name patterns (only keep special cases that can't be auto-detected)
@@ -2052,6 +2081,13 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = re.sub(r'^ieee/\w+\s+', '', venue_lower)  # Remove "IEEE/RSJ " etc
         venue_lower = re.sub(r'\s+ieee\s*$', '', venue_lower)  # Remove IEEE suffix
         venue_lower = re.sub(r'/\w+\s+', ' ', venue_lower)  # Remove "/ACM " style org separators
+        
+        # Remove organization + "Conference on" patterns (e.g., "IEEE/CVF Conference on")
+        venue_lower = re.sub(r'^(ieee|acm|aaai|nips|icml|iclr|cvpr|iccv|eccv)(/\w+)?\s+conference\s+on\s+', '', venue_lower)
+        # More general pattern for any organization + conference on
+        venue_lower = re.sub(r'^[a-z]+(/[a-z]+)?\s+conference\s+on\s+', '', venue_lower)
+        # Remove standalone "Conference on" at the beginning
+        venue_lower = re.sub(r'^conference\s+on\s+', '', venue_lower)
         
         # Clean up punctuation and spacing
         venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation
