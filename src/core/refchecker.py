@@ -91,7 +91,7 @@ def get_llm_api_key_interactive(provider: str) -> str:
     for env_var in env_vars.get(provider, []):
         api_key = os.getenv(env_var)
         if api_key:
-            logging.info(f"Using {provider} API key from environment variable {env_var}")
+            logging.debug(f"Using {provider} API key from environment variable {env_var}")
             return api_key
     
     # If not found in environment, prompt interactively
