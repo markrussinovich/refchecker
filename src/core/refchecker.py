@@ -984,9 +984,7 @@ class ArxivReferenceChecker:
             # Find the next section heading or end of document
             # Look for common section endings that come after references
             next_section_patterns = [
-                # High priority: Numbered sections that come after references
-                # But exclude repeated REFERENCES headers (page headers)
-                r'\n\s*\d+\s+(?!REFERENCES\s*REFERENCES\s*\n)[A-Z][A-Za-z\s]+\n',  # "3 PROMPT FOR MEDGPT", "4 Computation of..." but not "10 REFERENCES REFERENCES"
+                # Note: Removed problematic pattern that was matching page numbers in bibliography
                 r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',  # "3.1 Subsection Title"
                 # High priority: Common supplementary material patterns
                 r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
