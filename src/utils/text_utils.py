@@ -443,8 +443,11 @@ def is_name_match(name1: str, name2: str) -> bool:
             current_part = name_parts[i]
             
             # Check if current part is a surname particle
+            # Be more conservative: avoid treating short words as particles when followed by short surnames
+            # This prevents "Da Yu" from being treated as particle+surname instead of first+last name
             if (current_part.lower() in surname_particles and 
-                i + 1 < len(name_parts)):  # Not the last part
+                i + 1 < len(name_parts) and  # Not the last part
+                not (len(current_part) <= 2 and len(name_parts) == 2 and len(name_parts[i + 1]) <= 3)):  # Avoid "Da Yu" -> "Da Yu"
                 
                 # Collect all consecutive particles
                 compound_parts = [current_part]
@@ -475,6 +478,33 @@ def is_name_match(name1: str, name2: str) -> bool:
     parts1 = normalize_surname_particles(name1.split())
     parts2 = normalize_surname_particles(name2.split())
     
+    # Basic 2-part name matching: "F. Last" vs "First Last" 
+    # e.g., "D. Yu" vs "Da Yu", "J. Smith" vs "John Smith"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1 and
+        len(parts1[1]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "F. Last" format, parts2 is "First Last" format
+        initial1 = parts1[0].rstrip('.')  # "d"
+        last_name1 = parts1[1]  # "yu"
+        first_name2 = parts2[0]  # "da"
+        last_name2 = parts2[1]  # "yu"
+        
+        if last_name1 == last_name2 and initial1 == first_name2[0]:
+            return True
+    
+    # Reverse case: "First Last" vs "F. Last"
+    # e.g., "Da Yu" vs "D. Yu", "John Smith" vs "J. Smith"  
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0]) > 1 and len(parts2[0].rstrip('.')) == 1 and
+        len(parts1[1]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "First Last" format, parts2 is "F. Last" format
+        first_name1 = parts1[0]  # "da"
+        last_name1 = parts1[1]  # "yu"
+        initial2 = parts2[0].rstrip('.')  # "d"
+        last_name2 = parts2[1]  # "yu"
+        
+        if last_name1 == last_name2 and first_name1[0] == initial2:
+            return True
     
     # Special case: Handle hyphenated first names vs initials
     # e.g., "Stein JP" vs "Jan-Philipp Stein"
