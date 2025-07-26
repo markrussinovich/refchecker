@@ -63,6 +63,64 @@ except ImportError:
     __version__ = "1.2.1"
 from llm.base import create_llm_provider, ReferenceExtractor
 
+def get_llm_api_key_interactive(provider: str) -> str:
+    """
+    Get API key for LLM provider, checking environment variables first,
+    then prompting interactively if not found.
+    
+    Args:
+        provider: LLM provider name (openai, anthropic, google, azure, vllm)
+    
+    Returns:
+        API key string or None if not available
+    """
+    # Define environment variable names for each provider
+    env_vars = {
+        'openai': ['REFCHECKER_OPENAI_API_KEY', 'OPENAI_API_KEY'],
+        'anthropic': ['REFCHECKER_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'],
+        'google': ['REFCHECKER_GOOGLE_API_KEY', 'GOOGLE_API_KEY'],
+        'azure': ['REFCHECKER_AZURE_API_KEY', 'AZURE_OPENAI_API_KEY'],
+        'vllm': []  # vLLM doesn't need API key
+    }
+    
+    # vLLM doesn't need an API key
+    if provider == 'vllm':
+        return None
+    
+    # Check environment variables first
+    for env_var in env_vars.get(provider, []):
+        api_key = os.getenv(env_var)
+        if api_key:
+            logging.info(f"Using {provider} API key from environment variable {env_var}")
+            return api_key
+    
+    # If not found in environment, prompt interactively
+    import getpass
+    
+    provider_names = {
+        'openai': 'OpenAI',
+        'anthropic': 'Anthropic',
+        'google': 'Google',
+        'azure': 'Azure OpenAI'
+    }
+    
+    provider_display = provider_names.get(provider, provider.capitalize())
+    
+    print(f"\n{provider_display} API key not found in environment variables.")
+    print(f"Checked environment variables: {', '.join(env_vars.get(provider, []))}")
+    print(f"Please enter your {provider_display} API key (input will be hidden):")
+    
+    try:
+        api_key = getpass.getpass("API key: ").strip()
+        if api_key:
+            return api_key
+        else:
+            print("No API key provided.")
+            return None
+    except KeyboardInterrupt:
+        print("\nOperation cancelled by user.")
+        return None
+
 def setup_logging(debug_mode=False, level=None):
     """Set up logging configuration"""
     # Configure root logger to control all child loggers
@@ -2512,7 +2570,7 @@ class ArxivReferenceChecker:
                 
                 # Print paper heading in non-debug mode
                 print(f"\n📄 Processing: {paper.title}")
-                print(f"   URL: {paper_url}")
+                print(f"   {paper_url}")
                 
                 try:
                     # Extract bibliography
@@ -3592,7 +3650,7 @@ class ArxivReferenceChecker:
         # Check if this is a text file containing references
         if hasattr(paper, 'is_text_refs') and paper.is_text_refs:
             # Read the text file directly - it should contain references
-            logger.info(f"Processing text file containing references: {paper.file_path}")
+            logger.debug(f"Processing text file containing references: {paper.file_path}")
             try:
                 with open(paper.file_path, 'r', encoding='utf-8') as f:
                     bibliography_text = f.read()
@@ -4108,8 +4166,6 @@ def main():
                         help="Enable LLM with specified provider (openai, anthropic, google, azure, vllm)")
     parser.add_argument("--llm-model", type=str,
                         help="LLM model to use (overrides default for the provider)")
-    parser.add_argument("--llm-key", type=str,
-                        help="API key for the LLM provider (uses environment variable if not provided)")
     parser.add_argument("--llm-endpoint", type=str,
                         help="Endpoint for the LLM provider (overrides default endpoint)")
     parser.add_argument("--llm-parallel-chunks", action="store_true", default=None,
@@ -4157,10 +4213,16 @@ def main():
     # Process LLM configuration overrides
     llm_config = None
     if args.llm_provider:
+        # Get API key interactively if needed for LLM provider
+        api_key = get_llm_api_key_interactive(args.llm_provider)
+        if api_key is None and args.llm_provider != 'vllm':
+            print(f"Error: API key is required for {args.llm_provider} provider.")
+            return 1
+        
         llm_config = {
             'provider': args.llm_provider,
             'model': args.llm_model,
-            'api_key': args.llm_key,
+            'api_key': api_key,
             'endpoint': args.llm_endpoint
         }
         

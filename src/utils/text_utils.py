@@ -1969,6 +1969,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'inf.': 'information',
             'softw.': 'software',
             'process.': 'processing',
+            'symp.': 'symposium',
+            'ai': 'artificial intelligence',
             
             # Common venue name patterns (only keep special cases that can't be auto-detected)
             'iros': 'international conference on intelligent robots and systems',
@@ -1983,6 +1985,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             # Special cases that don't follow standard acronym patterns
             'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
             'nips': 'neural information processing systems',     # old name for neurips
+            'nsdi': 'networked systems design and implementation',  # USENIX NSDI
         }
         
         # Apply abbreviation expansion
@@ -2107,9 +2110,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = expand_abbreviations(venue_lower)
         
         # Remove organization prefixes/suffixes that don't affect identity
-        venue_lower = re.sub(r'^ieee\s+', '', venue_lower)  # Remove IEEE prefix
+        venue_lower = re.sub(r'^(ieee|acm|aaai|usenix|sigcomm|sigkdd|sigmod|vldb|osdi|sosp|eurosys)\s+', '', venue_lower)  # Remove org prefixes
         venue_lower = re.sub(r'^ieee/\w+\s+', '', venue_lower)  # Remove "IEEE/RSJ " etc
-        venue_lower = re.sub(r'\s+ieee\s*$', '', venue_lower)  # Remove IEEE suffix
+        venue_lower = re.sub(r'\s+(ieee|acm|aaai|usenix)\s*$', '', venue_lower)  # Remove org suffixes
         venue_lower = re.sub(r'/\w+\s+', ' ', venue_lower)  # Remove "/ACM " style org separators
         
         # Remove organization + "Conference on" patterns (e.g., "IEEE/CVF Conference on")
@@ -2118,6 +2121,11 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = re.sub(r'^[a-z]+(/[a-z]+)?\s+conference\s+on\s+', '', venue_lower)
         # Remove standalone "Conference on" at the beginning
         venue_lower = re.sub(r'^conference\s+on\s+', '', venue_lower)
+        
+        # Remove common prepositions that don't affect venue identity
+        venue_lower = re.sub(r'\s+on\s+', ' ', venue_lower)  # Remove "on" preposition
+        venue_lower = re.sub(r'\s+for\s+', ' ', venue_lower)  # Remove "for" preposition
+        venue_lower = re.sub(r'\s+in\s+', ' ', venue_lower)   # Remove "in" preposition
         
         # Clean up punctuation and spacing
         venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation

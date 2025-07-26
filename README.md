@@ -115,7 +115,7 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
      --llm-provider anthropic \
      --llm-model claude-sonnet-4-20250514 \
    ```
-   The command line supports an `--llm-key` parameter, but recommended usage is to set the environment variable API key setting for the provider you select.
+   API keys are obtained from environment variables, or if not found, the tool will prompt you interactively to enter them securely.
 
 ### LLM Examples
 
@@ -144,8 +144,7 @@ python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
 ```bash
 python refchecker.py --paper paper.tex \
   --llm-provider google \
-  --llm-model gemini-2.5-flash \
-  --llm-key your-google-key
+  --llm-model gemini-2.5-flash
 ```
 
 #### Azure OpenAI
@@ -154,7 +153,6 @@ python refchecker.py --paper paper.tex \
 python refchecker.py --paper paper.txt \
   --llm-provider azure \
   --llm-model gpt-4 \
-  --llm-key your-azure-key \
   --llm-endpoint https://your-resource.openai.azure.com/
 ```
 
@@ -339,9 +337,25 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 # LLM options
 --llm-provider {openai,anthropic,google,azure,vllm}  # Enable LLM with provider
 --llm-model MODEL                # Override default model
---llm-key KEY                    # Optional API key for LLM provider (environment variable recommended)
 --llm-endpoint URL               # Override endpoint (for Azure/vLLM)
 ```
+
+### API Key Handling
+
+The refchecker tool automatically handles API keys for LLM providers in the following order:
+
+1. **Environment Variables** (recommended): The tool checks for provider-specific environment variables
+2. **Interactive Prompts**: If no API key is found in environment variables, the tool will securely prompt you to enter it
+
+When you use an LLM provider without setting the corresponding environment variable, you'll see a prompt like:
+```
+OpenAI API key not found in environment variables.
+Checked environment variables: REFCHECKER_OPENAI_API_KEY, OPENAI_API_KEY
+Please enter your OpenAI API key (input will be hidden):
+API key: [your input is hidden]
+```
+
+This approach ensures your API keys are never exposed in command line history while providing a seamless user experience.
 
 ### Environment Variables
 
