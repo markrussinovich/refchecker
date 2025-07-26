@@ -2076,7 +2076,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = re.sub(r',?\s*\d{4}[a-z]?\s*$', '', venue_lower)  # Years like "2024" or "2024b"
         venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Years in parentheses
         venue_lower = re.sub(r"'\d{2}$", '', venue_lower)  # Year suffixes like 'CVPR'16'
-        venue_lower = re.sub(r',?\s*vol\.\s*\d+.*$', '', venue_lower)  # Volume info
+        venue_lower = re.sub(r',?\s*vol\.?\s*\d+.*$', '', venue_lower)  # Volume info
         venue_lower = re.sub(r',?\s*\d+\(\d+\).*$', '', venue_lower)  # Issue info
         venue_lower = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_lower)  # Page info
         venue_lower = re.sub(r'\s*\(print\).*$', '', venue_lower)  # Print designation
