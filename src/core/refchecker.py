@@ -940,6 +940,9 @@ class ArxivReferenceChecker:
             r'(?i)references\s*and\s*notes',  # References and Notes
             r'\\begin\{thebibliography\}',  # LaTeX bibliography environment
             r'\\bibliography\{[^}]+\}',  # BibTeX \bibliography{} command
+            # Roman numeral patterns
+            r'(?i)^\s*[IVX]+\.\s*references\s*$',  # "IX. References"
+            r'(?i)^\s*[IVX]+\s*references\s*$',   # "IX References"
             # Generic patterns that might match false positives - put at end
             r'(?i)sources',  # Sources (too generic, moved to end)
         ]
@@ -947,80 +950,116 @@ class ArxivReferenceChecker:
         # Try to find the bibliography section
         bibliography_text = None
         
+        # Collect all potential matches from all patterns
+        all_matches = []
         for pattern in section_patterns:
             matches = list(re.finditer(pattern, text))
-            if matches:
-                # Get the last match (in case there are multiple sections with similar names)
-                match = matches[-1]
-                start_pos = match.end()
-                
-                logger.debug(f"Found bibliography section with pattern: {pattern}")
-                logger.debug(f"Match: {match.group(0)}")
-                
-                # Find the next section heading or end of document
-                # Look for common section endings that come after references
-                next_section_patterns = [
-                    # High priority: Common supplementary material patterns
-                    r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
-                    r'\n\s*Supplementary\s+Material\s*\n',  
-                    r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
-                    r'\n\s*Supplemental\s+Material\s*\n',
-                    r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
-                    r'\n\s*Appendix\s*[A-Z]?\s*\n',
-                    r'\n\s*ACKNOWLEDGMENTS?\s*\n',
-                    r'\n\s*Acknowledgments?\s*\n',
-                    r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
-                    r'\n\s*Author\s+Contributions?\s*\n',
-                    # Pattern for "A Additional...", "B Supplementary...", etc.
-                    r'\n\s*[A-Z]\s+(?:Additional|Supplementary|Appendix|Extended|Extra|Further)\b[A-Za-z\s\-]*',
-                    # Pattern for appendix sections like "A Proofs for Section 2", "B Details", etc.
-                    r'\n\s*[A-Z]\s+(?:Proofs?|Details?|Derivations?|Calculations?|Algorithms?|Examples?|Experiments?|Implementation|Results?)\b[A-Za-z\s\-\d]*',
-                    # Original patterns
-                    r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
-                    r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
-                    r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|APPENDIX|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE|SURVEY|REVIEW|FUTURE|LIMITATION|CONTRIBUTION|INNOVATION|TECHNICAL|DETAILED|COMPLETE|EXTENDED)\b',  # Other section patterns
-                    # More specific pattern for numbered sections - only match section headers, not bibliography entries
-                    # Look for common section headers like "8. Appendix", "9. Conclusion" but not "8. Smith, J."
-                    r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS)\b[A-Za-z\s]*\n',
-                    r'\n\s*Appendix\s+[A-Z]',  # Appendix A
-                    # More restrictive pattern for bracketed sections - only match actual section headers
-                    # like [APPENDIX], [CONCLUSIONS] but not reference metadata like [Online], [cs], [PDF]
-                    r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM)\s*\]',
-                    # Pattern for consecutive capitalized lines that are clearly section headers (short and uppercase)
-                    r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',  # All caps sections like "APPENDIX\nALGORITHM"
-                    r'\\end\{thebibliography\}',  # LaTeX bibliography environment end
-                    r'\\end\{document\}',  # LaTeX document end
-                ]
-                
-                end_pos = len(text)  # Default to end of document
-                
-                for i, next_pattern in enumerate(next_section_patterns, 1):
-                    next_match = re.search(next_pattern, text[start_pos:])
-                    if next_match:
-                        section_end = start_pos + next_match.start()
-                        logger.debug(f"PATTERN {i} MATCHED: {next_pattern}")
-                        logger.debug(f"MATCHED TEXT: {repr(next_match.group(0))}")
-                        logger.debug(f"CONTEXT: {repr(text[section_end-30:section_end+30])}")
-                        # Only use this end position if it's reasonable (not too close to start)
-                        if section_end > start_pos + 100 and section_end < end_pos:
-                            end_pos = section_end
-                            logger.debug(f"ACCEPTED: End position set to {section_end}")
-                            break
-                        else:
-                            logger.debug(f"REJECTED: section_end={section_end}, start_pos={start_pos}, current_end={end_pos}")
-                
-                bibliography_text = text[start_pos:end_pos]
-                logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
-                
-                # Check if we have a reasonable amount of text
-                if len(bibliography_text.strip()) < 50:
-                    logger.warning(f"Bibliography section seems too short ({len(bibliography_text)} chars), trying another pattern")
-                    continue
-                
-                logger.debug(f"Bibliography section length: {len(bibliography_text)} chars")
-                logger.debug(f"Bibliography sample: {bibliography_text[:200]}...")
-                
-                break
+            for match in matches:
+                all_matches.append((pattern, match))
+        
+        if all_matches:
+            # Find the match that has [1] following it (indicating start of references)
+            best_match = None
+            best_pattern = None
+            
+            for pattern, match in all_matches:
+                test_start = match.end()
+                # Look for [1] within reasonable distance after the match
+                test_text = text[test_start:test_start + 100]
+                if '[1]' in test_text:
+                    best_match = match
+                    best_pattern = pattern
+                    break
+            
+            # If no match has [1] following it, fall back to the last match
+            if not best_match:
+                best_pattern, best_match = all_matches[-1]
+            
+            match = best_match
+            start_pos = match.end()
+            
+            logger.debug(f"Found bibliography section with pattern: {best_pattern}")
+            logger.debug(f"Match: {match.group(0)}")
+            
+            # Find the next section heading or end of document
+            # Look for common section endings that come after references
+            next_section_patterns = [
+                # High priority: Numbered sections that come after references
+                # But exclude repeated REFERENCES headers (page headers)
+                r'\n\s*\d+\s+(?!REFERENCES\s*REFERENCES\s*\n)[A-Z][A-Za-z\s]+\n',  # "3 PROMPT FOR MEDGPT", "4 Computation of..." but not "10 REFERENCES REFERENCES"
+                r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',  # "3.1 Subsection Title"
+                # High priority: Common supplementary material patterns
+                r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
+                r'\n\s*Supplementary\s+Material\s*\n',  
+                r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
+                r'\n\s*Supplemental\s+Material\s*\n',
+                r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
+                r'\n\s*Appendix\s*[A-Z]?\s*\n',
+                r'\n\s*ACKNOWLEDGMENTS?\s*\n',
+                r'\n\s*Acknowledgments?\s*\n',
+                r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
+                r'\n\s*Author\s+Contributions?\s*\n',
+                r'\n\s*DATA\s+AVAILABILITY\s*\n',
+                r'\n\s*Data\s+Availability\s*\n',
+                r'\n\s*CODE\s+AVAILABILITY\s*\n',
+                r'\n\s*Code\s+Availability\s*\n',
+                r'\n\s*SUPPORTING\s+INFORMATION\s*\n',
+                r'\n\s*Supporting\s+Information\s*\n',
+                r'\n\s*SUPPLEMENTARY\s+INFORMATION\s*\n',
+                r'\n\s*Supplementary\s+Information\s*\n',
+                r'\n\s*ETHICS\s+STATEMENT\s*\n',
+                r'\n\s*Ethics\s+Statement\s*\n',
+                r'\n\s*COMPETING\s+INTERESTS\s*\n',
+                r'\n\s*Competing\s+Interests\s*\n',
+                r'\n\s*FUNDING\s+INFORMATION\s*\n',
+                r'\n\s*Funding\s+Information\s*\n',
+                # Pattern for "A Additional...", "B Supplementary...", etc.
+                r'\n\s*[A-Z]\s+(?:Additional|Supplementary|Appendix|Extended|Extra|Further)\b[A-Za-z\s\-]*',
+                # Pattern for appendix sections like "A Proofs for Section 2", "B Details", etc.
+                r'\n\s*[A-Z]\s+(?:Proofs?|Details?|Derivations?|Calculations?|Algorithms?|Examples?|Experiments?|Implementation|Results?)\b[A-Za-z\s\-\d]*',
+                # Original patterns
+                r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
+                r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
+                r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|APPENDIX|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE|SURVEY|REVIEW|FUTURE|LIMITATION|CONTRIBUTION|INNOVATION|TECHNICAL|DETAILED|COMPLETE|EXTENDED)\b',  # Other section patterns
+                # More specific pattern for numbered sections - only match section headers, not bibliography entries
+                # Look for common section headers like "8. Appendix", "9. Conclusion" but not "8. Smith, J."
+                r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|DATA|CODE|SUPPORTING|COMPETING|AVAILABILITY|INFORMATION|STATEMENT|CONTRIBUTIONS?)\b[A-Za-z\s]*\n',
+                r'\n\s*Appendix\s+[A-Z]',  # Appendix A
+                # More restrictive pattern for bracketed sections - only match actual section headers
+                # like [APPENDIX], [CONCLUSIONS] but not reference metadata like [Online], [cs], [PDF]
+                r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM)\s*\]',
+                # Pattern for consecutive capitalized lines that are clearly section headers (short and uppercase)
+                r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',  # All caps sections like "APPENDIX\nALGORITHM"
+                r'\\end\{thebibliography\}',  # LaTeX bibliography environment end
+                r'\\end\{document\}',  # LaTeX document end
+            ]
+            
+            end_pos = len(text)  # Default to end of document
+            
+            for i, next_pattern in enumerate(next_section_patterns, 1):
+                next_match = re.search(next_pattern, text[start_pos:])
+                if next_match:
+                    section_end = start_pos + next_match.start()
+                    logger.debug(f"PATTERN {i} MATCHED: {next_pattern}")
+                    logger.debug(f"MATCHED TEXT: {repr(next_match.group(0))}")
+                    logger.debug(f"CONTEXT: {repr(text[section_end-30:section_end+30])}")
+                    # Only use this end position if it's reasonable (not too close to start)
+                    if section_end > start_pos + 100 and section_end < end_pos:
+                        end_pos = section_end
+                        logger.debug(f"ACCEPTED: End position set to {section_end}")
+                        break
+                    else:
+                        logger.debug(f"REJECTED: section_end={section_end}, start_pos={start_pos}, current_end={end_pos}")
+            
+            bibliography_text = text[start_pos:end_pos]
+            logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
+            
+            # Check if we have a reasonable amount of text
+            if len(bibliography_text.strip()) < 50:
+                logger.warning(f"Bibliography section seems too short ({len(bibliography_text)} chars)")
+            
+            logger.debug(f"Bibliography section length: {len(bibliography_text)} chars")
+            logger.debug(f"Bibliography sample: {bibliography_text[:200]}...")
         
         if bibliography_text is None:
             logger.warning("Could not find bibliography section with standard patterns")
@@ -2883,6 +2922,75 @@ class ArxivReferenceChecker:
         # If all else fails, return placeholder values
         return ["Unknown Author"], "Untitled Reference"
     
+    def _is_likely_reference(self, text):
+        """
+        Check if a numbered item is likely a bibliographic reference
+        and not section headers, figure captions, etc.
+        
+        Args:
+            text: The text to check (including the [N] number)
+            
+        Returns:
+            bool: True if it looks like a reference, False otherwise
+        """
+        # Remove the reference number for analysis
+        content = re.sub(r'^\[\d+\]\s*', '', text).strip()
+        
+        # If too short, probably not a reference
+        if len(content) < 20:
+            return False
+            
+        # Check for clear non-reference patterns
+        non_reference_patterns = [
+            r'^[A-Z\s]+$',  # All caps (section headers like "PROMPT FOR MEDGPT")
+            r'^[A-Z][a-z]*\s+[a-z][a-z\s]*$',  # Title case section headers
+            r'^(Computation|Prompt|Example|Figure|Table|Algorithm)\s+',  # Common section prefixes
+            r'^[A-Za-z\s]+:$',  # Section headers ending with colon
+            r'^\d+\.\d+\s+[A-Z]',  # Subsection numbers like "3.1 Title"
+        ]
+        
+        for pattern in non_reference_patterns:
+            if re.match(pattern, content):
+                return False
+        
+        # Check for positive reference indicators
+        reference_indicators = [
+            r'\b(19|20)\d{2}\b',  # Years
+            r'\bet\s+al\.?\b',    # "et al."
+            r'\bvol\.?\s*\d+\b',  # Volume numbers
+            r'\bpp\.?\s*\d+',     # Page numbers
+            r'\bdoi[:.]',         # DOI
+            r'https?://',         # URLs
+            r'\barXiv\b',         # arXiv preprints
+            r'\bProc\.?\s+of\b',  # "Proceedings of"
+            r'\bJ\.\s+[A-Z]',     # Journal abbreviations like "J. Med"
+            r'[A-Z][a-z]+,\s*[A-Z]',  # Author names like "Smith, J"
+        ]
+        
+        # Count positive indicators
+        indicator_count = sum(1 for pattern in reference_indicators if re.search(pattern, content))
+        
+        # If it has multiple reference indicators, likely a reference
+        if indicator_count >= 2:
+            return True
+        
+        # If it has at least one indicator and reasonable length, probably a reference
+        if indicator_count >= 1 and len(content) > 50:
+            return True
+            
+        # If no clear indicators but contains author-like patterns and reasonable length
+        author_patterns = [
+            r'[A-Z][a-z]+,\s*[A-Z]',  # "Smith, J"
+            r'[A-Z]\.\s*[A-Z][a-z]+',  # "J. Smith"
+        ]
+        
+        has_author_pattern = any(re.search(pattern, content) for pattern in author_patterns)
+        if has_author_pattern and len(content) > 30:
+            return True
+            
+        # Default to False for safety
+        return False
+
     def parse_references(self, bibliography_text):
         """
         Parse references from bibliography text
@@ -2970,6 +3078,17 @@ class ArxivReferenceChecker:
             # Ensure the last chunk is included if not already
             if numbered_refs[-1].strip() and not any(numbered_refs[-1].strip() in r for r in references):
                 references.append(numbered_refs[-1].strip())
+            # Additional defense: filter out numbered items that are clearly not references
+            validated_references = []
+            for ref in references:
+                if self._is_likely_reference(ref):
+                    validated_references.append(ref)
+                else:
+                    logger.debug(f"Filtered out non-reference item: {ref[:100]}...")
+            
+            logger.debug(f"Before validation: {len(references)} references")
+            logger.debug(f"After validation: {len(validated_references)} references")
+            references = validated_references
             logger.debug(f"Found {len(references)} numbered references")
         else:
             # Fallback to original logic if not numbered
@@ -3317,9 +3436,23 @@ class ArxivReferenceChecker:
         """
         Process references extracted by LLM with simplified formatting assumptions
         """
+        # Remove duplicates from LLM-extracted references first
+        seen = set()
+        unique_references = []
+        for ref in references:
+            # Convert to string for comparison
+            ref_str = str(ref) if not isinstance(ref, str) else ref
+            # Strip trailing # before comparison and normalize
+            ref_normalized = ref_str.strip().rstrip('#').strip().lower()
+            if ref_normalized not in seen and len(ref_normalized) > 10:
+                seen.add(ref_normalized)
+                unique_references.append(ref)
+        
+        logger.debug(f"Deduplicated {len(references)} references to {len(unique_references)} unique references")
+        
         processed_refs = []
         
-        for ref in references:
+        for ref in unique_references:
             # Handle case where ref might be a dict or other object
             if isinstance(ref, dict):
                 # Convert dict to string representation or extract relevant field
@@ -3993,7 +4126,11 @@ class ArxivReferenceChecker:
             venue = reference.get('venue', '')
             url = reference.get('url', '')
             doi = reference.get('doi', '')
-            print(f"[{i+1}/{len(bibliography)}] {title}")
+            # Extract actual reference number from raw text for accurate display
+            raw_text = reference.get('raw_text', '')
+            match = re.match(r'\[(\d+)\]', raw_text)
+            ref_num = match.group(1) if match else str(i + 1)
+            print(f"[{ref_num}/{len(bibliography)}] {title}")
             if authors:
                 print(f"       {authors}")
             if venue:

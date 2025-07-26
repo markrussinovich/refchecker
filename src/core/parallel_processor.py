@@ -282,7 +282,12 @@ class ParallelReferenceProcessor:
         url = reference.get('url', '')
         doi = reference.get('doi', '')
         
-        print(f"[{result.index + 1}/{self.total_references}] {title}")
+        # Extract actual reference number from raw text for accurate display
+        import re
+        raw_text = reference.get('raw_text', '')
+        match = re.match(r'\[(\d+)\]', raw_text)
+        ref_num = match.group(1) if match else str(result.index + 1)
+        print(f"[{ref_num}/{self.total_references}] {title}")
         if authors:
             print(f"       {authors}")
         if venue:

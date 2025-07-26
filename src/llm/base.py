@@ -48,19 +48,23 @@ class LLMProvider(ABC):
         raise NotImplementedError("Subclasses must implement _call_llm")
     
     def _chunk_bibliography(self, bibliography_text: str, max_tokens: int = 2000) -> List[str]:
-        """Split bibliography into equal-sized chunks for balanced parallel processing"""
+        """Split bibliography into balanced overlapping chunks to prevent reference loss at boundaries"""
         
         # Calculate target chunk size in characters (rough estimate: 1 token ≈ 4 characters)
         target_chunk_size = max_tokens * 4
         total_length = len(bibliography_text)
         
-        # Calculate number of chunks needed
+        # Calculate how many chunks we need for balanced processing
         num_chunks = max(1, (total_length + target_chunk_size - 1) // target_chunk_size)
         
-        # Calculate actual chunk size to distribute content evenly
-        actual_chunk_size = total_length // num_chunks
+        # Use overlap of ~10% of chunk size to ensure references aren't lost
+        overlap_size = target_chunk_size // 10
         
-        logger.debug(f"Bibliography length: {total_length} chars, creating {num_chunks} chunks of ~{actual_chunk_size} chars each")
+        # Calculate actual chunk size for balanced distribution
+        effective_chunk_size = (total_length + num_chunks - 1) // num_chunks
+        
+        logger.debug(f"Bibliography length: {total_length} chars, target: {target_chunk_size}, "
+                    f"creating {num_chunks} balanced chunks of ~{effective_chunk_size} chars with {overlap_size} overlap")
         
         chunks = []
         start = 0
@@ -69,38 +73,52 @@ class LLMProvider(ABC):
             if i == num_chunks - 1:
                 # Last chunk gets all remaining content
                 chunk = bibliography_text[start:].strip()
-            else:
-                # Calculate end position for this chunk
-                end = start + actual_chunk_size
-                
-                # Try to find a good breaking point near the target end position
-                # Look for line breaks within ±10% of the target position
-                search_window = actual_chunk_size // 10
-                search_start = max(start, end - search_window)
-                search_end = min(total_length, end + search_window)
-                
-                # Find the best line break within the search window
-                best_break = end
-                text_section = bibliography_text[search_start:search_end]
-                
-                # Look for line breaks (prioritize double newlines, then single)
-                double_newline_pos = text_section.rfind('\n\n')
-                single_newline_pos = text_section.rfind('\n')
-                
-                if double_newline_pos != -1:
-                    best_break = search_start + double_newline_pos + 2
-                elif single_newline_pos != -1:
-                    best_break = search_start + single_newline_pos + 1
-                
-                # Extract chunk and clean it up
-                chunk = bibliography_text[start:best_break].strip()
-                start = best_break
+                if chunk and len(chunk) > 50:
+                    chunks.append(chunk)
+                    logger.debug(f"Chunk {len(chunks)} (final): {len(chunk)} characters")
+                break
             
-            if chunk:  # Only add non-empty chunks
+            # Calculate end position for this chunk
+            end = min(start + effective_chunk_size, total_length)
+            
+            # Look for reference boundaries within reasonable distance
+            search_window = effective_chunk_size // 5  # Look within 20% of target size
+            search_start = max(start, end - search_window)
+            search_end = min(total_length, end + search_window)
+            
+            text_section = bibliography_text[search_start:search_end]
+            
+            # Find the latest reference start pattern like "\n[32]"
+            best_break = end
+            ref_boundary_matches = list(re.finditer(r'\n\[\d+\]', text_section))
+            if ref_boundary_matches:
+                # Use the last reference boundary found within the search window
+                last_match = ref_boundary_matches[-1]
+                best_break = search_start + last_match.start() + 1  # +1 to include the \n
+            
+            # Extract chunk
+            chunk = bibliography_text[start:best_break].strip()
+            
+            if chunk and len(chunk) > 50:
                 chunks.append(chunk)
-                logger.debug(f"Chunk {i+1}: {len(chunk)} characters")
+                logger.debug(f"Chunk {len(chunks)}: {len(chunk)} characters, starts with: {chunk[:60]}...")
+            
+            # For next chunk, start with overlap but ensure we're at a reference boundary
+            next_start = best_break - overlap_size
+            # Find the nearest reference start at or after next_start
+            if next_start > 0:
+                remaining_text = bibliography_text[next_start:]
+                ref_match = re.search(r'\n\[\d+\]', remaining_text)
+                if ref_match:
+                    next_start = next_start + ref_match.start() + 1  # +1 to include the \n
+                else:
+                    next_start = best_break
+            else:
+                next_start = best_break
+            
+            start = next_start
         
-        logger.debug(f"Created {len(chunks)} balanced chunks for parallel processing")
+        logger.debug(f"Created {len(chunks)} balanced overlapping chunks for parallel processing")
         return chunks
     
     def _parse_llm_response(self, response_text: str) -> List[str]:
@@ -150,14 +168,25 @@ class LLMProvider(ABC):
             # Process chunks in parallel
             all_references = self._process_chunks_parallel(chunks)
             
-            # Remove duplicates while preserving order
-            seen = set()
+            # Remove duplicates while preserving order based on reference numbers
+            seen_ref_nums = set()
             unique_references = []
             for ref in all_references:
-                ref_normalized = ref.strip().lower()
-                if ref_normalized not in seen:
-                    seen.add(ref_normalized)
-                    unique_references.append(ref)
+                # Extract reference number for more robust deduplication
+                ref_num_match = re.search(r'\[(\d+)\]', ref)
+                if ref_num_match:
+                    ref_num = ref_num_match.group(1)
+                    if ref_num not in seen_ref_nums:
+                        seen_ref_nums.add(ref_num)
+                        unique_references.append(ref)
+                    else:
+                        logger.debug(f"Skipping duplicate reference [{ref_num}]: {ref[:100]}...")
+                else:
+                    # Fallback to text-based deduplication for references without numbers
+                    ref_normalized = ref.strip().lower()
+                    if ref_normalized not in seen_ref_nums:
+                        seen_ref_nums.add(ref_normalized)
+                        unique_references.append(ref)
             
             logger.debug(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
             return unique_references
