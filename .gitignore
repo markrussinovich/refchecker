@@ -121,6 +121,7 @@ tmp/
 *.tmp
 *.temp
 models/
+reference_errors.txt
 
 # IDE
 .vscode/
