@@ -999,6 +999,11 @@ class ArxivReferenceChecker:
             # Find the next section heading or end of document
             # Look for common section endings that come after references
             next_section_patterns = [
+                # HIGH PRIORITY: Appendix patterns that appear at the end of bibliography
+                # General pattern for single letter appendix sections - must come FIRST to catch earliest occurrence
+                r'\n\s*[A-Z]\s+[A-Z][a-z][a-z]+(?:\s+[A-Z][a-z]+)*\s*\n',  # "A Theoretical Analysis", "B Implementation Details", "C Evaluation Details"
+                # Specific patterns (kept for backwards compatibility but won't be reached in most cases)
+                r'\n\s*[A-Z]\s+Evaluation\s+Details\s*\n',  # Specific "C Evaluation Details"
                 # Note: Removed problematic pattern that was matching page numbers in bibliography
                 r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',  # "3.1 Subsection Title"
                 # High priority: Common supplementary material patterns
@@ -3602,17 +3607,8 @@ class ArxivReferenceChecker:
         """
         Process references extracted by LLM with simplified formatting assumptions
         """
-        # Remove duplicates from LLM-extracted references first
-        seen = set()
-        unique_references = []
-        for ref in references:
-            # Convert to string for comparison
-            ref_str = str(ref) if not isinstance(ref, str) else ref
-            # Strip trailing # before comparison and normalize
-            ref_normalized = ref_str.strip().rstrip('#').strip().lower()
-            if ref_normalized not in seen and len(ref_normalized) > 10:
-                seen.add(ref_normalized)
-                unique_references.append(ref)
+        # Remove duplicates from LLM-extracted references using enhanced segment-based matching
+        unique_references = self._deduplicate_references_with_segment_matching(references)
         
         logger.debug(f"Deduplicated {len(references)} references to {len(unique_references)} unique references")
         
@@ -3638,6 +3634,117 @@ class ArxivReferenceChecker:
                 processed_refs.append(structured_ref)
         
         return processed_refs
+    
+    def _deduplicate_references_with_segment_matching(self, references):
+        """
+        Enhanced deduplication using segment-based matching to handle chunk boundary issues.
+        
+        Treats references as duplicates if:
+        1. Title segments match exactly (case-insensitive)
+        2. Either author segments match exactly OR one author segment is a substring of the other
+           (handles cases where chunking cuts through author lists)
+        """
+        unique_references = []
+        seen_segments = []
+        
+        for ref in references:
+            # Convert to string for comparison
+            ref_str = str(ref) if not isinstance(ref, str) else ref
+            
+            # Skip very short references
+            if not ref_str or len(ref_str.strip()) < 10:
+                continue
+                
+            # Parse segments from reference (format: authors # title # venue # year)
+            segments = self._parse_reference_segments(ref_str)
+            
+            # Check if this reference is a duplicate of any previously seen reference
+            is_duplicate = False
+            for seen_ref, seen_segments_data in seen_segments:
+                if self._are_references_duplicates(segments, seen_segments_data):
+                    logger.debug(f"Duplicate detected: '{ref_str[:80]}...' matches '{seen_ref[:80]}...'")
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                unique_references.append(ref)
+                seen_segments.append((ref_str, segments))
+        
+        return unique_references
+    
+    def _parse_reference_segments(self, ref_str):
+        """Parse reference into segments, normalizing for comparison"""
+        # Strip trailing # and normalize
+        clean_ref = ref_str.strip().rstrip('#').strip()
+        
+        # Split by # to get segments
+        segments = [seg.strip().lower() for seg in clean_ref.split('#') if seg.strip()]
+        
+        return {
+            'author': segments[0] if len(segments) > 0 else '',
+            'title': segments[1] if len(segments) > 1 else '',
+            'venue': segments[2] if len(segments) > 2 else '',
+            'year': segments[3] if len(segments) > 3 else '',
+            'raw_segments': segments
+        }
+    
+    def _are_references_duplicates(self, seg1, seg2):
+        """
+        Check if two reference segments represent the same reference.
+        
+        Enhanced logic:
+        - If titles match exactly, they are considered duplicates (primary criterion)
+        - Special handling for author chunk boundary issues by checking substring/overlap
+        """
+        # Title must match exactly (case-insensitive) - primary criterion
+        if not seg1['title'] or not seg2['title']:
+            # If either has no title, can't reliably determine if duplicate
+            return False
+            
+        # If titles match exactly, consider them duplicates
+        # This handles the case where the same paper appears multiple times
+        if seg1['title'] == seg2['title']:
+            return True
+        
+        # Alternative: Check if we have exact author match with different titles
+        # (This is less common but handles cases where title extraction varies)
+        author1 = seg1['author']
+        author2 = seg2['author']
+        
+        if author1 and author2 and author1 == author2:
+            # Same authors - check if one title is substring of other or significant similarity
+            title1 = seg1['title']
+            title2 = seg2['title']
+            
+            if (title1 in title2 or title2 in title1):
+                return True
+        
+        return False
+    
+    def _check_author_overlap(self, author1, author2):
+        """
+        Check if two author strings have significant overlap, indicating they're 
+        likely the same author list with one being truncated due to chunking.
+        """
+        # Split into individual author names
+        authors1 = [name.strip().lower() for name in author1.replace(',', ' ').split() if name.strip()]
+        authors2 = [name.strip().lower() for name in author2.replace(',', ' ').split() if name.strip()]
+        
+        # If either list is too short, require exact match
+        if len(authors1) < 3 or len(authors2) < 3:
+            return False
+        
+        # Calculate overlap
+        set1 = set(authors1)
+        set2 = set(authors2)
+        
+        overlap = len(set1.intersection(set2))
+        min_length = min(len(set1), len(set2))
+        
+        # Require at least 50% overlap and at least 2 matching names
+        overlap_ratio = overlap / min_length if min_length > 0 else 0
+        
+        return overlap >= 2 and overlap_ratio >= 0.5
     
     def _clean_llm_author_text(self, author_text):
         """
