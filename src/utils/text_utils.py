@@ -2181,9 +2181,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             # Look for standalone uppercase acronyms in the text (e.g., "Proc. of LICS")
             standalone_matches = re.findall(r'\b([A-Z]{2,8})\b', text)
             acronyms.extend([acr.lower() for acr in standalone_matches])
-            # DEBUG: Print what we found
-            if standalone_matches:
-                print(f"DEBUG: Found acronyms in '{text}': {standalone_matches}")
+            # Add standalone acronyms found in text
             
             return list(set(acronyms))  # Remove duplicates
         
@@ -2200,9 +2198,6 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             
             # Method 1: Standard acronym generation
             standard_acronym = create_acronym_from_title(normalized_full)
-            print(f"DEBUG: check_acronym_against_full_name('{acronym}', '{full_text}')")
-            print(f"  normalized_full: '{normalized_full}'")
-            print(f"  standard_acronym: '{standard_acronym}'")
             if standard_acronym:
                 possible_acronyms.append(standard_acronym)
             
