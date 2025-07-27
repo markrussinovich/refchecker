@@ -49,7 +49,6 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - [📊 Output and Results](#-output-and-results)
 - [⚙️ Configuration](#-configuration)
 - [🗄️ Local Database Setup](#-local-database-setup)
-- [🧪 Testing and Validation](#-testing-and-validation)
 - [📄 License](#-license)
 
 ## 🎯 Features
@@ -425,42 +424,6 @@ python download_semantic_scholar_db.py \
 - **`--fields`**: Metadata fields to include
 - **`--query`**: Search query for specific papers
 - **`--start-year`/`--end-year`**: Year range filter
-
-
-## 🧪 Testing and Validation
-
-### Run Validation Tests
-
-```bash
-# Test with comprehensive reference validation suite
-python tests/validate_refchecker.py --db-path semantic_scholar_db/semantic_scholar.db
-
-# Test without database (uses enhanced hybrid mode)
-python tests/validate_refchecker.py
-
-# Test specific papers
-python tests/validate_papers.py --paper attention --db-path semantic_scholar_db/semantic_scholar.db
-python tests/validate_papers.py --paper custom --arxiv-id 1706.03762
-
-# Test local database functionality
-python tests/validate_local_db.py --db-path semantic_scholar_db/semantic_scholar.db
-
-# Test with debug mode for detailed output
-python tests/validate_refchecker.py --debug
-```
-
-### Validation Scripts
-
-- **`tests/validate_refchecker.py`**: Comprehensive validation suite with known good/bad references
-- **`tests/validate_papers.py`**: Tests with specific papers (attention, website references, custom papers)  
-- **`tests/validate_local_db.py`**: Local database functionality and integrity checks
-- **`tests/validate_attention_paper.py`**: Specific validation of "Attention Is All You Need" paper
-
-All validation scripts support:
-- Local database testing (`--db-path`)
-- Enhanced hybrid mode testing (default)
-- Debug output (`--debug`)
-- API key configuration
 
 ## 📄 License
 
