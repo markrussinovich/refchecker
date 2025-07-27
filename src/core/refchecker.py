@@ -691,12 +691,26 @@ class ArxivReferenceChecker:
                 self.is_bibtex = path.lower().endswith('.bib')
                 
                 if is_url:
-                    # Extract filename from URL for title
+                    # Extract meaningful title from URL
                     url_path = urlparse(path).path
                     filename = os.path.splitext(os.path.basename(url_path))[0]
-                    if not filename:
-                        filename = "downloaded_pdf"
-                    self.title = filename.replace('_', ' ').title()
+                    
+                    # Handle repository URLs that end with generic names like "content"
+                    if not filename or filename.lower() in ['content', 'download', 'pdf']:
+                        # Try to extract from the domain and path
+                        parsed = urlparse(path)
+                        if 'repository' in parsed.netloc:
+                            domain_parts = parsed.netloc.split('.')
+                            # Find the institution name (usually the second part in repository.institution.edu)
+                            if len(domain_parts) >= 2 and domain_parts[0] == 'repository':
+                                institution = domain_parts[1] if domain_parts[1] else 'Repository'
+                            else:
+                                institution = domain_parts[0] if domain_parts else 'Repository'
+                            self.title = f"{institution.upper()} Repository PDF"
+                        else:
+                            self.title = "Downloaded PDF"
+                    else:
+                        self.title = filename.replace('_', ' ').title()
                 else:
                     # Extract filename without extension for title
                     filename = os.path.splitext(os.path.basename(path))[0]
@@ -923,6 +937,7 @@ class ArxivReferenceChecker:
             r'(?i)\d+\s*ref\s*er\s*ences\s*\n',  # "12 Refer ences" with spaces
             r'(?i)\d+\s*references\s*\n',  # "12References" or "12 References"
             r'(?i)^\s*\d+\.\s*references\s*$',  # Numbered section: "7. References"
+            r'(?i)\d+\s+references\s*\.',  # "9 References." format used in Georgia Tech paper
             # Standard reference patterns
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
@@ -2571,10 +2586,16 @@ class ArxivReferenceChecker:
                 # Set single paper mode
                 self.single_paper_mode = True
                                 
+                # Determine appropriate URL for display
+                if local_pdf_path.startswith('http'):
+                    display_url = local_pdf_path  # Use original URL for HTTP(S) links
+                else:
+                    display_url = f"file://{os.path.abspath(local_pdf_path)}"  # Use file:// for local files
+                
                 self.current_paper_info = {
                     'title': paper.title,
                     'id': paper.get_short_id(),
-                    'url': f"file://{os.path.abspath(local_pdf_path)}",
+                    'url': display_url,
                     'authors': ', '.join(paper.authors) if paper.authors else 'Unknown',
                     'year': paper.published.year
                 }
@@ -4326,7 +4347,11 @@ def main():
     if args.paper:
         if args.paper.startswith('http'):
             # Check if it's a PDF URL first
-            if args.paper.lower().endswith('.pdf') or 'pdf' in args.paper.lower():
+            if (args.paper.lower().endswith('.pdf') or 
+                'pdf' in args.paper.lower() or
+                '/content' in args.paper or  # Repository URLs often end with /content
+                'bitstreams' in args.paper or  # DSpace repository URLs
+                args.paper.endswith('/download')):  # Common download endpoint
                 # This is a PDF URL - we'll download it and process as a local PDF
                 local_pdf_path = args.paper  # Store the URL, we'll handle download later
             else:
