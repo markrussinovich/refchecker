@@ -2065,6 +2065,63 @@ class ArxivReferenceChecker:
                 formatted_errors.append(formatted_error)
             return formatted_errors if formatted_errors else [{"error_type": "unverified", "error_details": "GitHub repository could not be verified"}], paper_url, None
 
+    def verify_webpage_reference(self, reference):
+        """
+        Verify if a reference is a web page reference
+        
+        Args:
+            reference: The reference to verify
+            
+        Returns:
+            Tuple of (errors, url, verified_data) if this is a web page reference,
+            None if this is not a web page reference
+        """
+        # Check if this is a web page reference
+        web_url = reference.get('url', '').strip()
+        if not web_url:
+            return None  # No URL to check
+        
+        # Import and use web page checker
+        from checkers.webpage_checker import WebPageChecker
+        webpage_checker = WebPageChecker()
+        
+        if not webpage_checker.is_web_page_url(web_url):
+            return None  # Not a web page reference
+        
+        logger.debug(f"Detected web page URL, using web page verification: {web_url}")
+        
+        verified_data, errors, page_url = webpage_checker.verify_reference(reference)
+        
+        if verified_data:
+            logger.debug(f"Web page verification successful for: {reference.get('title', 'Untitled')}")
+            # Convert errors to our format if needed
+            formatted_errors = []
+            for error in errors:
+                formatted_error = {}
+                
+                # Handle error_type and warning_type properly
+                if 'error_type' in error:
+                    formatted_error['error_type'] = error['error_type']
+                    formatted_error['error_details'] = error['error_details']
+                elif 'warning_type' in error:
+                    formatted_error['warning_type'] = error['warning_type']
+                    formatted_error['warning_details'] = error['warning_details']
+                
+                formatted_errors.append(formatted_error)
+            
+            return formatted_errors if formatted_errors else None, page_url, verified_data
+        else:
+            logger.debug(f"Web page verification failed for: {reference.get('title', 'Untitled')}")
+            # Return web page verification errors
+            formatted_errors = []
+            for error in errors:
+                formatted_error = {}
+                if 'error_type' in error:
+                    formatted_error['error_type'] = error['error_type']
+                    formatted_error['error_details'] = error['error_details']
+                formatted_errors.append(formatted_error)
+            return formatted_errors if formatted_errors else [{"error_type": "unverified", "error_details": "Web page could not be verified"}], page_url, None
+
     def verify_reference_standard(self, source_paper, reference):
         """
         Verify if a reference is accurate using GitHub, Semantic Scholar, or other checkers
@@ -2085,6 +2142,11 @@ class ArxivReferenceChecker:
         github_result = self.verify_github_reference(reference)
         if github_result:
             return github_result
+        
+        # Next, check if this is a web page reference
+        webpage_result = self.verify_webpage_reference(reference)
+        if webpage_result:
+            return webpage_result
         
         # Use the Semantic Scholar client to verify the reference
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
@@ -3136,14 +3198,17 @@ class ArxivReferenceChecker:
         # Check if the text ends with a reference number followed by content
         if re.search(r'\[\d+\][^[]*$', normalized_bib):
             # The last reference is incomplete, try to find a better ending
-            # Look for the last complete sentence or period
+            # Look for the last complete sentence or period, but avoid truncating file extensions
             last_period = normalized_bib.rfind('.')
             if last_period > 0:
-                # Find the last reference number before this period
-                last_ref_match = re.search(r'\[\d+\][^[]*?\.', normalized_bib[:last_period+1])
-                if last_ref_match:
-                    # Truncate at the last complete reference
-                    normalized_bib = normalized_bib[:last_period+1]
+                # Check if this period is part of a file extension
+                text_after_period = normalized_bib[last_period+1:last_period+5]  # Check next 4 chars
+                if not re.match(r'^[a-zA-Z]{2,4}$', text_after_period):
+                    # Find the last reference number before this period
+                    last_ref_match = re.search(r'\[\d+\][^[]*?\.', normalized_bib[:last_period+1])
+                    if last_ref_match:
+                        # Truncate at the last complete reference
+                        normalized_bib = normalized_bib[:last_period+1]
         
         numbered_ref_pattern = r'(\[\d+\])'
         numbered_refs = re.split(numbered_ref_pattern, normalized_bib)
@@ -3158,13 +3223,15 @@ class ArxivReferenceChecker:
             for part in numbered_refs:
                 if re.match(r'^\[\d+\]$', part):
                     if temp:
-                        references.append(''.join(temp).strip())
+                        joined_ref = ''.join(temp).strip()
+                        references.append(joined_ref)
                         temp = []
                     temp.append(part)
                 else:
                     temp.append(part)
             if temp:
-                references.append(''.join(temp).strip())
+                joined_ref = ''.join(temp).strip()
+                references.append(joined_ref)
             # Remove empty or very short entries, but be less aggressive to preserve order
             references = [r for r in references if len(r.strip()) > 10 and not re.match(r'^\[\d+\]$', r.strip())]
             # Ensure the last chunk is included if not already
@@ -3233,8 +3300,10 @@ class ArxivReferenceChecker:
             if not url:
                 return url
             url = url.strip()
-            # Remove trailing punctuation
-            url = re.sub(r'[\.,;:]+$', '', url)
+            # Remove trailing punctuation, but preserve file extensions
+            # Only remove trailing punctuation if it's not part of a file extension
+            if not re.search(r'\.[a-zA-Z]{2,4}$', url):
+                url = re.sub(r'[\.,;:]+$', '', url)
             # Fix common malformed DOI/URL
             if url.startswith('https://doi') and not re.match(r'https://doi.org/\S+', url):
                 url = ''
@@ -3265,7 +3334,7 @@ class ArxivReferenceChecker:
             r'DOI:([^\s,\)]+)',
         ]
         url_patterns = [
-            r'https?://(?!arxiv\.org)[^\s,\)]+(?:\.(?=\s|$))?',
+            r'https?://(?!arxiv\.org)[^\s,\)]+',
         ]
         for i, ref in enumerate(references):
             logger.debug(f"Processing reference {i+1}: {ref[:100]}...")
@@ -3389,7 +3458,8 @@ class ArxivReferenceChecker:
                     for pattern in url_patterns:
                         url_match = re.search(pattern, ref)
                         if url_match:
-                            url = clean_url(url_match.group(0))
+                            raw_url = url_match.group(0)
+                            url = clean_url(raw_url)
                             break
                     
                     # Handle multi-line URLs specifically
@@ -3407,7 +3477,11 @@ class ArxivReferenceChecker:
                             # (alphanumeric characters, hyphens, slashes, etc.)
                             if re.match(r'^[a-zA-Z0-9\-_/.=?&%\n\s]+\s*\.?\s*$', remaining_ref):
                                 # Combine the URL parts, removing newlines and spaces
-                                url_continuation = re.sub(r'\s+', '', remaining_ref.rstrip('.'))
+                                # Don't strip dots from URLs as they might be file extensions
+                                url_continuation = re.sub(r'\s+', '', remaining_ref.strip())
+                                # Only remove trailing dot if it's not part of a file extension
+                                if url_continuation.endswith('.') and not re.search(r'\.[a-zA-Z]{2,4}\.?$', url_continuation):
+                                    url_continuation = url_continuation.rstrip('.')
                                 url = url_start + url_continuation
                 if url or doi:
                     logger.debug(f"Found non-arXiv reference {i+1}: {url or doi}")
