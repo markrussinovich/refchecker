@@ -64,10 +64,10 @@ class PDFProcessor:
             return self.cache[pdf_path]
         
         try:
-            import PyPDF2
+            import pypdf
             
             with open(pdf_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
+                pdf_reader = pypdf.PdfReader(file)
                 text = ""
                 
                 for page_num in range(len(pdf_reader.pages)):
@@ -80,7 +80,7 @@ class PDFProcessor:
                 return text
                 
         except ImportError:
-            logger.error("PyPDF2 not installed. Install with: pip install PyPDF2")
+            logger.error("pypdf not installed. Install with: pip install pypdf")
             raise
         except Exception as e:
             logger.error(f"Error extracting text from PDF {pdf_path}: {e}")

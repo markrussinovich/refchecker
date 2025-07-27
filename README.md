@@ -49,6 +49,8 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - [📊 Output and Results](#-output-and-results)
 - [⚙️ Configuration](#-configuration)
 - [🗄️ Local Database Setup](#-local-database-setup)
+- [🧪 Testing](#-testing)
+- [📦 Building the Package](#-building-the-package)
 - [📄 License](#-license)
 
 ## 🎯 Features
@@ -424,6 +426,81 @@ python download_semantic_scholar_db.py \
 - **`--fields`**: Metadata fields to include
 - **`--query`**: Search query for specific papers
 - **`--start-year`/`--end-year`**: Year range filter
+
+## 🧪 Testing
+
+RefChecker includes a comprehensive test suite with 124 tests covering unit, integration, and end-to-end scenarios. The tests ensure reliability across all components and provide examples of how to use the system.
+
+### Quick Test Run
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run specific test categories
+pytest tests/unit/              # Unit tests only
+pytest tests/integration/       # Integration tests only  
+pytest tests/e2e/              # End-to-end tests only
+
+# Run with coverage
+pytest --cov=src --cov-report=html tests/
+
+# Run tests in parallel (if pytest-xdist installed)
+pytest -n auto tests/
+```
+
+### Test Categories
+
+- **Unit Tests** (47 tests): Individual components like text utilities, error handling, and reference extraction
+- **Integration Tests** (63 tests): API interactions, LLM providers, and component integration  
+- **End-to-End Tests** (14 tests): Complete workflows, performance testing, and edge cases
+
+### Test Structure
+
+```
+tests/
+├── unit/                   # Unit tests for individual components
+├── integration/            # Integration tests for APIs and services
+├── e2e/                   # End-to-end workflow tests
+├── fixtures/              # Test data and mock objects
+└── README.md              # Detailed testing documentation
+```
+
+For detailed testing information, test execution options, and guidance on writing new tests, see the **[Testing Documentation](tests/README.md)**.
+
+## 📦 Building the Package
+
+To build RefChecker for distribution:
+
+```bash
+# Install build tool if needed
+pip install build
+
+# Build wheel and source distribution
+python -m build
+```
+
+The built packages will be available in the `dist/` directory.
+
+### Publishing to PyPI
+
+To publish the package for testing and distribution:
+
+```bash
+# Install twine for uploading
+pip install twine
+
+# Upload to Test PyPI first (recommended)
+twine upload --repository testpypi dist/*
+
+# Test install from Test PyPI
+pip install --index-url https://test.pypi.org/simple/ refchecker
+
+# Upload to production PyPI
+twine upload dist/*
+```
+
+**Note**: You'll need accounts on [Test PyPI](https://test.pypi.org/) and [PyPI](https://pypi.org/), and API tokens for authentication. Set up authentication with `~/.pypirc` or use `--username` and `--password` flags.
 
 ## 📄 License
 

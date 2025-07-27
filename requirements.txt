@@ -2,7 +2,7 @@
 numpy<2  # Pin to NumPy 1.x for compatibility with compiled modules
 requests>=2.25.0
 beautifulsoup4>=4.9.0
-PyPDF2>=3.0.0
+pypdf>=5.0.0
 arxiv>=1.4.0
 python-dateutil>=2.8.0
 tqdm>=4.60.0

@@ -36,7 +36,7 @@ import logging
 import os
 from urllib.parse import urlparse
 from tqdm import tqdm
-import PyPDF2
+import pypdf
 import pdfplumber
 import io
 import argparse
@@ -894,10 +894,10 @@ class ArxivReferenceChecker:
             return None
             
         try:
-            # Try with PyPDF2 first
+            # Try with pypdf first
             text = ""
             pdf_content.seek(0)  # Reset file pointer
-            pdf_reader = PyPDF2.PdfReader(pdf_content)
+            pdf_reader = pypdf.PdfReader(pdf_content)
             
             for page_num in range(len(pdf_reader.pages)):
                 page = pdf_reader.pages[page_num]
@@ -905,7 +905,7 @@ class ArxivReferenceChecker:
             
             return text
         except Exception as e:
-            logger.error(f"Error extracting text with PyPDF2: {str(e)}")
+            logger.error(f"Error extracting text with pypdf: {str(e)}")
             
             try:
                 # Try with pdfplumber as a fallback
