@@ -57,10 +57,10 @@ from .db_connection_pool import ThreadSafeLocalChecker
 
 # Import version from package
 try:
-    from .. import __version__
+    from ..__version__ import __version__
 except ImportError:
     # Fallback if running as script
-    __version__ = "1.2.1"
+    __version__ = "1.2.2"
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def get_llm_api_key_interactive(provider: str) -> str:

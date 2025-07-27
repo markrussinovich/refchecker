@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "refchecker"
-version = "1.2.1"
+dynamic = ["version"]
 description = "A comprehensive tool for validating reference accuracy in academic papers"
 readme = "README.md"
 license = "MIT"
@@ -81,6 +81,9 @@ refchecker = "core.refchecker:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "__version__.__version__"}
 
 [tool.setuptools.package-data]
 "*" = ["*.txt", "*.md", "*.conf", "*.py"]
