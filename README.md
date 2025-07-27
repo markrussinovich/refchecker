@@ -299,6 +299,14 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
            ❌  arxiv_id: Incorrect ArXiv ID: ArXiv ID 2503.01234 points to 'Self-Adaptive Gamma Context-Aware SSM-based Model for Metal Defect Detection'
     ```
   - `doi`: DOI mismatches
+    ```
+    [12/19] Attention Is All You Need
+           Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin
+           Neural Information Processing Systems
+           2017
+           https://doi.org/10.5555/3295222.3295349
+           ❌  doi: DOI mismatch: cited as '10.5555/3295222.3295349' but actually '10.48550/arXiv.1706.03762'
+    ```
 
 - **⚠️ Warnings**: Minor issues that may need attention
   - `year`: Publication year differences (common due to multiple paper versions)
