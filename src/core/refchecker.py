@@ -1998,9 +1998,76 @@ class ArxivReferenceChecker:
         return self.verify_reference_standard(source_paper, reference)
     
 
+    def verify_github_reference(self, reference):
+        """
+        Verify if a reference is a GitHub repository reference
+        
+        Args:
+            reference: The reference to verify
+            
+        Returns:
+            Tuple of (errors, url, verified_data) if this is a GitHub reference,
+            None if this is not a GitHub reference
+        """
+        # Check if this is a GitHub repository reference
+        github_url = None
+        if reference.get('url') and 'github.com' in reference['url']:
+            github_url = reference['url']
+        elif reference.get('venue') and 'github.com' in reference.get('venue', ''):
+            # Sometimes GitHub URLs are in the venue field
+            venue_parts = reference['venue'].split()
+            for part in venue_parts:
+                if 'github.com' in part:
+                    github_url = part
+                    break
+        
+        if not github_url:
+            return None  # Not a GitHub reference
+        
+        logger.debug(f"Detected GitHub URL, using GitHub verification: {github_url}")
+        
+        # Import and use GitHub checker
+        from checkers.github_checker import GitHubChecker
+        github_checker = GitHubChecker()
+        verified_data, errors, paper_url = github_checker.verify_reference(reference)
+        
+        if verified_data:
+            logger.debug(f"GitHub verification successful for: {reference.get('title', 'Untitled')}")
+            # Convert errors to our format if needed
+            formatted_errors = []
+            for error in errors:
+                formatted_error = {}
+                
+                # Handle error_type and warning_type properly
+                if 'error_type' in error:
+                    formatted_error['error_type'] = error['error_type']
+                    formatted_error['error_details'] = error['error_details']
+                elif 'warning_type' in error:
+                    formatted_error['warning_type'] = error['warning_type']
+                    formatted_error['warning_details'] = error['warning_details']
+                
+                # Add correct information based on error type
+                if error.get('warning_type') == 'year':
+                    formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
+                
+                formatted_errors.append(formatted_error)
+            
+            return formatted_errors if formatted_errors else None, paper_url, verified_data
+        else:
+            logger.debug(f"GitHub verification failed for: {reference.get('title', 'Untitled')}")
+            # Return GitHub verification errors
+            formatted_errors = []
+            for error in errors:
+                formatted_error = {}
+                if 'error_type' in error:
+                    formatted_error['error_type'] = error['error_type']
+                    formatted_error['error_details'] = error['error_details']
+                formatted_errors.append(formatted_error)
+            return formatted_errors if formatted_errors else [{"error_type": "unverified", "error_details": "GitHub repository could not be verified"}], paper_url, None
+
     def verify_reference_standard(self, source_paper, reference):
         """
-        Verify if a reference is accurate using Semantic Scholar
+        Verify if a reference is accurate using GitHub, Semantic Scholar, or other checkers
         
         Args:
             source_paper: The paper containing the reference
@@ -2013,6 +2080,11 @@ class ArxivReferenceChecker:
             - verified_data: The verified paper data from the verification service, None if not found
         """
         logger.debug(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
+        
+        # First, check if this is a GitHub repository reference
+        github_result = self.verify_github_reference(reference)
+        if github_result:
+            return github_result
         
         # Use the Semantic Scholar client to verify the reference
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
