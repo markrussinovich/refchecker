@@ -34,6 +34,7 @@ Instructions:
 8. Do not add any additional text or explanations
 9. Ensure that URLs and DOIs are from the specific reference only
 10. When parsing multi-line references, combine all authors from all lines before the title
+11. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
 
 Bibliography text:
 {bibliography_text}
@@ -75,6 +76,17 @@ Bibliography text:
             if 'extracted from the bibliography' in ref.lower():
                 continue
             if 'formatted as a complete' in ref.lower():
+                continue
+            # Skip verbose LLM explanatory responses
+            if 'cannot extract' in ref.lower() and ('references' in ref.lower() or 'bibliographic' in ref.lower()):
+                continue
+            if 'appears to be from' in ref.lower() and 'appendix' in ref.lower():
+                continue
+            if 'no numbered reference markers' in ref.lower():
+                continue
+            if 'only figures' in ref.lower() and 'learning curves' in ref.lower():
+                continue
+            if ref.lower().startswith('i cannot'):
                 continue
             
             # Remove common prefixes (bullets, numbers, etc.)

@@ -1019,6 +1019,7 @@ class ArxivReferenceChecker:
                 r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
                 r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
                 r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|APPENDIX|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE|SURVEY|REVIEW|FUTURE|LIMITATION|CONTRIBUTION|INNOVATION|TECHNICAL|DETAILED|COMPLETE|EXTENDED)\b',  # Other section patterns
+                r'\n\s*[A-Z]\.\s+Implementation\s+Details',  # Specific pattern for "A. Implementation Details"
                 # More specific pattern for numbered sections - only match section headers, not bibliography entries
                 # Look for common section headers like "8. Appendix", "9. Conclusion" but not "8. Smith, J."
                 r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|DATA|CODE|SUPPORTING|COMPETING|AVAILABILITY|INFORMATION|STATEMENT|CONTRIBUTIONS?)\b[A-Za-z\s]*\n',

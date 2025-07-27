@@ -706,14 +706,33 @@ def is_name_match(name1: str, name2: str) -> bool:
         if parts1[0] == parts2[0] and parts1[1] == parts2[1]:
             return True
     
-    # If either name has only one part, check if it matches any part of the other name
+    # If either name has only one part, check if it's a surname match
     if len(parts1) == 1 or len(parts2) == 1:
         if len(parts1) == 1:
             single_part = parts1[0]
-            return single_part in parts2
+            multi_parts = parts2
         else:
             single_part = parts2[0]
-            return single_part in parts1
+            multi_parts = parts1
+        
+        # For single-part names, check if it matches the last part (surname) of the multi-part name
+        # This handles cases like "Taieb" matching "Souhaib Ben Taieb"
+        if len(single_part) > 2:  # Avoid matching very short parts that could be initials
+            last_part = multi_parts[-1]
+            # Check exact match first
+            if single_part == last_part:
+                return True
+            # Check if single_part is the actual surname within a compound surname
+            # e.g., "Taieb" should match "ben taieb" (where "ben" is a surname particle)
+            if ' ' in last_part:
+                # Split compound surname and check if single_part matches the actual surname
+                surname_parts = last_part.split()
+                if single_part == surname_parts[-1]:  # Match the actual surname (last part of compound)
+                    return True
+            return False
+        else:
+            # For short single parts, use the more permissive matching
+            return single_part in multi_parts
     
     # IMPORTANT: Check special cases BEFORE the general last name comparison
     # because some cases like compound last names don't follow the standard pattern
@@ -2015,7 +2034,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             return None
             
         # Remove common words that don't contribute to acronyms
-        stop_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'but', 'as', 'from'}
+        # Note: 'in' is sometimes part of acronyms (e.g., "Logic IN Computer Science" -> LICS)
+        stop_words = {'the', 'a', 'an', 'of', 'on', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'but', 'as', 'from'}
         
         # Split and clean words
         words = []
@@ -2037,7 +2057,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             acronyms.append(standard_acronym)
         
         # Skip certain connector words even if not in stop_words for acronym generation
-        connector_words = {'meeting', 'conference', 'workshop', 'symposium', 'proceedings', 'international', 'annual', 'ieee', 'acm'}
+        # Note: Keep "international" and "conference" as they're often part of important acronyms (ICLR, ICML, etc.)
+        connector_words = {'meeting', 'workshop', 'symposium', 'proceedings', 'annual', 'ieee', 'acm'}
         important_words = [w for w in words if w not in connector_words]
         
         if len(important_words) >= 2 and important_words != words:
@@ -2115,17 +2136,14 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = re.sub(r'\s+(ieee|acm|aaai|usenix)\s*$', '', venue_lower)  # Remove org suffixes
         venue_lower = re.sub(r'/\w+\s+', ' ', venue_lower)  # Remove "/ACM " style org separators
         
-        # Remove organization + "Conference on" patterns (e.g., "IEEE/CVF Conference on")
-        venue_lower = re.sub(r'^(ieee|acm|aaai|nips|icml|iclr|cvpr|iccv|eccv)(/\w+)?\s+conference\s+on\s+', '', venue_lower)
-        # More general pattern for any organization + conference on
-        venue_lower = re.sub(r'^[a-z]+(/[a-z]+)?\s+conference\s+on\s+', '', venue_lower)
-        # Remove standalone "Conference on" at the beginning
-        venue_lower = re.sub(r'^conference\s+on\s+', '', venue_lower)
+        # IMPORTANT: Don't remove "Conference on" or "International" - they're needed for acronym generation
+        # Only remove specific org-prefixed conference patterns where the org is clear
+        venue_lower = re.sub(r'^(ieee|acm|aaai|nips)(/\w+)?\s+conference\s+on\s+', '', venue_lower)
         
         # Remove common prepositions that don't affect venue identity
+        # Note: Keep "in" as it's important for some acronyms (e.g., "Logic IN Computer Science" -> LICS)
         venue_lower = re.sub(r'\s+on\s+', ' ', venue_lower)  # Remove "on" preposition
         venue_lower = re.sub(r'\s+for\s+', ' ', venue_lower)  # Remove "for" preposition
-        venue_lower = re.sub(r'\s+in\s+', ' ', venue_lower)   # Remove "in" preposition
         
         # Clean up punctuation and spacing
         venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation
@@ -2160,6 +2178,13 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             paren_matches = re.findall(r'\(([A-Z]{2,8})\)', text)
             acronyms.extend([acr.lower() for acr in paren_matches])
             
+            # Look for standalone uppercase acronyms in the text (e.g., "Proc. of LICS")
+            standalone_matches = re.findall(r'\b([A-Z]{2,8})\b', text)
+            acronyms.extend([acr.lower() for acr in standalone_matches])
+            # DEBUG: Print what we found
+            if standalone_matches:
+                print(f"DEBUG: Found acronyms in '{text}': {standalone_matches}")
+            
             return list(set(acronyms))  # Remove duplicates
         
         def check_acronym_against_full_name(acronym, full_text):
@@ -2175,6 +2200,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             
             # Method 1: Standard acronym generation
             standard_acronym = create_acronym_from_title(normalized_full)
+            print(f"DEBUG: check_acronym_against_full_name('{acronym}', '{full_text}')")
+            print(f"  normalized_full: '{normalized_full}'")
+            print(f"  standard_acronym: '{standard_acronym}'")
             if standard_acronym:
                 possible_acronyms.append(standard_acronym)
             
@@ -2185,8 +2213,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 all_words_acronym = ''.join(w[0] for w in words if len(w) > 0)[:8]
                 possible_acronyms.append(all_words_acronym)
                 
-                # Skip very common words
-                skip_words = {'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
+                # Skip very common words (but keep 'in' as it can be important for acronyms like LICS)
+                skip_words = {'the', 'a', 'an', 'of', 'on', 'at', 'to', 'for', 'with', 'by', 'and', 'or'}
                 filtered_words = [w for w in words if w not in skip_words]
                 if len(filtered_words) >= 2:
                     filtered_acronym = ''.join(w[0] for w in filtered_words)[:8]

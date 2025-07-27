@@ -103,18 +103,8 @@ class LLMProvider(ABC):
                 chunks.append(chunk)
                 logger.debug(f"Chunk {len(chunks)}: {len(chunk)} characters, starts with: {chunk[:60]}...")
             
-            # For next chunk, start with overlap but ensure we're at a reference boundary
-            next_start = best_break - overlap_size
-            # Find the nearest reference start at or after next_start
-            if next_start > 0:
-                remaining_text = bibliography_text[next_start:]
-                ref_match = re.search(r'\n\[\d+\]', remaining_text)
-                if ref_match:
-                    next_start = next_start + ref_match.start() + 1  # +1 to include the \n
-                else:
-                    next_start = best_break
-            else:
-                next_start = best_break
+            # For next chunk, start with fixed overlap size
+            next_start = max(0, best_break - overlap_size)
             
             start = next_start
         
@@ -186,8 +176,12 @@ class LLMProvider(ABC):
                     # Split into segments separated by '#' and compare first two (author list and title)
                     segments = ref.split('#')
                     if len(segments) >= 2:
-                        # Use first two segments (author list and title) for deduplication
-                        author_title_key = (segments[0].strip().lower(), segments[1].strip().lower())
+                        # Normalize author names by removing spaces around periods in initials
+                        # This handles cases like "D.Iosifidis" vs "D. Iosifidis"
+                        author_normalized = re.sub(r'\s*\.\s*', '.', segments[0].strip().lower())
+                        title_normalized = segments[1].strip().lower()
+                        
+                        author_title_key = (author_normalized, title_normalized)
                         if author_title_key not in seen_ref_nums:
                             seen_ref_nums.add(author_title_key)
                             unique_references.append(ref)
