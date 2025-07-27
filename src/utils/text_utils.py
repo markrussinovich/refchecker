@@ -420,6 +420,15 @@ def is_name_match(name1: str, name2: str) -> bool:
     name1 = normalize_diacritics(name1.strip().lower())
     name2 = normalize_diacritics(name2.strip().lower())
     
+    # Handle spacing variations around periods: "F.Last" vs "F. Last"
+    # Normalize both to have consistent spacing
+    name1_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name1)  # "a.ashtekar" -> "a. ashtekar"
+    name2_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name2)  # Already "a. ashtekar"
+    
+    # If they're identical after normalization, they match
+    if name1_normalized == name2_normalized:
+        return True
+    
     # Only consider substring match if they are very similar (e.g., identical with/without punctuation)
     # Remove this overly broad check that causes false positives like "marie k. johnson" matching "k. johnson"
     # if name1 in name2 or name2 in name1:
@@ -445,9 +454,11 @@ def is_name_match(name1: str, name2: str) -> bool:
             # Check if current part is a surname particle
             # Be more conservative: avoid treating short words as particles when followed by short surnames
             # This prevents "Da Yu" from being treated as particle+surname instead of first+last name
+            # Also avoid treating first names as particles in 2-word names (e.g., "Bin Chen" shouldn't become "bin chen")
             if (current_part.lower() in surname_particles and 
                 i + 1 < len(name_parts) and  # Not the last part
-                not (len(current_part) <= 2 and len(name_parts) == 2 and len(name_parts[i + 1]) <= 3)):  # Avoid "Da Yu" -> "Da Yu"
+                not (len(current_part) <= 2 and len(name_parts) == 2 and len(name_parts[i + 1]) <= 3) and  # Avoid "Da Yu" -> "Da Yu"
+                not (i == 0 and len(name_parts) == 2)):  # Avoid treating first word as particle in 2-word names
                 
                 # Collect all consecutive particles
                 compound_parts = [current_part]
@@ -474,9 +485,10 @@ def is_name_match(name1: str, name2: str) -> bool:
                 
         return normalized_parts
     
-    # Split into parts (first name, last name, etc.)
-    parts1 = normalize_surname_particles(name1.split())
-    parts2 = normalize_surname_particles(name2.split())
+    # Split into parts (first name, last name, etc.) using normalized names with consistent spacing
+    parts1 = normalize_surname_particles(name1_normalized.split())
+    parts2 = normalize_surname_particles(name2_normalized.split())
+    
     
     # Basic 2-part name matching: "F. Last" vs "First Last" 
     # e.g., "D. Yu" vs "Da Yu", "J. Smith" vs "John Smith"
@@ -488,6 +500,7 @@ def is_name_match(name1: str, name2: str) -> bool:
         last_name1 = parts1[1]  # "yu"
         first_name2 = parts2[0]  # "da"
         last_name2 = parts2[1]  # "yu"
+        
         
         if last_name1 == last_name2 and initial1 == first_name2[0]:
             return True
