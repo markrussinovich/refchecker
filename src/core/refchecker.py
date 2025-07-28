@@ -2720,7 +2720,7 @@ class ArxivReferenceChecker:
                     file_type = "text file"
                 else:
                     file_type = "file"
-                logger.info(f"Processing {file_type}: {local_pdf_path}")
+                logger.debug(f"Processing {file_type}: {local_pdf_path}")
                 paper = self._create_local_file_paper(local_pdf_path)
                 papers = [paper]
                 # Set single paper mode
