@@ -82,6 +82,9 @@ refchecker = "core.refchecker:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools]
+py-modules = ["__version__"]
+
 [tool.setuptools.dynamic]
 version = {attr = "__version__.__version__"}
 
