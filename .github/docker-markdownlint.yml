@@ -1,0 +1,10 @@
+# Docker Compose file for Markdown validation using markdownlint-cli2
+# Usage: docker compose -f .github/docker-markdownlint.yml run markdownlint
+
+services:
+  markdownlint:
+    image: python:3.11-slim
+    volumes:
+      - ..:/workspace:ro
+    working_dir: /workspace
+    entrypoint: ["sh", "-c", "pip install pymarkdown && pymarkdown scan --config-file .github/markdownlint.config.yaml ."]

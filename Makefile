@@ -1,3 +1,9 @@
+# Index markdown docs with LLM
+llm-index-docs:
+	python scripts/llm_index_docs.py
+# Lint markdown docs
+lint-md:
+	python scripts/lint_markdown.py
 .PHONY: help install install-dev test clean lint format type-check run docs
 
 # Default target
@@ -26,7 +32,7 @@ install-dev:
 
 # Run tests
 test:
-	python scripts/run_tests.py
+	pytest tests/
 
 # Clean up generated files
 clean:
