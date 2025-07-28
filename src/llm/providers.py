@@ -29,12 +29,17 @@ Instructions:
 4. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
 5. Place a hashmark (#) rather than period between fields of a reference, but commas between authors
    e.g. Author1, Author2#Title#Venue#Year#URL
-6. Return ONLY the references, one per line
-7. Do not include reference numbers like [1], [2], etc. in your output
-8. Do not add any additional text or explanations
-9. Ensure that URLs and DOIs are from the specific reference only
-10. When parsing multi-line references, combine all authors from all lines before the title
-11. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
+6. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear
+   - If the original says "John Smith, Jane Doe, et al" then output "John Smith, Jane Doe, et al"
+   - If the original says "John Smith et al." then output "John Smith et al."
+   - Also preserve variations like "and others", "etc.", "..." when used to indicate additional authors
+   - Do NOT expand "et al" into individual author names, even if you know them
+7. Return ONLY the references, one per line
+8. Do not include reference numbers like [1], [2], etc. in your output
+9. Do not add any additional text or explanations
+10. Ensure that URLs and DOIs are from the specific reference only
+11. When parsing multi-line references, combine all authors from all lines before the title
+12. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
 
 Bibliography text:
 {bibliography_text}

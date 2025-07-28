@@ -1089,55 +1089,117 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     else:
         correct_names = correct_authors[:]  # Make a copy to avoid modifying original
     
-    # Clean up cited author names - remove "et al" and normalize
+    # Helper function to detect "et al" variations
+    def is_et_al_variant(text):
+        """Check if text is purely an 'et al' variant"""
+        if not text:
+            return False
+        text_clean = str(text).strip().lower()
+        # Check for standalone et al variants
+        et_al_variants = [
+            'et al', 'et al.', 'et.al', 'et.al.', 
+            'and others', 'and other', 'etc', 'etc.', '...'
+        ]
+        return text_clean in et_al_variants
+    
+    def contains_et_al(text):
+        """Check if text contains 'et al' variations at the end"""
+        if not text:
+            return False
+        text_lower = str(text).lower()
+        # Common variations of "et al" at end of author names
+        et_al_patterns = [
+            r'\bet\s+al\.?$',          # "et al" or "et al." at end
+            r'\band\s+others?$',       # "and others" or "and other" at end
+            r'\bet\s*\.?\s*al\.?$',    # "et.al" or similar variations
+            r'\betc\.?$',              # "etc" or "etc." at end
+            r'\s+\.\.\.$',             # "..." at end (sometimes used like et al)
+        ]
+        return any(re.search(pattern, text_lower) for pattern in et_al_patterns)
+    
+    # Clean up cited author names and detect "et al"
     cleaned_cited = []
+    has_et_al = False
+    
     for author in cited_authors:
         # Remove reference numbers (e.g., "[1]")
         author = re.sub(r'^\[\d+\]', '', str(author))
         # Remove line breaks
         author = author.replace('\n', ' ')
-        
-        # Handle "et al" cases properly
         author_clean = author.strip()
-        if author_clean.lower() == 'et al':
-            # Skip pure "et al" entries
-            continue
-        elif 'et al' in author_clean.lower():
-            # Remove "et al" from the author name (e.g., "S. M. Lundberg et al" -> "S. M. Lundberg")
-            author_clean = re.sub(r'\s+et\s+al\.?', '', author_clean, flags=re.IGNORECASE).strip()
-            if author_clean:  # Only add if something remains
+        
+        # Check if this is a standalone "et al" entry
+        if is_et_al_variant(author_clean):
+            has_et_al = True
+            continue  # Skip pure "et al" entries
+        
+        # Check if this author entry contains "et al" variations at the end
+        if contains_et_al(author_clean):
+            has_et_al = True
+            # Remove "et al" and similar patterns from the author name
+            author_clean = re.sub(r'\s+et\s+al\.?$', '', author_clean, flags=re.IGNORECASE)
+            author_clean = re.sub(r'\s+and\s+others?$', '', author_clean, flags=re.IGNORECASE)
+            author_clean = re.sub(r'\s+et\s*\.?\s*al\.?$', '', author_clean, flags=re.IGNORECASE)
+            author_clean = re.sub(r'\s+etc\.?$', '', author_clean, flags=re.IGNORECASE)
+            author_clean = re.sub(r'\s+\.\.\.$', '', author_clean)
+            author_clean = author_clean.strip()
+            
+            if author_clean:  # Only add if something remains after removing "et al"
                 cleaned_cited.append(author_clean)
         else:
             cleaned_cited.append(author_clean)
     
     if not cleaned_cited:
+        if has_et_al:
+            return True, "Only 'et al' reference - cannot verify specific authors"
         return True, "No authors to compare"
     
     if not correct_names:
         return False, "No correct authors provided"
     
-    # Handle "et al" cases and length mismatches
-    has_et_al = any('et al' in str(a).lower() for a in cited_authors)
+    # When "et al" is present, only compare the explicitly listed authors
+    # The key insight: if the citation has "et al", we should only verify the listed authors
+    # and not penalize for the authoritative source having more authors
+    if has_et_al:
+        # Only compare against the first N correct authors where N = number of cited authors
+        comparison_correct = correct_names[:len(cleaned_cited)]
+        comparison_cited = cleaned_cited
+        
+        # Compare each cited author against the corresponding position in the correct list
+        for i, (cited_author, correct_author) in enumerate(zip(comparison_cited, comparison_correct)):
+            if not is_name_match(cited_author, correct_author):
+                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_author}' (et al case)"
+        
+        return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
-    if len(cleaned_cited) < len(correct_names) and (has_et_al or len(cleaned_cited) <= 3):
-        # Only compare the authors that are listed
-        correct_names = correct_names[:len(cleaned_cited)]
-    elif len(cleaned_cited) > len(correct_names) and len(correct_names) >= 3:
-        # Use available correct authors
-        cleaned_cited = cleaned_cited[:len(correct_names)]
-    
-    # If there's a big count mismatch and no "et al", it's likely an error
-    if abs(len(cleaned_cited) - len(correct_names)) > 3 and not has_et_al:
-        return False, "Author count mismatch"
+    # Normal case without "et al" - compare all authors
+    if len(cleaned_cited) != len(correct_names):
+        # For non-et-al cases, be more strict about count mismatches
+        # Allow minor flexibility (1 author difference) but not more
+        if abs(len(cleaned_cited) - len(correct_names)) > 1:
+            return False, f"Author count mismatch: {len(cleaned_cited)} cited vs {len(correct_names)} correct"
+        
+        # Use the shorter list for comparison
+        min_len = min(len(cleaned_cited), len(correct_names))
+        comparison_cited = cleaned_cited[:min_len]
+        comparison_correct = correct_names[:min_len]
+    else:
+        comparison_cited = cleaned_cited
+        comparison_correct = correct_names
     
     # Compare first author (most important) using the enhanced name matching
-    if cleaned_cited and correct_names:
-        # Use raw names for comparison (is_name_match handles normalization internally)
-        cited_first = cleaned_cited[0]
-        correct_first = correct_names[0]
+    if comparison_cited and comparison_correct:
+        cited_first = comparison_cited[0]
+        correct_first = comparison_correct[0]
         
         if not is_name_match(cited_first, correct_first):
             return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
+    
+    # For complete verification, check all authors if reasonable number
+    if len(comparison_cited) <= 5:  # Only do full check for reasonable author counts
+        for i, (cited_author, correct_author) in enumerate(zip(comparison_cited, comparison_correct)):
+            if not is_name_match(cited_author, correct_author):
+                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_author}'"
     
     return True, "Authors match"
 
