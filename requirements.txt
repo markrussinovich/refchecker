@@ -42,7 +42,6 @@ flake8>=3.9.0
 mypy>=0.910
 
 # Markdown linting for docs
-pymarkdown>=0.9.10
 
 # Documentation dependencies
 sphinx>=4.0.0
