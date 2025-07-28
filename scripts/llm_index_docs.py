@@ -49,12 +49,20 @@ def get_specification_text():
 
 def ask_llm_to_index(docs, spec, api_key):
     openai.api_key = api_key
+    # Determine LLM server endpoint
+    endpoint = os.environ.get("LLM_SERVER_URL")
+    if not endpoint:
+        # Use Docker-friendly default if running in container
+        if os.path.exists("/.dockerenv") or os.environ.get("RUNNING_IN_DOCKER"):
+            endpoint = "http://host.docker.internal:1234/v1"
+        else:
+            endpoint = "http://127.0.0.1:1234/v1"
     # Support both openai-python v1.x (base_url) and v0.x (api_base)
     try:
-        openai.base_url = "http://127.0.0.1:1234/v1"
+        openai.base_url = endpoint
     except AttributeError:
-        openai.api_base = "http://127.0.0.1:1234/v1"
-    print("[DEBUG] Sending request to local LLM server at http://127.0.0.1:1234/v1 ...")
+        openai.api_base = endpoint
+    print(f"[DEBUG] Sending request to LLM server at {endpoint} ...")
     # Limit number of files and characters per file to avoid context overflow
     MAX_FILES = 5
     MAX_CHARS_PER_FILE = 1000
@@ -68,7 +76,7 @@ def ask_llm_to_index(docs, spec, api_key):
         + "what requirements it covers, and whether there are any gaps or missing links. "
         + "Produce a table or index mapping each doc to the relevant spec sections."
     )
-    client = openai.OpenAI(api_key=api_key, base_url="http://127.0.0.1:1234/v1")
+    client = openai.OpenAI(api_key=api_key, base_url=endpoint)
     print("[DEBUG] Streaming response from LLM server...")
     stream = client.chat.completions.create(
         model="gpt-4o",  # or your preferred model
@@ -90,8 +98,8 @@ if __name__ == "__main__":
     spec = get_specification_text()
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        print("Please set the OPENAI_API_KEY environment variable.")
-        exit(1)
+        print("No OPENAI_API_KEY found. Using dummy key for local vLLM server at http://127.0.0.1:1234/v1")
+        api_key = "sk-local"
     index = ask_llm_to_index(docs, spec, api_key)
     with open("docs_index.md", "w", encoding="utf-8") as f:
         f.write(index)
