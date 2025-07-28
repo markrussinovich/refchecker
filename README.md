@@ -89,7 +89,7 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
 
 ### Supported LLM Providers
 
-- **OpenAI** e.g., GPT-4o, o3
+- **OpenAI** e.g., GPT-4.1, o3
 - **Anthropic** e.g., Claude Sonnet 4
 - **Google** e.g., Gemini 2.5
 - **Azure OpenAI** e.g., GPT-4o, o3

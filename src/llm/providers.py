@@ -138,7 +138,7 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
         """Make the actual OpenAI API call and return the response text"""
         try:
             response = self.client.chat.completions.create(
-                model=self.model or "gpt-4o-mini",
+                model=self.model or "gpt-4.1",
                 messages=[
                     {"role": "user", "content": prompt}
                 ],

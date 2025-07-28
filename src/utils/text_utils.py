@@ -888,6 +888,79 @@ def is_name_match(name1: str, name2: str) -> bool:
             first_name1[0] == initials2[0] and second_name1[0] == initials2[1]):
             return True
 
+    # Special case: Handle "Last, First" vs "First Last" patterns
+    # e.g., "Cubitt, Toby S" vs "Toby S. Cubitt", "Smith, John" vs "John Smith"
+    def parse_comma_separated_name(name):
+        """Parse 'Last, First' format into (first_part, last_part)"""
+        if ',' in name:
+            parts = name.split(',', 1)  # Only split on first comma
+            last_part = parts[0].strip()
+            first_part = parts[1].strip()
+            return first_part, last_part
+        return None, None
+    
+    # Check if either name has comma format
+    first1_comma, last1_comma = parse_comma_separated_name(name1_normalized)
+    first2_comma, last2_comma = parse_comma_separated_name(name2_normalized)
+    
+    if first1_comma and last1_comma and not (first2_comma and last2_comma):
+        # name1 is "Last, First" format, name2 is regular format
+        # Compare "First Last" (reconstructed from name1) with name2
+        reconstructed_name1 = f"{first1_comma} {last1_comma}"
+        
+        # Try exact match first
+        if reconstructed_name1 == name2_normalized:
+            return True
+        
+        # Try with period normalization (remove all periods for comparison)
+        reconstructed_no_periods = reconstructed_name1.replace('.', '')
+        name2_no_periods = name2_normalized.replace('.', '')
+        if reconstructed_no_periods == name2_no_periods:
+            return True
+        
+        # Handle initial matching: "Smith, J." should match "John Smith"
+        # Check if first part is a single initial that matches the first letter of name2's first part
+        first_parts_comma = first1_comma.strip().rstrip('.')
+        if (len(first_parts_comma) == 1 and len(parts2) >= 2 and 
+            len(parts2[0]) > 1 and first_parts_comma.lower() == parts2[0][0].lower() and
+            last1_comma.lower() == parts2[-1].lower()):
+            return True
+        
+        # Also try with reconstructing name2 parts
+        if len(parts2) >= 2:
+            name2_reconstructed = " ".join(parts2)
+            if reconstructed_name1 == name2_reconstructed:
+                return True
+    
+    if first2_comma and last2_comma and not (first1_comma and last1_comma):
+        # name2 is "Last, First" format, name1 is regular format
+        # Compare name1 with "First Last" (reconstructed from name2)
+        reconstructed_name2 = f"{first2_comma} {last2_comma}"
+        
+        # Try exact match first
+        if name1_normalized == reconstructed_name2:
+            return True
+            
+        # Try with period normalization (remove all periods for comparison)
+        name1_no_periods = name1_normalized.replace('.', '')
+        reconstructed_no_periods = reconstructed_name2.replace('.', '')
+        if name1_no_periods == reconstructed_no_periods:
+            return True
+            
+        # Handle initial matching: "John Smith" should match "Smith, J."
+        # Check if second name's first part is a single initial that matches the first letter of name1's first part
+        first_parts_comma = first2_comma.strip().rstrip('.')
+        if (len(first_parts_comma) == 1 and len(parts1) >= 2 and 
+            len(parts1[0]) > 1 and first_parts_comma.lower() == parts1[0][0].lower() and
+            last2_comma.lower() == parts1[-1].lower()):
+            return True
+        
+        # Also try with reconstructing name1 parts
+        if len(parts1) >= 2:
+            name1_reconstructed = " ".join(parts1)
+            if name1_reconstructed == reconstructed_name2:
+                return True
+
     # Compare last names (last parts) - they must match (for standard cases)
     if parts1[-1] != parts2[-1]:
         return False
@@ -1161,14 +1234,17 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     # The key insight: if the citation has "et al", we should only verify the listed authors
     # and not penalize for the authoritative source having more authors
     if has_et_al:
-        # Only compare against the first N correct authors where N = number of cited authors
-        comparison_correct = correct_names[:len(cleaned_cited)]
-        comparison_cited = cleaned_cited
-        
-        # Compare each cited author against the corresponding position in the correct list
-        for i, (cited_author, correct_author) in enumerate(zip(comparison_cited, comparison_correct)):
-            if not is_name_match(cited_author, correct_author):
-                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_author}' (et al case)"
+        # For et al cases, check if each cited author matches ANY author in the correct list
+        # rather than comparing positionally, since author order can vary
+        for i, cited_author in enumerate(cleaned_cited):
+            author_found = False
+            for correct_author in correct_names:
+                if is_name_match(cited_author, correct_author):
+                    author_found = True
+                    break
+            
+            if not author_found:
+                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_names[i] if i < len(correct_names) else 'N/A'}' (et al case)"
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     

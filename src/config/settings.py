@@ -59,7 +59,7 @@ DEFAULT_CONFIG = {
         "parallel_chunks": True,  # Enable parallel chunk processing
         "max_chunk_workers": 4,   # Maximum number of parallel workers for chunk processing
         "openai": {
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1",
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
