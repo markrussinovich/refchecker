@@ -52,15 +52,11 @@ from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
-from .parallel_processor import ParallelReferenceProcessor
-from .db_connection_pool import ThreadSafeLocalChecker
+from core.parallel_processor import ParallelReferenceProcessor  
+from core.db_connection_pool import ThreadSafeLocalChecker
 
-# Import version from package
-try:
-    from ..__version__ import __version__
-except ImportError:
-    # Fallback if running as script
-    __version__ = "1.2.2"
+# Import version
+from __version__ import __version__
 from llm.base import create_llm_provider, ReferenceExtractor
 
 def get_llm_api_key_interactive(provider: str) -> str:

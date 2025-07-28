@@ -476,69 +476,48 @@ To build RefChecker for distribution:
 # Install build tool if needed
 pip install build
 
+# Build the package (automatically cleans previous builds)
+./build.sh
+```
+
+The build script will:
+- Clean previous builds (`dist/`, `build/`, `*.egg-info/`)
+- Build fresh wheel and source distributions
+- Display the created files
+
+### Manual Build (Advanced)
+
+If you prefer to build manually:
+
+```bash
+# Clean previous builds
+rm -rf dist/ build/ src/*.egg-info/
+
 # Build wheel and source distribution
 python -m build
 ```
-
-The built packages will be available in the `dist/` directory.
 
 ### Version Management
 
 The package version is centrally managed in `src/__version__.py`. To update the version:
 
 1. Edit `src/__version__.py` and change the `__version__` string
-2. Rebuild the package with `python -m build`
-
-This ensures the version is consistent across the package metadata, script output, and documentation.
+2. Run `./build.sh` to rebuild the package
 
 ### Publishing to PyPI
 
-To publish the package for testing and distribution:
+After building:
 
 ```bash
-# Install twine for uploading
-pip install twine
+# Upload to Test PyPI
+twine upload --repository testpypi dist/* --username __token__
 
-# Option 1: Use API token directly (recommended for CI/automation)
-twine upload --repository testpypi dist/* --username __token__ --password pypi-your-api-token-here
-
-# Option 2: Set up ~/.pypirc file for repeated uploads
-cat > ~/.pypirc << EOF
-[distutils]
-index-servers =
-    testpypi
-    pypi
-
-[testpypi]
-repository = https://test.pypi.org/legacy/
-username = __token__
-password = pypi-your-testpypi-token
-
-[pypi]
-repository = https://upload.pypi.org/legacy/
-username = __token__
-password = pypi-your-production-token
-EOF
-
-# Then upload without entering credentials
-twine upload --repository testpypi dist/*
-
-# Test install from Test PyPI
-pip install --index-url https://test.pypi.org/simple/ refchecker
-
-# Upload to production PyPI
-twine upload dist/*
+# Upload to PyPI
+twine upload dist/* --username __token__
 ```
 
-**Setup Requirements**:
-1. Create accounts on [Test PyPI](https://test.pypi.org/) and [PyPI](https://pypi.org/)
-2. Generate API tokens in your account settings
-3. Use `__token__` as username and your API token as password
+This ensures the version is consistent across the package metadata, script output, and documentation.
 
-**Common Issues**:
-- **400 Bad Request**: Usually means the version already exists. Bump the version in `pyproject.toml` and rebuild
-- **403 Forbidden**: Check your API token and package name permissions
-- **Package name taken**: Choose a different name or add a suffix (e.g., `refchecker-yourname`)
 
 ## 📄 License
 
