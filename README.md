@@ -36,6 +36,8 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 ❓ References that couldn't be verified: 15
 ```
 
+
+
 ## 📋 Table of Contents
 
 - [📊 Sample Output](#-sample-output)
@@ -51,7 +53,18 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - [📦 Building the Package](#-building-the-package)
 - [📄 License](#-license)
 
+
 ## 🎯 Features
+
+- **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
+- **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
+- **🤖 LLM-Enhanced Reference Extraction**: AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
+- **🆕 LLM-Powered Documentation Indexing**: Generate a Markdown index (`docs_index.md`) mapping documentation files to project requirements using a local LLM server (see Quick Start below). Output highlights coverage and gaps for documentation review and PRs.
+- **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venues, URLs, and DOIs
+- **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef with intelligent retry logic
+- **🧠 Smart Title Matching**: Advanced similarity algorithms handle common academic formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
+- **🏢 Venue Normalization**: Recognizes common journal and conference abbreviation patterns
+- **� Detailed Reporting**: Generates comprehensive error reports with drop-in corrected references
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
@@ -64,7 +77,19 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 ## 🚀 Quick Start
 
+
 ### Check Your First Paper
+### LLM-Powered Documentation Indexing
+
+To generate a documentation/spec index with a local LLM server (e.g., LM Studio):
+
+```bash
+# Start your local LLM server (see scripts/llm_index_docs.py for details)
+python scripts/llm_index_docs.py
+# or using the Makefile
+make llm-index-docs
+```
+The output (`docs_index.md`) maps each doc to project requirements and highlights coverage and gaps.
 
 1. **Check a famous paper:**
    ```bash

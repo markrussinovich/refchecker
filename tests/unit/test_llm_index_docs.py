@@ -1,10 +1,12 @@
 
 import os
 import sys
-import tempfile
 import pytest
 import importlib.util
 script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scripts/llm_index_docs.py'))
+spec = importlib.util.spec_from_file_location("llm_index_docs", script_path)
+llm_index_docs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(llm_index_docs)
 spec = importlib.util.spec_from_file_location("llm_index_docs", script_path)
 llm_index_docs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(llm_index_docs)
