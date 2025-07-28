@@ -34,8 +34,6 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 ❌ Total errors: 55
 ⚠️  Total warnings: 16
 ❓ References that couldn't be verified: 15
-
-💾 Detailed results saved to: reference_errors.txt
 ```
 
 ## 📋 Table of Contents
@@ -272,11 +270,33 @@ python refchecker.py --paper /path/to/your/paper.txt
 python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
+#### Saving Results to File
+
+By default, results are only displayed on the console. To save detailed results to a file, use the `--output-file` option:
+
+```bash
+# Save results to default filename (reference_errors.txt)
+python refchecker.py --paper 1706.03762 --output-file
+
+# Save results to custom filename
+python refchecker.py --paper /path/to/paper.pdf --output-file my_paper_errors.txt
+```
+
 ## 📊 Output and Results
 
 ### Generated Files
 
-- **`reference_errors.txt`**: Detailed report of references with errors and warnings, including corrected references
+By default, no files are generated. To save detailed results, use the `--output-file` option:
+
+```bash
+# Save to default filename (reference_errors.txt)
+python refchecker.py --paper 1706.03762 --output-file
+
+# Save to custom filename
+python refchecker.py --paper 1706.03762 --output-file my_errors.txt
+```
+
+The output file contains a detailed report of references with errors and warnings, including corrected references.
 
 ### Error Types
 
@@ -342,6 +362,7 @@ python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_
 --debug                          # Enable debug mode
 --semantic-scholar-api-key KEY   # Semantic Scholar API key (1-2s vs 5-10s without key; can also use SEMANTIC_SCHOLAR_API_KEY env var) 
 --db-path PATH                   # Local database path
+--output-file [PATH]             # Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)
 
 # LLM options
 --llm-provider {openai,anthropic,google,azure,vllm}  # Enable LLM with provider

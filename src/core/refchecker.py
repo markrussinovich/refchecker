@@ -11,7 +11,7 @@ For arXiv references, it uses the arXiv API to verify metadata.
 For non-arXiv references, it uses the local Semantic Scholar database for verification.
 
 Usage:
-    python refchecker.py --paper PAPER_SPEC [--db-path PATH] [--debug]
+    python refchecker.py --paper PAPER_SPEC [--db-path PATH] [--output-file [PATH]] [--debug]
 
 Options:
     --paper PAPER_SPEC            Validate a specific paper by:
@@ -20,6 +20,7 @@ Options:
                                     - Local PDF file path (e.g., /path/to/paper.pdf)
                                     - Local LaTeX file path (e.g., /path/to/paper.tex)
     --db-path PATH                Path to local Semantic Scholar database (recommended for offline verification)
+    --output-file [PATH]          Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)
     --debug                       Run in debug mode with verbose logging
     --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits).
                                     Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable
@@ -169,7 +170,7 @@ def setup_logging(debug_mode=False, level=None):
 logger = setup_logging(debug_mode=False)
 
 class ArxivReferenceChecker:
-    def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file="reference_errors.txt", 
+    def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None, 
                  llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4):
         # Initialize the reference checker for non-arXiv references
         self.fatal_error = False            
@@ -2520,6 +2521,10 @@ class ArxivReferenceChecker:
         """
         Write all accumulated errors to the output file at the end of the run
         """
+        if not self.verification_output_file:
+            logger.debug("No output file specified, skipping error file write")
+            return
+            
         if not self.errors:
             logger.debug("No errors to write to output file")
             return
@@ -2844,7 +2849,7 @@ class ArxivReferenceChecker:
             self._cleanup_resources()
             
             # If fatal error occurred, remove the output file to avoid confusion
-            if self.fatal_error:
+            if self.fatal_error and self.verification_output_file:
                 try:
                     if os.path.exists(self.verification_output_file):
                         os.remove(self.verification_output_file)
@@ -2873,7 +2878,8 @@ class ArxivReferenceChecker:
                 if self.used_regex_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
-                print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+                if self.verification_output_file:
+                    print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
             else:
                 # Multi-paper mode - show full summary
                 print(f"\n" + "="*60)
@@ -2891,7 +2897,8 @@ class ArxivReferenceChecker:
                 if self.used_regex_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
-                print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
+                if self.verification_output_file:
+                    print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
         
         # Write all accumulated errors to file at the end of the run
         self.write_all_errors_to_file()
@@ -4568,6 +4575,8 @@ def main():
                         help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
+    parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
+                        help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
     
     # LLM configuration arguments
     parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
@@ -4655,6 +4664,7 @@ def main():
         checker = ArxivReferenceChecker(
             semantic_scholar_api_key=semantic_scholar_api_key,
             db_path=args.db_path,
+            output_file=args.output_file,
             llm_config=llm_config,
             debug_mode=args.debug,
             enable_parallel=not args.disable_parallel,
