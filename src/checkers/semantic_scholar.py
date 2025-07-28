@@ -366,18 +366,52 @@ class NonArxivReferenceChecker:
             authors_match, author_error = self.compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:
-                errors.append({
-                    'error_type': 'author',
-                    'error_details': author_error,
-                    'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
-                })
+                # Check if we have an exact ArXiv ID match - if so, be more lenient with author mismatches
+                # since they might be due to incomplete data in Semantic Scholar
+                arxiv_id_match = False
+                if url and 'arxiv.org/abs/' in url:
+                    arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
+                    if arxiv_match:
+                        cited_arxiv_id = arxiv_match.group(1)
+                        external_ids = paper_data.get('externalIds', {})
+                        found_arxiv_id = external_ids.get('ArXiv')
+                        arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
+                
+                # If ArXiv IDs match exactly, treat author mismatch as warning (likely incomplete data)
+                if arxiv_id_match:
+                    errors.append({
+                        'warning_type': 'author',
+                        'warning_details': f"{author_error} (Note: ArXiv ID matches exactly - this may be due to incomplete author data in Semantic Scholar)",
+                        'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
+                    })
+                else:
+                    # No ArXiv ID match, treat as error
+                    errors.append({
+                        'error_type': 'author',
+                        'error_details': author_error,
+                        'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
+                    })
         
         # Verify year
         paper_year = paper_data.get('year')
         if year and paper_year and year != paper_year:
+            # Check if we have an exact ArXiv ID match for additional context
+            arxiv_id_match = False
+            if url and 'arxiv.org/abs/' in url:
+                arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
+                if arxiv_match:
+                    cited_arxiv_id = arxiv_match.group(1)
+                    external_ids = paper_data.get('externalIds', {})
+                    found_arxiv_id = external_ids.get('ArXiv')
+                    arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
+            
+            warning_details = f"Year mismatch: cited as {year} but actually {paper_year}"
+            if arxiv_id_match:
+                warning_details += " (Note: ArXiv ID matches exactly - this may be due to conference vs. preprint year difference)"
+            
             errors.append({
                 'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'warning_details': warning_details,
                 'ref_year_correct': paper_year
             })
         
