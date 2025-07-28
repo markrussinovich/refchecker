@@ -451,9 +451,9 @@ pytest -n auto tests/
 
 ### Test Categories
 
-- **Unit Tests** (47 tests): Individual components like text utilities, error handling, and reference extraction
-- **Integration Tests** (63 tests): API interactions, LLM providers, and component integration  
-- **End-to-End Tests** (14 tests): Complete workflows, performance testing, and edge cases
+- **Unit Tests** Individual components like text utilities, error handling, and reference extraction
+- **Integration Tests** API interactions, LLM providers, and component integration  
+- **End-to-End Tests** Complete workflows, performance testing, and edge cases
 
 ### Test Structure
 
@@ -484,18 +484,6 @@ The build script will:
 - Clean previous builds (`dist/`, `build/`, `*.egg-info/`)
 - Build fresh wheel and source distributions
 - Display the created files
-
-### Manual Build (Advanced)
-
-If you prefer to build manually:
-
-```bash
-# Clean previous builds
-rm -rf dist/ build/ src/*.egg-info/
-
-# Build wheel and source distribution
-python -m build
-```
 
 ### Version Management
 
