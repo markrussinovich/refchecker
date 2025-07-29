@@ -88,8 +88,11 @@ class NonArxivReferenceChecker:
             "sort": "relevance"  # Ensure consistent ordering
         }
         
+        # Reduce retries for ArXiv ID searches to avoid unnecessary API calls when mismatch is likely
+        max_retries_for_this_query = 2 if "arXiv:" in query else self.max_retries
+        
         # Make the request with retries and backoff
-        for attempt in range(self.max_retries):
+        for attempt in range(max_retries_for_this_query):
             try:
                 response = requests.get(endpoint, headers=self.headers, params=params)
                 
@@ -238,6 +241,7 @@ class NonArxivReferenceChecker:
         self._api_failed = False
         self._failure_reason = None
         
+        paper_data = None
         errors = []
         
         # Extract reference data
@@ -253,9 +257,7 @@ class NonArxivReferenceChecker:
             doi = reference['doi']
         elif url:
             doi = self.extract_doi_from_url(url)
-        
-        paper_data = None
-        
+            
         if doi:
             # Try to get the paper by DOI
             paper_data = self.get_paper_by_doi(doi)
@@ -287,6 +289,9 @@ class NonArxivReferenceChecker:
             else:
                 logger.debug(f"No papers found for title: {cleaned_title}")
         
+        # Track if we found an ArXiv ID mismatch (wrong paper via ArXiv ID)
+        arxiv_id_mismatch_detected = False
+        
         # If we still couldn't find the paper, try searching by ArXiv ID if available
         if not paper_data and url and 'arxiv.org/abs/' in url:
             # Extract ArXiv ID from URL
@@ -299,13 +304,32 @@ class NonArxivReferenceChecker:
                 search_results = self.search_paper(f"arXiv:{arxiv_id}")
                 
                 if search_results:
-                    # For ArXiv searches, be more lenient with matching
+                    # For ArXiv searches, check if the found paper matches the cited title
                     for result in search_results:
                         external_ids = result.get('externalIds', {})
                         if external_ids and external_ids.get('ArXiv') == arxiv_id:
-                            paper_data = result
-                            found_title = result['title']
-                            logger.debug(f"Found paper by ArXiv ID: {arxiv_id}")
+                            # Found the paper by ArXiv ID, but check if title matches cited title
+                            result_title = result.get('title', '').strip()
+                            cited_title = title.strip()
+                            
+                            if cited_title and result_title:
+                                title_similarity = calculate_title_similarity(cited_title.lower(), result_title.lower())
+                                logger.debug(f"Semantic Scholar ArXiv search title similarity: {title_similarity:.3f}")
+                                logger.debug(f"Cited title: '{cited_title}'")
+                                logger.debug(f"Found title: '{result_title}'")
+                                
+                                if title_similarity >= SIMILARITY_THRESHOLD:
+                                    paper_data = result
+                                    found_title = result['title']
+                                    logger.debug(f"Found matching paper by ArXiv ID: {arxiv_id}")
+                                else:
+                                    logger.debug(f"ArXiv ID points to different paper (similarity: {title_similarity:.3f})")
+                                    arxiv_id_mismatch_detected = True
+                            else:
+                                # If no title to compare, accept the paper (fallback)
+                                paper_data = result
+                                found_title = result['title']
+                                logger.debug(f"Found paper by ArXiv ID (no title comparison): {arxiv_id}")
                             break
                 
                 # If still not found after ArXiv ID search, try ArXiv API directly
@@ -313,12 +337,63 @@ class NonArxivReferenceChecker:
                     logger.debug(f"Paper not found in Semantic Scholar by ArXiv ID, trying ArXiv API directly for: {arxiv_id}")
                     arxiv_paper = self._get_paper_from_arxiv_api(arxiv_id)
                     if arxiv_paper:
-                        paper_data = arxiv_paper
-                        found_title = arxiv_paper['title']
-                        logger.debug(f"Found paper in ArXiv API: {arxiv_id}")
+                        # Verify that the ArXiv paper matches the cited reference title
+                        arxiv_title = arxiv_paper.get('title', '').strip()
+                        cited_title = title.strip()
+                        
+                        logger.debug(f"DEBUG: ArXiv paper found, comparing titles...")
+                        logger.debug(f"DEBUG: cited_title='{cited_title}', arxiv_title='{arxiv_title}'")
+                        
+                        if cited_title and arxiv_title:
+                            title_similarity = calculate_title_similarity(cited_title.lower(), arxiv_title.lower())
+                            logger.debug(f"ArXiv API title similarity: {title_similarity:.3f}")
+                            logger.debug(f"Cited title: '{cited_title}'")
+                            logger.debug(f"ArXiv title: '{arxiv_title}'")
+                            
+                            # Only accept the ArXiv paper if the titles match sufficiently
+                            if title_similarity >= SIMILARITY_THRESHOLD:
+                                paper_data = arxiv_paper
+                                found_title = arxiv_paper['title']
+                                logger.debug(f"Found matching paper in ArXiv API: {arxiv_id}")
+                            else:
+                                logger.debug(f"ArXiv paper title doesn't match cited title (similarity: {title_similarity:.3f})")
+                                arxiv_id_mismatch_detected = True
+                                logger.debug(f"DEBUG: Set arxiv_id_mismatch_detected = {arxiv_id_mismatch_detected}")
+                        else:
+                            # If we don't have a title to compare, don't use the ArXiv paper
+                            logger.debug(f"Cannot verify ArXiv paper without title comparison")
+                            logger.debug(f"DEBUG: No title comparison possible, cited_title='{cited_title}', arxiv_title='{arxiv_title}'")
+                    else:
+                        logger.debug(f"Paper not found in ArXiv API: {arxiv_id}")
+        
+        # Check for ArXiv ID mismatch before doing raw text search
+        if not paper_data and url and 'arxiv.org/abs/' in url:
+            # Extract ArXiv ID to check if it would cause a mismatch
+            arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
+            if arxiv_match:
+                check_arxiv_id = arxiv_match.group(1)
+                # Quick check if ArXiv ID would point to wrong paper
+                try:
+                    arxiv_paper_check = self._get_paper_from_arxiv_api(check_arxiv_id)
+                    if arxiv_paper_check:
+                        arxiv_title_check = arxiv_paper_check.get('title', '').strip()
+                        cited_title_check = title.strip()
+                        if cited_title_check and arxiv_title_check:
+                            title_similarity_check = calculate_title_similarity(cited_title_check.lower(), arxiv_title_check.lower())
+                            if title_similarity_check < SIMILARITY_THRESHOLD:
+                                logger.debug(f"Detected ArXiv ID mismatch before raw text search - skipping unnecessary searches")
+                                arxiv_id_mismatch_detected = True
+                except Exception as e:
+                    logger.debug(f"Error checking ArXiv ID mismatch: {e}")
         
         # If we still couldn't find the paper, try searching by the raw text
-        if not paper_data and raw_text:
+        # BUT skip this if we detected an ArXiv ID mismatch (no point in more searches)
+        if not paper_data and raw_text and not arxiv_id_mismatch_detected:
+            logger.debug(f"Proceeding with raw text search (arxiv_id_mismatch_detected={arxiv_id_mismatch_detected})")
+        elif not paper_data and raw_text and arxiv_id_mismatch_detected:
+            logger.debug(f"Skipping raw text search due to ArXiv ID mismatch detected")
+        
+        if not paper_data and raw_text and not arxiv_id_mismatch_detected:
             # Extract and normalize a reasonable search query from the raw text
             search_query = raw_text.replace('\n', ' ').strip()
             normalized_raw_query = normalize_text(search_query).lower().strip()
@@ -381,7 +456,7 @@ class NonArxivReferenceChecker:
                 if arxiv_id_match:
                     errors.append({
                         'warning_type': 'author',
-                        'warning_details': f"{author_error} (Note: ArXiv ID matches exactly - this may be due to incomplete author data in Semantic Scholar)",
+                        'warning_details': f"{author_error}",
                         'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
                     })
                 else:
@@ -441,11 +516,15 @@ class NonArxivReferenceChecker:
             if arxiv_id:
                 # For arXiv papers, suggest including the arXiv URL instead of venue
                 arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
-                errors.append({
-                    'warning_type': 'venue',
-                    'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
-                    'ref_url_correct': arxiv_url
-                })
+                
+                # Check if the reference already includes this ArXiv URL
+                reference_url = reference.get('url', '')
+                if arxiv_url not in reference_url:
+                    errors.append({
+                        'warning_type': 'venue',
+                        'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
+                        'ref_url_correct': arxiv_url
+                    })
             else:
                 # Original reference has the venue in raw text but not parsed correctly
                 raw_text = reference.get('raw_text', '')
@@ -482,32 +561,34 @@ class NonArxivReferenceChecker:
         
         logger.debug(f"Semantic Scholar - Extracting URL from paper data: {list(paper_data.keys())}")
         
-        # First priority: arXiv URL if available (most canonical for arXiv papers)
-        if external_ids.get('ArXiv'):
+        # Return the Semantic Scholar URL that was actually used for verification
+        # First priority: Semantic Scholar URL since that's what we used for verification
+        if external_ids.get('CorpusId'):
+            from utils.url_utils import construct_semantic_scholar_url
+            paper_url = construct_semantic_scholar_url(external_ids['CorpusId'])
+            logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
+        
+        # Second priority: DOI URL (if this was verified through DOI)
+        elif external_ids.get('DOI'):
+            from utils.doi_utils import construct_doi_url
+            paper_url = construct_doi_url(external_ids['DOI'])
+            logger.debug(f"Using DOI URL for verification: {paper_url}")
+        
+        # Third priority: open access PDF
+        elif paper_data.get('openAccessPdf') and paper_data['openAccessPdf'].get('url'):
+            paper_url = paper_data['openAccessPdf']['url']
+            logger.debug(f"Using open access PDF URL: {paper_url}")
+        
+        # Fourth priority: general URL field
+        elif paper_data.get('url'):
+            paper_url = paper_data['url']
+            logger.debug(f"Using general paper URL: {paper_url}")
+        
+        # Last resort: arXiv URL (only if no other verification source was available)
+        elif external_ids.get('ArXiv'):
             arxiv_id = external_ids['ArXiv']
             paper_url = f"https://arxiv.org/abs/{arxiv_id}"
-            logger.debug(f"Found arXiv URL: {paper_url}")
-        
-        # Second priority: open access PDF (most useful for non-arXiv papers)
-        if not paper_url:
-            open_access_pdf = paper_data.get('openAccessPdf')
-            if open_access_pdf and open_access_pdf.get('url'):
-                paper_url = open_access_pdf['url']
-                logger.debug(f"Found open access PDF URL: {paper_url}")
-        
-        # Third priority: general URL field (typically Semantic Scholar page)
-        if not paper_url:
-            paper_url = paper_data.get('url')
-            if paper_url:
-                logger.debug(f"Found paper URL: {paper_url}")
-        
-        # Fourth priority: DOI URL
-        if not paper_url:
-            if external_ids.get('DOI'):
-                # Use the utility function to construct consistent DOI URLs
-                from utils.doi_utils import construct_doi_url
-                paper_url = construct_doi_url(external_ids['DOI'])
-                logger.debug(f"Generated DOI URL: {paper_url}")
+            logger.debug(f"Using arXiv URL as fallback: {paper_url}")
         
         if not paper_url:
             logger.debug(f"No URL found in paper data - available fields: {list(paper_data.keys())}")

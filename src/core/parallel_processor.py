@@ -296,29 +296,81 @@ class ParallelReferenceProcessor:
             print(f"       {year}")
         if doi:
             print(f"       {doi}")
-        # Collect all URLs and deduplicate them
-        all_urls = []
+        # Show cited URL if available
         if url:
-            all_urls.append(url)
-        if result.url and result.url != url:
-            all_urls.append(result.url)
-        if result.verified_data and result.verified_data.get('url'):
-            verified_url = result.verified_data['url']
-            if verified_url != result.url and verified_url != url:
-                all_urls.append(verified_url)
+            print(f"       {url}")
         
-        # Show deduplicated URLs
-        final_urls = deduplicate_urls(all_urls)
-        for final_url in final_urls:
-            print(f"       {final_url}")
+        # Get the appropriate verified URL using shared logic from base checker
+        verified_url_to_show = self.base_checker._get_verified_url(result.verified_data, result.url, result.errors)
+        
+        # Show the verified URL with appropriate label
+        if verified_url_to_show:
+            print(f"\n       Verified URL: {verified_url_to_show}")
+        
+        # Show correct ArXiv URL if available from verified data and different from cited
+        if result.verified_data:
+            external_ids = result.verified_data.get('externalIds', {})
+            if external_ids.get('ArXiv'):
+                correct_arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
+                # Only show if it's different from the cited URL
+                if correct_arxiv_url != url:
+                    print(f"       ArXiv URL: {correct_arxiv_url}")
+        
+        # Show additional external ID URLs if available and different
+        if result.verified_data:
+            external_ids = result.verified_data.get('externalIds', {})
             
+            # Show DOI URL if available and different from what's already shown
+            if external_ids.get('DOI'):
+                from utils.doi_utils import construct_doi_url
+                doi_url = construct_doi_url(external_ids['DOI'])
+                if doi_url != verified_url_to_show and doi_url != url:
+                    print(f"       DOI URL: {doi_url}")
+            
+            # Show any other URL from verified data if different
+            if result.verified_data.get('url') and result.verified_data['url'] != verified_url_to_show and result.verified_data['url'] != url:
+                print(f"       {result.verified_data['url']}")
+            
+        # Display errors and warnings
+        if result.errors:
+            # Check if there's an unverified error
+            has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' for e in result.errors)
+            
+            if has_unverified_error:
+                # Show unverified message format
+                print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+                
+                # Handle missing or invalid year
+                year = reference.get('year')
+                if year and year != 0:
+                    year_str = str(year)
+                else:
+                    year_str = "year unknown"
+                
+                print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
+                
+                # Only show URL if it exists and is different from reference URL
+                ref_url = reference.get('url', '').strip()
+                if ref_url and ref_url != result.url:
+                    print(f"          URL: {ref_url}")
+            
+            # Display all non-unverified errors and warnings
+            for error in result.errors:
+                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified':
+                    error_type = error.get('error_type') or error.get('warning_type')
+                    error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
+                    
+                    if error_type == 'arxiv_id':
+                        print(f"      ❌ {error_details}")
+                    elif 'error_type' in error:
+                        print(f"      ❌ Error: {error_details}")
+                    else:
+                        print(f"      ⚠️  Warning: {error_details}")
+        
         # Show timing info for slow references
         if result.processing_time > 5.0:
             logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {title}")
             logger.debug(f"Raw text: {reference.get('raw_text', '')}")
-        
-        # Note: Error and warning output is handled by the callback to avoid duplication
-        # The parallel processor only prints basic reference info
     
     def _update_stats(self, result: ReferenceResult) -> None:
         """Update processing statistics."""

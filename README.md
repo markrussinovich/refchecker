@@ -13,19 +13,31 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 [1/45] Neural machine translation in linear time
        Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van den Oord, Alex Graves, Koray Kavukcuoglu
        2017
-         ⚠️  year: Year mismatch: cited as 2017 but actually 2016
+
+       Verified URL: https://www.semanticscholar.org/paper/5f4ac1ac7ca4b17d3db1b52d9aafd9e8b26c0d7
+       ArXiv URL: https://arxiv.org/abs/1610.10099
+       DOI URL: https://doi.org/10.48550/arxiv.1610.10099
+      ⚠️  Warning: Year mismatch: cited as 2017 but actually 2016
 
 [2/45] Effective approaches to attention-based neural machine translation
        Minh-Thang Luong, Hieu Pham, Christopher D. Manning
        2015
-         ❌  author: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
+
+       Verified URL: https://www.semanticscholar.org/paper/93499a7c7f699b6630a86fad964536f9423bb6d0
+       ArXiv URL: https://arxiv.org/abs/1508.04025
+       DOI URL: https://doi.org/10.18653/v1/d15-1166
+      ❌ Error: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
 
 [3/45] Deep Residual Learning for Image Recognition
        Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun
        Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition
        2016
        https://doi.org/10.1109/CVPR.2016.91
-         ❌  doi: DOI mismatch: cited as '10.1109/CVPR.2016.91' but actually '10.1109/CVPR.2016.90'
+
+       Verified URL: https://www.semanticscholar.org/paper/2c03df8b48bf3fa39054345bafabfeff15bfd11d
+       ArXiv URL: https://arxiv.org/abs/1512.03385
+       DOI URL: https://doi.org/10.1109/CVPR.2016.90
+      ❌ Error: DOI mismatch: cited as '10.1109/CVPR.2016.91' but actually '10.1109/CVPR.2016.90'
 
 ============================================================
 📋 SUMMARY
@@ -58,6 +70,7 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - **🤖 LLM-Enhanced Reference Extraction**: Recommended AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
 - **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venues, URLs, and DOIs
 - **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef with intelligent retry logic
+- **🔗 Enhanced URL Discovery**: Automatically discovers and displays additional authoritative URLs (Semantic Scholar, ArXiv, DOI) obtained through verification
 - **🧠 Smart Title Matching**: Advanced similarity algorithms handle common academic formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
 - **🏢 Venue Normalization**: Recognizes common journal and conference abbreviation patterns
 - **📊 Detailed Reporting**: Generates comprehensive error reports with drop-in corrected references
@@ -298,6 +311,17 @@ python refchecker.py --paper 1706.03762 --output-file my_errors.txt
 
 The output file contains a detailed report of references with errors and warnings, including corrected references.
 
+### Enhanced URL Display
+
+RefChecker automatically discovers and displays authoritative URLs for verified references:
+
+- **Verified URL**: The primary authoritative source (typically Semantic Scholar)
+- **ArXiv URL**: Direct link to the ArXiv preprint when available
+- **DOI URL**: Digital Object Identifier link when available
+- **Additional URLs**: Other relevant sources discovered during verification
+
+This enhanced URL display helps users access multiple authoritative sources for each reference and provides comprehensive citation information.
+
 ### Error Types
 
 - **❌ Errors**: Critical issues that need correction
@@ -305,19 +329,31 @@ The output file contains a detailed report of references with errors and warning
     ```
     [16/19] Bag of tricks: Benchmarking of jailbreak attacks on llms
            T. Xie, X. Qi, Y. Zeng, Y. Huang, U. M. Sehwag, K. Huang, L. He, B. Wei, D. Li, Y. Sheng et al
-           ❌  author: First author mismatch: 'T. Xie' vs 'Zhao Xu'
+
+           Verified URL: https://www.semanticscholar.org/paper/a1b2c3d4e5f6789012345678901234567890abcd
+           ArXiv URL: https://arxiv.org/abs/2312.02119
+           DOI URL: https://doi.org/10.48550/arxiv.2312.02119
+          ❌ Error: First author mismatch: 'T. Xie' vs 'Zhao Xu'
     ```
   - `title`: Title discrepancies
     ```
     [8/19] BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding
            J. Devlin, M.-W. Chang, K. Lee, K. Toutanova
-           ❌  title: Title mismatch: cited as 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding' but actually 'BERT: Pre-training of Deep Bidirectional Transformers for Language Comprehension'
+
+           Verified URL: https://www.semanticscholar.org/paper/df2b0e26d0599ce3e70df8a9da02e51594e0e992
+           ArXiv URL: https://arxiv.org/abs/1810.04805
+           DOI URL: https://doi.org/10.18653/v1/n19-1423
+          ❌ Error: Title mismatch: cited as 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding' but actually 'BERT: Pre-training of Deep Bidirectional Transformers for Language Comprehension'
     ```
-  - `url`: Incorrect URLs or arXiv IDs
+  - `arxiv_id`: Incorrect URLs or arXiv IDs
     ```
     [5/19] Jbshield: Neural representation-level defense against adversarial prompts in large language models
            W. Zhang, M. Li, H. Wang
-           ❌  arxiv_id: Incorrect ArXiv ID: ArXiv ID 2503.01234 points to 'Self-Adaptive Gamma Context-Aware SSM-based Model for Metal Defect Detection'
+           https://arxiv.org/abs/2503.01234
+
+           Verified URL: https://www.semanticscholar.org/paper/e1f2a3b4c5d6e7f8901234567890123456789012
+           DOI URL: https://doi.org/10.48550/arxiv.2401.12345
+          ❌ Error: Incorrect ArXiv ID: ArXiv ID 2503.01234 points to 'Self-Adaptive Gamma Context-Aware SSM-based Model for Metal Defect Detection'
     ```
   - `doi`: DOI mismatches
     ```
@@ -326,7 +362,11 @@ The output file contains a detailed report of references with errors and warning
            Neural Information Processing Systems
            2017
            https://doi.org/10.5555/3295222.3295349
-           ❌  doi: DOI mismatch: cited as '10.5555/3295222.3295349' but actually '10.48550/arXiv.1706.03762'
+
+           Verified URL: https://www.semanticscholar.org/paper/204e3073870fae3d05bcbc2f6a8e263d9b72e776
+           ArXiv URL: https://arxiv.org/abs/1706.03762
+           DOI URL: https://doi.org/10.48550/arXiv.1706.03762
+          ❌ Error: DOI mismatch: cited as '10.5555/3295222.3295349' but actually '10.48550/arXiv.1706.03762'
     ```
 
 - **⚠️ Warnings**: Minor issues that may need attention
@@ -334,13 +374,23 @@ The output file contains a detailed report of references with errors and warning
     ```
     [14/19] Smoothllm: Defending large language models against jailbreaking attacks
            A. Robey, E. Wong, H. Hassani, G. J. Pappas
-           ⚠️  year: Year mismatch: cited as 2024 but actually 2023
+           2024
+
+           Verified URL: https://www.semanticscholar.org/paper/f1a2b3c4d5e6f7890123456789012345678901ab
+           ArXiv URL: https://arxiv.org/abs/2310.03684
+           DOI URL: https://doi.org/10.48550/arxiv.2310.03684
+          ⚠️  Warning: Year mismatch: cited as 2024 but actually 2023
     ```
   - `venue`: Venue format variations
     ```
     [2/19] Gradient cuff: Detecting jailbreak attacks on large language models by exploring refusal loss landscapes
            X. Hu, P.-Y. Chen, T.-Y. Ho
-           ⚠️  venue: Venue mismatch: cited as 'arXiv, 2024' but actually 'Neural Information Processing Systems'
+           arXiv, 2024
+
+           Verified URL: https://www.semanticscholar.org/paper/c1d2e3f4a5b6c7d8e9f0123456789012345678ab
+           ArXiv URL: https://arxiv.org/abs/2403.02151
+           DOI URL: https://doi.org/10.48550/arxiv.2403.02151
+          ⚠️  Warning: Venue mismatch: cited as 'arXiv, 2024' but actually 'Neural Information Processing Systems'
     ```
 
 - **❓ Unverified**: References that couldn't be verified with any of the checker APIs

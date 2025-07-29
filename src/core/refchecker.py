@@ -1163,15 +1163,17 @@ class ArxivReferenceChecker:
             main_list = and_parts[0].strip()
             last_author = and_parts[1].strip()
             
-            # Split the main list by commas
-            authors = [a.strip() for a in main_list.split(',') if a.strip()]
+            # Split the main list by commas, handling initials properly
+            from utils.text_utils import parse_authors_with_initials
+            authors = parse_authors_with_initials(main_list)
             
             # Add the last author
             if last_author:
                 authors.append(last_author)
         else:
-            # No "and" found, just split by commas
-            authors = [a.strip() for a in authors_text.split(',') if a.strip()]
+            # No "and" found, use smart comma parsing for initials
+            from utils.text_utils import parse_authors_with_initials
+            authors = parse_authors_with_initials(authors_text)
         
         # Clean up each author name
         cleaned_authors = []
@@ -1652,7 +1654,8 @@ class ArxivReferenceChecker:
         if not title and not authors_text:
             # Try to detect a list of names
             if re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
-                authors = [a.strip() for a in cleaned_ref.split(',')]
+                from utils.text_utils import parse_authors_with_initials
+                authors = parse_authors_with_initials(cleaned_ref)
                 return authors, ""
         
         if authors_text and title:
@@ -1665,7 +1668,8 @@ class ArxivReferenceChecker:
         
         # Final fallback: if the reference is just a list of names, return as authors
         if not title and cleaned_ref and re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
-            authors = [a.strip() for a in cleaned_ref.split(',')]
+            from utils.text_utils import parse_authors_with_initials
+            authors = parse_authors_with_initials(cleaned_ref)
             return authors, ""
         
         # Fallback: if the reference is just a list of author names (with initials, and 'and' before last author), treat as authors
@@ -1962,6 +1966,7 @@ class ArxivReferenceChecker:
             if hasattr(self.non_arxiv_checker, 'conn') or hasattr(self.non_arxiv_checker, 'connection_pool'):
                 # Use the local database checker's verify_reference method which returns URLs
                 verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
+                logger.debug(f"Database mode: Initial paper_url from database checker: {paper_url}")
                 
                 if not verified_data:
                     # Mark as unverified but keep the URL if found
@@ -1990,6 +1995,65 @@ class ArxivReferenceChecker:
                         formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
                     
                     formatted_errors.append(formatted_error)
+                
+                # Check for ArXiv ID mismatch in database mode as well
+                arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
+                logger.debug(f"Database mode: ArXiv ID mismatch check for '{reference.get('title', 'Unknown')}': {len(arxiv_errors) if arxiv_errors else 0} errors found")
+                if arxiv_errors:
+                    logger.debug("Database mode: ArXiv ID mismatch detected - replacing other errors with ArXiv ID error only")
+                    logger.debug(f"Original paper_url before ArXiv ID mismatch fix: {paper_url}")
+                    
+                    # For ArXiv ID mismatch, we need to find the CORRECT paper (not the wrong one from ArXiv ID)
+                    # The verified_data contains the wrong paper's data, so we need to search by title/authors
+                    correct_paper_data = None
+                    correct_paper_url = None
+                    try:
+                        title = reference.get('title', '').strip()
+                        authors = reference.get('authors', [])
+                        year = reference.get('year')
+                        
+                        if title or authors:
+                            logger.debug(f"Database mode: Searching for correct paper by title/authors for ArXiv ID mismatch")
+                            # Use the database checker to find the correct paper by title/authors
+                            correct_paper_data = self.non_arxiv_checker.find_best_match(title, authors, year)
+                            
+                            if correct_paper_data:
+                                logger.debug(f"Database mode: Found correct paper: '{correct_paper_data.get('title', '')}'")
+                                # Use the CORRECT paper's Semantic Scholar URL
+                                correct_external_ids = correct_paper_data.get('externalIds', {})
+                                if correct_external_ids.get('CorpusId'):
+                                    from utils.url_utils import construct_semantic_scholar_url
+                                    correct_paper_url = construct_semantic_scholar_url(correct_external_ids['CorpusId'])
+                                    paper_url = correct_paper_url  # Update the main URL
+                                    logger.debug(f"Database mode: Using correct paper's Semantic Scholar URL for ArXiv ID mismatch: {paper_url}")
+                                else:
+                                    logger.debug("Database mode: Correct paper found but no CorpusId available")
+                            else:
+                                logger.debug("Database mode: Could not find correct paper by title/authors")
+                    except Exception as e:
+                        logger.debug(f"Database mode: Error finding correct paper for ArXiv ID mismatch: {e}")
+                    
+                    # Build formatted errors with correct URL
+                    formatted_errors = []
+                    for error in arxiv_errors:
+                        formatted_error = {
+                            'error_type': error['error_type'],
+                            'error_details': error['error_details']
+                        }
+                        # Add the correct URL if we found the correct paper
+                        if correct_paper_url:
+                            formatted_error['ref_url_correct'] = correct_paper_url
+                        elif error.get('ref_url_correct'):
+                            formatted_error['ref_url_correct'] = error['ref_url_correct']
+                        formatted_errors.append(formatted_error)
+                    
+                    # Fallback to wrong paper's URL if we couldn't find the correct one
+                    if not correct_paper_data and verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
+                        from utils.url_utils import construct_semantic_scholar_url
+                        paper_url = construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
+                        logger.debug(f"Database mode: Fallback to wrong paper's Semantic Scholar URL: {paper_url}")
+                    elif not correct_paper_data:
+                        logger.debug(f"Database mode: No CorpusId available for Semantic Scholar URL construction. verified_data keys: {list(verified_data.keys()) if verified_data else 'None'}")
                 
                 return formatted_errors if formatted_errors else None, paper_url, verified_data
             else:
@@ -2155,22 +2219,58 @@ class ArxivReferenceChecker:
         
         logger.debug(f"Non-arXiv verification result: verified_data={verified_data is not None}, errors={len(errors) if errors else 0}, paper_url={paper_url}")
         
+        # ALWAYS check for ArXiv ID mismatch first, regardless of verification status
+        arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
+        
         if not verified_data:
             logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
             logger.debug(f"Raw text: {reference['raw_text']}")
-            # Mark as unverified but keep the URL if found
-            return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
+            
+            # If there's also an ArXiv ID mismatch, report both errors
+            if arxiv_errors:
+                logger.debug("ArXiv ID mismatch detected with unverified paper")
+                combined_errors = [
+                    {"error_type": "unverified", "error_details": "Reference could not be verified"},
+                    *arxiv_errors
+                ]
+                return combined_errors, paper_url, verified_data
+            else:
+                # Only unverified error
+                return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
         
-        # Check for ArXiv ID mismatch independently - this should happen regardless of 
-        # whether Semantic Scholar verification succeeded or failed
-        arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
+        # verified_data exists, check if there's an ArXiv ID mismatch
         if arxiv_errors:
-            # If we found an ArXiv ID mismatch, ONLY report that error
-            # Don't report title/author mismatches because the reference itself is correct
-            logger.debug("ArXiv ID mismatch detected - replacing other errors with ArXiv ID error only")
-            errors = arxiv_errors
+            logger.debug("ArXiv ID mismatch detected with verified paper")
+            
+            # Check if the verified paper has any displayable URLs after ArXiv ID filtering
+            has_displayable_verified_url = False
+            if verified_data:
+                external_ids = verified_data.get('externalIds', {})
+                # Check for non-ArXiv URLs that would be displayed
+                if (external_ids.get('DOI') or 
+                    external_ids.get('CorpusId') or 
+                    (verified_data.get('url') and 'arxiv.org' not in verified_data.get('url', ''))):
+                    has_displayable_verified_url = True
+            
+            if has_displayable_verified_url:
+                # Paper has other verification URLs to display, so treat as verified with ArXiv ID error only
+                errors = arxiv_errors
+                logger.debug("ArXiv ID mismatch error for verified paper with displayable URLs")
+            else:
+                # Paper only has ArXiv URLs which will be filtered out, treat as unverified
+                logger.debug("Verified paper has only ArXiv URLs - treating as unverified due to ArXiv ID mismatch")
+                combined_errors = [
+                    {"error_type": "unverified", "error_details": "Reference could not be verified"},
+                    *arxiv_errors
+                ]
+                errors = combined_errors
+            
+            # Don't use the wrong paper's URL - return None to indicate no valid URL
+            paper_url = None
+            logger.debug("Setting paper_url to None due to ArXiv ID mismatch")
         elif errors:
             # Only keep other errors if there's no ArXiv ID mismatch
+            logger.debug("No ArXiv ID mismatch, keeping original verification errors")
             pass
         
         # If no errors were found by the Semantic Scholar client, we're done
@@ -2180,7 +2280,9 @@ class ArxivReferenceChecker:
         # Convert the errors to our format
         formatted_errors = []
         
-        for error in errors:
+        logger.debug(f"DEBUG: Converting {len(errors)} errors to formatted errors")
+        for i, error in enumerate(errors):
+            logger.debug(f"DEBUG: Error {i}: {error}")
             formatted_error = {}
             
             # Handle error_type and warning_type properly
@@ -2202,6 +2304,7 @@ class ArxivReferenceChecker:
             
             formatted_errors.append(formatted_error)
         
+        logger.debug(f"DEBUG: Returning {len(formatted_errors)} formatted errors: {formatted_errors}")
         return formatted_errors if formatted_errors else None, paper_url, verified_data
     
     def check_independent_arxiv_id_mismatch(self, reference, verified_data):
@@ -2258,15 +2361,11 @@ class ArxivReferenceChecker:
         
         # If titles are very different (less than 40% similarity), flag as ArXiv ID error
         if title_similarity < 0.4:
-            # Try to find the correct ArXiv URL for the expected paper
-            correct_arxiv_url = None
-            if verified_data:
-                correct_arxiv_url = self.find_correct_arxiv_url(verified_data)
-            
+            # For ArXiv ID mismatch, we don't provide a correct URL here
+            # The correct URL should be determined by finding the right paper by title/authors
             return [{
                 'error_type': 'arxiv_id',
-                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'",
-                'ref_url_correct': correct_arxiv_url or ''
+                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'"
             }]
         
         return []
@@ -2932,7 +3031,8 @@ class ArxivReferenceChecker:
             
             if authors:
                 # Limit to first 3 authors for readability
-                author_list = [a.strip() for a in authors.split(',')]
+                from utils.text_utils import parse_authors_with_initials
+                author_list = parse_authors_with_initials(authors)
                 if len(author_list) > 3:
                     formatted += ", ".join(author_list[:3]) + " et al."
                 else:
@@ -3759,8 +3859,9 @@ class ArxivReferenceChecker:
         # First remove 'and' and trailing periods from the entire text
         cleaned_text = author_text.replace(' and ', ', ').rstrip('.')
         
-        # Then split by commas
-        authors = [a.strip() for a in cleaned_text.split(',') if a.strip()]
+        # Then parse authors properly handling initials
+        from utils.text_utils import parse_authors_with_initials
+        authors = parse_authors_with_initials(cleaned_text)
         
         # Remove any remaining trailing periods and clean up
         authors = [a.rstrip('.').strip() for a in authors if a.strip()]
@@ -4419,21 +4520,40 @@ class ArxivReferenceChecker:
             start_time = time.time()
             errors, reference_url, verified_data = self.verify_reference(paper, reference)
 
-            # Collect all URLs and deduplicate them
-            all_urls = []
+            # Show cited URL if available
             if url:
-                all_urls.append(url)
-            if reference_url and reference_url != url:
-                all_urls.append(reference_url)
-            if verified_data and verified_data.get('url'):
-                verified_url = verified_data['url']
-                if verified_url != reference_url and verified_url != url:
-                    all_urls.append(verified_url)
+                print(f"       {url}")
             
-            # Show deduplicated URLs
-            final_urls = deduplicate_urls(all_urls)
-            for final_url in final_urls:
-                print(f"       {final_url}")
+            # Get the appropriate verified URL using shared logic
+            verified_url_to_show = self._get_verified_url(verified_data, reference_url, errors)
+            
+            # Show the verified URL with appropriate label
+            if verified_url_to_show:
+                print(f"       Verified URL: {verified_url_to_show}")
+            
+            # Show correct ArXiv URL if available from verified data and different from cited
+            if verified_data:
+                external_ids = verified_data.get('externalIds', {})
+                if external_ids.get('ArXiv'):
+                    correct_arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
+                    # Only show if it's different from the cited URL
+                    if correct_arxiv_url != url:
+                        print(f"       Correct ArXiv URL: {correct_arxiv_url}")
+            
+            # Show additional external ID URLs if available and different
+            if verified_data:
+                external_ids = verified_data.get('externalIds', {})
+                
+                # Show DOI URL if available and different from what's already shown
+                if external_ids.get('DOI'):
+                    from utils.doi_utils import construct_doi_url
+                    doi_url = construct_doi_url(external_ids['DOI'])
+                    if doi_url != verified_url_to_show and doi_url != url:
+                        print(f"       DOI URL: {doi_url}")
+                
+                # Show any other URL from verified data if different
+                if verified_data.get('url') and verified_data['url'] != verified_url_to_show and verified_data['url'] != url:
+                    print(f"       {verified_data['url']}")
             elapsed = time.time() - start_time
             if elapsed > 5.0:
                 logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
@@ -4464,7 +4584,7 @@ class ArxivReferenceChecker:
         # Set up result callback to handle each completed reference  
         def result_callback(result):
             self._process_reference_result(paper, result.reference, result.errors, result.url,
-                                         paper_errors, unverified_count, debug_mode, print_output=True, verified_data=result.verified_data)
+                                         paper_errors, unverified_count, debug_mode, print_output=False, verified_data=result.verified_data)
         
         # Run parallel verification
         processor.verify_references_parallel(paper, bibliography, result_callback)
@@ -4486,57 +4606,139 @@ class ArxivReferenceChecker:
         """
         # If errors found, add to dataset and optionally print details
         if errors:
-            # Check if the reference is just unverified
-            if len(errors) == 1 and (errors[0].get('error_type') == 'unverified' or errors[0].get('warning_type') == 'unverified'):
-                # Note: we can't modify unverified_count directly since it's passed by value
-                # The calling method should handle this counter
+            # Check if there's an unverified error among the errors
+            has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' for e in errors)
+            
+            if has_unverified_error:
                 self.total_unverified_refs += 1
-                # Add unverified reference to dataset
-                self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
-                if not debug_mode and print_output:
-                    # Show full citation details for unverified references
-                    print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-                    
-                    # Handle missing or invalid year
-                    year = reference.get('year')
-                    if year and year != 0:
-                        year_str = str(year)
-                    else:
-                        year_str = "year unknown"
-                    
-                    print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
-                    
-                    # Only show URL if it exists and is different from reference_url
-                    ref_url = reference.get('url', '').strip()
-                    if ref_url and ref_url != reference_url:
-                        print(f"          URL: {ref_url}")
-            else:
-                # Real errors or warnings found
-                self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
-                paper_errors.extend(errors)
-                
-                # Count errors vs warnings
-                error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
-                warning_count = sum(1 for e in errors if 'warning_type' in e)
-                self.total_errors_found += error_count
-                self.total_warnings_found += warning_count
-                
-                if not debug_mode and print_output:
-                    # Always show errors and warnings if they exist
-                    for error in errors:
-                        if 'error_type' in error and error['error_type'] != 'unverified':
-                            # Clean up error details to remove unwanted line breaks
-                            error_details = error['error_details'].replace('\n', ' ').replace('\r', ' ')
-                            # Ensure proper spacing
-                            error_details = ' '.join(error_details.split())
-                            print(f"       ❌  {error['error_type']}: {error_details}")
-                        elif 'warning_type' in error:
-                            # Clean up warning details to remove unwanted line breaks  
-                            warning_details = error['warning_details'].replace('\n', ' ').replace('\r', ' ')
-                            # Ensure proper spacing
-                            warning_details = ' '.join(warning_details.split())
-                            print(f"       ⚠️  {error['warning_type']}: {warning_details}")
+                self._display_unverified_error(reference, reference_url, debug_mode, print_output)
+            
+            # Add to dataset and handle all errors
+            self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
+            paper_errors.extend(errors)
+            
+            # Count errors vs warnings
+            error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
+            warning_count = sum(1 for e in errors if 'warning_type' in e)
+            self.total_errors_found += error_count
+            self.total_warnings_found += warning_count
+            
+            # Display all non-unverified errors and warnings
+            self._display_non_unverified_errors(errors, debug_mode, print_output)
     
+    def _has_arxiv_id_error(self, errors):
+        """Check if there's an ArXiv ID error in the error list"""
+        if not errors:
+            return False
+        return any(error.get('error_type') == 'arxiv_id' for error in errors)
+    
+    def _get_verified_url(self, verified_data, reference_url, errors):
+        """Get the appropriate verified URL based on priority and ArXiv ID validation"""
+        # Check if there's an ArXiv ID error FIRST - if so, don't show any verified URL
+        if self._has_arxiv_id_error(errors):
+            return None
+            
+        # First priority: Non-ArXiv URLs from verified_data (direct from API, most reliable)
+        if verified_data and verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
+            return verified_data['url']
+        
+        # Second priority: Semantic Scholar URL from CorpusId (if no direct URL available)
+        if verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
+            from utils.url_utils import construct_semantic_scholar_url
+            return construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
+        
+        # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
+        if verified_data and verified_data.get('externalIds', {}).get('DOI'):
+            from utils.doi_utils import construct_doi_url
+            return construct_doi_url(verified_data['externalIds']['DOI'])
+        
+        # Fourth priority: ArXiv URL from verified data (only if it matches the correct ArXiv ID)
+        if verified_data and verified_data.get('externalIds', {}).get('ArXiv'):
+            from utils.url_utils import construct_arxiv_url
+            correct_arxiv_id = verified_data['externalIds']['ArXiv']
+            return construct_arxiv_url(correct_arxiv_id)
+        
+        # Fifth priority: Other URLs from verified_data
+        if verified_data and verified_data.get('url'):
+            return verified_data['url']
+        
+        # Last resort: Use the URL returned by the verification process (but be cautious with ArXiv URLs)
+        if reference_url:
+            return self._validate_reference_url(reference_url, verified_data)
+            
+        return None
+    
+    def _validate_reference_url(self, reference_url, verified_data):
+        """Validate and potentially replace reference URL based on ArXiv ID matching"""
+        # If it's an ArXiv URL and we have verified data, only use it if the ArXiv ID matches
+        if 'arxiv.org' in reference_url and verified_data:
+            external_ids = verified_data.get('externalIds', {})
+            if external_ids.get('ArXiv'):
+                # Extract ArXiv ID from the URL using shared utility
+                from utils.url_utils import extract_arxiv_id_from_url
+                url_arxiv_id = extract_arxiv_id_from_url(reference_url)
+                if url_arxiv_id:
+                    correct_arxiv_id = external_ids['ArXiv']
+                    # Only use the URL if the ArXiv IDs match
+                    if url_arxiv_id == correct_arxiv_id:
+                        return reference_url
+                    # If they don't match, prefer the Semantic Scholar URL or DOI
+                    else:
+                        return self._get_fallback_url(external_ids)
+                else:
+                    # If we can't extract ArXiv ID, be safe and use verified data
+                    return self._get_fallback_url(external_ids)
+            else:
+                # No verified ArXiv ID, so the URL might be wrong
+                return reference_url
+        else:
+            # Non-ArXiv URL, probably safe to use
+            return reference_url
+    
+    def _get_fallback_url(self, external_ids):
+        """Get fallback URL from external IDs (Semantic Scholar or DOI)"""
+        if external_ids.get('CorpusId'):
+            from utils.url_utils import construct_semantic_scholar_url
+            return construct_semantic_scholar_url(external_ids['CorpusId'])
+        elif external_ids.get('DOI'):
+            from utils.doi_utils import construct_doi_url
+            return construct_doi_url(external_ids['DOI'])
+        return None
+    
+    def _format_year_string(self, year):
+        """Format year for display, handling missing or invalid years"""
+        if year and year != 0:
+            return str(year)
+        return "year unknown"
+    
+    def _display_unverified_error(self, reference, reference_url, debug_mode, print_output):
+        """Display the unverified error message with citation details"""
+        if not debug_mode and print_output:
+            print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+            
+            year_str = self._format_year_string(reference.get('year'))
+            print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
+            
+            # Only show URL if it exists and is different from reference_url
+            ref_url = reference.get('url', '').strip()
+            if ref_url and ref_url != reference_url:
+                print(f"          URL: {ref_url}")
+    
+    def _display_non_unverified_errors(self, errors, debug_mode, print_output):
+        """Display all non-unverified errors and warnings"""
+        if not debug_mode and print_output:
+            for error in errors:
+                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified':
+                    error_type = error.get('error_type') or error.get('warning_type')
+                    error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
+                    
+                    if error_type == 'arxiv_id':
+                        print(f"      ❌ {error_details}")
+                    elif 'error_type' in error:
+                        print(f"      ❌ Error: {error_details}")
+                    else:
+                        print(f"      ⚠️  Warning: {error_details}")
+
     def _output_reference_errors(self, reference, errors, url):
         """
         Output method for parallel processor to use (maintains consistent formatting)

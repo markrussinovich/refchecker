@@ -246,8 +246,8 @@ class EnhancedHybridReferenceChecker:
             verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
                 return verified_data, errors, url
-            # For Semantic Scholar, save ALL failure types for retry since it has best coverage
-            if failure_type in ['throttled', 'timeout', 'server_error', 'other']:
+            # For Semantic Scholar, only retry retryable failures (not 'not_found')
+            if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
         
         # Strategy 4: Try OpenAlex API (excellent reliability, replaces Google Scholar)

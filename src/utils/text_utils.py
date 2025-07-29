@@ -63,6 +63,54 @@ def normalize_text(text):
     return text.lower()
 
 
+def parse_authors_with_initials(authors_text):
+    """
+    Parse author list that may contain initials, handling formats like:
+    "Jiang, J, Xia, G. G, Carlton, D. B" -> ["Jiang, J", "Xia, G. G", "Carlton, D. B"]
+    
+    Args:
+        authors_text: String containing author names with potential initials
+        
+    Returns:
+        List of properly parsed author names
+    """
+    if not authors_text:
+        return []
+    
+    # Import regex at function level to avoid import issues
+    import re
+    
+    # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
+    authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
+    
+    # Split on commas first
+    parts = [part.strip() for part in authors_text.split(',') if part.strip()]
+    
+    authors = []
+    current_author = ""
+    
+    for i, part in enumerate(parts):
+        if current_author:
+            # We're building an author name
+            # Check if this part looks like an initial (1-3 characters, possibly with periods)
+            if re.match(r'^[A-Z]\.?\s*$', part) or re.match(r'^[A-Z]\.\s*[A-Z]\.?\s*$', part):
+                # This is an initial, add to current author
+                current_author += f", {part}"
+            else:
+                # This is a new author, finish the current one and start new
+                authors.append(current_author)
+                current_author = part
+        else:
+            # Starting a new author
+            current_author = part
+    
+    # Don't forget the last author
+    if current_author:
+        authors.append(current_author)
+    
+    return authors
+
+
 def clean_author_name(author):
     """
     Clean and normalize an author name
@@ -78,6 +126,9 @@ def clean_author_name(author):
     
     # Remove extra whitespace
     author = re.sub(r'\s+', ' ', author).strip()
+    
+    # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li")
+    author = re.sub(r'(\w)\s+\.', r'\1.', author)
     
     # Remove common prefixes/suffixes
     author = re.sub(r'\b(Dr\.?|Prof\.?|Professor|Mr\.?|Ms\.?|Mrs\.?)\s*', '', author, flags=re.IGNORECASE)
@@ -299,6 +350,9 @@ def normalize_author_name(name: str) -> str:
     
     # Remove reference numbers (e.g., "[1]")
     name = re.sub(r'^\[\d+\]', '', name)
+    
+    # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li")
+    name = re.sub(r'(\w)\s+\.', r'\1.', name)
     
     # Use common normalization function
     return normalize_text(name)
@@ -1636,6 +1690,40 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
     return references
 
 
+def _extract_corrected_reference_data(error_entry: dict, corrected_data: dict) -> dict:
+    """
+    Extract corrected reference data from error entry and corrected data.
+    
+    Args:
+        error_entry: Error entry containing corrected reference information
+        corrected_data: Verified data from API response
+        
+    Returns:
+        Dictionary containing corrected reference information
+    """
+    # Get the corrected information
+    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
+    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
+    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
+    
+    # Prioritize the verified URL that was actually used for verification
+    correct_url = (error_entry.get('ref_url_correct') or 
+                   error_entry.get('ref_verified_url') or 
+                   corrected_data.get('url', ''))
+    
+    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
+    
+    return {
+        'title': correct_title,
+        'authors': correct_authors,
+        'year': correct_year,
+        'url': correct_url,
+        'venue': correct_venue,
+        'doi': correct_doi
+    }
+
+
 def format_corrected_reference(original_reference, corrected_data, error_entry):
     """
     Format a corrected reference in the same format as the original
@@ -1666,12 +1754,13 @@ def format_corrected_reference(original_reference, corrected_data, error_entry):
 def format_corrected_bibtex(original_reference, corrected_data, error_entry):
     """Format a corrected BibTeX entry in the same style as the original"""
     
-    # Get the corrected information
-    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
-    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
-    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
-    correct_doi = corrected_data.get('externalIds', {}).get('DOI', '') if corrected_data else ''
+    # Get the corrected information using shared utility
+    corrected_ref = _extract_corrected_reference_data(error_entry, corrected_data)
+    correct_title = corrected_ref['title']
+    correct_authors = corrected_ref['authors'] 
+    correct_year = corrected_ref['year']
+    correct_url = corrected_ref['url']
+    correct_doi = corrected_ref['doi']
     
     # Get original BibTeX details
     bibtex_key = original_reference.get('bibtex_key', 'unknown')
@@ -1736,12 +1825,13 @@ def format_corrected_bibtex(original_reference, corrected_data, error_entry):
 def format_corrected_bibitem(original_reference, corrected_data, error_entry):
     """Format a corrected \\bibitem entry"""
     
-    # Get the corrected information
-    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
-    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
-    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
-    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    # Get the corrected information using shared utility
+    corrected_ref = _extract_corrected_reference_data(error_entry, corrected_data)
+    correct_title = corrected_ref['title']
+    correct_authors = corrected_ref['authors'] 
+    correct_year = corrected_ref['year']
+    correct_url = corrected_ref['url']
+    correct_venue = corrected_ref['venue']
     
     # Ensure venue is a string (sometimes it can be a dict)
     if isinstance(correct_venue, dict):
@@ -1785,12 +1875,13 @@ def format_corrected_bibitem(original_reference, corrected_data, error_entry):
 def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     """Format a corrected plaintext citation"""
     
-    # Get the corrected information
-    correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
-    correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
-    correct_url = error_entry.get('ref_url_correct') or corrected_data.get('url', '')
-    correct_venue = corrected_data.get('journal', '') or corrected_data.get('venue', '')
+    # Get the corrected information using shared utility
+    corrected_ref = _extract_corrected_reference_data(error_entry, corrected_data)
+    correct_title = corrected_ref['title']
+    correct_authors = corrected_ref['authors'] 
+    correct_year = corrected_ref['year']
+    correct_url = corrected_ref['url']
+    correct_venue = corrected_ref['venue']
     
     # Ensure venue is a string (sometimes it can be a dict)
     if isinstance(correct_venue, dict):

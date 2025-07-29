@@ -6,6 +6,7 @@ This module provides utilities for URL construction, validation, and manipulatio
 related to academic references.
 """
 
+import re
 from typing import Optional
 from .doi_utils import normalize_doi
 
@@ -28,6 +29,32 @@ def construct_doi_url(doi: str) -> str:
     
     # Construct URL
     return f"https://doi.org/{normalized_doi}"
+
+
+def extract_arxiv_id_from_url(url: str) -> Optional[str]:
+    """
+    Extract ArXiv ID from an ArXiv URL.
+    
+    Args:
+        url: ArXiv URL (abs or pdf)
+        
+    Returns:
+        ArXiv ID if found, None otherwise
+    """
+    if not url:
+        return None
+    
+    # Use the more comprehensive regex from text_utils.py
+    arxiv_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^\s/?#]+?)(?:\.pdf|v\d+)?(?:[?\#]|$)', url)
+    if arxiv_match:
+        return arxiv_match.group(1)
+    
+    # Fallback to simpler regex for edge cases
+    fallback_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^/?#]+)', url)
+    if fallback_match:
+        return fallback_match.group(1).replace('.pdf', '')
+    
+    return None
 
 
 def construct_arxiv_url(arxiv_id: str, url_type: str = "abs") -> str:

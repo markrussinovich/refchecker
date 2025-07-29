@@ -452,13 +452,21 @@ class LocalNonArxivReferenceChecker:
         else:
             logger.debug("Local DB: Reference verification passed - no errors found")
         
-        # Extract URL using utility function
+        # Return the Semantic Scholar URL that was actually used for verification
+        # since this is a Semantic Scholar database checker
         external_ids = paper_data.get('externalIds', {})
-        open_access_pdf = paper_data.get('openAccessPdf')
-        paper_url = get_best_available_url(external_ids, open_access_pdf)
         
-        if paper_url:
-            logger.debug(f"Found best available URL: {paper_url}")
+        # First try to get the Semantic Scholar URL since that's what we used for verification
+        if external_ids.get('CorpusId'):
+            from utils.url_utils import construct_semantic_scholar_url
+            paper_url = construct_semantic_scholar_url(external_ids['CorpusId'])
+            logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
+        else:
+            # Fallback to best available URL if Semantic Scholar URL not available
+            open_access_pdf = paper_data.get('openAccessPdf')
+            paper_url = get_best_available_url(external_ids, open_access_pdf)
+            if paper_url:
+                logger.debug(f"Using fallback URL: {paper_url}")
         
         return paper_data, errors, paper_url
     
