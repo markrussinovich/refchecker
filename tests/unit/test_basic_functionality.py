@@ -156,3 +156,50 @@ class TestMockIntegration:
         
         for method_name in verification_methods:
             assert hasattr(ref_checker, method_name), f"Method {method_name} not found"
+
+
+class TestSystemStability:
+    """Test system stability and import integrity."""
+    
+    def test_core_imports_work_without_circular_dependencies(self):
+        """Test that core imports work without circular dependencies."""
+        try:
+            # Import all major components to check for circular imports
+            from core.refchecker import ArxivReferenceChecker
+            from core.parallel_processor import ParallelReferenceProcessor
+            from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+            from checkers.semantic_scholar import NonArxivReferenceChecker
+            from utils.text_utils import normalize_author_name, parse_authors_with_initials
+            
+            # Try to instantiate key components
+            checker = ArxivReferenceChecker()
+            assert checker is not None, "Should be able to create ArxivReferenceChecker"
+            
+            # Test that we can use the text utility functions
+            result = normalize_author_name("Y . Li")
+            assert result is not None, "Should be able to call normalize_author_name"
+            
+            result = parse_authors_with_initials("A, B. C, D . E")
+            assert isinstance(result, list), "Should return a list from parse_authors_with_initials"
+            
+        except ImportError as e:
+            pytest.fail(f"Import error detected (possible circular import): {e}")
+        except Exception as e:
+            pytest.fail(f"Unexpected error in system stability test: {e}")
+    
+    def test_author_processing_functions_available(self):
+        """Test that author processing functions are available and working."""
+        from utils.text_utils import parse_authors_with_initials, normalize_author_name, clean_author_name
+        
+        # Test basic functionality
+        test_authors = "A. Smith, B . Jones"
+        parsed = parse_authors_with_initials(test_authors)
+        assert len(parsed) == 2, "Should parse 2 authors"
+        assert parsed == ["A. Smith", "B. Jones"], "Should fix spacing in parsing"
+        
+        # Test individual functions
+        cleaned = clean_author_name("Y . Li")
+        assert cleaned == "Y. Li", "Should fix spacing in cleaning"
+        
+        normalized = normalize_author_name("Y . Li")
+        assert "y" in normalized and "li" in normalized, "Should normalize author name"

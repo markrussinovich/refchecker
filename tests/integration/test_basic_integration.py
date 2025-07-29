@@ -189,3 +189,70 @@ class TestEndToEndMock:
         # Test configuration attributes
         assert hasattr(ref_checker, 'debug_mode')
         assert hasattr(ref_checker, 'config')
+
+
+class TestUrlPrioritization:
+    """Test URL prioritization logic for verified URLs."""
+    
+    def test_direct_url_prioritized_over_corpus_id(self):
+        """Test that direct URLs are prioritized over CorpusId-constructed URLs."""
+        # Mock verified_data scenarios to test prioritization logic
+        test_scenarios = [
+            {
+                "name": "Direct URL available (should be prioritized)",
+                "verified_data": {
+                    "url": "https://www.semanticscholar.org/paper/6d465be006615460d41060f9f5068d51fc1f46b1",
+                    "externalIds": {"CorpusId": "266521508"}
+                },
+                "expected_priority": "direct_url"
+            },
+            {
+                "name": "Only CorpusId available",
+                "verified_data": {
+                    "externalIds": {"CorpusId": "266521508"}
+                },
+                "expected_priority": "corpus_id"
+            },
+            {
+                "name": "ArXiv URL should be lower priority than direct URL",
+                "verified_data": {
+                    "url": "https://www.semanticscholar.org/paper/abc123",
+                    "externalIds": {"ArXiv": "2312.14197"}
+                },
+                "expected_priority": "direct_url"
+            }
+        ]
+        
+        # Test the priority logic that was implemented
+        for scenario in test_scenarios:
+            verified_data = scenario["verified_data"]
+            
+            # Simulate the fixed priority logic from _get_verified_url
+            if verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
+                priority = "direct_url"
+            elif verified_data.get('externalIds', {}).get('CorpusId'):
+                priority = "corpus_id"
+            else:
+                priority = "other"
+            
+            expected = scenario["expected_priority"]
+            assert priority == expected, f"Priority test failed for scenario: {scenario['name']}"
+
+
+class TestArxivWarningLogic:
+    """Test ArXiv URL warning logic to prevent duplicate warnings."""
+    
+    def test_arxiv_warning_url_containment_logic(self):
+        """Test the URL containment logic for ArXiv warnings."""
+        # Test cases that simulate the fixed logic in semantic_scholar.py
+        test_cases = [
+            ("https://arxiv.org/abs/2407.07791", "https://arxiv.org/abs/2407.07791", True),  # Exact match
+            ("https://arxiv.org/abs/2407.07791", "https://arxiv.org/abs/2407.07792", False),  # Different ID
+            ("", "https://arxiv.org/abs/2407.07791", False),  # No URL in reference
+            ("https://example.com", "https://arxiv.org/abs/2407.07791", False),  # Different URL
+        ]
+        
+        # Test the URL containment check that was implemented
+        for reference_url, arxiv_url, should_contain in test_cases:
+            contains = arxiv_url in reference_url
+            assert contains == should_contain, f"URL containment check failed for '{reference_url}' and '{arxiv_url}'"

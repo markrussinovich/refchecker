@@ -16,7 +16,8 @@ from utils.text_utils import (
     extract_arxiv_id_from_url,
     clean_author_name,
     normalize_author_name,
-    calculate_title_similarity
+    calculate_title_similarity,
+    parse_authors_with_initials
 )
 
 
@@ -83,6 +84,87 @@ class TestAuthorNameProcessing:
         normalized = normalize_author_name("John Smith")
         assert isinstance(normalized, str)
         assert len(normalized) > 0
+    
+    def test_parse_authors_with_initials(self):
+        """Test parsing authors with initials."""
+        # Basic test
+        authors = parse_authors_with_initials("Smith, J, Jones, B")
+        assert isinstance(authors, list)
+        assert len(authors) == 2
+        
+        # Test with complex initials (the original bug case)
+        complex_authors = parse_authors_with_initials("Jiang, J, Xia, G. G, Carlton, D. B")
+        assert len(complex_authors) == 3
+        assert "Jiang, J" in complex_authors
+        assert "Xia, G. G" in complex_authors
+        assert "Carlton, D. B" in complex_authors
+        
+        # Test the specific case that was failing: counting 10 authors instead of 5
+        problematic_case = "Jiang, J, Xia, G. G, Carlton, D. B, Anderson, C. N, Miyakawa, R. H"
+        parsed = parse_authors_with_initials(problematic_case)
+        assert len(parsed) == 5, f"Expected 5 authors but got {len(parsed)}: {parsed}"
+        expected = ["Jiang, J", "Xia, G. G", "Carlton, D. B", "Anderson, C. N", "Miyakawa, R. H"]
+        assert parsed == expected, f"Expected {expected} but got {parsed}"
+        
+        # Test various initial formats
+        test_cases = [
+            ("Smith, J. A, Jones, B", ["Smith, J. A", "Jones, B"]),
+            ("A. Smith, B. C. Jones", ["A. Smith", "B. C. Jones"]),
+            ("Last, F, Other, G. H", ["Last, F", "Other, G. H"]),
+        ]
+        
+        for input_authors, expected in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
+    
+    def test_author_name_spacing_fixes(self):
+        """Test that author names with spacing issues around periods are handled correctly."""
+        # Test normalize_author_name with spacing issues
+        test_cases = [
+            ("Y . Li", "y li"),  # After normalization, periods are removed
+            ("A . B . Smith", "a b smith"),
+            ("T. Liu", "t liu"),  # No change needed
+            ("J . K . Rowling", "j k rowling")
+        ]
+        
+        for input_name, expected in test_cases:
+            result = normalize_author_name(input_name)
+            assert result == expected, f"normalize_author_name: Expected '{expected}' but got '{result}' for input '{input_name}'"
+    
+    def test_clean_author_name_spacing_fixes(self):
+        """Test that clean_author_name removes spaces before periods correctly."""
+        test_cases = [
+            ("Y . Li", "Y. Li"),
+            ("A . B . Smith", "A. B. Smith"),
+            ("T. Liu", "T. Liu"),  # No change needed
+            ("J . K . Rowling", "J. K. Rowling"),
+            ("Multiple   Y . Li   spaces", "Multiple Y. Li spaces")
+        ]
+        
+        for input_name, expected in test_cases:
+            result = clean_author_name(input_name)
+            assert result == expected, f"clean_author_name: Expected '{expected}' but got '{result}' for input '{input_name}'"
+    
+    def test_author_functions_integration(self):
+        """Test that author processing functions work together correctly."""
+        # Test the specific case that was problematic
+        problematic_authors = "T. Liu, Z . Deng, G. Meng, Y . Li, K. Chen"
+        
+        # Parse authors
+        parsed = parse_authors_with_initials(problematic_authors)
+        
+        # Should parse correctly
+        assert len(parsed) == 5, f"Expected 5 authors, got {len(parsed)}: {parsed}"
+        
+        # Each author should be cleaned properly
+        for author in parsed:
+            cleaned = clean_author_name(author)
+            # Should not have space before period
+            assert ' .' not in cleaned, f"Cleaned author '{cleaned}' should not have space before period"
+            
+            # Normalization should work
+            normalized = normalize_author_name(author)
+            assert normalized is not None, f"Should be able to normalize '{author}'"
 
 
 class TestTitleCleaning:
