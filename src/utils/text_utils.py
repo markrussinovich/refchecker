@@ -1497,7 +1497,7 @@ def parse_bibtex_entries(bib_content):
     return entries
 
 
-def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
+def extract_latex_references(text, file_path=None, ignore_keys=None):  # pylint: disable=unused-argument
     """
     Extract references from LaTeX content programmatically
     
@@ -1551,6 +1551,12 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'bibtex_key': entry['key'],
                 'bibtex_type': entry['type']
             }
+
+            if ignore_keys:
+                # If ignore_keys is provided, skip processing this entry
+                if ref['bibtex_key'] in ignore_keys:
+                    logger.info(f"Ignoring BibTeX entry with key: {ref['bibtex_key']}")
+                    continue
             
             # Preserve all original BibTeX fields for formatting correction
             for field_name, field_value in fields.items():

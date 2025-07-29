@@ -16,7 +16,8 @@ from utils.text_utils import (
     extract_arxiv_id_from_url,
     clean_author_name,
     normalize_author_name,
-    calculate_title_similarity
+    calculate_title_similarity,
+    extract_latex_references
 )
 
 
@@ -151,3 +152,31 @@ class TestArxivIdExtraction:
             result = extract_arxiv_id_from_url(url)
             # Should return None or handle gracefully
             assert result is None or isinstance(result, str)
+
+class TestBibIgnorefile:
+    """Test ignore file functionality."""
+    
+    def test_ignore_file_processing(self):
+        """Test processing of ignore files."""
+        bib_content = """
+        @article{test_key,
+          title={Test Paper},
+          author={Test Author},
+          year={2023},
+          url={https://arxiv.org/abs/1234.5678}
+        }
+        @article{another_key,
+          title={Another Test Paper},
+          author={Another Author},
+          year={2024},
+          url={https://arxiv.org/abs/2345.6789}
+        }
+        """
+        ignore_keys = ["test_key"]
+        result = extract_latex_references(bib_content, ignore_keys=ignore_keys)
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]['bibtex_key'] == "another_key"
+        # Ensure ignored key is not present
+        for ref in result:
+            assert ref['bibtex_key'] != "test_key"

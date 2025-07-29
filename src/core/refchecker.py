@@ -21,6 +21,7 @@ Options:
                                     - Local LaTeX file path (e.g., /path/to/paper.tex)
     --db-path PATH                Path to local Semantic Scholar database (recommended for offline verification)
     --output-file [PATH]          Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)
+    --ignore-file [PATH]          Path to ignore file for references (default: .refignore if flag provided, no file if not provided)
     --debug                       Run in debug mode with verbose logging
     --semantic-scholar-api-key KEY API key for Semantic Scholar (optional, increases rate limits).
                                     Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable
@@ -2655,7 +2656,7 @@ class ArxivReferenceChecker:
                 
         return corrected_data
     
-    def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
+    def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None, ignore_file=None):
         """
         Run the reference checking process
         
@@ -2775,7 +2776,7 @@ class ArxivReferenceChecker:
                 
                 try:
                     # Extract bibliography
-                    bibliography = self.extract_bibliography(paper, debug_mode)
+                    bibliography = self.extract_bibliography(paper, debug_mode, ignore_file)
                                         
                     # Update statistics
                     self.total_papers_processed += 1
@@ -4047,7 +4048,7 @@ class ArxivReferenceChecker:
             'type': ref_type
         }
     
-    def extract_bibliography(self, paper, debug_mode=False):
+    def extract_bibliography(self, paper, debug_mode=False, ignore_file=None):
         """
         Extract bibliography from a paper (PDF, LaTeX, or text file)
         
@@ -4120,10 +4121,20 @@ class ArxivReferenceChecker:
                     bib_content = f.read()
                 
                 logger.info(f"Processing BibTeX file: {paper.file_path}")
+
+                # If ignore_file is provided, read the ignore keys
+                ignore_keys = None
+                if ignore_file:
+                    if os.path.exists(ignore_file):
+                        with open(ignore_file, "r") as f:
+                            ignore_keys = f.read().splitlines()
+                    else:
+                        logger.warning(f"Ignore file {ignore_file} does not exist, skipping ignore checks")
+
                 
                 # Use programmatic BibTeX extraction
-                bibtex_references = extract_latex_references(bib_content, paper.file_path)
-                
+                bibtex_references = extract_latex_references(bib_content, paper.file_path, ignore_keys)
+
                 if bibtex_references:
                     logger.info(f"Extracted {len(bibtex_references)} references from BibTeX file")
                     return bibtex_references
@@ -4154,7 +4165,7 @@ class ArxivReferenceChecker:
             debug_dir = "debug"
             if not os.path.exists(debug_dir):
                 os.makedirs(debug_dir)
-            
+
             try:
                 with open(os.path.join(debug_dir, f"{paper_id}_text.txt"), 'w', encoding='utf-8', errors='replace') as f:
                     f.write(text)
@@ -4577,6 +4588,8 @@ def main():
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
                         help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
+    parser.add_argument("--ignore-file", nargs='?', const='.refignore', type=str, default=None,
+                        help="Path to ignore file for references (default: .refignore if flag provided, no file if not provided)")
     
     # LLM configuration arguments
     parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
@@ -4678,7 +4691,8 @@ def main():
         checker.run(
             debug_mode=args.debug,
             specific_paper_id=paper_id,
-            local_pdf_path=local_pdf_path
+            local_pdf_path=local_pdf_path,
+            ignore_file=args.ignore_file
         )
         
         # Check for fatal errors that occurred during runtime
