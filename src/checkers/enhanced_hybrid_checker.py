@@ -168,7 +168,7 @@ class EnhancedHybridReferenceChecker:
             duration = time.time() - start_time
             self._update_api_stats(api_name, False, duration)
             failure_type = 'timeout'
-            logger.warning(f"Enhanced Hybrid: {api_name} timed out in {duration:.2f}s: {e}")
+            logger.debug(f"Enhanced Hybrid: {api_name} timed out in {duration:.2f}s: {e}")
             return None, [], None, False, failure_type
             
         except requests.exceptions.RequestException as e:
@@ -182,20 +182,20 @@ class EnhancedHybridReferenceChecker:
             if (status_code == 429) or "429" in str(e) or "rate limit" in error_str:
                 failure_type = 'throttled'
                 self.api_stats[api_name]['throttled'] += 1
-                logger.warning(f"Enhanced Hybrid: {api_name} rate limited in {duration:.2f}s: {e}")
+                logger.debug(f"Enhanced Hybrid: {api_name} rate limited in {duration:.2f}s: {e}")
             elif (status_code and status_code >= 500) or "500" in str(e) or "502" in str(e) or "503" in str(e) or "server error" in error_str or "service unavailable" in error_str:
                 failure_type = 'server_error'
-                logger.warning(f"Enhanced Hybrid: {api_name} server error in {duration:.2f}s: {e}")
+                logger.debug(f"Enhanced Hybrid: {api_name} server error in {duration:.2f}s: {e}")
             else:
                 failure_type = 'other'
-                logger.warning(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
+                logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
             return None, [], None, False, failure_type
             
         except Exception as e:
             duration = time.time() - start_time
             self._update_api_stats(api_name, False, duration)
             failure_type = 'other'
-            logger.warning(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
+            logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
             return None, [], None, False, failure_type
     
     def _should_try_doi_apis_first(self, reference: Dict[str, Any]) -> bool:
@@ -291,7 +291,7 @@ class EnhancedHybridReferenceChecker:
                 logger.debug(f"Enhanced Hybrid: Retrying {api_name}")
                 verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
                 if success:
-                    logger.info(f"Enhanced Hybrid: {api_name} succeeded on retry after {failure_type} (delay: {final_delay:.1f}s)")
+                    logger.debug(f"Enhanced Hybrid: {api_name} succeeded on retry after {failure_type} (delay: {final_delay:.1f}s)")
                     return verified_data, errors, url
                 
                 # For Semantic Scholar, try additional retries with increasing delays
@@ -307,7 +307,7 @@ class EnhancedHybridReferenceChecker:
                         
                         verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
                         if success:
-                            logger.info(f"Enhanced Hybrid: {api_name} succeeded on retry {retry_attempt + 2} (delay: {final_retry_delay:.1f}s)")
+                            logger.debug(f"Enhanced Hybrid: {api_name} succeeded on retry {retry_attempt + 2} (delay: {final_retry_delay:.1f}s)")
                             return verified_data, errors, url
         
         # If all APIs failed, return unverified

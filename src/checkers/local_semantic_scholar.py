@@ -445,7 +445,9 @@ class LocalNonArxivReferenceChecker:
             # Compare DOIs using utility function
             if doi and paper_doi and not compare_dois(doi, paper_doi):
                 logger.debug(f"Local DB: DOI mismatch - cited: {doi}, actual: {paper_doi}")
-                errors.append(create_doi_error(doi, paper_doi))
+                doi_error = create_doi_error(doi, paper_doi)
+                if doi_error:  # Only add if there's actually a mismatch after cleaning
+                    errors.append(doi_error)
         
         if errors:
             logger.debug(f"Local DB: Found {len(errors)} errors in reference verification")

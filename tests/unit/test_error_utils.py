@@ -68,11 +68,23 @@ class TestDoiError:
     
     def test_create_doi_error(self):
         """Test creating DOI error dictionary."""
+        # Test with different DOIs
         error = create_doi_error("10.1000/invalid", "10.1000/correct")
         
         assert error['error_type'] == 'doi'
         assert "DOI mismatch" in error['error_details']
         assert error['ref_doi_correct'] == "10.1000/correct"
+        
+    def test_create_doi_error_trailing_period(self):
+        """Test that trailing periods don't cause false DOI mismatches."""
+        # DOIs that are the same except for trailing period should not create an error
+        error = create_doi_error("10.1162/tacl_a_00562.", "10.1162/tacl_a_00562")
+        assert error is None
+        
+        # Actually different DOIs should still create an error
+        error = create_doi_error("10.1162/tacl_a_00562.", "10.1162/tacl_a_00999")
+        assert error is not None
+        assert error['error_type'] == 'doi'
 
 
 class TestTitleError:

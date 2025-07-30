@@ -485,9 +485,9 @@ class CrossRefReferenceChecker:
         # Verify DOI
         work_doi = work_data.get('DOI')
         if doi and work_doi:
-            # Normalize DOIs for comparison
-            cited_doi_clean = doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip()
-            work_doi_clean = work_doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip()
+            # Normalize DOIs for comparison (remove URL prefix and trailing periods)
+            cited_doi_clean = doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip().rstrip('.')
+            work_doi_clean = work_doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip().rstrip('.')
             
             if cited_doi_clean.lower() != work_doi_clean.lower():
                 errors.append({

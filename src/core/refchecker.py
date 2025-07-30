@@ -555,7 +555,7 @@ class ArxivReferenceChecker:
             return semantic_result
         
         # Both APIs failed
-        logger.error(f"Paper {arxiv_id} not found in any source")
+        logger.debug(f"Paper {arxiv_id} not found in any source")
         return None
     
     def get_paper_metadata_from_semantic_scholar(self, arxiv_id):
@@ -631,7 +631,7 @@ class ArxivReferenceChecker:
                 return None
             else:
                 self._api_performance['semantic_scholar']['failed'] += 1
-                logger.warning(f"Semantic Scholar API returned status {response.status_code} for {arxiv_id}")
+                logger.debug(f"Semantic Scholar API returned status {response.status_code} for {arxiv_id}")
                 return None
                 
         except requests.exceptions.RequestException as e:
@@ -661,7 +661,7 @@ class ArxivReferenceChecker:
                 return results[0]
             else:
                 self._api_performance['arxiv']['failed'] += 1
-                logger.warning(f"Paper {arxiv_id} not found in arXiv API")
+                logger.debug(f"Paper {arxiv_id} not found in arXiv API")
                 return None
                 
         except Exception as e:
@@ -2253,8 +2253,9 @@ class ArxivReferenceChecker:
                     has_displayable_verified_url = True
             
             if has_displayable_verified_url:
-                # Paper has other verification URLs to display, so treat as verified with ArXiv ID error only
-                errors = arxiv_errors
+                # Paper has other verification URLs to display, combine ArXiv ID error with original verification errors
+                combined_errors = (errors or []) + arxiv_errors
+                errors = combined_errors
                 logger.debug("ArXiv ID mismatch error for verified paper with displayable URLs")
             else:
                 # Paper only has ArXiv URLs which will be filtered out, treat as unverified
@@ -2336,9 +2337,50 @@ class ArxivReferenceChecker:
         
         # Get what the ArXiv ID actually points to
         actual_arxiv_paper = self.get_paper_metadata(ref_arxiv_id)
+        
+        # If we have verified data, check for ArXiv ID mismatch
+        if verified_data:
+            # Check if verified data has an ArXiv ID
+            correct_arxiv_id = None
+            if verified_data.get('externalIds', {}).get('ArXiv'):
+                correct_arxiv_id = verified_data['externalIds']['ArXiv']
+            elif verified_data.get('arxivId'):
+                correct_arxiv_id = verified_data['arxivId']
+            
+            if correct_arxiv_id and ref_arxiv_id != correct_arxiv_id:
+                # Direct ArXiv ID mismatch - the paper was verified but has different ArXiv ID
+                return [{
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} should be {correct_arxiv_id}"
+                }]
+            elif correct_arxiv_id is None and not actual_arxiv_paper:
+                # Verified paper has no ArXiv ID and cited ArXiv ID doesn't exist
+                return [{
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Invalid ArXiv ID: ArXiv ID {ref_arxiv_id} does not exist"
+                }]
+        
+        # If the cited ArXiv ID doesn't exist and we have no verified data
         if not actual_arxiv_paper:
             logger.debug(f"Could not fetch ArXiv paper metadata for ID: {ref_arxiv_id}")
-            return []
+            if not verified_data:
+                # No verified data and invalid ArXiv ID - return error only if this is the primary verification method
+                # For references with invalid ArXiv IDs, we should still allow title/author verification to proceed
+                # Only return the invalid ArXiv ID error here if the reference appears to be purely ArXiv-based
+                if not reference.get('title') and not reference.get('authors'):
+                    return [{
+                        'error_type': 'arxiv_id',
+                        'error_details': f"Invalid ArXiv ID: ArXiv ID {ref_arxiv_id} does not exist"
+                    }]
+                else:
+                    # Let verification proceed, we'll report the invalid ArXiv ID later if verification succeeds
+                    return []
+            else:
+                # We have verified data but the cited ArXiv ID doesn't exist - report as error
+                return [{
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Invalid ArXiv ID: ArXiv ID {ref_arxiv_id} does not exist"
+                }]
         
         # Get the expected paper metadata from the reference
         expected_title = reference.get('title', '').strip()
@@ -3922,11 +3964,8 @@ class ArxivReferenceChecker:
             if url_match:
                 url = url_match.group(0)
         
-        # Extract year - LLM output should have clear year formatting
+        # Extract year - will be determined from structured parts below
         year = None
-        year_match = re.search(r'\b(19|20)\d{2}\b', ref_text)
-        if year_match:
-            year = int(year_match.group(0))
         
         # For LLM-extracted references, use simple parsing since they're well-formatted
         # LLM now formats as: "Authors # Title # Journal/Venue # Year" or "#Title#Venue#Year#" (no authors)
@@ -3972,12 +4011,30 @@ class ArxivReferenceChecker:
             # Parse authors
             authors = self._clean_llm_author_text(author_text)
         elif len(parts) == 4:
-            # Format: Authors # Title # Venue # Year
+            # Format could be: Authors # Title # Venue # Year
+            # OR: Authors # Title # Year # URL (when venue is empty)
             author_text = parts[0].strip()
             title = clean_title_basic(parts[1].strip())
-            venue = parts[2].strip()
-            year_part = parts[3].strip()
-            logger.debug(f"4-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year part: '{year_part}'")
+            third_part = parts[2].strip()
+            fourth_part = parts[3].strip()
+            
+            # Check if third part looks like a year (4 digits starting with 19 or 20)
+            if re.match(r'^(19|20)\d{2}$', third_part):
+                # Format: Authors # Title # Year # URL
+                venue = ""
+                year_part = third_part
+                # Check if fourth part is a URL
+                if fourth_part.startswith('http'):
+                    url = fourth_part if 'arxiv' not in fourth_part.lower() else None
+                    arxiv_url = fourth_part if 'arxiv' in fourth_part.lower() else arxiv_url
+                else:
+                    year_part = fourth_part  # In case fourth part is also a year
+                logger.debug(f"4-part format (Year in 3rd) - Authors: '{author_text}', Title: '{title}', Year: '{year_part}', URL: '{fourth_part}'")
+            else:
+                # Standard format: Authors # Title # Venue # Year
+                venue = third_part
+                year_part = fourth_part
+                logger.debug(f"4-part format (Venue/Year) - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year part: '{year_part}'")
             
             # Parse authors
             authors = self._clean_llm_author_text(author_text)
@@ -4012,6 +4069,7 @@ class ArxivReferenceChecker:
         
         # Extract year from year_part if we have one
         if 'year_part' in locals() and year_part:
+            # First try to extract a 4-digit year from year_part
             year_match = re.search(r'\b(19|20)\d{2}\b', year_part)
             if year_match:
                 year = int(year_match.group(0))
@@ -4019,6 +4077,16 @@ class ArxivReferenceChecker:
                 # Try to extract year from the year_part itself if it's just a year
                 if year_part.isdigit() and len(year_part) == 4:
                     year = int(year_part)
+        
+        # If no year found from structured parts, fall back to regex search of entire text
+        # but exclude URLs to avoid picking up years from ArXiv IDs like 1911.01547
+        if not year:
+            # Remove URLs before searching for years
+            text_without_urls = re.sub(r'https?://[^\s]+', '', ref_text)
+            text_without_urls = re.sub(r'arxiv:[^\s]+', '', text_without_urls, flags=re.IGNORECASE)
+            year_match = re.search(r'\b(19|20)\d{2}\b', text_without_urls)
+            if year_match:
+                year = int(year_match.group(0))
         
         # Fallback: if no clear structure, extract what we can
         if not title:
@@ -4056,6 +4124,22 @@ class ArxivReferenceChecker:
         
         # Determine reference type
         ref_type = 'arxiv' if arxiv_url else ('non-arxiv' if (url or doi) else 'other')
+        
+        # If we have an ArXiv URL but suspicious year (like 1911 from ArXiv ID), try to get correct year from ArXiv API
+        if arxiv_url and year and (year < 1990 or str(year) in arxiv_url):
+            arxiv_id_match = re.search(r'(\d{4}\.\d{4,5})', arxiv_url)
+            if arxiv_id_match:
+                arxiv_id = arxiv_id_match.group(1)
+                try:
+                    import arxiv
+                    search = arxiv.Search(id_list=[arxiv_id])
+                    paper = next(iter(search.results()), None)
+                    if paper and paper.published:
+                        correct_year = paper.published.year
+                        logger.debug(f"Corrected year from ArXiv API: {year} -> {correct_year} for {arxiv_id}")
+                        year = correct_year
+                except Exception as e:
+                    logger.debug(f"Could not fetch ArXiv year for {arxiv_id}: {e}")
         
         return {
             'url': arxiv_url or url or "",

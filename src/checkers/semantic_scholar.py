@@ -545,9 +545,9 @@ class NonArxivReferenceChecker:
         if external_ids and 'DOI' in external_ids:
             paper_doi = external_ids['DOI']
             
-            # Compare DOIs, but strip hash fragments for comparison
-            cited_doi_clean = doi.split('#')[0] if doi else ''
-            paper_doi_clean = paper_doi.split('#')[0] if paper_doi else ''
+            # Compare DOIs, but strip hash fragments and trailing periods for comparison
+            cited_doi_clean = doi.split('#')[0].rstrip('.') if doi else ''
+            paper_doi_clean = paper_doi.split('#')[0].rstrip('.') if paper_doi else ''
             
             if cited_doi_clean and paper_doi_clean and cited_doi_clean.lower() != paper_doi_clean.lower():
                 errors.append({
