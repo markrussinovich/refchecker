@@ -3714,6 +3714,7 @@ class ArxivReferenceChecker:
         unique_references = self._deduplicate_references_with_segment_matching(references)
         
         logger.debug(f"Deduplicated {len(references)} references to {len(unique_references)} unique references")
+        logger.info(f"Extracted {len(unique_references)} references using LLM")
         
         processed_refs = []
         
@@ -4528,6 +4529,7 @@ class ArxivReferenceChecker:
             verified_url_to_show = self._get_verified_url(verified_data, reference_url, errors)
             
             # Show the verified URL with appropriate label
+            print("")
             if verified_url_to_show:
                 print(f"       Verified URL: {verified_url_to_show}")
             
@@ -4634,10 +4636,9 @@ class ArxivReferenceChecker:
     
     def _get_verified_url(self, verified_data, reference_url, errors):
         """Get the appropriate verified URL based on priority and ArXiv ID validation"""
-        # Check if there's an ArXiv ID error FIRST - if so, don't show any verified URL
-        if self._has_arxiv_id_error(errors):
-            return None
-            
+        # If we have verified data, we should show a verified URL even if there's an ArXiv ID error
+        # The ArXiv ID error is a separate issue from successful paper verification
+        
         # First priority: Non-ArXiv URLs from verified_data (direct from API, most reliable)
         if verified_data and verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
             return verified_data['url']
@@ -4652,11 +4653,13 @@ class ArxivReferenceChecker:
             from utils.doi_utils import construct_doi_url
             return construct_doi_url(verified_data['externalIds']['DOI'])
         
-        # Fourth priority: ArXiv URL from verified data (only if it matches the correct ArXiv ID)
+        # Fourth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
         if verified_data and verified_data.get('externalIds', {}).get('ArXiv'):
-            from utils.url_utils import construct_arxiv_url
-            correct_arxiv_id = verified_data['externalIds']['ArXiv']
-            return construct_arxiv_url(correct_arxiv_id)
+            # Only show ArXiv URL as verified URL if there's no ArXiv ID mismatch
+            if not self._has_arxiv_id_error(errors):
+                from utils.url_utils import construct_arxiv_url
+                correct_arxiv_id = verified_data['externalIds']['ArXiv']
+                return construct_arxiv_url(correct_arxiv_id)
         
         # Fifth priority: Other URLs from verified_data
         if verified_data and verified_data.get('url'):

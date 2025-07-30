@@ -342,7 +342,6 @@ class ReferenceExtractor:
                 self.logger.info(f"Attempting LLM-based reference extraction using {model_name}")
                 references = self.llm_provider.extract_references(bibliography_text)
                 if references:
-                    self.logger.info(f"Extracted {len(references)} references using LLM")
                     return references
                 else:
                     self.logger.warning("LLM returned no references")

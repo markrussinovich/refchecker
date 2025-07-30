@@ -304,8 +304,9 @@ class ParallelReferenceProcessor:
         verified_url_to_show = self.base_checker._get_verified_url(result.verified_data, result.url, result.errors)
         
         # Show the verified URL with appropriate label
+        print("")
         if verified_url_to_show:
-            print(f"\n       Verified URL: {verified_url_to_show}")
+            print(f"       Verified URL: {verified_url_to_show}")
         
         # Show correct ArXiv URL if available from verified data and different from cited
         if result.verified_data:
