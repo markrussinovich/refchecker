@@ -59,7 +59,7 @@ def log_query_debug(query: str, params: list, execution_time: float, result_coun
         logger.debug(f"DB Result Count: {result_count}")
     else:
         # Always log strategy and result count for INFO level
-        logger.info(f"DB Query [{strategy}]: {result_count} results in {execution_time:.3f}s")
+        logger.debug(f"DB Query [{strategy}]: {result_count} results in {execution_time:.3f}s")
 
 class LocalNonArxivReferenceChecker:
     """

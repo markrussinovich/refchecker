@@ -1419,6 +1419,59 @@ def strip_latex_commands(text):
     # Remove comments
     text = re.sub(r'%.*', '', text)
     
+    # Handle LaTeX accented characters first (before general command removal)
+    latex_accents = {
+        # Acute accents
+        r"\{\\\'([aeiouAEIOU])\}": r'\1',  # {\'a} -> á
+        r"\\\'([aeiouAEIOU])": r'\1',      # \'a -> á
+        # Grave accents  
+        r"\{\\`([aeiouAEIOU])\}": r'\1',   # {\`a} -> à
+        r"\\`([aeiouAEIOU])": r'\1',       # \`a -> à
+        # Grave accents - partially processed forms (backslashes already stripped)
+        r"\{`([aeiouAEIOU])\}": r'\1',     # {`a} -> a
+        r"`([aeiouAEIOU])": r'\1',         # `a -> a
+        # Circumflex
+        r"\{\\\^([aeiouAEIOU])\}": r'\1',  # {\^a} -> â
+        r"\\\^([aeiouAEIOU])": r'\1',      # \^a -> â
+        # Umlaut/diaeresis - handle both \" and \\"
+        r'\{\\"([aeiouAEIOU])\}': r'\1',   # {\"a} -> ä
+        r'\{\\\\"([aeiouAEIOU])\}': r'\1', # {\\"a} -> ä
+        r'\\"([aeiouAEIOU])': r'\1',       # \"a -> ä
+        r'\\\\"([aeiouAEIOU])': r'\1',     # \\"a -> ä
+        # Umlaut/diaeresis - partially processed forms (backslashes already stripped)
+        r'\{"([aeiouAEIOU])\}': r'\1',     # {"a} -> a
+        r'"([aeiouAEIOU])': r'\1',         # "a -> a
+        # Tilde
+        r"\{\\~([aeiouAEIOU])\}": r'\1',   # {\~a} -> ã
+        r"\\~([aeiouAEIOU])": r'\1',       # \~a -> ã
+        # Cedilla
+        r"\{\\c\{([cC])\}\}": r'\1',       # {\c{c}} -> ç
+        r"\\c\{([cC])\}": r'\1',           # \c{c} -> ç
+        # Ring
+        r"\{\\r\{([aA])\}\}": r'\1',       # {\r{a}} -> å
+        r"\\r\{([aA])\}": r'\1',           # \r{a} -> å
+        # Slash
+        r"\{\\\/([oO])\}": r'\1',          # {\/o} -> ø
+        r"\\\/([oO])": r'\1',              # \/o -> ø
+        # Special characters like {\`\i} -> ì
+        r"\{\\`\\\\i\}": 'ì',             # {\`\i} -> ì
+        r"\\`\\\\i": 'ì',                 # \`\i -> ì
+    }
+    
+    # Apply accent replacements
+    for pattern, replacement in latex_accents.items():
+        text = re.sub(pattern, replacement, text)
+    
+    # Handle specific common patterns
+    # Non-breaking space ~ should become regular space
+    text = re.sub(r'~', ' ', text)
+    
+    # Handle et~al specifically (common in academic papers)
+    text = re.sub(r'\bet~al\.?', 'et al.', text)
+    
+    # Handle name patterns like Juan~D -> Juan D
+    text = re.sub(r'([a-zA-Z])~([A-Z])', r'\1 \2', text)
+    
     # Remove common text formatting commands
     text = re.sub(r'\\(textbf|textit|emph|underline|textsc|texttt)\{([^{}]*)\}', r'\2', text)
     
@@ -1448,7 +1501,7 @@ def strip_latex_commands(text):
     # Remove remaining commands without arguments
     text = re.sub(r'\\[a-zA-Z]+\b', '', text)
     
-    # Clean up whitespace
+    # Clean up multiple spaces and normalize whitespace
     text = re.sub(r'\s+', ' ', text)
     text = text.strip()
     
@@ -1627,7 +1680,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             references.append(ref)
     
     elif format_info['format_type'] == 'thebibliography':
-        # Parse \bibitem entries
+        # Parse \bibitem entries (improved for .bbl files)
         bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\})'
         
         matches = re.finditer(bibitem_pattern, text, re.DOTALL | re.IGNORECASE)
@@ -1637,7 +1690,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             key = match.group(2)
             content = match.group(3).strip()
             
-            # Clean LaTeX commands from content
+            # Clean LaTeX commands from content but preserve structure
             cleaned_content = strip_latex_commands(content)
             
             ref = {
@@ -1652,32 +1705,105 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'bibitem_label': label
             }
             
-            # Try to extract structured information from cleaned content
-            # This is a basic implementation - could be enhanced
+            # Parse .bbl file structure which typically follows:
+            # Authors. \newblock Title. \newblock Journal/Venue, Year.
             
-            # Extract year
-            year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_content)
-            if year_match:
-                ref['year'] = int(year_match.group())
+            # Split by \newblock to get different parts
+            parts = re.split(r'\\newblock', content, flags=re.IGNORECASE)
             
-            # Extract potential title (often in quotes or italics)
-            title_match = re.search(r'["""]([^"""]+)["""]', cleaned_content)
-            if not title_match:
-                title_match = re.search(r'\*([^*]+)\*', cleaned_content)
-            if title_match:
-                ref['title'] = title_match.group(1).strip()
+            if len(parts) >= 3:
+                # Standard .bbl structure with \newblock separators
+                author_part = parts[0].strip()
+                title_part = parts[1].strip() 
+                venue_part = parts[2].strip()
+                
+                # Clean LaTeX commands from each part
+                author_part_clean = strip_latex_commands(author_part)
+                title_part_clean = strip_latex_commands(title_part)
+                venue_part_clean = strip_latex_commands(venue_part)
+                
+                # Set raw text as combination of all parts
+                ref['raw_text'] = f"{author_part_clean} {title_part_clean} {venue_part_clean}".strip()
+                
+                # Extract authors (remove trailing period)
+                if author_part_clean.endswith('.'):
+                    author_part_clean = author_part_clean[:-1]
+                
+                # Parse authors - handle "First Last, First Last, and First Last" format
+                authors = []
+                if author_part_clean:
+                    # Split by ", and" first (common in academic citations), then by commas
+                    if ', and ' in author_part_clean:
+                        author_groups = author_part_clean.split(', and ')
+                    else:
+                        # Fallback to just "and" 
+                        author_groups = re.split(r'\s+and\s+', author_part_clean, flags=re.IGNORECASE)
+                    
+                    for group in author_groups:
+                        # Split by comma for multiple authors
+                        names = [name.strip() for name in group.split(',') if name.strip()]
+                        # Filter out empty names and clean up
+                        names = [name for name in names if name and len(name) > 1]
+                        authors.extend(names)
+                
+                ref['authors'] = authors[:10]  # Limit to reasonable number
+                
+                # Extract title (remove trailing period if present)
+                title = title_part_clean
+                if title.endswith('.'):
+                    title = title[:-1]
+                ref['title'] = title.strip()
+                
+                # Extract year from venue part
+                year_match = re.search(r'\b(19|20)\d{2}\b', venue_part_clean)
+                if year_match:
+                    ref['year'] = int(year_match.group())
+                
+                # Extract journal/venue (everything before year or before last comma)
+                journal = venue_part_clean
+                if ref['year']:
+                    journal = re.split(r'\b' + str(ref['year']) + r'\b', venue_part_clean)[0]
+                # Clean up punctuation and spacing
+                journal = re.sub(r'[,.\s]+$', '', journal).strip()
+                # Remove common LaTeX artifacts 
+                journal = re.sub(r'\\penalty0\s*\([^)]*\):\\penalty0', '', journal)
+                ref['journal'] = journal
+                
+            else:
+                # Fallback for non-standard format or when there are fewer parts
+                # Clean LaTeX commands from content
+                cleaned_content = strip_latex_commands(content)
+                ref['raw_text'] = cleaned_content
+                
+                # Extract year first
+                year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_content)
+                if year_match:
+                    ref['year'] = int(year_match.group())
+                
+                # Extract title (look for patterns like "emph{title}" or content after first period)
+                title_match = re.search(r'\\emph\{([^}]+)\}', content)
+                if title_match:
+                    ref['title'] = title_match.group(1).strip()
+                else:
+                    # Look for content between periods that might be title
+                    sentences = cleaned_content.split('. ')
+                    if len(sentences) >= 2:
+                        # Usually title is second sentence in bibliographic entries
+                        title_candidate = sentences[1].strip()
+                        if title_candidate and len(title_candidate) > 10:  # Reasonable title length
+                            ref['title'] = title_candidate
+                
+                # Extract authors (names at beginning before first period)
+                first_sentence = cleaned_content.split('.')[0] if '.' in cleaned_content else cleaned_content
+                # Look for pattern of capitalized names
+                author_matches = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+\b', first_sentence)
+                if author_matches:
+                    ref['authors'] = author_matches[:10]
             
-            # Simple author extraction (names before year or title)
-            author_part = cleaned_content
-            if ref['year']:
-                author_part = cleaned_content.split(str(ref['year']))[0]
-            elif ref['title']:
-                author_part = cleaned_content.split(ref['title'])[0]
-            
-            # Extract names (very basic approach)
-            potential_authors = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]*\.?)?\s+[A-Z][a-z]+\b', author_part)
-            if potential_authors:
-                ref['authors'] = potential_authors[:5]  # Limit to first 5 matches
+            # Extract URLs if present
+            url_match = re.search(r'\\url\{([^}]+)\}', content)
+            if url_match:
+                ref['url'] = url_match.group(1)
             
             references.append(ref)
     

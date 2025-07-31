@@ -725,7 +725,16 @@ class ArxivReferenceChecker:
             def get_short_id(self):
                 if self.is_url:
                     url_path = urlparse(self.file_path).path
-                    filename = os.path.splitext(os.path.basename(url_path))[0]
+                    basename = os.path.basename(url_path)
+                    
+                    # Special handling for arXiv URLs - preserve the full arXiv ID
+                    if 'arxiv.org' in self.file_path:
+                        # For arXiv URLs, the entire basename is the arXiv ID (no file extension)
+                        filename = basename
+                    else:
+                        # For other URLs, use normal extension removal
+                        filename = os.path.splitext(basename)[0]
+                    
                     if not filename:
                         filename = "downloaded_pdf"
                     return f"url_{filename}"
@@ -2943,10 +2952,36 @@ class ArxivReferenceChecker:
                 
                 
                 # Log paper info
-                logger.debug(f"Processing paper: {paper.title} ({paper_id})")
+                logger.debug(f"Processing paper: {getattr(paper, 'title', 'No title')} ({paper_id})")
                 
                 # Print paper heading in non-debug mode
-                print(f"\n📄 Processing: {paper.title}")
+                # Try to get a meaningful title
+                paper_title = getattr(paper, 'title', None)
+                clean_arxiv_id = paper_id.replace('url_', '') if paper_id.startswith('url_') else paper_id
+                
+                # If we have a good title (not just the arXiv ID), use it
+                if paper_title and paper_title.strip() and paper_title != paper_id and paper_title != clean_arxiv_id and len(paper_title) > 10:
+                    print(f"\n📄 Processing: {paper_title}")
+                    print(f"   ArXiv ID: {clean_arxiv_id}")
+                else:
+                    # Try to fetch the title directly from arXiv API as fallback
+                    title_found = False
+                    try:
+                        import arxiv
+                        logger.debug(f"Attempting to fetch title for arXiv ID: {clean_arxiv_id}")
+                        client = arxiv.Client()
+                        search = arxiv.Search(id_list=[clean_arxiv_id])
+                        arxiv_paper = next(client.results(search))
+                        if arxiv_paper and arxiv_paper.title and len(arxiv_paper.title.strip()) > 10:
+                            print(f"\n📄 Processing: {arxiv_paper.title}")
+                            print(f"   ArXiv ID: {clean_arxiv_id}")
+                            title_found = True
+                    except Exception as e:
+                        logger.debug(f"Could not fetch title from arXiv API: {e}")
+                    
+                    if not title_found:
+                        print(f"\n📄 Processing: ArXiv Paper {clean_arxiv_id}")
+                
                 print(f"   {paper_url}")
                 
                 try:
@@ -4268,6 +4303,8 @@ class ArxivReferenceChecker:
             'type': ref_type
         }
     
+
+
     def extract_bibliography(self, paper, debug_mode=False):
         """
         Extract bibliography from a paper (PDF, LaTeX, or text file)
@@ -4278,6 +4315,16 @@ class ArxivReferenceChecker:
         """
         paper_id = paper.get_short_id()
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+        
+        # OPTIMIZATION: For ArXiv papers, try downloading LaTeX source first
+        # This can provide much cleaner bibliography extraction than PDF parsing
+        from utils.arxiv_utils import extract_arxiv_id_from_paper, extract_references_from_arxiv_source
+        
+        arxiv_id = extract_arxiv_id_from_paper(paper)
+        if arxiv_id:
+            references = extract_references_from_arxiv_source(arxiv_id, paper_id, debug_mode)
+            if references:
+                return references
         
         # Check if this is a text file containing references
         if hasattr(paper, 'is_text_refs') and paper.is_text_refs:
@@ -4577,7 +4624,7 @@ class ArxivReferenceChecker:
             mock_paper = MockArxivPaper(paper_data, authors_data, arxiv_id)
             conn.close()
             
-            logger.info(f"Found arXiv paper {arxiv_id} in local database")
+            logger.debug(f"Found arXiv paper {arxiv_id} in local database")
             return mock_paper
             
         except Exception as e:
