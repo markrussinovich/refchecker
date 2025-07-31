@@ -26,20 +26,33 @@ Instructions:
 1. Split the bibliography into individual references based on numbered markers like [1], [2], etc.
 2. IMPORTANT: References may span multiple lines. A single reference includes everything from one number marker (e.g., [37]) until the next number marker (e.g., [38])
 3. For each reference, extract: authors, title, publication venue, year, and any URLs/DOIs
+   - For BibTeX entries, extract fields correctly:
+     * title = the actual paper title from "title" field
+     * venue = from "journal", "booktitle", "conference" fields  
+     * Do NOT confuse journal names like "arXiv preprint arXiv:1234.5678" with paper titles
 4. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
-5. Place a hashmark (#) rather than period between fields of a reference, but commas between authors
-   e.g. Author1, Author2#Title#Venue#Year#URL
-6. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear
+5. Place a hashmark (#) rather than period between fields of a reference, but asterisks (*) between individual authors
+   e.g. Author1*Author2*Author3#Title#Venue#Year#URL
+6. CRITICAL: When extracting authors, preserve the EXACT format from BibTeX or the source
+   - Copy author names exactly as they appear in the bibliography
+   - Use asterisks (*) to separate individual authors instead of commas
+   - For BibTeX format "Arnab, Anurag and Dehghani, Mostafa", output "Arnab, Anurag*Dehghani, Mostafa*Heigold, Georg*Sun, Chen*Lui'c, Mario*Schmid, Cordelia"
+   - Do NOT convert or change the author format - just separate with asterisks
+   - If a BibTeX entry has NO author field, output an empty author field (nothing before the first #)
+   - Do NOT infer or guess authors based on title or context - only use what is explicitly stated
+7. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear
    - If the original says "John Smith, Jane Doe, et al" then output "John Smith, Jane Doe, et al"
    - If the original says "John Smith et al." then output "John Smith et al."
    - Also preserve variations like "and others", "etc.", "..." when used to indicate additional authors
    - Do NOT expand "et al" into individual author names, even if you know them
-7. Return ONLY the references, one per line
-8. Do not include reference numbers like [1], [2], etc. in your output
-9. Do not add any additional text or explanations
-10. Ensure that URLs and DOIs are from the specific reference only
-11. When parsing multi-line references, combine all authors from all lines before the title
-12. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
+8. Return ONLY the references, one per line
+9. Do not include reference numbers like [1], [2], etc. in your output
+10. Do not add any additional text or explanations
+11. Ensure that URLs and DOIs are from the specific reference only
+    - When extracting URLs, preserve the complete URL including protocol
+    - For BibTeX howpublished fields, extract the full URL from the field value
+12. When parsing multi-line references, combine all authors from all lines before the title
+13. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
 
 Bibliography text:
 {bibliography_text}

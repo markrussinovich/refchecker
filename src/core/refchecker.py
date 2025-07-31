@@ -3403,6 +3403,12 @@ class ArxivReferenceChecker:
         Parse references using regex-based approach (original implementation)
         """
         self.used_regex_extraction = True
+        
+        # Check if this is BibTeX format first
+        if re.search(r'@\w+\s*\{', bibliography_text):
+            logger.debug("Detected BibTeX format, using BibTeX-specific parsing")
+            return self._parse_bibtex_references(bibliography_text)
+        
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
         # This fixes the issue where years appear as separate lines
@@ -3818,6 +3824,194 @@ class ArxivReferenceChecker:
         all_refs = arxiv_refs + non_arxiv_refs + other_refs
         return all_refs
     
+    def _parse_bibtex_references(self, bibliography_text):
+        """
+        Parse BibTeX formatted references like @inproceedings{...}, @article{...}, etc.
+        
+        Args:
+            bibliography_text: String containing BibTeX entries
+            
+        Returns:
+            List of structured reference dictionaries
+        """
+        import re
+        
+        # Pattern to match BibTeX entries: @type{key, ...}
+        # This handles nested braces properly
+        bibtex_pattern = r'@(\w+)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+        
+        entries = []
+        for match in re.finditer(bibtex_pattern, bibliography_text, re.DOTALL | re.IGNORECASE):
+            entry_type = match.group(1).lower()
+            entry_content = match.group(2)
+            
+            # Extract fields from the BibTeX entry
+            entry_data = self._parse_bibtex_entry(entry_type, entry_content)
+            if entry_data:
+                entries.append(entry_data)
+        
+        if not entries:
+            # Fallback: try simpler pattern if the above doesn't work
+            logger.debug("Complex BibTeX pattern failed, trying simpler approach")
+            # Split on @word{ patterns to find entry boundaries
+            parts = re.split(r'(?=@\w+\s*\{)', bibliography_text)
+            
+            for part in parts:
+                part = part.strip()
+                if not part or not part.startswith('@'):
+                    continue
+                    
+                # Find the entry type
+                type_match = re.match(r'@(\w+)\s*\{', part)
+                if not type_match:
+                    continue
+                
+                entry_type = type_match.group(1).lower()
+                
+                # Extract the content between the first { and the last }
+                # This is a simplified approach but should work for most cases
+                brace_start = part.find('{')
+                if brace_start == -1:
+                    continue
+                
+                # Find the matching closing brace
+                brace_count = 0
+                content_end = -1
+                for i, char in enumerate(part[brace_start:], brace_start):
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            content_end = i
+                            break
+                
+                if content_end == -1:
+                    # No matching brace found, take everything after first {
+                    entry_content = part[brace_start + 1:]
+                else:
+                    entry_content = part[brace_start + 1:content_end]
+                
+                entry_data = self._parse_bibtex_entry(entry_type, entry_content)
+                if entry_data:
+                    entries.append(entry_data)
+        
+        logger.debug(f"Extracted {len(entries)} BibTeX entries")
+        return entries
+    
+    def _parse_bibtex_entry(self, entry_type, content):
+        """
+        Parse a single BibTeX entry content to extract fields
+        
+        Args:
+            entry_type: Type of entry (inproceedings, article, etc.)
+            content: Content inside the braces
+            
+        Returns:
+            Dictionary with structured reference data
+        """
+        import re
+        from utils.text_utils import parse_authors_with_initials, clean_title
+        from utils.doi_utils import construct_doi_url, is_valid_doi_format
+        
+        # Extract key (first part before comma)
+        key_match = re.match(r'([^,]+),', content)
+        key = key_match.group(1).strip() if key_match else ""
+        
+        # Extract fields using regex
+        fields = {}
+        
+        # Pattern to match field = {value} or field = "value"
+        field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)")'
+        
+        for match in re.finditer(field_pattern, content, re.DOTALL):
+            field_name = match.group(1).lower()
+            field_value = match.group(2) or match.group(3) or ""
+            fields[field_name] = field_value.strip()
+        
+        # If field extraction failed, try a simpler approach
+        if not fields:
+            logger.debug("Field extraction failed, trying line-by-line approach")
+            lines = content.split('\n')
+            for line in lines:
+                line = line.strip()
+                if '=' in line:
+                    field_match = re.match(r'(\w+)\s*=\s*[{"]([^{}"]*)[}"]', line)
+                    if field_match:
+                        field_name = field_match.group(1).lower()
+                        field_value = field_match.group(2).strip()
+                        fields[field_name] = field_value
+        
+        # Extract required information
+        title = fields.get('title', '')
+        author_string = fields.get('author', '')
+        year = 0
+        
+        # Parse year
+        year_str = fields.get('year', '')
+        if year_str:
+            year_match = re.search(r'\d{4}', year_str)
+            if year_match:
+                year = int(year_match.group())
+        
+        # Parse authors using the enhanced function
+        authors = []
+        if author_string:
+            try:
+                authors = parse_authors_with_initials(author_string)
+            except Exception as e:
+                logger.debug(f"Author parsing failed for '{author_string}': {e}")
+                # Fallback: split by 'and' and clean up
+                author_parts = author_string.split(' and ')
+                authors = [part.strip() for part in author_parts if part.strip()]
+        
+        if not authors:
+            authors = ["Unknown Author"]
+        
+        # Clean title
+        title = clean_title(title) if title else "Unknown Title"
+        
+        # Extract URL/DOI
+        url = fields.get('url', '')
+        doi = fields.get('doi', '')
+        
+        # Construct DOI URL if we have a DOI
+        if doi and is_valid_doi_format(doi):
+            url = construct_doi_url(doi)
+        
+        # Handle special URL fields
+        if not url:
+            howpublished = fields.get('howpublished', '')
+            if 'url{' in howpublished or 'href{' in howpublished:
+                url_match = re.search(r'url\{([^}]+)\}', howpublished)
+                if not url_match:
+                    url_match = re.search(r'href\{([^}]+)\}', howpublished)
+                if url_match:
+                    url = url_match.group(1)
+        
+        # Determine reference type
+        ref_type = 'other'
+        if 'arxiv' in url.lower() or 'arxiv' in title.lower():
+            ref_type = 'arxiv'
+        elif url or doi:
+            ref_type = 'non-arxiv'
+        
+        # Create structured reference
+        structured_ref = {
+            'url': url,
+            'doi': doi,
+            'year': year,
+            'authors': authors,
+            'title': title,
+            'raw_text': f"@{entry_type}{{{key}, {content}}}",
+            'type': ref_type,
+            'bibtex_key': key,
+            'bibtex_type': entry_type
+        }
+        
+        logger.debug(f"Parsed BibTeX entry: {title} by {authors} ({year})")
+        return structured_ref
+    
     def _process_llm_extracted_references(self, references):
         """
         Process references extracted by LLM with simplified formatting assumptions
@@ -3921,6 +4115,11 @@ class ArxivReferenceChecker:
         # This handles the case where the same paper appears multiple times
         if seg1['title'] == seg2['title']:
             return True
+            
+        # Special case: Check if one title is an arXiv identifier and the other is a real title
+        # from the same paper (handles LLM extraction inconsistencies)
+        if self._is_arxiv_identifier_title_mismatch(seg1, seg2):
+            return True
         
         # Alternative: Check if we have exact author match with different titles
         # (This is less common but handles cases where title extraction varies)
@@ -3937,6 +4136,57 @@ class ArxivReferenceChecker:
         
         return False
     
+    def _is_arxiv_identifier_title_mismatch(self, seg1, seg2):
+        """
+        Check if one reference has an arXiv identifier as title while the other has a real title,
+        but they're actually the same paper (detected by similar authors and venues).
+        """
+        import re
+        
+        # Check if either title looks like an arXiv identifier
+        arxiv_pattern = r'arxiv\s*preprint\s*arxiv:\d{4}\.\d{4,5}'
+        
+        title1_is_arxiv = bool(re.search(arxiv_pattern, seg1['title'], re.IGNORECASE))
+        title2_is_arxiv = bool(re.search(arxiv_pattern, seg2['title'], re.IGNORECASE))
+        
+        # We need exactly one to be arXiv identifier and one to be real title
+        if title1_is_arxiv == title2_is_arxiv:
+            return False
+            
+        # Check if venues are similar (both should mention the same arXiv ID)
+        venue1 = seg1.get('venue', '').lower()
+        venue2 = seg2.get('venue', '').lower()
+        
+        # Extract arXiv ID from venues
+        arxiv_id_pattern = r'arxiv:\d{4}\.\d{4,5}'
+        arxiv_ids_1 = re.findall(arxiv_id_pattern, venue1, re.IGNORECASE)
+        arxiv_ids_2 = re.findall(arxiv_id_pattern, venue2, re.IGNORECASE)
+        
+        # If both venues mention the same arXiv ID, likely the same paper
+        if arxiv_ids_1 and arxiv_ids_2 and arxiv_ids_1[0] == arxiv_ids_2[0]:
+            return True
+            
+        # Also check if authors have significant overlap (at least 50% of the shorter author list)
+        author1_parts = seg1['author'].split('*') if '*' in seg1['author'] else seg1['author'].split(',')
+        author2_parts = seg2['author'].split('*') if '*' in seg2['author'] else seg2['author'].split(',')
+        
+        # Clean and normalize author names
+        author1_clean = {a.strip().lower() for a in author1_parts if a.strip() and a.strip() not in ['et al', 'others']}
+        author2_clean = {a.strip().lower() for a in author2_parts if a.strip() and a.strip() not in ['et al', 'others']}
+        
+        if not author1_clean or not author2_clean:
+            return False
+            
+        # Calculate overlap
+        overlap = len(author1_clean.intersection(author2_clean))
+        min_authors = min(len(author1_clean), len(author2_clean))
+        
+        # If significant author overlap (>= 50%) and one title is arXiv identifier, consider duplicate
+        if min_authors > 0 and overlap / min_authors >= 0.5:
+            return True
+            
+        return False
+
     def _check_author_overlap(self, author1, author2):
         """
         Check if two author strings have significant overlap, indicating they're 
@@ -3964,22 +4214,119 @@ class ArxivReferenceChecker:
     
     def _clean_llm_author_text(self, author_text):
         """
-        Clean author text by removing 'and' and trailing periods
+        Clean author text and parse authors properly
         """
         if not author_text:
             return []
         
-        # First remove 'and' and trailing periods from the entire text
-        cleaned_text = author_text.replace(' and ', ', ').rstrip('.')
+        # Check if the author_text uses asterisk delimiter (new format)
+        if '*' in author_text:
+            # Split on asterisks to get individual author entries
+            raw_authors = [author.strip() for author in author_text.split('*') if author.strip()]
+            
+            parsed_authors = []
+            for author in raw_authors:
+                # Clean up the author entry
+                author_cleaned = author.rstrip('.')
+                
+                # Skip special indicators like "others", "et al", etc.
+                if author_cleaned.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
+                    # Add "et al" as a standard indicator and stop processing more authors
+                    if parsed_authors:  # Only add if we have at least one real author
+                        parsed_authors.append("et al")
+                    break
+                
+                # Parse single author entry - could be BibTeX "Surname, Given" or regular "Given Surname"
+                parsed_author = self._parse_single_author_entry(author_cleaned)
+                if parsed_author:
+                    parsed_authors.append(parsed_author)
+            
+            return parsed_authors
+        else:
+            # Fallback to original logic for backward compatibility
+            from utils.text_utils import parse_authors_with_initials
+            
+            cleaned_text = author_text.rstrip('.')
+            authors = parse_authors_with_initials(cleaned_text)
+            authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+            
+            # Handle "others" and similar indicators in fallback logic too
+            processed_authors = []
+            for author in authors:
+                if author.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
+                    if processed_authors:  # Only add if we have at least one real author
+                        processed_authors.append("et al")
+                    break
+                processed_authors.append(author)
+            
+            return processed_authors
+
+    def _parse_single_author_entry(self, author_text):
+        """
+        Parse a single author entry that may be in various formats:
+        - BibTeX format: "Surname, Given" -> "Given Surname"  
+        - Regular format: "Given Surname" -> "Given Surname"
+        - Handle edge cases like all-caps surnames, compound names, etc.
+        """
+        if not author_text or not author_text.strip():
+            return None
+            
+        author_text = author_text.strip()
         
-        # Then parse authors properly handling initials
-        from utils.text_utils import parse_authors_with_initials
-        authors = parse_authors_with_initials(cleaned_text)
+        # Check if this looks like BibTeX format "Surname, Given"
+        if ',' in author_text and author_text.count(',') == 1:
+            parts = author_text.split(',', 1)
+            surname_part = parts[0].strip()
+            given_part = parts[1].strip()
+            
+            # Enhanced detection for BibTeX format
+            if self._is_bibtex_surname_given_format(surname_part, given_part):
+                return f"{given_part} {surname_part}"
         
-        # Remove any remaining trailing periods and clean up
-        authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+        # Not BibTeX format, return as-is (already "Given Surname" format or single name)
+        return author_text
+    
+    def _is_bibtex_surname_given_format(self, surname_part, given_part):
+        """
+        Determine if "surname_part, given_part" represents BibTeX "Surname, Given" format
+        vs just a regular list of names that happen to have a comma
+        """
+        # Both parts must be non-empty
+        if not surname_part or not given_part:
+            return False
         
-        return authors
+        # Length checks - very short parts are likely initials or abbreviations
+        if len(surname_part) < 2 or len(given_part) < 1:
+            return False
+            
+        # Check if surname_part looks like a surname:
+        # 1. Starts with capital letter OR starts with lowercase prefix (like "de", "van", "von")
+        # 2. Not just initials (has some lowercase letters OR is all-caps like "VS") 
+        # 3. Doesn't end with period (not an initial)
+        
+        # Check for compound surnames with lowercase prefixes
+        compound_prefixes = ['de', 'van', 'von', 'del', 'da', 'du', 'le', 'la', 'el']
+        starts_with_prefix = any(surname_part.lower().startswith(prefix + ' ') for prefix in compound_prefixes)
+        
+        surname_valid = (
+            (surname_part[0].isupper() or starts_with_prefix) and
+            not surname_part.endswith('.') and
+            (any(c.islower() for c in surname_part) or  # Has lowercase letters
+             surname_part.isupper() or                   # All caps (like "VS")
+             ' ' in surname_part)                        # Compound name (like "de Melo")
+        )
+        
+        # Check if given_part looks like a given name:
+        # 1. Starts with capital letter
+        # 2. Could be full name, all-caps abbreviation, or name with middle initial
+        given_valid = (
+            given_part[0].isupper() and
+            (any(c.islower() for c in given_part) or    # Has lowercase letters  
+             given_part.isupper() or                     # All caps (like "VS")
+             ' ' in given_part)                          # Has space (like "Celso M")
+        )
+        
+        return surname_valid and given_valid
 
     def _create_structured_llm_references(self, ref_text):
         """
@@ -4304,6 +4651,55 @@ class ArxivReferenceChecker:
         }
     
 
+    def _get_bibtex_content(self, paper):
+        """
+        Try to get BibTeX content for a paper from various sources.
+        
+        Args:
+            paper: Paper object
+            
+        Returns:
+            str: BibTeX content if found, None otherwise
+        """
+        # Try ArXiv source if it's an ArXiv paper
+        from utils.arxiv_utils import extract_arxiv_id_from_paper, download_arxiv_source
+        
+        arxiv_id = extract_arxiv_id_from_paper(paper)
+        if arxiv_id:
+            logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
+            tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
+            
+            # Prefer .bib files (most structured), then .bbl files
+            if bib_content:
+                logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
+                
+                # If we have LaTeX content, filter BibTeX by cited keys
+                if tex_content:
+                    from utils.text_utils import extract_cited_keys_from_latex, filter_bibtex_by_cited_keys
+                    cited_keys = extract_cited_keys_from_latex(tex_content)
+                    if cited_keys:
+                        logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
+                        filtered_content = filter_bibtex_by_cited_keys(bib_content, cited_keys)
+                        return filtered_content
+                
+                return bib_content
+                
+            elif bbl_content:
+                logger.info(f"Found .bbl files in ArXiv source for {arxiv_id}")
+                return bbl_content
+                
+            elif tex_content:
+                # Check for embedded bibliography in LaTeX
+                from utils.text_utils import detect_latex_bibliography_format
+                latex_format = detect_latex_bibliography_format(tex_content)
+                if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
+                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source for {arxiv_id}")
+                    return tex_content
+        
+        # Could add other BibTeX sources here (e.g., direct BibTeX URLs, etc.)
+        
+        return None
+
 
     def extract_bibliography(self, paper, debug_mode=False):
         """
@@ -4316,14 +4712,36 @@ class ArxivReferenceChecker:
         paper_id = paper.get_short_id()
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
         
-        # OPTIMIZATION: For ArXiv papers, try downloading LaTeX source first
-        # This can provide much cleaner bibliography extraction than PDF parsing
-        from utils.arxiv_utils import extract_arxiv_id_from_paper, extract_references_from_arxiv_source
-        
-        arxiv_id = extract_arxiv_id_from_paper(paper)
-        if arxiv_id:
-            references = extract_references_from_arxiv_source(arxiv_id, paper_id, debug_mode)
+        # Check if we can get BibTeX content for this paper (ArXiv or other sources)
+        bibtex_content = self._get_bibtex_content(paper)
+        if bibtex_content:
+            logger.info(f"Found BibTeX content for {paper_id}, using structured bibliography")
+            
+            # Save BibTeX for debugging
+            if debug_mode:
+                debug_dir = "debug"
+                if not os.path.exists(debug_dir):
+                    os.makedirs(debug_dir)
+                try:
+                    with open(os.path.join(debug_dir, f"{paper_id}_bibliography.txt"), 'w', encoding='utf-8', errors='replace') as f:
+                        f.write(bibtex_content)
+                    logger.info(f"Saved BibTeX content to {os.path.join(debug_dir, f'{paper_id}_bibliography.txt')}")
+                except Exception as e:
+                    logger.warning(f"Could not save debug BibTeX file for {paper_id}: {e}")
+            
+            # Parse the BibTeX using the standard flow (LLM or regex based on config)
+            references = self.parse_references(bibtex_content)
+            
+            # Save extracted references for debugging
+            if debug_mode:
+                try:
+                    with open(os.path.join(debug_dir, f"{paper_id}_references.json"), 'w', encoding='utf-8', errors='replace') as f:
+                        json.dump(references, f, indent=2)
+                except Exception as e:
+                    logger.warning(f"Could not save debug references file for {paper_id}: {e}")
+            
             if references:
+                logger.info(f"Successfully extracted {len(references)} references from BibTeX for {paper_id}")
                 return references
         
         # Check if this is a text file containing references

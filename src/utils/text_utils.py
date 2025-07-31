@@ -65,8 +65,9 @@ def normalize_text(text):
 
 def parse_authors_with_initials(authors_text):
     """
-    Parse author list that may contain initials, handling formats like:
-    "Jiang, J, Xia, G. G, Carlton, D. B" -> ["Jiang, J", "Xia, G. G", "Carlton, D. B"]
+    Parse author list that may contain initials, handling various formats:
+    - BibTeX format: "Surname1, Given1, Surname2, Given2" -> ["Given1 Surname1", "Given2 Surname2"]
+    - Initial format: "Jiang, J, Xia, G. G, Carlton, D. B" -> ["Jiang, J", "Xia, G. G", "Carlton, D. B"]
     
     Args:
         authors_text: String containing author names with potential initials
@@ -86,6 +87,95 @@ def parse_authors_with_initials(authors_text):
     # Split on commas first
     parts = [part.strip() for part in authors_text.split(',') if part.strip()]
     
+    # Check if this is BibTeX comma-separated format: "Surname, Given, Surname, Given"
+    # Enhanced heuristic: even number of parts >= 6, alternating proper surname/given pattern
+    # Distinguish between initials (should remain as "Surname, Initial") and full names
+    if len(parts) >= 6 and len(parts) % 2 == 0:
+        # Pattern for proper surnames: capitalized word(s), possibly hyphenated or compound, length >= 2
+        # Allow compound surnames like "De Mathelin", "Van der Berg", etc.
+        surname_pattern = r'^[A-Z][a-z]{1,}(-[A-Z][a-z]{1,})*(\s+[A-Z][a-z]{1,})*$'  # Allow spaces in surnames
+        # Pattern for FULL given names (not initials): starts with capital, at least 2 chars, no periods
+        # Allow hyphenated names, shorter names like "Qi", and names with middle initials like "Andru P"
+        full_given_pattern = r'^[A-Z][a-z]{1,}(-[A-Z][a-z]{1,})*(\s+[A-Z]([a-z]+)?)*$'  # Full names with optional middle initials
+        # Pattern for initials: single letters with optional periods and spaces
+        initial_pattern = r'^[A-Z]\.?\s*([A-Z]\.?\s*)*$'  # Like "J", "G. G", "D. B"
+        
+        is_bibtex_format = True
+        surname_count = 0
+        valid_pairs = 0
+        has_full_names = False  # Track if we see actual full given names (not just initials)
+        
+        for i in range(0, len(parts), 2):
+            if i + 1 < len(parts):
+                surname_candidate = parts[i].strip()
+                given_candidate = parts[i + 1].strip()
+                
+                # Check if this follows surname, given pattern
+                surname_matches = re.match(surname_pattern, surname_candidate)
+                is_full_given = re.match(full_given_pattern, given_candidate)
+                is_initial = re.match(initial_pattern, given_candidate)
+                
+                # Accept if surname matches and given is either full name or initial
+                given_matches = is_full_given or is_initial
+                
+                # Track if we see full given names (indicates BibTeX format vs initial format)
+                if is_full_given:
+                    has_full_names = True
+                
+                # Additional validation: surname should not be a common word
+                if (surname_matches and given_matches and 
+                    len(surname_candidate) >= 2 and len(given_candidate) >= 1 and
+                    surname_candidate not in ['The', 'And', 'For', 'With', 'From', 'To'] and
+                    given_candidate not in ['The', 'And', 'For', 'With', 'From', 'To']):
+                    valid_pairs += 1
+                    if surname_matches:
+                        surname_count += 1
+                else:
+                    is_bibtex_format = False
+                    break
+        
+        # Apply BibTeX logic ONLY if we have strong evidence of FULL given names (not just initials)
+        # At least 75% of pairs should be valid, we need at least 3 total pairs, 
+        # and we need to see actual full given names (not just initials)
+        min_pairs = len(parts) // 2
+        if (is_bibtex_format and min_pairs >= 3 and 
+            valid_pairs >= max(3, int(0.75 * min_pairs)) and
+            surname_count >= 3 and has_full_names):  # Only if we see full names
+            # Reconstruct as "Given Surname" format
+            authors = []
+            for i in range(0, len(parts), 2):
+                if i + 1 < len(parts):
+                    surname = parts[i].strip()
+                    given = parts[i + 1].strip()
+                    authors.append(f"{given} {surname}")
+            return authors
+    
+    # Special case for exactly 4 parts that clearly match BibTeX pattern with known surnames
+    elif len(parts) == 4:
+        # More lenient for 4-part lists but still require proper pattern
+        surname_pattern = r'^[A-Z][a-z]{2,}(-[A-Z][a-z]{2,})*$'  # At least 3 chars for surname, allow hyphens
+        given_pattern = r'^[A-Z][a-z]{1,}$'  # Full given names (at least 2 chars total)
+        
+        all_match = True
+        for i in range(0, 4, 2):
+            surname_candidate = parts[i]
+            given_candidate = parts[i + 1]
+            
+            if not (re.match(surname_pattern, surname_candidate) and 
+                   re.match(given_pattern, given_candidate)):
+                all_match = False
+                break
+        
+        if all_match:
+            # Reconstruct as "Given Surname" format
+            authors = []
+            for i in range(0, 4, 2):
+                surname = parts[i]
+                given = parts[i + 1]
+                authors.append(f"{given} {surname}")
+            return authors
+    
+    # Fall back to original logic for initial-based formats
     authors = []
     current_author = ""
     
@@ -1525,6 +1615,83 @@ def strip_latex_commands(text):
     return text
 
 
+def extract_cited_keys_from_latex(tex_content):
+    """
+    Extract citation keys from LaTeX content by finding \cite{} commands.
+    
+    Args:
+        tex_content: LaTeX source content
+        
+    Returns:
+        Set of citation keys that are actually cited in the document
+    """
+    if not tex_content:
+        return set()
+    
+    cited_keys = set()
+    
+    # Match various citation commands: \cite{}, \citep{}, \citet{}, \cite*{}, etc.
+    cite_patterns = [
+        r'\\cite[pt]?\*?\{([^}]+)\}',  # \cite{}, \citep{}, \citet{}, \cite*{}
+        r'\\citealp\{([^}]+)\}',       # \citealp{}
+        r'\\citealt\{([^}]+)\}',       # \citealt{}
+        r'\\citeauthor\{([^}]+)\}',    # \citeauthor{}
+        r'\\citeyear\{([^}]+)\}',      # \citeyear{}
+        r'\\Cite[pt]?\{([^}]+)\}',     # \Cite{}, \Citep{}, \Citet{}
+    ]
+    
+    for pattern in cite_patterns:
+        matches = re.finditer(pattern, tex_content, re.IGNORECASE)
+        for match in matches:
+            keys_str = match.group(1)
+            # Split by comma to handle multiple keys in one cite command
+            keys = [key.strip() for key in keys_str.split(',')]
+            cited_keys.update(keys)
+    
+    # Clean up any empty keys
+    cited_keys.discard('')
+    
+    return cited_keys
+
+
+def filter_bibtex_by_cited_keys(bib_content, cited_keys):
+    """
+    Filter BibTeX content to only include entries that are actually cited.
+    
+    Args:
+        bib_content: Full BibTeX content
+        cited_keys: Set of citation keys that are actually cited
+        
+    Returns:
+        Filtered BibTeX content containing only cited entries
+    """
+    if not bib_content or not cited_keys:
+        return bib_content
+    
+    # Parse entries and filter
+    entries = parse_bibtex_entries(bib_content)
+    filtered_entries = []
+    
+    for entry in entries:
+        if entry['key'] in cited_keys:
+            filtered_entries.append(entry)
+    
+    # Reconstruct BibTeX content from filtered entries
+    filtered_bib_lines = []
+    for entry in filtered_entries:
+        # Reconstruct the entry
+        entry_lines = [f"@{entry['type']}{{{entry['key']},"]
+        for field_name, field_value in entry['fields'].items():
+            entry_lines.append(f"  {field_name} = {{{field_value}}},")
+        # Remove trailing comma from last field
+        if entry_lines[-1].endswith(','):
+            entry_lines[-1] = entry_lines[-1][:-1]
+        entry_lines.append("}\n")
+        filtered_bib_lines.extend(entry_lines)
+    
+    return '\n'.join(filtered_bib_lines)
+
+
 def parse_bibtex_entries(bib_content):
     """
     Parse BibTeX entries from text content
@@ -2583,10 +2750,18 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         # Split and clean words
         words = []
         for word in title.lower().split():
-            # Remove punctuation
-            clean_word = re.sub(r'[^\w]', '', word)
-            if clean_word and clean_word not in stop_words and len(clean_word) > 1:
-                words.append(clean_word)
+            # Handle hyphenated compound words (e.g., "computer-assisted" -> ["computer", "assisted"])
+            if '-' in word and len(word) > 5:  # Only split meaningful hyphenated words
+                hyphen_parts = [part.strip() for part in word.split('-') if part.strip()]
+                for part in hyphen_parts:
+                    clean_part = re.sub(r'[^\w]', '', part)
+                    if clean_part and clean_part not in stop_words and len(clean_part) > 1:
+                        words.append(clean_part)
+            else:
+                # Remove punctuation
+                clean_word = re.sub(r'[^\w]', '', word)
+                if clean_word and clean_word not in stop_words and len(clean_word) > 1:
+                    words.append(clean_word)
         
         if len(words) < 2:
             return None
@@ -2607,6 +2782,20 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         if len(important_words) >= 2 and important_words != words:
             focused_acronym = ''.join(word[0] for word in important_words[:6])
             acronyms.append(focused_acronym)
+        
+        # Special case: for medical/scientific conferences, try skipping "International Conference" prefix
+        # This handles cases like MICCAI where "International Conference on X" becomes just the X part
+        if len(words) >= 4 and words[0] == 'international' and words[1] == 'conference':
+            # Skip "International Conference" and "on" if present
+            start_idx = 2
+            if start_idx < len(words) and words[start_idx] == 'on':
+                start_idx = 3
+            
+            if start_idx < len(words):
+                subject_words = words[start_idx:]
+                if len(subject_words) >= 2:
+                    subject_acronym = ''.join(word[0] for word in subject_words[:6])
+                    acronyms.append(subject_acronym)
         
         # For compound concepts, try taking more letters from key words
         if len(words) <= 4:

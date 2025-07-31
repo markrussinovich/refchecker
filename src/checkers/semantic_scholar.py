@@ -265,7 +265,7 @@ class NonArxivReferenceChecker:
             if paper_data:
                 logger.debug(f"Found paper by DOI: {doi}")
             else:
-                logger.warning(f"Could not find paper with DOI: {doi}")
+                logger.debug(f"Could not find paper with DOI: {doi}")
         
         # If we couldn't get the paper by DOI, try searching by title
         found_title = ''
