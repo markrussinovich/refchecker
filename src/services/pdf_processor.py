@@ -179,6 +179,9 @@ class PDFProcessor:
                 end_markers = [
                     r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
                     r'\n\s*Appendix\s*[A-Z]?\s*\n',
+                    r'\n\s*[A-Z]\s+[A-Z]{2,}.*\n',  # Pattern like "A LRE Dataset", "B ADDITIONAL RESULTS"
+                    r'\n\s*[A-Z]\.\d+\s+.*\n',  # Pattern like "A.1 Dataset Details"
+                    r'\nTable\s+\d+:.*\n[A-Z]\s+[A-Z]',  # Table followed by appendix section like "Table 7: ...\nA LRE"
                     r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
                     r'\n\s*Supplementary\s+Material\s*\n',  
                     r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',

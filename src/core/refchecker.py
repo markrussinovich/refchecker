@@ -996,9 +996,12 @@ class ArxivReferenceChecker:
             # Find the next section heading or end of document
             # Look for common section endings that come after references
             next_section_patterns = [
+                # HIGHEST PRIORITY: Table/Data patterns that immediately follow references
+                r'\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',  # "Relation # Samples", "Table 1:", "Figure 1:"
+                r'\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',  # Structured table headers like "Relation # Samples Context Templates Query Templates"
                 # HIGH PRIORITY: Appendix patterns that appear at the end of bibliography
                 # General pattern for single letter appendix sections - must come FIRST to catch earliest occurrence
-                r'\n\s*[A-Z]\s+[A-Z][a-z][a-z]+(?:\s+[A-Z][a-z]+)*\s*\n',  # "A Theoretical Analysis", "B Implementation Details", "C Evaluation Details"
+                r'\n\s*[A-Z]\s+(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',  # "A LRE Dataset", "A Theoretical Analysis", "B Implementation Details"
                 # Specific patterns (kept for backwards compatibility but won't be reached in most cases)
                 r'\n\s*[A-Z]\s+Evaluation\s+Details\s*\n',  # Specific "C Evaluation Details"
                 # Note: Removed problematic pattern that was matching page numbers in bibliography
@@ -1059,6 +1062,38 @@ class ArxivReferenceChecker:
                     logger.debug(f"PATTERN {i} MATCHED: {next_pattern}")
                     logger.debug(f"MATCHED TEXT: {repr(next_match.group(0))}")
                     logger.debug(f"CONTEXT: {repr(text[section_end-30:section_end+30])}")
+                    
+                    # For table/data patterns, make sure we don't cut off mid-reference
+                    # Look backwards to find the end of the previous complete reference
+                    if i <= 2:  # First two patterns are table/data patterns
+                        # Look backwards from the match to find the end of the last reference
+                        # References typically end with a period, year, or arXiv ID
+                        search_back = 500  # Look back up to 500 chars
+                        search_start = max(start_pos, section_end - search_back)
+                        text_before = text[search_start:section_end]
+                        
+                        # Look for patterns that indicate end of a reference
+                        ref_end_patterns = [
+                            r'arXiv:\d+\.\d+[v\d]*\.\s*',  # arXiv ID with period
+                            r'Preprint[,\.]?\s*arXiv:\d+\.\d+[v\d]*\.\s*',  # Preprint with arXiv ID
+                            r'20\d{2}[.\n]\s*',  # Year (2000-2099) with period or newline
+                            r'[A-Za-z]+\.\s*$',  # Word ending with period
+                        ]
+                        
+                        best_end = section_end
+                        for pattern in ref_end_patterns:
+                            matches = list(re.finditer(pattern, text_before, re.MULTILINE))
+                            if matches:
+                                # Get the last match (closest to section_end)
+                                last_match = matches[-1]
+                                potential_end = search_start + last_match.end()
+                                logger.debug(f"Found reference end pattern: {pattern} at position {potential_end}")
+                                best_end = potential_end
+                                break
+                        
+                        section_end = best_end
+                        logger.debug(f"Adjusted end position to: {section_end}")
+                    
                     # Only use this end position if it's reasonable (not too close to start)
                     if section_end > start_pos + 100 and section_end < end_pos:
                         end_pos = section_end
