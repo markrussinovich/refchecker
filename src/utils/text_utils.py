@@ -1727,104 +1727,194 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             if year_match:
                 ref['year'] = int(year_match.group(1))
             
-            # Extract authors from \bibfield{author} section
-            # Use a more robust approach to handle nested braces
-            author_start = content.find('\\bibfield{author}{')
-            if author_start != -1:
-                # Start after the opening brace of the author field
-                start_pos = author_start + len('\\bibfield{author}{')
-                brace_count = 1
-                pos = start_pos
+            # Check if this is ACM-style format (has \bibfield or \bibinfo commands)
+            is_acm_format = ('\\bibfield{' in content or '\\bibinfo{' in content)
+            
+            if is_acm_format:
+                # ACM-style parsing (existing logic)
+                # Extract authors from \bibfield{author} section
+                # Use a more robust approach to handle nested braces
+                author_start = content.find('\\bibfield{author}{')
+                if author_start != -1:
+                    # Start after the opening brace of the author field
+                    start_pos = author_start + len('\\bibfield{author}{')
+                    brace_count = 1
+                    pos = start_pos
+                    
+                    # Find the matching closing brace
+                    while pos < len(content) and brace_count > 0:
+                        if content[pos] == '{':
+                            brace_count += 1
+                        elif content[pos] == '}':
+                            brace_count -= 1
+                        pos += 1
+                    
+                    if brace_count == 0:
+                        author_content = content[start_pos:pos-1]
+                        # Extract individual authors from \bibinfo{person}{Name} tags
+                        person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+                        if person_matches:
+                            # Clean and format author names
+                            authors = []
+                            for person in person_matches:
+                                # Strip LaTeX commands and clean up
+                                clean_name = strip_latex_commands(person).strip()
+                                if clean_name and clean_name not in ['and', '{and}']:
+                                    authors.append(clean_name)
+                            ref['authors'] = authors
+            else:
+                # Natbib-style parsing (simpler format with \newblock)
+                # Extract year from bibitem label like [Author(2023)] or from content
+                if not ref['year']:
+                    # Try to extract from bibitem label
+                    label_year_match = re.search(r'\((\d{4})\)', label or '')
+                    if label_year_match:
+                        ref['year'] = int(label_year_match.group(1))
+                    else:
+                        # Try to extract from content
+                        content_year_match = re.search(r'\b(19|20)\d{2}\b', content)
+                        if content_year_match:
+                            ref['year'] = int(content_year_match.group())
                 
-                # Find the matching closing brace
-                while pos < len(content) and brace_count > 0:
-                    if content[pos] == '{':
-                        brace_count += 1
-                    elif content[pos] == '}':
-                        brace_count -= 1
-                    pos += 1
+                # Parse natbib format: usually has author line, then \newblock title, then \newblock venue
+                parts = re.split(r'\\newblock', content, flags=re.IGNORECASE)
                 
-                if brace_count == 0:
-                    author_content = content[start_pos:pos-1]
-                    # Extract individual authors from \bibinfo{person}{Name} tags
-                    person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
-                    if person_matches:
-                        # Clean and format author names
+                if len(parts) >= 1:
+                    # First part is usually authors (before first \newblock)
+                    author_part = parts[0].strip()
+                    # Clean and extract authors
+                    author_part_clean = strip_latex_commands(author_part).strip()
+                    
+                    # Handle organization authors (like "Learn Prompting." or "ProtectAI.")
+                    if author_part_clean and len(author_part_clean) < 50 and not '\\' in author_part_clean:
+                        # Remove trailing periods and clean up
+                        author_name = author_part_clean.rstrip('.')
+                        if author_name and len(author_name) > 2:
+                            ref['authors'] = [author_name]
+                    elif author_part_clean and not author_part_clean.endswith('.'):
+                        # Parse author names - handle comma-separated list for regular authors
+                        if ', and ' in author_part_clean:
+                            author_names = re.split(r', and |, ', author_part_clean)
+                        else:
+                            author_names = [name.strip() for name in author_part_clean.split(',')]
+                        
+                        # Clean up author names
                         authors = []
-                        for person in person_matches:
-                            # Strip LaTeX commands and clean up
-                            clean_name = strip_latex_commands(person).strip()
-                            if clean_name and clean_name not in ['and', '{and}']:
-                                authors.append(clean_name)
-                        ref['authors'] = authors
+                        for name in author_names:
+                            name = name.strip()
+                            if name and len(name) > 2 and not name in ['et~al', 'et al', 'et~al.']:
+                                # Remove trailing dots
+                                name = name.rstrip('.')
+                                authors.append(name)
+                        if authors:
+                            ref['authors'] = authors
+                    
+                    # Second part is usually title  
+                    if len(parts) >= 2:
+                        title_part = parts[1].strip()
+                        title_clean = strip_latex_commands(title_part).strip()
+                        # Remove trailing dots and clean up
+                        title_clean = title_clean.rstrip('.')
+                        if title_clean and len(title_clean) > 5:  # Reasonable title length
+                            ref['title'] = title_clean
+                    
+                    # Third part is usually venue/journal
+                    if len(parts) >= 3:
+                        venue_part = parts[2].strip()
+                        venue_clean = strip_latex_commands(venue_part).strip()
+                        # Remove year and clean up
+                        if ref['year']:
+                            venue_clean = re.sub(rf'\b{ref["year"]}\b.*', '', venue_clean)
+                        venue_clean = venue_clean.rstrip(',. ')
+                        if venue_clean:
+                            ref['journal'] = venue_clean
+                
+                # Extract URL if present
+                url_match = re.search(r'\\url\{([^}]+)\}', content)
+                if url_match:
+                    ref['url'] = url_match.group(1)
             
             # Extract title from \showarticletitle{} or \bibinfo{title}{}
             # Use the same brace-matching approach for titles to handle nested braces
-            title_patterns = ['\\showarticletitle{', '\\bibinfo{title}{']
-            for pattern in title_patterns:
-                title_start = content.find(pattern)
-                if title_start != -1:
-                    start_pos = title_start + len(pattern)
-                    brace_count = 1
-                    pos = start_pos
-                    
-                    # Find the matching closing brace
-                    while pos < len(content) and brace_count > 0:
-                        if content[pos] == '{':
-                            brace_count += 1
-                        elif content[pos] == '}':
-                            brace_count -= 1
-                        pos += 1
-                    
-                    if brace_count == 0:
-                        title_content = content[start_pos:pos-1]
-                        # Clean LaTeX commands from title
-                        clean_title = strip_latex_commands(title_content).strip()
-                        if clean_title:
-                            ref['title'] = clean_title
-                            break
+            if is_acm_format:
+                title_patterns = ['\\showarticletitle{', '\\bibinfo{title}{']
+                for pattern in title_patterns:
+                    title_start = content.find(pattern)
+                    if title_start != -1:
+                        start_pos = title_start + len(pattern)
+                        brace_count = 1
+                        pos = start_pos
+                        
+                        # Find the matching closing brace
+                        while pos < len(content) and brace_count > 0:
+                            if content[pos] == '{':
+                                brace_count += 1
+                            elif content[pos] == '}':
+                                brace_count -= 1
+                            pos += 1
+                        
+                        if brace_count == 0:
+                            title_content = content[start_pos:pos-1]
+                            # Clean LaTeX commands from title
+                            clean_title = strip_latex_commands(title_content).strip()
+                            if clean_title:
+                                ref['title'] = clean_title
+                                break
+            # For natbib format, title extraction is handled above in the natbib parsing section
             
             # Extract journal/venue from \bibinfo{booktitle} or \bibinfo{journal}
             # Use brace-matching for venue extraction too
-            venue_patterns = ['\\bibinfo{booktitle}{', '\\bibinfo{journal}{']
-            for pattern in venue_patterns:
-                venue_start = content.find(pattern)
-                if venue_start != -1:
-                    start_pos = venue_start + len(pattern)
-                    brace_count = 1
-                    pos = start_pos
-                    
-                    # Find the matching closing brace
-                    while pos < len(content) and brace_count > 0:
-                        if content[pos] == '{':
-                            brace_count += 1
-                        elif content[pos] == '}':
-                            brace_count -= 1
-                        pos += 1
-                    
-                    if brace_count == 0:
-                        venue_content = content[start_pos:pos-1]
-                        clean_venue = strip_latex_commands(venue_content).strip()
-                        if clean_venue:
-                            ref['journal'] = clean_venue
-                            break
+            if is_acm_format:
+                venue_patterns = ['\\bibinfo{booktitle}{', '\\bibinfo{journal}{']
+                for pattern in venue_patterns:
+                    venue_start = content.find(pattern)
+                    if venue_start != -1:
+                        start_pos = venue_start + len(pattern)
+                        brace_count = 1
+                        pos = start_pos
+                        
+                        # Find the matching closing brace
+                        while pos < len(content) and brace_count > 0:
+                            if content[pos] == '{':
+                                brace_count += 1
+                            elif content[pos] == '}':
+                                brace_count -= 1
+                            pos += 1
+                        
+                        if brace_count == 0:
+                            venue_content = content[start_pos:pos-1]
+                            clean_venue = strip_latex_commands(venue_content).strip()
+                            if clean_venue:
+                                ref['journal'] = clean_venue
+                                break
+            # For natbib format, venue extraction is handled above in the natbib parsing section
             
             # Extract URL from \url{} or \bibinfo{howpublished}{\url{}}
-            url_match = re.search(r'\\url\{([^}]+)\}', content)
-            if url_match:
-                ref['url'] = url_match.group(1)
+            if not ref['url']:
+                url_match = re.search(r'\\url\{([^}]+)\}', content)
+                if url_match:
+                    ref['url'] = url_match.group(1)
             
             # Extract DOI from \href{https://doi.org/...}
-            doi_match = re.search(r'\\href\{https?://doi\.org/([^}]+)\}', content)
-            if doi_match:
-                ref['doi'] = doi_match.group(1)
+            if not ref.get('doi'):
+                doi_match = re.search(r'\\href\{https?://doi\.org/([^}]+)\}', content)
+                if doi_match:
+                    ref['doi'] = doi_match.group(1)
             
-            # Extract arXiv ID from \showeprint[arxiv]{...}
+            # Extract arXiv ID from \showeprint[arxiv]{...} (ACM format) or from content (natbib format)
             arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
-            arxiv_id = None
+            if not arxiv_match and not ref['url']:
+                # Look for arXiv patterns in natbib format
+                arxiv_content_match = re.search(r'arXiv preprint arXiv:(\d{4}\.\d{4,5})', content)
+                if arxiv_content_match:
+                    arxiv_id = arxiv_content_match.group(1)
+                    ref['url'] = f"https://arxiv.org/abs/{arxiv_id}"
+                    arxiv_match = arxiv_content_match
+            
             if arxiv_match:
                 arxiv_id = arxiv_match.group(1)
-                ref['url'] = f"https://arxiv.org/abs/{arxiv_id}"
+                if not ref['url']:
+                    ref['url'] = f"https://arxiv.org/abs/{arxiv_id}"
             
             # Build clean raw text for display
             clean_content_parts = []
@@ -1835,11 +1925,12 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             
             # Add venue info  
             if ref['journal']:
-                venue_text = f"In {ref['journal']}"
+                venue_text = f"In {ref['journal']}" if not ref['journal'].startswith('In ') else ref['journal']
                 clean_content_parts.append(venue_text)
             
-            # Add arXiv info if available
-            if arxiv_id:
+            # Add arXiv info if available (for ACM format)
+            if is_acm_format and arxiv_match:
+                arxiv_id = arxiv_match.group(1) if hasattr(arxiv_match, 'group') else str(arxiv_match)
                 arxiv_text = f"[arxiv]{arxiv_id}"
                 # Extract subject class like [cs.CR] from the content
                 subject_match = re.search(r'~\[([^]]+)\]', content)
@@ -1856,6 +1947,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             
             if author_line_parts:
                 clean_content_parts.append(' '.join(author_line_parts))
+            
+            # Add URL if available
+            if ref['url']:
+                clean_content_parts.append(ref['url'])
             
             # Combine all parts
             ref['raw_text'] = '\n       '.join(clean_content_parts) if clean_content_parts else strip_latex_commands(content)
