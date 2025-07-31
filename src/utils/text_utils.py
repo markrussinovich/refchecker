@@ -1501,6 +1501,23 @@ def strip_latex_commands(text):
     # Remove remaining commands without arguments
     text = re.sub(r'\\[a-zA-Z]+\b', '', text)
     
+    # Remove excessive curly braces that are used for grouping in LaTeX/BibTeX
+    # Handle nested braces carefully - remove outer braces but preserve content
+    # First pass: remove simple {content} patterns (single level)
+    text = re.sub(r'\{([^{}]+)\}', r'\1', text)
+    
+    # Second pass: handle any remaining nested braces (up to 2 levels deep)
+    # This handles cases like {{title}} -> {title} -> title
+    text = re.sub(r'\{([^{}]*\{[^{}]*\}[^{}]*)\}', r'\1', text)
+    text = re.sub(r'\{([^{}]+)\}', r'\1', text)
+    
+    # Third pass: handle any remaining double braces or triple braces
+    text = re.sub(r'\{\{([^{}]+)\}\}', r'\1', text)
+    text = re.sub(r'\{\{\{([^{}]+)\}\}\}', r'\1', text)
+    
+    # Remove any isolated braces that might be left
+    text = re.sub(r'[{}]', '', text)
+    
     # Clean up multiple spaces and normalize whitespace
     text = re.sub(r'\s+', ' ', text)
     text = text.strip()
@@ -1680,8 +1697,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             references.append(ref)
     
     elif format_info['format_type'] == 'thebibliography':
-        # Parse \bibitem entries (improved for .bbl files)
-        bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\})'
+        # Parse \bibitem entries (improved for .bbl files with ACM-Reference-Format)
+        # Handle both simple \bibitem{key} and complex \bibitem[label]{key} formats
+        # Also handle line continuation with % and various spacing patterns
+        bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\s*%?\s*\n?\s*\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\})'
         
         matches = re.finditer(bibitem_pattern, text, re.DOTALL | re.IGNORECASE)
         
@@ -1690,11 +1709,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             key = match.group(2)
             content = match.group(3).strip()
             
-            # Clean LaTeX commands from content but preserve structure
-            cleaned_content = strip_latex_commands(content)
-            
             ref = {
-                'raw_text': cleaned_content,
+                'raw_text': '',
                 'title': '',
                 'authors': [],
                 'year': None,
@@ -1705,105 +1721,169 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'bibitem_label': label
             }
             
-            # Parse .bbl file structure which typically follows:
-            # Authors. \newblock Title. \newblock Journal/Venue, Year.
+            # ACM .bbl format parsing
+            # Extract year first (look for \bibinfo{year}{YYYY})
+            year_match = re.search(r'\\bibinfo\{year\}\{(\d{4})\}', content)
+            if year_match:
+                ref['year'] = int(year_match.group(1))
             
-            # Split by \newblock to get different parts
-            parts = re.split(r'\\newblock', content, flags=re.IGNORECASE)
+            # Extract authors from \bibfield{author} section
+            # Use a more robust approach to handle nested braces
+            author_start = content.find('\\bibfield{author}{')
+            if author_start != -1:
+                # Start after the opening brace of the author field
+                start_pos = author_start + len('\\bibfield{author}{')
+                brace_count = 1
+                pos = start_pos
+                
+                # Find the matching closing brace
+                while pos < len(content) and brace_count > 0:
+                    if content[pos] == '{':
+                        brace_count += 1
+                    elif content[pos] == '}':
+                        brace_count -= 1
+                    pos += 1
+                
+                if brace_count == 0:
+                    author_content = content[start_pos:pos-1]
+                    # Extract individual authors from \bibinfo{person}{Name} tags
+                    person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+                    if person_matches:
+                        # Clean and format author names
+                        authors = []
+                        for person in person_matches:
+                            # Strip LaTeX commands and clean up
+                            clean_name = strip_latex_commands(person).strip()
+                            if clean_name and clean_name not in ['and', '{and}']:
+                                authors.append(clean_name)
+                        ref['authors'] = authors
             
-            if len(parts) >= 3:
-                # Standard .bbl structure with \newblock separators
-                author_part = parts[0].strip()
-                title_part = parts[1].strip() 
-                venue_part = parts[2].strip()
-                
-                # Clean LaTeX commands from each part
-                author_part_clean = strip_latex_commands(author_part)
-                title_part_clean = strip_latex_commands(title_part)
-                venue_part_clean = strip_latex_commands(venue_part)
-                
-                # Set raw text as combination of all parts
-                ref['raw_text'] = f"{author_part_clean} {title_part_clean} {venue_part_clean}".strip()
-                
-                # Extract authors (remove trailing period)
-                if author_part_clean.endswith('.'):
-                    author_part_clean = author_part_clean[:-1]
-                
-                # Parse authors - handle "First Last, First Last, and First Last" format
-                authors = []
-                if author_part_clean:
-                    # Split by ", and" first (common in academic citations), then by commas
-                    if ', and ' in author_part_clean:
-                        author_groups = author_part_clean.split(', and ')
-                    else:
-                        # Fallback to just "and" 
-                        author_groups = re.split(r'\s+and\s+', author_part_clean, flags=re.IGNORECASE)
+            # Extract title from \showarticletitle{} or \bibinfo{title}{}
+            # Use the same brace-matching approach for titles to handle nested braces
+            title_patterns = ['\\showarticletitle{', '\\bibinfo{title}{']
+            for pattern in title_patterns:
+                title_start = content.find(pattern)
+                if title_start != -1:
+                    start_pos = title_start + len(pattern)
+                    brace_count = 1
+                    pos = start_pos
                     
-                    for group in author_groups:
-                        # Split by comma for multiple authors
-                        names = [name.strip() for name in group.split(',') if name.strip()]
-                        # Filter out empty names and clean up
-                        names = [name for name in names if name and len(name) > 1]
-                        authors.extend(names)
-                
-                ref['authors'] = authors[:10]  # Limit to reasonable number
-                
-                # Extract title (remove trailing period if present)
-                title = title_part_clean
-                if title.endswith('.'):
-                    title = title[:-1]
-                ref['title'] = title.strip()
-                
-                # Extract year from venue part
-                year_match = re.search(r'\b(19|20)\d{2}\b', venue_part_clean)
-                if year_match:
-                    ref['year'] = int(year_match.group())
-                
-                # Extract journal/venue (everything before year or before last comma)
-                journal = venue_part_clean
-                if ref['year']:
-                    journal = re.split(r'\b' + str(ref['year']) + r'\b', venue_part_clean)[0]
-                # Clean up punctuation and spacing
-                journal = re.sub(r'[,.\s]+$', '', journal).strip()
-                # Remove common LaTeX artifacts 
-                journal = re.sub(r'\\penalty0\s*\([^)]*\):\\penalty0', '', journal)
-                ref['journal'] = journal
-                
-            else:
-                # Fallback for non-standard format or when there are fewer parts
-                # Clean LaTeX commands from content
-                cleaned_content = strip_latex_commands(content)
-                ref['raw_text'] = cleaned_content
-                
-                # Extract year first
-                year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_content)
-                if year_match:
-                    ref['year'] = int(year_match.group())
-                
-                # Extract title (look for patterns like "emph{title}" or content after first period)
-                title_match = re.search(r'\\emph\{([^}]+)\}', content)
-                if title_match:
-                    ref['title'] = title_match.group(1).strip()
-                else:
-                    # Look for content between periods that might be title
-                    sentences = cleaned_content.split('. ')
-                    if len(sentences) >= 2:
-                        # Usually title is second sentence in bibliographic entries
-                        title_candidate = sentences[1].strip()
-                        if title_candidate and len(title_candidate) > 10:  # Reasonable title length
-                            ref['title'] = title_candidate
-                
-                # Extract authors (names at beginning before first period)
-                first_sentence = cleaned_content.split('.')[0] if '.' in cleaned_content else cleaned_content
-                # Look for pattern of capitalized names
-                author_matches = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+\b', first_sentence)
-                if author_matches:
-                    ref['authors'] = author_matches[:10]
+                    # Find the matching closing brace
+                    while pos < len(content) and brace_count > 0:
+                        if content[pos] == '{':
+                            brace_count += 1
+                        elif content[pos] == '}':
+                            brace_count -= 1
+                        pos += 1
+                    
+                    if brace_count == 0:
+                        title_content = content[start_pos:pos-1]
+                        # Clean LaTeX commands from title
+                        clean_title = strip_latex_commands(title_content).strip()
+                        if clean_title:
+                            ref['title'] = clean_title
+                            break
             
-            # Extract URLs if present
+            # Extract journal/venue from \bibinfo{booktitle} or \bibinfo{journal}
+            # Use brace-matching for venue extraction too
+            venue_patterns = ['\\bibinfo{booktitle}{', '\\bibinfo{journal}{']
+            for pattern in venue_patterns:
+                venue_start = content.find(pattern)
+                if venue_start != -1:
+                    start_pos = venue_start + len(pattern)
+                    brace_count = 1
+                    pos = start_pos
+                    
+                    # Find the matching closing brace
+                    while pos < len(content) and brace_count > 0:
+                        if content[pos] == '{':
+                            brace_count += 1
+                        elif content[pos] == '}':
+                            brace_count -= 1
+                        pos += 1
+                    
+                    if brace_count == 0:
+                        venue_content = content[start_pos:pos-1]
+                        clean_venue = strip_latex_commands(venue_content).strip()
+                        if clean_venue:
+                            ref['journal'] = clean_venue
+                            break
+            
+            # Extract URL from \url{} or \bibinfo{howpublished}{\url{}}
             url_match = re.search(r'\\url\{([^}]+)\}', content)
             if url_match:
                 ref['url'] = url_match.group(1)
+            
+            # Extract DOI from \href{https://doi.org/...}
+            doi_match = re.search(r'\\href\{https?://doi\.org/([^}]+)\}', content)
+            if doi_match:
+                ref['doi'] = doi_match.group(1)
+            
+            # Extract arXiv ID from \showeprint[arxiv]{...}
+            arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
+            arxiv_id = None
+            if arxiv_match:
+                arxiv_id = arxiv_match.group(1)
+                ref['url'] = f"https://arxiv.org/abs/{arxiv_id}"
+            
+            # Build clean raw text for display
+            clean_content_parts = []
+            
+            # Add title
+            if ref['title']:
+                clean_content_parts.append(ref['title'])
+            
+            # Add venue info  
+            if ref['journal']:
+                venue_text = f"In {ref['journal']}"
+                clean_content_parts.append(venue_text)
+            
+            # Add arXiv info if available
+            if arxiv_id:
+                arxiv_text = f"[arxiv]{arxiv_id}"
+                # Extract subject class like [cs.CR] from the content
+                subject_match = re.search(r'~\[([^]]+)\]', content)
+                if subject_match:
+                    arxiv_text += f" [{subject_match.group(1)}]"
+                clean_content_parts.append(arxiv_text)
+            
+            # Add authors and year on separate line
+            author_line_parts = []
+            if ref['authors']:
+                author_line_parts.append(', '.join(ref['authors']))
+            if ref['year']:
+                author_line_parts.append(str(ref['year']))
+            
+            if author_line_parts:
+                clean_content_parts.append(' '.join(author_line_parts))
+            
+            # Combine all parts
+            ref['raw_text'] = '\n       '.join(clean_content_parts) if clean_content_parts else strip_latex_commands(content)
+            
+            # Fallback for entries that don't match ACM format
+            if not ref['title'] and not ref['authors']:
+                # Try simpler parsing for non-ACM .bbl files
+                cleaned_content = strip_latex_commands(content)
+                ref['raw_text'] = cleaned_content
+                
+                # Extract year from anywhere in content
+                if not ref['year']:
+                    year_match = re.search(r'\b(19|20)\d{2}\b', cleaned_content)
+                    if year_match:
+                        ref['year'] = int(year_match.group())
+                
+                # Look for title patterns
+                if not ref['title']:
+                    title_match = re.search(r'\\emph\{([^}]+)\}', content)
+                    if title_match:
+                        ref['title'] = strip_latex_commands(title_match.group(1)).strip()
+                
+                # Look for author patterns at the beginning
+                if not ref['authors']:
+                    first_sentence = cleaned_content.split('.')[0] if '.' in cleaned_content else cleaned_content
+                    author_matches = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z]\.?)?\s+[A-Z][a-z]+\b', first_sentence)
+                    if author_matches:
+                        ref['authors'] = author_matches[:10]
             
             references.append(ref)
     
