@@ -4226,8 +4226,9 @@ class ArxivReferenceChecker:
             
             parsed_authors = []
             for author in raw_authors:
-                # Clean up the author entry
-                author_cleaned = author.rstrip('.')
+                # Clean up the author entry and strip LaTeX commands
+                from utils.text_utils import strip_latex_commands
+                author_cleaned = strip_latex_commands(author.rstrip('.'))
                 
                 # Skip special indicators like "others", "et al", etc.
                 if author_cleaned.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
@@ -4251,13 +4252,16 @@ class ArxivReferenceChecker:
             authors = [a.rstrip('.').strip() for a in authors if a.strip()]
             
             # Handle "others" and similar indicators in fallback logic too
+            from utils.text_utils import strip_latex_commands
             processed_authors = []
             for author in authors:
-                if author.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
+                # Apply LaTeX cleaning to each author
+                author_clean = strip_latex_commands(author)
+                if author_clean.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
                     if processed_authors:  # Only add if we have at least one real author
                         processed_authors.append("et al")
                     break
-                processed_authors.append(author)
+                processed_authors.append(author_clean)
             
             return processed_authors
 

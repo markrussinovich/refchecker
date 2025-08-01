@@ -1565,6 +1565,9 @@ def strip_latex_commands(text):
     # Remove common text formatting commands
     text = re.sub(r'\\(textbf|textit|emph|underline|textsc|texttt)\{([^{}]*)\}', r'\2', text)
     
+    # Handle {\scshape ...} and similar font switching commands
+    text = re.sub(r'\{\\(scshape|bfseries|itshape|ttfamily|sffamily|rmfamily)\s+([^{}]*)\}', r'\2', text)
+    
     # Remove font size commands
     text = re.sub(r'\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)\b', '', text)
     
