@@ -1,0 +1,11 @@
+# Example markdownlint-cli2 config for common documentation rules
+# Adjust or extend rules as needed for your repo
+
+extends: markdownlint:recommended
+
+rules:
+  MD013: false  # Disable line length rule (optional, enable if you want)
+  MD033: false  # Allow inline HTML (optional)
+  MD041: true   # Require first line to be a heading
+
+# You can add more rules or overrides as needed
