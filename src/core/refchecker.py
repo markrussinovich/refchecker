@@ -3541,6 +3541,9 @@ class ArxivReferenceChecker:
                 return None
             # Strip URL fragments (everything after #) from DOI
             doi = doi.split('#')[0]
+            # Clean DOI: remove asterisk contamination (e.g., "10.1088/123*http://..." -> "10.1088/123")
+            if '*' in doi:
+                doi = doi.split('*')[0]
             return doi
 
         arxiv_refs = []
@@ -4375,6 +4378,11 @@ class ArxivReferenceChecker:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
                 doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
+                
+                # Clean DOI: remove asterisk contamination (e.g., "10.1088/123*http://..." -> "10.1088/123")
+                if '*' in doi:
+                    doi = doi.split('*')[0]
+                
                 from utils.doi_utils import construct_doi_url
                 url = construct_doi_url(doi)
                 break
@@ -4613,6 +4621,11 @@ class ArxivReferenceChecker:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
                 doi = doi_match.group(1).split('#')[0]  # Strip URL fragments
+                
+                # Clean DOI: remove asterisk contamination (e.g., "10.1088/123*http://..." -> "10.1088/123")
+                if '*' in doi:
+                    doi = doi.split('*')[0]
+                
                 from utils.doi_utils import construct_doi_url
                 url = construct_doi_url(doi)
                 break
@@ -4697,8 +4710,10 @@ class ArxivReferenceChecker:
                 from utils.text_utils import detect_latex_bibliography_format
                 latex_format = detect_latex_bibliography_format(tex_content)
                 if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
-                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source for {arxiv_id}")
-                    return tex_content
+                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source for {arxiv_id}, but skipping due to formatting issues")
+                    logger.info(f"Embedded bibliographies often have inconsistent formatting - falling back to alternative extraction methods")
+                    # Skip embedded bibliography and return None to trigger fallback methods
+                    return None
         
         # Could add other BibTeX sources here (e.g., direct BibTeX URLs, etc.)
         
@@ -5308,7 +5323,17 @@ class ArxivReferenceChecker:
             print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
             
             year_str = self._format_year_string(reference.get('year'))
-            print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
+            
+            # Apply LaTeX cleaning to authors for display
+            authors = reference.get('authors', [])
+            if authors:
+                from utils.text_utils import strip_latex_commands
+                cleaned_authors = [strip_latex_commands(author) for author in authors]
+                authors_display = ', '.join(cleaned_authors)
+            else:
+                authors_display = 'Unknown authors'
+                
+            print(f"          Cited as: {authors_display} ({year_str})")
             
             # Only show URL if it exists and is different from reference_url
             ref_url = reference.get('url', '').strip()

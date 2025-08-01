@@ -17,8 +17,52 @@ logger = logging.getLogger(__name__)
 class LLMProviderMixin:
     """Common functionality for all LLM providers"""
     
+    def _clean_bibtex_for_llm(self, bibliography_text: str) -> str:
+        """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
+        if not bibliography_text:
+            return bibliography_text
+            
+        import re
+        
+        # First, protect LaTeX commands from being stripped
+        protected_commands = []
+        command_pattern = r'\{\\[a-zA-Z]+(?:\s+[^{}]*?)?\}'
+        
+        def protect_command(match):
+            protected_commands.append(match.group(0))
+            return f"__PROTECTED_LATEX_{len(protected_commands)-1}__"
+        
+        text = re.sub(command_pattern, protect_command, bibliography_text)
+        
+        # Clean up LaTeX math expressions in titles (but preserve the math content)
+        # Convert $expression$ to expression and ${expression}$ to expression
+        text = re.sub(r'\$\{([^{}]+)\}\$', r'\1', text)  # ${expr}$ -> expr
+        text = re.sub(r'\$([^$]+)\$', r'\1', text)        # $expr$ -> expr
+        
+        # Remove curly braces around titles and other fields
+        # Match { content } where content doesn't contain unmatched braces
+        text = re.sub(r'\{([^{}]+)\}', r'\1', text)
+        
+        # Clean up DOI and URL field contamination
+        # Fix cases where DOI field contains both DOI and URL separated by *
+        # Pattern: DOI*URL -> separate them properly
+        text = re.sub(r'(doi\s*=\s*\{?)([^}*,]+)\*http([^},\s]*)\}?', r'\1\2},\n  url = {http\3}', text)
+        text = re.sub(r'(\d+\.\d+/[^*\s,]+)\*http', r'\1,\n  url = {http', text)
+        
+        # Clean up asterisk contamination in DOI values within the text
+        text = re.sub(r'(10\.[0-9]+/[A-Za-z0-9\-.:()/_]+)\*http', r'\1', text)
+        
+        # Restore protected LaTeX commands
+        for i, command in enumerate(protected_commands):
+            text = text.replace(f"__PROTECTED_LATEX_{i}__", command)
+        
+        return text
+
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
         """Create prompt for reference extraction"""
+        # Clean BibTeX formatting before sending to LLM
+        cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
+        
         return f"""
 Please extract individual references from the following bibliography text. Each reference should be a complete bibliographic entry.
 
@@ -55,7 +99,7 @@ Instructions:
 13. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
 
 Bibliography text:
-{bibliography_text}
+{cleaned_bibliography}
 """
     
     def _parse_llm_response(self, content: str) -> List[str]:

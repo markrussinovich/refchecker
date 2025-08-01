@@ -1345,6 +1345,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         author = author.replace('\n', ' ')
         author_clean = author.strip()
         
+        # Apply LaTeX cleaning to remove commands like \L, \", etc.
+        author_clean = strip_latex_commands(author_clean)
+        
         # Check if this is a standalone "et al" entry
         if is_et_al_variant(author_clean):
             has_et_al = True
@@ -1524,7 +1527,7 @@ def strip_latex_commands(text):
         r"\{\\\^([aeiouAEIOU])\}": r'\1',  # {\^a} -> â
         r"\\\^([aeiouAEIOU])": r'\1',      # \^a -> â
         # Umlaut/diaeresis - handle both \" and \\"
-        r'\{\\"([aeiouAEIOU])\}': r'\1',   # {\"a} -> ä
+        r'\{\\"([aeiouAEIOU])\}': r'\1',   # {\"a} -> ä (handled by replace_umlaut function)
         r'\{\\\\"([aeiouAEIOU])\}': r'\1', # {\\"a} -> ä
         r'\\"([aeiouAEIOU])': r'\1',       # \"a -> ä
         r'\\\\"([aeiouAEIOU])': r'\1',     # \\"a -> ä
@@ -1543,14 +1546,38 @@ def strip_latex_commands(text):
         # Slash
         r"\{\\\/([oO])\}": r'\1',          # {\/o} -> ø
         r"\\\/([oO])": r'\1',              # \/o -> ø
+        # Polish L with stroke - need to handle as replacements not patterns
+        r'\\L(?=[a-z])': 'L',              # \L followed by lowercase -> L
+        r'\{\\L\}': 'L',                   # {\L} -> L
+        r'\\l(?=[a-z])': 'l',              # \l followed by lowercase -> l  
+        r'\{\\l\}': 'l',                   # {\l} -> l
         # Special characters like {\`\i} -> ì
         r"\{\\`\\\\i\}": 'ì',             # {\`\i} -> ì
         r"\\`\\\\i": 'ì',                 # \`\i -> ì
     }
     
+    # Helper function to replace umlaut characters with Unicode equivalents
+    def replace_umlaut(match):
+        char_map = {
+            'a': 'ä', 'e': 'ë', 'i': 'ï', 'o': 'ö', 'u': 'ü',
+            'A': 'Ä', 'E': 'Ë', 'I': 'Ï', 'O': 'Ö', 'U': 'Ü'
+        }
+        return char_map.get(match.group(1), match.group(1))
+    
     # Apply accent replacements
     for pattern, replacement in latex_accents.items():
+        if 'umlaut' in latex_accents.get(pattern, '') or 'diaeresis' in str(replacement):
+            # Skip umlaut patterns, handle them separately
+            continue
         text = re.sub(pattern, replacement, text)
+    
+    # Handle umlauts with proper Unicode conversion
+    text = re.sub(r'\{\\"([aeiouAEIOU])\}', replace_umlaut, text)     # {\"u} -> ü
+    text = re.sub(r'\{\\\\"([aeiouAEIOU])\}', replace_umlaut, text)   # {\\"u} -> ü
+    text = re.sub(r'\\"([aeiouAEIOU])', replace_umlaut, text)         # \"u -> ü
+    text = re.sub(r'\\\\"([aeiouAEIOU])', replace_umlaut, text)       # \\"u -> ü
+    text = re.sub(r'\{"([aeiouAEIOU])\}', replace_umlaut, text)       # {"u} -> ü
+    text = re.sub(r'"([aeiouAEIOU])', replace_umlaut, text)           # "u -> ü
     
     # Handle specific common patterns
     # Non-breaking space ~ should become regular space
@@ -1619,7 +1646,7 @@ def strip_latex_commands(text):
 
 
 def extract_cited_keys_from_latex(tex_content):
-    """
+    r"""
     Extract citation keys from LaTeX content by finding \cite{} commands.
     
     Args:
@@ -2845,9 +2872,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         prefixes_to_remove = [
             r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
             r'^\d{4}\s+',                     # "2024 "
-            r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',  # "Proceedings of the 41st"
-            r'^proc\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',        # "Proc. of the 41st"
-            r'^procs\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?',       # "Procs. of the"
+            r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',  # "Proceedings of the IEEE"
+            r'^proc\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE"
+            r'^procs\.\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE"
             r'^in\s+',
             r'^advances\s+in\s+',             # "Advances in Neural Information Processing Systems"
             r'^adv\.\s+',                     # "Adv. Neural Information Processing Systems"
@@ -2877,6 +2904,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         
         # Remove common prepositions that don't affect venue identity
         # Note: Keep "in" as it's important for some acronyms (e.g., "Logic IN Computer Science" -> LICS)
+        venue_lower = re.sub(r'^conference\s+on\s+', '', venue_lower)  # Remove "conference on" prefix
         venue_lower = re.sub(r'\s+on\s+', ' ', venue_lower)  # Remove "on" preposition
         venue_lower = re.sub(r'\s+for\s+', ' ', venue_lower)  # Remove "for" preposition
         
