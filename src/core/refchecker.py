@@ -48,7 +48,8 @@ from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
-                       strip_latex_commands, format_corrected_reference, is_name_match,
+                       detect_standard_acm_natbib_format, strip_latex_commands, 
+                       format_corrected_reference, is_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
@@ -1723,7 +1724,14 @@ class ArxivReferenceChecker:
             if re.match(author_list_pattern, cleaned_ref.replace(' and ', ', and ')):
                 # Split on ', ' and ' and ' for the last author
                 authors = re.split(r',\s+|\s+and\s+', cleaned_ref)
-                authors = [a.strip() for a in authors if a.strip()]
+                cleaned_authors = []
+                for a in authors:
+                    a = a.strip()
+                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
+                    a = re.sub(r'^and\s+', '', a)
+                    if a:
+                        cleaned_authors.append(a)
+                authors = cleaned_authors
                 return authors, ""
         
         return None
@@ -3377,9 +3385,16 @@ class ArxivReferenceChecker:
         bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
         logger.debug(f"Bibliography sample: {bib_sample}")
 
-        # Try LLM-based extraction first if available
+        # Check if this is a standard ACM/natbib format first
+        if detect_standard_acm_natbib_format(bibliography_text):
+            logger.info("Detected standard ACM/natbib format, using regex-based parsing")
+            self.used_regex_extraction = True
+            return self._parse_standard_acm_natbib_references(bibliography_text)
+        
+        # For non-standard formats, try LLM-based extraction if available
         if self.llm_extractor:
             try:
+                logger.info("Non-standard bibliography format detected, using LLM-based extraction")
                 references = self.llm_extractor.extract_references(bibliography_text)
                 if references:
                     logger.debug(f"Parsed {len(references)} references")
@@ -3395,9 +3410,192 @@ class ArxivReferenceChecker:
                 return []
         
         # Fallback to regex-based parsing only if LLM was not specified
+        logger.info("No LLM available, falling back to regex-based parsing")
         self.used_regex_extraction = True
         return self._parse_references_regex(bibliography_text)
     
+    def _parse_standard_acm_natbib_references(self, bibliography_text):
+        """
+        Parse references using regex for standard ACM/natbib format (both ACM Reference Format and simple natbib)
+        """
+        references = []
+        
+        # Detect which format we're dealing with
+        is_acm_format = re.search(r'\\bibfield\{author\}\{.*?\\bibinfo\{person\}', bibliography_text)
+        
+        # Pattern to extract \bibitem entries with the complete content
+        bibitem_pattern = r'\\bibitem\[([^\]]*)\]\s*%?\s*\n?\s*\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\}|$)'
+        
+        matches = re.finditer(bibitem_pattern, bibliography_text, re.DOTALL | re.IGNORECASE)
+        
+        for match in matches:
+            label = match.group(1)
+            key = match.group(2)
+            content = match.group(3).strip()
+            
+            ref = {
+                'raw_text': f"\\bibitem[{label}]{{{key}}}\n{content}",
+                'title': '',
+                'authors': [],
+                'year': None,
+                'journal': '',
+                'venue': '',
+                'url': '',
+                'doi': '',
+                'arxiv_id': '',
+                'bibitem_key': key,
+                'bibitem_label': label
+            }
+            
+            if is_acm_format:
+                # Parse ACM Reference Format
+                self._parse_acm_reference_format(ref, content)
+            else:
+                # Parse simple natbib format
+                self._parse_simple_natbib_format(ref, content, label)
+            
+            # Only add if we have essential information
+            if ref['title'] or ref['authors']:
+                references.append(ref)
+        
+        format_name = "ACM Reference Format" if is_acm_format else "simple natbib format"
+        logger.debug(f"Parsed {len(references)} references using {format_name}")
+        return references
+    
+    def _parse_acm_reference_format(self, ref, content):
+        """Parse ACM Reference Format with \bibfield and \bibinfo commands"""
+        # Extract year from \bibinfo{year}{YYYY}
+        year_match = re.search(r'\\bibinfo\{year\}\{(\d{4})\}', content)
+        if year_match:
+            ref['year'] = int(year_match.group(1))
+        
+        # Extract authors from \bibfield{author}{\bibinfo{person}{Name1}, \bibinfo{person}{Name2}, ...}
+        author_field_match = re.search(r'\\bibfield\{author\}\{(.*?)\}(?:\s*\\bibinfo\{year\}|\s*\\newblock|$)', content, re.DOTALL)
+        if author_field_match:
+            author_content = author_field_match.group(1)
+            # Find all \bibinfo{person}{Name} entries
+            person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+            if person_matches:
+                authors = []
+                for person in person_matches:
+                    # Clean the author name and remove any remaining LaTeX commands
+                    clean_name = strip_latex_commands(person).strip()
+                    # Remove leading "and" that might be left over
+                    clean_name = re.sub(r'^and\s+', '', clean_name)
+                    if clean_name and clean_name not in ['and', '{and}']:
+                        authors.append(clean_name)
+                ref['authors'] = authors
+        
+        # Extract title from \bibinfo{title}{Title}
+        title_match = re.search(r'\\bibinfo\{title\}\{([^}]+)\}', content)
+        if title_match:
+            title = strip_latex_commands(title_match.group(1)).strip()
+            ref['title'] = title
+        
+        # Extract venue/journal from various fields
+        venue_patterns = [
+            r'\\bibinfo\{booktitle\}\{([^}]+)\}',
+            r'\\bibinfo\{journal\}\{([^}]+)\}',
+            r'\\bibinfo\{series\}\{([^}]+)\}',
+            r'\\bibinfo\{note\}\{([^}]+)\}'
+        ]
+        
+        for pattern in venue_patterns:
+            venue_match = re.search(pattern, content)
+            if venue_match:
+                venue = strip_latex_commands(venue_match.group(1)).strip()
+                if venue:
+                    ref['venue'] = venue
+                    ref['journal'] = venue  # For compatibility
+                    break
+        
+        # Extract DOI
+        doi_match = re.search(r'\\bibinfo\{doi\}\{([^}]+)\}', content)
+        if doi_match:
+            ref['doi'] = doi_match.group(1).strip()
+        
+        # Extract ArXiv ID from \showeprint[arxiv]{ID}
+        arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
+        if arxiv_match:
+            ref['arxiv_id'] = arxiv_match.group(1).strip()
+        
+        # Extract URL
+        url_match = re.search(r'\\bibinfo\{url\}\{([^}]+)\}', content)
+        if url_match:
+            ref['url'] = url_match.group(1).strip()
+    
+    def _parse_simple_natbib_format(self, ref, content, label):
+        """Parse simple natbib format with plain text content"""
+        # Extract year from label like "Author(2023)" or from content
+        year_match = re.search(r'\((\d{4})\)', label)
+        if year_match:
+            ref['year'] = int(year_match.group(1))
+        else:
+            # Try to find year in content
+            year_match = re.search(r'\b(19|20)\d{2}\b', content)
+            if year_match:
+                ref['year'] = int(year_match.group())
+        
+        # Split content by \newblock to get different parts
+        parts = re.split(r'\\newblock\s*', content)
+        
+        if len(parts) >= 1:
+            # First part (before first \newblock) is usually authors
+            author_part = parts[0].strip()
+            if author_part:
+                # Clean author part and extract authors
+                author_part_clean = strip_latex_commands(author_part).strip()
+                if author_part_clean and not author_part_clean.startswith('\\'):
+                    # Parse author names - handle comma-separated list and "and"
+                    if ', and ' in author_part_clean:
+                        author_names = re.split(r', and |, ', author_part_clean)
+                    else:
+                        author_names = [name.strip() for name in author_part_clean.split(',')]
+                    
+                    # Clean up author names
+                    authors = []
+                    for name in author_names:
+                        name = name.strip()
+                        # Remove leading "and" from author names
+                        name = re.sub(r'^and\s+', '', name)
+                        if name and len(name) > 2 and name not in ['et~al', 'et al', 'et~al.']:
+                            # Remove trailing dots
+                            name = name.rstrip('.')
+                            authors.append(name)
+                    if authors:
+                        ref['authors'] = authors
+        
+        if len(parts) >= 2:
+            # Second part is usually title
+            title_part = parts[1].strip()
+            if title_part:
+                title_clean = strip_latex_commands(title_part).strip()
+                # Remove trailing periods and clean up
+                title_clean = title_clean.rstrip('.,')
+                if title_clean:
+                    ref['title'] = title_clean
+        
+        if len(parts) >= 3:
+            # Third part is usually venue/journal
+            venue_part = parts[2].strip()
+            if venue_part:
+                venue_clean = strip_latex_commands(venue_part).strip()
+                # Remove trailing periods and clean up
+                venue_clean = venue_clean.rstrip('.,')
+                if venue_clean:
+                    ref['venue'] = venue_clean
+                    ref['journal'] = venue_clean  # For compatibility
+        
+        # Extract DOI from \doi{...} commands
+        doi_match = re.search(r'\\doi\{([^}]+)\}', content)
+        if doi_match:
+            ref['doi'] = doi_match.group(1).strip()
+        
+        # Extract URL from \url{...} commands
+        url_match = re.search(r'\\url\{([^}]+)\}', content)
+        if url_match:
+            ref['url'] = url_match.group(1).strip()
+
     def _parse_references_regex(self, bibliography_text):
         """
         Parse references using regex-based approach (original implementation)
@@ -3966,7 +4164,12 @@ class ArxivReferenceChecker:
                 logger.debug(f"Author parsing failed for '{author_string}': {e}")
                 # Fallback: split by 'and' and clean up
                 author_parts = author_string.split(' and ')
-                authors = [part.strip() for part in author_parts if part.strip()]
+                authors = []
+                for part in author_parts:
+                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
+                    part = re.sub(r'^and\s+', '', part.strip())
+                    if part:
+                        authors.append(part)
         
         if not authors:
             authors = ["Unknown Author"]
@@ -4748,8 +4951,14 @@ class ArxivReferenceChecker:
                 except Exception as e:
                     logger.warning(f"Could not save debug BibTeX file for {paper_id}: {e}")
             
-            # Parse the BibTeX using the standard flow (LLM or regex based on config)
-            references = self.parse_references(bibtex_content)
+            # Check if this is LaTeX thebibliography format (e.g., from .bbl files)
+            if '\\begin{thebibliography}' in bibtex_content and '\\bibitem' in bibtex_content:
+                logger.info(f"Detected LaTeX thebibliography format, using extract_latex_references")
+                # Use None for file_path since this is content from .bbl files
+                references = extract_latex_references(bibtex_content, None)
+            else:
+                # Parse BibTeX using the standard flow (LLM or regex based on config)
+                references = self.parse_references(bibtex_content)
             
             # Save extracted references for debugging
             if debug_mode:

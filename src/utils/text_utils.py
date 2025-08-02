@@ -1427,6 +1427,77 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     return True, "Authors match"
 
 
+def detect_standard_acm_natbib_format(text):
+    """
+    Detect if the bibliography text uses the standard ACM/natbib format with specific patterns.
+    
+    This checks for two types of structured formats:
+    1. ACM Reference Format:
+       \\bibitem[Label]{key}
+       \\bibfield{author}{\\bibinfo{person}{Name1}, \\bibinfo{person}{Name2}}
+       \\bibinfo{year}{YYYY}
+       \\newblock \\bibinfo{title}{Title}
+    
+    2. Simple natbib format:
+       \\bibitem[Label]{key}
+       Author names...
+       \\newblock Title...
+       \\newblock Journal/Venue...
+    
+    Args:
+        text: Bibliography text to analyze
+        
+    Returns:
+        bool: True if it matches either standard format
+    """
+    if not text:
+        return False
+    
+    # Check that we have multiple bibitem entries (at least 2)
+    bibitem_count = len(re.findall(r'\\bibitem', text))
+    if bibitem_count < 2:
+        return False
+    
+    # Check for ACM Reference Format indicators
+    acm_indicators = [
+        r'\\bibitem\[.*?\]\s*%?\s*\{.*?\}',  # \bibitem[label]{key}
+        r'\\bibfield\{author\}\{.*?\\bibinfo\{person\}',  # \bibfield{author}{\bibinfo{person}{...}}
+        r'\\bibinfo\{year\}\{\d{4}\}',  # \bibinfo{year}{YYYY}
+        r'\\newblock\s+\\bibinfo\{title\}',  # \newblock \bibinfo{title}{...}
+    ]
+    
+    acm_indicator_count = 0
+    for pattern in acm_indicators:
+        if re.search(pattern, text):
+            acm_indicator_count += 1
+    
+    # If we have at least 3 out of 4 ACM indicators, it's ACM format
+    if acm_indicator_count >= 3:
+        logger.debug(f"Detected ACM Reference Format: {acm_indicator_count}/4 indicators, {bibitem_count} bibitems")
+        return True
+    
+    # Check for simple natbib format indicators
+    natbib_indicators = [
+        r'\\bibitem\[.*?\]\s*%?\s*\{.*?\}',  # \bibitem[label]{key}
+        r'\\newblock\s+.*?[.!?]',  # \newblock with content
+        r'\\begin\{thebibliography\}',  # proper bibliography environment
+        r'\\emph\{.*?\}',  # emphasized text (journal/venue names)
+    ]
+    
+    natbib_indicator_count = 0
+    for pattern in natbib_indicators:
+        if re.search(pattern, text):
+            natbib_indicator_count += 1
+    
+    # If we have at least 3 out of 4 natbib indicators, it's simple natbib format
+    if natbib_indicator_count >= 3:
+        logger.debug(f"Detected simple natbib format: {natbib_indicator_count}/4 indicators, {bibitem_count} bibitems")
+        return True
+    
+    logger.debug(f"No standard format detected: ACM {acm_indicator_count}/4, natbib {natbib_indicator_count}/4, {bibitem_count} bibitems")
+    return False
+
+
 def detect_latex_bibliography_format(text):
     """
     Detect if the bibliography is in LaTeX format
@@ -1883,7 +1954,16 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 author_text = fields['author']
                 # Split by 'and' and clean up
                 authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
-                ref['authors'] = authors
+                
+                # Clean up any author names that still have "and" prefix due to edge cases
+                cleaned_authors = []
+                for author in authors:
+                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
+                    author = re.sub(r'^and\s+', '', author.strip())
+                    if author:  # Only add non-empty authors
+                        cleaned_authors.append(author)
+                
+                ref['authors'] = cleaned_authors
             
             # Extract year
             if 'year' in fields:
@@ -1999,6 +2079,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                         authors = []
                         for name in author_names:
                             name = name.strip()
+                            # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
+                            name = re.sub(r'^and\s+', '', name)
                             if name and len(name) > 2 and not name in ['et~al', 'et al', 'et~al.']:
                                 # Remove trailing dots
                                 name = name.rstrip('.')
