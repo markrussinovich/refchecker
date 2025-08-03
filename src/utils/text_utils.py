@@ -569,8 +569,17 @@ def is_name_match(name1: str, name2: str) -> bool:
     name1_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name1)  # "a.ashtekar" -> "a. ashtekar"
     name2_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name2)  # Already "a. ashtekar"
     
+    # Also handle the case where one name has periods and the other doesn't
+    # Remove all periods for comparison (e.g., "Pavlo O. Dral" -> "Pavlo O Dral")
+    name1_no_periods = re.sub(r'\.', '', name1_normalized)
+    name2_no_periods = re.sub(r'\.', '', name2_normalized)
+    
     # If they're identical after normalization, they match
     if name1_normalized == name2_normalized:
+        return True
+    
+    # If they're identical after removing periods, they match
+    if name1_no_periods == name2_no_periods:
         return True
     
     # Only consider substring match if they are very similar (e.g., identical with/without punctuation)
