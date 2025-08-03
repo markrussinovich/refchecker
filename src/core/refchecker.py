@@ -4450,12 +4450,32 @@ class ArxivReferenceChecker:
             
             return parsed_authors
         else:
-            # Fallback to original logic for backward compatibility
-            from utils.text_utils import parse_authors_with_initials
+            # Handle single author entries (no asterisk separators)
+            # This could be a single BibTeX "Last, First" format author
             
             cleaned_text = author_text.rstrip('.')
-            authors = parse_authors_with_initials(cleaned_text)
-            authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+            
+            # Check if this is a single BibTeX format author name
+            if ',' in cleaned_text and cleaned_text.count(',') == 1:
+                # Could be "Dolan, Brian P." (single author) or "Smith, John" 
+                parts = cleaned_text.split(',', 1)
+                surname_part = parts[0].strip()
+                given_part = parts[1].strip() 
+                
+                # Check if this looks like BibTeX format
+                if self._is_bibtex_surname_given_format(surname_part, given_part):
+                    # Single author in BibTeX format - convert to normal format
+                    authors = [f"{given_part} {surname_part}"]
+                else:
+                    # Multiple authors separated by commas - use old logic
+                    from utils.text_utils import parse_authors_with_initials
+                    authors = parse_authors_with_initials(cleaned_text)
+                    authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+            else:
+                # No comma or multiple commas - use old logic  
+                from utils.text_utils import parse_authors_with_initials
+                authors = parse_authors_with_initials(cleaned_text)
+                authors = [a.rstrip('.').strip() for a in authors if a.strip()]
             
             # Handle "others" and similar indicators in fallback logic too
             from utils.text_utils import strip_latex_commands

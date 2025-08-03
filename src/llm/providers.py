@@ -77,11 +77,16 @@ Instructions:
 4. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
 5. Place a hashmark (#) rather than period between fields of a reference, but asterisks (*) between individual authors
    e.g. Author1*Author2*Author3#Title#Venue#Year#URL
-6. CRITICAL: When extracting authors, preserve the EXACT format from BibTeX or the source
-   - Copy author names exactly as they appear in the bibliography
-   - Use asterisks (*) to separate individual authors instead of commas
-   - For BibTeX format "Arnab, Anurag and Dehghani, Mostafa", output "Arnab, Anurag*Dehghani, Mostafa*Heigold, Georg*Sun, Chen*Lui'c, Mario*Schmid, Cordelia"
-   - Do NOT convert or change the author format - just separate with asterisks
+6. CRITICAL: When extracting authors, understand BibTeX author field format correctly
+   - In BibTeX, the "author" field contains author names separated by " and " (not commas)
+   - Individual author names may be in "Last, First" format (e.g., "Smith, John")
+   - Multiple authors are separated by " and " (e.g., "Smith, John and Doe, Jane")
+   - EXAMPLES:
+     * author = {"Dolan, Brian P."} → ONE author: "Dolan, Brian P."
+     * author = {"Smith, John and Doe, Jane"} → TWO authors: "Smith, John*Doe, Jane"
+     * author = {"Arnab, Anurag and Dehghani, Mostafa and Heigold, Georg"} → THREE authors: "Arnab, Anurag*Dehghani, Mostafa*Heigold, Georg"
+   - Use asterisks (*) to separate individual authors in your output
+   - Preserve the exact name format (including commas within names)
    - If a BibTeX entry has NO author field, output an empty author field (nothing before the first #)
    - Do NOT infer or guess authors based on title or context - only use what is explicitly stated
 7. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear

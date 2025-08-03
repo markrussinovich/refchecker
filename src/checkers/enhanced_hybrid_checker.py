@@ -208,6 +208,31 @@ class EnhancedHybridReferenceChecker:
                   (reference.get('raw_text') and ('doi' in reference['raw_text'].lower())))
         return has_doi
     
+    def _is_data_complete(self, verified_data: Dict[str, Any], reference: Dict[str, Any]) -> bool:
+        """
+        Check if the verified data is sufficiently complete for the reference verification
+        
+        Args:
+            verified_data: Paper data returned by API
+            reference: Original reference data
+            
+        Returns:
+            True if data is complete enough to use, False if incomplete
+        """
+        if not verified_data:
+            return False
+        
+        # If the reference has authors, the verified data should also have authors
+        cited_authors = reference.get('authors', [])
+        found_authors = verified_data.get('authors', [])
+        
+        # If we cited authors but found none, the data is incomplete
+        if cited_authors and not found_authors:
+            logger.debug(f"Enhanced Hybrid: Data incomplete - cited authors {cited_authors} but found none")
+            return False
+        
+        return True
+    
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using multiple APIs in priority order
@@ -234,10 +259,17 @@ class EnhancedHybridReferenceChecker:
                 failed_apis.append(('local_db', self.local_db, failure_type))
         
         # Strategy 2: If reference has DOI, prioritize CrossRef
+        crossref_result = None
         if self._should_try_doi_apis_first(reference) and self.crossref:
             verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
-                return verified_data, errors, url
+                # Check if the data is complete enough to use
+                if self._is_data_complete(verified_data, reference):
+                    return verified_data, errors, url
+                else:
+                    # Data is incomplete, save it as fallback and continue with other APIs
+                    crossref_result = (verified_data, errors, url)
+                    logger.debug("Enhanced Hybrid: CrossRef data incomplete, continuing with other APIs")
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('crossref', self.crossref, failure_type))
         
@@ -251,10 +283,17 @@ class EnhancedHybridReferenceChecker:
                 failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
         
         # Strategy 4: Try OpenAlex API (excellent reliability, replaces Google Scholar)
+        openalex_result = None
         if self.openalex:
             verified_data, errors, url, success, failure_type = self._try_api('openalex', self.openalex, reference)
             if success:
-                return verified_data, errors, url
+                # Check if the data is complete enough to use
+                if self._is_data_complete(verified_data, reference):
+                    return verified_data, errors, url
+                else:
+                    # Data is incomplete, save it as fallback and continue with other APIs
+                    openalex_result = (verified_data, errors, url)
+                    logger.debug("Enhanced Hybrid: OpenAlex data incomplete, continuing with other APIs")
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('openalex', self.openalex, failure_type))
         
@@ -262,7 +301,14 @@ class EnhancedHybridReferenceChecker:
         if not self._should_try_doi_apis_first(reference) and self.crossref:
             verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
-                return verified_data, errors, url
+                # Check if the data is complete enough to use
+                if self._is_data_complete(verified_data, reference):
+                    return verified_data, errors, url
+                else:
+                    # Data is incomplete, save it as fallback
+                    if not crossref_result:  # Only save if we don't already have one
+                        crossref_result = (verified_data, errors, url)
+                        logger.debug("Enhanced Hybrid: CrossRef data incomplete (non-DOI), continuing with other APIs")
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('crossref', self.crossref, failure_type))
         
@@ -309,6 +355,14 @@ class EnhancedHybridReferenceChecker:
                         if success:
                             logger.debug(f"Enhanced Hybrid: {api_name} succeeded on retry {retry_attempt + 2} (delay: {final_retry_delay:.1f}s)")
                             return verified_data, errors, url
+        
+        # PHASE 3: If all APIs failed or returned incomplete data, use best available incomplete data as fallback
+        incomplete_results = [r for r in [crossref_result, openalex_result] if r is not None]
+        if incomplete_results:
+            # Prefer CrossRef over OpenAlex for incomplete data (usually more reliable)
+            best_incomplete = crossref_result if crossref_result else openalex_result
+            logger.debug("Enhanced Hybrid: No complete data found, using incomplete data as fallback")
+            return best_incomplete
         
         # If all APIs failed, return unverified
         failed_count = len(failed_apis)
