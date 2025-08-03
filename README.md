@@ -60,7 +60,6 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - [⚙️ Configuration](#-configuration)
 - [🗄️ Local Database Setup](#-local-database-setup)
 - [🧪 Testing](#-testing)
-- [📦 Building the Package](#-building-the-package)
 - [📄 License](#-license)
 
 ## 🎯 Features
@@ -183,12 +182,12 @@ You can debug vllm server issues by running refchecker with the `--debug` flag.
 
 ## 📦 Installation
 
-### Option 1: Install from Test PyPI (Recommended for Testing)
+### Option 1: Install from PyPI (Recommended)
 
-For the latest development version with all features:
+For the latest stable release with all features:
 
 ```bash
-pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ refchecker[llm,dev,optional]
+pip install academic-refchecker[llm,dev,optional]
 ```
 
 This installs RefChecker with:
@@ -198,7 +197,7 @@ This installs RefChecker with:
 
 For a minimal installation:
 ```bash
-pip install -i https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ refchecker
+pip install academic-refchecker
 ```
 
 ### Option 2: Install from Source
@@ -527,44 +526,6 @@ tests/
 ```
 
 For detailed testing information, test execution options, and guidance on writing new tests, see the **[Testing Documentation](tests/README.md)**.
-
-## 📦 Building the Package
-
-To build RefChecker for distribution:
-
-```bash
-# Install build tool if needed
-pip install build
-
-# Build the package (automatically cleans previous builds)
-./build.sh
-```
-
-The build script will:
-- Clean previous builds (`dist/`, `build/`, `*.egg-info/`)
-- Build fresh wheel and source distributions
-- Display the created files
-
-### Version Management
-
-The package version is centrally managed in `src/__version__.py`. To update the version:
-
-1. Edit `src/__version__.py` and change the `__version__` string
-2. Run `./build.sh` to rebuild the package
-
-### Publishing to PyPI
-
-After building:
-
-```bash
-# Upload to Test PyPI
-twine upload --repository testpypi dist/* --username __token__
-
-# Upload to PyPI
-twine upload dist/* --username __token__
-```
-
-This ensures the version is consistent across the package metadata, script output, and documentation.
 
 
 ## 📄 License
