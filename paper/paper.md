@@ -26,7 +26,7 @@ Given a PDF, LaTeX source, plain-text bibliography, or arXiv ID, the program:
 2. **Queries** authoritative bibliographic APIs—Semantic Scholar, OpenAlex, and Crossref
 3. **Reports** discrepancies such as misspelled authors, wrong publication years, malformed DOIs, incorrect arXiv IDs, and broken URLs  
 
-A single run produces a color-coded report together with drop-in corrected BibTeX entries, enabling authors, reviewers, and editors to safeguard citation integrity in seconds. Academic RefChecker is released under the MIT licence and currently comprises ≈11 k lines of tested Python with continuous integration on GitHub.
+A single run produces a color-coded report together with drop-in corrected BibTeX entries, enabling authors, reviewers, and editors to safeguard citation integrity in seconds. Academic RefChecker is released under the MIT licence and currently comprises approximately 11k lines of tested Python with continuous integration on GitHub.
 
 # Statement of need
 
@@ -64,12 +64,12 @@ academic-refchecker --llm-provider openai --llm-model gpt-4.1 --paper 1706.03762
 academic-refchecker my_draft.pdf --output results.txt
 ````
 
-On the *Attention Is All You Need* bibliography (40 items), Academic RefChecker completed in \~2 min and surfaced multiple errors and warnings.
+On the *Attention Is All You Need* bibliography (40 items), Academic RefChecker completed in approximately 2 minutes and surfaced multiple errors and warnings.
 
 # Comparison with related work
 
 Crossref's Simple Text Query [@crossref_api] provides free DOI lookup by pasting references but requires manual input and only validates DOIs, not authors, venues, or other metadata fields.
-Recite [@reciteworks] offers commercial reference validation focused on citation-reference consistency checking but lacks multi-source verification and comprehensive metadata validation.
+Recite [@recitework] offers commercial reference validation focused on citation-reference consistency checking but lacks multi-source verification and comprehensive metadata validation.
 Scite.ai [@scite] provides "Smart Citations" and reference validation features, identifying retracted papers and citation contexts, but operates as a proprietary research platform rather than a standalone validation tool.
 Amazon Science's [@amazon_science_refchecker] RefChecker focuses on hallucination detection in LLM outputs using knowledge triplets, not bibliographic metadata accuracy.
 
