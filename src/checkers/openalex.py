@@ -118,11 +118,11 @@ class OpenAlexReferenceChecker:
                 
             except requests.exceptions.RequestException as e:
                 wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
-                logger.warning(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                logger.debug(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
                 time.sleep(wait_time)
         
         # If we get here, all retries failed
-        logger.warning(f"Failed to search OpenAlex after {self.max_retries} attempts")
+        logger.debug(f"Failed to search OpenAlex after {self.max_retries} attempts")
         return []
     
     def get_work_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
@@ -180,7 +180,7 @@ class OpenAlexReferenceChecker:
                 
             except requests.exceptions.RequestException as e:
                 wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
-                logger.warning(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
+                logger.debug(f"OpenAlex request failed: {str(e)}. Retrying in {wait_time:.2f} seconds...")
                 time.sleep(wait_time)
         
         # If we get here, all retries failed
