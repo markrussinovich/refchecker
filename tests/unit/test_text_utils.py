@@ -68,6 +68,31 @@ class TestNameMatching:
         # Different names should return False
         assert not result1
         assert not result2
+    
+    def test_middle_initial_period_matching(self):
+        """Test matching names with and without periods in middle initials."""
+        # These should match (regression test for issue)
+        assert is_name_match("Pavlo O Dral", "Pavlo O. Dral")
+        assert is_name_match("Pavlo O. Dral", "Pavlo O Dral")
+        assert is_name_match("John A Smith", "John A. Smith")
+        assert is_name_match("Mary K Johnson", "Mary K. Johnson")
+        assert is_name_match("Robert J Brown", "Robert J. Brown")
+        
+        # These should not match (different middle initials)
+        assert not is_name_match("Pavlo O Dral", "Pavlo A. Dral")
+        assert not is_name_match("John A Smith", "John B. Smith")
+        
+        # These should not match (different last names)
+        assert not is_name_match("Pavlo O Dral", "Pavlo O. Smith")
+        
+        # Edge cases with multiple periods
+        assert is_name_match("J. K. Rowling", "J K Rowling")
+        assert is_name_match("A. B. Smith", "A B Smith")
+        
+        # Should still work with existing patterns
+        assert is_name_match("J. Smith", "John Smith")
+        assert is_name_match("John Smith", "J. Smith")
+        assert is_name_match("D. Yu", "Da Yu")
 
 
 class TestAuthorNameProcessing:
