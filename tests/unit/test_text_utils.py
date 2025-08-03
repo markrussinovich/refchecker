@@ -93,6 +93,34 @@ class TestNameMatching:
         assert is_name_match("J. Smith", "John Smith")
         assert is_name_match("John Smith", "J. Smith")
         assert is_name_match("D. Yu", "Da Yu")
+    
+    def test_consecutive_initials_matching(self):
+        """Test matching consecutive initials vs spaced initials."""
+        # Main regression case from the issue
+        assert is_name_match("GV Abramkin", "G. V. Abramkin")
+        assert is_name_match("GV Abramkin", "G V Abramkin")
+        
+        # Reverse order
+        assert is_name_match("G. V. Abramkin", "GV Abramkin")
+        assert is_name_match("G V Abramkin", "GV Abramkin")
+        
+        # More initials
+        assert is_name_match("ABC Smith", "A. B. C. Smith")
+        assert is_name_match("AB Johnson", "A. B. Johnson")
+        assert is_name_match("ABCD Wilson", "A. B. C. D. Wilson")
+        
+        # Different initials - should not match
+        assert not is_name_match("GV Abramkin", "G. A. Abramkin")
+        assert not is_name_match("GV Abramkin", "A. V. Abramkin")
+        assert not is_name_match("AB Smith", "A. C. Smith")
+        
+        # Different last names - should not match
+        assert not is_name_match("GV Abramkin", "G. V. Smith")
+        assert not is_name_match("AB Johnson", "A. B. Wilson")
+        
+        # Edge cases
+        assert is_name_match("JK Brown", "J. K. Brown")
+        assert not is_name_match("JK Brown", "J. L. Brown")  # Different middle initial
 
 
 class TestAuthorNameProcessing:

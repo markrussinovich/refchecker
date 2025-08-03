@@ -1,4 +1,4 @@
-name: Build and Release to Test PyPI
+name: Build and Release to PyPI
 
 on:
   push:
@@ -67,12 +67,12 @@ jobs:
         chmod +x build.sh
         ./build.sh
     
-    - name: Publish to Test PyPI
+    - name: Publish to PyPI
       env:
         TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_KEY }}
       run: |
-        twine upload --repository testpypi dist/* --verbose
+        twine upload dist/* --verbose
     
     - name: Create GitHub Release
       uses: actions/create-release@v1

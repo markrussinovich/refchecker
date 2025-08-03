@@ -14,8 +14,8 @@ echo "✅ Build complete! Files created:"
 ls -la dist/
 
 echo ""
-echo "To upload to Test PyPI:"
-echo "  twine upload --repository testpypi dist/* --username __token__"
-echo ""
 echo "To upload to PyPI:"
 echo "  twine upload dist/* --username __token__"
+echo ""
+echo "To upload to Test PyPI (for testing):"
+echo "  twine upload --repository testpypi dist/* --username __token__"
