@@ -3,7 +3,7 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "refchecker"
+name = "academic-refchecker"
 dynamic = ["version"]
 description = "A comprehensive tool for validating reference accuracy in academic papers"
 readme = "README.md"
@@ -77,7 +77,7 @@ Repository = "https://github.com/markrussinovich/refchecker"
 "Bug Tracker" = "https://github.com/markrussinovich/refchecker/issues"
 
 [project.scripts]
-refchecker = "core.refchecker:main"
+academic-refchecker = "core.refchecker:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

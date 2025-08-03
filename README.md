@@ -187,7 +187,7 @@ You can debug vllm server issues by running refchecker with the `--debug` flag.
 For the latest stable release with all features:
 
 ```bash
-pip install refchecker[llm,dev,optional]
+pip install academic-refchecker[llm,dev,optional]
 ```
 
 This installs RefChecker with:
@@ -197,7 +197,7 @@ This installs RefChecker with:
 
 For a minimal installation:
 ```bash
-pip install refchecker
+pip install academic-refchecker
 ```
 
 ### Option 2: Install from Source
