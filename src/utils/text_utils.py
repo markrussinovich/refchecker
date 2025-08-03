@@ -582,6 +582,43 @@ def is_name_match(name1: str, name2: str) -> bool:
     if name1_no_periods == name2_no_periods:
         return True
     
+    # Special case: Handle consecutive initials vs spaced initials BEFORE other pattern matching
+    # e.g., "GV Abramkin" vs "G V Abramkin" or "G. V. Abramkin"
+    # This needs to be checked before general pattern matching because the names differ after period removal
+    parts1_temp = name1_no_periods.split()
+    parts2_temp = name2_no_periods.split()
+    
+    def _matches_consecutive_vs_spaced_initials(consecutive_parts, spaced_parts):
+        """
+        Check if consecutive initials match spaced initials
+        
+        Args:
+            consecutive_parts: Parts like ["gv", "abramkin"]
+            spaced_parts: Parts like ["g", "v", "abramkin"]
+            
+        Returns:
+            True if they match, False otherwise
+        """
+        if (len(consecutive_parts) == 2 and len(spaced_parts) >= 3 and 
+            len(consecutive_parts[0]) >= 2 and all(len(p) == 1 for p in spaced_parts[:-1]) and 
+            len(spaced_parts[-1]) > 1 and consecutive_parts[1] == spaced_parts[-1]):
+            
+            consecutive_initials = consecutive_parts[0]  # "gv"
+            spaced_initials = spaced_parts[:-1]  # ["g", "v"]
+            
+            # Check if consecutive initials match spaced initials
+            if len(consecutive_initials) == len(spaced_initials):
+                for cons_init, spaced_init in zip(consecutive_initials, spaced_initials):
+                    if cons_init != spaced_init:
+                        return False
+                return True  # All initials match
+        return False
+    
+    # Try both directions: consecutive vs spaced, and spaced vs consecutive
+    if (_matches_consecutive_vs_spaced_initials(parts1_temp, parts2_temp) or 
+        _matches_consecutive_vs_spaced_initials(parts2_temp, parts1_temp)):
+        return True
+    
     # Only consider substring match if they are very similar (e.g., identical with/without punctuation)
     # Remove this overly broad check that causes false positives like "marie k. johnson" matching "k. johnson"
     # if name1 in name2 or name2 in name1:
@@ -643,112 +680,112 @@ def is_name_match(name1: str, name2: str) -> bool:
     parts2 = normalize_surname_particles(name2_normalized.split())
     
     
-    # Basic 2-part name matching: "F. Last" vs "First Last" 
+    # Helper function for 2-part name matching: "F. Last" vs "First Last"
+    def _matches_initial_vs_full_name(initial_parts, full_parts):
+        """
+        Check if initial format matches full name format
+        
+        Args:
+            initial_parts: Parts like ["d.", "yu"] (F. Last format)
+            full_parts: Parts like ["da", "yu"] (First Last format)
+            
+        Returns:
+            True if they match, False otherwise
+        """
+        if (len(initial_parts) == 2 and len(full_parts) == 2 and
+            len(initial_parts[0].rstrip('.')) == 1 and len(full_parts[0]) > 1 and
+            len(initial_parts[1]) > 1 and len(full_parts[1]) > 1):
+            
+            initial = initial_parts[0].rstrip('.')  # "d"
+            last_name1 = initial_parts[1]  # "yu"
+            first_name = full_parts[0]  # "da"
+            last_name2 = full_parts[1]  # "yu"
+            
+            if last_name1 == last_name2 and initial == first_name[0]:
+                return True
+        return False
+    
+    # Basic 2-part name matching: "F. Last" vs "First Last" in both directions
     # e.g., "D. Yu" vs "Da Yu", "J. Smith" vs "John Smith"
-    if (len(parts1) == 2 and len(parts2) == 2 and
-        len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1 and
-        len(parts1[1]) > 1 and len(parts2[1]) > 1):
-        # parts1 is "F. Last" format, parts2 is "First Last" format
-        initial1 = parts1[0].rstrip('.')  # "d"
-        last_name1 = parts1[1]  # "yu"
-        first_name2 = parts2[0]  # "da"
-        last_name2 = parts2[1]  # "yu"
-        
-        
-        if last_name1 == last_name2 and initial1 == first_name2[0]:
-            return True
+    if (_matches_initial_vs_full_name(parts1, parts2) or 
+        _matches_initial_vs_full_name(parts2, parts1)):
+        return True
     
-    # Reverse case: "First Last" vs "F. Last"
-    # e.g., "Da Yu" vs "D. Yu", "John Smith" vs "J. Smith"  
-    if (len(parts1) == 2 and len(parts2) == 2 and
-        len(parts1[0]) > 1 and len(parts2[0].rstrip('.')) == 1 and
-        len(parts1[1]) > 1 and len(parts2[1]) > 1):
-        # parts1 is "First Last" format, parts2 is "F. Last" format
-        first_name1 = parts1[0]  # "da"
-        last_name1 = parts1[1]  # "yu"
-        initial2 = parts2[0].rstrip('.')  # "d"
-        last_name2 = parts2[1]  # "yu"
+    # Helper function for hyphenated names vs initials
+    def _matches_hyphenated_vs_initials(hyphenated_parts, initial_parts):
+        """
+        Check if hyphenated name format matches initials format
         
-        if last_name1 == last_name2 and first_name1[0] == initial2:
-            return True
+        Args:
+            hyphenated_parts: Parts like ["jan-philipp", "stein"] (First-Second Last format)
+            initial_parts: Parts like ["stein", "jp"] (Last FI format)
+            
+        Returns:
+            True if they match, False otherwise
+        """
+        if (len(hyphenated_parts) == 2 and len(initial_parts) == 2 and
+            '-' in hyphenated_parts[0] and len(hyphenated_parts[1]) > 1 and len(initial_parts[1]) == 2):
+            
+            hyphenated_first = hyphenated_parts[0]  # "jan-philipp"
+            last_name1 = hyphenated_parts[1]  # "stein"
+            last_name2 = initial_parts[0]  # "stein" 
+            initials = initial_parts[1]  # "jp"
+            
+            # Split hyphenated name
+            first_parts = hyphenated_first.split('-')
+            if (last_name1 == last_name2 and 
+                len(initials) >= 2 and len(first_parts) >= 2 and
+                first_parts[0][0] == initials[0] and
+                first_parts[1][0] == initials[1]):
+                return True
+        return False
     
-    # Special case: Handle hyphenated first names vs initials
+    # Special case: Handle hyphenated first names vs initials in both directions
     # e.g., "Stein JP" vs "Jan-Philipp Stein"
-    if (len(parts1) == 2 and len(parts2) == 2 and 
-        len(parts1[1]) == 2 and '-' in parts2[0] and len(parts2[1]) > 1):
-        # parts1 is "Last FI" format, parts2 is "First-Second Last" format
-        last_name1 = parts1[0]  # "Stein"
-        initials1 = parts1[1]  # "JP"
-        hyphenated_first2 = parts2[0]  # "Jan-Philipp" 
-        last_name2 = parts2[1]  # "Stein"
-        
-        # Split hyphenated name
-        first_parts = hyphenated_first2.split('-')
-        if (last_name1 == last_name2 and 
-            len(initials1) >= 2 and len(first_parts) >= 2 and
-            initials1[0] == first_parts[0][0] and
-            initials1[1] == first_parts[1][0]):
-            return True
-    
-    if (len(parts1) == 2 and len(parts2) == 2 and 
-        '-' in parts1[0] and len(parts1[1]) > 1 and len(parts2[1]) == 2):
-        # parts1 is "First-Second Last" format, parts2 is "Last FI" format  
-        hyphenated_first1 = parts1[0]  # "Jan-Philipp"
-        last_name1 = parts1[1]  # "Stein"
-        last_name2 = parts2[0]  # "Stein"
-        initials2 = parts2[1]  # "JP"
-        
-        # Split hyphenated name
-        first_parts = hyphenated_first1.split('-')
-        if (last_name1 == last_name2 and 
-            len(initials2) >= 2 and len(first_parts) >= 2 and
-            first_parts[0][0] == initials2[0] and
-            first_parts[1][0] == initials2[1]):
-            return True
+    if (_matches_hyphenated_vs_initials(parts1, parts2) or 
+        _matches_hyphenated_vs_initials(parts2, parts1)):
+        return True
 
-    # Special case: Handle "Last I/FI" vs "F. I. Last" patterns (with periods)
-    # e.g., "Fang G" vs "G. Fang", "Digman JM" vs "J. M. Digman", "Kaelbling LP" vs "L. Kaelbling"
-    if (len(parts1) == 2 and len(parts2) >= 2 and 
-        len(parts1[1]) >= 1 and all(len(p.rstrip('.')) == 1 for p in parts2[:-1]) and len(parts2[-1]) > 1):
-        # parts1 is "Last I/FI" format, parts2 is "F. I. Last" format
-        last_name1 = parts1[0]  # "Fang" or "Digman"
-        initials1 = parts1[1]  # "G" or "JM"
-        last_name2 = parts2[-1]  # "Fang" or "Digman"
-        initials2 = [p.rstrip('.') for p in parts2[:-1]]  # ["G"] or ["J", "M"]
+    # Helper function for "Last I/FI" vs "F. I. Last" patterns
+    def _matches_last_initials_vs_initials_last(last_initials_parts, initials_last_parts):
+        """
+        Check if "Last I/FI" format matches "F. I. Last" format
         
-        if last_name1 == last_name2:
-            # Handle both single initials and multiple initials with middle initial omission
-            if len(initials1) == 1:
-                # Single initial case: "Fang G" vs "G. Fang"
-                if len(initials2) == 1 and initials1 == initials2[0]:
-                    return True
-            else:
-                # Multiple initials case: allow middle initial omission
-                if (len(initials2) >= 1 and initials1[0] == initials2[0] and
-                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
-                     len(initials2) == 1)):  # Middle initial omitted in parts2
-                    return True
+        Args:
+            last_initials_parts: Parts like ["fang", "g"] or ["digman", "jm"] (Last I/FI format)
+            initials_last_parts: Parts like ["g.", "fang"] or ["j.", "m.", "digman"] (F. I. Last format)
+            
+        Returns:
+            True if they match, False otherwise
+        """
+        if (len(last_initials_parts) == 2 and len(initials_last_parts) >= 2 and 
+            len(last_initials_parts[1]) >= 1 and all(len(p.rstrip('.')) == 1 for p in initials_last_parts[:-1]) and 
+            len(initials_last_parts[-1]) > 1):
+            
+            last_name1 = last_initials_parts[0]  # "fang" or "digman"
+            initials1 = last_initials_parts[1]  # "g" or "jm"
+            last_name2 = initials_last_parts[-1]  # "fang" or "digman"
+            initials2 = [p.rstrip('.') for p in initials_last_parts[:-1]]  # ["g"] or ["j", "m"]
+            
+            if last_name1 == last_name2:
+                # Handle both single initials and multiple initials with middle initial omission
+                if len(initials1) == 1:
+                    # Single initial case: "Fang G" vs "G. Fang"
+                    if len(initials2) == 1 and initials1 == initials2[0]:
+                        return True
+                else:
+                    # Multiple initials case: allow middle initial omission
+                    if (len(initials2) >= 1 and initials1[0] == initials2[0] and
+                        (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
+                         len(initials2) == 1)):  # Middle initial omitted in initials2
+                        return True
+        return False
     
-    if (len(parts1) >= 2 and len(parts2) == 2 and 
-        all(len(p.rstrip('.')) == 1 for p in parts1[:-1]) and len(parts1[-1]) > 1 and len(parts2[1]) >= 1):
-        # parts1 is "F. I. Last" format, parts2 is "Last I/FI" format  
-        last_name1 = parts1[-1]  # "Fang" or "Digman"
-        initials1 = [p.rstrip('.') for p in parts1[:-1]]  # ["G"] or ["J", "M"]
-        last_name2 = parts2[0]  # "Fang" or "Digman"
-        initials2 = parts2[1]  # "G" or "JM"
-        
-        if last_name1 == last_name2:
-            # Handle both single initials and multiple initials with middle initial omission
-            if len(initials2) == 1:
-                # Single initial case: "G. Fang" vs "Fang G"
-                if len(initials1) == 1 and initials1[0] == initials2:
-                    return True
-            else:
-                # Multiple initials case: allow middle initial omission
-                if (len(initials1) >= 1 and initials1[0] == initials2[0] and
-                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
-                     len(initials1) == 1)):  # Middle initial omitted in parts1
-                    return True
+    # Special case: Handle "Last I/FI" vs "F. I. Last" patterns in both directions
+    # e.g., "Fang G" vs "G. Fang", "Digman JM" vs "J. M. Digman", "Kaelbling LP" vs "L. Kaelbling"
+    if (_matches_last_initials_vs_initials_last(parts1, parts2) or 
+        _matches_last_initials_vs_initials_last(parts2, parts1)):
+        return True
 
     # Special case: Handle "LastName FM" vs "FirstName MiddleInitial. LastName" patterns
     # e.g., "Kostick-Quenet KM" vs "Kristin M. Kostick-Quenet"
@@ -985,31 +1022,35 @@ def is_name_match(name1: str, name2: str) -> bool:
             first_initial1 == initials2[0]):  # Only check first initial, allow middle to be omitted
             return True
     
-    # Special case: Handle "Last I" vs "First Last" patterns 
-    # e.g., "Alessi C" vs "Carlo Alessi", "Fang G" vs "Guoxin Fang"
-    if (len(parts1) == 2 and len(parts2) == 2 and
-        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1]) > 1):
-        # parts1 is "Last I" format, parts2 is "First Last" format
-        last_name1 = parts1[0]  # "Alessi"
-        initial1 = parts1[1]  # "C"
-        first_name2 = parts2[0]  # "Carlo"
-        last_name2 = parts2[1]  # "Alessi"
+    # Helper function for "Last I" vs "First Last" patterns
+    def _matches_last_initial_vs_first_last(last_initial_parts, first_last_parts):
+        """
+        Check if "Last I" format matches "First Last" format
         
-        if last_name1 == last_name2 and initial1 == first_name2[0]:
-            return True
+        Args:
+            last_initial_parts: Parts like ["alessi", "c"] (Last I format)
+            first_last_parts: Parts like ["carlo", "alessi"] (First Last format)
+            
+        Returns:
+            True if they match, False otherwise
+        """
+        if (len(last_initial_parts) == 2 and len(first_last_parts) == 2 and
+            len(last_initial_parts[1]) == 1 and len(first_last_parts[0]) > 1 and len(first_last_parts[1]) > 1):
+            
+            last_name1 = last_initial_parts[0]  # "alessi"
+            initial = last_initial_parts[1]  # "c"
+            first_name = first_last_parts[0]  # "carlo"
+            last_name2 = first_last_parts[1]  # "alessi"
+            
+            if last_name1 == last_name2 and initial == first_name[0]:
+                return True
+        return False
     
-    # Special case: Handle "First Last" vs "Last I" patterns 
-    # e.g., "Carlo Alessi" vs "Alessi C", "Guoxin Fang" vs "Fang G"
-    if (len(parts1) == 2 and len(parts2) == 2 and
-        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts2[1]) == 1):
-        # parts1 is "First Last" format, parts2 is "Last I" format
-        first_name1 = parts1[0]  # "Carlo"
-        last_name1 = parts1[1]  # "Alessi"
-        last_name2 = parts2[0]  # "Alessi"
-        initial2 = parts2[1]  # "C"
-        
-        if last_name1 == last_name2 and first_name1[0] == initial2:
-            return True
+    # Special case: Handle "Last I" vs "First Last" patterns in both directions
+    # e.g., "Alessi C" vs "Carlo Alessi", "Fang G" vs "Guoxin Fang" 
+    if (_matches_last_initial_vs_first_last(parts1, parts2) or 
+        _matches_last_initial_vs_first_last(parts2, parts1)):
+        return True
 
     # Special case: Handle "Last II" vs "First Second Last" patterns 
     # e.g., "Nazeer MS" vs "Muhammad Sunny Nazeer", "Thuruthel TG" vs "Thomas George Thuruthel"

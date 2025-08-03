@@ -283,17 +283,6 @@ python refchecker.py --paper /path/to/your/paper.txt
 python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
-#### Saving Results to File
-
-By default, results are only displayed on the console. To save detailed results to a file, use the `--output-file` option:
-
-```bash
-# Save results to default filename (reference_errors.txt)
-python refchecker.py --paper 1706.03762 --output-file
-
-# Save results to custom filename
-python refchecker.py --paper /path/to/paper.pdf --output-file my_paper_errors.txt
-```
 
 ## 📊 Output and Results
 
