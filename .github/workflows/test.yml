@@ -2,8 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: [ '**' ]
-    branches-ignore: [ main ]  # Don't run on main (release workflow handles that)
+    branches-ignore: [ main ]  # Run on all branches except main
   pull_request:
     branches: [ main ]
 
