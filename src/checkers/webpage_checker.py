@@ -51,6 +51,10 @@ class WebPageChecker:
         if 'github.com' in url:
             return False
         
+        # Skip Semantic Scholar CorpusID URLs (handled by Semantic Scholar API)
+        if 'api.semanticscholar.org/CorpusID:' in url:
+            return False
+        
         # Skip direct file downloads, but allow PDFs that are likely web-viewable
         file_extensions = ['.doc', '.docx', '.zip', '.tar.gz', '.exe', '.dmg']
         if any(url.lower().endswith(ext) for ext in file_extensions):

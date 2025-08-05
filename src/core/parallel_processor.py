@@ -338,22 +338,8 @@ class ParallelReferenceProcessor:
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' for e in result.errors)
             
             if has_unverified_error:
-                # Show unverified message format
-                print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-                
-                # Handle missing or invalid year
-                year = reference.get('year')
-                if year and year != 0:
-                    year_str = str(year)
-                else:
-                    year_str = "year unknown"
-                
-                print(f"          Cited as: {', '.join(reference.get('authors', []))} ({year_str})")
-                
-                # Only show URL if it exists and is different from reference URL
-                ref_url = reference.get('url', '').strip()
-                if ref_url and ref_url != result.url:
-                    print(f"          URL: {ref_url}")
+                # Use the centralized unverified error display function from base checker
+                self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
             
             # Display all non-unverified errors and warnings
             for error in result.errors:
@@ -413,3 +399,4 @@ class ParallelReferenceProcessor:
             'fastest_time': self.processing_stats['fastest_time'] if self.processing_stats['fastest_time'] != float('inf') else 0,
             'slowest_time': self.processing_stats['slowest_time']
         }
+
