@@ -254,7 +254,6 @@ class NonArxivReferenceChecker:
         # First, check if we have a Semantic Scholar URL (API format)
         if url and 'api.semanticscholar.org/CorpusID:' in url:
             # Extract CorpusID from API URL
-            import re
             corpus_match = re.search(r'CorpusID:(\d+)', url)
             if corpus_match:
                 corpus_id = corpus_match.group(1)
