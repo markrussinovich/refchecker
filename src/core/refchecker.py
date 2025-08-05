@@ -4193,7 +4193,8 @@ class ArxivReferenceChecker:
                 if not url_match:
                     url_match = re.search(r'href\{([^}]+)\}', howpublished)
                 if url_match:
-                    url = url_match.group(1)
+                    from utils.url_utils import clean_url_punctuation
+                    url = clean_url_punctuation(url_match.group(1))
         
         # Determine reference type
         ref_type = 'other'
@@ -4450,32 +4451,12 @@ class ArxivReferenceChecker:
             
             return parsed_authors
         else:
-            # Handle single author entries (no asterisk separators)
-            # This could be a single BibTeX "Last, First" format author
+            # Fallback to original logic for backward compatibility
+            from utils.text_utils import parse_authors_with_initials
             
             cleaned_text = author_text.rstrip('.')
-            
-            # Check if this is a single BibTeX format author name
-            if ',' in cleaned_text and cleaned_text.count(',') == 1:
-                # Could be "Dolan, Brian P." (single author) or "Smith, John" 
-                parts = cleaned_text.split(',', 1)
-                surname_part = parts[0].strip()
-                given_part = parts[1].strip() 
-                
-                # Check if this looks like BibTeX format
-                if self._is_bibtex_surname_given_format(surname_part, given_part):
-                    # Single author in BibTeX format - convert to normal format
-                    authors = [f"{given_part} {surname_part}"]
-                else:
-                    # Multiple authors separated by commas - use old logic
-                    from utils.text_utils import parse_authors_with_initials
-                    authors = parse_authors_with_initials(cleaned_text)
-                    authors = [a.rstrip('.').strip() for a in authors if a.strip()]
-            else:
-                # No comma or multiple commas - use old logic  
-                from utils.text_utils import parse_authors_with_initials
-                authors = parse_authors_with_initials(cleaned_text)
-                authors = [a.rstrip('.').strip() for a in authors if a.strip()]
+            authors = parse_authors_with_initials(cleaned_text)
+            authors = [a.rstrip('.').strip() for a in authors if a.strip()]
             
             # Handle "others" and similar indicators in fallback logic too
             from utils.text_utils import strip_latex_commands
@@ -4614,7 +4595,8 @@ class ArxivReferenceChecker:
         if not url and not arxiv_url:
             url_match = re.search(r'https?://(?!arxiv\.org)[^\s,]+', ref_text)
             if url_match:
-                url = url_match.group(0)
+                from utils.url_utils import clean_url_punctuation
+                url = clean_url_punctuation(url_match.group(0))
         
         # Extract year - will be determined from structured parts below
         year = None
@@ -4691,20 +4673,24 @@ class ArxivReferenceChecker:
             # Parse authors
             authors = self._clean_llm_author_text(author_text)
         elif len(parts) == 5:
-            # Format: Authors # Title # Venue # Pages/Details # Publisher/Year
+            # Format: Authors # Title # Venue # Year # URL (standard LLM format)
             author_text = parts[0].strip()
             title = clean_title_basic(parts[1].strip())
             venue = parts[2].strip()
-            pages_details = parts[3].strip()
-            year_part = parts[4].strip()
-            logger.debug(f"5-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Pages: '{pages_details}', Year part: '{year_part}'")
+            year_part = parts[3].strip()
+            url_part = parts[4].strip()
+            logger.debug(f"5-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year: '{year_part}', URL: '{url_part}'")
             
             # Parse authors
             authors = self._clean_llm_author_text(author_text)
             
-            # Combine venue with pages/details for a more complete venue description
-            if pages_details:
-                venue = f"{venue}, {pages_details}" if venue else pages_details
+            # Process URL part
+            if url_part.startswith('http'):
+                if 'arxiv' in url_part.lower():
+                    arxiv_url = url_part
+                else:
+                    from utils.url_utils import clean_url_punctuation
+                    url = clean_url_punctuation(url_part)
         else:
             # Fallback for other formats or malformed input
             logger.debug(f"Unexpected format with {len(parts)} parts: {parts}")
@@ -4716,8 +4702,20 @@ class ArxivReferenceChecker:
             if len(parts) >= 3:
                 venue = parts[2].strip()
             if len(parts) >= 4:
-                # For cases with more than 5 parts, combine the last parts as year_part
-                year_part = ' '.join(parts[3:]).strip()
+                year_part = parts[3].strip()
+            if len(parts) >= 5:
+                # Handle URL in 5th position
+                url_part = parts[4].strip()
+                if url_part.startswith('http'):
+                    if 'arxiv' in url_part.lower():
+                        arxiv_url = url_part
+                    else:
+                        from utils.url_utils import clean_url_punctuation
+                        url = clean_url_punctuation(url_part)
+            if len(parts) > 5:
+                # For cases with more than 5 parts, combine the remaining parts as additional info
+                additional_info = ' '.join(parts[5:]).strip()
+                logger.debug(f"Additional parts beyond standard 5-part format: {additional_info}")
         
         # Extract year from year_part if we have one
         if 'year_part' in locals() and year_part:
@@ -4857,7 +4855,8 @@ class ArxivReferenceChecker:
         if not url and not arxiv_url:
             url_match = re.search(r'https?://(?!arxiv\.org)[^\s,\)]+', ref_text)
             if url_match:
-                url = url_match.group(0)
+                from utils.url_utils import clean_url_punctuation
+                url = clean_url_punctuation(url_match.group(0))
         
         # Extract year
         year = None
@@ -5567,7 +5566,10 @@ class ArxivReferenceChecker:
             # Only show URL if it exists and is different from reference_url
             ref_url = reference.get('url', '').strip()
             if ref_url and ref_url != reference_url:
-                print(f"          URL: {ref_url}")
+                # Clean trailing punctuation from URL display
+                from utils.url_utils import clean_url_punctuation
+                clean_ref_url = clean_url_punctuation(ref_url)
+                print(f"          URL: {clean_ref_url}")
     
     def _display_non_unverified_errors(self, errors, debug_mode, print_output):
         """Display all non-unverified errors and warnings"""
