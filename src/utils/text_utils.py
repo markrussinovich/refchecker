@@ -84,7 +84,47 @@ def parse_authors_with_initials(authors_text):
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
-    # Split on commas first
+    # Check if this is a "and" separated format (common in BibTeX)
+    if ' and ' in authors_text:
+        and_parts = [part.strip() for part in authors_text.split(' and ') if part.strip()]
+        
+        # Case 1: Pure "and" separation with no commas (e.g., "John Smith and Jane Doe")
+        if ',' not in authors_text and len(and_parts) > 1:
+            # Basic validation: each part should look like a name (at least 2 words or contain initials)
+            valid_names = []
+            for part in and_parts:
+                part = part.strip()
+                if part and (len(part.split()) >= 2 or re.search(r'[A-Z]\.', part)):
+                    valid_names.append(part)
+            
+            if len(valid_names) == len(and_parts):  # All parts look like valid names
+                return valid_names
+        
+        # Case 2: "Lastname, Initial and Lastname, Initial" format
+        elif ',' in authors_text and len(and_parts) > 1:
+            # Check if each "and" part contains exactly one comma (Lastname, Initial format)
+            valid_author_parts = []
+            for part in and_parts:
+                part = part.strip()
+                comma_count = part.count(',')
+                
+                # Should have exactly one comma for "Lastname, Initial" format
+                if comma_count == 1:
+                    # Validate it looks like "Lastname, Initial(s)" format
+                    comma_parts = [p.strip() for p in part.split(',')]
+                    if len(comma_parts) == 2:
+                        lastname, initials = comma_parts
+                        # Lastname should be letters, initials should be short (letters/periods/spaces)
+                        if (re.match(r'^[A-Za-z\s\-\']+$', lastname) and 
+                            re.match(r'^[A-Z\.\s]+$', initials) and 
+                            len(initials.replace('.', '').replace(' ', '')) <= 4):
+                            valid_author_parts.append(part)
+            
+            # If all parts are valid "Lastname, Initial" format, return them
+            if len(valid_author_parts) == len(and_parts):
+                return valid_author_parts
+    
+    # Split on commas first for other formats
     parts = [part.strip() for part in authors_text.split(',') if part.strip()]
     
     # Check if this is BibTeX comma-separated format: "Surname, Given, Surname, Given"
@@ -510,8 +550,10 @@ def normalize_diacritics(text: str) -> str:
         'Vojtěch' -> 'vojtech'
         'José' -> 'jose'
         'Łukasz' -> 'lukasz'
+        'J. Gl¨ uck' -> 'J. Gluck'
     """
     # First handle special characters that don't decompose properly
+    # Including common transliterations
     special_chars = {
         'ł': 'l', 'Ł': 'L',
         'đ': 'd', 'Đ': 'D', 
@@ -521,10 +563,53 @@ def normalize_diacritics(text: str) -> str:
         'ß': 'ss',
         'æ': 'ae', 'Æ': 'AE',
         'œ': 'oe', 'Œ': 'OE',
+        # Common German/Austrian transliterations
+        'ü': 'ue', 'Ü': 'UE',
+        'ö': 'oe', 'Ö': 'OE',
+        'ä': 'ae', 'Ä': 'AE',
     }
     
     for special, replacement in special_chars.items():
         text = text.replace(special, replacement)
+    
+    # Handle standalone diacritics and modifier symbols that aren't handled by NFD
+    # These often appear in incorrectly formatted academic papers
+    # We need to be careful not to create mid-word spaces when removing diacritics
+    standalone_diacritics = {
+        '¨': '',    # Diaeresis (U+00A8) - category Sk
+        '´': '',    # Acute accent (U+00B4) - category Sk  
+        '`': '',    # Grave accent (U+0060) - category Sk (except when used as quotes)
+        '^': '',    # Circumflex accent (U+005E) - category Sk
+        '˜': '',    # Small tilde (U+02DC) - category Sk
+        '¯': '',    # Macron (U+00AF) - category Sk
+        '˘': '',    # Breve (U+02D8) - category Sk
+        '˙': '',    # Dot above (U+02D9) - category Sk
+        '¸': '',    # Cedilla (U+00B8) - category Sk
+        '˚': '',    # Ring above (U+02DA) - category Sk
+        '˝': '',    # Double acute accent (U+02DD) - category Sk
+        'ˇ': '',    # Caron (U+02C7) - category Sk
+    }
+    
+    # Remove standalone diacritics, being careful about spacing
+    # Use a more intelligent approach that considers context
+    for diacritic, replacement in standalone_diacritics.items():
+        # Skip grave accent if it looks like it's being used as a quote mark
+        if diacritic == '`' and ('`' in text[1:] if text else False):
+            continue
+            
+        # Only apply the fix if this diacritic is actually present
+        if diacritic in text:
+            # Replace the diacritic
+            old_text = text
+            text = text.replace(diacritic, replacement)
+            
+            # Only apply the letter merging if we actually made a change
+            # and if it looks like we created a mid-word space issue
+            if old_text != text:
+                # Look for patterns where removing the diacritic created "letter space lowercase"
+                # but be more specific - only merge if there's exactly one space
+                # and the pattern looks like it was from a single word split
+                text = re.sub(r'([a-zA-Z]) ([a-z]{1,4})\b', r'\1\2', text)
     
     # Normalize different hyphen-like characters to standard hyphen
     # Common hyphen variants that appear in academic papers
@@ -541,8 +626,51 @@ def normalize_diacritics(text: str) -> str:
     
     # Decompose characters into base + combining characters (NFD normalization)
     normalized = unicodedata.normalize('NFD', text)
-    # Remove all combining characters (accents, diacritics)
+    # Remove all combining characters (accents, diacritics) - category Mn
     ascii_text = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    
+    # Clean up any extra spaces that may have been created by removing diacritics
+    ascii_text = re.sub(r'\s+', ' ', ascii_text).strip()
+    
+    return ascii_text
+
+def normalize_diacritics_simple(text: str) -> str:
+    """
+    Simple diacritic normalization that only removes accents without transliteration.
+    Used as an alternative normalization for name matching.
+    """
+    # Remove standalone diacritics without transliteration
+    standalone_diacritics = {
+        '¨': '',    # Diaeresis
+        '´': '',    # Acute accent
+        '`': '',    # Grave accent
+        '^': '',    # Circumflex accent
+        '˜': '',    # Small tilde
+        '¯': '',    # Macron
+        '˘': '',    # Breve
+        '˙': '',    # Dot above
+        '¸': '',    # Cedilla
+        '˚': '',    # Ring above
+        '˝': '',    # Double acute accent
+        'ˇ': '',    # Caron
+    }
+    
+    for diacritic in standalone_diacritics:
+        if diacritic in text:
+            old_text = text
+            text = text.replace(diacritic, '')
+            if old_text != text:
+                # Only merge if we created a pattern like "Gl uck" -> "Gluck"
+                text = re.sub(r'([a-zA-Z]) ([a-z]{1,4})\b', r'\1\2', text)
+    
+    # NFD normalization to decompose characters
+    normalized = unicodedata.normalize('NFD', text)
+    # Remove combining characters (accents, diacritics)
+    ascii_text = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    
+    # Clean up spaces
+    ascii_text = re.sub(r'\s+', ' ', ascii_text).strip()
+    
     return ascii_text
 
 def is_name_match(name1: str, name2: str) -> bool:
@@ -560,64 +688,93 @@ def is_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
     
-    # Normalize case and diacritics for comparison
-    name1 = normalize_diacritics(name1.strip().lower())
-    name2 = normalize_diacritics(name2.strip().lower())
+    # Try primary normalization first (with transliterations)
+    name1_primary = normalize_diacritics(name1.strip().lower())
+    name2_primary = normalize_diacritics(name2.strip().lower())
     
     # Handle spacing variations around periods: "F.Last" vs "F. Last"
-    # Normalize both to have consistent spacing
-    name1_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name1)  # "a.ashtekar" -> "a. ashtekar"
-    name2_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name2)  # Already "a. ashtekar"
+    name1_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name1_primary)
+    name2_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name2_primary)
     
-    # Also handle the case where one name has periods and the other doesn't
-    # Remove all periods for comparison (e.g., "Pavlo O. Dral" -> "Pavlo O Dral")
-    name1_no_periods = re.sub(r'\.', '', name1_normalized)
-    name2_no_periods = re.sub(r'\.', '', name2_normalized)
-    
-    # If they're identical after normalization, they match
+    # If they're identical after primary normalization, they match
     if name1_normalized == name2_normalized:
         return True
     
-    # If they're identical after removing periods, they match
-    if name1_no_periods == name2_no_periods:
+    # Try alternative normalization (without transliterations) if primary failed  
+    name1_alt = normalize_diacritics_simple(name1.strip().lower())
+    name2_alt = normalize_diacritics_simple(name2.strip().lower())
+    
+    name1_alt_norm = re.sub(r'\.([A-Za-z])', r'. \1', name1_alt)
+    name2_alt_norm = re.sub(r'\.([A-Za-z])', r'. \1', name2_alt)
+    
+    # If they match with alternative normalization, they match
+    if name1_alt_norm == name2_alt_norm:
         return True
     
-    # Special case: Handle consecutive initials vs spaced initials BEFORE other pattern matching
-    # e.g., "GV Abramkin" vs "G V Abramkin" or "G. V. Abramkin"
-    # This needs to be checked before general pattern matching because the names differ after period removal
-    parts1_temp = name1_no_periods.split()
-    parts2_temp = name2_no_periods.split()
+    # Handle middle initial period variations: "Pavlo O Dral" vs "Pavlo O. Dral"
+    def add_periods_to_middle_initials(name):
+        """Add periods after single letter middle names for consistent matching"""
+        # Match: word + space + single letter + space + word
+        # Replace with: word + space + single letter + period + space + word
+        return re.sub(r'(\w+) ([a-z]) (\w+)', r'\1 \2. \3', name)
     
-    def _matches_consecutive_vs_spaced_initials(consecutive_parts, spaced_parts):
-        """
-        Check if consecutive initials match spaced initials
+    name1_middle_norm = add_periods_to_middle_initials(name1_normalized)
+    name2_middle_norm = add_periods_to_middle_initials(name2_normalized)
+    
+    if name1_middle_norm == name2_middle_norm:
+        return True
+    
+    # Handle consecutive initials: "GV Abramkin" vs "G. V. Abramkin"
+    def expand_consecutive_initials(name):
+        """Convert consecutive initials to spaced initials for consistent matching"""
+        parts = name.split()
+        if len(parts) >= 2:
+            first_part = parts[0]
+            # Check if first part is consecutive letters (initials)
+            if len(first_part) > 1 and first_part.isalpha():
+                # Convert "gv" to "g. v."
+                spaced = '. '.join(first_part) + '.'
+                return spaced + ' ' + ' '.join(parts[1:])
+        return name
+    
+    name1_init_norm = expand_consecutive_initials(name1_normalized)
+    name2_init_norm = expand_consecutive_initials(name2_normalized)
+    
+    if name1_init_norm == name2_init_norm:
+        return True
+    
+    # Try basic initial matching with alternative normalization
+    # This handles cases like "J. Glück" vs "Jochen Gluck" where simple normalization helps
+    parts1_alt = name1_alt_norm.split()
+    parts2_alt = name2_alt_norm.split()
+    
+    # Basic 2-part name matching: "J. Last" vs "First Last"
+    if (len(parts1_alt) == 2 and len(parts2_alt) == 2 and
+        len(parts1_alt[0].rstrip('.')) == 1 and len(parts2_alt[0]) > 1 and
+        len(parts1_alt[1]) > 1 and len(parts2_alt[1]) > 1):
         
-        Args:
-            consecutive_parts: Parts like ["gv", "abramkin"]
-            spaced_parts: Parts like ["g", "v", "abramkin"]
-            
-        Returns:
-            True if they match, False otherwise
-        """
-        if (len(consecutive_parts) == 2 and len(spaced_parts) >= 3 and 
-            len(consecutive_parts[0]) >= 2 and all(len(p) == 1 for p in spaced_parts[:-1]) and 
-            len(spaced_parts[-1]) > 1 and consecutive_parts[1] == spaced_parts[-1]):
-            
-            consecutive_initials = consecutive_parts[0]  # "gv"
-            spaced_initials = spaced_parts[:-1]  # ["g", "v"]
-            
-            # Check if consecutive initials match spaced initials
-            if len(consecutive_initials) == len(spaced_initials):
-                for cons_init, spaced_init in zip(consecutive_initials, spaced_initials):
-                    if cons_init != spaced_init:
-                        return False
-                return True  # All initials match
-        return False
+        initial1 = parts1_alt[0].rstrip('.')
+        last_name1 = parts1_alt[1]
+        first_name2 = parts2_alt[0]
+        last_name2 = parts2_alt[1]
+        
+        if last_name1 == last_name2 and initial1 == first_name2[0]:
+            return True
     
-    # Try both directions: consecutive vs spaced, and spaced vs consecutive
-    if (_matches_consecutive_vs_spaced_initials(parts1_temp, parts2_temp) or 
-        _matches_consecutive_vs_spaced_initials(parts2_temp, parts1_temp)):
-        return True
+    # Reverse case: "First Last" vs "J. Last"
+    if (len(parts1_alt) == 2 and len(parts2_alt) == 2 and
+        len(parts1_alt[0]) > 1 and len(parts2_alt[0].rstrip('.')) == 1 and
+        len(parts1_alt[1]) > 1 and len(parts2_alt[1]) > 1):
+        
+        first_name1 = parts1_alt[0]
+        last_name1 = parts1_alt[1]
+        initial2 = parts2_alt[0].rstrip('.')
+        last_name2 = parts2_alt[1]
+        
+        if last_name1 == last_name2 and first_name1[0] == initial2:
+            return True
+    
+    # Continue with the detailed matching logic using primary normalization
     
     # Only consider substring match if they are very similar (e.g., identical with/without punctuation)
     # Remove this overly broad check that causes false positives like "marie k. johnson" matching "k. johnson"
@@ -680,112 +837,112 @@ def is_name_match(name1: str, name2: str) -> bool:
     parts2 = normalize_surname_particles(name2_normalized.split())
     
     
-    # Helper function for 2-part name matching: "F. Last" vs "First Last"
-    def _matches_initial_vs_full_name(initial_parts, full_parts):
-        """
-        Check if initial format matches full name format
-        
-        Args:
-            initial_parts: Parts like ["d.", "yu"] (F. Last format)
-            full_parts: Parts like ["da", "yu"] (First Last format)
-            
-        Returns:
-            True if they match, False otherwise
-        """
-        if (len(initial_parts) == 2 and len(full_parts) == 2 and
-            len(initial_parts[0].rstrip('.')) == 1 and len(full_parts[0]) > 1 and
-            len(initial_parts[1]) > 1 and len(full_parts[1]) > 1):
-            
-            initial = initial_parts[0].rstrip('.')  # "d"
-            last_name1 = initial_parts[1]  # "yu"
-            first_name = full_parts[0]  # "da"
-            last_name2 = full_parts[1]  # "yu"
-            
-            if last_name1 == last_name2 and initial == first_name[0]:
-                return True
-        return False
-    
-    # Basic 2-part name matching: "F. Last" vs "First Last" in both directions
+    # Basic 2-part name matching: "F. Last" vs "First Last" 
     # e.g., "D. Yu" vs "Da Yu", "J. Smith" vs "John Smith"
-    if (_matches_initial_vs_full_name(parts1, parts2) or 
-        _matches_initial_vs_full_name(parts2, parts1)):
-        return True
-    
-    # Helper function for hyphenated names vs initials
-    def _matches_hyphenated_vs_initials(hyphenated_parts, initial_parts):
-        """
-        Check if hyphenated name format matches initials format
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1 and
+        len(parts1[1]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "F. Last" format, parts2 is "First Last" format
+        initial1 = parts1[0].rstrip('.')  # "d"
+        last_name1 = parts1[1]  # "yu"
+        first_name2 = parts2[0]  # "da"
+        last_name2 = parts2[1]  # "yu"
         
-        Args:
-            hyphenated_parts: Parts like ["jan-philipp", "stein"] (First-Second Last format)
-            initial_parts: Parts like ["stein", "jp"] (Last FI format)
-            
-        Returns:
-            True if they match, False otherwise
-        """
-        if (len(hyphenated_parts) == 2 and len(initial_parts) == 2 and
-            '-' in hyphenated_parts[0] and len(hyphenated_parts[1]) > 1 and len(initial_parts[1]) == 2):
-            
-            hyphenated_first = hyphenated_parts[0]  # "jan-philipp"
-            last_name1 = hyphenated_parts[1]  # "stein"
-            last_name2 = initial_parts[0]  # "stein" 
-            initials = initial_parts[1]  # "jp"
-            
-            # Split hyphenated name
-            first_parts = hyphenated_first.split('-')
-            if (last_name1 == last_name2 and 
-                len(initials) >= 2 and len(first_parts) >= 2 and
-                first_parts[0][0] == initials[0] and
-                first_parts[1][0] == initials[1]):
-                return True
-        return False
+        
+        if last_name1 == last_name2 and initial1 == first_name2[0]:
+            return True
     
-    # Special case: Handle hyphenated first names vs initials in both directions
+    # Reverse case: "First Last" vs "F. Last"
+    # e.g., "Da Yu" vs "D. Yu", "John Smith" vs "J. Smith"  
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0]) > 1 and len(parts2[0].rstrip('.')) == 1 and
+        len(parts1[1]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "First Last" format, parts2 is "F. Last" format
+        first_name1 = parts1[0]  # "da"
+        last_name1 = parts1[1]  # "yu"
+        initial2 = parts2[0].rstrip('.')  # "d"
+        last_name2 = parts2[1]  # "yu"
+        
+        if last_name1 == last_name2 and first_name1[0] == initial2:
+            return True
+    
+    # Special case: Handle hyphenated first names vs initials
     # e.g., "Stein JP" vs "Jan-Philipp Stein"
-    if (_matches_hyphenated_vs_initials(parts1, parts2) or 
-        _matches_hyphenated_vs_initials(parts2, parts1)):
-        return True
-
-    # Helper function for "Last I/FI" vs "F. I. Last" patterns
-    def _matches_last_initials_vs_initials_last(last_initials_parts, initials_last_parts):
-        """
-        Check if "Last I/FI" format matches "F. I. Last" format
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        len(parts1[1]) == 2 and '-' in parts2[0] and len(parts2[1]) > 1):
+        # parts1 is "Last FI" format, parts2 is "First-Second Last" format
+        last_name1 = parts1[0]  # "Stein"
+        initials1 = parts1[1]  # "JP"
+        hyphenated_first2 = parts2[0]  # "Jan-Philipp" 
+        last_name2 = parts2[1]  # "Stein"
         
-        Args:
-            last_initials_parts: Parts like ["fang", "g"] or ["digman", "jm"] (Last I/FI format)
-            initials_last_parts: Parts like ["g.", "fang"] or ["j.", "m.", "digman"] (F. I. Last format)
-            
-        Returns:
-            True if they match, False otherwise
-        """
-        if (len(last_initials_parts) == 2 and len(initials_last_parts) >= 2 and 
-            len(last_initials_parts[1]) >= 1 and all(len(p.rstrip('.')) == 1 for p in initials_last_parts[:-1]) and 
-            len(initials_last_parts[-1]) > 1):
-            
-            last_name1 = last_initials_parts[0]  # "fang" or "digman"
-            initials1 = last_initials_parts[1]  # "g" or "jm"
-            last_name2 = initials_last_parts[-1]  # "fang" or "digman"
-            initials2 = [p.rstrip('.') for p in initials_last_parts[:-1]]  # ["g"] or ["j", "m"]
-            
-            if last_name1 == last_name2:
-                # Handle both single initials and multiple initials with middle initial omission
-                if len(initials1) == 1:
-                    # Single initial case: "Fang G" vs "G. Fang"
-                    if len(initials2) == 1 and initials1 == initials2[0]:
-                        return True
-                else:
-                    # Multiple initials case: allow middle initial omission
-                    if (len(initials2) >= 1 and initials1[0] == initials2[0] and
-                        (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
-                         len(initials2) == 1)):  # Middle initial omitted in initials2
-                        return True
-        return False
+        # Split hyphenated name
+        first_parts = hyphenated_first2.split('-')
+        if (last_name1 == last_name2 and 
+            len(initials1) >= 2 and len(first_parts) >= 2 and
+            initials1[0] == first_parts[0][0] and
+            initials1[1] == first_parts[1][0]):
+            return True
     
-    # Special case: Handle "Last I/FI" vs "F. I. Last" patterns in both directions
+    if (len(parts1) == 2 and len(parts2) == 2 and 
+        '-' in parts1[0] and len(parts1[1]) > 1 and len(parts2[1]) == 2):
+        # parts1 is "First-Second Last" format, parts2 is "Last FI" format  
+        hyphenated_first1 = parts1[0]  # "Jan-Philipp"
+        last_name1 = parts1[1]  # "Stein"
+        last_name2 = parts2[0]  # "Stein"
+        initials2 = parts2[1]  # "JP"
+        
+        # Split hyphenated name
+        first_parts = hyphenated_first1.split('-')
+        if (last_name1 == last_name2 and 
+            len(initials2) >= 2 and len(first_parts) >= 2 and
+            first_parts[0][0] == initials2[0] and
+            first_parts[1][0] == initials2[1]):
+            return True
+
+    # Special case: Handle "Last I/FI" vs "F. I. Last" patterns (with periods)
     # e.g., "Fang G" vs "G. Fang", "Digman JM" vs "J. M. Digman", "Kaelbling LP" vs "L. Kaelbling"
-    if (_matches_last_initials_vs_initials_last(parts1, parts2) or 
-        _matches_last_initials_vs_initials_last(parts2, parts1)):
-        return True
+    if (len(parts1) == 2 and len(parts2) >= 2 and 
+        len(parts1[1]) >= 1 and all(len(p.rstrip('.')) == 1 for p in parts2[:-1]) and len(parts2[-1]) > 1):
+        # parts1 is "Last I/FI" format, parts2 is "F. I. Last" format
+        last_name1 = parts1[0]  # "Fang" or "Digman"
+        initials1 = parts1[1]  # "G" or "JM"
+        last_name2 = parts2[-1]  # "Fang" or "Digman"
+        initials2 = [p.rstrip('.') for p in parts2[:-1]]  # ["G"] or ["J", "M"]
+        
+        if last_name1 == last_name2:
+            # Handle both single initials and multiple initials with middle initial omission
+            if len(initials1) == 1:
+                # Single initial case: "Fang G" vs "G. Fang"
+                if len(initials2) == 1 and initials1 == initials2[0]:
+                    return True
+            else:
+                # Multiple initials case: allow middle initial omission
+                if (len(initials2) >= 1 and initials1[0] == initials2[0] and
+                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
+                     len(initials2) == 1)):  # Middle initial omitted in parts2
+                    return True
+    
+    if (len(parts1) >= 2 and len(parts2) == 2 and 
+        all(len(p.rstrip('.')) == 1 for p in parts1[:-1]) and len(parts1[-1]) > 1 and len(parts2[1]) >= 1):
+        # parts1 is "F. I. Last" format, parts2 is "Last I/FI" format  
+        last_name1 = parts1[-1]  # "Fang" or "Digman"
+        initials1 = [p.rstrip('.') for p in parts1[:-1]]  # ["G"] or ["J", "M"]
+        last_name2 = parts2[0]  # "Fang" or "Digman"
+        initials2 = parts2[1]  # "G" or "JM"
+        
+        if last_name1 == last_name2:
+            # Handle both single initials and multiple initials with middle initial omission
+            if len(initials2) == 1:
+                # Single initial case: "G. Fang" vs "Fang G"
+                if len(initials1) == 1 and initials1[0] == initials2:
+                    return True
+            else:
+                # Multiple initials case: allow middle initial omission
+                if (len(initials1) >= 1 and initials1[0] == initials2[0] and
+                    (len(initials1) == len(initials2) and all(initials1[i] == initials2[i] for i in range(len(initials1))) or
+                     len(initials1) == 1)):  # Middle initial omitted in parts1
+                    return True
 
     # Special case: Handle "LastName FM" vs "FirstName MiddleInitial. LastName" patterns
     # e.g., "Kostick-Quenet KM" vs "Kristin M. Kostick-Quenet"
@@ -880,8 +1037,28 @@ def is_name_match(name1: str, name2: str) -> bool:
                         return True
         
         elif len(init_parts) == 3 and len(name_parts) == 3:
+            # Check for "Last, First Middle" vs "First Middle Last" format
+            # e.g., "ong, c. s." vs "cheng soon ong"
+            if (len(init_parts[0]) > 1 and  # Last name
+                len(init_parts[1].rstrip('.')) == 1 and  # First initial
+                len(init_parts[2].rstrip('.')) == 1 and  # Middle initial
+                len(name_parts[0]) > 1 and len(name_parts[1]) > 1 and len(name_parts[2]) > 1):
+                
+                last_name_cited = init_parts[0].rstrip(',')  # "ong" (remove comma)
+                first_initial_cited = init_parts[1].rstrip('.')  # "c"
+                middle_initial_cited = init_parts[2].rstrip('.')  # "s"
+                
+                first_name_correct = name_parts[0]  # "cheng"
+                middle_name_correct = name_parts[1]  # "soon"
+                last_name_correct = name_parts[2]  # "ong"
+                
+                if (last_name_cited == last_name_correct and
+                    first_initial_cited == first_name_correct[0] and
+                    middle_initial_cited == middle_name_correct[0]):
+                    return True
+            
             # Standard 3-part case: ['g.', 'v.', 'horn'] vs ['grant', 'van', 'horn']
-            if (len(init_parts[0].rstrip('.')) == 1 and len(init_parts[1].rstrip('.')) == 1 and len(init_parts[2]) > 1 and
+            elif (len(init_parts[0].rstrip('.')) == 1 and len(init_parts[1].rstrip('.')) == 1 and len(init_parts[2]) > 1 and
                 len(name_parts[0]) > 1 and len(name_parts[1]) > 1 and len(name_parts[2]) > 1):
                 
                 first_initial = init_parts[0].rstrip('.')
@@ -1022,35 +1199,31 @@ def is_name_match(name1: str, name2: str) -> bool:
             first_initial1 == initials2[0]):  # Only check first initial, allow middle to be omitted
             return True
     
-    # Helper function for "Last I" vs "First Last" patterns
-    def _matches_last_initial_vs_first_last(last_initial_parts, first_last_parts):
-        """
-        Check if "Last I" format matches "First Last" format
+    # Special case: Handle "Last I" vs "First Last" patterns 
+    # e.g., "Alessi C" vs "Carlo Alessi", "Fang G" vs "Guoxin Fang"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[1]) == 1 and len(parts2[0]) > 1 and len(parts2[1]) > 1):
+        # parts1 is "Last I" format, parts2 is "First Last" format
+        last_name1 = parts1[0]  # "Alessi"
+        initial1 = parts1[1]  # "C"
+        first_name2 = parts2[0]  # "Carlo"
+        last_name2 = parts2[1]  # "Alessi"
         
-        Args:
-            last_initial_parts: Parts like ["alessi", "c"] (Last I format)
-            first_last_parts: Parts like ["carlo", "alessi"] (First Last format)
-            
-        Returns:
-            True if they match, False otherwise
-        """
-        if (len(last_initial_parts) == 2 and len(first_last_parts) == 2 and
-            len(last_initial_parts[1]) == 1 and len(first_last_parts[0]) > 1 and len(first_last_parts[1]) > 1):
-            
-            last_name1 = last_initial_parts[0]  # "alessi"
-            initial = last_initial_parts[1]  # "c"
-            first_name = first_last_parts[0]  # "carlo"
-            last_name2 = first_last_parts[1]  # "alessi"
-            
-            if last_name1 == last_name2 and initial == first_name[0]:
-                return True
-        return False
+        if last_name1 == last_name2 and initial1 == first_name2[0]:
+            return True
     
-    # Special case: Handle "Last I" vs "First Last" patterns in both directions
-    # e.g., "Alessi C" vs "Carlo Alessi", "Fang G" vs "Guoxin Fang" 
-    if (_matches_last_initial_vs_first_last(parts1, parts2) or 
-        _matches_last_initial_vs_first_last(parts2, parts1)):
-        return True
+    # Special case: Handle "First Last" vs "Last I" patterns 
+    # e.g., "Carlo Alessi" vs "Alessi C", "Guoxin Fang" vs "Fang G"
+    if (len(parts1) == 2 and len(parts2) == 2 and
+        len(parts1[0]) > 1 and len(parts1[1]) > 1 and len(parts2[1]) == 1):
+        # parts1 is "First Last" format, parts2 is "Last I" format
+        first_name1 = parts1[0]  # "Carlo"
+        last_name1 = parts1[1]  # "Alessi"
+        last_name2 = parts2[0]  # "Alessi"
+        initial2 = parts2[1]  # "C"
+        
+        if last_name1 == last_name2 and first_name1[0] == initial2:
+            return True
 
     # Special case: Handle "Last II" vs "First Second Last" patterns 
     # e.g., "Nazeer MS" vs "Muhammad Sunny Nazeer", "Thuruthel TG" vs "Thomas George Thuruthel"
@@ -1356,6 +1529,19 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     else:
         correct_names = correct_authors[:]  # Make a copy to avoid modifying original
     
+    # Clean up correct author names and handle potential duplicates
+    # Some databases may have duplicate entries or empty names
+    cleaned_correct_names = []
+    seen_names = set()
+    for name in correct_names:
+        name = str(name).strip() if name else ''
+        # Skip empty names and avoid duplicates
+        if name and name not in seen_names:
+            cleaned_correct_names.append(name)
+            seen_names.add(name)
+    
+    correct_names = cleaned_correct_names
+    
     # Helper function to detect "et al" variations
     def is_et_al_variant(text):
         """Check if text is purely an 'et al' variant"""
@@ -1435,13 +1621,18 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         # rather than comparing positionally, since author order can vary
         for i, cited_author in enumerate(cleaned_cited):
             author_found = False
+            matched_author = None
             for correct_author in correct_names:
                 if is_name_match(cited_author, correct_author):
                     author_found = True
+                    matched_author = correct_author
                     break
             
             if not author_found:
-                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_names[i] if i < len(correct_names) else 'N/A'}' (et al case)"
+                # Create a more informative error message that doesn't assume positional matching
+                # Show some example correct authors instead of a misleading positional match
+                example_authors = ', '.join(correct_names[:3]) + ('...' if len(correct_names) > 3 else '')
+                return False, f"Author {i+1} mismatch: '{cited_author}' not found in author list (et al case). Correct authors include: {example_authors}"
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
@@ -2112,31 +2303,59 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     # Clean and extract authors
                     author_part_clean = strip_latex_commands(author_part).strip()
                     
-                    # Handle organization authors (like "Learn Prompting." or "ProtectAI.")
-                    if author_part_clean and len(author_part_clean) < 50 and not '\\' in author_part_clean:
-                        # Remove trailing periods and clean up
-                        author_name = author_part_clean.rstrip('.')
+                    # Simple fix: just improve the organization detection without complex parsing
+                    # Remove year pattern first
+                    author_text_clean = re.sub(r'\s*\(\d{4}\)\.?$', '', author_part_clean).strip()
+                    
+                    # Better organization detection - check if it looks like multiple authors
+                    is_multi_author = (
+                        ', and ' in author_text_clean or  # "A, B, and C" format
+                        re.search(r'\w+,\s+[A-Z]\.', author_text_clean) or  # "Last, F." patterns
+                        (author_text_clean.count(',') >= 2 and len(author_text_clean) > 30)  # Multiple commas in longer text
+                    )
+                    
+                    if is_multi_author:
+                        # Parse multiple authors - use existing logic from parse_authors_with_initials
+                        try:
+                            parsed_authors = parse_authors_with_initials(author_text_clean)
+                            if parsed_authors and len(parsed_authors) > 1:
+                                # Clean up "and" prefixes and "et al" suffixes
+                                cleaned_authors = []
+                                for author in parsed_authors:
+                                    # Remove leading "and" 
+                                    author = re.sub(r'^and\s+', '', author.strip())
+                                    # Skip "et al" variants
+                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et']:
+                                        cleaned_authors.append(author)
+                                if cleaned_authors:
+                                    ref['authors'] = cleaned_authors
+                            else:
+                                # Fallback: simple comma split
+                                simple_authors = []
+                                for a in author_text_clean.split(','):
+                                    a = a.strip()
+                                    # Remove "and" prefix and skip short/empty entries
+                                    a = re.sub(r'^and\s+', '', a)
+                                    if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
+                                        simple_authors.append(a)
+                                if simple_authors:
+                                    ref['authors'] = simple_authors
+                        except Exception:
+                            # Fallback: simple comma split with cleanup
+                            simple_authors = []
+                            for a in author_text_clean.split(','):
+                                a = a.strip()
+                                # Remove "and" prefix and skip short/empty entries
+                                a = re.sub(r'^and\s+', '', a)
+                                if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
+                                    simple_authors.append(a)
+                            if simple_authors:
+                                ref['authors'] = simple_authors
+                    else:
+                        # Single organization author
+                        author_name = author_text_clean.rstrip('.')
                         if author_name and len(author_name) > 2:
                             ref['authors'] = [author_name]
-                    elif author_part_clean and not author_part_clean.endswith('.'):
-                        # Parse author names - handle comma-separated list for regular authors
-                        if ', and ' in author_part_clean:
-                            author_names = re.split(r', and |, ', author_part_clean)
-                        else:
-                            author_names = [name.strip() for name in author_part_clean.split(',')]
-                        
-                        # Clean up author names
-                        authors = []
-                        for name in author_names:
-                            name = name.strip()
-                            # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
-                            name = re.sub(r'^and\s+', '', name)
-                            if name and len(name) > 2 and not name in ['et~al', 'et al', 'et~al.']:
-                                # Remove trailing dots
-                                name = name.rstrip('.')
-                                authors.append(name)
-                        if authors:
-                            ref['authors'] = authors
                     
                     # Second part is usually title  
                     if len(parts) >= 2:
@@ -2161,7 +2380,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 # Extract URL if present
                 url_match = re.search(r'\\url\{([^}]+)\}', content)
                 if url_match:
-                    ref['url'] = url_match.group(1)
+                    from utils.url_utils import clean_url_punctuation
+                    ref['url'] = clean_url_punctuation(url_match.group(1))
             
             # Extract title from \showarticletitle{} or \bibinfo{title}{}
             # Use the same brace-matching approach for titles to handle nested braces
@@ -2222,7 +2442,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             if not ref['url']:
                 url_match = re.search(r'\\url\{([^}]+)\}', content)
                 if url_match:
-                    ref['url'] = url_match.group(1)
+                    from utils.url_utils import clean_url_punctuation
+                    ref['url'] = clean_url_punctuation(url_match.group(1))
             
             # Extract DOI from \href{https://doi.org/...}
             if not ref.get('doi'):
@@ -2873,20 +3094,60 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'case': 'ieee international conference on automation science and engineering',
             'ddcls': 'data driven control and learning systems conference',
             
+            # Physics journal abbreviations - very common in academic literature
+            'phys.': 'physics',  # Changed from 'physical' to 'physics' to match "Physics Letters"
+            'rev.': 'review',
+            'phys. rev.': 'physical review',  # But keep this as 'physical review' since that's the correct name
+            'phys. rev. lett.': 'physical review letters',
+            'phys. rev. a': 'physical review a',
+            'phys. rev. b': 'physical review b', 
+            'phys. rev. c': 'physical review c',
+            'phys. rev. d': 'physical review d',
+            'phys. rev. e': 'physical review e',
+            'phys. lett.': 'physics letters',
+            'phys. lett. b': 'physics letters b',
+            'nucl. phys.': 'nuclear physics',
+            'nucl. phys. a': 'nuclear physics a',
+            'nucl. phys. b': 'nuclear physics b',
+            'j. phys.': 'journal of physics',
+            'ann. phys.': 'annals of physics',
+            'mod. phys. lett.': 'modern physics letters',
+            'eur. phys. j.': 'european physical journal',
+            
+            # Other common science journal abbreviations
+            'nature phys.': 'nature physics',
+            'nat. phys.': 'nature physics',
+            'science adv.': 'science advances',
+            'sci. adv.': 'science advances',
+            'proc. natl. acad. sci.': 'proceedings of the national academy of sciences',
+            'pnas': 'proceedings of the national academy of sciences',
+            'natl.': 'national',
+            'acad.': 'academy',
+            
             # Special cases that don't follow standard acronym patterns
             'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
             'nips': 'neural information processing systems',     # old name for neurips
             'nsdi': 'networked systems design and implementation',  # USENIX NSDI
         }
         
-        # Apply abbreviation expansion
-        words = text.split()
+        # Apply abbreviation expansion - handle multi-word phrases first
+        text_lower = text.lower()
+        expanded_text = text_lower
+        
+        # First pass: handle multi-word abbreviations (longest first to avoid partial matches)
+        multi_word_abbrevs = {k: v for k, v in common_abbrevs.items() if ' ' in k}
+        for abbrev in sorted(multi_word_abbrevs.keys(), key=len, reverse=True):
+            if abbrev in expanded_text:
+                expanded_text = expanded_text.replace(abbrev, multi_word_abbrevs[abbrev])
+        
+        # Second pass: handle single word abbreviations
+        words = expanded_text.split()
         expanded_words = []
         
         for word in words:
             word_lower = word.lower()
             
-            # First try exact match with the word as-is (including periods)
+            # Check for single-word abbreviations
             if word_lower in common_abbrevs:
                 expanded_words.append(common_abbrevs[word_lower])
             else:
@@ -3429,3 +3690,29 @@ def deduplicate_urls(urls: List[str]) -> List[str]:
     
     # Return all unique URLs
     return list(normalized_urls.values())
+
+
+def is_year_substantially_different(cited_year: int, correct_year: int, context: dict = None) -> tuple:
+    """
+    Check if two years are different and flag all mismatches as warnings for review.
+    
+    Args:
+        cited_year: Year as cited in the reference
+        correct_year: Year from authoritative source
+        context: Optional context dict (preserved for compatibility but not used)
+        
+    Returns:
+        Tuple of (is_different: bool, warning_message: str or None)
+        - is_different: True if years differ and should be flagged as warning
+        - warning_message: Simple message about the year mismatch, or None if years match
+    """
+    if not cited_year or not correct_year:
+        return False, None
+    
+    # If years are the same, no warning needed
+    if cited_year == correct_year:
+        return False, None
+    
+    # Any year difference should be flagged as a warning for manual review
+    warning_msg = f"Year mismatch: cited as {cited_year} but actually {correct_year}"
+    return True, warning_msg

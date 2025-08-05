@@ -206,13 +206,39 @@ def clean_url(url: str) -> str:
     # Remove leading/trailing whitespace
     url = url.strip()
     
-    # Remove common tracking parameters
-    if '?' in url:
+    # Note: Preserving query parameters for all URLs now
+    # Previously this function removed query parameters for non-DOI URLs,
+    # but this was causing issues with OpenReview and other URLs that need their parameters
+    # Only remove query parameters for DOI URLs where they're typically not needed
+    if '?' in url and 'doi.org' in url:
         base_url, params = url.split('?', 1)
-        # Keep only essential parameters (like DOI redirects)
-        if 'doi.org' in base_url:
-            return base_url
-        # For other URLs, might want to preserve specific params
         url = base_url
+    
+    return url
+
+
+def clean_url_punctuation(url: str) -> str:
+    """
+    Clean trailing punctuation from URLs that often gets included during extraction.
+    
+    This function removes trailing punctuation that commonly gets extracted with URLs
+    from academic references (periods, commas, semicolons, etc.) while preserving
+    legitimate URL characters including query parameters.
+    
+    Args:
+        url: URL string that may have trailing punctuation
+        
+    Returns:
+        Cleaned URL with trailing punctuation removed
+    """
+    if not url:
+        return ""
+    
+    # Remove leading/trailing whitespace
+    url = url.strip()
+    
+    # Remove trailing punctuation that's commonly part of sentence structure
+    # but preserve legitimate URL characters
+    url = url.rstrip('.,;!?)')
     
     return url

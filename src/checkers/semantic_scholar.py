@@ -251,14 +251,54 @@ class NonArxivReferenceChecker:
         url = reference.get('url', '')
         raw_text = reference.get('raw_text', '')
         
-        # If we have a DOI, try to get the paper directly
+        # First, check if we have a Semantic Scholar URL (API format)
+        if url and 'api.semanticscholar.org/CorpusID:' in url:
+            # Extract CorpusID from API URL
+            import re
+            corpus_match = re.search(r'CorpusID:(\d+)', url)
+            if corpus_match:
+                corpus_id = corpus_match.group(1)
+                # Try to get the paper directly by CorpusID
+                endpoint = f"{self.base_url}/paper/CorpusId:{corpus_id}"
+                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"}
+                
+                for attempt in range(self.max_retries):
+                    try:
+                        response = requests.get(endpoint, headers=self.headers, params=params)
+                        
+                        if response.status_code == 429:
+                            wait_time = self.request_delay * (self.backoff_factor ** attempt)
+                            logger.debug(f"Rate limit exceeded. Retrying in {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                        
+                        if response.status_code == 200:
+                            paper_data = response.json()
+                            logger.debug(f"Found paper by Semantic Scholar CorpusID: {corpus_id}")
+                            break
+                        elif response.status_code == 404:
+                            logger.debug(f"Paper not found for CorpusID: {corpus_id}")
+                            break
+                        else:
+                            logger.warning(f"Unexpected status code {response.status_code} for CorpusID: {corpus_id}")
+                            break
+                            
+                    except requests.RequestException as e:
+                        logger.warning(f"Request failed for CorpusID {corpus_id}: {e}")
+                        if attempt == self.max_retries - 1:
+                            break
+                        else:
+                            time.sleep(self.request_delay * (self.backoff_factor ** attempt))
+        
+        # Initialize DOI variable for later use
         doi = None
         if 'doi' in reference and reference['doi']:
             doi = reference['doi']
         elif url:
             doi = self.extract_doi_from_url(url)
-            
-        if doi:
+        
+        # If we don't have paper data yet, try DOI
+        if not paper_data and doi:
             # Try to get the paper by DOI
             paper_data = self.get_paper_by_doi(doi)
             
@@ -467,9 +507,9 @@ class NonArxivReferenceChecker:
                         'ref_authors_correct': ', '.join([author.get('name', '') for author in paper_data.get('authors', [])])
                     })
         
-        # Verify year
+        # Verify year using flexible validation
         paper_year = paper_data.get('year')
-        if year and paper_year and year != paper_year:
+        if year and paper_year:
             # Check if we have an exact ArXiv ID match for additional context
             arxiv_id_match = False
             if url and 'arxiv.org/abs/' in url:
@@ -480,15 +520,17 @@ class NonArxivReferenceChecker:
                     found_arxiv_id = external_ids.get('ArXiv')
                     arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
             
-            warning_details = f"Year mismatch: cited as {year} but actually {paper_year}"
-            if arxiv_id_match:
-                warning_details += " (Note: ArXiv ID matches exactly - this may be due to conference vs. preprint year difference)"
+            # Use flexible year validation
+            from utils.text_utils import is_year_substantially_different
+            context = {'arxiv_match': arxiv_id_match}
+            is_different, warning_message = is_year_substantially_different(year, paper_year, context)
             
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': warning_details,
-                'ref_year_correct': paper_year
-            })
+            if is_different and warning_message:
+                errors.append({
+                    'warning_type': 'year',
+                    'warning_details': warning_message,
+                    'ref_year_correct': paper_year
+                })
         
         # Verify venue
         cited_venue = reference.get('journal', '') or reference.get('venue', '')

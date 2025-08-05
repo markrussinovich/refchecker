@@ -81,12 +81,17 @@ Instructions:
    - In BibTeX, the "author" field contains author names separated by " and " (not commas)
    - Individual author names may be in "Last, First" format (e.g., "Smith, John")
    - Multiple authors are separated by " and " (e.g., "Smith, John and Doe, Jane")
+   - SPECIAL CASE for collaborations: Handle "Last, First and others" pattern correctly
+     * author = {"Khachatryan, Vardan and others"} → ONE explicit author plus et al: "Vardan Khachatryan*et al"
+     * author = {"Smith, John and others"} → ONE explicit author plus et al: "John Smith*et al"
+     * The "Last, First and others" pattern indicates a collaboration paper where only the first author is listed explicitly
    - EXAMPLES:
      * author = {"Dolan, Brian P."} → ONE author: "Dolan, Brian P."
      * author = {"Smith, John and Doe, Jane"} → TWO authors: "Smith, John*Doe, Jane"
      * author = {"Arnab, Anurag and Dehghani, Mostafa and Heigold, Georg"} → THREE authors: "Arnab, Anurag*Dehghani, Mostafa*Heigold, Georg"
+     * author = {"Khachatryan, Vardan and others"} → ONE explicit author plus et al: "Vardan Khachatryan*et al"
    - Use asterisks (*) to separate individual authors in your output
-   - Preserve the exact name format (including commas within names)
+   - For "Last, First" format, convert to "First Last" for readability (e.g., "Smith, John" → "John Smith")
    - If a BibTeX entry has NO author field, output an empty author field (nothing before the first #)
    - Do NOT infer or guess authors based on title or context - only use what is explicitly stated
 7. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear
