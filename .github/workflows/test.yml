@@ -1,9 +1,10 @@
 name: Tests
 
 on:
-  pull_request:
-    branches: [ main ]
   push:
+    branches: [ '**' ]
+    branches-ignore: [ main ]  # Don't run on main (release workflow handles that)
+  pull_request:
     branches: [ main ]
 
 jobs:
