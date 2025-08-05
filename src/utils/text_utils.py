@@ -1630,9 +1630,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             
             if not author_found:
                 # Create a more informative error message that doesn't assume positional matching
-                # Show some example correct authors instead of a misleading positional match
-                example_authors = ', '.join(correct_names[:3]) + ('...' if len(correct_names) > 3 else '')
-                return False, f"Author {i+1} mismatch: '{cited_author}' not found in author list (et al case). Correct authors include: {example_authors}"
+                # Show the full list of correct authors instead of truncating
+                full_author_list = ', '.join(correct_names)
+                return False, f"Author {i+1} mismatch: '{cited_author}' not found in author list (et al case). Correct authors include: {full_author_list}"
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     

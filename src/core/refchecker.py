@@ -5444,7 +5444,7 @@ class ArxivReferenceChecker:
             
             if has_unverified_error:
                 self.total_unverified_refs += 1
-                self._display_unverified_error(reference, reference_url, debug_mode, print_output)
+                self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
             self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
@@ -5570,6 +5570,78 @@ class ArxivReferenceChecker:
                 from utils.url_utils import clean_url_punctuation
                 clean_ref_url = clean_url_punctuation(ref_url)
                 print(f"          URL: {clean_ref_url}")
+
+    def _display_unverified_error_with_subreason(self, reference, reference_url, errors, debug_mode, print_output):
+        """Display the unverified error message with citation details and subreason"""
+        if not debug_mode and print_output:
+            print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+            
+            # Extract and display the subreason from unverified errors
+            unverified_errors = [e for e in errors if e.get('error_type') == 'unverified']
+            if unverified_errors:
+                error_details = unverified_errors[0].get('error_details', '')
+                if error_details:
+                    subreason = self._categorize_unverified_reason(error_details)
+                    print(f"          Subreason: {subreason}")
+            
+            year_str = self._format_year_string(reference.get('year'))
+            
+            # Apply LaTeX cleaning to authors for display
+            authors = reference.get('authors', [])
+            if authors:
+                from utils.text_utils import strip_latex_commands
+                cleaned_authors = [strip_latex_commands(author) for author in authors]
+                authors_display = ', '.join(cleaned_authors)
+            else:
+                authors_display = 'Unknown authors'
+                
+            print(f"          Cited as: {authors_display} ({year_str})")
+            
+            # Only show URL if it exists and is different from reference_url
+            ref_url = reference.get('url', '').strip()
+            if ref_url and ref_url != reference_url:
+                # Clean trailing punctuation from URL display
+                from utils.url_utils import clean_url_punctuation
+                clean_ref_url = clean_url_punctuation(ref_url)
+                print(f"          URL: {clean_ref_url}")
+
+    def _categorize_unverified_reason(self, error_details):
+        """Categorize the unverified error into checker error or not found"""
+        error_details_lower = error_details.lower()
+        
+        # Checker/API errors
+        api_error_patterns = [
+            'api error', 'rate limit', 'http error', 'network error', 
+            'could not fetch', 'connection', 'timeout', 'server error',
+            'could not verify reference using any available api',
+            'database connection not available'
+        ]
+        
+        # Not found patterns  
+        not_found_patterns = [
+            'not found', 'could not be found', 'repository not found',
+            'web page not found', '404', 'invalid', 'too short or empty'
+        ]
+        
+        # Processing errors
+        processing_error_patterns = [
+            'error processing', 'error parsing', 'unexpected error'
+        ]
+        
+        for pattern in api_error_patterns:
+            if pattern in error_details_lower:
+                return "Checker had an error"
+                
+        for pattern in not_found_patterns:
+            if pattern in error_details_lower:
+                return "Paper not found by any checker"
+                
+        for pattern in processing_error_patterns:
+            if pattern in error_details_lower:
+                return "Checker had an error"
+        
+        # Default fallback
+        return "Paper not found by any checker"
     
     def _display_non_unverified_errors(self, errors, debug_mode, print_output):
         """Display all non-unverified errors and warnings"""
