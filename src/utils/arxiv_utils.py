@@ -111,11 +111,48 @@ def download_arxiv_source(arxiv_id):
                     main_tex_content = largest_file[1]
                     logger.debug(f"Using largest tex file: {largest_file[0]}")
             
-            # Combine all bib file contents
+            # Find which .bib files are actually referenced in the main tex file
             bib_content = None
-            if bib_files:
+            if bib_files and main_tex_content:
+                # Extract bibliography references from main tex file
+                referenced_bibs = []
+                bib_pattern = r'\\bibliography\{([^}]+)\}'
+                matches = re.findall(bib_pattern, main_tex_content)
+                
+                for match in matches:
+                    # Handle multiple bib files separated by commas
+                    bib_names = [name.strip() for name in match.split(',')]
+                    for bib_name in bib_names:
+                        # Add .bib extension if not present
+                        if not bib_name.endswith('.bib'):
+                            bib_name += '.bib'
+                        referenced_bibs.append(bib_name)
+                
+                # Use only referenced .bib files, or all if no references found
+                if referenced_bibs:
+                    used_bibs = []
+                    for bib_name in referenced_bibs:
+                        if bib_name in bib_files:
+                            used_bibs.append(bib_files[bib_name])
+                            logger.debug(f"Using referenced .bib file: {bib_name}")
+                        else:
+                            logger.debug(f"Referenced .bib file not found: {bib_name}")
+                    
+                    if used_bibs:
+                        bib_content = '\n\n'.join(used_bibs)
+                        logger.debug(f"Found {len(used_bibs)} referenced .bib files out of {len(bib_files)} total")
+                    else:
+                        # Fallback to all bib files if none of the referenced ones found
+                        bib_content = '\n\n'.join(bib_files.values())
+                        logger.debug(f"No referenced .bib files found, using all {len(bib_files)} .bib files")
+                else:
+                    # No \bibliography command found, use all bib files
+                    bib_content = '\n\n'.join(bib_files.values())
+                    logger.debug(f"No \\bibliography command found, using all {len(bib_files)} .bib files")
+            elif bib_files:
+                # No main tex file but have bib files
                 bib_content = '\n\n'.join(bib_files.values())
-                logger.debug(f"Found {len(bib_files)} .bib files")
+                logger.debug(f"Found {len(bib_files)} .bib files (no main tex to filter)")
             
             # Combine all bbl file contents  
             bbl_content = None

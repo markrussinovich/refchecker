@@ -1715,9 +1715,17 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if is_name_match(name1, name2):
         return True
     
-    # Clean and normalize both names
-    cleaned1 = clean_author_name(name1).strip().lower()
-    cleaned2 = clean_author_name(name2).strip().lower()
+    # Convert both names to consistent "First Middle Last" format for comparison
+    name1_formatted = format_author_for_display(name1)
+    name2_formatted = format_author_for_display(name2)
+    
+    # Try matching with formatted names
+    if is_name_match(name1_formatted, name2_formatted):
+        return True
+    
+    # Clean and normalize both formatted names
+    cleaned1 = clean_author_name(name1_formatted).strip().lower()
+    cleaned2 = clean_author_name(name2_formatted).strip().lower()
     
     parts1 = cleaned1.split()
     parts2 = cleaned2.split()
@@ -1725,7 +1733,7 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if not parts1 or not parts2:
         return False
     
-    # Enhanced matching for "P. Wawrzy'nski" vs "Pawel Wawrzynski" type cases
+    # Enhanced matching for various name format cases
     if len(parts1) == 2 and len(parts2) == 2:
         # Case 1: "P. Wawrzy'nski" vs "Pawel Wawrzynski"
         if (len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1):
@@ -1750,6 +1758,42 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
             if (first_name1[0] == initial2 and 
                 surname_similarity(surname1, surname2)):
                 return True
+    
+    # Handle 3-part names with middle names vs middle initials
+    elif len(parts1) == 3 and len(parts2) == 3:
+        first1, middle1, last1 = parts1
+        first2, middle2, last2 = parts2
+        
+        # Case 1: "Kenneth L. McMillan" vs "Kenneth Lauchlin McMillan"
+        if (len(middle1.rstrip('.')) == 1 and len(middle2) > 1):
+            middle_initial1 = middle1.rstrip('.')
+            if (first1 == first2 and
+                middle_initial1 == middle2[0] and
+                surname_similarity(last1, last2)):
+                return True
+        
+        # Case 2: "Kenneth Lauchlin McMillan" vs "Kenneth L. McMillan"
+        elif (len(middle1) > 1 and len(middle2.rstrip('.')) == 1):
+            middle_initial2 = middle2.rstrip('.')
+            if (first1 == first2 and
+                middle1[0] == middle_initial2 and
+                surname_similarity(last1, last2)):
+                return True
+    
+    # Handle mixed 2-part vs 3-part names (first middle last vs first last)
+    elif len(parts1) == 2 and len(parts2) == 3:
+        first1, last1 = parts1
+        first2, middle2, last2 = parts2
+        # "Kenneth McMillan" vs "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan"
+        if (first1 == first2 and surname_similarity(last1, last2)):
+            return True
+    
+    elif len(parts1) == 3 and len(parts2) == 2:
+        first1, middle1, last1 = parts1
+        first2, last2 = parts2
+        # "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan" vs "Kenneth McMillan"
+        if (first1 == first2 and surname_similarity(last1, last2)):
+            return True
     
     return False
 
@@ -2383,16 +2427,44 @@ def parse_bibtex_entries(bib_content):
     
     entries = []
     
-    # Pattern to match BibTeX entries
-    entry_pattern = r'@(\w+)\s*\{\s*([^,]+)\s*,\s*(.*?)\n\s*\}'
+    # Pattern to match BibTeX entries (excluding @string, @comment, @preamble)
+    # First find entry starts, then use brace counting for proper boundaries
+    entry_start_pattern = r'@(article|inproceedings|incproceedings|book|incollection|inbook|proceedings|techreport|mastersthesis|masterthesis|phdthesis|misc|unpublished|conference|manual|booklet|collection)\s*\{\s*([^,]+)\s*,'
     
-    # Find all entries
-    matches = re.finditer(entry_pattern, bib_content, re.DOTALL | re.IGNORECASE)
+    # Find entry starts and extract complete entries using brace counting
+    start_matches = list(re.finditer(entry_start_pattern, bib_content, re.DOTALL | re.IGNORECASE))
     
-    for match in matches:
-        entry_type = match.group(1).lower()
-        entry_key = match.group(2).strip()
-        fields_text = match.group(3)
+    for start_match in start_matches:
+        entry_type = start_match.group(1).lower()
+        entry_key = start_match.group(2).strip()
+        
+        # Find the complete entry by counting braces
+        start_pos = start_match.start()
+        brace_start = bib_content.find('{', start_pos)
+        if brace_start == -1:
+            continue
+            
+        # Count braces to find the matching closing brace
+        brace_count = 0
+        pos = brace_start
+        end_pos = -1
+        
+        while pos < len(bib_content):
+            if bib_content[pos] == '{':
+                brace_count += 1
+            elif bib_content[pos] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = pos
+                    break
+            pos += 1
+        
+        if end_pos == -1:
+            continue  # Malformed entry, skip
+            
+        # Extract fields text (everything between first comma and closing brace)
+        comma_pos = start_match.end()
+        fields_text = bib_content[comma_pos:end_pos].strip()
         
         # Parse fields using a more robust approach
         fields = {}

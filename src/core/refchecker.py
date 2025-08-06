@@ -4054,70 +4054,14 @@ class ArxivReferenceChecker:
         Returns:
             List of structured reference dictionaries
         """
-        import re
+        # Use the improved BibTeX parsing from text_utils
+        from utils.text_utils import extract_latex_references
         
-        # Pattern to match BibTeX entries: @type{key, ...}
-        # This handles nested braces properly
-        bibtex_pattern = r'@(\w+)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+        # Extract references using the improved parsing logic
+        references = extract_latex_references(bibliography_text)
         
-        entries = []
-        for match in re.finditer(bibtex_pattern, bibliography_text, re.DOTALL | re.IGNORECASE):
-            entry_type = match.group(1).lower()
-            entry_content = match.group(2)
-            
-            # Extract fields from the BibTeX entry
-            entry_data = self._parse_bibtex_entry(entry_type, entry_content)
-            if entry_data:
-                entries.append(entry_data)
-        
-        if not entries:
-            # Fallback: try simpler pattern if the above doesn't work
-            logger.debug("Complex BibTeX pattern failed, trying simpler approach")
-            # Split on @word{ patterns to find entry boundaries
-            parts = re.split(r'(?=@\w+\s*\{)', bibliography_text)
-            
-            for part in parts:
-                part = part.strip()
-                if not part or not part.startswith('@'):
-                    continue
-                    
-                # Find the entry type
-                type_match = re.match(r'@(\w+)\s*\{', part)
-                if not type_match:
-                    continue
-                
-                entry_type = type_match.group(1).lower()
-                
-                # Extract the content between the first { and the last }
-                # This is a simplified approach but should work for most cases
-                brace_start = part.find('{')
-                if brace_start == -1:
-                    continue
-                
-                # Find the matching closing brace
-                brace_count = 0
-                content_end = -1
-                for i, char in enumerate(part[brace_start:], brace_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            content_end = i
-                            break
-                
-                if content_end == -1:
-                    # No matching brace found, take everything after first {
-                    entry_content = part[brace_start + 1:]
-                else:
-                    entry_content = part[brace_start + 1:content_end]
-                
-                entry_data = self._parse_bibtex_entry(entry_type, entry_content)
-                if entry_data:
-                    entries.append(entry_data)
-        
-        logger.debug(f"Extracted {len(entries)} BibTeX entries")
-        return entries
+        logger.debug(f"Extracted {len(references)} BibTeX references using improved parser")
+        return references
     
     def _parse_bibtex_entry(self, entry_type, content):
         """
