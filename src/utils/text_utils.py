@@ -2478,6 +2478,16 @@ def parse_bibtex_entries(bib_content):
             # Replace individual brace-protected words/phrases with just their content
             field_value = re.sub(r'\{([^}]+)\}', r'\1', field_value)
             
+            # Remove surrounding quotes (common in BibTeX field values)
+            # Handle both single and double quotes
+            while ((field_value.startswith('"') and field_value.endswith('"')) or 
+                   (field_value.startswith("'") and field_value.endswith("'"))):
+                inner_value = field_value[1:-1].strip()
+                if inner_value:
+                    field_value = inner_value
+                else:
+                    break
+            
             # Clean up the field value
             field_value = strip_latex_commands(field_value)
             fields[field_name.lower()] = field_value

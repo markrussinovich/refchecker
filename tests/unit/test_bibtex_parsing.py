@@ -240,6 +240,51 @@ url={https://example.com}
         self.assertEqual(len(ref['authors']), 2)
         self.assertEqual(ref['authors'][0], 'Smith, John')
         self.assertEqual(ref['authors'][1], 'Doe, Jane')
+    
+    def test_espriu_mescia_author_parsing_regression(self):
+        """Test specific regression case: Espriu, Domenec and Mescia, Federico parsing"""
+        # Test the exact case from the GitHub issue
+        bib_content = '''@article{composite1,
+    author = "Espriu, Domenec and Mescia, Federico",
+    title = "{Unitarity and causality constraints in composite Higgs models}",
+    eprint = "1403.7386",
+    archivePrefix = "arXiv", 
+    primaryClass = "hep-ph",
+    doi = "10.1103/PhysRevD.90.015035",
+    year = "2014"
+}'''
+        
+        # Test direct BibTeX parsing
+        entries = parse_bibtex_entries(bib_content)
+        self.assertEqual(len(entries), 1)
+        
+        entry = entries[0]
+        
+        # Check that author field has quotes stripped
+        author_field = entry['fields']['author']
+        self.assertEqual(author_field, 'Espriu, Domenec and Mescia, Federico')
+        self.assertFalse(author_field.endswith('"'))  # No trailing quote
+        
+        # Test full LaTeX reference extraction
+        from utils.text_utils import extract_latex_references
+        refs = extract_latex_references(bib_content)
+        self.assertEqual(len(refs), 1)
+        
+        ref = refs[0]
+        
+        # Check that authors are correctly parsed as two separate authors
+        self.assertEqual(len(ref['authors']), 2)
+        self.assertEqual(ref['authors'][0], 'Espriu, Domenec')
+        self.assertEqual(ref['authors'][1], 'Mescia, Federico')
+        
+        # Check that neither author has trailing quotes
+        for author in ref['authors']:
+            self.assertFalse(author.endswith('"'))
+            self.assertFalse(author.endswith("'"))
+        
+        # Check title is also properly cleaned
+        self.assertEqual(ref['title'], 'Unitarity and causality constraints in composite Higgs models')
+        self.assertFalse(ref['title'].endswith('"'))
 
 
 if __name__ == '__main__':
