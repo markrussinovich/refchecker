@@ -98,6 +98,16 @@ class EnhancedHybridReferenceChecker:
             except Exception as e:
                 logger.warning(f"Enhanced Hybrid: Failed to initialize CrossRef: {e}")
         
+        # Initialize OpenReview checker
+        self.openreview = None
+        try:
+            from .openreview_checker import OpenReviewReferenceChecker
+            self.openreview = OpenReviewReferenceChecker()
+            logger.debug("Enhanced Hybrid: OpenReview checker initialized")
+        except Exception as e:
+            logger.warning(f"Enhanced Hybrid: Failed to initialize OpenReview: {e}")
+            self.openreview = None
+        
         # Google Scholar removed - using more reliable APIs only
         
         # Track API performance for adaptive selection
@@ -105,7 +115,8 @@ class EnhancedHybridReferenceChecker:
             'local_db': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openalex': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
-            'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0}
+            'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0}
         }
         
         # Track failed API calls for retry logic - OPTIMIZED CONFIGURATION
@@ -297,7 +308,17 @@ class EnhancedHybridReferenceChecker:
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('openalex', self.openalex, failure_type))
         
-        # Strategy 5: Try CrossRef if we haven't already (for non-DOI references)
+        # Strategy 5: Try OpenReview if URL suggests it's an OpenReview paper
+        if (self.openreview and 
+            hasattr(self.openreview, 'is_openreview_reference') and 
+            self.openreview.is_openreview_reference(reference)):
+            verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
+            if success:
+                return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout', 'server_error']:
+                failed_apis.append(('openreview', self.openreview, failure_type))
+        
+        # Strategy 6: Try CrossRef if we haven't already (for non-DOI references)
         if not self._should_try_doi_apis_first(reference) and self.crossref:
             verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
