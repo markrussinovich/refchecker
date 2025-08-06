@@ -81,6 +81,11 @@ def parse_authors_with_initials(authors_text):
     # Import regex at function level to avoid import issues
     import re
     
+    # Handle standalone "others" or "et al" cases that should return empty list
+    stripped_text = authors_text.strip().lower()
+    if stripped_text in ['others', 'and others', 'et al', 'et al.']:
+        return []
+    
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
@@ -94,10 +99,16 @@ def parse_authors_with_initials(authors_text):
             valid_names = []
             for part in and_parts:
                 part = part.strip()
-                if part and (len(part.split()) >= 2 or re.search(r'[A-Z]\.', part)):
+                # Check for et al indicators first
+                if part.lower() in ['others', 'et al', 'et al.', 'and others']:
+                    # Add et al if we have real authors, then stop
+                    if valid_names:
+                        valid_names.append("et al")
+                    break
+                elif part and (len(part.split()) >= 2 or re.search(r'[A-Z]\.', part)):
                     valid_names.append(part)
             
-            if len(valid_names) == len(and_parts):  # All parts look like valid names
+            if valid_names:  # Return if we found any valid names (including et al handling)
                 return valid_names
         
         # Case 2: "Lastname, Firstname and Lastname, Firstname" format (BibTeX format)
@@ -112,9 +123,11 @@ def parse_authors_with_initials(authors_text):
                 # Handle special cases without commas
                 if comma_count == 0:
                     # Check if this is "others", "et al", or similar
-                    if part.lower() in ['others', 'et al', 'et al.']:
-                        # Skip these entirely - they're not real author names
-                        continue
+                    if part.lower() in ['others', 'et al', 'et al.', 'and others']:
+                        # Convert to standard "et al" and add it, then stop processing
+                        if valid_author_parts:  # Only add if we have real authors
+                            valid_author_parts.append("et al")
+                        break  # Stop processing after et al indicator
                     else:
                         # This might be a name without lastname, firstname format
                         # For now, skip to be safe unless it's clearly a single name
@@ -3865,6 +3878,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         word_roots = {
             'robot': 'robotics', 'robotics': 'robot',
             'sci': 'science', 'science': 'sci',
+            'science': 'sciences', 'sciences': 'science',  # Handle singular/plural
             'adv': 'advanced', 'advanced': 'adv', 
             'intell': 'intelligent', 'intelligent': 'intell',
             'syst': 'systems', 'systems': 'syst',

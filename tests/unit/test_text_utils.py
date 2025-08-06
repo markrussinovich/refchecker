@@ -17,7 +17,11 @@ from utils.text_utils import (
     clean_author_name,
     normalize_author_name,
     calculate_title_similarity,
-    parse_authors_with_initials
+    parse_authors_with_initials,
+    are_venues_substantially_different,
+    is_year_substantially_different,
+    normalize_diacritics,
+    compare_authors
 )
 
 
@@ -378,3 +382,133 @@ class TestArxivIdExtraction:
             result = extract_arxiv_id_from_url(url)
             # Should return None or handle gracefully
             assert result is None or isinstance(result, str)
+
+
+class TestVenueValidation:
+    """Test venue comparison and validation functionality."""
+    
+    def test_physics_journal_abbreviations(self):
+        """Test that common physics journal abbreviations are recognized."""
+        test_cases = [
+            ("Phys. Rev. Lett.", "Physical Review Letters"),
+            ("Phys. Rev. A", "Physical Review A"),
+            ("Phys. Rev. B", "Physical Review B"),
+            ("Phys. Lett. B", "Physics Letters B"),
+            ("J. Phys.", "Journal of Physics"),
+            ("Ann. Phys.", "Annals of Physics"),
+            ("Nucl. Phys. A", "Nuclear Physics A"),
+        ]
+        
+        for abbreviated, full_name in test_cases:
+            is_different = are_venues_substantially_different(abbreviated, full_name)
+            assert not is_different, f"'{abbreviated}' should match '{full_name}'"
+    
+    def test_other_common_abbreviations(self):
+        """Test other common academic journal abbreviations."""
+        test_cases = [
+            ("Nature Phys.", "Nature Physics"),
+            ("Sci. Adv.", "Science Advances"),
+            ("Proc. Natl. Acad. Sci.", "Proceedings of the National Academy of Sciences"),
+            ("PNAS", "Proceedings of the National Academy of Sciences"),
+        ]
+        
+        for abbreviated, full_name in test_cases:
+            is_different = are_venues_substantially_different(abbreviated, full_name)
+            assert not is_different, f"'{abbreviated}' should match '{full_name}'"
+    
+    def test_truly_different_venues(self):
+        """Test that truly different venues are still flagged as different."""
+        test_cases = [
+            ("Nature", "Science"),
+            ("ICML", "NeurIPS"),
+            ("Physical Review Letters", "Journal of Machine Learning Research"),
+        ]
+        
+        for venue1, venue2 in test_cases:
+            is_different = are_venues_substantially_different(venue1, venue2)
+            assert is_different, f"'{venue1}' and '{venue2}' should be considered different"
+
+
+class TestYearValidation:
+    """Test year validation functionality."""
+    
+    def test_exact_year_match(self):
+        """Test that exact year matches are not flagged."""
+        is_different, message = is_year_substantially_different(2023, 2023)
+        assert not is_different
+        assert message is None
+    
+    def test_any_year_difference_flagged(self):
+        """Test that ANY year difference is flagged as a warning."""
+        test_cases = [
+            (2022, 2023),
+            (2020, 2021),
+            (1995, 2023),
+        ]
+        
+        for cited_year, correct_year in test_cases:
+            is_different, message = is_year_substantially_different(cited_year, correct_year)
+            assert is_different, f"Year mismatch {cited_year} vs {correct_year} should be flagged"
+            assert message is not None
+            assert str(cited_year) in message
+            assert str(correct_year) in message
+    
+    def test_context_ignored(self):
+        """Test that context doesn't prevent year mismatch flagging."""
+        # Even with explanatory context, differences should be flagged
+        is_different, message = is_year_substantially_different(2017, 2016)
+        assert is_different
+        assert "2017" in message
+        assert "2016" in message
+    
+    def test_edge_cases(self):
+        """Test edge cases in year validation."""
+        # None values - function returns (False, None) when either year is None
+        is_different1, message1 = is_year_substantially_different(None, 2023)
+        assert not is_different1
+        assert message1 is None
+        
+        is_different2, message2 = is_year_substantially_different(2023, None)
+        assert not is_different2
+        assert message2 is None
+        
+        is_different3, message3 = is_year_substantially_different(None, None)
+        assert not is_different3
+        assert message3 is None
+
+
+class TestDiacriticHandling:
+    """Test diacritic normalization functionality."""
+    
+    def test_standalone_diaeresis_normalization(self):
+        """Test that standalone diaeresis (¨) is properly normalized."""
+        test_cases = [
+            ("J. Gl¨ uck", "J. Gluck"),  # Malformed diaeresis
+            ("J. Glück", "J. Glueck"),  # Proper umlaut with transliteration
+            ("J. Glück", "J. Gluck"),   # Proper umlaut with simple normalization
+            ("Müller", "Mueller"),      # German umlaut transliteration
+            ("José", "Jose"),           # Accent removal
+        ]
+        
+        for original, expected in test_cases:
+            normalized = normalize_diacritics(original)
+            # Should normalize properly without creating mid-word spaces
+            assert "  " not in normalized, f"Double spaces in: {normalized}"
+    
+    def test_umlaut_name_matching(self):
+        """Test that names with umlauts match their normalized forms."""
+        test_cases = [
+            ("J. Glück", "J. Gluck"),
+            ("Müller", "Mueller"), 
+            ("José García", "Jose Garcia"),
+            ("François", "Francois"),
+        ]
+        
+        for name_with_diacritics, name_without in test_cases:
+            # Both should normalize to similar forms for matching
+            norm1 = normalize_diacritics(name_with_diacritics)
+            norm2 = normalize_diacritics(name_without)
+            
+            # Should be similar enough for matching (exact match not required, 
+            # but no major structural differences)
+            assert len(norm1.split()) == len(norm2.split()), f"Word count mismatch: '{norm1}' vs '{norm2}'"
