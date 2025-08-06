@@ -100,28 +100,43 @@ def parse_authors_with_initials(authors_text):
             if len(valid_names) == len(and_parts):  # All parts look like valid names
                 return valid_names
         
-        # Case 2: "Lastname, Initial and Lastname, Initial" format
+        # Case 2: "Lastname, Firstname and Lastname, Firstname" format (BibTeX format)
         elif ',' in authors_text and len(and_parts) > 1:
-            # Check if each "and" part contains exactly one comma (Lastname, Initial format)
+            # Check if each "and" part contains exactly one comma (Lastname, Firstname format)
+            # Allow special cases like "others", "et al" which don't have commas
             valid_author_parts = []
             for part in and_parts:
                 part = part.strip()
                 comma_count = part.count(',')
                 
-                # Should have exactly one comma for "Lastname, Initial" format
+                # Handle special cases without commas
+                if comma_count == 0:
+                    # Check if this is "others", "et al", or similar
+                    if part.lower() in ['others', 'et al', 'et al.']:
+                        # Skip these entirely - they're not real author names
+                        continue
+                    else:
+                        # This might be a name without lastname, firstname format
+                        # For now, skip to be safe unless it's clearly a single name
+                        if len(part.split()) >= 2:  # Multi-word name like "Joseph E"
+                            valid_author_parts.append(part)
+                        continue
+                
+                # Should have exactly one comma for "Lastname, Firstname" format
                 if comma_count == 1:
-                    # Validate it looks like "Lastname, Initial(s)" format
+                    # Validate it looks like "Lastname, Firstname" format
                     comma_parts = [p.strip() for p in part.split(',')]
                     if len(comma_parts) == 2:
-                        lastname, initials = comma_parts
-                        # Lastname should be letters, initials should be short (letters/periods/spaces)
-                        if (re.match(r'^[A-Za-z\s\-\']+$', lastname) and 
-                            re.match(r'^[A-Z\.\s]+$', initials) and 
-                            len(initials.replace('.', '').replace(' ', '')) <= 4):
+                        lastname, firstname = comma_parts
+                        # Both parts should contain only letters, spaces, hyphens, apostrophes, and periods
+                        if (re.match(r'^[A-Za-z\s\-\'.]+$', lastname) and 
+                            re.match(r'^[A-Za-z\s\-\'.]+$', firstname) and
+                            lastname and firstname):
                             valid_author_parts.append(part)
             
-            # If all parts are valid "Lastname, Initial" format, return them
-            if len(valid_author_parts) == len(and_parts):
+            # If we got valid author parts (even if not all parts were valid), use them
+            # This handles cases where some parts are "others" or similar non-author text
+            if len(valid_author_parts) >= 2:  # At least 2 valid authors
                 return valid_author_parts
     
     # Split on commas first for other formats
@@ -243,7 +258,7 @@ def parse_authors_with_initials(authors_text):
 
 def clean_author_name(author):
     """
-    Clean and normalize an author name
+    Clean and normalize an author name with Unicode support
     
     Args:
         author: Author name string
@@ -253,6 +268,53 @@ def clean_author_name(author):
     """
     if not isinstance(author, str):
         return str(author) if author is not None else ''
+    
+    import unicodedata
+    
+    # Normalize Unicode characters (e.g., combining diacritics)
+    author = unicodedata.normalize('NFKC', author)
+    
+    # Handle common Unicode escape sequences and LaTeX encodings
+    # Note: Order matters - process longer patterns first
+    unicode_replacements = [
+        (r'---', '—'),   # LaTeX em-dash (must come before en-dash)
+        (r'--', '–'),    # LaTeX en-dash  
+        (r'\\\'', "'"),  # LaTeX escaped apostrophe
+        (r"\\'", "'"),   # Alternative LaTeX apostrophe
+        (r"\'", "'"),    # Simple escaped apostrophe
+        (r'\\"', '"'),   # LaTeX escaped quote
+        (r'``', '"'),    # LaTeX open quotes
+        (r"''", '"'),    # LaTeX close quotes
+        (r'~', ' '),     # LaTeX non-breaking space
+    ]
+    
+    for latex_form, unicode_form in unicode_replacements:
+        author = re.sub(latex_form, unicode_form, author)
+    
+    # Handle specific Polish and other diacritics that might be escaped
+    polish_replacements = {
+        r'\\l': 'ł',
+        r'\\L': 'Ł', 
+        r'\\a': 'ą',
+        r'\\A': 'Ą',
+        r'\\c\{c\}': 'ć',
+        r'\\c\{C\}': 'Ć',
+        r'\\e': 'ę',
+        r'\\E': 'Ę',
+        r'\\n': 'ń',
+        r'\\N': 'Ń',
+        r'\\o': 'ó',
+        r'\\O': 'Ó',
+        r'\\s': 'ś',
+        r'\\S': 'Ś',
+        r'\\z\{z\}': 'ż',
+        r'\\z\{Z\}': 'Ż',
+        r'\\.z': 'ż',
+        r'\\.Z': 'Ż',
+    }
+    
+    for latex_form, unicode_form in polish_replacements.items():
+        author = re.sub(latex_form, unicode_form, author, flags=re.IGNORECASE)
     
     # Remove extra whitespace
     author = re.sub(r'\s+', ' ', author).strip()
@@ -273,6 +335,14 @@ def clean_author_name(author):
     # Remove numbers and superscripts
     author = re.sub(r'\d+', '', author)
     author = re.sub(r'[†‡§¶‖#*]', '', author)
+    
+    # Remove trailing periods that are not part of initials
+    # This handles cases like "M. Bowling." -> "M. Bowling"
+    # but preserves "Jr." or "Sr." and middle initials like "J. R."
+    if author.endswith('.') and not re.search(r'\b(Jr|Sr|III|IV|II)\.$', author, re.IGNORECASE):
+        # Check if the period is after a single letter (initial) at the end
+        if not re.search(r'\b[A-Z]\.$', author):
+            author = author.rstrip('.')
     
     # Clean up extra spaces
     author = re.sub(r'\s+', ' ', author).strip()
@@ -1285,11 +1355,27 @@ def is_name_match(name1: str, name2: str) -> bool:
         if reconstructed_no_periods == name2_no_periods:
             return True
         
+        # Handle middle initial/name omission: "Smith, John" vs "John P. Smith"
+        reconstructed_parts = reconstructed_name1.split()
+        name2_parts = name2_normalized.split()
+        if (len(reconstructed_parts) != len(name2_parts) and 
+            len(reconstructed_parts) >= 2 and len(name2_parts) >= 2 and
+            reconstructed_parts[-1] == name2_parts[-1] and  # Last names match
+            reconstructed_parts[0] == name2_parts[0]):      # First names match
+            return True
+        
         # Handle initial matching: "Smith, J." should match "John Smith"
         # Check if first part is a single initial that matches the first letter of name2's first part
         first_parts_comma = first1_comma.strip().rstrip('.')
         if (len(first_parts_comma) == 1 and len(parts2) >= 2 and 
             len(parts2[0]) > 1 and first_parts_comma.lower() == parts2[0][0].lower() and
+            last1_comma.lower() == parts2[-1].lower()):
+            return True
+        
+        # Handle reverse initial matching: "Khattab, Omar" should match "O. Khattab"  
+        # Check if name2's first part is a single initial that matches the first letter of the comma format's first part
+        if (len(parts2) >= 2 and len(parts2[0].rstrip('.')) == 1 and 
+            len(first_parts_comma) > 1 and first_parts_comma.lower()[0] == parts2[0].rstrip('.').lower() and
             last1_comma.lower() == parts2[-1].lower()):
             return True
         
@@ -1314,6 +1400,15 @@ def is_name_match(name1: str, name2: str) -> bool:
         if name1_no_periods == reconstructed_no_periods:
             return True
             
+        # Handle middle initial/name omission: "John P. Smith" vs "Smith, John"
+        name1_parts = name1_normalized.split()
+        reconstructed_parts = reconstructed_name2.split()
+        if (len(name1_parts) != len(reconstructed_parts) and 
+            len(name1_parts) >= 2 and len(reconstructed_parts) >= 2 and
+            name1_parts[-1] == reconstructed_parts[-1] and  # Last names match
+            name1_parts[0] == reconstructed_parts[0]):      # First names match
+            return True
+            
         # Handle initial matching: "John Smith" should match "Smith, J."
         # Check if second name's first part is a single initial that matches the first letter of name1's first part
         first_parts_comma = first2_comma.strip().rstrip('.')
@@ -1322,10 +1417,34 @@ def is_name_match(name1: str, name2: str) -> bool:
             last2_comma.lower() == parts1[-1].lower()):
             return True
         
+        # Handle reverse initial matching: "O. Khattab" should match "Khattab, Omar"
+        # Check if name1's first part is a single initial that matches the first letter of the comma format's first part
+        if (len(parts1) >= 2 and len(parts1[0].rstrip('.')) == 1 and 
+            len(first_parts_comma) > 1 and first_parts_comma.lower()[0] == parts1[0].rstrip('.').lower() and
+            last2_comma.lower() == parts1[-1].lower()):
+            return True
+        
         # Also try with reconstructing name1 parts
         if len(parts1) >= 2:
             name1_reconstructed = " ".join(parts1)
             if name1_reconstructed == reconstructed_name2:
+                return True
+
+    # Handle middle initial/name omission cases 
+    # e.g., "Srivathsan Koundinyan" vs "Srivathsan P. Koundinyan"
+    # or "John Smith" vs "John Michael Smith"
+    if len(parts1) != len(parts2) and parts1[-1] == parts2[-1]:
+        # Last names match, but different number of parts
+        # Check if the shorter name matches the longer name with middle parts omitted
+        shorter_parts = parts1 if len(parts1) < len(parts2) else parts2
+        longer_parts = parts2 if len(parts1) < len(parts2) else parts1
+        
+        # Must have at least first + last name (2 parts) for both
+        if len(shorter_parts) >= 2 and len(longer_parts) >= 2:
+            # First names must match
+            if shorter_parts[0].lower() == longer_parts[0].lower():
+                # Last names already confirmed to match above
+                # This is a middle initial/name omission case
                 return True
 
     # Compare last names (last parts) - they must match (for standard cases)
@@ -1510,6 +1629,118 @@ def is_name_match(name1: str, name2: str) -> bool:
     return True
 
 
+def surname_similarity(surname1: str, surname2: str) -> bool:
+    """
+    Check if two surnames are similar enough to be considered the same,
+    handling apostrophes and diacritic variations.
+    
+    Args:
+        surname1: First surname
+        surname2: Second surname
+        
+    Returns:
+        True if surnames are similar enough to match
+    """
+    if not surname1 or not surname2:
+        return False
+    
+    # Normalize both surnames
+    s1 = clean_author_name(surname1.strip().lower())
+    s2 = clean_author_name(surname2.strip().lower())
+    
+    # Direct match after cleaning
+    if s1 == s2:
+        return True
+    
+    # Remove apostrophes and compare
+    s1_no_apos = s1.replace("'", "").replace("'", "").replace("`", "")
+    s2_no_apos = s2.replace("'", "").replace("'", "").replace("`", "")
+    
+    if s1_no_apos == s2_no_apos:
+        return True
+    
+    # Handle Polish/diacritic variations: wawrzynski vs wawrzy'nski
+    # Remove diacritics and apostrophes
+    import unicodedata
+    
+    def remove_all_accents(text):
+        # Normalize to NFD (decomposed form) and remove combining characters
+        normalized = unicodedata.normalize('NFD', text)
+        without_accents = ''.join(c for c in normalized if not unicodedata.combining(c))
+        # Also remove apostrophes
+        return without_accents.replace("'", "").replace("'", "").replace("`", "")
+    
+    s1_clean = remove_all_accents(s1)
+    s2_clean = remove_all_accents(s2)
+    
+    if s1_clean == s2_clean:
+        return True
+    
+    # Check if one is a substring of the other (for compound surnames)
+    if len(s1_clean) > 3 and len(s2_clean) > 3:
+        if s1_clean in s2_clean or s2_clean in s1_clean:
+            return True
+    
+    return False
+
+
+def enhanced_name_match(name1: str, name2: str) -> bool:
+    """
+    Enhanced name matching that handles initial-to-full-name and surname variations.
+    
+    Args:
+        name1: First author name
+        name2: Second author name
+        
+    Returns:
+        True if names match with enhanced logic
+    """
+    if not name1 or not name2:
+        return False
+    
+    # First try the existing matching logic
+    if is_name_match(name1, name2):
+        return True
+    
+    # Clean and normalize both names
+    cleaned1 = clean_author_name(name1).strip().lower()
+    cleaned2 = clean_author_name(name2).strip().lower()
+    
+    parts1 = cleaned1.split()
+    parts2 = cleaned2.split()
+    
+    if not parts1 or not parts2:
+        return False
+    
+    # Enhanced matching for "P. Wawrzy'nski" vs "Pawel Wawrzynski" type cases
+    if len(parts1) == 2 and len(parts2) == 2:
+        # Case 1: "P. Wawrzy'nski" vs "Pawel Wawrzynski"
+        if (len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1):
+            initial1 = parts1[0].rstrip('.')
+            surname1 = parts1[1]
+            first_name2 = parts2[0]
+            surname2 = parts2[1]
+            
+            # Check if initial matches first name and surnames are similar
+            if (initial1 == first_name2[0] and 
+                surname_similarity(surname1, surname2)):
+                return True
+        
+        # Case 2: "Pawel Wawrzynski" vs "P. Wawrzy'nski"  
+        elif (len(parts1[0]) > 1 and len(parts2[0].rstrip('.')) == 1):
+            first_name1 = parts1[0]
+            surname1 = parts1[1]
+            initial2 = parts2[0].rstrip('.')
+            surname2 = parts2[1]
+            
+            # Check if initial matches first name and surnames are similar
+            if (first_name1[0] == initial2 and 
+                surname_similarity(surname1, surname2)):
+                return True
+    
+    return False
+
+
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
     """
     Compare author lists to check if they match.
@@ -1623,7 +1854,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             author_found = False
             matched_author = None
             for correct_author in correct_names:
-                if is_name_match(cited_author, correct_author):
+                if enhanced_name_match(cited_author, correct_author):
                     author_found = True
                     matched_author = correct_author
                     break
@@ -1656,14 +1887,20 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         cited_first = comparison_cited[0]
         correct_first = comparison_correct[0]
         
-        if not is_name_match(cited_first, correct_first):
-            return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
+        if not enhanced_name_match(cited_first, correct_first):
+            # Use consistent display format for both names
+            cited_display = format_author_for_display(cited_first)
+            correct_display = format_author_for_display(correct_first)
+            return False, f"First author mismatch: '{cited_display}' vs '{correct_display}'"
     
     # For complete verification, check all authors if reasonable number
     if len(comparison_cited) <= 5:  # Only do full check for reasonable author counts
         for i, (cited_author, correct_author) in enumerate(zip(comparison_cited, comparison_correct)):
-            if not is_name_match(cited_author, correct_author):
-                return False, f"Author {i+1} mismatch: '{cited_author}' vs '{correct_author}'"
+            if not enhanced_name_match(cited_author, correct_author):
+                # Use consistent display format for both names
+                cited_display = format_author_for_display(cited_author)
+                correct_display = format_author_for_display(correct_author)
+                return False, f"Author {i+1} mismatch: '{cited_display}' vs '{correct_display}'"
     
     return True, "Authors match"
 
@@ -1808,6 +2045,85 @@ def detect_latex_bibliography_format(text):
     }
 
 
+def detect_bibtex_format(text):
+    """
+    Detect if the bibliography text is in BibTeX format
+    
+    Args:
+        text: Bibliography text to analyze
+        
+    Returns:
+        bool: True if the text contains BibTeX entries
+    """
+    if not text:
+        return False
+    
+    # Look for BibTeX entry patterns: @type{key,
+    bibtex_pattern = r'@\w+\s*\{\s*[^,}]+\s*,'
+    matches = re.findall(bibtex_pattern, text, re.IGNORECASE)
+    
+    # Require at least 2 BibTeX entries to be confident
+    if len(matches) >= 2:
+        return True
+    
+    # Also check for common BibTeX entry types
+    common_types = ['@article', '@inproceedings', '@misc', '@book', '@incollection', '@phdthesis', '@mastersthesis', '@techreport']
+    type_count = 0
+    for entry_type in common_types:
+        if entry_type.lower() in text.lower():
+            type_count += 1
+    
+    # If we find multiple different BibTeX entry types, likely BibTeX format
+    return type_count >= 2
+
+
+def format_author_for_display(author_name):
+    """
+    Convert author name from 'Lastname, Firstname' to 'Firstname Lastname' format for display.
+    
+    Args:
+        author_name: Author name in various formats
+        
+    Returns:
+        Author name in 'Firstname Lastname' format
+    """
+    if not author_name:
+        return author_name
+    
+    author_name = author_name.strip()
+    
+    # Check if it's in "Lastname, Firstname" format
+    if ',' in author_name:
+        parts = [p.strip() for p in author_name.split(',', 1)]  # Split only on first comma
+        if len(parts) == 2:
+            lastname, firstname = parts
+            if lastname and firstname:
+                return f"{firstname} {lastname}"
+    
+    # Return as-is if not in the expected format
+    return author_name
+
+
+def format_authors_for_display(authors):
+    """
+    Convert a list of author names to display format ('Firstname Lastname').
+    
+    Args:
+        authors: List of author names
+        
+    Returns:
+        Comma-separated string of formatted author names
+    """
+    if not authors:
+        return ""
+    
+    if isinstance(authors, str):
+        authors = [authors]
+    
+    formatted_authors = [format_author_for_display(author) for author in authors]
+    return ', '.join(formatted_authors)
+
+
 def strip_latex_commands(text):
     """
     Strip LaTeX commands and markup from text
@@ -1821,8 +2137,10 @@ def strip_latex_commands(text):
     if not text:
         return ""
     
-    # Remove comments
-    text = re.sub(r'%.*', '', text)
+    # Remove LaTeX comments (% followed by text to end of line)
+    # But preserve URL-encoded characters like %20, %21, etc.
+    # Only treat % as comment start if it's followed by non-hex digits or whitespace
+    text = re.sub(r'%(?![0-9A-Fa-f]{2}).*', '', text)
     
     # Handle LaTeX accented characters first (before general command removal)
     latex_accents = {
@@ -1920,6 +2238,9 @@ def strip_latex_commands(text):
     
     # Remove citation commands but keep the keys
     text = re.sub(r'\\cite[pt]?\*?\{([^}]+)\}', r'[\1]', text)
+    
+    # Remove penalty commands (LaTeX line breaking hints)
+    text = re.sub(r'\\penalty\d+', '', text)
     
     # Remove common commands
     text = re.sub(r'\\(newline|linebreak|pagebreak|clearpage|newpage)\b', ' ', text)
@@ -2064,10 +2385,37 @@ def parse_bibtex_entries(bib_content):
         fields = {}
         
         # Split fields by looking for field = pattern
+        # Use a more sophisticated approach that doesn't match patterns inside braced values
         field_starts = []
+        
+        # First, find all potential field patterns
         field_pattern = r'(\w+)\s*='
-        for match in re.finditer(field_pattern, fields_text):
-            field_starts.append((match.group(1), match.start(), match.end()))
+        potential_matches = list(re.finditer(field_pattern, fields_text))
+        
+        # Filter out matches that are inside braced values by tracking brace depth
+        for match in potential_matches:
+            field_name = match.group(1)
+            match_pos = match.start()
+            
+            # Check if this match is inside braces by counting braces before it
+            text_before = fields_text[:match_pos]
+            brace_depth = 0
+            in_braces = False
+            
+            i = 0
+            while i < len(text_before):
+                if text_before[i] == '{':
+                    brace_depth += 1
+                    in_braces = True
+                elif text_before[i] == '}':
+                    brace_depth -= 1
+                    if brace_depth == 0:
+                        in_braces = False
+                i += 1
+            
+            # Only add this as a field start if we're not inside braces
+            if not in_braces or brace_depth == 0:
+                field_starts.append((field_name, match.start(), match.end()))
         
         for i, (field_name, _, end) in enumerate(field_starts):
             # Find the value part after the =
@@ -2310,6 +2658,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     # Better organization detection - check if it looks like multiple authors
                     is_multi_author = (
                         ', and ' in author_text_clean or  # "A, B, and C" format
+                        ' and ' in author_text_clean or    # "A and B" format
                         re.search(r'\w+,\s+[A-Z]\.', author_text_clean) or  # "Last, F." patterns
                         (author_text_clean.count(',') >= 2 and len(author_text_clean) > 30)  # Multiple commas in longer text
                     )
@@ -2319,11 +2668,13 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                         try:
                             parsed_authors = parse_authors_with_initials(author_text_clean)
                             if parsed_authors and len(parsed_authors) > 1:
-                                # Clean up "and" prefixes and "et al" suffixes
+                                # Clean up "and" prefixes, periods, and "et al" suffixes
                                 cleaned_authors = []
                                 for author in parsed_authors:
                                     # Remove leading "and" 
                                     author = re.sub(r'^and\s+', '', author.strip())
+                                    # Remove trailing periods that shouldn't be there
+                                    author = clean_author_name(author)
                                     # Skip "et al" variants
                                     if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et']:
                                         cleaned_authors.append(author)
@@ -2336,6 +2687,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                     a = a.strip()
                                     # Remove "and" prefix and skip short/empty entries
                                     a = re.sub(r'^and\s+', '', a)
+                                    # Clean author name (remove unnecessary periods)
+                                    a = clean_author_name(a)
                                     if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
                                         simple_authors.append(a)
                                 if simple_authors:
@@ -2347,13 +2700,15 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                 a = a.strip()
                                 # Remove "and" prefix and skip short/empty entries
                                 a = re.sub(r'^and\s+', '', a)
+                                # Clean author name (remove unnecessary periods)
+                                a = clean_author_name(a)
                                 if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
                                     simple_authors.append(a)
                             if simple_authors:
                                 ref['authors'] = simple_authors
                     else:
                         # Single organization author
-                        author_name = author_text_clean.rstrip('.')
+                        author_name = clean_author_name(author_text_clean)
                         if author_name and len(author_name) > 2:
                             ref['authors'] = [author_name]
                     
@@ -3032,6 +3387,10 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
     
+    # Clean LaTeX commands from both venues first
+    venue1 = strip_latex_commands(venue1)
+    venue2 = strip_latex_commands(venue2)
+    
     def expand_abbreviations(text):
         """Generic abbreviation expansion using common academic patterns"""
         # Common academic abbreviations mapping
@@ -3256,7 +3615,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         venue_lower = re.sub(r',?\s*\(\d{4}\)$', '', venue_lower)  # Years in parentheses
         venue_lower = re.sub(r"'\d{2}$", '', venue_lower)  # Year suffixes like 'CVPR'16'
         venue_lower = re.sub(r',?\s*vol\.?\s*\d+.*$', '', venue_lower)  # Volume info
-        venue_lower = re.sub(r',?\s*\d+\(\d+\).*$', '', venue_lower)  # Issue info
+        venue_lower = re.sub(r',?\s*\d+\s*\([^)]*\).*$', '', venue_lower)  # Issue info with optional spaces
         venue_lower = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_lower)  # Page info
         venue_lower = re.sub(r'\s*\(print\).*$', '', venue_lower)  # Print designation
         venue_lower = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_lower)  # Year.Print
