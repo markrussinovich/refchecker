@@ -558,9 +558,17 @@ class NonArxivReferenceChecker:
                 # For arXiv papers, suggest including the arXiv URL instead of venue
                 arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
                 
-                # Check if the reference already includes this ArXiv URL
+                # Check if the reference already includes this ArXiv URL or equivalent DOI
                 reference_url = reference.get('url', '')
-                if arxiv_url not in reference_url:
+                
+                # Check for direct arXiv URL match
+                has_arxiv_url = arxiv_url in reference_url
+                
+                # Also check for arXiv DOI URL (e.g., https://doi.org/10.48550/arxiv.2505.11595)
+                arxiv_doi_url = f"https://doi.org/10.48550/arxiv.{arxiv_id}"
+                has_arxiv_doi = arxiv_doi_url.lower() in reference_url.lower()
+                
+                if not (has_arxiv_url or has_arxiv_doi):
                     errors.append({
                         'warning_type': 'venue',
                         'warning_details': f"Reference should include arXiv URL: {arxiv_url}",

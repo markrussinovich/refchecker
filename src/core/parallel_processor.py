@@ -276,7 +276,8 @@ class ParallelReferenceProcessor:
         
         # Print reference info in the same format as sequential mode
         title = reference.get('title', 'Untitled')
-        authors = ', '.join(reference.get('authors', []))
+        from utils.text_utils import format_authors_for_display
+        authors = format_authors_for_display(reference.get('authors', []))
         year = reference.get('year', '')
         venue = reference.get('venue', '')
         url = reference.get('url', '')

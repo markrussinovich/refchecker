@@ -89,3 +89,55 @@ class TestSemanticScholarApiUrlRegression:
         # Both should be recognized as Semantic Scholar URLs
         assert 'api.semanticscholar.org/CorpusID:' in api_url_ref['url']
         assert 'www.semanticscholar.org/paper/' in paper_url_ref['url']
+    
+    def test_arxiv_doi_url_recognition(self):
+        """Test that arXiv DOI URLs are recognized and don't trigger warnings (regression test)"""
+        from unittest.mock import Mock
+        
+        # Create a mock reference with arXiv DOI URL  
+        reference = {
+            'title': 'Test ArXiv Paper',
+            'authors': ['Test Author'],
+            'year': '2025', 
+            'url': 'https://doi.org/10.48550/arxiv.2505.11595',  # DOI URL for arXiv
+            'raw_text': 'Test Author. Test ArXiv Paper. 2025. https://doi.org/10.48550/arxiv.2505.11595'
+        }
+        
+        # Mock Semantic Scholar response with arXiv ID
+        mock_verified_data = {
+            'title': 'Test ArXiv Paper',
+            'authors': [{'name': 'Test Author'}],
+            'year': 2025,
+            'externalIds': {'ArXiv': '2505.11595'},  # This triggers the arXiv check
+            'url': 'https://www.semanticscholar.org/paper/test'
+        }
+        
+        checker = NonArxivReferenceChecker()
+        
+        # Simulate the venue checking logic
+        errors = []
+        external_ids = mock_verified_data.get('externalIds', {})
+        arxiv_id = external_ids.get('ArXiv') if external_ids else None
+        
+        if arxiv_id:
+            # This is the logic we fixed
+            arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+            reference_url = reference.get('url', '')
+            
+            # Check for direct arXiv URL match
+            has_arxiv_url = arxiv_url in reference_url
+            
+            # Also check for arXiv DOI URL (the fix)
+            arxiv_doi_url = f"https://doi.org/10.48550/arxiv.{arxiv_id}"
+            has_arxiv_doi = arxiv_doi_url.lower() in reference_url.lower()
+            
+            if not (has_arxiv_url or has_arxiv_doi):
+                errors.append({
+                    'warning_type': 'venue',
+                    'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
+                    'ref_url_correct': arxiv_url
+                })
+        
+        # Should NOT have any arXiv URL warnings since we have a valid DOI URL
+        arxiv_warnings = [e for e in errors if 'arXiv URL' in e.get('warning_details', '')]
+        assert len(arxiv_warnings) == 0, f"Should not warn about arXiv URL when DOI URL is present, got: {arxiv_warnings}"

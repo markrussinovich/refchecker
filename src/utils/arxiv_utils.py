@@ -174,30 +174,3 @@ def download_arxiv_bibtex(arxiv_id):
         return None
 
 
-def save_debug_content(content, filename, debug_mode=True):
-    """
-    Save content to debug file if debug mode is enabled.
-    
-    Args:
-        content: String content to save
-        filename: Name of the debug file
-        debug_mode: Whether debug mode is enabled
-        
-    Returns:
-        bool: True if saved successfully, False otherwise
-    """
-    if not debug_mode:
-        return False
-        
-    debug_dir = "debug"
-    if not os.path.exists(debug_dir):
-        os.makedirs(debug_dir)
-    
-    try:
-        with open(os.path.join(debug_dir, filename), 'w', encoding='utf-8', errors='replace') as f:
-            f.write(content)
-        logger.info(f"Saved debug content to {os.path.join(debug_dir, filename)}")
-        return True
-    except Exception as e:
-        logger.warning(f"Could not save debug file {filename}: {e}")
-        return False

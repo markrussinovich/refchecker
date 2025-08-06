@@ -122,6 +122,98 @@ class TestNameMatching:
         assert is_name_match("JK Brown", "J. K. Brown")
         assert not is_name_match("JK Brown", "J. L. Brown")  # Different middle initial
 
+    def test_comma_separated_name_matching(self):
+        """Test comma-separated name format matching - regression test for 'Khattab, Omar' vs 'O. Khattab' issue"""
+        
+        # Main regression test case
+        assert is_name_match("Khattab, Omar", "O. Khattab")
+        assert is_name_match("O. Khattab", "Khattab, Omar")
+        
+        # Additional comma format test cases
+        assert is_name_match("Smith, John", "J. Smith")
+        assert is_name_match("J. Smith", "Smith, John")  # This was already working
+        assert is_name_match("Smith, John", "John Smith")
+        assert is_name_match("John Smith", "Smith, John")
+        
+        # Multi-part first names with comma format
+        assert is_name_match("Johnson, Maria K.", "M. K. Johnson")
+        assert is_name_match("M. K. Johnson", "Johnson, Maria K.")
+        assert is_name_match("Brown, Thomas", "T. Brown")
+        assert is_name_match("T. Brown", "Brown, Thomas")
+        
+        # Should not match different names
+        assert not is_name_match("Smith, John", "J. Wilson")
+        assert not is_name_match("Smith, John", "M. Smith")
+        assert not is_name_match("Johnson, Alice", "A. Brown")
+
+    def test_middle_initial_omission_matching(self):
+        """Test middle initial/name omission cases - regression test for 'Koundinyan, Srivathsan' vs 'Srivathsan P. Koundinyan'"""
+        
+        # Main regression test case from user report
+        assert is_name_match("Koundinyan, Srivathsan", "Srivathsan P. Koundinyan")
+        assert is_name_match("Srivathsan P. Koundinyan", "Koundinyan, Srivathsan")
+        
+        # Comma format with missing middle initials
+        assert is_name_match("Smith, John", "John P. Smith")
+        assert is_name_match("Brown, Mary", "Mary K. Brown")
+        assert is_name_match("Johnson, David", "David M. Johnson")
+        
+        # Reverse cases (non-comma format with missing middle initials)
+        assert is_name_match("John P. Smith", "Smith, John")
+        assert is_name_match("Mary K. Brown", "Brown, Mary")
+        assert is_name_match("David M. Johnson", "Johnson, David")
+        
+        # Full middle names (not just initials)
+        assert is_name_match("Wilson, Sarah", "Sarah Elizabeth Wilson")
+        assert is_name_match("Sarah Elizabeth Wilson", "Wilson, Sarah")
+        assert is_name_match("Anderson, Michael", "Michael James Anderson")
+        
+        # Multiple middle initials/names
+        assert is_name_match("Garcia, Maria", "Maria Elena Carmen Garcia")
+        assert is_name_match("Thompson, Robert", "Robert J. K. Thompson")
+        
+        # Should not match different first names
+        assert not is_name_match("Smith, John", "Mary P. Smith")
+        assert not is_name_match("John P. Smith", "Smith, Mary")
+        
+        # Should not match different last names  
+        assert not is_name_match("Smith, John", "John P. Wilson")
+        assert not is_name_match("John P. Smith", "Wilson, John")
+        
+        # Should not match when both names are completely different
+        assert not is_name_match("Smith, John", "Alice Brown")
+        assert not is_name_match("John Smith", "Alice P. Brown")
+
+    def test_author_display_consistency_in_errors(self):
+        """Test that author error messages show names in consistent 'First Last' format"""
+        from utils.text_utils import compare_authors
+        
+        # Test with comma format vs regular format - should show both in "First Last" format
+        cited = ["Koundinyan, Srivathsan"] 
+        correct = [{"name": "John P. Smith"}]  # Different name to trigger error
+        
+        match, error = compare_authors(cited, correct)
+        assert not match
+        assert "First author mismatch:" in error
+        # Both names should be displayed in "First Last" format
+        assert "Srivathsan Koundinyan" in error
+        assert "John P. Smith" in error
+        # Should NOT contain comma format
+        assert "Koundinyan, Srivathsan" not in error
+        
+        # Test multiple authors
+        cited_multi = ["Smith, John", "Brown, Alice"]
+        correct_multi = [{"name": "John Smith"}, {"name": "Bob Brown"}]
+        
+        match_multi, error_multi = compare_authors(cited_multi, correct_multi)
+        assert not match_multi
+        assert "Author 2 mismatch:" in error_multi
+        # Both names should be in "First Last" format
+        assert "Alice Brown" in error_multi
+        assert "Bob Brown" in error_multi
+        # Should NOT contain comma format
+        assert "Brown, Alice" not in error_multi
+
 
 class TestAuthorNameProcessing:
     """Test author name processing functions."""
