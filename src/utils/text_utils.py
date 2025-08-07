@@ -2657,6 +2657,95 @@ def _is_arxiv_entry(fields):
     return False
 
 
+def validate_parsed_references(references):
+    """
+    Validate that parsed references meet minimum quality standards.
+    
+    Args:
+        references: List of reference dictionaries
+        
+    Returns:
+        dict with validation results:
+        - is_valid: bool indicating if references are acceptable
+        - issues: list of detected issues
+        - quality_score: float from 0.0 to 1.0
+    """
+    if not references:
+        return {
+            'is_valid': False,
+            'issues': ['No references parsed'],
+            'quality_score': 0.0
+        }
+    
+    issues = []
+    valid_refs = 0
+    total_refs = len(references)
+    
+    for i, ref in enumerate(references):
+        ref_issues = []
+        
+        # Check for basic required fields
+        if not ref.get('title') or len(ref['title'].strip()) < 3:
+            ref_issues.append('missing or too short title')
+            
+        if not ref.get('authors') or len(ref['authors']) == 0:
+            ref_issues.append('missing authors')
+            
+        # Check for malformed content that suggests parsing failure
+        title = ref.get('title', '')
+        
+        # Detect incomplete ArXiv references
+        if 'arxiv' in title.lower() and 'arXiv:,' in title:
+            ref_issues.append('incomplete arXiv ID')
+            
+        # Detect LaTeX command artifacts
+        latex_artifacts = [
+            'em plus', 'em minus', '\\newblock', '\\bibinfo', 
+            'vol., no., pp. –,', 'vol. , no. , pp. -',
+            'vol.,no.,pp.–', 'vol. , no. , pp. –'
+        ]
+        
+        for artifact in latex_artifacts:
+            # Check title, authors, journal, and venue fields for artifacts
+            fields_to_check = [
+                title,
+                ' '.join(str(author) for author in ref.get('authors', [])),
+                ref.get('journal', ''),
+                ref.get('venue', '')
+            ]
+            
+            if any(artifact in field for field in fields_to_check):
+                ref_issues.append(f'LaTeX artifact detected: {artifact}')
+                break
+        
+        # Check for incomplete volume/page information patterns
+        venue = ref.get('journal', '') + ' ' + ref.get('venue', '')
+        if re.search(r'vol\.\s*,\s*no\.\s*,\s*pp\.\s*[–-]\s*,', venue.lower()):
+            ref_issues.append('incomplete volume/page information')
+            
+        # Check year validity
+        year = ref.get('year')
+        if year and (not isinstance(year, int) or year < 1900 or year > 2030):
+            ref_issues.append('invalid year')
+        
+        if not ref_issues:
+            valid_refs += 1
+        else:
+            issues.append(f"Reference {i+1}: {', '.join(ref_issues)}")
+    
+    # Calculate quality score
+    quality_score = valid_refs / total_refs if total_refs > 0 else 0.0
+    
+    # Consider references valid if at least 70% are good quality
+    is_valid = quality_score >= 0.7
+    
+    return {
+        'is_valid': is_valid,
+        'issues': issues,
+        'quality_score': quality_score
+    }
+
+
 def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
     """
     Extract references from LaTeX content programmatically
