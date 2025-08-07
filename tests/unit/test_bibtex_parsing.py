@@ -240,6 +240,303 @@ url={https://example.com}
         self.assertEqual(len(ref['authors']), 2)
         self.assertEqual(ref['authors'][0], 'Smith, John')
         self.assertEqual(ref['authors'][1], 'Doe, Jane')
+    
+    def test_espriu_mescia_author_parsing_regression(self):
+        """Test specific regression case: Espriu, Domenec and Mescia, Federico parsing"""
+        # Test the exact case from the GitHub issue
+        bib_content = '''@article{composite1,
+    author = "Espriu, Domenec and Mescia, Federico",
+    title = "{Unitarity and causality constraints in composite Higgs models}",
+    eprint = "1403.7386",
+    archivePrefix = "arXiv", 
+    primaryClass = "hep-ph",
+    doi = "10.1103/PhysRevD.90.015035",
+    year = "2014"
+}'''
+        
+        # Test direct BibTeX parsing
+        entries = parse_bibtex_entries(bib_content)
+        self.assertEqual(len(entries), 1)
+        
+        entry = entries[0]
+        
+        # Check that author field has quotes stripped
+        author_field = entry['fields']['author']
+        self.assertEqual(author_field, 'Espriu, Domenec and Mescia, Federico')
+        self.assertFalse(author_field.endswith('"'))  # No trailing quote
+        
+        # Test full LaTeX reference extraction
+        from utils.text_utils import extract_latex_references
+        refs = extract_latex_references(bib_content)
+        self.assertEqual(len(refs), 1)
+        
+        ref = refs[0]
+        
+        # Check that authors are correctly parsed as two separate authors
+        self.assertEqual(len(ref['authors']), 2)
+        self.assertEqual(ref['authors'][0], 'Espriu, Domenec')
+        self.assertEqual(ref['authors'][1], 'Mescia, Federico')
+        
+        # Check that neither author has trailing quotes
+        for author in ref['authors']:
+            self.assertFalse(author.endswith('"'))
+            self.assertFalse(author.endswith("'"))
+        
+        # Check title is also properly cleaned
+        self.assertEqual(ref['title'], 'Unitarity and causality constraints in composite Higgs models')
+        self.assertFalse(ref['title'].endswith('"'))
+    
+    def test_bibtex_string_definitions_excluded(self):
+        """Test that @string definitions are excluded from parsing (regression test)"""
+        bib_content = '''@string{acm = {ACM}}
+@string{ieee = {IEEE}}
+@string{springer = {Springer}}
+
+@article{test_article,
+  title = {Test Article},
+  author = {John Doe},
+  year = {2023},
+  journal = acm
+}
+
+@inproceedings{test_conference,
+  title = {Test Conference Paper},
+  author = {Jane Smith},
+  year = {2023},
+  booktitle = {Conference Proceedings}
+}'''
+        
+        entries = parse_bibtex_entries(bib_content)
+        
+        # Should only find the actual entries, not @string definitions
+        self.assertEqual(len(entries), 2)
+        
+        # Check that we got the right entries
+        entry_keys = [entry['key'] for entry in entries]
+        self.assertIn('test_article', entry_keys)
+        self.assertIn('test_conference', entry_keys)
+        
+        # Ensure no @string entries were parsed
+        for entry in entries:
+            self.assertNotIn('acm', entry['key'])
+            self.assertNotIn('ieee', entry['key'])
+            self.assertNotIn('springer', entry['key'])
+    
+    def test_bibtex_entry_type_variations(self):
+        """Test various BibTeX entry type variations and typos (regression test)"""
+        bib_content = '''@ARTICLE{uppercase,
+  title = {Uppercase Article},
+  author = {Author One},
+  year = {2023}
+}
+
+@incproceedings{typo_conference,
+  title = {Conference with Typo},
+  author = {Author Two},
+  year = {2023}
+}
+
+@masterthesis{alt_thesis,
+  title = {Alternative Thesis},
+  author = {Author Three},
+  year = {2023}
+}'''
+        
+        entries = parse_bibtex_entries(bib_content)
+        self.assertEqual(len(entries), 3)
+        
+        # Check that all variations are properly parsed
+        entry_types = [entry['type'] for entry in entries]
+        self.assertIn('article', entry_types)  # Normalized from ARTICLE
+        self.assertIn('incproceedings', entry_types)  # Typo preserved
+        self.assertIn('masterthesis', entry_types)  # Alternative form
+    
+    def test_bibtex_multiline_entries(self):
+        """Test parsing of multi-line BibTeX entries with complex field values"""
+        bib_content = '''@article{multiline_test,
+  title = {A Very Long Title That Spans
+           Multiple Lines and Contains
+           Various Special Characters},
+  author = {Smith, John Michael and 
+            Doe, Jane Elizabeth and
+            Brown, Robert William},
+  abstract = {This is a very long abstract that contains
+              multiple sentences and spans several lines.
+              It may contain special characters like $\\alpha$
+              and complex LaTeX formatting.},
+  year = {2023},
+  journal = {Journal of Important Research},
+  volume = {42},
+  pages = {123--145}
+}'''
+        
+        entries = parse_bibtex_entries(bib_content)
+        self.assertEqual(len(entries), 1)
+        
+        entry = entries[0]
+        self.assertEqual(entry['key'], 'multiline_test')
+        
+        # Check that multi-line fields are properly parsed
+        self.assertIn('title', entry['fields'])
+        self.assertIn('author', entry['fields'])
+        self.assertIn('abstract', entry['fields'])
+        
+        # Verify complex content is preserved
+        title = entry['fields']['title']
+        self.assertIn('Multiple Lines', title)
+        self.assertIn('Special Characters', title)
+        
+        author = entry['fields']['author']
+        self.assertIn('Smith, John Michael', author)
+        self.assertIn('Doe, Jane Elizabeth', author)
+        self.assertIn('Brown, Robert William', author)
+    
+    def test_bibtex_large_entry_count(self):
+        """Test that parser can handle large numbers of entries efficiently"""
+        # Create a bibliography with many entries
+        bib_entries = []
+        for i in range(100):
+            entry = f'''@article{{test_entry_{i},
+  title = {{Test Article {i}}},
+  author = {{Author {i}}},
+  year = {{202{i % 10}}},
+  journal = {{Test Journal}}
+}}'''
+            bib_entries.append(entry)
+        
+        # Add some @string definitions to ensure they're ignored
+        bib_content = '@string{testjournal = {Test Journal}}\n@string{testconf = {Test Conference}}\n\n'
+        bib_content += '\n\n'.join(bib_entries)
+        
+        entries = parse_bibtex_entries(bib_content)
+        
+        # Should parse all 100 entries, ignoring @string definitions
+        self.assertEqual(len(entries), 100)
+        
+        # Check that entries are properly indexed
+        entry_keys = [entry['key'] for entry in entries]
+        self.assertIn('test_entry_0', entry_keys)
+        self.assertIn('test_entry_50', entry_keys)
+        self.assertIn('test_entry_99', entry_keys)
+    
+    def test_middle_name_initial_matching(self):
+        """Test that middle name vs middle initial matching works (regression test)"""
+        from utils.text_utils import enhanced_name_match
+        
+        # The specific case from the user report
+        self.assertTrue(enhanced_name_match(
+            "Kenneth Lauchlin McMillan", 
+            "Kenneth L. McMillan"
+        ))
+        
+        # Reverse case
+        self.assertTrue(enhanced_name_match(
+            "Kenneth L. McMillan", 
+            "Kenneth Lauchlin McMillan"
+        ))
+        
+        # Other similar cases
+        self.assertTrue(enhanced_name_match(
+            "John David Smith", 
+            "John D. Smith"
+        ))
+        
+        self.assertTrue(enhanced_name_match(
+            "Mary E. Johnson", 
+            "Mary Elizabeth Johnson"
+        ))
+        
+        # Should not match if middle initial is wrong
+        self.assertFalse(enhanced_name_match(
+            "Kenneth Robert McMillan", 
+            "Kenneth L. McMillan"
+        ))
+        
+        # Should not match if first name is different
+        self.assertFalse(enhanced_name_match(
+            "Robert L. McMillan", 
+            "Kenneth L. McMillan"
+        ))
+        
+        # Should not match if last name is different
+        self.assertFalse(enhanced_name_match(
+            "Kenneth L. Miller", 
+            "Kenneth L. McMillan"
+        ))
+    
+    def test_mixed_name_format_matching(self):
+        """Test matching between 2-part and 3-part names"""
+        from utils.text_utils import enhanced_name_match
+        
+        # 2-part vs 3-part with initial
+        self.assertTrue(enhanced_name_match(
+            "Kenneth McMillan", 
+            "Kenneth L. McMillan"
+        ))
+        
+        # 2-part vs 3-part with full middle name
+        self.assertTrue(enhanced_name_match(
+            "Kenneth McMillan", 
+            "Kenneth Lauchlin McMillan"
+        ))
+        
+        # Reverse cases
+        self.assertTrue(enhanced_name_match(
+            "Kenneth L. McMillan", 
+            "Kenneth McMillan"
+        ))
+        
+        self.assertTrue(enhanced_name_match(
+            "Kenneth Lauchlin McMillan", 
+            "Kenneth McMillan"
+        ))
+        
+        # Should not match if names are actually different
+        self.assertFalse(enhanced_name_match(
+            "Robert McMillan", 
+            "Kenneth L. McMillan"
+        ))
+    
+    def test_lastname_firstname_format_matching(self):
+        """Test matching between 'Lastname, Firstname' and 'Firstname Lastname' formats (regression test)"""
+        from utils.text_utils import enhanced_name_match, compare_authors
+        
+        # The specific failing case from the user report
+        self.assertTrue(enhanced_name_match(
+            "McMillan, Kenneth Lauchlin", 
+            "Kenneth L. McMillan"
+        ))
+        
+        # Reverse case
+        self.assertTrue(enhanced_name_match(
+            "Kenneth L. McMillan", 
+            "McMillan, Kenneth Lauchlin"
+        ))
+        
+        # Other similar cases
+        self.assertTrue(enhanced_name_match(
+            "Smith, John David", 
+            "John D. Smith"
+        ))
+        
+        self.assertTrue(enhanced_name_match(
+            "Johnson, Mary Elizabeth", 
+            "Mary E. Johnson"
+        ))
+        
+        # Test complete author comparison pipeline (the actual failing scenario)
+        cited_authors = ['McMillan, Kenneth Lauchlin']
+        correct_authors = [{'name': 'Kenneth L. McMillan'}]
+        
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+        self.assertTrue(match_result)
+        self.assertEqual(error_message, "Authors match")
+        
+        # Should not match if middle names don't align
+        self.assertFalse(enhanced_name_match(
+            "McMillan, Kenneth Robert", 
+            "Kenneth L. McMillan"
+        ))
 
 
 if __name__ == '__main__':

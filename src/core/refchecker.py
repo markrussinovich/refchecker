@@ -202,6 +202,10 @@ class ArxivReferenceChecker:
         # debug mode
         self.debug_mode = debug_mode
         
+        # Initialize extraction flags
+        self.used_regex_extraction = False
+        self.used_unreliable_extraction = False
+        
         # Parallel processing configuration
         self.enable_parallel = enable_parallel
         self.max_workers = max_workers
@@ -2887,6 +2891,7 @@ class ArxivReferenceChecker:
         self.total_other_refs = 0
         self.total_unverified_refs = 0
         self.used_regex_extraction = False
+        self.used_unreliable_extraction = False  # Only set for fallback regex parsing, not BibTeX
         
         try:
             # Get papers to process
@@ -3105,8 +3110,8 @@ class ArxivReferenceChecker:
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 
-                # Show warning if regex extraction was used and there are many errors
-                if self.used_regex_extraction and self.total_errors_found > 5:
+                # Show warning if unreliable extraction was used and there are many errors
+                if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
                 if self.verification_output_file:
@@ -3124,8 +3129,8 @@ class ArxivReferenceChecker:
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
                 
-                # Show warning if regex extraction was used and there are many errors
-                if self.used_regex_extraction and self.total_errors_found > 5:
+                # Show warning if unreliable extraction was used and there are many errors
+                if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
                 if self.verification_output_file:
@@ -3401,6 +3406,7 @@ class ArxivReferenceChecker:
         if detect_standard_acm_natbib_format(bibliography_text):
             logger.info("Detected standard ACM/natbib format, using regex-based parsing")
             self.used_regex_extraction = True
+            # Note: ACM/natbib parsing is also quite robust for standard formats
             return self._parse_standard_acm_natbib_references(bibliography_text)
         
         # Check if this is BibTeX format
@@ -3408,6 +3414,7 @@ class ArxivReferenceChecker:
         if detect_bibtex_format(bibliography_text):
             logger.info("Detected BibTeX format, using BibTeX parser")
             self.used_regex_extraction = True
+            # Note: BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
         
         # For non-standard formats, try LLM-based extraction if available
@@ -3431,6 +3438,7 @@ class ArxivReferenceChecker:
         # Fallback to regex-based parsing only if LLM was not specified
         logger.info("No LLM available, falling back to regex-based parsing")
         self.used_regex_extraction = True
+        self.used_unreliable_extraction = True  # This is the unreliable fallback parsing
         return self._parse_references_regex(bibliography_text)
     
     def _parse_standard_acm_natbib_references(self, bibliography_text):
@@ -3624,7 +3632,11 @@ class ArxivReferenceChecker:
         # Check if this is BibTeX format first
         if re.search(r'@\w+\s*\{', bibliography_text):
             logger.debug("Detected BibTeX format, using BibTeX-specific parsing")
+            # BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
+        
+        # If we reach here, we're using the unreliable fallback regex parsing
+        self.used_unreliable_extraction = True
         
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
@@ -4054,70 +4066,14 @@ class ArxivReferenceChecker:
         Returns:
             List of structured reference dictionaries
         """
-        import re
+        # Use the improved BibTeX parsing from text_utils
+        from utils.text_utils import extract_latex_references
         
-        # Pattern to match BibTeX entries: @type{key, ...}
-        # This handles nested braces properly
-        bibtex_pattern = r'@(\w+)\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+        # Extract references using the improved parsing logic
+        references = extract_latex_references(bibliography_text)
         
-        entries = []
-        for match in re.finditer(bibtex_pattern, bibliography_text, re.DOTALL | re.IGNORECASE):
-            entry_type = match.group(1).lower()
-            entry_content = match.group(2)
-            
-            # Extract fields from the BibTeX entry
-            entry_data = self._parse_bibtex_entry(entry_type, entry_content)
-            if entry_data:
-                entries.append(entry_data)
-        
-        if not entries:
-            # Fallback: try simpler pattern if the above doesn't work
-            logger.debug("Complex BibTeX pattern failed, trying simpler approach")
-            # Split on @word{ patterns to find entry boundaries
-            parts = re.split(r'(?=@\w+\s*\{)', bibliography_text)
-            
-            for part in parts:
-                part = part.strip()
-                if not part or not part.startswith('@'):
-                    continue
-                    
-                # Find the entry type
-                type_match = re.match(r'@(\w+)\s*\{', part)
-                if not type_match:
-                    continue
-                
-                entry_type = type_match.group(1).lower()
-                
-                # Extract the content between the first { and the last }
-                # This is a simplified approach but should work for most cases
-                brace_start = part.find('{')
-                if brace_start == -1:
-                    continue
-                
-                # Find the matching closing brace
-                brace_count = 0
-                content_end = -1
-                for i, char in enumerate(part[brace_start:], brace_start):
-                    if char == '{':
-                        brace_count += 1
-                    elif char == '}':
-                        brace_count -= 1
-                        if brace_count == 0:
-                            content_end = i
-                            break
-                
-                if content_end == -1:
-                    # No matching brace found, take everything after first {
-                    entry_content = part[brace_start + 1:]
-                else:
-                    entry_content = part[brace_start + 1:content_end]
-                
-                entry_data = self._parse_bibtex_entry(entry_type, entry_content)
-                if entry_data:
-                    entries.append(entry_data)
-        
-        logger.debug(f"Extracted {len(entries)} BibTeX entries")
-        return entries
+        logger.debug(f"Extracted {len(references)} BibTeX references using improved parser")
+        return references
     
     def _parse_bibtex_entry(self, entry_type, content):
         """
@@ -4327,7 +4283,6 @@ class ArxivReferenceChecker:
         unique_references = self._deduplicate_references_with_segment_matching(references)
         
         logger.debug(f"Deduplicated {len(references)} references to {len(unique_references)} unique references")
-        logger.info(f"Extracted {len(unique_references)} references using LLM")
         
         processed_refs = []
         
@@ -5032,8 +4987,7 @@ class ArxivReferenceChecker:
                 from utils.text_utils import detect_latex_bibliography_format
                 latex_format = detect_latex_bibliography_format(tex_content)
                 if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
-                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source for {arxiv_id}, but skipping due to formatting issues")
-                    logger.info(f"Embedded bibliographies often have inconsistent formatting - falling back to alternative extraction methods")
+                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source, but skipping due to formatting incompatibility")
                     # Skip embedded bibliography and return None to trigger fallback methods
                     return None
         
@@ -5075,6 +5029,40 @@ class ArxivReferenceChecker:
                 logger.info(f"Detected LaTeX thebibliography format, using extract_latex_references")
                 # Use None for file_path since this is content from .bbl files
                 references = extract_latex_references(bibtex_content, None)
+                
+                # Validate the parsed references and fallback to LLM if needed
+                from utils.text_utils import validate_parsed_references
+                validation = validate_parsed_references(references)
+                
+                if not validation['is_valid']:
+                    logger.debug(f"LaTeX parsing validation failed (quality: {validation['quality_score']:.2f})")
+                    logger.debug(f"Issues detected: {len(validation['issues'])} problems")
+                    for issue in validation['issues'][:5]:  # Log first 5 issues
+                        logger.debug(f"  - {issue}")
+                    
+                    # Try LLM fallback if available
+                    if self.llm_extractor:
+                        logger.info("Falling back to LLM-based extraction due to unsupported LaTeX format")
+                        try:
+                            llm_references = self.llm_extractor.extract_references(bibtex_content)
+                            if llm_references:
+                                # Process LLM results first to get structured references
+                                processed_llm_refs = self._process_llm_extracted_references(llm_references)
+                                # Then validate the processed results
+                                llm_validation = validate_parsed_references(processed_llm_refs)
+                                if llm_validation['quality_score'] > validation['quality_score']:
+                                    logger.debug(f"LLM extraction successful (quality: {llm_validation['quality_score']:.2f})")
+                                    references = processed_llm_refs
+                                else:
+                                    logger.debug("LLM extraction didn't improve quality, keeping original results")
+                            else:
+                                logger.warning("LLM extraction returned no results")
+                        except Exception as e:
+                            logger.error(f"LLM fallback failed: {e}")
+                    else:
+                        logger.warning("No LLM available for fallback, using original parsing results")
+                else:
+                    logger.info(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
             else:
                 # Parse BibTeX using the standard flow (LLM or regex based on config)
                 references = self.parse_references(bibtex_content)
@@ -5088,7 +5076,7 @@ class ArxivReferenceChecker:
                     logger.warning(f"Could not save debug references file for {paper_id}: {e}")
             
             if references:
-                logger.info(f"Successfully extracted {len(references)} references from BibTeX for {paper_id}")
+                logger.info(f"Extracted {len(references)} references")
                 return references
         
         # Check if this is a text file containing references

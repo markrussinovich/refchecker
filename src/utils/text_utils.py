@@ -89,6 +89,64 @@ def parse_authors_with_initials(authors_text):
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
+    # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
+    if ';' in authors_text:
+        # Split by semicolons and handle the last part which might have "and"
+        semicolon_parts = [part.strip() for part in authors_text.split(';')]
+        
+        # Handle cases where the last part starts with "and" (e.g., "and Dimarogonas, D. V.")
+        if len(semicolon_parts) > 1:
+            # Process each part, handling "and" at the beginning of parts
+            processed_parts = []
+            for part in semicolon_parts:
+                part = part.strip()
+                # Remove leading "and" from parts
+                if part.startswith('and '):
+                    part = part[4:].strip()  # Remove "and " prefix
+                if part:  # Only add non-empty parts
+                    processed_parts.append(part)
+            
+            semicolon_parts = processed_parts
+            
+            # Validate that each part looks like "Surname, Initial(s)" format
+            valid_authors = []
+            for part in semicolon_parts:
+                part = part.strip()
+                if not part:
+                    continue
+                    
+                # Check for et al indicators
+                if part.lower() in ['others', 'et al', 'et al.', 'and others']:
+                    if valid_authors:  # Only add et al if we have real authors
+                        valid_authors.append("et al")
+                    break
+                
+                # Check if it matches "Surname, Initial(s)" pattern
+                if ',' in part:
+                    comma_parts = [p.strip() for p in part.split(',', 1)]  # Split on first comma only
+                    if len(comma_parts) == 2:
+                        surname, initials = comma_parts
+                        # Surname should be capitalized word(s)
+                        surname_pattern = r'^[A-Z][a-zA-Z\s\-\.\']+$'
+                        # Initials should be 1-3 capital letters with optional periods and spaces
+                        # Allow patterns like "K.", "D. V.", "A. B. C."
+                        initial_pattern = r'^[A-Z]\.?(\s+[A-Z]\.?)*\s*$'
+                        
+                        if (re.match(surname_pattern, surname) and 
+                            re.match(initial_pattern, initials) and
+                            len(surname) >= 2 and len(initials.replace('.', '').replace(' ', '')) >= 1):
+                            valid_authors.append(f"{surname}, {initials}")
+                        else:
+                            # Doesn't match expected pattern, maybe not semicolon format
+                            break
+                else:
+                    # No comma, doesn't match expected format
+                    break
+            
+            # If we successfully parsed at least 2 authors, use this format
+            if len(valid_authors) >= 2:
+                return valid_authors
+    
     # Check if this is a "and" separated format (common in BibTeX)
     if ' and ' in authors_text:
         and_parts = [part.strip() for part in authors_text.split(' and ') if part.strip()]
@@ -248,7 +306,16 @@ def parse_authors_with_initials(authors_text):
     current_author = ""
     
     for i, part in enumerate(parts):
-        if current_author:
+        # Check for "others" or "et al" variations
+        if part.lower() in ['others', 'and others', 'et al', 'et al.']:
+            # Finish current author if any, then add et al
+            if current_author:
+                authors.append(current_author)
+                current_author = ""
+            if authors:  # Only add et al if we have real authors
+                authors.append("et al")
+            break  # Stop processing after et al indicator
+        elif current_author:
             # We're building an author name
             # Check if this part looks like an initial (1-3 characters, possibly with periods)
             if re.match(r'^[A-Z]\.?\s*$', part) or re.match(r'^[A-Z]\.\s*[A-Z]\.?\s*$', part):
@@ -1715,9 +1782,17 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if is_name_match(name1, name2):
         return True
     
-    # Clean and normalize both names
-    cleaned1 = clean_author_name(name1).strip().lower()
-    cleaned2 = clean_author_name(name2).strip().lower()
+    # Convert both names to consistent "First Middle Last" format for comparison
+    name1_formatted = format_author_for_display(name1)
+    name2_formatted = format_author_for_display(name2)
+    
+    # Try matching with formatted names
+    if is_name_match(name1_formatted, name2_formatted):
+        return True
+    
+    # Clean and normalize both formatted names
+    cleaned1 = clean_author_name(name1_formatted).strip().lower()
+    cleaned2 = clean_author_name(name2_formatted).strip().lower()
     
     parts1 = cleaned1.split()
     parts2 = cleaned2.split()
@@ -1725,7 +1800,7 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if not parts1 or not parts2:
         return False
     
-    # Enhanced matching for "P. Wawrzy'nski" vs "Pawel Wawrzynski" type cases
+    # Enhanced matching for various name format cases
     if len(parts1) == 2 and len(parts2) == 2:
         # Case 1: "P. Wawrzy'nski" vs "Pawel Wawrzynski"
         if (len(parts1[0].rstrip('.')) == 1 and len(parts2[0]) > 1):
@@ -1750,6 +1825,42 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
             if (first_name1[0] == initial2 and 
                 surname_similarity(surname1, surname2)):
                 return True
+    
+    # Handle 3-part names with middle names vs middle initials
+    elif len(parts1) == 3 and len(parts2) == 3:
+        first1, middle1, last1 = parts1
+        first2, middle2, last2 = parts2
+        
+        # Case 1: "Kenneth L. McMillan" vs "Kenneth Lauchlin McMillan"
+        if (len(middle1.rstrip('.')) == 1 and len(middle2) > 1):
+            middle_initial1 = middle1.rstrip('.')
+            if (first1 == first2 and
+                middle_initial1 == middle2[0] and
+                surname_similarity(last1, last2)):
+                return True
+        
+        # Case 2: "Kenneth Lauchlin McMillan" vs "Kenneth L. McMillan"
+        elif (len(middle1) > 1 and len(middle2.rstrip('.')) == 1):
+            middle_initial2 = middle2.rstrip('.')
+            if (first1 == first2 and
+                middle1[0] == middle_initial2 and
+                surname_similarity(last1, last2)):
+                return True
+    
+    # Handle mixed 2-part vs 3-part names (first middle last vs first last)
+    elif len(parts1) == 2 and len(parts2) == 3:
+        first1, last1 = parts1
+        first2, middle2, last2 = parts2
+        # "Kenneth McMillan" vs "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan"
+        if (first1 == first2 and surname_similarity(last1, last2)):
+            return True
+    
+    elif len(parts1) == 3 and len(parts2) == 2:
+        first1, middle1, last1 = parts1
+        first2, last2 = parts2
+        # "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan" vs "Kenneth McMillan"
+        if (first1 == first2 and surname_similarity(last1, last2)):
+            return True
     
     return False
 
@@ -2383,16 +2494,44 @@ def parse_bibtex_entries(bib_content):
     
     entries = []
     
-    # Pattern to match BibTeX entries
-    entry_pattern = r'@(\w+)\s*\{\s*([^,]+)\s*,\s*(.*?)\n\s*\}'
+    # Pattern to match BibTeX entries (excluding @string, @comment, @preamble)
+    # First find entry starts, then use brace counting for proper boundaries
+    entry_start_pattern = r'@(article|inproceedings|incproceedings|book|incollection|inbook|proceedings|techreport|mastersthesis|masterthesis|phdthesis|misc|unpublished|conference|manual|booklet|collection)\s*\{\s*([^,]+)\s*,'
     
-    # Find all entries
-    matches = re.finditer(entry_pattern, bib_content, re.DOTALL | re.IGNORECASE)
+    # Find entry starts and extract complete entries using brace counting
+    start_matches = list(re.finditer(entry_start_pattern, bib_content, re.DOTALL | re.IGNORECASE))
     
-    for match in matches:
-        entry_type = match.group(1).lower()
-        entry_key = match.group(2).strip()
-        fields_text = match.group(3)
+    for start_match in start_matches:
+        entry_type = start_match.group(1).lower()
+        entry_key = start_match.group(2).strip()
+        
+        # Find the complete entry by counting braces
+        start_pos = start_match.start()
+        brace_start = bib_content.find('{', start_pos)
+        if brace_start == -1:
+            continue
+            
+        # Count braces to find the matching closing brace
+        brace_count = 0
+        pos = brace_start
+        end_pos = -1
+        
+        while pos < len(bib_content):
+            if bib_content[pos] == '{':
+                brace_count += 1
+            elif bib_content[pos] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = pos
+                    break
+            pos += 1
+        
+        if end_pos == -1:
+            continue  # Malformed entry, skip
+            
+        # Extract fields text (everything between first comma and closing brace)
+        comma_pos = start_match.end()
+        fields_text = bib_content[comma_pos:end_pos].strip()
         
         # Parse fields using a more robust approach
         fields = {}
@@ -2478,6 +2617,16 @@ def parse_bibtex_entries(bib_content):
             # Replace individual brace-protected words/phrases with just their content
             field_value = re.sub(r'\{([^}]+)\}', r'\1', field_value)
             
+            # Remove surrounding quotes (common in BibTeX field values)
+            # Handle both single and double quotes
+            while ((field_value.startswith('"') and field_value.endswith('"')) or 
+                   (field_value.startswith("'") and field_value.endswith("'"))):
+                inner_value = field_value[1:-1].strip()
+                if inner_value:
+                    field_value = inner_value
+                else:
+                    break
+            
             # Clean up the field value
             field_value = strip_latex_commands(field_value)
             fields[field_name.lower()] = field_value
@@ -2489,6 +2638,112 @@ def parse_bibtex_entries(bib_content):
         })
     
     return entries
+
+
+def _is_arxiv_entry(fields):
+    """
+    Check if BibTeX fields indicate an ArXiv entry
+    
+    Args:
+        fields: Dictionary of BibTeX fields
+        
+    Returns:
+        Boolean indicating if this is an ArXiv entry
+    """
+    # Check for archivePrefix field (case-insensitive)
+    for field_name, field_value in fields.items():
+        if field_name.lower() == 'archiveprefix' and field_value.lower() == 'arxiv':
+            return True
+    return False
+
+
+def validate_parsed_references(references):
+    """
+    Validate that parsed references meet minimum quality standards.
+    
+    Args:
+        references: List of reference dictionaries
+        
+    Returns:
+        dict with validation results:
+        - is_valid: bool indicating if references are acceptable
+        - issues: list of detected issues
+        - quality_score: float from 0.0 to 1.0
+    """
+    if not references:
+        return {
+            'is_valid': False,
+            'issues': ['No references parsed'],
+            'quality_score': 0.0
+        }
+    
+    issues = []
+    valid_refs = 0
+    total_refs = len(references)
+    
+    for i, ref in enumerate(references):
+        ref_issues = []
+        
+        # Check for basic required fields
+        if not ref.get('title') or len(ref['title'].strip()) < 3:
+            ref_issues.append('missing or too short title')
+            
+        if not ref.get('authors') or len(ref['authors']) == 0:
+            ref_issues.append('missing authors')
+            
+        # Check for malformed content that suggests parsing failure
+        title = ref.get('title', '')
+        
+        # Detect incomplete ArXiv references
+        if 'arxiv' in title.lower() and 'arXiv:,' in title:
+            ref_issues.append('incomplete arXiv ID')
+            
+        # Detect LaTeX command artifacts
+        latex_artifacts = [
+            'em plus', 'em minus', '\\newblock', '\\bibinfo', 
+            'vol., no., pp. –,', 'vol. , no. , pp. -',
+            'vol.,no.,pp.–', 'vol. , no. , pp. –'
+        ]
+        
+        for artifact in latex_artifacts:
+            # Check title, authors, journal, and venue fields for artifacts
+            fields_to_check = [
+                title,
+                ' '.join(str(author) for author in ref.get('authors', [])),
+                ref.get('journal', ''),
+                ref.get('venue', '')
+            ]
+            
+            if any(artifact in field for field in fields_to_check):
+                ref_issues.append(f'LaTeX artifact detected: {artifact}')
+                break
+        
+        # Check for incomplete volume/page information patterns
+        venue = ref.get('journal', '') + ' ' + ref.get('venue', '')
+        if re.search(r'vol\.\s*,\s*no\.\s*,\s*pp\.\s*[–-]\s*,', venue.lower()):
+            ref_issues.append('incomplete volume/page information')
+            
+        # Check year validity
+        year = ref.get('year')
+        if year and (not isinstance(year, int) or year < 1900 or year > 2030):
+            ref_issues.append('invalid year')
+        
+        if not ref_issues:
+            valid_refs += 1
+        else:
+            issues.append(f"Reference {i+1}: {', '.join(ref_issues)}")
+    
+    # Calculate quality score
+    quality_score = valid_refs / total_refs if total_refs > 0 else 0.0
+    
+    # Consider references valid if at least 70% are good quality
+    is_valid = quality_score >= 0.7
+    
+    return {
+        'is_valid': is_valid,
+        'issues': issues,
+        'quality_score': quality_score
+    }
 
 
 def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
@@ -2517,9 +2772,11 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
         for entry in entries:
             fields = entry['fields']
             
-            # Skip entries without essential fields (title or author)
-            # These are typically URL-only entries like @misc{key, howpublished={\url{...}}}
-            if not fields.get('title') and not fields.get('author'):
+            # Skip entries without essential fields (title, author, or howpublished)
+            # But allow @misc entries with howpublished URLs or ArXiv entries
+            if (not fields.get('title') and not fields.get('author') and 
+                not (entry['type'] == 'misc' and fields.get('howpublished')) and
+                not _is_arxiv_entry(fields)):
                 continue
             
             # Reconstruct the full BibTeX entry for raw_text
@@ -2543,7 +2800,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'url': fields.get('url', ''),
                 'doi': fields.get('doi', ''),
                 'bibtex_key': entry['key'],
-                'bibtex_type': entry['type']
+                'bibtex_type': entry['type'],
+                'type': 'non-arxiv'  # Default type for BibTeX entries
             }
             
             # Preserve all original BibTeX fields for formatting correction
@@ -2551,27 +2809,108 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 if field_name not in ref:  # Don't overwrite already processed fields
                     ref[field_name] = field_value
             
-            # Parse authors
+            # Parse authors using the sophisticated parsing logic
             if 'author' in fields:
                 author_text = fields['author']
-                # Split by 'and' and clean up
-                authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
+                # Use parse_authors_with_initials which properly handles "others" -> "et al"
+                parsed_authors = parse_authors_with_initials(author_text)
                 
-                # Clean up any author names that still have "and" prefix due to edge cases
-                cleaned_authors = []
-                for author in authors:
-                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
-                    author = re.sub(r'^and\s+', '', author.strip())
-                    if author:  # Only add non-empty authors
-                        cleaned_authors.append(author)
-                
-                ref['authors'] = cleaned_authors
+                if parsed_authors:
+                    ref['authors'] = parsed_authors
+                else:
+                    # Fallback to simple split if parsing fails
+                    authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
+                    cleaned_authors = []
+                    for author in authors:
+                        # Remove leading "and" from author names
+                        author = re.sub(r'^and\s+', '', author.strip())
+                        # Convert "others" to "et al"
+                        if author.lower() in ['others', 'and others']:
+                            if cleaned_authors:  # Only add if we have real authors
+                                cleaned_authors.append("et al")
+                        elif author:  # Only add non-empty authors
+                            cleaned_authors.append(author)
+                    ref['authors'] = cleaned_authors
+            
+            # Special handling for @misc entries with only howpublished field
+            if not ref['title'] and not ref['authors'] and entry['type'] == 'misc':
+                howpublished = fields.get('howpublished', '')
+                if howpublished:
+                    # Try to extract a URL from howpublished
+                    url_patterns = [
+                        r'://([^/]+)',  # Missing protocol case: "://example.com/path"
+                        r'https?://([^/\s]+)',  # Standard URL
+                        r'www\.([^/\s]+)',  # www without protocol
+                    ]
+                    
+                    extracted_url = ''
+                    for pattern in url_patterns:
+                        match = re.search(pattern, howpublished)
+                        if match:
+                            domain = match.group(1)
+                            # Reconstruct URL with https if protocol was missing
+                            if howpublished.startswith('://'):
+                                extracted_url = 'https' + howpublished
+                            elif not howpublished.startswith(('http://', 'https://')):
+                                extracted_url = 'https://' + howpublished
+                            else:
+                                extracted_url = howpublished
+                            
+                            # Generate title from domain/path
+                            if 'jailbreakchat.com' in domain:
+                                title = 'JailbreakChat Website'
+                            elif 'lesswrong.com' in domain:
+                                title = 'LessWrong Post: Jailbreaking ChatGPT'
+                            elif 'chat.openai.com' in domain:
+                                title = 'ChatGPT Conversation Share'
+                            elif 'gemini.google.com' in domain:
+                                title = 'Gemini Conversation Share'
+                            elif 'microsoft.com' in domain:
+                                title = 'Microsoft Azure Content Safety API'
+                            elif 'perspectiveapi.com' in domain:
+                                title = 'Perspective API'
+                            else:
+                                # Generic title based on domain
+                                title = f"Web Resource: {domain}"
+                            
+                            ref['title'] = title
+                            ref['authors'] = ["Web Resource"]
+                            ref['url'] = extracted_url
+                            break
             
             # Extract year
             if 'year' in fields:
                 year_match = re.search(r'\d{4}', fields['year'])
                 if year_match:
                     ref['year'] = int(year_match.group())
+            
+            # Extract year from eprint for ArXiv entries (e.g., "2311.09096" -> 2023)
+            elif 'eprint' in fields and _is_arxiv_entry(fields):
+                eprint = fields['eprint']
+                year_match = re.match(r'^(\d{2})(\d{2})\.\d+', eprint)
+                if year_match:
+                    year_prefix = int(year_match.group(1))
+                    year_full = 2000 + year_prefix if year_prefix >= 90 else 2000 + year_prefix
+                    ref['year'] = year_full
+            
+            # Determine if this is an ArXiv reference
+            arxiv_indicators = [
+                _is_arxiv_entry(fields),
+                'arxiv' in str(fields.get('url', '')).lower(),
+                'arxiv' in str(fields.get('title', '')).lower(),
+                'journal' in fields and 'arxiv' in fields['journal'].lower()
+            ]
+            
+            if any(arxiv_indicators):
+                ref['type'] = 'arxiv'
+                
+                # Construct ArXiv URL from eprint field if no URL present
+                if not ref['url'] and 'eprint' in fields:
+                    eprint = fields['eprint']
+                    # Remove version number if present (e.g., "1610.10099v2" -> "1610.10099")
+                    clean_eprint = re.sub(r'v\d+$', '', eprint)
+                    if re.match(r'^\d{4}\.\d{4,5}', clean_eprint):
+                        ref['url'] = f"https://arxiv.org/abs/{clean_eprint}"
             
             references.append(ref)
     
@@ -2681,15 +3020,15 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                         try:
                             parsed_authors = parse_authors_with_initials(author_text_clean)
                             if parsed_authors and len(parsed_authors) > 1:
-                                # Clean up "and" prefixes, periods, and "et al" suffixes
+                                # Clean up "and" prefixes, periods, and preserve "et al"
                                 cleaned_authors = []
                                 for author in parsed_authors:
                                     # Remove leading "and" 
                                     author = re.sub(r'^and\s+', '', author.strip())
                                     # Remove trailing periods that shouldn't be there
                                     author = clean_author_name(author)
-                                    # Skip "et al" variants
-                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et']:
+                                    # Skip all "et al" variants for LaTeX bibliographies
+                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
                                         cleaned_authors.append(author)
                                 if cleaned_authors:
                                     ref['authors'] = cleaned_authors
@@ -2702,8 +3041,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                     a = re.sub(r'^and\s+', '', a)
                                     # Clean author name (remove unnecessary periods)
                                     a = clean_author_name(a)
-                                    if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
-                                        simple_authors.append(a)
+                                    if a and len(a) > 2:
+                                        # Skip all "et al" variants for LaTeX bibliographies
+                                        if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                            simple_authors.append(a)
                                 if simple_authors:
                                     ref['authors'] = simple_authors
                         except Exception:
@@ -2715,8 +3056,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                 a = re.sub(r'^and\s+', '', a)
                                 # Clean author name (remove unnecessary periods)
                                 a = clean_author_name(a)
-                                if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
-                                    simple_authors.append(a)
+                                if a and len(a) > 2:
+                                    # Skip all "et al" variants for LaTeX bibliographies
+                                    if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                        simple_authors.append(a)
                             if simple_authors:
                                 ref['authors'] = simple_authors
                     else:

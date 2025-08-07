@@ -111,11 +111,56 @@ def download_arxiv_source(arxiv_id):
                     main_tex_content = largest_file[1]
                     logger.debug(f"Using largest tex file: {largest_file[0]}")
             
-            # Combine all bib file contents
+            # Find which .bib files are actually referenced in the main tex file
             bib_content = None
-            if bib_files:
-                bib_content = '\n\n'.join(bib_files.values())
-                logger.debug(f"Found {len(bib_files)} .bib files")
+            if bib_files and main_tex_content:
+                # Extract bibliography references from main tex file
+                referenced_bibs = []
+                bib_pattern = r'\\bibliography\{([^}]+)\}'
+                matches = re.findall(bib_pattern, main_tex_content)
+                
+                for match in matches:
+                    # Handle multiple bib files separated by commas
+                    bib_names = [name.strip() for name in match.split(',')]
+                    for bib_name in bib_names:
+                        # Add .bib extension if not present
+                        if not bib_name.endswith('.bib'):
+                            bib_name += '.bib'
+                        referenced_bibs.append(bib_name)
+                
+                # Use only referenced .bib files, or all if no references found
+                if referenced_bibs:
+                    used_bibs = []
+                    for bib_name in referenced_bibs:
+                        if bib_name in bib_files:
+                            used_bibs.append(bib_files[bib_name])
+                            logger.debug(f"Using referenced .bib file: {bib_name}")
+                        else:
+                            logger.debug(f"Referenced .bib file not found: {bib_name}")
+                    
+                    if used_bibs:
+                        raw_bib_content = '\n\n'.join(used_bibs)
+                        
+                        # Filter BibTeX to only include cited references
+                        bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+                        
+                        logger.debug(f"Found {len(used_bibs)} referenced .bib files out of {len(bib_files)} total")
+                    else:
+                        # Fallback to all bib files if none of the referenced ones found
+                        raw_bib_content = '\n\n'.join(bib_files.values())
+                        bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+                        logger.debug(f"No referenced .bib files found, using all {len(bib_files)} .bib files")
+                else:
+                    # No \bibliography command found, use all bib files
+                    raw_bib_content = '\n\n'.join(bib_files.values())
+                    bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+                    logger.debug(f"No \\bibliography command found, using all {len(bib_files)} .bib files")
+            elif bib_files:
+                # No main tex file but have bib files
+                raw_bib_content = '\n\n'.join(bib_files.values())
+                # Can't filter without tex files, so use original content
+                bib_content = raw_bib_content
+                logger.debug(f"Found {len(bib_files)} .bib files (no main tex to filter)")
             
             # Combine all bbl file contents  
             bbl_content = None
@@ -172,5 +217,160 @@ def download_arxiv_bibtex(arxiv_id):
     except Exception as e:
         logger.debug(f"Failed to download BibTeX for ArXiv paper {arxiv_id}: {str(e)}")
         return None
+
+
+def extract_cited_keys_from_tex(tex_files, main_tex_content):
+    """
+    Extract all citation keys from TeX files.
+    
+    Args:
+        tex_files: Dict of all tex files {filename: content}
+        main_tex_content: Content of main tex file
+        
+    Returns:
+        Set of cited reference keys
+    """
+    cited_keys = set()
+    
+    # Combine all tex content
+    all_tex_content = main_tex_content or ""
+    for tex_content in tex_files.values():
+        all_tex_content += "\n" + tex_content
+        
+    # Find all \cite{...} commands
+    cite_pattern = r'\\cite\{([^}]+)\}'
+    matches = re.findall(cite_pattern, all_tex_content)
+    
+    for match in matches:
+        # Handle multiple citations: \cite{key1,key2,key3}
+        keys = [key.strip() for key in match.split(',')]
+        cited_keys.update(keys)
+    
+    logger.debug(f"Found {len(cited_keys)} unique cited references")
+    return cited_keys
+
+
+def is_reference_used(reference_key, cited_keys):
+    """
+    Check if a specific reference key is used/cited.
+    
+    Args:
+        reference_key: The BibTeX key to check
+        cited_keys: Set of all cited reference keys
+        
+    Returns:
+        True if the reference is cited, False otherwise
+    """
+    return reference_key in cited_keys
+
+
+def filter_bibtex_by_citations(bib_content, tex_files, main_tex_content):
+    """
+    Filter BibTeX content to only include references that are actually cited.
+    
+    Args:
+        bib_content: Full BibTeX content
+        tex_files: Dict of all tex files {filename: content}
+        main_tex_content: Content of main tex file
+        
+    Returns:
+        Filtered BibTeX content with only cited references
+    """
+    if not bib_content:
+        return bib_content
+        
+    try:
+        # Extract all citation keys from tex files
+        cited_keys = extract_cited_keys_from_tex(tex_files, main_tex_content)
+        
+        if not cited_keys:
+            logger.debug("No citations found, returning full BibTeX content")
+            return bib_content
+            
+        # Parse BibTeX entries and filter
+        from utils.text_utils import parse_bibtex_entries
+        entries = parse_bibtex_entries(bib_content)
+        
+        # Filter entries to only cited ones
+        cited_entries = []
+        for entry in entries:
+            entry_key = entry.get('key', '')
+            if is_reference_used(entry_key, cited_keys):
+                cited_entries.append(entry)
+                
+        logger.debug(f"Filtered BibTeX: {len(entries)} total -> {len(cited_entries)} cited")
+        
+        # Reconstruct BibTeX content from cited entries
+        if not cited_entries:
+            logger.debug("No cited entries found in BibTeX, returning original content")
+            return bib_content
+            
+        # Convert entries back to BibTeX format
+        filtered_content = reconstruct_bibtex_content(cited_entries, bib_content)
+        return filtered_content
+        
+    except Exception as e:
+        logger.debug(f"Error filtering BibTeX by citations: {e}")
+        return bib_content  # Fallback to original content
+
+
+def reconstruct_bibtex_content(cited_entries, original_content):
+    """
+    Reconstruct BibTeX content from filtered entries by extracting original text.
+    
+    Args:
+        cited_entries: List of cited entry dictionaries
+        original_content: Original BibTeX content
+        
+    Returns:
+        Reconstructed BibTeX content with only cited entries
+    """
+    cited_keys = {entry.get('key', '') for entry in cited_entries}
+    
+    # Extract original BibTeX entries by finding their text blocks using robust brace counting
+    filtered_parts = []
+    
+    import re
+    # Find all entry starts
+    entry_starts = []
+    for match in re.finditer(r'@\w+\s*\{', original_content, re.IGNORECASE):
+        entry_starts.append(match.start())
+    
+    # For each entry start, find the complete entry by counting braces
+    for start_pos in entry_starts:
+        # Extract the key from the entry header
+        key_match = re.search(r'@\w+\s*\{\s*([^,\s}]+)', original_content[start_pos:start_pos+200])
+        if not key_match:
+            continue
+            
+        entry_key = key_match.group(1).strip()
+        if entry_key not in cited_keys:
+            continue
+            
+        # Find the complete entry by counting braces
+        brace_count = 0
+        pos = start_pos
+        entry_start_found = False
+        
+        while pos < len(original_content):
+            char = original_content[pos]
+            if char == '{':
+                if not entry_start_found:
+                    entry_start_found = True
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if entry_start_found and brace_count == 0:
+                    entry_end = pos + 1
+                    entry_text = original_content[start_pos:entry_end]
+                    filtered_parts.append(entry_text)
+                    break
+            pos += 1
+    
+    if not filtered_parts:
+        logger.debug("Could not reconstruct BibTeX entries, returning original")
+        return original_content
+        
+    return '\n\n'.join(filtered_parts) + '\n'
 
 
