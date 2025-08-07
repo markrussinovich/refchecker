@@ -89,6 +89,64 @@ def parse_authors_with_initials(authors_text):
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
+    # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
+    if ';' in authors_text:
+        # Split by semicolons and handle the last part which might have "and"
+        semicolon_parts = [part.strip() for part in authors_text.split(';')]
+        
+        # Handle cases where the last part starts with "and" (e.g., "and Dimarogonas, D. V.")
+        if len(semicolon_parts) > 1:
+            # Process each part, handling "and" at the beginning of parts
+            processed_parts = []
+            for part in semicolon_parts:
+                part = part.strip()
+                # Remove leading "and" from parts
+                if part.startswith('and '):
+                    part = part[4:].strip()  # Remove "and " prefix
+                if part:  # Only add non-empty parts
+                    processed_parts.append(part)
+            
+            semicolon_parts = processed_parts
+            
+            # Validate that each part looks like "Surname, Initial(s)" format
+            valid_authors = []
+            for part in semicolon_parts:
+                part = part.strip()
+                if not part:
+                    continue
+                    
+                # Check for et al indicators
+                if part.lower() in ['others', 'et al', 'et al.', 'and others']:
+                    if valid_authors:  # Only add et al if we have real authors
+                        valid_authors.append("et al")
+                    break
+                
+                # Check if it matches "Surname, Initial(s)" pattern
+                if ',' in part:
+                    comma_parts = [p.strip() for p in part.split(',', 1)]  # Split on first comma only
+                    if len(comma_parts) == 2:
+                        surname, initials = comma_parts
+                        # Surname should be capitalized word(s)
+                        surname_pattern = r'^[A-Z][a-zA-Z\s\-\.\']+$'
+                        # Initials should be 1-3 capital letters with optional periods and spaces
+                        # Allow patterns like "K.", "D. V.", "A. B. C."
+                        initial_pattern = r'^[A-Z]\.?(\s+[A-Z]\.?)*\s*$'
+                        
+                        if (re.match(surname_pattern, surname) and 
+                            re.match(initial_pattern, initials) and
+                            len(surname) >= 2 and len(initials.replace('.', '').replace(' ', '')) >= 1):
+                            valid_authors.append(f"{surname}, {initials}")
+                        else:
+                            # Doesn't match expected pattern, maybe not semicolon format
+                            break
+                else:
+                    # No comma, doesn't match expected format
+                    break
+            
+            # If we successfully parsed at least 2 authors, use this format
+            if len(valid_authors) >= 2:
+                return valid_authors
+    
     # Check if this is a "and" separated format (common in BibTeX)
     if ' and ' in authors_text:
         and_parts = [part.strip() for part in authors_text.split(' and ') if part.strip()]
@@ -248,7 +306,16 @@ def parse_authors_with_initials(authors_text):
     current_author = ""
     
     for i, part in enumerate(parts):
-        if current_author:
+        # Check for "others" or "et al" variations
+        if part.lower() in ['others', 'and others', 'et al', 'et al.']:
+            # Finish current author if any, then add et al
+            if current_author:
+                authors.append(current_author)
+                current_author = ""
+            if authors:  # Only add et al if we have real authors
+                authors.append("et al")
+            break  # Stop processing after et al indicator
+        elif current_author:
             # We're building an author name
             # Check if this part looks like an initial (1-3 characters, possibly with periods)
             if re.match(r'^[A-Z]\.?\s*$', part) or re.match(r'^[A-Z]\.\s*[A-Z]\.?\s*$', part):
@@ -2573,6 +2640,23 @@ def parse_bibtex_entries(bib_content):
     return entries
 
 
+def _is_arxiv_entry(fields):
+    """
+    Check if BibTeX fields indicate an ArXiv entry
+    
+    Args:
+        fields: Dictionary of BibTeX fields
+        
+    Returns:
+        Boolean indicating if this is an ArXiv entry
+    """
+    # Check for archivePrefix field (case-insensitive)
+    for field_name, field_value in fields.items():
+        if field_name.lower() == 'archiveprefix' and field_value.lower() == 'arxiv':
+            return True
+    return False
+
+
 def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
     """
     Extract references from LaTeX content programmatically
@@ -2599,9 +2683,11 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
         for entry in entries:
             fields = entry['fields']
             
-            # Skip entries without essential fields (title or author)
-            # These are typically URL-only entries like @misc{key, howpublished={\url{...}}}
-            if not fields.get('title') and not fields.get('author'):
+            # Skip entries without essential fields (title, author, or howpublished)
+            # But allow @misc entries with howpublished URLs or ArXiv entries
+            if (not fields.get('title') and not fields.get('author') and 
+                not (entry['type'] == 'misc' and fields.get('howpublished')) and
+                not _is_arxiv_entry(fields)):
                 continue
             
             # Reconstruct the full BibTeX entry for raw_text
@@ -2625,7 +2711,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 'url': fields.get('url', ''),
                 'doi': fields.get('doi', ''),
                 'bibtex_key': entry['key'],
-                'bibtex_type': entry['type']
+                'bibtex_type': entry['type'],
+                'type': 'non-arxiv'  # Default type for BibTeX entries
             }
             
             # Preserve all original BibTeX fields for formatting correction
@@ -2633,27 +2720,108 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 if field_name not in ref:  # Don't overwrite already processed fields
                     ref[field_name] = field_value
             
-            # Parse authors
+            # Parse authors using the sophisticated parsing logic
             if 'author' in fields:
                 author_text = fields['author']
-                # Split by 'and' and clean up
-                authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
+                # Use parse_authors_with_initials which properly handles "others" -> "et al"
+                parsed_authors = parse_authors_with_initials(author_text)
                 
-                # Clean up any author names that still have "and" prefix due to edge cases
-                cleaned_authors = []
-                for author in authors:
-                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
-                    author = re.sub(r'^and\s+', '', author.strip())
-                    if author:  # Only add non-empty authors
-                        cleaned_authors.append(author)
-                
-                ref['authors'] = cleaned_authors
+                if parsed_authors:
+                    ref['authors'] = parsed_authors
+                else:
+                    # Fallback to simple split if parsing fails
+                    authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
+                    cleaned_authors = []
+                    for author in authors:
+                        # Remove leading "and" from author names
+                        author = re.sub(r'^and\s+', '', author.strip())
+                        # Convert "others" to "et al"
+                        if author.lower() in ['others', 'and others']:
+                            if cleaned_authors:  # Only add if we have real authors
+                                cleaned_authors.append("et al")
+                        elif author:  # Only add non-empty authors
+                            cleaned_authors.append(author)
+                    ref['authors'] = cleaned_authors
+            
+            # Special handling for @misc entries with only howpublished field
+            if not ref['title'] and not ref['authors'] and entry['type'] == 'misc':
+                howpublished = fields.get('howpublished', '')
+                if howpublished:
+                    # Try to extract a URL from howpublished
+                    url_patterns = [
+                        r'://([^/]+)',  # Missing protocol case: "://example.com/path"
+                        r'https?://([^/\s]+)',  # Standard URL
+                        r'www\.([^/\s]+)',  # www without protocol
+                    ]
+                    
+                    extracted_url = ''
+                    for pattern in url_patterns:
+                        match = re.search(pattern, howpublished)
+                        if match:
+                            domain = match.group(1)
+                            # Reconstruct URL with https if protocol was missing
+                            if howpublished.startswith('://'):
+                                extracted_url = 'https' + howpublished
+                            elif not howpublished.startswith(('http://', 'https://')):
+                                extracted_url = 'https://' + howpublished
+                            else:
+                                extracted_url = howpublished
+                            
+                            # Generate title from domain/path
+                            if 'jailbreakchat.com' in domain:
+                                title = 'JailbreakChat Website'
+                            elif 'lesswrong.com' in domain:
+                                title = 'LessWrong Post: Jailbreaking ChatGPT'
+                            elif 'chat.openai.com' in domain:
+                                title = 'ChatGPT Conversation Share'
+                            elif 'gemini.google.com' in domain:
+                                title = 'Gemini Conversation Share'
+                            elif 'microsoft.com' in domain:
+                                title = 'Microsoft Azure Content Safety API'
+                            elif 'perspectiveapi.com' in domain:
+                                title = 'Perspective API'
+                            else:
+                                # Generic title based on domain
+                                title = f"Web Resource: {domain}"
+                            
+                            ref['title'] = title
+                            ref['authors'] = ["Web Resource"]
+                            ref['url'] = extracted_url
+                            break
             
             # Extract year
             if 'year' in fields:
                 year_match = re.search(r'\d{4}', fields['year'])
                 if year_match:
                     ref['year'] = int(year_match.group())
+            
+            # Extract year from eprint for ArXiv entries (e.g., "2311.09096" -> 2023)
+            elif 'eprint' in fields and _is_arxiv_entry(fields):
+                eprint = fields['eprint']
+                year_match = re.match(r'^(\d{2})(\d{2})\.\d+', eprint)
+                if year_match:
+                    year_prefix = int(year_match.group(1))
+                    year_full = 2000 + year_prefix if year_prefix >= 90 else 2000 + year_prefix
+                    ref['year'] = year_full
+            
+            # Determine if this is an ArXiv reference
+            arxiv_indicators = [
+                _is_arxiv_entry(fields),
+                'arxiv' in str(fields.get('url', '')).lower(),
+                'arxiv' in str(fields.get('title', '')).lower(),
+                'journal' in fields and 'arxiv' in fields['journal'].lower()
+            ]
+            
+            if any(arxiv_indicators):
+                ref['type'] = 'arxiv'
+                
+                # Construct ArXiv URL from eprint field if no URL present
+                if not ref['url'] and 'eprint' in fields:
+                    eprint = fields['eprint']
+                    # Remove version number if present (e.g., "1610.10099v2" -> "1610.10099")
+                    clean_eprint = re.sub(r'v\d+$', '', eprint)
+                    if re.match(r'^\d{4}\.\d{4,5}', clean_eprint):
+                        ref['url'] = f"https://arxiv.org/abs/{clean_eprint}"
             
             references.append(ref)
     
@@ -2763,15 +2931,15 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                         try:
                             parsed_authors = parse_authors_with_initials(author_text_clean)
                             if parsed_authors and len(parsed_authors) > 1:
-                                # Clean up "and" prefixes, periods, and "et al" suffixes
+                                # Clean up "and" prefixes, periods, and preserve "et al"
                                 cleaned_authors = []
                                 for author in parsed_authors:
                                     # Remove leading "and" 
                                     author = re.sub(r'^and\s+', '', author.strip())
                                     # Remove trailing periods that shouldn't be there
                                     author = clean_author_name(author)
-                                    # Skip "et al" variants
-                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et']:
+                                    # Skip all "et al" variants for LaTeX bibliographies
+                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
                                         cleaned_authors.append(author)
                                 if cleaned_authors:
                                     ref['authors'] = cleaned_authors
@@ -2784,8 +2952,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                     a = re.sub(r'^and\s+', '', a)
                                     # Clean author name (remove unnecessary periods)
                                     a = clean_author_name(a)
-                                    if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
-                                        simple_authors.append(a)
+                                    if a and len(a) > 2:
+                                        # Skip all "et al" variants for LaTeX bibliographies
+                                        if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                            simple_authors.append(a)
                                 if simple_authors:
                                     ref['authors'] = simple_authors
                         except Exception:
@@ -2797,8 +2967,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                 a = re.sub(r'^and\s+', '', a)
                                 # Clean author name (remove unnecessary periods)
                                 a = clean_author_name(a)
-                                if a and len(a) > 2 and a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.']:
-                                    simple_authors.append(a)
+                                if a and len(a) > 2:
+                                    # Skip all "et al" variants for LaTeX bibliographies
+                                    if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                        simple_authors.append(a)
                             if simple_authors:
                                 ref['authors'] = simple_authors
                     else:

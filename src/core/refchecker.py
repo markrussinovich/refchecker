@@ -202,6 +202,10 @@ class ArxivReferenceChecker:
         # debug mode
         self.debug_mode = debug_mode
         
+        # Initialize extraction flags
+        self.used_regex_extraction = False
+        self.used_unreliable_extraction = False
+        
         # Parallel processing configuration
         self.enable_parallel = enable_parallel
         self.max_workers = max_workers
@@ -2887,6 +2891,7 @@ class ArxivReferenceChecker:
         self.total_other_refs = 0
         self.total_unverified_refs = 0
         self.used_regex_extraction = False
+        self.used_unreliable_extraction = False  # Only set for fallback regex parsing, not BibTeX
         
         try:
             # Get papers to process
@@ -3105,8 +3110,8 @@ class ArxivReferenceChecker:
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 
-                # Show warning if regex extraction was used and there are many errors
-                if self.used_regex_extraction and self.total_errors_found > 5:
+                # Show warning if unreliable extraction was used and there are many errors
+                if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
                 if self.verification_output_file:
@@ -3124,8 +3129,8 @@ class ArxivReferenceChecker:
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
                 
-                # Show warning if regex extraction was used and there are many errors
-                if self.used_regex_extraction and self.total_errors_found > 5:
+                # Show warning if unreliable extraction was used and there are many errors
+                if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
                 
                 if self.verification_output_file:
@@ -3401,6 +3406,7 @@ class ArxivReferenceChecker:
         if detect_standard_acm_natbib_format(bibliography_text):
             logger.info("Detected standard ACM/natbib format, using regex-based parsing")
             self.used_regex_extraction = True
+            # Note: ACM/natbib parsing is also quite robust for standard formats
             return self._parse_standard_acm_natbib_references(bibliography_text)
         
         # Check if this is BibTeX format
@@ -3408,6 +3414,7 @@ class ArxivReferenceChecker:
         if detect_bibtex_format(bibliography_text):
             logger.info("Detected BibTeX format, using BibTeX parser")
             self.used_regex_extraction = True
+            # Note: BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
         
         # For non-standard formats, try LLM-based extraction if available
@@ -3431,6 +3438,7 @@ class ArxivReferenceChecker:
         # Fallback to regex-based parsing only if LLM was not specified
         logger.info("No LLM available, falling back to regex-based parsing")
         self.used_regex_extraction = True
+        self.used_unreliable_extraction = True  # This is the unreliable fallback parsing
         return self._parse_references_regex(bibliography_text)
     
     def _parse_standard_acm_natbib_references(self, bibliography_text):
@@ -3624,7 +3632,11 @@ class ArxivReferenceChecker:
         # Check if this is BibTeX format first
         if re.search(r'@\w+\s*\{', bibliography_text):
             logger.debug("Detected BibTeX format, using BibTeX-specific parsing")
+            # BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
+        
+        # If we reach here, we're using the unreliable fallback regex parsing
+        self.used_unreliable_extraction = True
         
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
