@@ -138,6 +138,57 @@ def detect_biblatex_format(text: str) -> bool:
     return has_biblatex_marker or has_numbered_refs
 
 
+def _validate_parsing_quality(references: List[Dict[str, Any]]) -> bool:
+    """
+    Validate that biblatex parsing results are of acceptable quality.
+    If quality is poor, we should fallback to LLM parsing instead.
+    
+    Args:
+        references: List of parsed reference dictionaries
+        
+    Returns:
+        True if parsing quality is acceptable, False if should fallback to LLM
+    """
+    if not references:
+        return False
+    
+    # Count problematic entries
+    unknown_authors = 0
+    unknown_titles = 0
+    total_entries = len(references)
+    
+    for ref in references:
+        authors = ref.get('authors', [])
+        title = ref.get('title', '')
+        
+        # Check for "Unknown Author" entries
+        if not authors or authors == ['Unknown Author']:
+            unknown_authors += 1
+        
+        # Check for "Unknown Title" entries  
+        if not title or title == 'Unknown Title':
+            unknown_titles += 1
+    
+    # Calculate failure rates
+    author_failure_rate = unknown_authors / total_entries
+    title_failure_rate = unknown_titles / total_entries
+    
+    # Quality thresholds - if more than 20% of entries have parsing failures,
+    # fallback to LLM which is more robust
+    MAX_ACCEPTABLE_FAILURE_RATE = 0.2
+    
+    if author_failure_rate > MAX_ACCEPTABLE_FAILURE_RATE:
+        logger.debug(f"Biblatex parsing quality poor: {author_failure_rate:.1%} unknown authors (>{MAX_ACCEPTABLE_FAILURE_RATE:.0%}). Falling back to LLM.")
+        return False
+        
+    if title_failure_rate > MAX_ACCEPTABLE_FAILURE_RATE:
+        logger.debug(f"Biblatex parsing quality poor: {title_failure_rate:.1%} unknown titles (>{MAX_ACCEPTABLE_FAILURE_RATE:.0%}). Falling back to LLM.")
+        return False
+    
+    logger.debug(f"Biblatex parsing quality acceptable: {author_failure_rate:.1%} unknown authors, {title_failure_rate:.1%} unknown titles")
+    return True
+
+
 def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
     """
     Parse biblatex formatted references into structured format
@@ -146,7 +197,8 @@ def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
         text: String containing biblatex .bbl entries
         
     Returns:
-        List of structured reference dictionaries
+        List of structured reference dictionaries, or empty list if 
+        parsing quality is poor (to trigger LLM fallback)
     """
     from utils.text_utils import parse_authors_with_initials, clean_title
     from utils.doi_utils import construct_doi_url, is_valid_doi_format
@@ -171,7 +223,7 @@ def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
         # Find the content between this entry and the next (or end of text)
         if i + 1 < len(entry_starts):
             next_start = entry_starts[i + 1][1]
-            content = text[end:next_start].strip()
+            raw_content = text[end:next_start].strip()
         else:
             # Last entry - take everything to end, but be smart about stopping
             remaining = text[end:].strip()
@@ -190,9 +242,20 @@ def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
                 if match and match.start() < min_stop:
                     min_stop = match.start()
             
-            content = remaining[:min_stop].strip()
+            raw_content = remaining[:min_stop].strip()
         
-        if content:
+        # Clean up content - handle cases where entry might be incomplete or malformed
+        if raw_content:
+            # Remove stray closing brackets or incomplete markers
+            content = raw_content
+            # Remove trailing "]" if it's the only thing on the last line
+            lines = content.split('\n')
+            if len(lines) > 1 and lines[-1].strip() == ']':
+                content = '\n'.join(lines[:-1]).strip()
+            elif content.strip() == ']':
+                # If content is only "], skip this entry as it's incomplete
+                continue
+            
             matches.append((entry_num, content))
     
     for entry_num, content in matches:
@@ -218,6 +281,11 @@ def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
             references.append(parsed_ref)
     
     logger.debug(f"Extracted {len(references)} biblatex references")
+    
+    # Validate parsing quality - if poor, return empty list to trigger LLM fallback
+    if not _validate_parsing_quality(references):
+        return []
+    
     return references
 
 
@@ -263,6 +331,8 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
         # Pattern: "FirstAuthor et al. Title Goes Here. Year." or "Author. Title. Year."
         # Order matters: more specific patterns first
         title_patterns = [
+            # Pattern for unquoted books: "Author1 and Author2, Title: Subtitle. Location: Publisher, Year."
+            r'(?:and\s+[A-Z][^,]*),\s+([A-Z][^.]*?:\s*[^.]*?)\.\s+[A-Z][^:]*:\s*[^,]*,\s*\d{4}',
             r'[A-Z][^.]+\.\s*([A-Z][^.]*?)\.\s*(?:https?://|arXiv:|\d{4})',  # "Authors. Title. URL/arXiv/Year" (flexible spacing) - MOST SPECIFIC
             r'\.([A-Z][A-Za-z\s]+(?:\?|!)?)\.?\s+\d{4}',  # ".Title. Year" - for cases where authors end without space
             r'[A-Z][a-z]+\.([A-Z][A-Za-z\s\-&]+?)\.\s+\d{4}',  # "Name.Title. Year" - missing space after period
@@ -276,7 +346,14 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
             if title_match:
                 potential_title = title_match.group(1)
                 # Make sure it looks like a title and not author names
-                if len(potential_title) > 10 and not re.match(r'^[A-Z][a-z]+,\s*[A-Z]', potential_title):
+                # Be more specific about author name patterns - should be "Surname, Initial" not "Word, Word"
+                author_like_pattern = r'^[A-Z][a-z]+,\s*[A-Z]\.?$'  # "Smith, J." or "Smith, J"
+                multi_word_author = r'^[A-Z][a-z]+,\s*[A-Z][a-z]+$'  # "Smith, John" - but still reject this
+                
+                is_author_like = (re.match(author_like_pattern, potential_title) or 
+                                re.match(multi_word_author, potential_title))
+                
+                if len(potential_title) > 2 and not is_author_like:
                     title = clean_title(potential_title)
                     break
     
@@ -330,16 +407,25 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
     # Examples we need to handle:
     # "Egor Zverev, Sahar Abdelnabi, Mario Fritz, and Christoph H Lampert. \"Title\". In: venue (year)."
     # "Andrej Karpathy. Intro to Large Language Models. https://... year."
+    # "A. Author and B. Coauthor, \"Title\","  <- handle this format
     
     # Try multiple patterns to extract authors
+    # Order matters - more specific patterns first!
     author_patterns = [
         # Pattern 1: Authors followed by quoted title (handle both regular and smart quotes)
+        r'^([^"\u201c\u201d]+?),\s*["\u201c\u201d]',  # "Authors, \"Title\"" - more restrictive, requires comma before quote
         r'^([^"\u201c\u201d]+)\.\s*["\u201c\u201d]',  # "Authors. \"Title\"" or smart quotes
         
-        # Pattern 2: Authors followed by title, then period, then year or venue
+        # Pattern 2: Authors followed by unquoted title for books: "Author1 and Author2, Title:"
+        r'^([^,]+(?:\s+and\s+[^,]+)?),\s+([A-Z][^.]*?):\s*([^.]*?)\.',  # "Author1 and Author2, Title: Subtitle." - book format
+        
+        # Pattern 3: Authors ending with period, no space, then title (missing space case) - MORE SPECIFIC
+        r'^([^.]+?)\.([A-Z][^.]*)\.',  # "Authors.Title." - missing space after period
+        
+        # Pattern 4: Authors followed by title, then period, then year or venue (with extracted title)
         r'^(.+?)\.\s*([A-Z][^.]+)\.\s+(?:In:|https?://|\d{4})',  # "Authors. Title. In:/URL/Year" (allow no space after period)
         
-        # Pattern 3: Authors ending with period followed by capital letter (simpler fallback)
+        # Pattern 5: Authors ending with period followed by capital letter (simpler fallback) - LEAST SPECIFIC
         r'^([^.]+?)\.\s*[A-Z]',  # Allow no space after period
     ]
     
@@ -349,9 +435,17 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
             potential_authors = author_match.group(1).strip()
             
             # For patterns that also capture title, extract it
-            if i == 1 and not title and len(author_match.groups()) > 1:
+            if i == 2 and not title and len(author_match.groups()) > 2:
+                # Pattern 2 (book format) captures authors, title, and subtitle
+                title_part = author_match.group(2).strip()
+                subtitle_part = author_match.group(3).strip()
+                combined_title = f"{title_part}: {subtitle_part}" if subtitle_part else title_part
+                if len(combined_title) > 2:
+                    title = clean_title(combined_title)
+            elif (i == 3 or i == 4) and not title and len(author_match.groups()) > 1:
+                # Pattern 3 (missing space, index 3) and Pattern 4 (with space, index 4) capture both authors and title
                 potential_title = author_match.group(2).strip()
-                if len(potential_title) > 5 and not re.match(r'^[A-Z][a-z]+,', potential_title):
+                if len(potential_title) > 2 and not re.match(r'^[A-Z][a-z]+,', potential_title):
                     title = clean_title(potential_title)
             
             # Validate that this looks like authors
@@ -431,8 +525,11 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
                             authors.append(part)
     
     # 7. Extract journal/venue - look for patterns like "In: Conference" or remaining text
+    # Also handle cases like "Tasks,"Adv. Neural" where there's missing space after quote-comma
     journal_patterns = [
         r'In:\s*([^.]+?)(?:\.|$)',  # "In: Conference Name"
+        r'"[^"]*,"([A-Z][^,]*?\. [A-Z][^,]*)',  # Quote-comma-venue like "Tasks,"Adv. Neural Inf. Process. Syst."
+        r'["\u201c\u201d]([A-Z][^.]*(?:Adv\.|Proc\.|IEEE|Journal)[^.]*)',  # Missing space after quote like "Tasks"Adv. Neural"
         r'([A-Z][^.]*(?:Conference|Workshop|Journal|Proceedings)[^.]*)',  # Conference/journal names
     ]
     
