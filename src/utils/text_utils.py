@@ -3775,6 +3775,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         for abbrev in sorted(multi_word_abbrevs.keys(), key=len, reverse=True):
             if abbrev in expanded_text:
                 expanded_text = expanded_text.replace(abbrev, multi_word_abbrevs[abbrev])
+                break  # Only apply the first (longest) matching abbreviation to avoid conflicts
         
         # Second pass: handle single word abbreviations
         words = expanded_text.split()
@@ -4169,8 +4170,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         return False
     
     # Order-aware fuzzy matching - words should match in sequence
-    words1_list = list(words1)
-    words2_list = list(words2)
+    # Sort to ensure deterministic order (set iteration is not guaranteed to be consistent)
+    words1_list = sorted(list(words1))
+    words2_list = sorted(list(words2))
     
     # If word counts are very different, they're likely different venues
     if len(words1) > 0 and len(words2) > 0:
