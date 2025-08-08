@@ -32,6 +32,7 @@ torch>=2.0.0
 vllm>=0.3.0
 huggingface_hub>=0.17.0
 
+
 # Development dependencies
 pytest>=6.0.0
 pytest-cov>=2.0.0
@@ -39,6 +40,8 @@ black>=21.0.0
 isort>=5.0.0
 flake8>=3.9.0
 mypy>=0.910
+
+# Markdown linting for docs
 
 # Documentation dependencies
 sphinx>=4.0.0

@@ -48,6 +48,8 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 ❓ References that couldn't be verified: 15
 ```
 
+
+
 ## 📋 Table of Contents
 
 - [📊 Sample Output](#-sample-output)
@@ -62,7 +64,18 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 - [🧪 Testing](#-testing)
 - [📄 License](#-license)
 
+
 ## 🎯 Features
+
+- **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
+- **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
+- **🤖 LLM-Enhanced Reference Extraction**: AI-powered bibliography parsing with support for OpenAI, Anthropic, Google, Azure, and local vLLM
+- **🆕 LLM-Powered Documentation Indexing**: Generate a Markdown index (`docs_index.md`) mapping documentation files to project requirements using a local LLM server (see Quick Start below). Output highlights coverage and gaps for documentation review and PRs.
+- **✅ Comprehensive Error Detection**: Identifies issues with titles, authors, years, venues, URLs, and DOIs
+- **🔄 Multi-Tier Verification Sources**: Uses a prioritized check of Semantic Scholar, OpenAlex, and CrossRef with intelligent retry logic
+- **🧠 Smart Title Matching**: Advanced similarity algorithms handle common academic formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
+- **🏢 Venue Normalization**: Recognizes common journal and conference abbreviation patterns
+- **� Detailed Reporting**: Generates comprehensive error reports with drop-in corrected references
 
 - **📄 Multiple Input Formats**: Process ArXiv papers, local PDFs, LaTeX files, and text documents
 - **🔍 Advanced Bibliography Detection**: Uses intelligent pattern matching to identify bibliography sections
@@ -76,7 +89,40 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 ## 🚀 Quick Start
 
+
 ### Check Your First Paper
+### LLM-Powered Documentation Indexing
+
+
+To generate a documentation/spec index with a local LLM server (e.g., LM Studio):
+
+```bash
+# Start your local LLM server (see scripts/llm_index_docs.py for details)
+python scripts/llm_index_docs.py
+```
+
+> **Note for Windows users:** The `make llm-index-docs` command requires GNU Make, which is not available by default on Windows. Simply run the Python script directly as shown above.
+
+
+The output ([docs_index.md](docs_index.md)) maps each doc to project requirements and highlights coverage and gaps. All links in the generated index point to the actual documentation files in this repository for easy navigation.
+
+**Example: Generating a Documentation Index with LLM**
+
+```bash
+# Start your local LLM server (e.g., LM Studio)
+python scripts/llm_index_docs.py
+# Output will be written to docs_index.md
+```
+
+Sample output table (in `docs_index.md`):
+
+| Document File | Covered Features/Requirements | Relevant Sections in README.md | Gaps/Missing Links |
+|--------------|-------------------------------|-------------------------------|--------------------|
+| [README.md](README.md) | Overview, features, usage, testing | All sections | None |
+| [docs_index.md](docs_index.md) | Index mapping docs to spec | LLM doc index section | More usage examples |
+| [llm_index_docs_summary.md](llm_index_docs_summary.md) | LLM indexing script description | LLM doc index section | Example output missing |
+| [PR_llm_index_docs.md](PR_llm_index_docs.md) | PR documentation for new feature | Features section | Example output missing |
+| [.github/copilot-instructions.md](.github/copilot-instructions.md) | Copilot/project architecture | Setup and usage | Config details missing |
 
 1. **Check a famous paper:**
    ```bash
