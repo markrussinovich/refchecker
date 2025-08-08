@@ -3383,7 +3383,7 @@ class ArxivReferenceChecker:
         # Check if this is biblatex format  
         from utils.biblatex_parser import detect_biblatex_format
         if detect_biblatex_format(bibliography_text):
-            logger.info("Detected biblatex format, using biblatex parser")
+            logger.debug("Detected biblatex format")
             self.used_regex_extraction = True
             # Note: biblatex parsing is also robust, so we don't set used_unreliable_extraction
             biblatex_refs = self._parse_biblatex_references(bibliography_text)
@@ -3391,7 +3391,7 @@ class ArxivReferenceChecker:
             # If biblatex parsing returned empty results (due to quality validation),
             # fallback to LLM if available
             if not biblatex_refs and self.llm_extractor:
-                logger.debug("Biblatex parser returned no results due to quality validation, trying LLM fallback")
+                logger.debug("Biblatex is incompatible with parser")
                 try:
                     references = self.llm_extractor.extract_references(bibliography_text)
                     if references:
@@ -3403,7 +3403,7 @@ class ArxivReferenceChecker:
                 except Exception as e:
                     logger.error(f"LLM fallback failed: {e}")
                     return []
-            
+            logger.debug("Using biblatex file")               
             return biblatex_refs
         
         # For non-standard formats, try LLM-based extraction if available
@@ -3634,6 +3634,7 @@ class ArxivReferenceChecker:
             # we'll continue with the unreliable fallback regex parsing
             if not biblatex_refs:
                 logger.debug("Biblatex parser returned no results due to quality validation, falling back to regex parsing")
+                print(f"⚠️  Biblatex parser found no valid references (failed quality validation) - falling back to regex parsing")
             else:
                 return biblatex_refs
         
