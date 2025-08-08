@@ -365,6 +365,8 @@ class TestArxivIdExtraction:
         test_cases = [
             ("https://arxiv.org/abs/1706.03762", "1706.03762"),
             ("https://arxiv.org/pdf/1810.04805.pdf", "1810.04805"),
+            ("https://arxiv.org/html/2507.23751v1", "2507.23751"),
+            ("https://arxiv.org/html/2507.23751", "2507.23751"),
         ]
         
         for url, expected in test_cases:

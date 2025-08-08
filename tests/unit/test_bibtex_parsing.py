@@ -880,6 +880,80 @@ Yuan, Z.; and Zhu, M. 2024.
         self.assertIsInstance(error_message, str)
         self.assertNotIn('Z.; and Zhu', error_message, 
                         f"Malformed author in error message: {error_message}")
+    
+    def test_apostrophe_and_trailing_period_name_matching_regression(self):
+        """Test apostrophe names and trailing period handling (D'Amato case regression test)"""
+        from utils.text_utils import enhanced_name_match, compare_authors
+        
+        # Test cases with apostrophes and various formatting issues
+        apostrophe_test_cases = [
+            # The original failing case - trailing period
+            ("J. L. D'Amato.", "Jorge L. D'Amato"),
+            
+            # Other apostrophe cases  
+            ("J. L. D'Amato", "Jorge L. D'Amato"),
+            ("M. A. O'Connor", "Mary A. O'Connor"),
+            ("P. J. O'Brien", "Patrick James O'Brien"),
+            ("S. D'Alessandro", "Sara D'Alessandro"),
+            
+            # Trailing period variations
+            ("J. Smith.", "John Smith"),
+            ("M. A. Wilson.", "Mary Anne Wilson"),
+            ("P. D'Angelo.", "Paolo D'Angelo"),
+            
+            # Multiple trailing periods (edge case)
+            ("J. L. Brown..", "Jennifer L. Brown"),
+            
+            # Mixed apostrophe and period issues
+            ("A. O'Connor.", "Anthony O'Connor"),
+            ("B. D'Alessandro.", "Barbara D'Alessandro"),
+        ]
+        
+        print(f"\nTesting apostrophe and trailing period name matching:")
+        
+        for cited_name, correct_name in apostrophe_test_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                # Test enhanced_name_match directly
+                match_result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(match_result, 
+                              f"enhanced_name_match failed for {repr(cited_name)} vs {repr(correct_name)}")
+                
+                # Test full author comparison pipeline
+                cited_authors = [cited_name]
+                correct_authors = [{'name': correct_name}]
+                
+                comparison_result, error_message = compare_authors(cited_authors, correct_authors)
+                self.assertTrue(comparison_result, 
+                               f"Author comparison failed for {repr(cited_name)} vs {repr(correct_name)}: {error_message}")
+                self.assertEqual(error_message, "Authors match")
+    
+    def test_trailing_period_normalization_edge_cases(self):
+        """Test that trailing period removal doesn't break valid initials"""
+        from utils.text_utils import enhanced_name_match
+        
+        # Cases where trailing periods should be removed
+        should_match_cases = [
+            ("J. Smith.", "John Smith"),
+            ("A. B. Johnson.", "Albert B. Johnson"),
+            ("M. O'Connor.", "Mary O'Connor"),
+        ]
+        
+        # Cases where periods should be preserved (part of initials)
+        should_still_work_cases = [
+            ("J. L. Smith", "John L. Smith"),  # Normal initials
+            ("A. B. C. Wilson", "Albert B. C. Wilson"),  # Multiple initials
+            # Note: Single initial "J." vs "John" is not expected to match without surname context
+        ]
+        
+        for cited_name, correct_name in should_match_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(result, f"Should match: {repr(cited_name)} vs {repr(correct_name)}")
+        
+        for cited_name, correct_name in should_still_work_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(result, f"Should still work: {repr(cited_name)} vs {repr(correct_name)}")
 
 
 if __name__ == '__main__':

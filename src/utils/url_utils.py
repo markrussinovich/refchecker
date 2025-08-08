@@ -33,26 +33,43 @@ def construct_doi_url(doi: str) -> str:
 
 def extract_arxiv_id_from_url(url: str) -> Optional[str]:
     """
-    Extract ArXiv ID from an ArXiv URL.
+    Extract ArXiv ID from an ArXiv URL or text containing ArXiv reference.
+    
+    This is the common function that handles all ArXiv ID extraction patterns:
+    - URLs: https://arxiv.org/abs/1234.5678, https://arxiv.org/pdf/1234.5678.pdf, https://arxiv.org/html/1234.5678
+    - Text references: arXiv:1234.5678, arXiv preprint arXiv:1234.5678
+    - Version handling: removes version numbers (v1, v2, etc.)
     
     Args:
-        url: ArXiv URL (abs or pdf)
+        url: ArXiv URL or text containing ArXiv reference
         
     Returns:
-        ArXiv ID if found, None otherwise
+        ArXiv ID (without version) if found, None otherwise
     """
-    if not url:
+    if not url or not isinstance(url, str):
         return None
     
-    # Use the more comprehensive regex from text_utils.py
-    arxiv_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^\s/?#]+?)(?:\.pdf|v\d+)?(?:[?\#]|$)', url)
-    if arxiv_match:
-        return arxiv_match.group(1)
+    # Pattern 1: arXiv: format (e.g., "arXiv:1610.10099" or "arXiv preprint arXiv:1610.10099")
+    arxiv_text_match = re.search(r'arXiv:(\d{4}\.\d{4,5})', url, re.IGNORECASE)
+    if arxiv_text_match:
+        arxiv_id = arxiv_text_match.group(1)
+        # Remove version number if present
+        return re.sub(r'v\d+$', '', arxiv_id)
     
-    # Fallback to simpler regex for edge cases
-    fallback_match = re.search(r'arxiv\.org/(?:abs|pdf)/([^/?#]+)', url)
+    # Pattern 2: arxiv.org URLs (abs, pdf, html)
+    # Handle URLs with version numbers and various formats
+    arxiv_url_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/([^\s/?#]+?)(?:\.pdf|v\d+)?(?:[?\#]|$)', url, re.IGNORECASE)
+    if arxiv_url_match:
+        arxiv_id = arxiv_url_match.group(1)
+        # Remove version number if present
+        return re.sub(r'v\d+$', '', arxiv_id)
+    
+    # Pattern 3: Fallback for simpler URL patterns
+    fallback_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/([^/?#]+)', url, re.IGNORECASE)
     if fallback_match:
-        return fallback_match.group(1).replace('.pdf', '')
+        arxiv_id = fallback_match.group(1).replace('.pdf', '')
+        # Remove version number if present
+        return re.sub(r'v\d+$', '', arxiv_id)
     
     return None
 

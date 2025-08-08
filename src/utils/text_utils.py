@@ -527,31 +527,19 @@ def clean_title(title):
 
 def extract_arxiv_id_from_url(url):
     """
-    Extract ArXiv ID from URL
+    Extract ArXiv ID from URL or text containing ArXiv reference.
+    
+    This function is deprecated. Use utils.url_utils.extract_arxiv_id_from_url instead.
+    Kept for backwards compatibility.
     
     Args:
-        url: URL string
+        url: URL string or text containing arXiv reference
         
     Returns:
         ArXiv ID or None if not found
     """
-    if not isinstance(url, str):
-        return None
-    
-    # Common ArXiv URL patterns
-    patterns = [
-        r'arxiv\.org/abs/(\d+\.\d+(?:v\d+)?)',
-        r'arxiv\.org/pdf/(\d+\.\d+(?:v\d+)?)',
-        r'arxiv:(\d+\.\d+(?:v\d+)?)',
-        r'arXiv:(\d+\.\d+(?:v\d+)?)'
-    ]
-    
-    for pattern in patterns:
-        match = re.search(pattern, url, re.IGNORECASE)
-        if match:
-            return match.group(1)
-    
-    return None
+    from utils.url_utils import extract_arxiv_id_from_url as common_extract
+    return common_extract(url)
 
 def extract_year_from_text(text):
     """
@@ -856,6 +844,10 @@ def is_name_match(name1: str, name2: str) -> bool:
     name1_primary = normalize_diacritics(name1.strip().lower())
     name2_primary = normalize_diacritics(name2.strip().lower())
     
+    # Remove trailing periods that are not part of initials (e.g., "J. L. D'Amato." -> "J. L. D'Amato")
+    name1_primary = re.sub(r'\.+$', '', name1_primary)
+    name2_primary = re.sub(r'\.+$', '', name2_primary)
+    
     # Handle spacing variations around periods: "F.Last" vs "F. Last"
     name1_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name1_primary)
     name2_normalized = re.sub(r'\.([A-Za-z])', r'. \1', name2_primary)
@@ -867,6 +859,10 @@ def is_name_match(name1: str, name2: str) -> bool:
     # Try alternative normalization (without transliterations) if primary failed  
     name1_alt = normalize_diacritics_simple(name1.strip().lower())
     name2_alt = normalize_diacritics_simple(name2.strip().lower())
+    
+    # Remove trailing periods for alternative normalization too
+    name1_alt = re.sub(r'\.+$', '', name1_alt)
+    name2_alt = re.sub(r'\.+$', '', name2_alt)
     
     name1_alt_norm = re.sub(r'\.([A-Za-z])', r'. \1', name1_alt)
     name2_alt_norm = re.sub(r'\.([A-Za-z])', r'. \1', name2_alt)
@@ -2899,8 +2895,10 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                     author = re.sub(r'^and\s+', '', author.strip())
                                     # Remove trailing periods that shouldn't be there
                                     author = clean_author_name(author)
-                                    # Skip all "et al" variants for LaTeX bibliographies
-                                    if author.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
+                                    # Preserve "et al" variants to enable proper author count handling
+                                    if author.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
+                                        cleaned_authors.append('et al')  # Normalize to standard form
+                                    else:
                                         cleaned_authors.append(author)
                                 if cleaned_authors:
                                     ref['authors'] = cleaned_authors
@@ -2924,9 +2922,13 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                         # Clean author name (remove unnecessary periods)
                                         a = clean_author_name(a)
                                         if a and len(a) > 2:
-                                            # Skip all "et al" variants for LaTeX bibliographies
-                                            if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                            # Preserve "et al" variants to enable proper author count handling
+                                            if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                                simple_authors.append('et al')  # Normalize to standard form
+                                            else:
                                                 simple_authors.append(a)
+                                        elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                            simple_authors.append('et al')  # Handle short "et al" variants
                                 
                                 if simple_authors:
                                     ref['authors'] = simple_authors
@@ -2940,9 +2942,13 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                 # Clean author name (remove unnecessary periods)
                                 a = clean_author_name(a)
                                 if a and len(a) > 2:
-                                    # Skip all "et al" variants for LaTeX bibliographies
-                                    if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                    # Preserve "et al" variants to enable proper author count handling
+                                    if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                        simple_authors.append('et al')  # Normalize to standard form
+                                    else:
                                         simple_authors.append(a)
+                                elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                    simple_authors.append('et al')  # Handle short "et al" variants
                             if simple_authors:
                                 ref['authors'] = simple_authors
                     else:
