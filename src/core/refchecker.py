@@ -3386,7 +3386,25 @@ class ArxivReferenceChecker:
             logger.info("Detected biblatex format, using biblatex parser")
             self.used_regex_extraction = True
             # Note: biblatex parsing is also robust, so we don't set used_unreliable_extraction
-            return self._parse_biblatex_references(bibliography_text)
+            biblatex_refs = self._parse_biblatex_references(bibliography_text)
+            
+            # If biblatex parsing returned empty results (due to quality validation),
+            # fallback to LLM if available
+            if not biblatex_refs and self.llm_extractor:
+                logger.debug("Biblatex parser returned no results due to quality validation, trying LLM fallback")
+                try:
+                    references = self.llm_extractor.extract_references(bibliography_text)
+                    if references:
+                        logger.debug(f"LLM fallback extracted {len(references)} references")
+                        return self._process_llm_extracted_references(references)
+                    else:
+                        logger.warning("LLM fallback also returned no results")
+                        return []
+                except Exception as e:
+                    logger.error(f"LLM fallback failed: {e}")
+                    return []
+            
+            return biblatex_refs
         
         # For non-standard formats, try LLM-based extraction if available
         if self.llm_extractor:
@@ -3610,7 +3628,14 @@ class ArxivReferenceChecker:
         if detect_biblatex_format(bibliography_text):
             logger.debug("Detected biblatex format, using biblatex-specific parsing")
             # biblatex parsing is also robust, so we don't set used_unreliable_extraction
-            return self._parse_biblatex_references(bibliography_text)
+            biblatex_refs = self._parse_biblatex_references(bibliography_text)
+            
+            # If biblatex parsing returned empty results (due to quality validation),
+            # we'll continue with the unreliable fallback regex parsing
+            if not biblatex_refs:
+                logger.debug("Biblatex parser returned no results due to quality validation, falling back to regex parsing")
+            else:
+                return biblatex_refs
         
         # If we reach here, we're using the unreliable fallback regex parsing
         self.used_unreliable_extraction = True

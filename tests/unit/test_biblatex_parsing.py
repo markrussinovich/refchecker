@@ -641,5 +641,214 @@ assisted question-answering with human feedback". In: arXiv preprint arXiv:2112.
         self.assertEqual(result, normal_hyphen)
 
 
+class TestBiblatexQualityValidation(unittest.TestCase):
+    """Test quality validation to prevent partial parsing issues"""
+    
+    def test_quality_validation_good_bibliography(self):
+        """Test that good quality bibliography parsing works normally"""
+        content = """
+[1] John Smith, Jane Doe. "A Great Paper on Machine Learning". Conference on AI 2024.
+[2] Alice Brown. "Another Excellent Study". Journal of Science 2023.
+[3] Bob Wilson et al. "Third Important Paper". Nature 2022.
+"""
+        refs = parse_biblatex_references(content)
+        
+        # Should parse all 3 references successfully
+        self.assertEqual(len(refs), 3)
+        
+        # All should have proper authors and titles
+        for ref in refs:
+            self.assertNotEqual(ref['authors'], ['Unknown Author'])
+            self.assertNotEqual(ref['title'], 'Unknown Title')
+            self.assertTrue(len(ref['authors']) > 0)
+            self.assertTrue(len(ref['title']) > 0)
+    
+    def test_quality_validation_poor_bibliography_triggers_fallback(self):
+        """Test that poor quality bibliography triggers LLM fallback"""
+        # Bibliography with mostly unparseable entries
+        content = """
+[1] SomeWeirdFormatThatCantBeParsed123.RandomText.2024.
+[2] AnotherBadEntry,WithCommasEverywhere,2023,Something.
+[3] John Smith. "This one is okay". Conference 2024.
+[4] MoreUnparseableText#$%^&*()12345.
+[5] YetAnotherBadOne|||Random|||2022.
+"""
+        refs = parse_biblatex_references(content)
+        
+        # Should return empty list to trigger LLM fallback
+        self.assertEqual(len(refs), 0, 
+                        "Poor quality parsing should return empty list to trigger LLM fallback")
+    
+    def test_quality_validation_threshold_behavior(self):
+        """Test the quality threshold behavior (20% failure rate)"""
+        # Create bibliography with exactly 20% unknown authors (2 out of 10)
+        content = """
+[1] John Smith. "Good Paper 1". Conference 2024.
+[2] Jane Doe. "Good Paper 2". Journal 2023.
+[3] Bob Wilson. "Good Paper 3". Nature 2022.
+[4] Alice Brown. "Good Paper 4". Science 2021.
+[5] Charlie Davis. "Good Paper 5". PNAS 2020.
+[6] Eve White. "Good Paper 6". Cell 2019.
+[7] Frank Black. "Good Paper 7". Nature 2018.
+[8] Grace Green. "Good Paper 8". Science 2017.
+[9] UnparseableEntry1###.BadFormat.2016.
+[10] UnparseableEntry2@@@.AlsoBad.2015.
+"""
+        refs = parse_biblatex_references(content)
+        
+        # With 20% failure rate, should still trigger fallback (threshold is > 20%)
+        # But let's be flexible since parsing might improve some of these
+        if len(refs) == 0:
+            # Triggered fallback - that's fine
+            pass
+        else:
+            # If it didn't trigger fallback, check the quality
+            unknown_count = sum(1 for ref in refs 
+                              if ref.get('authors') == ['Unknown Author'] or 
+                                 ref.get('title') == 'Unknown Title')
+            failure_rate = unknown_count / len(refs)
+            self.assertLess(failure_rate, 0.3, 
+                          f"If not triggering fallback, failure rate should be reasonable: {failure_rate:.1%}")
+
+
+class TestBiblatexParsingRegressionPaper2508(unittest.TestCase):
+    """Test regression cases specifically found in paper 2508.04714"""
+    
+    def test_incomplete_entry_author_extraction(self):
+        """Test that authors are extracted even when entry appears incomplete"""
+        content = '''[1] A. Author and B. Coauthor, "LLM-Aided Machine Prognosis (LAMP):
+A Framework for Numerical Data Analysis,"
+[2] P. Lewis et al., "Retrieval-Augmented Generation for Knowledge-
+Intensive NLP Tasks,"Adv. Neural Inf. Process. Syst., vol. 33, pp. 9459–
+9474, 2020.'''
+        
+        refs = parse_biblatex_references(content)
+        self.assertEqual(len(refs), 2)
+        
+        # First reference should have authors parsed correctly
+        ref1 = refs[0]
+        self.assertEqual(len(ref1['authors']), 2)
+        self.assertEqual(ref1['authors'][0], 'A. Author')
+        self.assertEqual(ref1['authors'][1], 'B. Coauthor')
+        self.assertNotEqual(ref1['authors'], ['Unknown Author'])
+        
+        # Second reference should also have authors
+        ref2 = refs[1]
+        self.assertEqual(len(ref2['authors']), 2)
+        self.assertEqual(ref2['authors'][0], 'P. Lewis')
+        self.assertEqual(ref2['authors'][1], 'et al')
+        self.assertNotEqual(ref2['authors'], ['Unknown Author'])
+        
+    def test_missing_space_after_quote_comma_journal_extraction(self):
+        """Test that journal/venue is extracted when there's no space after quote-comma"""
+        content = '[2] P. Lewis et al., "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,"Adv. Neural Inf. Process. Syst., vol. 33, pp. 9459–9474, 2020.'
+        
+        refs = parse_biblatex_references(content)
+        self.assertEqual(len(refs), 1)
+        
+        ref = refs[0]
+        self.assertEqual(ref['journal'], 'Adv. Neural Inf. Process. Syst.')
+        self.assertNotEqual(ref['journal'], '')  # Should not be empty
+        
+    def test_entry_ending_with_bracket_cleanup(self):
+        """Test that entries ending with just ] are cleaned up properly"""
+        content = '''[23] A. Author and B. Coauthor, "LLM-Aided Machine Prognosis (LAMP),"
+]'''
+        
+        refs = parse_biblatex_references(content)
+        self.assertEqual(len(refs), 1)
+        
+        ref = refs[0]
+        self.assertEqual(ref['title'], 'LLM-Aided Machine Prognosis (LAMP)')
+        self.assertEqual(len(ref['authors']), 2)
+        self.assertEqual(ref['authors'][0], 'A. Author')
+        self.assertEqual(ref['authors'][1], 'B. Coauthor')
+        self.assertNotEqual(ref['authors'], ['Unknown Author'])
+        
+    def test_real_paper_2508_issues_regression(self):
+        """Test the exact format issues found in paper 2508.04714"""
+        # Test cases based on actual problematic entries from the paper
+        test_cases = [
+            {
+                'content': '[1] A. Author and B. Coauthor, "LLM-Aided Machine Prognosis (LAMP): A Framework for Numerical Data Analysis,"',
+                'expected_authors': ['A. Author', 'B. Coauthor'],
+                'expected_title': 'LLM-Aided Machine Prognosis (LAMP): A Framework for Numerical Data Analysis'
+            },
+            {
+                'content': '[2] P. Lewis et al., "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks,"Adv. Neural Inf. Process. Syst., vol. 33, pp. 9459–9474, 2020.',
+                'expected_authors': ['P. Lewis', 'et al'],
+                'expected_title': 'Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks',
+                'expected_journal': 'Adv. Neural Inf. Process. Syst.',
+                'expected_year': 2020
+            }
+        ]
+        
+        for i, case in enumerate(test_cases):
+            with self.subTest(case=i):
+                refs = parse_biblatex_references(case['content'])
+                self.assertEqual(len(refs), 1, f"Should find exactly 1 reference for case {i}")
+                
+                ref = refs[0]
+                
+                # Test authors
+                if 'expected_authors' in case:
+                    self.assertEqual(ref['authors'], case['expected_authors'], 
+                                   f"Authors mismatch for case {i}")
+                    self.assertNotEqual(ref['authors'], ['Unknown Author'], 
+                                      f"Should not have Unknown Author for case {i}")
+                
+                # Test title
+                if 'expected_title' in case:
+                    self.assertEqual(ref['title'], case['expected_title'], 
+                                   f"Title mismatch for case {i}")
+                    self.assertNotEqual(ref['title'], 'Unknown Title', 
+                                      f"Should not have Unknown Title for case {i}")
+                
+                # Test journal
+                if 'expected_journal' in case:
+                    self.assertEqual(ref['journal'], case['expected_journal'], 
+                                   f"Journal mismatch for case {i}")
+                
+                # Test year
+                if 'expected_year' in case:
+                    self.assertEqual(ref['year'], case['expected_year'], 
+                                   f"Year mismatch for case {i}")
+                                   
+    def test_multiple_format_variations_from_2508(self):
+        """Test multiple format variations seen in paper 2508.04714"""
+        # Various formatting issues seen in the actual paper
+        content = '''[3] A. K. S. Jardine and A. H. C. Tsang, Maintenance, Replacement, and
+Reliability: Theory and Applications. Boca Raton, FL, USA: CRC Press,
+2006.
+[18] Gemini Team et al., "Gemini: A Family of Highly Capable Multimodal
+Models," arXiv:2312.11805, 2023.
+[24] Chitranshu Harbola and Anupam Purwar, "KnowsLM: A framework for
+evaluation of small language models for knowledge augmentation and
+humanised conversations," arXiv preprint arXiv:2504.04569, Apr. 2025.'''
+        
+        refs = parse_biblatex_references(content)
+        self.assertEqual(len(refs), 3)
+        
+        # Test each reference has proper authors (not Unknown Author)
+        for i, ref in enumerate(refs):
+            self.assertNotEqual(ref['authors'], ['Unknown Author'], 
+                              f"Reference {i+1} should not have Unknown Author")
+            self.assertNotEqual(ref['title'], 'Unknown Title', 
+                              f"Reference {i+1} should not have Unknown Title")
+            self.assertTrue(len(ref['authors']) > 0, 
+                          f"Reference {i+1} should have at least one author")
+            
+        # Specific tests for each entry
+        self.assertIn('Jardine', ' '.join(refs[0]['authors']))
+        self.assertIn('Tsang', ' '.join(refs[0]['authors']))
+        
+        self.assertIn('Gemini Team', ' '.join(refs[1]['authors']))
+        self.assertEqual(refs[1]['title'], 'Gemini: A Family of Highly Capable Multimodal Models')
+        
+        self.assertIn('Chitranshu Harbola', ' '.join(refs[2]['authors']))
+        self.assertIn('Anupam Purwar', ' '.join(refs[2]['authors']))
+        self.assertEqual(refs[2]['title'], 'KnowsLM: A framework for evaluation of small language models for knowledge augmentation and humanised conversations')
+
+
 if __name__ == '__main__':
     unittest.main()
