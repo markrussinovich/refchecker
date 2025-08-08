@@ -537,6 +537,70 @@ url={https://example.com}
             "McMillan, Kenneth Robert", 
             "Kenneth L. McMillan"
         ))
+    
+    def test_multiline_bibtex_author_formatting_regression(self):
+        """Test that multi-line BibTeX author strings with line breaks are parsed correctly (regression test)"""
+        from utils.text_utils import parse_authors_with_initials, format_authors_for_display
+        
+        # The specific problematic format reported by user
+        multiline_author_string = '''Haotian Liu and
+                     Chunyuan Li and
+                     Qingyang Wu and
+                     Yong Jae Lee'''
+        
+        # Should parse into 4 separate authors
+        parsed_authors = parse_authors_with_initials(multiline_author_string)
+        self.assertEqual(len(parsed_authors), 4)
+        self.assertEqual(parsed_authors[0], 'Haotian Liu')
+        self.assertEqual(parsed_authors[1], 'Chunyuan Li')
+        self.assertEqual(parsed_authors[2], 'Qingyang Wu')
+        self.assertEqual(parsed_authors[3], 'Yong Jae Lee')
+        
+        # Should format to proper comma-separated display
+        formatted = format_authors_for_display(parsed_authors)
+        expected = 'Haotian Liu, Chunyuan Li, Qingyang Wu, Yong Jae Lee'
+        self.assertEqual(formatted, expected)
+        
+        # Should not contain line breaks or excessive whitespace in formatted output
+        self.assertNotIn('\n', formatted)
+        self.assertNotIn('  ', formatted)  # No double spaces
+        
+        # Test other variations of multi-line formatting
+        variations = [
+            'John Smith and\nJane Doe and\nBob Wilson',
+            'Author One and\n    Author Two and\n        Author Three',
+            'First Author and\n                Author Two',
+        ]
+        
+        for variation in variations:
+            authors = parse_authors_with_initials(variation)
+            self.assertGreaterEqual(len(authors), 2, f"Failed to parse multiple authors from: {repr(variation)}")
+            
+            # No author should contain line breaks
+            for author in authors:
+                self.assertNotIn('\n', author)
+                self.assertFalse(author.startswith(' '))  # No leading whitespace
+                self.assertFalse(author.endswith(' '))   # No trailing whitespace
+    
+    def test_bibtex_whitespace_normalization_regression(self):
+        """Test that various whitespace issues in BibTeX are handled correctly (regression test)"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        # Test cases with different whitespace patterns
+        test_cases = [
+            ('John Smith   and   Jane Doe', ['John Smith', 'Jane Doe']),
+            ('Author\tOne\tand\tAuthor\tTwo', ['Author One', 'Author Two']),
+            ('  Leading Space Author  and  Trailing Space Author  ', ['Leading Space Author', 'Trailing Space Author']),
+            ('Author\n\nwith\n\nextra\n\nlines and Another Author', ['Author with extra lines', 'Another Author']),
+        ]
+        
+        for input_str, expected_authors in test_cases:
+            parsed = parse_authors_with_initials(input_str)
+            self.assertEqual(len(parsed), len(expected_authors), 
+                           f"Wrong number of authors for {repr(input_str)}: got {parsed}")
+            for i, expected in enumerate(expected_authors):
+                self.assertEqual(parsed[i], expected, 
+                               f"Author {i} mismatch for {repr(input_str)}: got {repr(parsed[i])}, expected {repr(expected)}")
 
 
 if __name__ == '__main__':

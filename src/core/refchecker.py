@@ -3410,12 +3410,20 @@ class ArxivReferenceChecker:
             return self._parse_standard_acm_natbib_references(bibliography_text)
         
         # Check if this is BibTeX format
-        from utils.text_utils import detect_bibtex_format
+        from utils.bibtex_parser import detect_bibtex_format
         if detect_bibtex_format(bibliography_text):
             logger.info("Detected BibTeX format, using BibTeX parser")
             self.used_regex_extraction = True
             # Note: BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
+        
+        # Check if this is biblatex format  
+        from utils.biblatex_parser import detect_biblatex_format
+        if detect_biblatex_format(bibliography_text):
+            logger.info("Detected biblatex format, using biblatex parser")
+            self.used_regex_extraction = True
+            # Note: biblatex parsing is also robust, so we don't set used_unreliable_extraction
+            return self._parse_biblatex_references(bibliography_text)
         
         # For non-standard formats, try LLM-based extraction if available
         if self.llm_extractor:
@@ -3630,10 +3638,18 @@ class ArxivReferenceChecker:
         self.used_regex_extraction = True
         
         # Check if this is BibTeX format first
-        if re.search(r'@\w+\s*\{', bibliography_text):
+        from utils.bibtex_parser import detect_bibtex_format
+        if detect_bibtex_format(bibliography_text):
             logger.debug("Detected BibTeX format, using BibTeX-specific parsing")
             # BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
+        
+        # Check if this is biblatex format
+        from utils.biblatex_parser import detect_biblatex_format  
+        if detect_biblatex_format(bibliography_text):
+            logger.debug("Detected biblatex format, using biblatex-specific parsing")
+            # biblatex parsing is also robust, so we don't set used_unreliable_extraction
+            return self._parse_biblatex_references(bibliography_text)
         
         # If we reach here, we're using the unreliable fallback regex parsing
         self.used_unreliable_extraction = True
@@ -4066,214 +4082,33 @@ class ArxivReferenceChecker:
         Returns:
             List of structured reference dictionaries
         """
-        # Use the improved BibTeX parsing from text_utils
-        from utils.text_utils import extract_latex_references
+        # Use the dedicated BibTeX parser
+        from utils.bibtex_parser import parse_bibtex_references
         
-        # Extract references using the improved parsing logic
-        references = extract_latex_references(bibliography_text)
+        # Extract references using the BibTeX parser
+        references = parse_bibtex_references(bibliography_text)
         
-        logger.debug(f"Extracted {len(references)} BibTeX references using improved parser")
+        logger.debug(f"Extracted {len(references)} BibTeX references using dedicated parser")
         return references
     
-    def _parse_bibtex_entry(self, entry_type, content):
+    def _parse_biblatex_references(self, bibliography_text):
         """
-        Parse a single BibTeX entry content to extract fields
+        Parse biblatex formatted references like [1] Author. "Title". In: Venue. Year.
         
         Args:
-            entry_type: Type of entry (inproceedings, article, etc.)
-            content: Content inside the braces
+            bibliography_text: String containing biblatex .bbl entries
             
         Returns:
-            Dictionary with structured reference data
+            List of structured reference dictionaries
         """
-        import re
-        from utils.text_utils import parse_authors_with_initials, clean_title
-        from utils.doi_utils import construct_doi_url, is_valid_doi_format
+        # Use the dedicated biblatex parser
+        from utils.biblatex_parser import parse_biblatex_references
         
-        # Extract key (first part before comma)
-        key_match = re.match(r'([^,]+),', content)
-        key = key_match.group(1).strip() if key_match else ""
+        # Extract references using the biblatex parser
+        references = parse_biblatex_references(bibliography_text)
         
-        # Extract fields using regex
-        fields = {}
-        
-        # Pattern to match field = {value} or field = "value"
-        field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)")'
-        
-        for match in re.finditer(field_pattern, content, re.DOTALL):
-            field_name = match.group(1).lower()
-            field_value = match.group(2) or match.group(3) or ""
-            # Strip outer quotes if present (handles cases like title = {"Some Title"})
-            field_value = field_value.strip()
-            if field_value.startswith('"') and field_value.endswith('"'):
-                field_value = field_value[1:-1]
-            fields[field_name] = field_value
-        
-        # If field extraction failed, try a simpler approach
-        if not fields:
-            logger.debug("Field extraction failed, trying line-by-line approach")
-            lines = content.split('\n')
-            for line in lines:
-                line = line.strip()
-                if '=' in line:
-                    field_match = re.match(r'(\w+)\s*=\s*[{"]([^{}"]*)[}"]', line)
-                    if field_match:
-                        field_name = field_match.group(1).lower()
-                        field_value = field_match.group(2).strip()
-                        # Strip outer quotes if present
-                        if field_value.startswith('"') and field_value.endswith('"'):
-                            field_value = field_value[1:-1]
-                        fields[field_name] = field_value
-        
-        # Extract required information
-        title = fields.get('title', '')
-        author_string = fields.get('author', '')
-        year = 0
-        
-        # Parse year
-        year_str = fields.get('year', '')
-        if year_str:
-            year_match = re.search(r'\d{4}', year_str)
-            if year_match:
-                year = int(year_match.group())
-        
-        # If no year found but we have a valid title/authors, try extracting from eprint or other fields
-        if year == 0 and (title or author_string):
-            # Check eprint field for arXiv entries like "2024" prefix
-            eprint = fields.get('eprint', '')
-            if eprint:
-                # Extract year from ArXiv eprint ID (e.g., "2311.09096" -> 2023)
-                eprint_year_match = re.match(r'^(\d{2})(\d{2})', eprint)
-                if eprint_year_match:
-                    yy = int(eprint_year_match.group(1))
-                    # Convert to 4-digit year (23 -> 2023, assumes 21st century)
-                    if yy >= 91:  # ArXiv started in 1991
-                        year = 1900 + yy
-                    else:
-                        year = 2000 + yy
-        
-        # For entries without year, set None instead of 0
-        if year == 0:
-            year = None
-        
-        # Parse authors using the enhanced function
-        authors = []
-        if author_string:
-            try:
-                authors = parse_authors_with_initials(author_string)
-            except Exception as e:
-                logger.debug(f"Author parsing failed for '{author_string}': {e}")
-                # Fallback: split by 'and' and clean up
-                author_parts = author_string.split(' and ')
-                authors = []
-                for part in author_parts:
-                    # Remove leading "and" from author names (handles cases like "and Krishnamoorthy, S")
-                    part = re.sub(r'^and\s+', '', part.strip())
-                    if part:
-                        authors.append(part)
-        
-        # Special handling for @misc entries with only howpublished field
-        if not title and not authors and entry_type == 'misc':
-            howpublished = fields.get('howpublished', '')
-            if howpublished:
-                # Try to extract a URL from howpublished
-                url_patterns = [
-                    r'://([^/]+)',  # Missing protocol case: "://example.com/path"
-                    r'https?://([^/\s]+)',  # Standard URL
-                    r'www\.([^/\s]+)',  # www without protocol
-                ]
-                
-                extracted_url = ''
-                for pattern in url_patterns:
-                    match = re.search(pattern, howpublished)
-                    if match:
-                        domain = match.group(1)
-                        # Reconstruct URL with https if protocol was missing
-                        if howpublished.startswith('://'):
-                            extracted_url = 'https' + howpublished
-                        elif not howpublished.startswith(('http://', 'https://')):
-                            extracted_url = 'https://' + howpublished
-                        else:
-                            extracted_url = howpublished
-                        
-                        # Generate title from domain/path
-                        if 'jailbreakchat.com' in domain:
-                            title = 'JailbreakChat Website'
-                        elif 'lesswrong.com' in domain:
-                            title = 'LessWrong Post: Jailbreaking ChatGPT'
-                        elif 'chat.openai.com' in domain:
-                            title = 'ChatGPT Conversation Share'
-                        elif 'gemini.google.com' in domain:
-                            title = 'Gemini Conversation Share'
-                        elif 'microsoft.com' in domain:
-                            title = 'Microsoft Azure Content Safety API'
-                        elif 'perspectiveapi.com' in domain:
-                            title = 'Perspective API'
-                        else:
-                            # Generic title based on domain
-                            title = f"Web Resource: {domain}"
-                        
-                        authors = ["Web Resource"]
-                        # Store the extracted URL
-                        fields['url'] = extracted_url
-                        break
-        
-        # Apply defaults only if we still don't have values
-        if not authors:
-            authors = ["Unknown Author"]
-        
-        # Clean title
-        title = clean_title(title) if title else "Unknown Title"
-        
-        # Extract URL/DOI
-        url = fields.get('url', '')
-        doi = fields.get('doi', '')
-        
-        # Construct DOI URL if we have a DOI
-        if doi and is_valid_doi_format(doi):
-            url = construct_doi_url(doi)
-        
-        # Construct ArXiv URL from eprint field if no URL present
-        if not url:
-            eprint = fields.get('eprint', '')
-            if eprint and re.match(r'^\d{4}\.\d{4,5}', eprint):
-                # Remove version number if present and construct ArXiv URL
-                clean_eprint = re.sub(r'v\d+$', '', eprint)
-                url = f"https://arxiv.org/abs/{clean_eprint}"
-        
-        # Handle special URL fields
-        if not url:
-            howpublished = fields.get('howpublished', '')
-            if 'url{' in howpublished or 'href{' in howpublished:
-                url_match = re.search(r'url\{([^}]+)\}', howpublished)
-                if not url_match:
-                    url_match = re.search(r'href\{([^}]+)\}', howpublished)
-                if url_match:
-                    from utils.url_utils import clean_url_punctuation
-                    url = clean_url_punctuation(url_match.group(1))
-        
-        # Determine reference type
-        ref_type = 'other'
-        if 'arxiv' in url.lower() or 'arxiv' in title.lower():
-            ref_type = 'arxiv'
-        elif url or doi:
-            ref_type = 'non-arxiv'
-        
-        # Create structured reference
-        structured_ref = {
-            'url': url,
-            'doi': doi,
-            'year': year,
-            'authors': authors,
-            'title': title,
-            'raw_text': f"@{entry_type}{{{key}, {content}}}",
-            'type': ref_type,
-            'bibtex_key': key,
-            'bibtex_type': entry_type
-        }
-        
-        logger.debug(f"Parsed BibTeX entry: {title} by {authors} ({year})")
-        return structured_ref
+        logger.debug(f"Extracted {len(references)} biblatex references using dedicated parser")
+        return references
     
     def _process_llm_extracted_references(self, references):
         """
@@ -5076,7 +4911,7 @@ class ArxivReferenceChecker:
                     logger.warning(f"Could not save debug references file for {paper_id}: {e}")
             
             if references:
-                logger.info(f"Extracted {len(references)} references")
+                logger.debug(f"Extracted {len(references)} references")
                 return references
         
         # Check if this is a text file containing references
@@ -5146,7 +4981,7 @@ class ArxivReferenceChecker:
                 bibtex_references = extract_latex_references(bib_content, paper.file_path)
                 
                 if bibtex_references:
-                    logger.info(f"Extracted {len(bibtex_references)} references from BibTeX file")
+                    logger.debug(f"Extracted {len(bibtex_references)} references from BibTeX file")
                     return bibtex_references
                 else:
                     logger.warning(f"No references found in BibTeX file: {paper.file_path}")
