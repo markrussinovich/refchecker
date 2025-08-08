@@ -11,12 +11,40 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
+def normalize_apostrophes(text):
+    """
+    Normalize all apostrophe variants to standard ASCII apostrophe
+    """
+    if not text:
+        return text
+    
+    # All known apostrophe variants
+    apostrophe_variants = [
+        "'",      # U+0027 ASCII apostrophe
+        "'",      # U+2019 Right single quotation mark (most common)
+        "'",      # U+2018 Left single quotation mark  
+        "ʼ",      # U+02BC Modifier letter apostrophe
+        "ˈ",      # U+02C8 Modifier letter vertical line (primary stress)
+        "`",      # U+0060 Grave accent (sometimes used as apostrophe)
+        "´",      # U+00B4 Acute accent (sometimes used as apostrophe)
+    ]
+    
+    # Replace all variants with standard ASCII apostrophe
+    for variant in apostrophe_variants:
+        text = text.replace(variant, "'")
+    
+    return text
+
+
 def normalize_text(text):
     """
     Normalize text by removing diacritical marks and special characters
     """
     if not text:
         return ""
+        
+    # First normalize apostrophes to standard form
+    text = normalize_apostrophes(text)
         
     # Replace common special characters with their ASCII equivalents
     replacements = {
@@ -29,7 +57,7 @@ def normalize_text(text):
         'Ł': 'L', 'ł': 'l',
         '¨': '', '´': '', '`': '', '^': '', '~': '',
         '–': '-', '—': '-', '−': '-',
-        '„': '"', '"': '"', '"': '"', ''': "'", ''': "'",
+        '„': '"', '"': '"', '"': '"',
         '«': '"', '»': '"',
         '¡': '!', '¿': '?',
         '°': 'degrees', '©': '(c)', '®': '(r)', '™': '(tm)',
@@ -39,10 +67,6 @@ def normalize_text(text):
         '\u00A0': ' ',  # Non-breaking space
         '\u2013': '-',  # En dash
         '\u2014': '-',  # Em dash
-        '\u2018': "'",  # Left single quotation mark
-        '\u2019': "'",  # Right single quotation mark
-        '\u201C': '"',  # Left double quotation mark
-        '\u201D': '"',  # Right double quotation mark
         '\u2026': '...',  # Horizontal ellipsis
         '\u00B7': '.',  # Middle dot
         '\u2022': '.',  # Bullet
@@ -54,8 +78,8 @@ def normalize_text(text):
     # Remove any remaining diacritical marks
     text = unicodedata.normalize('NFKD', text).encode('ASCII', 'ignore').decode('ASCII')
     
-    # Remove special characters
-    text = re.sub(r'[^\w\s]', '', text)
+    # Remove special characters except apostrophes
+    text = re.sub(r"[^\w\s']", '', text)
     
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text).strip()
@@ -367,6 +391,9 @@ def clean_author_name(author):
     
     # Normalize Unicode characters (e.g., combining diacritics)
     author = unicodedata.normalize('NFKC', author)
+    
+    # Normalize apostrophes first before other processing
+    author = normalize_apostrophes(author)
     
     # Handle common Unicode escape sequences and LaTeX encodings
     # Note: Order matters - process longer patterns first
@@ -703,8 +730,12 @@ def normalize_diacritics(text: str) -> str:
         'José' -> 'jose'
         'Łukasz' -> 'lukasz'
         'J. Gl¨ uck' -> 'J. Gluck'
+        'D'Amato' -> 'D'Amato' (apostrophes normalized)
     """
-    # First handle special characters that don't decompose properly
+    # First normalize apostrophes
+    text = normalize_apostrophes(text)
+    
+    # Then handle special characters that don't decompose properly
     # Including common transliterations
     special_chars = {
         'ł': 'l', 'Ł': 'L',
@@ -2224,7 +2255,8 @@ def format_author_for_display(author_name):
     if not author_name:
         return author_name
     
-    author_name = author_name.strip()
+    # Normalize apostrophes for consistent display
+    author_name = normalize_apostrophes(author_name.strip())
     
     # Check if it's in "Lastname, Firstname" format
     if ',' in author_name:
