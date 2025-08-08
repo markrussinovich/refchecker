@@ -154,10 +154,14 @@ Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J.~D., Dhariwal, P., Neelak
         self.assertEqual(len(references), 1)
         ref = references[0]
         
-        # Should extract the named authors, excluding 'et al'
+        # Should extract the named authors, including normalized 'et al'
         self.assertGreater(len(ref['authors']), 5)  # Should have at least several authors
-        # Check that none of the author entries are just 'et al' variants
-        for author in ref['authors']:
+        
+        # The last author should be 'et al' (normalized from 'et~al')
+        self.assertEqual(ref['authors'][-1], 'et al')
+        
+        # All authors except the last should be real names (not et al variants)
+        for author in ref['authors'][:-1]:
             self.assertNotIn('et al', author.lower())
             self.assertNotIn('et~al', author.lower())
     

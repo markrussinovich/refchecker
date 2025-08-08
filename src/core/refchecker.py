@@ -451,47 +451,10 @@ class ArxivReferenceChecker:
         
     def extract_arxiv_id_from_url(self, url):
         """
-        Extract ArXiv ID from a URL or text containing ArXiv reference
+        Extract ArXiv ID from a URL or text containing ArXiv reference.
+        Uses the common extraction function from utils.url_utils.
         """
-        if not url:
-            return None
-
-        # First, check for arXiv: format (e.g., "arXiv:1610.10099" or "arXiv preprint arXiv:1610.10099")
-        arxiv_match = re.search(r'arXiv:(\d{4}\.\d{4,5})', url, re.IGNORECASE)
-        if arxiv_match:
-            arxiv_id = arxiv_match.group(1)
-            # Remove version number if present
-            arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
-            return arxiv_id
-
-        # Remove version string from end if present (e.g., 'v1')
-        url = re.sub(r'v\d+$', '', url)
-            
-        # Parse URL
-        parsed_url = urlparse(url)
-        
-        # Check if it's an arxiv.org URL
-        if 'arxiv.org' in parsed_url.netloc:
-            # Extract ID from path
-            path = parsed_url.path.strip('/')
-            
-            # Handle different URL formats
-            if path.startswith('abs/'):
-                arxiv_id = path.replace('abs/', '')
-            elif path.startswith('pdf/'):
-                arxiv_id = path.replace('pdf/', '').replace('.pdf', '')
-            elif '/abs/' in path:
-                arxiv_id = path.split('/abs/')[1]
-            elif '/pdf/' in path:
-                arxiv_id = path.split('/pdf/')[1].replace('.pdf', '')
-            else:
-                arxiv_id = path
-            
-            # Remove version number from the extracted ID
-            arxiv_id = re.sub(r'v\d+$', '', arxiv_id)
-            return arxiv_id
-        
-        return None
+        return extract_arxiv_id_from_url(url)
     
     def get_paper_metadata(self, arxiv_id):
         """
@@ -3581,11 +3544,9 @@ class ArxivReferenceChecker:
                 # Clean author part and extract authors
                 author_part_clean = strip_latex_commands(author_part).strip()
                 if author_part_clean and not author_part_clean.startswith('\\'):
-                    # Parse author names - handle comma-separated list and "and"
-                    if ', and ' in author_part_clean:
-                        author_names = re.split(r', and |, ', author_part_clean)
-                    else:
-                        author_names = [name.strip() for name in author_part_clean.split(',')]
+                    # Parse author names using the robust author parsing function
+                    from utils.text_utils import parse_authors_with_initials
+                    author_names = parse_authors_with_initials(author_part_clean)
                     
                     # Clean up author names
                     authors = []
@@ -4264,8 +4225,17 @@ class ArxivReferenceChecker:
             return True
             
         # Also check if authors have significant overlap (at least 50% of the shorter author list)
-        author1_parts = seg1['author'].split('*') if '*' in seg1['author'] else seg1['author'].split(',')
-        author2_parts = seg2['author'].split('*') if '*' in seg2['author'] else seg2['author'].split(',')
+        from utils.text_utils import parse_authors_with_initials
+        
+        if '*' in seg1['author']:
+            author1_parts = seg1['author'].split('*')
+        else:
+            author1_parts = parse_authors_with_initials(seg1['author'])
+            
+        if '*' in seg2['author']:
+            author2_parts = seg2['author'].split('*')
+        else:
+            author2_parts = parse_authors_with_initials(seg2['author'])
         
         # Clean and normalize author names
         author1_clean = {a.strip().lower() for a in author1_parts if a.strip() and a.strip() not in ['et al', 'others']}
@@ -4780,55 +4750,6 @@ class ArxivReferenceChecker:
         }
     
 
-    def _get_bibtex_content(self, paper):
-        """
-        Try to get BibTeX content for a paper from various sources.
-        
-        Args:
-            paper: Paper object
-            
-        Returns:
-            str: BibTeX content if found, None otherwise
-        """
-        # Try ArXiv source if it's an ArXiv paper
-        from utils.arxiv_utils import extract_arxiv_id_from_paper, download_arxiv_source
-        
-        arxiv_id = extract_arxiv_id_from_paper(paper)
-        if arxiv_id:
-            logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
-            tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
-            
-            # Prefer .bib files (most structured), then .bbl files
-            if bib_content:
-                logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
-                
-                # If we have LaTeX content, filter BibTeX by cited keys
-                if tex_content:
-                    from utils.text_utils import extract_cited_keys_from_latex, filter_bibtex_by_cited_keys
-                    cited_keys = extract_cited_keys_from_latex(tex_content)
-                    if cited_keys:
-                        logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
-                        filtered_content = filter_bibtex_by_cited_keys(bib_content, cited_keys)
-                        return filtered_content
-                
-                return bib_content
-                
-            elif bbl_content:
-                logger.info(f"Found .bbl files in ArXiv source for {arxiv_id}")
-                return bbl_content
-                
-            elif tex_content:
-                # Check for embedded bibliography in LaTeX
-                from utils.text_utils import detect_latex_bibliography_format
-                latex_format = detect_latex_bibliography_format(tex_content)
-                if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
-                    logger.info(f"Found embedded bibliography in ArXiv LaTeX source, but skipping due to formatting incompatibility")
-                    # Skip embedded bibliography and return None to trigger fallback methods
-                    return None
-        
-        # Could add other BibTeX sources here (e.g., direct BibTeX URLs, etc.)
-        
-        return None
 
 
     def extract_bibliography(self, paper, debug_mode=False):
@@ -4843,7 +4764,8 @@ class ArxivReferenceChecker:
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
         
         # Check if we can get BibTeX content for this paper (ArXiv or other sources)
-        bibtex_content = self._get_bibtex_content(paper)
+        from utils.arxiv_utils import get_bibtex_content
+        bibtex_content = get_bibtex_content(paper)
         if bibtex_content:
             logger.debug(f"Found BibTeX content for {paper_id}, using structured bibliography")
             
@@ -4897,7 +4819,7 @@ class ArxivReferenceChecker:
                     else:
                         logger.warning("No LLM available for fallback, using original parsing results")
                 else:
-                    logger.info(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
+                    logger.debug(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
             else:
                 # Parse BibTeX using the standard flow (LLM or regex based on config)
                 references = self.parse_references(bibtex_content)
@@ -5458,7 +5380,7 @@ class ArxivReferenceChecker:
                 error_details = unverified_errors[0].get('error_details', '')
                 if error_details:
                     subreason = self._categorize_unverified_reason(error_details)
-                    print(f"          Subreason: {subreason}")
+                    print(f"         Subreason: {subreason}")
             
             year_str = self._format_year_string(reference.get('year'))
             

@@ -391,10 +391,10 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
         # Fallback: split by common patterns if parse_authors_with_initials failed
         if not authors:
             if 'et al' in authors_text.lower():
-                # Handle "FirstAuthor et al." case
+                # Handle "FirstAuthor et al." case - separate base author from "et al"
                 base_author = authors_text.split(' et al')[0].strip()
                 if base_author:
-                    authors = [base_author + ' et al']
+                    authors = [base_author, 'et al']
             elif ' and ' in authors_text:
                 # Handle "Author1 and Author2 and Author3" format
                 author_parts = [p.strip() for p in authors_text.split(' and ')]
@@ -404,18 +404,29 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
                     if part and len(part) > 2:
                         authors.append(part)
             else:
-                # Try comma separation for "Author1, Author2, Author3"
-                author_parts = [p.strip() for p in authors_text.split(',')]
-                authors = []
-                for part in author_parts:
-                    part = part.strip(' .')
-                    # Remove "and" prefix if present
-                    if part.startswith('and '):
-                        part = part[4:].strip()
-                    # Skip parts that are too short or look like initials only
-                    if (part and len(part) > 2 and 
-                        not re.search(r'\b(http|www|doi|arxiv|proceedings)\b', part.lower())):
-                        authors.append(part)
+                # Try sophisticated parsing one more time with relaxed constraints
+                try:
+                    # Remove "and" connectors for cleaner parsing
+                    clean_text = re.sub(r'\s+and\s+', ', ', authors_text)
+                    fallback_authors = parse_authors_with_initials(clean_text)
+                    if fallback_authors and len(fallback_authors) >= 1:
+                        authors = fallback_authors
+                    else:
+                        raise ValueError("Fallback parsing failed")
+                except:
+                    # Last resort: naive comma separation for "Author1, Author2, Author3"
+                    # This should rarely be reached now
+                    author_parts = [p.strip() for p in authors_text.split(',')]
+                    authors = []
+                    for part in author_parts:
+                        part = part.strip(' .')
+                        # Remove "and" prefix if present
+                        if part.startswith('and '):
+                            part = part[4:].strip()
+                        # Skip parts that are too short or look like initials only
+                        if (part and len(part) > 2 and 
+                            not re.search(r'\b(http|www|doi|arxiv|proceedings)\b', part.lower())):
+                            authors.append(part)
     
     # 7. Extract journal/venue - look for patterns like "In: Conference" or remaining text
     journal_patterns = [

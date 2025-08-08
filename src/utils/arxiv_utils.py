@@ -374,3 +374,79 @@ def reconstruct_bibtex_content(cited_entries, original_content):
     return '\n\n'.join(filtered_parts) + '\n'
 
 
+def get_bibtex_content(paper):
+    """
+    Try to get BibTeX content for a paper from various sources.
+    
+    Args:
+        paper: Paper object
+        
+    Returns:
+        str: BibTeX content if found, None otherwise
+    """
+    import re
+    
+    # Try ArXiv source if it's an ArXiv paper
+    arxiv_id = extract_arxiv_id_from_paper(paper)
+    if arxiv_id:
+        logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
+        tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
+        
+        # Choose between .bib and .bbl files based on content richness
+        # Prioritize .bbl if it has more references than filtered .bib, otherwise prefer .bib
+        if bib_content and bbl_content:
+            # Count entries in both
+            bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
+            bbl_entry_count = len(re.findall(r'\\bibitem\[', bbl_content))
+            
+            # If we have LaTeX content, get filtered BibTeX count
+            filtered_bib_count = bib_entry_count
+            filtered_content = bib_content
+            if tex_content:
+                cited_keys = extract_cited_keys_from_tex({}, tex_content)
+                if cited_keys:
+                    logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
+                    filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
+                    filtered_bib_count = len(re.findall(r'@\w+\s*\{', filtered_content))
+            
+            logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, filtered .bib has {filtered_bib_count} entries")
+            
+            # Prioritize .bbl if it has significantly more entries
+            if bbl_entry_count > filtered_bib_count * 1.5:  # 50% more entries threshold
+                logger.info(f"Using .bbl files from ArXiv source")
+                return bbl_content
+            else:
+                logger.info(f"Using filtered .bib files")
+                return filtered_content
+                    
+        elif bib_content:
+            logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
+            
+            # If we have LaTeX content, filter BibTeX by cited keys
+            if tex_content:
+                cited_keys = extract_cited_keys_from_tex({}, tex_content)
+                if cited_keys:
+                    logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
+                    filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
+                    return filtered_content
+            
+            return bib_content
+            
+        elif bbl_content:
+            logger.info(f"Found .bbl files in ArXiv source for {arxiv_id}")
+            return bbl_content
+            
+        elif tex_content:
+            # Check for embedded bibliography in LaTeX
+            from utils.text_utils import detect_latex_bibliography_format
+            latex_format = detect_latex_bibliography_format(tex_content)
+            if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
+                logger.info(f"Found embedded bibliography in ArXiv LaTeX source, but skipping due to formatting incompatibility")
+                # Skip embedded bibliography and return None to trigger fallback methods
+                return None
+    
+    # Could add other BibTeX sources here (e.g., direct BibTeX URLs, etc.)
+    
+    return None
+
+

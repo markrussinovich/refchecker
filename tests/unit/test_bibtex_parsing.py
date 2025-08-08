@@ -601,6 +601,359 @@ url={https://example.com}
             for i, expected in enumerate(expected_authors):
                 self.assertEqual(parsed[i], expected, 
                                f"Author {i} mismatch for {repr(input_str)}: got {repr(parsed[i])}, expected {repr(expected)}")
+    
+    def test_et_al_parsing_regression(self):
+        """Test that 'et al' is correctly separated from single authors (regression test)"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        # Test cases: (input, expected_output)
+        et_al_test_cases = [
+            # Single author with "et al" should be split
+            ('Mubashara Akhtar et al.', ['Mubashara Akhtar', 'et al']),
+            ('Edoardo Debenedetti et al.', ['Edoardo Debenedetti', 'et al']),
+            ('Xiao Liu et al', ['Xiao Liu', 'et al']),
+            ('John Smith et al.', ['John Smith', 'et al']),
+            ('Jane A. Doe et al', ['Jane A. Doe', 'et al']),
+            
+            # Multiple authors with "et al" should work correctly
+            # Note: Mixed comma and "and" separators have complex parsing behavior
+            ('First Author and Second Author and et al', ['First Author', 'Second Author', 'et al']),
+            ('Author1, Author2, Author3, et al', ['Author1', 'Author2', 'Author3', 'et al']),
+            
+            # Cases without "et al" should remain unchanged
+            ('Single Author', ['Single Author']),
+            ('John Smith and Jane Doe', ['John Smith', 'Jane Doe']),
+            ('Smith, John and Doe, Jane', ['Smith, John', 'Doe, Jane']),
+            
+            # Edge cases
+            ('First Middle Last et al.', ['First Middle Last', 'et al']),
+            ('Dr. John Smith et al', ['Dr. John Smith', 'et al']),
+        ]
+        
+        for input_str, expected in et_al_test_cases:
+            with self.subTest(input_str=input_str):
+                result = parse_authors_with_initials(input_str)
+                self.assertEqual(result, expected, 
+                               f"Failed for {repr(input_str)}: got {result}, expected {expected}")
+    
+    def test_biblatex_et_al_integration_regression(self):
+        """Test that 'et al' parsing works correctly in full biblatex entries (regression test)"""
+        from utils.biblatex_parser import parse_biblatex_references
+        
+        # Test the specific problematic entries that were failing
+        test_entries = [
+            # Single author with et al
+            ('[1] Mubashara Akhtar et al. "Test Title". Conference (2023).', 
+             ['Mubashara Akhtar', 'et al']),
+            
+            # Another single author with et al
+            ('[2] Edoardo Debenedetti et al. "Another Title". Journal (2024).', 
+             ['Edoardo Debenedetti', 'et al']),
+            
+            # Multiple authors with et al (should still work)
+            ('[3] First Author, Second Author, Third Author, et al. "Multi Author Title". Venue (2023).', 
+             ['First Author', 'Second Author', 'Third Author', 'et al']),
+        ]
+        
+        for entry_content, expected_authors in test_entries:
+            with self.subTest(entry=entry_content[:50] + '...'):
+                refs = parse_biblatex_references(entry_content)
+                self.assertEqual(len(refs), 1, f"Should parse exactly one reference from: {entry_content}")
+                
+                ref = refs[0]
+                actual_authors = ref['authors']
+                self.assertEqual(actual_authors, expected_authors,
+                               f"Author parsing failed for: {entry_content[:50]}...\nGot: {actual_authors}\nExpected: {expected_authors}")
+                
+                # Verify that the last author is 'et al' if expected
+                if expected_authors and expected_authors[-1] == 'et al':
+                    self.assertEqual(actual_authors[-1], 'et al', 
+                                   "Last author should be 'et al'")
+                
+                # Verify that 'et al' doesn't appear in non-final positions
+                for i, author in enumerate(actual_authors[:-1]):
+                    self.assertNotIn('et al', author.lower(), 
+                                   f"'et al' found in non-final position {i}: '{author}'")
+    
+    def test_semicolon_and_author_parsing_regression(self):
+        """Test that semicolon-separated authors with 'and' are parsed correctly (regression test)"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        # The specific problematic case from the user report
+        problematic_input = "Snelson, E.; and Ghahramani, Z."
+        
+        # Should parse into exactly 2 authors
+        result = parse_authors_with_initials(problematic_input)
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], 'Snelson, E.')
+        self.assertEqual(result[1], 'Ghahramani, Z.')
+        
+        # Ensure the malformed parsing doesn't happen
+        # Naive comma-splitting would create: ['Snelson', ' E.; and Ghahramani', ' Z.']
+        self.assertNotIn('E.; and Ghahramani', result)
+        self.assertNotIn(' E.; and Ghahramani', result)
+        
+        # Test other similar semicolon + and patterns
+        other_cases = [
+            ("Smith, J.; and Doe, A.", ['Smith, J.', 'Doe, A.']),
+            ("Author, A.; and Writer, B.; and Scholar, C.", ['Author, A.', 'Writer, B.', 'Scholar, C.']),
+            ("Last, F.; and Another, S.", ['Last, F.', 'Another, S.']),
+        ]
+        
+        for input_str, expected in other_cases:
+            with self.subTest(input_str=input_str):
+                result = parse_authors_with_initials(input_str)
+                self.assertEqual(result, expected,
+                               f"Failed for {repr(input_str)}: got {result}, expected {expected}")
+                
+                # Ensure no malformed authors are created
+                for author in result:
+                    self.assertNotIn('; and ', author)
+                    self.assertTrue(len(author) > 1)
+                    self.assertFalse(author.startswith(' '))
+    
+    def test_natbib_format_author_parsing_integration(self):
+        """Test that natbib format parsing handles semicolon separators correctly (regression test)"""
+        from core.refchecker import ArxivReferenceChecker
+        
+        # Create a mock natbib-style reference with semicolon separators
+        checker = ArxivReferenceChecker()
+        
+        # Test the specific parsing method that was causing issues
+        ref = {'entry_number': 23}
+        content = "Snelson, E.; and Ghahramani, Z. \\newblock Sparse Gaussian Processes using Pseudo-inputs"
+        label = "Snelson et~al.(2005)"
+        
+        # This should use the fixed parsing logic
+        checker._parse_simple_natbib_format(ref, content, label)
+        
+        # Check that authors are parsed correctly
+        self.assertIn('authors', ref)
+        self.assertEqual(len(ref['authors']), 2)
+        self.assertEqual(ref['authors'][0], 'Snelson, E')  # trailing dot removed
+        self.assertEqual(ref['authors'][1], 'Ghahramani, Z')
+        
+        # Ensure the malformed parsing doesn't happen
+        for author in ref['authors']:
+            self.assertNotIn('; and ', author)
+            self.assertNotIn('E.; and', author)
+    
+    def test_comprehensive_semicolon_parsing_fixes(self):
+        """Test that all semicolon parsing issues are fixed across the codebase (regression test)"""
+        from utils.text_utils import parse_authors_with_initials
+        from utils.biblatex_parser import parse_biblatex_references
+        from core.refchecker import ArxivReferenceChecker
+        
+        # Test case from the user report: Yuan, Z.; and Zhu, M.
+        problematic_cases = [
+            ("Yuan, Z.; and Zhu, M.", ['Yuan, Z.', 'Zhu, M.']),
+            ("Smith, A.; and Jones, B.", ['Smith, A.', 'Jones, B.']),
+            ("Author, X.; and Writer, Y.; and Scholar, Z.", ['Author, X.', 'Writer, Y.', 'Scholar, Z.']),
+            ("First, F.; and Second, S.; and Third, T.", ['First, F.', 'Second, S.', 'Third, T.']),
+        ]
+        
+        print(f"\nTesting comprehensive semicolon parsing fixes:")
+        
+        for input_str, expected in problematic_cases:
+            with self.subTest(input_str=input_str):
+                # Test 1: Direct parsing function
+                result = parse_authors_with_initials(input_str)
+                self.assertEqual(result, expected,
+                               f"parse_authors_with_initials failed for {repr(input_str)}: got {result}, expected {expected}")
+                
+                # Test 2: Biblatex entry parsing
+                full_entry = f'[1] {input_str} "Test Title". Conference (2024).'
+                refs = parse_biblatex_references(full_entry)
+                self.assertEqual(len(refs), 1)
+                biblatex_authors = refs[0]['authors']
+                # Remove trailing periods that might be added
+                biblatex_authors = [a.rstrip('.') for a in biblatex_authors]
+                expected_clean = [a.rstrip('.') for a in expected]
+                self.assertEqual(biblatex_authors, expected_clean,
+                               f"Biblatex parsing failed for {repr(input_str)}: got {biblatex_authors}, expected {expected_clean}")
+                
+                # Test 3: Deduplication function doesn't create malformed authors
+                checker = ArxivReferenceChecker()
+                
+                # Mock reference segments for deduplication testing
+                seg1 = {'author': input_str, 'title': 'Test Title 1', 'venue': 'Conference 1'}
+                seg2 = {'author': 'Other Author', 'title': 'Test Title 2', 'venue': 'Conference 2'}
+                
+                # This should not crash and should not create malformed authors
+                try:
+                    is_mismatch = checker._is_arxiv_identifier_title_mismatch(seg1, seg2)
+                    # We don't care about the result, just that it doesn't crash with semicolon authors
+                    self.assertIsInstance(is_mismatch, bool)
+                except Exception as e:
+                    self.fail(f"Deduplication function crashed with semicolon authors {repr(input_str)}: {e}")
+                
+                # Ensure no malformed authors in any result
+                for author in result:
+                    self.assertNotIn('; and ', author, f"Malformed author found: {repr(author)}")
+                    self.assertNotIn(' ; and', author, f"Malformed author found: {repr(author)}")
+                    self.assertFalse(author.startswith('; and'), f"Malformed author starts with '; and': {repr(author)}")
+                    self.assertFalse(author.endswith('; and'), f"Malformed author ends with '; and': {repr(author)}")
+    
+    def test_no_malformed_authors_in_error_messages(self):
+        """Test that author comparison error messages don't contain malformed authors (regression test)"""
+        from utils.text_utils import compare_authors, format_author_for_display
+        
+        # Test the specific error pattern from the user report
+        malformed_authors = [
+            'Z.; and Zhu',
+            ' Z.; and Zhu', 
+            'E.; and Ghahramani',
+            'A.; and Smith',
+        ]
+        
+        for malformed in malformed_authors:
+            with self.subTest(malformed=malformed):
+                # These malformed authors should not be produced by our parsing
+                # But if they somehow exist, format_author_for_display should handle them gracefully
+                try:
+                    display_result = format_author_for_display(malformed)
+                    # Should not crash, and should return something reasonable
+                    self.assertIsInstance(display_result, str)
+                    self.assertTrue(len(display_result) > 0)
+                except Exception as e:
+                    self.fail(f"format_author_for_display crashed with malformed author {repr(malformed)}: {e}")
+                
+                # Test comparison with correct authors
+                cited_authors = [malformed]
+                correct_authors = [{'name': 'Correct Author'}]
+                
+                match_result, error_message = compare_authors(cited_authors, correct_authors)
+                
+                # Should return False (no match) but not crash
+                self.assertFalse(match_result)
+                self.assertIsInstance(error_message, str)
+                self.assertTrue(len(error_message) > 0)
+                
+                # The error message should contain the malformed author for debugging
+                # but the system should be robust enough to handle it
+                self.assertIn(malformed.strip(), error_message)
+    
+    def test_latex_thebibliography_semicolon_parsing_regression(self):
+        """Test LaTeX thebibliography format with semicolon authors (Yuan, Zhu case regression test)"""
+        from utils.text_utils import extract_latex_references
+        
+        # This is the exact format from the user's paper that was causing "Z.; and Zhu"
+        latex_content = r'''\begin{thebibliography}{35}
+
+\bibitem[{Yuan and Zhu(2024)}]{Yuan_TAC2024_Lightweight}
+Yuan, Z.; and Zhu, M. 2024.
+\newblock {Lightweight Distributed Gaussian Process Regression for Online
+  Machine Learning}.
+\newblock \emph{IEEE Transactions on Automatic Control}, 69(6): 3928--3943.
+
+\end{thebibliography}'''
+        
+        refs = extract_latex_references(latex_content)
+        self.assertEqual(len(refs), 1)
+        
+        ref = refs[0]
+        self.assertEqual(ref['title'], 'Lightweight Distributed Gaussian Process Regression for Online Machine Learning')
+        self.assertEqual(ref['year'], 2024)
+        
+        # The critical test: authors should be properly parsed
+        authors = ref['authors']
+        self.assertEqual(len(authors), 2)
+        self.assertEqual(authors[0], 'Yuan, Z.')
+        self.assertEqual(authors[1], 'Zhu, M.')
+        
+        # Ensure no malformed authors are created
+        for author in authors:
+            self.assertNotIn('; and ', author, f"Malformed author found: {repr(author)}")
+            self.assertNotIn('2024', author, f"Year not properly removed from author: {repr(author)}")
+            self.assertFalse(author.startswith('Z.; and'), f"Malformed author pattern found: {repr(author)}")
+        
+        # Test author comparison to ensure it doesn't fail
+        from utils.text_utils import compare_authors
+        
+        # Mock correct authors based on the user's error scenario
+        correct_authors = [{'name': 'Yuan Zhang'}, {'name': 'Minghui Zhu'}]
+        
+        match_result, error_message = compare_authors(authors, correct_authors)
+        # The match might not be perfect (different first names), but it should not crash
+        # and should not contain the malformed "Z.; and Zhu" pattern
+        self.assertIsInstance(match_result, bool)
+        self.assertIsInstance(error_message, str)
+        self.assertNotIn('Z.; and Zhu', error_message, 
+                        f"Malformed author in error message: {error_message}")
+    
+    def test_apostrophe_and_trailing_period_name_matching_regression(self):
+        """Test apostrophe names and trailing period handling (D'Amato case regression test)"""
+        from utils.text_utils import enhanced_name_match, compare_authors
+        
+        # Test cases with apostrophes and various formatting issues
+        apostrophe_test_cases = [
+            # The original failing case - trailing period
+            ("J. L. D'Amato.", "Jorge L. D'Amato"),
+            
+            # Other apostrophe cases  
+            ("J. L. D'Amato", "Jorge L. D'Amato"),
+            ("M. A. O'Connor", "Mary A. O'Connor"),
+            ("P. J. O'Brien", "Patrick James O'Brien"),
+            ("S. D'Alessandro", "Sara D'Alessandro"),
+            
+            # Trailing period variations
+            ("J. Smith.", "John Smith"),
+            ("M. A. Wilson.", "Mary Anne Wilson"),
+            ("P. D'Angelo.", "Paolo D'Angelo"),
+            
+            # Multiple trailing periods (edge case)
+            ("J. L. Brown..", "Jennifer L. Brown"),
+            
+            # Mixed apostrophe and period issues
+            ("A. O'Connor.", "Anthony O'Connor"),
+            ("B. D'Alessandro.", "Barbara D'Alessandro"),
+        ]
+        
+        print(f"\nTesting apostrophe and trailing period name matching:")
+        
+        for cited_name, correct_name in apostrophe_test_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                # Test enhanced_name_match directly
+                match_result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(match_result, 
+                              f"enhanced_name_match failed for {repr(cited_name)} vs {repr(correct_name)}")
+                
+                # Test full author comparison pipeline
+                cited_authors = [cited_name]
+                correct_authors = [{'name': correct_name}]
+                
+                comparison_result, error_message = compare_authors(cited_authors, correct_authors)
+                self.assertTrue(comparison_result, 
+                               f"Author comparison failed for {repr(cited_name)} vs {repr(correct_name)}: {error_message}")
+                self.assertEqual(error_message, "Authors match")
+    
+    def test_trailing_period_normalization_edge_cases(self):
+        """Test that trailing period removal doesn't break valid initials"""
+        from utils.text_utils import enhanced_name_match
+        
+        # Cases where trailing periods should be removed
+        should_match_cases = [
+            ("J. Smith.", "John Smith"),
+            ("A. B. Johnson.", "Albert B. Johnson"),
+            ("M. O'Connor.", "Mary O'Connor"),
+        ]
+        
+        # Cases where periods should be preserved (part of initials)
+        should_still_work_cases = [
+            ("J. L. Smith", "John L. Smith"),  # Normal initials
+            ("A. B. C. Wilson", "Albert B. C. Wilson"),  # Multiple initials
+            # Note: Single initial "J." vs "John" is not expected to match without surname context
+        ]
+        
+        for cited_name, correct_name in should_match_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(result, f"Should match: {repr(cited_name)} vs {repr(correct_name)}")
+        
+        for cited_name, correct_name in should_still_work_cases:
+            with self.subTest(cited=cited_name, correct=correct_name):
+                result = enhanced_name_match(cited_name, correct_name)
+                self.assertTrue(result, f"Should still work: {repr(cited_name)} vs {repr(correct_name)}")
 
 
 if __name__ == '__main__':
