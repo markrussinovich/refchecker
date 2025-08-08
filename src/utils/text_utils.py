@@ -89,6 +89,11 @@ def parse_authors_with_initials(authors_text):
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
+    # Normalize multi-line whitespace (especially for BibTeX author strings with line breaks)
+    # This fixes cases like "Haotian Liu and\n                     Chunyuan Li and\n                     Qingyang Wu"
+    # by converting to "Haotian Liu and Chunyuan Li and Qingyang Wu"
+    authors_text = re.sub(r'\s+', ' ', authors_text.strip())
+    
     # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
     if ';' in authors_text:
         # Split by semicolons and handle the last part which might have "and"
@@ -1782,7 +1787,7 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if is_name_match(name1, name2):
         return True
     
-    # Convert both names to consistent "First Middle Last" format for comparison
+    # Convert both names to consistent "First Middle Last" format for comparisonF
     name1_formatted = format_author_for_display(name1)
     name2_formatted = format_author_for_display(name2)
     
@@ -2456,6 +2461,7 @@ def filter_bibtex_by_cited_keys(bib_content, cited_keys):
         return bib_content
     
     # Parse entries and filter
+    from utils.bibtex_parser import parse_bibtex_entries
     entries = parse_bibtex_entries(bib_content)
     filtered_entries = []
     
@@ -2766,153 +2772,9 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
         return references
     
     if format_info['format_type'] == 'bibtex':
-        # Parse BibTeX entries directly from text
-        entries = parse_bibtex_entries(text)
-        
-        for entry in entries:
-            fields = entry['fields']
-            
-            # Skip entries without essential fields (title, author, or howpublished)
-            # But allow @misc entries with howpublished URLs or ArXiv entries
-            if (not fields.get('title') and not fields.get('author') and 
-                not (entry['type'] == 'misc' and fields.get('howpublished')) and
-                not _is_arxiv_entry(fields)):
-                continue
-            
-            # Reconstruct the full BibTeX entry for raw_text
-            bibtex_lines = [f"@{entry['type']}{{{entry['key']},"]
-            for field_name, field_value in fields.items():
-                # Keep the original field value with proper BibTeX formatting
-                bibtex_lines.append(f"  {field_name} = {{{field_value}}},")
-            # Remove trailing comma from last field and close the entry
-            if bibtex_lines[-1].endswith(','):
-                bibtex_lines[-1] = bibtex_lines[-1][:-1]
-            bibtex_lines.append("}")
-            full_bibtex = '\n'.join(bibtex_lines)
-            
-            # Extract common reference information
-            ref = {
-                'raw_text': full_bibtex,
-                'title': fields.get('title', ''),
-                'authors': [],
-                'year': None,
-                'journal': fields.get('journal', ''),
-                'url': fields.get('url', ''),
-                'doi': fields.get('doi', ''),
-                'bibtex_key': entry['key'],
-                'bibtex_type': entry['type'],
-                'type': 'non-arxiv'  # Default type for BibTeX entries
-            }
-            
-            # Preserve all original BibTeX fields for formatting correction
-            for field_name, field_value in fields.items():
-                if field_name not in ref:  # Don't overwrite already processed fields
-                    ref[field_name] = field_value
-            
-            # Parse authors using the sophisticated parsing logic
-            if 'author' in fields:
-                author_text = fields['author']
-                # Use parse_authors_with_initials which properly handles "others" -> "et al"
-                parsed_authors = parse_authors_with_initials(author_text)
-                
-                if parsed_authors:
-                    ref['authors'] = parsed_authors
-                else:
-                    # Fallback to simple split if parsing fails
-                    authors = [author.strip() for author in re.split(r'\s+and\s+', author_text)]
-                    cleaned_authors = []
-                    for author in authors:
-                        # Remove leading "and" from author names
-                        author = re.sub(r'^and\s+', '', author.strip())
-                        # Convert "others" to "et al"
-                        if author.lower() in ['others', 'and others']:
-                            if cleaned_authors:  # Only add if we have real authors
-                                cleaned_authors.append("et al")
-                        elif author:  # Only add non-empty authors
-                            cleaned_authors.append(author)
-                    ref['authors'] = cleaned_authors
-            
-            # Special handling for @misc entries with only howpublished field
-            if not ref['title'] and not ref['authors'] and entry['type'] == 'misc':
-                howpublished = fields.get('howpublished', '')
-                if howpublished:
-                    # Try to extract a URL from howpublished
-                    url_patterns = [
-                        r'://([^/]+)',  # Missing protocol case: "://example.com/path"
-                        r'https?://([^/\s]+)',  # Standard URL
-                        r'www\.([^/\s]+)',  # www without protocol
-                    ]
-                    
-                    extracted_url = ''
-                    for pattern in url_patterns:
-                        match = re.search(pattern, howpublished)
-                        if match:
-                            domain = match.group(1)
-                            # Reconstruct URL with https if protocol was missing
-                            if howpublished.startswith('://'):
-                                extracted_url = 'https' + howpublished
-                            elif not howpublished.startswith(('http://', 'https://')):
-                                extracted_url = 'https://' + howpublished
-                            else:
-                                extracted_url = howpublished
-                            
-                            # Generate title from domain/path
-                            if 'jailbreakchat.com' in domain:
-                                title = 'JailbreakChat Website'
-                            elif 'lesswrong.com' in domain:
-                                title = 'LessWrong Post: Jailbreaking ChatGPT'
-                            elif 'chat.openai.com' in domain:
-                                title = 'ChatGPT Conversation Share'
-                            elif 'gemini.google.com' in domain:
-                                title = 'Gemini Conversation Share'
-                            elif 'microsoft.com' in domain:
-                                title = 'Microsoft Azure Content Safety API'
-                            elif 'perspectiveapi.com' in domain:
-                                title = 'Perspective API'
-                            else:
-                                # Generic title based on domain
-                                title = f"Web Resource: {domain}"
-                            
-                            ref['title'] = title
-                            ref['authors'] = ["Web Resource"]
-                            ref['url'] = extracted_url
-                            break
-            
-            # Extract year
-            if 'year' in fields:
-                year_match = re.search(r'\d{4}', fields['year'])
-                if year_match:
-                    ref['year'] = int(year_match.group())
-            
-            # Extract year from eprint for ArXiv entries (e.g., "2311.09096" -> 2023)
-            elif 'eprint' in fields and _is_arxiv_entry(fields):
-                eprint = fields['eprint']
-                year_match = re.match(r'^(\d{2})(\d{2})\.\d+', eprint)
-                if year_match:
-                    year_prefix = int(year_match.group(1))
-                    year_full = 2000 + year_prefix if year_prefix >= 90 else 2000 + year_prefix
-                    ref['year'] = year_full
-            
-            # Determine if this is an ArXiv reference
-            arxiv_indicators = [
-                _is_arxiv_entry(fields),
-                'arxiv' in str(fields.get('url', '')).lower(),
-                'arxiv' in str(fields.get('title', '')).lower(),
-                'journal' in fields and 'arxiv' in fields['journal'].lower()
-            ]
-            
-            if any(arxiv_indicators):
-                ref['type'] = 'arxiv'
-                
-                # Construct ArXiv URL from eprint field if no URL present
-                if not ref['url'] and 'eprint' in fields:
-                    eprint = fields['eprint']
-                    # Remove version number if present (e.g., "1610.10099v2" -> "1610.10099")
-                    clean_eprint = re.sub(r'v\d+$', '', eprint)
-                    if re.match(r'^\d{4}\.\d{4,5}', clean_eprint):
-                        ref['url'] = f"https://arxiv.org/abs/{clean_eprint}"
-            
-            references.append(ref)
+        # Use the dedicated BibTeX parser for consistent results
+        from utils.bibtex_parser import parse_bibtex_references
+        return parse_bibtex_references(text)
     
     elif format_info['format_type'] == 'thebibliography':
         # Parse \bibitem entries (improved for .bbl files with ACM-Reference-Format)

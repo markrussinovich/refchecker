@@ -288,7 +288,7 @@ def filter_bibtex_by_citations(bib_content, tex_files, main_tex_content):
             return bib_content
             
         # Parse BibTeX entries and filter
-        from utils.text_utils import parse_bibtex_entries
+        from utils.bibtex_parser import parse_bibtex_entries
         entries = parse_bibtex_entries(bib_content)
         
         # Filter entries to only cited ones
