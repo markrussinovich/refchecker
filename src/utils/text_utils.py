@@ -94,6 +94,15 @@ def parse_authors_with_initials(authors_text):
     # by converting to "Haotian Liu and Chunyuan Li and Qingyang Wu"
     authors_text = re.sub(r'\s+', ' ', authors_text.strip())
     
+    # Special case: Handle single author followed by "et al" (e.g., "Mubashara Akhtar et al.")
+    # This should be split into ["Mubashara Akhtar", "et al"]
+    single_et_al_match = re.match(r'^(.+?)\s+et\s+al\.?$', authors_text, re.IGNORECASE)
+    if single_et_al_match:
+        base_author = single_et_al_match.group(1).strip()
+        if base_author and not ' and ' in base_author and not ',' in base_author:
+            # This is a simple "FirstName LastName et al" case
+            return [base_author, 'et al']
+    
     # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
     if ';' in authors_text:
         # Split by semicolons and handle the last part which might have "and"
@@ -2866,8 +2875,9 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     author_part_clean = strip_latex_commands(author_part).strip()
                     
                     # Simple fix: just improve the organization detection without complex parsing
-                    # Remove year pattern first
+                    # Remove year pattern first - handle both parenthetical and standalone years
                     author_text_clean = re.sub(r'\s*\(\d{4}\)\.?$', '', author_part_clean).strip()
+                    author_text_clean = re.sub(r'\s+\d{4}\.?$', '', author_text_clean).strip()
                     
                     # Better organization detection - check if it looks like multiple authors
                     is_multi_author = (
@@ -2895,18 +2905,29 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                                 if cleaned_authors:
                                     ref['authors'] = cleaned_authors
                             else:
-                                # Fallback: simple comma split
+                                # Fallback: try once more with semicolon handling, then simple comma split
                                 simple_authors = []
-                                for a in author_text_clean.split(','):
-                                    a = a.strip()
-                                    # Remove "and" prefix and skip short/empty entries
-                                    a = re.sub(r'^and\s+', '', a)
-                                    # Clean author name (remove unnecessary periods)
-                                    a = clean_author_name(a)
-                                    if a and len(a) > 2:
-                                        # Skip all "et al" variants for LaTeX bibliographies
-                                        if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
-                                            simple_authors.append(a)
+                                try:
+                                    # Try parsing again with normalized separators
+                                    normalized_text = re.sub(r';\s*and\s+', ', ', author_text_clean)
+                                    fallback_authors = parse_authors_with_initials(normalized_text)
+                                    if fallback_authors and len(fallback_authors) >= 2:
+                                        simple_authors = fallback_authors
+                                    else:
+                                        raise ValueError("Fallback parsing failed")
+                                except:
+                                    # Last resort: naive comma split
+                                    for a in author_text_clean.split(','):
+                                        a = a.strip()
+                                        # Remove "and" prefix and skip short/empty entries
+                                        a = re.sub(r'^and\s+', '', a)
+                                        # Clean author name (remove unnecessary periods)
+                                        a = clean_author_name(a)
+                                        if a and len(a) > 2:
+                                            # Skip all "et al" variants for LaTeX bibliographies
+                                            if a.lower() not in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                                simple_authors.append(a)
+                                
                                 if simple_authors:
                                     ref['authors'] = simple_authors
                         except Exception:

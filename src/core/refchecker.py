@@ -3581,11 +3581,9 @@ class ArxivReferenceChecker:
                 # Clean author part and extract authors
                 author_part_clean = strip_latex_commands(author_part).strip()
                 if author_part_clean and not author_part_clean.startswith('\\'):
-                    # Parse author names - handle comma-separated list and "and"
-                    if ', and ' in author_part_clean:
-                        author_names = re.split(r', and |, ', author_part_clean)
-                    else:
-                        author_names = [name.strip() for name in author_part_clean.split(',')]
+                    # Parse author names using the robust author parsing function
+                    from utils.text_utils import parse_authors_with_initials
+                    author_names = parse_authors_with_initials(author_part_clean)
                     
                     # Clean up author names
                     authors = []
@@ -4264,8 +4262,17 @@ class ArxivReferenceChecker:
             return True
             
         # Also check if authors have significant overlap (at least 50% of the shorter author list)
-        author1_parts = seg1['author'].split('*') if '*' in seg1['author'] else seg1['author'].split(',')
-        author2_parts = seg2['author'].split('*') if '*' in seg2['author'] else seg2['author'].split(',')
+        from utils.text_utils import parse_authors_with_initials
+        
+        if '*' in seg1['author']:
+            author1_parts = seg1['author'].split('*')
+        else:
+            author1_parts = parse_authors_with_initials(seg1['author'])
+            
+        if '*' in seg2['author']:
+            author2_parts = seg2['author'].split('*')
+        else:
+            author2_parts = parse_authors_with_initials(seg2['author'])
         
         # Clean and normalize author names
         author1_clean = {a.strip().lower() for a in author1_parts if a.strip() and a.strip() not in ['et al', 'others']}
@@ -4897,7 +4904,7 @@ class ArxivReferenceChecker:
                     else:
                         logger.warning("No LLM available for fallback, using original parsing results")
                 else:
-                    logger.info(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
+                    logger.debug(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
             else:
                 # Parse BibTeX using the standard flow (LLM or regex based on config)
                 references = self.parse_references(bibtex_content)
@@ -5458,7 +5465,7 @@ class ArxivReferenceChecker:
                 error_details = unverified_errors[0].get('error_details', '')
                 if error_details:
                     subreason = self._categorize_unverified_reason(error_details)
-                    print(f"          Subreason: {subreason}")
+                    print(f"         Subreason: {subreason}")
             
             year_str = self._format_year_string(reference.get('year'))
             

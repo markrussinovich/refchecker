@@ -147,7 +147,7 @@ class TestBiblatexParsing(unittest.TestCase):
         self.assertEqual(len(refs), 1)
         
         ref = refs[0]
-        self.assertEqual(ref['authors'], ['First Author et al'])
+        self.assertEqual(ref['authors'], ['First Author', 'et al'])
         self.assertEqual(ref['title'], 'Title of Paper')
         self.assertEqual(ref['year'], 2023)
         
@@ -194,7 +194,7 @@ Important Topics. (2023).'''
         
         self.assertEqual(refs[1]['entry_number'], 2)
         self.assertEqual(refs[1]['title'], 'Second Title')
-        self.assertEqual(refs[1]['authors'], ['Second Author et al'])
+        self.assertEqual(refs[1]['authors'], ['Second Author', 'et al'])
         
         self.assertEqual(refs[2]['entry_number'], 3)
         # The title pattern may not capture the full title in this format
@@ -341,7 +341,7 @@ This should not interfere with parsing.'''
         
         self.assertEqual(refs[2]['entry_number'], 23)
         self.assertEqual(refs[2]['title'], 'Exploiting programmatic behavior')
-        self.assertEqual(refs[2]['authors'], ['Daniel Kang et al'])
+        self.assertEqual(refs[2]['authors'], ['Daniel Kang', 'et al'])
         
     def test_title_with_space_before_period(self):
         """Test parsing titles with space before period like 'Title . URL'"""
