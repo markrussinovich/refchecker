@@ -3006,7 +3006,9 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                         if ref['year']:
                             venue_clean = re.sub(rf'\b{ref["year"]}\b.*', '', venue_clean)
                         venue_clean = venue_clean.rstrip(',. ')
-                        if venue_clean:
+                        # Filter out common non-venue patterns that shouldn't be treated as venues
+                        non_venue_patterns = ['URL', 'url', 'http:', 'https:', 'DOI', 'doi:', 'ArXiv', 'arxiv:']
+                        if venue_clean and not any(pattern in venue_clean for pattern in non_venue_patterns):
                             ref['journal'] = venue_clean
                 
                 # Extract URL if present
