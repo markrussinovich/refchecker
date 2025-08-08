@@ -261,11 +261,13 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
     else:
         # If no quoted title, look for title after author names
         # Pattern: "FirstAuthor et al. Title Goes Here. Year." or "Author. Title. Year."
+        # Order matters: more specific patterns first
         title_patterns = [
-            r'[A-Z][a-z]+(?:\s+et\s+al)?\.?\s+([A-Z][^.]*?)\.\s+\d{4}',  # "Author et al. Title. Year"
-            r'[A-Z][^.]+\.\s*([A-Z][^.]*?)\.\s*(?:https?://|arXiv:|\d{4})',  # "Authors. Title. URL/arXiv/Year" (flexible spacing)
-            r'(?:[A-Z][a-z]+,?\s+)+([A-Z][^.]*?)\.\s+\d{4}',  # "Name, Name. Title. Year"
+            r'[A-Z][^.]+\.\s*([A-Z][^.]*?)\.\s*(?:https?://|arXiv:|\d{4})',  # "Authors. Title. URL/arXiv/Year" (flexible spacing) - MOST SPECIFIC
             r'\.([A-Z][A-Za-z\s]+(?:\?|!)?)\.?\s+\d{4}',  # ".Title. Year" - for cases where authors end without space
+            r'[A-Z][a-z]+\.([A-Z][A-Za-z\s\-&]+?)\.\s+\d{4}',  # "Name.Title. Year" - missing space after period
+            r'[A-Z][a-z]+(?:\s+et\s+al)?\.?\s+([A-Z][^.]*?)\.\s+\d{4}',  # "Author et al. Title. Year" - LESS SPECIFIC
+            r'(?:[A-Z][a-z]+,?\s+)+([A-Z][^.]*?)\.\s+\d{4}',  # "Name, Name. Title. Year"
             r'\b([A-Z][A-Za-z\s\-0-9]+)\s+\.\s+https',  # "Title . https" - handle space before period
         ]
         
