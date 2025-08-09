@@ -209,7 +209,13 @@ def validate_url_format(url: str) -> bool:
 
 def clean_url(url: str) -> str:
     """
-    Clean a URL by removing common issues like extra spaces, fragments, etc.
+    Clean a URL by removing common issues like extra spaces, fragments, malformed LaTeX, etc.
+    
+    This function handles:
+    - Whitespace trimming
+    - Malformed LaTeX URL wrappers like \\url{https://...}
+    - Trailing punctuation from academic references
+    - DOI URL query parameter cleanup
     
     Args:
         url: URL to clean
@@ -222,6 +228,18 @@ def clean_url(url: str) -> str:
     
     # Remove leading/trailing whitespace
     url = url.strip()
+    
+    # Handle malformed URLs that contain \url{} wrappers within the URL text
+    # e.g., "https://\url{https://www.example.com/}" -> "https://www.example.com/"
+    import re
+    url_pattern = r'https?://\\url\{(https?://[^}]+)\}'
+    url_match = re.search(url_pattern, url)
+    if url_match:
+        url = url_match.group(1)
+    
+    # Remove trailing punctuation that's commonly part of sentence structure
+    # but preserve legitimate URL characters
+    url = url.rstrip('.,;!?)')
     
     # Note: Preserving query parameters for all URLs now
     # Previously this function removed query parameters for non-DOI URLs,
@@ -253,6 +271,14 @@ def clean_url_punctuation(url: str) -> str:
     
     # Remove leading/trailing whitespace
     url = url.strip()
+    
+    # Handle malformed URLs that contain \\url{} wrappers within the URL text
+    # e.g., "https://\\url{https://www.example.com/}" -> "https://www.example.com/"
+    import re
+    url_pattern = r'https?://\\url\{(https?://[^}]+)\}'
+    url_match = re.search(url_pattern, url)
+    if url_match:
+        url = url_match.group(1)
     
     # Remove trailing punctuation that's commonly part of sentence structure
     # but preserve legitimate URL characters

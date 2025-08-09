@@ -5407,25 +5407,6 @@ class ArxivReferenceChecker:
                 if error_details:
                     subreason = self._categorize_unverified_reason(error_details)
                     print(f"         Subreason: {subreason}")
-            
-            year_str = self._format_year_string(reference.get('year'))
-            
-            # Apply LaTeX cleaning and formatting to authors for display
-            authors = reference.get('authors', [])
-            if authors:
-                from utils.text_utils import strip_latex_commands, format_authors_for_display
-                cleaned_authors = [strip_latex_commands(author) for author in authors]
-                authors_display = format_authors_for_display(cleaned_authors)
-            else:
-                authors_display = 'Unknown authors'
-                
-            # Only show URL if it exists and is different from reference_url
-            ref_url = reference.get('url', '').strip()
-            if ref_url and ref_url != reference_url:
-                # Clean trailing punctuation from URL display
-                from utils.url_utils import clean_url_punctuation
-                clean_ref_url = clean_url_punctuation(ref_url)
-                print(f"          URL: {clean_ref_url}")
 
     def _categorize_unverified_reason(self, error_details):
         """Categorize the unverified error into checker error or not found"""

@@ -11,6 +11,69 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
+def expand_abbreviations(text: str) -> str:
+    """
+    Generic abbreviation expansion using common academic patterns.
+    
+    This function expands common academic abbreviations to their full forms
+    to improve venue name matching and comparison.
+    
+    Args:
+        text: Text containing potential abbreviations
+        
+    Returns:
+        Text with abbreviations expanded
+    """
+    if not text:
+        return text
+        
+    common_abbrevs = {
+        # IEEE specific abbreviations (only expand with periods, not full words)
+        'robot.': 'robotics', 'autom.': 'automation', 'lett.': 'letters',
+        'trans.': 'transactions', 'syst.': 'systems', 'netw.': 'networks',
+        'learn.': 'learning', 'ind.': 'industrial', 'electron.': 'electronics',
+        'mechatron.': 'mechatronics', 'intell.': 'intelligence',
+        'transp.': 'transportation', 'contr.': 'control', 'mag.': 'magazine',
+        # General academic abbreviations (only expand with periods)
+        'int.': 'international', 'intl.': 'international', 'conf.': 'conference',
+        'j.': 'journal', 'proc.': 'proceedings', 'assoc.': 'association',
+        'comput.': 'computing', 'sci.': 'science', 'eng.': 'engineering',
+        'tech.': 'technology', 'artif.': 'artificial', 'mach.': 'machine',
+        'stat.': 'statistics', 'math.': 'mathematics', 'phys.': 'physics',
+        'chem.': 'chemistry', 'bio.': 'biology', 'med.': 'medicine',
+        'adv.': 'advances', 'ann.': 'annual', 'symp.': 'symposium',
+        'workshop': 'workshop', 'worksh.': 'workshop',
+        'natl.': 'national', 'acad.': 'academy', 'rev.': 'review',
+        # Physics journal abbreviations
+        'phys.': 'physics', 'phys. rev.': 'physical review', 
+        'phys. rev. lett.': 'physical review letters',
+        'phys. rev. a': 'physical review a', 'phys. rev. b': 'physical review b',
+        'phys. rev. c': 'physical review c', 'phys. rev. d': 'physical review d',
+        'phys. rev. e': 'physical review e', 'phys. lett.': 'physics letters',
+        'phys. lett. b': 'physics letters b', 'nucl. phys.': 'nuclear physics',
+        'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
+        'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
+        'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+        # Nature journals
+        'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
+        # Handle specific multi-word patterns and well-known acronyms
+        'proc. natl. acad. sci.': 'proceedings of the national academy of sciences',
+        'pnas': 'proceedings of the national academy of sciences',
+        'neurips': 'neural information processing systems',
+    }
+    
+    # Sort by length (longest first) to ensure longer matches take precedence
+    for abbrev, expansion in sorted(common_abbrevs.items(), key=lambda x: len(x[0]), reverse=True):
+        # For abbreviations ending in period, use word boundary at start only
+        if abbrev.endswith('.'):
+            pattern = r'\b' + re.escape(abbrev)
+        else:
+            pattern = r'\b' + re.escape(abbrev) + r'\b'
+        text = re.sub(pattern, expansion, text)
+    
+    return text
+
+
 def normalize_apostrophes(text):
     """
     Normalize all apostrophe variants to standard ASCII apostrophe
