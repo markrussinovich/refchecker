@@ -544,11 +544,8 @@ class NonArxivReferenceChecker:
         if cited_venue and paper_venue:
             # Use the utility function to check if venues are substantially different
             if are_venues_substantially_different(cited_venue, paper_venue):
-                errors.append({
-                    'warning_type': 'venue',
-                    'warning_details': f"Venue mismatch: cited as '{cited_venue}' but actually '{paper_venue}'",
-                    'ref_venue_correct': paper_venue
-                })
+                from utils.error_utils import create_venue_warning
+                errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
             # Check if this is an arXiv paper first
             external_ids = paper_data.get('externalIds', {})

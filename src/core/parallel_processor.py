@@ -279,8 +279,11 @@ class ParallelReferenceProcessor:
         from utils.text_utils import format_authors_for_display
         authors = format_authors_for_display(reference.get('authors', []))
         year = reference.get('year', '')
-        # Get venue from either 'venue' or 'journal' field
+        # Get venue from either 'venue' or 'journal' field and clean it up
         venue = reference.get('venue', '') or reference.get('journal', '')
+        if venue:
+            from utils.error_utils import clean_venue_for_comparison
+            venue = clean_venue_for_comparison(venue)
         url = reference.get('url', '')
         doi = reference.get('doi', '')
         

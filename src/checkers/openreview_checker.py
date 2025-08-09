@@ -473,9 +473,10 @@ class OpenReviewReferenceChecker:
         
         if cited_venue and paper_venue:
             if are_venues_substantially_different(cited_venue, paper_venue):
+                from utils.error_utils import clean_venue_for_comparison
                 errors.append({
                     "warning_type": "venue",
-                    "warning_details": f"Venue mismatch: cited as '{cited_venue}' but OpenReview shows '{paper_venue}'"
+                    "warning_details": f"Venue mismatch: cited as '{clean_venue_for_comparison(cited_venue)}' but OpenReview shows '{clean_venue_for_comparison(paper_venue)}'"
                 })
         
         # Create verified data structure

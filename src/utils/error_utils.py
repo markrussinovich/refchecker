@@ -89,6 +89,20 @@ def create_title_error(error_details: str, correct_title: str) -> Dict[str, str]
     }
 
 
+def clean_venue_for_comparison(venue: str) -> str:
+    """
+    Clean venue name for display in warnings using the shared normalization logic.
+    
+    Args:
+        venue: Raw venue string
+        
+    Returns:
+        Cleaned venue name suitable for display
+    """
+    from utils.text_utils import normalize_venue_for_display
+    return normalize_venue_for_display(venue)
+
+
 def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]:
     """
     Create a standardized venue warning dictionary.
@@ -100,9 +114,13 @@ def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]
     Returns:
         Standardized warning dictionary
     """
+    # Clean both venues for display in the warning
+    clean_cited = clean_venue_for_comparison(cited_venue)
+    clean_correct = clean_venue_for_comparison(correct_venue)
+    
     return {
         'warning_type': 'venue',
-        'warning_details': f"Venue mismatch: cited as '{cited_venue}' but actually '{correct_venue}'",
+        'warning_details': f"Venue mismatch: cited as '{clean_cited}' but actually '{clean_correct}'",
         'ref_venue_correct': correct_venue
     }
 
