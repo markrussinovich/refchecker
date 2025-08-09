@@ -2255,8 +2255,13 @@ def format_author_for_display(author_name):
     if not author_name:
         return author_name
     
+    # Clean up any stray punctuation that might have been attached during parsing
+    author_name = author_name.strip()
+    # Remove trailing semicolons that sometimes get attached during bibliographic parsing
+    author_name = re.sub(r'[;,]\s*$', '', author_name)
+    
     # Normalize apostrophes for consistent display
-    author_name = normalize_apostrophes(author_name.strip())
+    author_name = normalize_apostrophes(author_name)
     
     # Check if it's in "Lastname, Firstname" format
     if ',' in author_name:
@@ -3667,8 +3672,77 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         return bool(venue1 != venue2)
     
     # Clean LaTeX commands from both venues first
-    venue1 = strip_latex_commands(venue1)
-    venue2 = strip_latex_commands(venue2)
+    venue1_latex_cleaned = strip_latex_commands(venue1)
+    venue2_latex_cleaned = strip_latex_commands(venue2)
+    
+    # For comparison, we need lowercase normalized versions
+    def normalize_for_comparison(venue_text):
+        # Get the cleaned display version first
+        cleaned = normalize_venue_for_display(venue_text)
+        # Then normalize for comparison: lowercase, expand abbreviations, remove punctuation
+        venue_lower = cleaned.lower()
+        
+        # Handle LaTeX penalty commands before abbreviation expansion
+        venue_lower = re.sub(r'\\penalty\d+\s*', ' ', venue_lower)  # Remove \\penalty0 etc
+        venue_lower = re.sub(r'\s+', ' ', venue_lower).strip()  # Clean up extra spaces
+        
+        # Expand abbreviations for comparison
+        def expand_abbreviations(text):
+            common_abbrevs = {
+                # IEEE specific abbreviations (only expand with periods, not full words)
+                'robot.': 'robotics', 'autom.': 'automation', 'lett.': 'letters',
+                'trans.': 'transactions', 'syst.': 'systems', 'netw.': 'networks',
+                'learn.': 'learning', 'ind.': 'industrial', 'electron.': 'electronics',
+                'mechatron.': 'mechatronics', 'intell.': 'intelligence',
+                'transp.': 'transportation', 'contr.': 'control', 'mag.': 'magazine',
+                # General academic abbreviations (only expand with periods)
+                'int.': 'international', 'intl.': 'international', 'conf.': 'conference',
+                'j.': 'journal', 'proc.': 'proceedings', 'assoc.': 'association',
+                'comput.': 'computing', 'sci.': 'science', 'eng.': 'engineering',
+                'tech.': 'technology', 'artif.': 'artificial', 'mach.': 'machine',
+                'stat.': 'statistics', 'math.': 'mathematics', 'phys.': 'physics',
+                'chem.': 'chemistry', 'bio.': 'biology', 'med.': 'medicine',
+                'adv.': 'advances', 'ann.': 'annual', 'symp.': 'symposium',
+                'workshop': 'workshop', 'worksh.': 'workshop',
+                'natl.': 'national', 'acad.': 'academy', 'rev.': 'review',
+                # Physics journal abbreviations
+                'phys.': 'physics', 'phys. rev.': 'physical review', 
+                'phys. rev. lett.': 'physical review letters',
+                'phys. rev. a': 'physical review a', 'phys. rev. b': 'physical review b',
+                'phys. rev. c': 'physical review c', 'phys. rev. d': 'physical review d',
+                'phys. rev. e': 'physical review e', 'phys. lett.': 'physics letters',
+                'phys. lett. b': 'physics letters b', 'nucl. phys.': 'nuclear physics',
+                'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
+                'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
+                'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+                # Nature journals
+                'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
+                # Handle specific multi-word patterns and well-known acronyms
+                'proc. natl. acad. sci.': 'proceedings of the national academy of sciences',
+                'pnas': 'proceedings of the national academy of sciences',
+            }
+            # Sort by length (longest first) to ensure longer matches take precedence
+            for abbrev, expansion in sorted(common_abbrevs.items(), key=lambda x: len(x[0]), reverse=True):
+                # For abbreviations ending in period, use word boundary at start only
+                if abbrev.endswith('.'):
+                    pattern = r'\b' + re.escape(abbrev)
+                else:
+                    pattern = r'\b' + re.escape(abbrev) + r'\b'
+                text = re.sub(pattern, expansion, text)
+            return text
+        
+        venue_lower = expand_abbreviations(venue_lower)
+        
+        # Remove punctuation and normalize spacing for comparison
+        venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation
+        venue_lower = re.sub(r'\\s+on\\s+', ' ', venue_lower)  # Remove \"on\" preposition
+        venue_lower = re.sub(r'\\s+for\\s+', ' ', venue_lower)  # Remove \"for\" preposition
+        venue_lower = re.sub(r'\\s+', ' ', venue_lower).strip()  # Normalize whitespace
+        
+        return venue_lower
+    
+    normalized_venue1 = normalize_for_comparison(venue1_latex_cleaned)
+    normalized_venue2 = normalize_for_comparison(venue2_latex_cleaned)
     
     def expand_abbreviations(text):
         """Generic abbreviation expansion using common academic patterns"""
@@ -3985,8 +4059,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             if not acronym or not full_text:
                 return False
             
-            # Normalize the full text
-            normalized_full = normalize_venue(full_text)
+            # Use the internal comparison normalization function
+            normalized_full = normalize_for_comparison(full_text)
             
             # Generate all possible acronyms from the full text
             possible_acronyms = []
@@ -4100,9 +4174,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
         if (arxiv1 == 'arxiv' and arxiv2.startswith('https://arxiv.org')) or (arxiv2 == 'arxiv' and arxiv1.startswith('https://arxiv.org')):
             return False
     
-    # Normalize both venues first
-    norm1 = normalize_venue(venue1)
-    norm2 = normalize_venue(venue2)
+    # Use normalized venues from shared function
+    norm1 = normalized_venue1
+    norm2 = normalized_venue2
     
     # Direct match after normalization (highest priority)
     if norm1 == norm2:
@@ -4357,3 +4431,143 @@ def is_year_substantially_different(cited_year: int, correct_year: int, context:
     # Any year difference should be flagged as a warning for manual review
     warning_msg = f"Year mismatch: cited as {cited_year} but actually {correct_year}"
     return True, warning_msg
+
+
+def normalize_venue_for_display(venue: str) -> str:
+    """
+    Normalize venue names for consistent display and comparison.
+    
+    This function is used both for display in warnings and for venue comparison
+    to ensure consistent normalization across the system.
+    
+    Args:
+        venue: Raw venue string
+        
+    Returns:
+        Normalized venue string with prefixes removed and abbreviations expanded
+    """
+    if not venue:
+        return ""
+    
+    def expand_abbreviations(text):
+        """Generic abbreviation expansion using common academic patterns"""
+        # Common academic abbreviations mapping
+        common_abbrevs = {
+            # IEEE specific abbreviations (only expand with periods, not full words)
+            'robot.': 'robotics',
+            'autom.': 'automation',
+            'lett.': 'letters',
+            'trans.': 'transactions',
+            'syst.': 'systems',
+            'netw.': 'networks',
+            'learn.': 'learning',
+            'ind.': 'industrial',
+            'electron.': 'electronics',
+            'mechatron.': 'mechatronics',
+            'intell.': 'intelligence',
+            'transp.': 'transportation',
+            'contr.': 'control',
+            'mag.': 'magazine',
+            
+            # General academic abbreviations (only expand with periods)
+            'int.': 'international',
+            'intl.': 'international', 
+            'conf.': 'conference',
+            'j.': 'journal',
+            'proc.': 'proceedings',
+            'assoc.': 'association',
+            'comput.': 'computing',
+            'sci.': 'science',
+            'eng.': 'engineering',
+            'tech.': 'technology',
+            'artif.': 'artificial',
+            'mach.': 'machine',
+            'stat.': 'statistics',
+            'math.': 'mathematics',
+            'phys.': 'physics',
+            'chem.': 'chemistry',
+            'bio.': 'biology',
+            'med.': 'medicine',
+            'adv.': 'advances',
+            'ann.': 'annual',
+            'symp.': 'symposium',
+            'workshop': 'workshop',
+            'worksh.': 'workshop',
+        }
+        
+        text_lower = text.lower()
+        for abbrev, expansion in common_abbrevs.items():
+            # Only replace if it's a word boundary to avoid partial replacements
+            pattern = r'\b' + re.escape(abbrev) + r'\b'
+            text_lower = re.sub(pattern, expansion, text_lower)
+        
+        return text_lower
+    
+    venue_text = venue.strip()
+    
+    # Extract venue from complex editor strings (e.g. "In Smith, J.; and Doe, K., eds., Conference Name, volume 1")
+    # This handles patterns like "In [authors], eds., [venue], [optional metadata]" (case-insensitive)
+    editor_match = re.search(r'in\s+[^,]+(?:,\s*[^,]*)*,\s*eds?\.,\s*(.+?)(?:,\s*volume\s*\d+|,\s*pp?\.|$)', venue_text, re.IGNORECASE)
+    if editor_match:
+        # Extract the venue part from editor string (preserve original case)
+        venue_text = editor_match.group(1).strip()
+        # Clean up any remaining metadata like "volume X of Proceedings..." (case-insensitive)
+        venue_text = re.sub(r',\s*volume\s+\d+.*$', '', venue_text, flags=re.IGNORECASE)
+        venue_text = re.sub(r'\s+of\s+proceedings.*$', '', venue_text, flags=re.IGNORECASE)
+    
+    # Remove years, volumes, pages, and other citation metadata
+    # But preserve arXiv IDs (don't remove digits after arXiv:)
+    if not re.match(r'arxiv:', venue_text, re.IGNORECASE):
+        venue_text = re.sub(r',?\s*\d{4}[a-z]?\s*$', '', venue_text)  # Years like "2024" or "2024b"
+        venue_text = re.sub(r',?\s*\(\d{4}\)$', '', venue_text)  # Years in parentheses
+        venue_text = re.sub(r"'\d{2}$", '', venue_text)  # Year suffixes like 'CVPR'16'
+    venue_text = re.sub(r',?\s*(vol\.?\s*|volume\s*)\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Volume info
+    venue_text = re.sub(r',?\s*\d+\s*\([^)]*\).*$', '', venue_text)  # Issue info with optional spaces
+    venue_text = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
+    venue_text = re.sub(r'\s*\(print\).*$', '', venue_text, flags=re.IGNORECASE)  # Print designation
+    venue_text = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_text, flags=re.IGNORECASE)  # Year.Print
+    
+    # Remove procedural prefixes (case-insensitive)
+    prefixes_to_remove = [
+        r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
+        r'^\d{4}\s+',                     # "2024 "
+        r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',  # "Proceedings of the IEEE"
+        r'^proc\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE" (require "of")
+        r'^procs\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE" (require "of")
+        r'^in\s+',
+        r'^advances\s+in\s+',             # "Advances in Neural Information Processing Systems"
+        r'^adv\.\s+',                     # "Adv. Neural Information Processing Systems"
+        # Handle ordinal prefixes: "The Twelfth", "The Ninth", etc.
+        r'^the\s+(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth|twenty-first|twenty-second|twenty-third|twenty-fourth|twenty-fifth|twenty-sixth|twenty-seventh|twenty-eighth|twenty-ninth|thirtieth|thirty-first|thirty-second|thirty-third|thirty-fourth|thirty-fifth|thirty-sixth|thirty-seventh|thirty-eighth|thirty-ninth|fortieth|forty-first|forty-second|forty-third|forty-fourth|forty-fifth|forty-sixth|forty-seventh|forty-eighth|forty-ninth|fiftieth)\s+',
+        # Handle numeric ordinals: "The 41st", "The 12th", etc.
+        r'^the\s+\d+(st|nd|rd|th)\s+',
+        # Handle standalone "The" prefix
+        r'^the\s+',
+    ]
+    
+    for prefix_pattern in prefixes_to_remove:
+        venue_text = re.sub(prefix_pattern, '', venue_text, flags=re.IGNORECASE)
+    
+    # Note: For display purposes, we preserve case and don't expand abbreviations
+    # Only do minimal cleaning needed for proper display
+    
+    # Remove organization prefixes/suffixes that don't affect identity (case-insensitive)
+    # But preserve IEEE when it's part of a journal name like \"IEEE Transactions\"
+    if not re.match(r'ieee\s+transactions', venue_text, re.IGNORECASE):
+        venue_text = re.sub(r'^(ieee|acm|aaai|usenix|sigcomm|sigkdd|sigmod|vldb|osdi|sosp|eurosys)\s+', '', venue_text, flags=re.IGNORECASE)  # Remove org prefixes
+    venue_text = re.sub(r'^ieee/\w+\s+', '', venue_text, flags=re.IGNORECASE)  # Remove "IEEE/RSJ " etc
+    venue_text = re.sub(r'\s+(ieee|acm|aaai|usenix)\s*$', '', venue_text, flags=re.IGNORECASE)  # Remove org suffixes
+    venue_text = re.sub(r'/\w+\s+', ' ', venue_text)  # Remove "/ACM " style org separators
+    
+    # IMPORTANT: Don't remove "Conference on" or "International" - they're needed for display
+    # Only remove specific org-prefixed conference patterns where the org is clear
+    venue_text = re.sub(r'^(ieee|acm|aaai|nips)(/\w+)?\s+conference\s+on\s+', '', venue_text, flags=re.IGNORECASE)
+    
+    # Note: Don't remove "Conference on" as it's often part of the actual venue name
+    # Only remove it if it's clearly a procedural prefix (handled in prefixes_to_remove above)
+    
+    # Clean up spacing (preserve punctuation and case for display)
+    venue_text = re.sub(r'\s+', ' ', venue_text)     # Normalize whitespace
+    venue_text = venue_text.strip()
+    
+    return venue_text
