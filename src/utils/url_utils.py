@@ -214,6 +214,7 @@ def clean_url(url: str) -> str:
     This function handles:
     - Whitespace trimming
     - Malformed LaTeX URL wrappers like \\url{https://...}
+    - Markdown-style links like [text](url)
     - Trailing punctuation from academic references
     - DOI URL query parameter cleanup
     
@@ -236,6 +237,14 @@ def clean_url(url: str) -> str:
     url_match = re.search(url_pattern, url)
     if url_match:
         url = url_match.group(1)
+    
+    # Handle markdown-style links like [text](url) or [url](url)
+    # e.g., "[https://example.com](https://example.com)" -> "https://example.com"
+    markdown_pattern = r'\[([^\]]*)\]\((https?://[^)]+)\)'
+    markdown_match = re.search(markdown_pattern, url)
+    if markdown_match:
+        # Use the URL from parentheses
+        url = markdown_match.group(2)
     
     # Remove trailing punctuation that's commonly part of sentence structure
     # but preserve legitimate URL characters
@@ -279,6 +288,14 @@ def clean_url_punctuation(url: str) -> str:
     url_match = re.search(url_pattern, url)
     if url_match:
         url = url_match.group(1)
+    
+    # Handle markdown-style links like [text](url) or [url](url)
+    # e.g., "[https://example.com](https://example.com)" -> "https://example.com"
+    markdown_pattern = r'\[([^\]]*)\]\((https?://[^)]+)\)'
+    markdown_match = re.search(markdown_pattern, url)
+    if markdown_match:
+        # Use the URL from parentheses
+        url = markdown_match.group(2)
     
     # Remove trailing punctuation that's commonly part of sentence structure
     # but preserve legitimate URL characters

@@ -4594,7 +4594,7 @@ def normalize_venue_for_display(venue: str) -> str:
     prefixes_to_remove = [
         r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
         r'^\d{4}\s+',                     # "2024 "
-        r'^proceedings\s+(of\s+)?(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',  # "Proceedings of the IEEE"
+        r'^proceedings\s+(of\s+)?(the\s+)?((acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(\d+(st|nd|rd|th)\s+)?',  # "Proceedings of the [ORG] [ORG] 29th"
         r'^proc\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE" (require "of")
         r'^procs\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE" (require "of")
         r'^in\s+',
