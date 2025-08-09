@@ -103,37 +103,99 @@ def parse_bibtex_entry_content(entry_type: str, entry_key: str, content: str) ->
     Returns:
         Dictionary with parsed entry data
     """
-    # Extract fields using regex
     fields = {}
     
-    # Pattern to match field = {value} or field = "value"
-    # Handle nested braces properly
-    field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)")'
+    # Use a more robust approach with manual parsing
+    i = 0
+    while i < len(content):
+        # Skip whitespace
+        while i < len(content) and content[i].isspace():
+            i += 1
+        
+        if i >= len(content):
+            break
+        
+        # Look for field name
+        field_start = i
+        while i < len(content) and (content[i].isalnum() or content[i] == '_'):
+            i += 1
+        
+        if i == field_start:
+            i += 1  # Skip non-alphanumeric character
+            continue
+        
+        field_name = content[field_start:i].lower()
+        
+        # Skip whitespace
+        while i < len(content) and content[i].isspace():
+            i += 1
+        
+        # Look for equals sign
+        if i >= len(content) or content[i] != '=':
+            continue
+        i += 1  # Skip '='
+        
+        # Skip whitespace
+        while i < len(content) and content[i].isspace():
+            i += 1
+        
+        if i >= len(content):
+            break
+        
+        # Parse field value
+        field_value = ""
+        if content[i] == '"':
+            # Handle quoted strings
+            i += 1  # Skip opening quote
+            value_start = i
+            while i < len(content) and content[i] != '"':
+                i += 1
+            if i < len(content):
+                field_value = content[value_start:i]
+                i += 1  # Skip closing quote
+        elif content[i] == '{':
+            # Handle braced strings with proper nesting
+            brace_count = 0
+            value_start = i + 1  # Skip opening brace
+            i += 1
+            while i < len(content):
+                if content[i] == '{':
+                    brace_count += 1
+                elif content[i] == '}':
+                    if brace_count == 0:
+                        break
+                    brace_count -= 1
+                i += 1
+            
+            if i < len(content):
+                field_value = content[value_start:i]
+                i += 1  # Skip closing brace
+        
+        if field_value:
+            field_value = field_value.strip()
+            # Strip outer quotes if present (handles cases like title = {"Some Title"})
+            if field_value.startswith('"') and field_value.endswith('"'):
+                field_value = field_value[1:-1]
+            fields[field_name] = field_value
+        
+        # Skip to next field (look for comma)
+        while i < len(content) and content[i] not in ',}':
+            i += 1
+        if i < len(content) and content[i] == ',':
+            i += 1
     
-    for match in re.finditer(field_pattern, content, re.DOTALL):
-        field_name = match.group(1).lower()
-        field_value = match.group(2) or match.group(3) or ""
-        # Strip outer quotes if present (handles cases like title = {"Some Title"})
-        field_value = field_value.strip()
-        if field_value.startswith('"') and field_value.endswith('"'):
-            field_value = field_value[1:-1]
-        fields[field_name] = field_value
-    
-    # If field extraction failed, try a simpler approach
+    # Fallback to regex if manual parsing failed
     if not fields:
-        logger.debug("Field extraction failed, trying line-by-line approach")
-        lines = content.split('\n')
-        for line in lines:
-            line = line.strip()
-            if '=' in line:
-                field_match = re.match(r'(\w+)\s*=\s*[{"]([^{}"]*)[}"]', line)
-                if field_match:
-                    field_name = field_match.group(1).lower()
-                    field_value = field_match.group(2).strip()
-                    # Strip outer quotes if present
-                    if field_value.startswith('"') and field_value.endswith('"'):
-                        field_value = field_value[1:-1]
-                    fields[field_name] = field_value
+        logger.debug("Manual parsing failed, trying regex approach")
+        field_pattern = r'(\w+)\s*=\s*(?:\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}|"([^"]*)")'
+        
+        for match in re.finditer(field_pattern, content, re.DOTALL):
+            field_name = match.group(1).lower()
+            field_value = match.group(2) or match.group(3) or ""
+            field_value = field_value.strip()
+            if field_value.startswith('"') and field_value.endswith('"'):
+                field_value = field_value[1:-1]
+            fields[field_name] = field_value
     
     return {
         'type': entry_type,
@@ -216,6 +278,9 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
         
         # Extract journal/venue
         journal = fields.get('journal', fields.get('booktitle', fields.get('venue', '')))
+        # Remove braces from journal/venue names
+        if journal and journal.startswith('{') and journal.endswith('}'):
+            journal = journal[1:-1]
         
         # Extract DOI and construct URL
         doi = fields.get('doi', '')
@@ -225,6 +290,9 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
         
         # Extract other URLs
         url = fields.get('url', '')
+        if url:
+            from utils.url_utils import clean_url
+            url = clean_url(url)
         
         # Handle special @misc entries with only howpublished field
         if not title and not authors and entry_type == 'misc':
@@ -248,6 +316,10 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
                             url = 'https://' + howpublished
                         else:
                             url = howpublished
+                        
+                        # Clean the reconstructed URL
+                        from utils.url_utils import clean_url
+                        url = clean_url(url)
                         
                         # Generate title from domain/path
                         if 'jailbreakchat.com' in domain:
@@ -275,6 +347,11 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
             
         if url.startswith('\\url{') and url.endswith('}'):
             url = url[5:-1]  # Remove \url{...}
+            
+        # Clean any URL we extracted
+        if url:
+            from utils.url_utils import clean_url
+            url = clean_url(url)
         
         # Construct ArXiv URL from eprint field if no URL present
         if not url and not doi_url:
