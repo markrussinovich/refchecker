@@ -5181,7 +5181,7 @@ class ArxivReferenceChecker:
             from utils.text_utils import format_authors_for_display
             authors = format_authors_for_display(reference.get('authors', []))
             year = reference.get('year', '')
-            venue = reference.get('venue', '')
+            venue = reference.get('venue', '') or reference.get('journal', '')
             url = reference.get('url', '')
             doi = reference.get('doi', '')
             # Extract actual reference number from raw text for accurate display
