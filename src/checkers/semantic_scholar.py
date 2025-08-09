@@ -591,11 +591,9 @@ class NonArxivReferenceChecker:
         if external_ids and 'DOI' in external_ids:
             paper_doi = external_ids['DOI']
             
-            # Compare DOIs, but strip hash fragments and trailing periods for comparison
-            cited_doi_clean = doi.split('#')[0].rstrip('.') if doi else ''
-            paper_doi_clean = paper_doi.split('#')[0].rstrip('.') if paper_doi else ''
-            
-            if cited_doi_clean and paper_doi_clean and cited_doi_clean.lower() != paper_doi_clean.lower():
+            # Compare DOIs using the proper comparison function
+            from utils.doi_utils import compare_dois
+            if doi and paper_doi and not compare_dois(doi, paper_doi):
                 errors.append({
                     'error_type': 'doi',
                     'error_details': f"DOI mismatch: cited as {doi} but actually {paper_doi}",

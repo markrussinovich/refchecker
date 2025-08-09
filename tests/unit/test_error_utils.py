@@ -220,3 +220,108 @@ class TestErrorValidation:
         error_dict = {'some_field': 'value'}
         
         assert validate_error_dict(error_dict, [])
+
+
+class TestDoiComparison:
+    """Test DOI comparison case sensitivity and format handling"""
+    
+    def test_case_insensitive_comparison(self):
+        """Test that DOI comparison is case-insensitive"""
+        from utils.doi_utils import compare_dois
+        
+        test_cases = [
+            # Case differences in journal abbreviations
+            ('10.1016/j.isprsjprs.2007.01.001', '10.1016/J.ISPRSJPRS.2007.01.001'),
+            ('10.1016/J.PMCj.2022.101687', '10.1016/j.pmcj.2022.101687'),
+            ('10.1038/NATURE12373', '10.1038/nature12373'),
+            # Mixed case
+            ('10.1109/TPAMI.2020.2963957', '10.1109/tpami.2020.2963957'),
+        ]
+        
+        for cited, actual in test_cases:
+            assert compare_dois(cited, actual), f"DOIs should match despite case differences: {cited} vs {actual}"
+    
+    def test_url_vs_raw_doi_comparison(self):
+        """Test comparison between DOI URLs and raw DOIs"""
+        from utils.doi_utils import compare_dois
+        
+        test_cases = [
+            # URL vs raw DOI (from the actual error messages)
+            ('https://doi.org/10.1016/j.isprsjprs.2007.01.001', '10.1016/J.ISPRSJPRS.2007.01.001'),
+            ('https://doi.org/10.1016/j.pmcj.2022.101687', '10.1016/j.pmcj.2022.101687'),
+            ('https://doi.org/10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101221'),
+            # HTTP vs HTTPS URLs
+            ('http://doi.org/10.1016/j.pmcj.2020.101221', 'https://doi.org/10.1016/j.pmcj.2020.101221'),
+            # With and without URL prefix
+            ('doi:10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101221'),
+        ]
+        
+        for cited, actual in test_cases:
+            assert compare_dois(cited, actual), f"DOIs should match despite format differences: {cited} vs {actual}"
+    
+    def test_doi_normalization(self):
+        """Test that DOI normalization produces consistent results"""
+        from utils.doi_utils import normalize_doi
+        
+        test_cases = [
+            # Different prefixes should normalize to same result
+            ('https://doi.org/10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101221'),
+            ('http://doi.org/10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101221'),
+            ('doi:10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101221'),
+            # Case differences should normalize to same result
+            ('10.1016/J.ISPRSJPRS.2007.01.001', '10.1016/j.isprsjprs.2007.01.001'),
+            # With trailing punctuation
+            ('10.1016/j.pmcj.2020.101221.', '10.1016/j.pmcj.2020.101221'),
+            ('10.1016/j.pmcj.2020.101221,', '10.1016/j.pmcj.2020.101221'),
+        ]
+        
+        for input_doi, expected_base in test_cases:
+            normalized = normalize_doi(input_doi)
+            expected_normalized = normalize_doi(expected_base)
+            assert normalized == expected_normalized, f"DOI normalization should be consistent: {input_doi} -> {normalized}"
+    
+    def test_doi_fragments_and_parameters(self):
+        """Test that DOI comparison handles URL fragments and parameters correctly"""
+        from utils.doi_utils import compare_dois
+        
+        test_cases = [
+            # Hash fragments should be ignored
+            ('10.1016/j.pmcj.2020.101221#section1', '10.1016/j.pmcj.2020.101221'),
+            ('https://doi.org/10.1016/j.pmcj.2020.101221?param=value', '10.1016/j.pmcj.2020.101221'),
+            # Both with fragments/parameters
+            ('10.1016/j.pmcj.2020.101221#sec1', '10.1016/j.pmcj.2020.101221#sec2'),
+        ]
+        
+        for cited, actual in test_cases:
+            assert compare_dois(cited, actual), f"DOIs should match ignoring fragments/parameters: {cited} vs {actual}"
+    
+    def test_invalid_doi_comparisons(self):
+        """Test that invalid or empty DOIs are handled correctly"""
+        from utils.doi_utils import compare_dois
+        
+        test_cases = [
+            # Empty DOIs
+            ('', '10.1016/j.pmcj.2020.101221'),
+            ('10.1016/j.pmcj.2020.101221', ''),
+            ('', ''),
+            # None values
+            (None, '10.1016/j.pmcj.2020.101221'),
+            ('10.1016/j.pmcj.2020.101221', None),
+        ]
+        
+        for cited, actual in test_cases:
+            result = compare_dois(cited, actual)
+            assert not result, f"Invalid DOI comparison should return False: {cited} vs {actual}"
+    
+    def test_different_dois_not_matching(self):
+        """Test that genuinely different DOIs don't match"""
+        from utils.doi_utils import compare_dois
+        
+        test_cases = [
+            ('10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101222'),  # Different number
+            ('10.1016/j.pmcj.2020.101221', '10.1038/nature12373'),         # Different publisher/journal
+            ('10.1016/j.pmcj.2020.101221', '10.1016/j.isprsjprs.2007.01.001'),  # Different journal
+        ]
+        
+        for cited, actual in test_cases:
+            assert not compare_dois(cited, actual), f"Different DOIs should not match: {cited} vs {actual}"

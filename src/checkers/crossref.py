@@ -485,11 +485,9 @@ class CrossRefReferenceChecker:
         # Verify DOI
         work_doi = work_data.get('DOI')
         if doi and work_doi:
-            # Normalize DOIs for comparison (remove URL prefix and trailing periods)
-            cited_doi_clean = doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip().rstrip('.')
-            work_doi_clean = work_doi.replace('https://doi.org/', '').replace('http://doi.org/', '').strip().rstrip('.')
-            
-            if cited_doi_clean.lower() != work_doi_clean.lower():
+            # Compare DOIs using the proper comparison function
+            from utils.doi_utils import compare_dois
+            if not compare_dois(doi, work_doi):
                 errors.append({
                     'error_type': 'doi',
                     'error_details': f"DOI mismatch: cited as {doi} but actually {work_doi}",
