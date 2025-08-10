@@ -38,6 +38,19 @@ logger = logging.getLogger(__name__)
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 
+def format_title_mismatch(cited_title: str, verified_title: str) -> str:
+    """
+    Format a multi-line title mismatch message in a consistent style.
+
+    Example output:
+    Title mismatch: Cited:     '...'
+                                 Verified: '...'
+    """
+    return (
+        f"Title mismatch: Cited:     '{cited_title}'\n"
+        f"                             Verified: '{verified_title}'"
+    )
+
 class NonArxivReferenceChecker:
     """
     A class to verify non-arXiv references using the Semantic Scholar API
@@ -471,7 +484,7 @@ class NonArxivReferenceChecker:
         if found_title and title_similarity < SIMILARITY_THRESHOLD:
             errors.append({
                 'error_type': 'title',
-                'error_details': f"Title mismatch: cited as '{title}' but actually '{found_title}'",
+                'error_details': format_title_mismatch(title, found_title),
                 'ref_title_correct': paper_data.get('title', '')
             })
         
