@@ -2512,6 +2512,97 @@ def strip_latex_commands(text):
     return text
 
 
+def extract_balanced_braces(text, start_pos):
+    """
+    Extract content from balanced braces starting at start_pos.
+    
+    This function properly handles nested braces, which is important for LaTeX content
+    where patterns like {Jos{\'e} Meseguer} need to be extracted as complete units.
+    
+    Args:
+        text: The text to search in
+        start_pos: Position of the opening brace
+        
+    Returns:
+        tuple: (content, end_pos) or (None, start_pos) if no balanced content found
+    """
+    if start_pos >= len(text) or text[start_pos] != '{':
+        return None, start_pos
+    
+    brace_count = 1
+    pos = start_pos + 1
+    
+    while pos < len(text) and brace_count > 0:
+        if text[pos] == '{':
+            brace_count += 1
+        elif text[pos] == '}':
+            brace_count -= 1
+        pos += 1
+    
+    if brace_count == 0:
+        return text[start_pos + 1:pos - 1], pos
+    else:
+        return None, start_pos
+
+
+def extract_bibinfo_person_content(text):
+    """
+    Extract all person names from \\bibinfo{person}{...} with proper brace handling.
+    
+    This function correctly handles nested braces in author names, such as:
+    \\bibinfo{person}{Jos{\\'e} Meseguer}
+    
+    Args:
+        text: Text containing \\bibinfo{person}{...} patterns
+        
+    Returns:
+        list: List of extracted person names with balanced braces preserved
+    """
+    return extract_bibinfo_field_content(text, 'person', return_all=True)
+
+
+def extract_bibinfo_field_content(text, field_type, return_all=False):
+    """
+    Extract content from \\bibinfo{field_type}{...} with proper brace handling.
+    
+    This function correctly handles nested braces in field content, such as:
+    \\bibinfo{journal}{\\emph{Commun. ACM}}
+    
+    Args:
+        text: Text containing \\bibinfo{field_type}{...} patterns
+        field_type: The field type to extract (e.g., 'person', 'journal', 'title')
+        return_all: If True, return list of all matches; if False, return first match or None
+        
+    Returns:
+        list or str or None: Extracted content based on return_all parameter
+    """
+    pattern = f'\\\\bibinfo\\{{{re.escape(field_type)}\\}}\\{{'
+    matches = []
+    pos = 0
+    
+    while True:
+        match = re.search(pattern, text[pos:])
+        if not match:
+            break
+        
+        # Find the start of the content braces
+        brace_start = pos + match.end() - 1  # -1 because we want the opening brace
+        content, end_pos = extract_balanced_braces(text, brace_start)
+        
+        if content is not None:
+            matches.append(content)
+            pos = end_pos
+            if not return_all:
+                break  # Return first match only
+        else:
+            pos += match.end()
+    
+    if return_all:
+        return matches
+    else:
+        return matches[0] if matches else None
+
+
 def extract_cited_keys_from_latex(tex_content):
     r"""
     Extract citation keys from LaTeX content by finding \cite{} commands.
@@ -2936,8 +3027,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     
                     if brace_count == 0:
                         author_content = content[start_pos:pos-1]
-                        # Extract individual authors from \bibinfo{person}{Name} tags
-                        person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+                        # Extract individual authors from \bibinfo{person}{Name} tags using balanced brace extraction
+                        person_matches = extract_bibinfo_person_content(author_content)
                         if person_matches:
                             # Clean and format author names
                             authors = []

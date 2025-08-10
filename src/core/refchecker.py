@@ -3493,8 +3493,9 @@ class ArxivReferenceChecker:
         author_field_match = re.search(r'\\bibfield\{author\}\{(.*?)\}(?:\s*\\bibinfo\{year\}|\s*\\newblock|$)', content, re.DOTALL)
         if author_field_match:
             author_content = author_field_match.group(1)
-            # Find all \bibinfo{person}{Name} entries
-            person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+            # Find all \bibinfo{person}{Name} entries using balanced brace extraction
+            from utils.text_utils import extract_bibinfo_person_content
+            person_matches = extract_bibinfo_person_content(author_content)
             if person_matches:
                 authors = []
                 for person in person_matches:
@@ -3506,33 +3507,31 @@ class ArxivReferenceChecker:
                         authors.append(clean_name)
                 ref['authors'] = authors
         
-        # Extract title from \bibinfo{title}{Title}
-        title_match = re.search(r'\\bibinfo\{title\}\{([^}]+)\}', content)
-        if title_match:
-            title = strip_latex_commands(title_match.group(1)).strip()
+        # Import balanced brace extraction function
+        from utils.text_utils import extract_bibinfo_field_content
+        
+        # Extract title from \bibinfo{title}{Title} using balanced brace extraction
+        title_content = extract_bibinfo_field_content(content, 'title')
+        if title_content:
+            title = strip_latex_commands(title_content).strip()
             ref['title'] = title
         
-        # Extract venue/journal from various fields
-        venue_patterns = [
-            r'\\bibinfo\{booktitle\}\{([^}]+)\}',
-            r'\\bibinfo\{journal\}\{([^}]+)\}',
-            r'\\bibinfo\{series\}\{([^}]+)\}',
-            r'\\bibinfo\{note\}\{([^}]+)\}'
-        ]
+        # Extract venue/journal from various fields using balanced brace extraction
+        venue_field_types = ['booktitle', 'journal', 'series', 'note']
         
-        for pattern in venue_patterns:
-            venue_match = re.search(pattern, content)
-            if venue_match:
-                venue = strip_latex_commands(venue_match.group(1)).strip()
+        for field_type in venue_field_types:
+            venue_content = extract_bibinfo_field_content(content, field_type)
+            if venue_content:
+                venue = strip_latex_commands(venue_content).strip()
                 if venue:
                     ref['venue'] = venue
                     ref['journal'] = venue  # For compatibility
                     break
         
-        # Extract DOI
-        doi_match = re.search(r'\\bibinfo\{doi\}\{([^}]+)\}', content)
-        if doi_match:
-            ref['doi'] = doi_match.group(1).strip()
+        # Extract DOI using balanced brace extraction
+        doi_content = extract_bibinfo_field_content(content, 'doi')
+        if doi_content:
+            ref['doi'] = doi_content.strip()
         
         # Extract ArXiv ID from \showeprint[arxiv]{ID}
         arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
