@@ -506,8 +506,10 @@ def clean_author_name(author):
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li")
     author = re.sub(r'(\w)\s+\.', r'\1.', author)
     
-    # Remove common prefixes/suffixes
-    author = re.sub(r'\b(Dr\.?|Prof\.?|Professor|Mr\.?|Ms\.?|Mrs\.?)\s*', '', author, flags=re.IGNORECASE)
+    # Remove common honorific prefixes only when they are standalone at the start (require trailing whitespace)
+    # Previous pattern falsely removed the leading "Mr" from names like "Mrinmaya" due to optional whitespace.
+    # Anchor to start and require at least one space after the title to avoid stripping inside longer names.
+    author = re.sub(r'^(?:Dr|Prof|Professor|Mr|Ms|Mrs)\.?\s+', '', author, flags=re.IGNORECASE)
     
     # Remove email addresses
     author = re.sub(r'\S+@\S+\.\S+', '', author)
@@ -3588,6 +3590,12 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     # Normalize titles for comparison
     t1 = title1.lower().strip()
     t2 = title2.lower().strip()
+
+    # Remove trailing year suffixes like ", 2024" or " 2024" for robust matching
+    def strip_trailing_year(s: str) -> str:
+        return re.sub(r"[,\s]*\b(19|20)\d{2}\b\s*$", "", s).strip()
+    t1 = strip_trailing_year(t1)
+    t2 = strip_trailing_year(t2)
     
     # Exact match
     if t1 == t2:
@@ -4676,6 +4684,13 @@ def normalize_venue_for_display(venue: str) -> str:
     
     venue_text = venue.strip()
     
+    # Strip leading editor name lists like "..., editors, Venue ..." or "..., eds., Venue ..."
+    # This prevents author/editor lists from being treated as venue
+    # Match 'editors,' 'editor,' or 'eds.,' possibly after a comma; capture the remainder as venue
+    editors_match = re.search(r"(?:^|,)\s*(?:editors?|eds?\.?|editor)\s*,\s*(.+)$", venue_text, re.IGNORECASE)
+    if editors_match:
+        venue_text = editors_match.group(1).strip()
+    
     # Extract venue from complex editor strings (e.g. "In Smith, J.; and Doe, K., eds., Conference Name, volume 1")
     # This handles patterns like "In [authors], eds., [venue], [optional metadata]" (case-insensitive)
     editor_match = re.search(r'in\s+[^,]+(?:,\s*[^,]*)*,\s*eds?\.,\s*(.+?)(?:,\s*volume\s*\d+|,\s*pp?\.|$)', venue_text, re.IGNORECASE)
@@ -4702,7 +4717,9 @@ def normalize_venue_for_display(venue: str) -> str:
     prefixes_to_remove = [
         r'^\d{4}\s+\d+(st|nd|rd|th)\s+',  # "2012 IEEE/RSJ"
         r'^\d{4}\s+',                     # "2024 "
-        r'^proceedings\s+(of\s+)?(the\s+)?((acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(\d+(st|nd|rd|th)\s+)?',  # "Proceedings of the [ORG] [ORG] 29th"
+    # Remove 'Proceedings of [the] [ORG]* [ordinal]*' only when followed by at least one word
+    # This avoids cutting a venue down to just 'Proceedings of the'
+    r'^proceedings\s+of\s+(?!the\s*$)(?:the\s+)?(?:(?:acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(?:\d+(?:st|nd|rd|th)\s+)?',
         r'^proc\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE" (require "of")
         r'^procs\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE" (require "of")
         r'^in\s+',
@@ -4740,5 +4757,9 @@ def normalize_venue_for_display(venue: str) -> str:
     # Clean up spacing (preserve punctuation and case for display)
     venue_text = re.sub(r'\s+', ' ', venue_text)     # Normalize whitespace
     venue_text = venue_text.strip()
+    
+    # If what's left is too generic (e.g., just 'Proceedings of the'), treat as no venue
+    if venue_text.lower() in {"proceedings of the", "proceedings of"}:
+        return ""
     
     return venue_text
