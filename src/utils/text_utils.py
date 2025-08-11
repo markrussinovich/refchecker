@@ -2083,6 +2083,8 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     # The key insight: if the citation has "et al", we should only verify the listed authors
     # and not penalize for the authoritative source having more authors
     if has_et_al:
+        # Import here to avoid circular imports
+        from utils.error_utils import format_author_mismatch
         # For et al cases, check if each cited author matches ANY author in the correct list
         # rather than comparing positionally, since author order can vary
         for i, cited_author in enumerate(cleaned_cited):
@@ -2108,6 +2110,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         # For non-et-al cases, be more strict about count mismatches
         # Allow minor flexibility (1 author difference) but not more
         if abs(len(cleaned_cited) - len(correct_names)) > 1:
+            from utils.error_utils import format_author_count_mismatch
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), cleaned_cited, correct_names)
             return False, error_msg
         
@@ -2120,7 +2123,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         comparison_correct = correct_names
     
     # Use shared three-line formatter (imported lazily to avoid circular imports)
-    from utils.error_utils import format_first_author_mismatch, format_author_mismatch, format_author_count_mismatch
+    from utils.error_utils import format_first_author_mismatch, format_author_mismatch
 
     # Compare first author (most important) using the enhanced name matching
     if comparison_cited and comparison_correct:
