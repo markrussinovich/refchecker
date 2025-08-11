@@ -99,6 +99,10 @@ def compare_dois(doi1: str, doi2: str) -> bool:
     """
     Compare two DOIs for equality, handling different formats and prefixes.
     
+    This function performs exact matching after normalization, which means
+    DOIs are only considered equal if they are identical after removing
+    prefixes, case differences, and punctuation.
+    
     Args:
         doi1: First DOI to compare
         doi2: Second DOI to compare
@@ -109,21 +113,11 @@ def compare_dois(doi1: str, doi2: str) -> bool:
     if not doi1 or not doi2:
         return False
     
-    # Normalize both DOIs (already converted to lowercase)
+    # Normalize both DOIs (handles prefixes, case, punctuation)
     norm_doi1 = normalize_doi(doi1)
     norm_doi2 = normalize_doi(doi2)
 
-    # If DOIs are identical, they match
-    if norm_doi1 == norm_doi2:
-        return True
-
-    # Check if first two components match (publisher.registrant)
-    doi1_parts = norm_doi1.split('.')
-    doi2_parts = norm_doi2.split('.')
-
-    if len(doi1_parts) >= 2 and len(doi2_parts) >= 2:
-        return doi1_parts[0] == doi2_parts[0] and doi1_parts[1].split('/')[0] == doi2_parts[1].split('/')[0]
-    
+    # DOIs must be exactly identical after normalization
     return norm_doi1 == norm_doi2
 
 

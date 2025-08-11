@@ -9,6 +9,86 @@ for reference checkers.
 from typing import Dict, List, Any, Optional
 
 
+def print_labeled_multiline(label: str, text: str) -> None:
+    """
+    Print a multi-line message with consistent label formatting.
+    
+    This function ensures consistent indentation for all error and warning messages,
+    regardless of emoji width differences in the labels.
+    
+    Args:
+        label: The label (e.g., "❌ Error", "⚠️  Warning")
+        text: The multi-line text to print
+    """
+    prefix = f"      {label}: "
+    lines = (text or "").splitlines() or [""]
+    
+    # Print the first line with the label prefix
+    print(prefix + lines[0])
+    
+    # Print subsequent lines with fixed indentation to ensure consistency
+    # Use fixed 19-character indentation to align regardless of emoji width
+    fixed_indent = " " * 15
+    for line in lines[1:]:
+        print(fixed_indent + line)
+
+
+def format_three_line_mismatch(mismatch_type: str, left: str, right: str) -> str:
+    """
+    Format a three-line mismatch message with fixed indentation.
+
+    This creates a clean, consistently formatted mismatch message that separates
+    the mismatch type from the values being compared:
+
+    Example:
+    Title mismatch:
+        'Cited Title'
+    vs: 'Correct Title'
+
+    Args:
+        mismatch_type: The type of mismatch (e.g., "Author 2 mismatch", "Title mismatch")
+        left: The cited/incorrect value
+        right: The correct value
+
+    Returns:
+        Three-line formatted mismatch message
+    """
+    # Ensure mismatch_type ends with a colon
+    if not mismatch_type.endswith(":"):
+        mismatch_type = mismatch_type.rstrip() + ":"
+    
+    # Use fixed indentation for clean, consistent alignment
+    indent = ""  # spaces for content indentation
+    vs_indent = ""   # vs: starts at column 0 for clear visual separation
+    
+    return f"{mismatch_type}\n{indent}cited:  '{left}'\n{vs_indent}actual: '{right}'"
+
+
+def format_title_mismatch(cited_title: str, verified_title: str) -> str:
+    """
+    Format a three-line title mismatch message.
+
+    Output format:
+    Title mismatch:
+        'Cited Title'
+    vs: 'Correct Title'
+    """
+    return format_three_line_mismatch("Title mismatch", cited_title, verified_title)
+
+
+def format_year_mismatch(cited_year: int | str, correct_year: int | str) -> str:
+    """
+    Three-line year mismatch message.
+    """
+    return format_three_line_mismatch("Year mismatch", str(cited_year), str(correct_year))
+
+
+def format_doi_mismatch(cited_doi: str, correct_doi: str) -> str:
+    """
+    Three-line DOI mismatch message.
+    """
+    return format_three_line_mismatch("DOI mismatch", str(cited_doi), str(correct_doi))
+
 def create_author_error(error_details: str, correct_authors: List[Dict[str, str]]) -> Dict[str, str]:
     """
     Create a standardized author error dictionary.
@@ -40,7 +120,7 @@ def create_year_warning(cited_year: int, correct_year: int) -> Dict[str, Any]:
     """
     return {
         'warning_type': 'year',
-        'warning_details': f"Year mismatch: cited as {cited_year} but actually {correct_year}",
+        'warning_details': format_year_mismatch(cited_year, correct_year),
         'ref_year_correct': correct_year
     }
 
@@ -64,7 +144,7 @@ def create_doi_error(cited_doi: str, correct_doi: str) -> Optional[Dict[str, str
     if cited_doi_clean != correct_doi_clean:
         return {
             'error_type': 'doi',
-            'error_details': f"DOI mismatch: cited as {cited_doi} but actually {correct_doi}",
+            'error_details': format_doi_mismatch(cited_doi, correct_doi),
             'ref_doi_correct': correct_doi
         }
     
@@ -120,9 +200,18 @@ def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]
     
     return {
         'warning_type': 'venue',
-        'warning_details': f"Venue mismatch: cited as '{clean_cited}' but actually '{clean_correct}'",
+        'warning_details': format_three_line_mismatch("Venue mismatch", clean_cited, clean_correct),
         'ref_venue_correct': correct_venue
     }
+
+
+def format_venue_mismatch(cited_venue: str, verified_venue: str) -> str:
+    """
+    Format a three-line venue mismatch message with cleaned venue names.
+    """
+    clean_cited = clean_venue_for_comparison(cited_venue)
+    clean_verified = clean_venue_for_comparison(verified_venue)
+    return format_three_line_mismatch("Venue mismatch", clean_cited, clean_verified)
 
 
 def create_url_error(error_details: str, correct_url: Optional[str] = None) -> Dict[str, str]:
@@ -187,6 +276,59 @@ def create_generic_warning(warning_type: str, warning_details: str, **kwargs) ->
     
     warning_dict.update(kwargs)
     return warning_dict
+
+
+def format_author_mismatch(author_number: int, cited_author: str, correct_author: str) -> str:
+    """
+    Format a three-line author mismatch message.
+    
+    Args:
+        author_number: The author position (1-based)
+        cited_author: The cited author name
+        correct_author: The correct author name
+        
+    Returns:
+        Formatted three-line author mismatch message
+    """
+    return format_three_line_mismatch(f"Author {author_number} mismatch", cited_author, correct_author)
+
+
+def format_first_author_mismatch(cited_author: str, correct_author: str) -> str:
+    """
+    Format a three-line first author mismatch message.
+    
+    Args:
+        cited_author: The cited first author name
+        correct_author: The correct first author name
+        
+    Returns:
+        Formatted three-line first author mismatch message
+    """
+    return format_three_line_mismatch("First author mismatch", cited_author, correct_author)
+
+
+def format_author_count_mismatch(cited_count: int, correct_count: int, cited_authors: list, correct_authors: list) -> str:
+    """
+    Format an author count mismatch message showing all cited and correct authors.
+    
+    Args:
+        cited_count: Number of cited authors
+        correct_count: Number of correct authors  
+        cited_authors: List of cited author names
+        correct_authors: List of correct author names
+        
+    Returns:
+        Formatted multi-line author count mismatch message
+    """
+    # Create the header with count information
+    header = f"Author count mismatch: {cited_count} cited vs {correct_count} correct"
+    
+    # Format author lists
+    cited_list = ", ".join(cited_authors) if cited_authors else "None"
+    correct_list = ", ".join(correct_authors) if correct_authors else "None"
+    
+    # Use the same format as other mismatches
+    return format_three_line_mismatch(header, cited_list, correct_list)
 
 
 def format_authors_list(authors: List[Dict[str, str]]) -> str:

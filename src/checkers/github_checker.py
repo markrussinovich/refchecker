@@ -169,9 +169,14 @@ class GitHubChecker:
             if cited_title:
                 title_match = self._check_title_match(cited_title, actual_name, actual_description)
                 if not title_match:
+                    from utils.error_utils import format_title_mismatch
+                    details = format_title_mismatch(cited_title, actual_name)
+                    if actual_description:
+                        snippet = actual_description[:100] + ('...' if len(actual_description) > 100 else '')
+                        details += f" ({snippet})"
                     errors.append({
                         "warning_type": "title",
-                        "warning_details": f"Title mismatch: cited as '{cited_title}' but repository is '{actual_name}' ({actual_description[:100]}{'...' if len(actual_description) > 100 else ''})"
+                        "warning_details": details
                     })
             
             # Verify authors
@@ -180,9 +185,13 @@ class GitHubChecker:
                 author_str = ', '.join(cited_authors) if isinstance(cited_authors, list) else str(cited_authors)
                 author_match = self._check_author_match(author_str, actual_owner, actual_owner_name)
                 if not author_match:
+                    from utils.error_utils import format_three_line_mismatch
+                    left = author_str
+                    right = f"{actual_owner} ({actual_owner_name})" if actual_owner_name else actual_owner
+                    details = format_three_line_mismatch("Author mismatch", left, right)
                     errors.append({
                         "warning_type": "author",
-                        "warning_details": f"Author mismatch: cited as '{author_str}' but repository owner is '{actual_owner}' ({actual_owner_name})"
+                        "warning_details": details
                     })
             
             # Verify year
@@ -191,9 +200,10 @@ class GitHubChecker:
                 try:
                     cited_year_int = int(cited_year)
                     if cited_year_int < creation_year:
+                        from utils.error_utils import format_year_mismatch
                         errors.append({
                             "warning_type": "year",
-                            "warning_details": f"Year mismatch: cited as {cited_year} but repository created in {creation_year}",
+                            "warning_details": format_year_mismatch(cited_year, creation_year),
                             "ref_year_correct": str(creation_year)
                         })
                 except (ValueError, TypeError):

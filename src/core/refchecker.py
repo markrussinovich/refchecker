@@ -1900,10 +1900,11 @@ class ArxivReferenceChecker:
             db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
             
             if normalized_title != db_title:
+                from utils.error_utils import format_title_mismatch
                 logger.debug(f"DB Verification: Title mismatch - cited: '{title}', actual: '{paper_data.get('title')}'")
                 errors.append({
                     'error_type': 'title',
-                    'error_details': f"Title mismatch: cited as '{title}' but actually '{paper_data.get('title')}'",
+                    'error_details': format_title_mismatch(title, paper_data.get('title')),
                     'ref_title_correct': paper_data.get('title')
                 })
         
@@ -1925,30 +1926,36 @@ class ArxivReferenceChecker:
         paper_year = paper_data.get('year')
         if year and paper_year and year != paper_year:
             logger.debug(f"DB Verification: Year mismatch - cited: {year}, actual: {paper_year}")
+            from utils.error_utils import format_year_mismatch
             errors.append({
                 'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'warning_details': format_year_mismatch(year, paper_year),
                 'ref_year_correct': paper_year
             })
         
         # Verify DOI
-        if doi and external_ids.get('DOI') and doi.lower() != external_ids['DOI'].lower():
-            # Check if the cited DOI is a partial match of the actual DOI
-            # This handles cases like "10.1111/j.2044-8260." vs "10.1111/J.2044-8260.1997.TB01237.X"
-            cited_doi_clean = doi.lower().rstrip('.')
-            actual_doi_clean = external_ids['DOI'].lower().rstrip('.')
+        if doi and external_ids.get('DOI'):
+            from utils.doi_utils import compare_dois, normalize_doi
             
-            # If the cited DOI is a prefix of the actual DOI, it's likely a partial citation
-            # Only flag as error if it's not a reasonable partial match
-            if not actual_doi_clean.startswith(cited_doi_clean):
-                logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
-                errors.append({
-                    'error_type': 'doi',
-                    'error_details': f"DOI mismatch: cited as {doi} but actually {external_ids['DOI']}",
-                    'ref_doi_correct': external_ids['DOI']
-                })
-            else:
-                logger.debug(f"DB Verification: DOI partial match - cited: {doi}, actual: {external_ids['DOI']} (acceptable)")
+            # Use proper DOI comparison first
+            if not compare_dois(doi, external_ids['DOI']):
+                # Check if the cited DOI is a partial match of the actual DOI
+                # This handles cases like "10.1111/j.2044-8260." vs "10.1111/J.2044-8260.1997.TB01237.X"
+                cited_doi_normalized = normalize_doi(doi)
+                actual_doi_normalized = normalize_doi(external_ids['DOI'])
+                
+                # If the cited DOI is a prefix of the actual DOI, it's likely a partial citation
+                # Only flag as error if it's not a reasonable partial match
+                if not actual_doi_normalized.startswith(cited_doi_normalized.rstrip('.')):
+                    logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
+                    from utils.error_utils import format_doi_mismatch
+                    errors.append({
+                        'error_type': 'doi',
+                        'error_details': format_doi_mismatch(doi, external_ids['DOI']),
+                        'ref_doi_correct': external_ids['DOI']
+                    })
+                else:
+                    logger.debug(f"DB Verification: DOI partial match - cited: {doi}, actual: {external_ids['DOI']} (acceptable)")
 
         # Verify ArXiv ID
         if reference.get('type') == 'arxiv':
@@ -3489,8 +3496,9 @@ class ArxivReferenceChecker:
         author_field_match = re.search(r'\\bibfield\{author\}\{(.*?)\}(?:\s*\\bibinfo\{year\}|\s*\\newblock|$)', content, re.DOTALL)
         if author_field_match:
             author_content = author_field_match.group(1)
-            # Find all \bibinfo{person}{Name} entries
-            person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+            # Find all \bibinfo{person}{Name} entries using balanced brace extraction
+            from utils.text_utils import extract_bibinfo_person_content
+            person_matches = extract_bibinfo_person_content(author_content)
             if person_matches:
                 authors = []
                 for person in person_matches:
@@ -3502,33 +3510,31 @@ class ArxivReferenceChecker:
                         authors.append(clean_name)
                 ref['authors'] = authors
         
-        # Extract title from \bibinfo{title}{Title}
-        title_match = re.search(r'\\bibinfo\{title\}\{([^}]+)\}', content)
-        if title_match:
-            title = strip_latex_commands(title_match.group(1)).strip()
+        # Import balanced brace extraction function
+        from utils.text_utils import extract_bibinfo_field_content
+        
+        # Extract title from \bibinfo{title}{Title} using balanced brace extraction
+        title_content = extract_bibinfo_field_content(content, 'title')
+        if title_content:
+            title = strip_latex_commands(title_content).strip()
             ref['title'] = title
         
-        # Extract venue/journal from various fields
-        venue_patterns = [
-            r'\\bibinfo\{booktitle\}\{([^}]+)\}',
-            r'\\bibinfo\{journal\}\{([^}]+)\}',
-            r'\\bibinfo\{series\}\{([^}]+)\}',
-            r'\\bibinfo\{note\}\{([^}]+)\}'
-        ]
+        # Extract venue/journal from various fields using balanced brace extraction
+        venue_field_types = ['booktitle', 'journal', 'series', 'note']
         
-        for pattern in venue_patterns:
-            venue_match = re.search(pattern, content)
-            if venue_match:
-                venue = strip_latex_commands(venue_match.group(1)).strip()
+        for field_type in venue_field_types:
+            venue_content = extract_bibinfo_field_content(content, field_type)
+            if venue_content:
+                venue = strip_latex_commands(venue_content).strip()
                 if venue:
                     ref['venue'] = venue
                     ref['journal'] = venue  # For compatibility
                     break
         
-        # Extract DOI
-        doi_match = re.search(r'\\bibinfo\{doi\}\{([^}]+)\}', content)
-        if doi_match:
-            ref['doi'] = doi_match.group(1).strip()
+        # Extract DOI using balanced brace extraction
+        doi_content = extract_bibinfo_field_content(content, 'doi')
+        if doi_content:
+            ref['doi'] = doi_content.strip()
         
         # Extract ArXiv ID from \showeprint[arxiv]{ID}
         arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
@@ -5048,7 +5054,8 @@ class ArxivReferenceChecker:
             correct_first = correct_authors[0]
             
             if not enhanced_name_match(cited_first, correct_first):
-                return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
+                from utils.error_utils import format_first_author_mismatch
+                return False, format_first_author_mismatch(cited_first, correct_first)
         
         return True, "Authors match"
     
@@ -5454,12 +5461,14 @@ class ArxivReferenceChecker:
                     error_type = error.get('error_type') or error.get('warning_type')
                     error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
                     
+                    from utils.error_utils import print_labeled_multiline
+
                     if error_type == 'arxiv_id':
                         print(f"      ❌ {error_details}")
                     elif 'error_type' in error:
-                        print(f"      ❌ Error: {error_details}")
+                        print_labeled_multiline("❌ Error", error_details)
                     else:
-                        print(f"      ⚠️  Warning: {error_details}")
+                        print_labeled_multiline("⚠️  Warning", error_details)
 
     def _output_reference_errors(self, reference, errors, url):
         """

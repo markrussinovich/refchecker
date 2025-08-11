@@ -554,6 +554,10 @@ def clean_title_basic(title):
     # Remove trailing punctuation
     title = re.sub(r'[.,;:]+$', '', title)
     
+    # Remove BibTeX publication type indicators at the end (common in Chinese and some international BibTeX styles)
+    # [J] = Journal, [C] = Conference, [M] = Monograph/Book, [D] = Dissertation, [P] = Patent, [R] = Report
+    title = re.sub(r'\s*\[[JCMDPRS]\]\s*$', '', title)
+    
     return title
 
 
@@ -577,6 +581,9 @@ def clean_title_for_search(title):
     # Clean up newlines and normalize whitespace (but preserve other structure)
     title = title.replace('\n', ' ').strip()
     title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
+    
+    # Remove BibTeX publication type indicators that are not part of the actual title
+    title = re.sub(r'\s*\[[JCMDPRS]\]\s*$', '', title)
     
     # Note: We intentionally preserve:
     # - Capitalization (helps with exact matching)
@@ -2076,6 +2083,8 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     # The key insight: if the citation has "et al", we should only verify the listed authors
     # and not penalize for the authoritative source having more authors
     if has_et_al:
+        # Import here to avoid circular imports
+        from utils.error_utils import format_author_mismatch
         # For et al cases, check if each cited author matches ANY author in the correct list
         # rather than comparing positionally, since author order can vary
         for i, cited_author in enumerate(cleaned_cited):
@@ -2088,10 +2097,11 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
                     break
             
             if not author_found:
-                # Create a more informative error message that doesn't assume positional matching
-                # Show the full list of correct authors instead of truncating
+                # Use standardized three-line formatting for author mismatch
+                cited_display = format_author_for_display(cited_author)
                 full_author_list = ', '.join(correct_names)
-                return False, f"Author {i+1} mismatch: '{cited_author}' not found in author list (et al case). Correct authors include: {full_author_list}"
+                error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list - et al case)", f"Correct authors: {full_author_list}")
+                return False, error_msg
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
@@ -2100,7 +2110,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         # For non-et-al cases, be more strict about count mismatches
         # Allow minor flexibility (1 author difference) but not more
         if abs(len(cleaned_cited) - len(correct_names)) > 1:
-            return False, f"Author count mismatch: {len(cleaned_cited)} cited vs {len(correct_names)} correct"
+            from utils.error_utils import format_author_count_mismatch
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), cleaned_cited, correct_names)
+            return False, error_msg
         
         # Use the shorter list for comparison
         min_len = min(len(cleaned_cited), len(correct_names))
@@ -2110,6 +2122,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         comparison_cited = cleaned_cited
         comparison_correct = correct_names
     
+    # Use shared three-line formatter (imported lazily to avoid circular imports)
+    from utils.error_utils import format_first_author_mismatch, format_author_mismatch
+
     # Compare first author (most important) using the enhanced name matching
     if comparison_cited and comparison_correct:
         cited_first = comparison_cited[0]
@@ -2119,7 +2134,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             # Use consistent display format for both names
             cited_display = format_author_for_display(cited_first)
             correct_display = format_author_for_display(correct_first)
-            return False, f"First author mismatch: '{cited_display}' vs '{correct_display}'"
+            return False, format_first_author_mismatch(cited_display, correct_display)
     
     # For complete verification, check all authors if reasonable number
     if len(comparison_cited) <= 5:  # Only do full check for reasonable author counts
@@ -2128,7 +2143,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
                 # Use consistent display format for both names
                 cited_display = format_author_for_display(cited_author)
                 correct_display = format_author_for_display(correct_author)
-                return False, f"Author {i+1} mismatch: '{cited_display}' vs '{correct_display}'"
+                return False, format_author_mismatch(i+1, cited_display, correct_display)
     
     return True, "Authors match"
 
@@ -2510,6 +2525,97 @@ def strip_latex_commands(text):
     text = text.strip()
     
     return text
+
+
+def extract_balanced_braces(text, start_pos):
+    """
+    Extract content from balanced braces starting at start_pos.
+    
+    This function properly handles nested braces, which is important for LaTeX content
+    where patterns like {Jos{\'e} Meseguer} need to be extracted as complete units.
+    
+    Args:
+        text: The text to search in
+        start_pos: Position of the opening brace
+        
+    Returns:
+        tuple: (content, end_pos) or (None, start_pos) if no balanced content found
+    """
+    if start_pos >= len(text) or text[start_pos] != '{':
+        return None, start_pos
+    
+    brace_count = 1
+    pos = start_pos + 1
+    
+    while pos < len(text) and brace_count > 0:
+        if text[pos] == '{':
+            brace_count += 1
+        elif text[pos] == '}':
+            brace_count -= 1
+        pos += 1
+    
+    if brace_count == 0:
+        return text[start_pos + 1:pos - 1], pos
+    else:
+        return None, start_pos
+
+
+def extract_bibinfo_person_content(text):
+    """
+    Extract all person names from \\bibinfo{person}{...} with proper brace handling.
+    
+    This function correctly handles nested braces in author names, such as:
+    \\bibinfo{person}{Jos{\\'e} Meseguer}
+    
+    Args:
+        text: Text containing \\bibinfo{person}{...} patterns
+        
+    Returns:
+        list: List of extracted person names with balanced braces preserved
+    """
+    return extract_bibinfo_field_content(text, 'person', return_all=True)
+
+
+def extract_bibinfo_field_content(text, field_type, return_all=False):
+    """
+    Extract content from \\bibinfo{field_type}{...} with proper brace handling.
+    
+    This function correctly handles nested braces in field content, such as:
+    \\bibinfo{journal}{\\emph{Commun. ACM}}
+    
+    Args:
+        text: Text containing \\bibinfo{field_type}{...} patterns
+        field_type: The field type to extract (e.g., 'person', 'journal', 'title')
+        return_all: If True, return list of all matches; if False, return first match or None
+        
+    Returns:
+        list or str or None: Extracted content based on return_all parameter
+    """
+    pattern = f'\\\\bibinfo\\{{{re.escape(field_type)}\\}}\\{{'
+    matches = []
+    pos = 0
+    
+    while True:
+        match = re.search(pattern, text[pos:])
+        if not match:
+            break
+        
+        # Find the start of the content braces
+        brace_start = pos + match.end() - 1  # -1 because we want the opening brace
+        content, end_pos = extract_balanced_braces(text, brace_start)
+        
+        if content is not None:
+            matches.append(content)
+            pos = end_pos
+            if not return_all:
+                break  # Return first match only
+        else:
+            pos += match.end()
+    
+    if return_all:
+        return matches
+    else:
+        return matches[0] if matches else None
 
 
 def extract_cited_keys_from_latex(tex_content):
@@ -2936,8 +3042,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     
                     if brace_count == 0:
                         author_content = content[start_pos:pos-1]
-                        # Extract individual authors from \bibinfo{person}{Name} tags
-                        person_matches = re.findall(r'\\bibinfo\{person\}\{([^}]+)\}', author_content)
+                        # Extract individual authors from \bibinfo{person}{Name} tags using balanced brace extraction
+                        person_matches = extract_bibinfo_person_content(author_content)
                         if person_matches:
                             # Clean and format author names
                             authors = []

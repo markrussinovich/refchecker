@@ -182,9 +182,10 @@ class WebPageChecker:
             # Check title match
             if cited_title and page_title:
                 if not self._check_title_match(cited_title, page_title, page_description):
+                    from utils.error_utils import format_title_mismatch
                     errors.append({
                         "warning_type": "title",
-                        "warning_details": f"Title mismatch: cited as '{cited_title}' but page title is '{page_title}'"
+                        "warning_details": format_title_mismatch(cited_title, page_title)
                     })
             
             # Check if this is a documentation page for the cited topic
@@ -201,9 +202,13 @@ class WebPageChecker:
             if cited_authors:
                 author_str = ', '.join(cited_authors) if isinstance(cited_authors, list) else str(cited_authors)
                 if not self._check_author_match(author_str, site_info, web_url):
+                    from utils.error_utils import format_three_line_mismatch
+                    left = author_str
+                    right = site_info.get('organization', 'unknown')
+                    details = format_three_line_mismatch("Author/organization mismatch", left, right)
                     errors.append({
                         "warning_type": "author",
-                        "warning_details": f"Author/organization mismatch: cited as '{author_str}' but page is from '{site_info.get('organization', 'unknown')}'"
+                        "warning_details": details
                     })
             
             logger.debug(f"Web page verification completed for: {web_url}")

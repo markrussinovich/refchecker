@@ -29,6 +29,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search
+from utils.error_utils import format_title_mismatch
 from config.settings import get_config
 
 # Set up logging
@@ -471,7 +472,7 @@ class NonArxivReferenceChecker:
         if found_title and title_similarity < SIMILARITY_THRESHOLD:
             errors.append({
                 'error_type': 'title',
-                'error_details': f"Title mismatch: cited as '{title}' but actually '{found_title}'",
+                'error_details': format_title_mismatch(title, found_title),
                 'ref_title_correct': paper_data.get('title', '')
             })
         
@@ -525,9 +526,10 @@ class NonArxivReferenceChecker:
             is_different, warning_message = is_year_substantially_different(year, paper_year, context)
             
             if is_different and warning_message:
+                from utils.error_utils import format_year_mismatch
                 errors.append({
                     'warning_type': 'year',
-                    'warning_details': warning_message,
+                    'warning_details': format_year_mismatch(year, paper_year),
                     'ref_year_correct': paper_year
                 })
         
@@ -591,14 +593,13 @@ class NonArxivReferenceChecker:
         if external_ids and 'DOI' in external_ids:
             paper_doi = external_ids['DOI']
             
-            # Compare DOIs, but strip hash fragments and trailing periods for comparison
-            cited_doi_clean = doi.split('#')[0].rstrip('.') if doi else ''
-            paper_doi_clean = paper_doi.split('#')[0].rstrip('.') if paper_doi else ''
-            
-            if cited_doi_clean and paper_doi_clean and cited_doi_clean.lower() != paper_doi_clean.lower():
+            # Compare DOIs using the proper comparison function
+            from utils.doi_utils import compare_dois
+            if doi and paper_doi and not compare_dois(doi, paper_doi):
+                from utils.error_utils import format_doi_mismatch
                 errors.append({
                     'error_type': 'doi',
-                    'error_details': f"DOI mismatch: cited as {doi} but actually {paper_doi}",
+                    'error_details': format_doi_mismatch(doi, paper_doi),
                     'ref_doi_correct': paper_doi
                 })
         

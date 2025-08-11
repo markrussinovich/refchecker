@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 from utils.text_utils import (
     is_name_match, 
     clean_title,
+    clean_title_for_search,
     normalize_text,
     extract_arxiv_id_from_url,
     clean_author_name,
@@ -339,6 +340,53 @@ class TestTitleCleaning:
         title = clean_title("4th gen intel® xeon® scalable processors")
         assert isinstance(title, str)
         assert len(title) > 0
+    
+    def test_bibtex_publication_type_indicators(self):
+        """Test removal of BibTeX publication type indicators like [J], [C], etc.
+        
+        Regression test for bug where titles like "A self regularized non-monotonic activation function [J]"
+        were not properly cleaned, causing paper verification failures.
+        """
+        test_cases = [
+            # The original problematic case
+            ("A self regularized non-monotonic activation function [J]", 
+             "A self regularized non-monotonic activation function"),
+            
+            # Other publication type indicators  
+            ("Some Conference Paper [C]", "Some Conference Paper"),
+            ("A Book Title [M]", "A Book Title"),
+            ("PhD Dissertation Title [D]", "PhD Dissertation Title"),
+            ("Patent Document Title [P]", "Patent Document Title"),
+            ("Research Report Title [R]", "Research Report Title"),
+            
+            # Should not remove brackets in middle of title
+            ("Title with [brackets] inside [J]", "Title with [brackets] inside"),
+            ("Title [J] in middle", "Title [J] in middle"),
+            
+            # With extra whitespace
+            ("Title with trailing spaces [J]   ", "Title with trailing spaces"),
+            ("Title with leading spaces   [C]", "Title with leading spaces"),
+            
+            # Normal titles should be unchanged
+            ("Normal Title Without Indicators", "Normal Title Without Indicators"),
+            ("Title with [other brackets]", "Title with [other brackets]"),
+        ]
+        
+        for input_title, expected_output in test_cases:
+            cleaned = clean_title(input_title)
+            assert cleaned == expected_output, f"Failed for '{input_title}': got '{cleaned}', expected '{expected_output}'"
+        
+        # Also test clean_title_for_search handles publication type indicators
+        search_test_cases = [
+            ("A self regularized non-monotonic activation function [J]", 
+             "A self regularized non-monotonic activation function"),
+            ("Some Conference Paper [C]", "Some Conference Paper"),
+            ("Normal Title", "Normal Title"),
+        ]
+        
+        for input_title, expected_output in search_test_cases:
+            search_cleaned = clean_title_for_search(input_title)
+            assert search_cleaned == expected_output, f"Search cleaning failed for '{input_title}': got '{search_cleaned}', expected '{expected_output}'"
 
 
 class TestTextNormalization:
@@ -514,3 +562,293 @@ class TestDiacriticHandling:
             # Should be similar enough for matching (exact match not required, 
             # but no major structural differences)
             assert len(norm1.split()) == len(norm2.split()), f"Word count mismatch: '{norm1}' vs '{norm2}'"
+
+
+class TestAndOthersHandling:
+    """Test 'and others' handling regression fixes"""
+    
+    def test_and_others_in_bibtex_format(self):
+        """Test 'and others' in BibTeX comma-separated format"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        test_cases = [
+            # Basic case
+            ("Smith, John and Doe, Jane and others", ["Smith, John", "Doe, Jane", "et al"]),
+            
+            # Multiple authors with 'and others'
+            ("Zheng, Lianmin and Yin, Liangsheng and Xie, Zhiqiang and others", 
+             ["Zheng, Lianmin", "Yin, Liangsheng", "Xie, Zhiqiang", "et al"]),
+            
+            # Single author with 'and others'
+            ("Smith, John and others", ["Smith, John", "et al"]),
+            
+            # Comparison: 'et al' should work the same way
+            ("Smith, John and Doe, Jane and et al", ["Smith, John", "Doe, Jane", "et al"]),
+            ("Smith, John and Doe, Jane and et al.", ["Smith, John", "Doe, Jane", "et al"]),
+        ]
+        
+        for input_authors, expected_output in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected_output, f"Failed for input: {input_authors}, got {result}"
+    
+    def test_and_others_edge_cases(self):
+        """Test edge cases for 'and others' handling"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        test_cases = [
+            # Case sensitivity
+            ("Smith, John and Others", ["Smith, John", "et al"]),
+            ("Smith, John and OTHERS", ["Smith, John", "et al"]),
+            
+            # No authors before 'and others' (should not add et al)
+            ("and others", []),
+            ("others", []),
+            
+            # Mixed with regular authors
+            ("Smith, John and Jones, Sarah and Brown, Mike and others",
+             ["Smith, John", "Jones, Sarah", "Brown, Mike", "et al"]),
+        ]
+        
+        for input_authors, expected_output in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected_output, f"Failed for input: {input_authors}, got {result}"
+    
+    def test_backwards_compatibility_et_al(self):
+        """Ensure existing 'et al' handling still works correctly"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        test_cases = [
+            # Various 'et al' formats should still work
+            ("Smith, John and et al", ["Smith, John", "et al"]),
+            ("Smith, John and et al.", ["Smith, John", "et al"]),
+            ("Doe, Jane and Jones, Mike and et al", ["Doe, Jane", "Jones, Mike", "et al"]),
+        ]
+        
+        for input_authors, expected_output in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected_output, f"Backwards compatibility failed for: {input_authors}, got {result}"
+    
+    def test_no_false_positives(self):
+        """Ensure words containing 'others' are not falsely converted"""
+        from utils.text_utils import parse_authors_with_initials
+        
+        test_cases = [
+            # Author names that contain 'others' should not be converted
+            ("Brothers, John and Sisters, Jane", ["Brothers, John", "Sisters, Jane"]),
+            ("Mothers, Mary and Fathers, Frank", ["Mothers, Mary", "Fathers, Frank"]),
+            
+            # Regular author lists without et al indicators
+            ("Smith, John and Doe, Jane and Brown, Mike", ["Smith, John", "Doe, Jane", "Brown, Mike"]),
+        ]
+        
+        for input_authors, expected_output in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected_output, f"False positive for: {input_authors}, got {result}"
+            
+            # Ensure no 'et al' was incorrectly added
+            assert "et al" not in result, f"'et al' incorrectly added to: {input_authors}"
+
+
+class TestProceedingsOrdinalNormalization:
+    """Test proceedings normalization with ordinal numbers"""
+    
+    def test_acm_sigops_29th_symposium(self):
+        """Test the specific case that was failing"""
+        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        
+        cited_venue = 'Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles'
+        actual_venue = 'Symposium on Operating Systems Principles'
+        
+        # Test normalization
+        normalized_cited = normalize_venue_for_display(cited_venue)
+        normalized_actual = normalize_venue_for_display(actual_venue)
+        
+        assert normalized_cited == 'Symposium on Operating Systems Principles'
+        assert normalized_actual == 'Symposium on Operating Systems Principles'
+        assert normalized_cited == normalized_actual
+        
+        # Test venue comparison
+        assert not are_venues_substantially_different(cited_venue, actual_venue), \
+            "These venues should be considered the same after normalization"
+        
+        # Test that no venue warning would be generated (simulating the checker logic)
+        from utils.error_utils import create_venue_warning
+        should_create_warning = are_venues_substantially_different(cited_venue, actual_venue)
+        assert not should_create_warning, \
+            "No venue warning should be generated for properly normalized venues"
+    
+    def test_ieee_ordinal_conference(self):
+        """Test IEEE proceedings with ordinals"""
+        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        
+        cited_venue = 'Proceedings of the IEEE 25th International Conference on Computer Vision'
+        actual_venue = 'International Conference on Computer Vision'
+        
+        normalized_cited = normalize_venue_for_display(cited_venue)
+        normalized_actual = normalize_venue_for_display(actual_venue)
+        
+        assert normalized_cited == 'International Conference on Computer Vision'
+        assert normalized_actual == 'International Conference on Computer Vision'
+        assert normalized_cited == normalized_actual
+        
+        assert not are_venues_substantially_different(cited_venue, actual_venue)
+    
+    def test_usenix_osdi_ordinal(self):
+        """Test USENIX OSDI with ordinals"""
+        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        
+        cited_venue = 'Proceedings of the USENIX OSDI 15th Symposium on Operating Systems Design'
+        actual_venue = 'Symposium on Operating Systems Design'
+        
+        normalized_cited = normalize_venue_for_display(cited_venue)
+        normalized_actual = normalize_venue_for_display(actual_venue)
+        
+        assert normalized_cited == 'Symposium on Operating Systems Design'
+        assert normalized_actual == 'Symposium on Operating Systems Design'
+        assert normalized_cited == normalized_actual
+        
+        assert not are_venues_substantially_different(cited_venue, actual_venue)
+    
+    def test_simple_ordinal_proceedings(self):
+        """Test proceedings with simple ordinals (no org names)"""
+        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        
+        cited_venue = 'Proceedings of the 29th Conference on Machine Learning'
+        actual_venue = 'Conference on Machine Learning'
+        
+        normalized_cited = normalize_venue_for_display(cited_venue)
+        normalized_actual = normalize_venue_for_display(actual_venue)
+        
+        assert normalized_cited == 'Conference on Machine Learning'
+        assert normalized_actual == 'Conference on Machine Learning'
+        assert normalized_cited == normalized_actual
+        
+        assert not are_venues_substantially_different(cited_venue, actual_venue)
+    
+    def test_neurips_preserved(self):
+        """Test that proceedings without org prefixes are preserved correctly"""
+        from utils.text_utils import normalize_venue_for_display
+        
+        # This case should NOT be over-processed
+        venue = 'Proceedings of Neural Information Processing Systems'
+        normalized = normalize_venue_for_display(venue)
+        
+        # Should preserve the full name, not just "Systems"
+        assert normalized == 'Neural Information Processing Systems'
+    
+    def test_multiple_organization_names(self):
+        """Test proceedings with multiple organization acronyms"""
+        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        
+        cited_venue = 'Proceedings of the ACM SIGCOMM 45th Annual Conference on Data Communication'
+        actual_venue = 'Annual Conference on Data Communication'
+        
+        normalized_cited = normalize_venue_for_display(cited_venue)
+        normalized_actual = normalize_venue_for_display(actual_venue)
+        
+        assert normalized_cited == 'Annual Conference on Data Communication'
+        assert normalized_actual == 'Annual Conference on Data Communication'
+        assert normalized_cited == normalized_actual
+        
+        assert not are_venues_substantially_different(cited_venue, actual_venue)
+    
+    def test_edge_cases(self):
+        """Test edge cases that should not be affected"""
+        from utils.text_utils import normalize_venue_for_display
+        
+        test_cases = [
+            # Regular journals should not be affected
+            ('IEEE Transactions on Software Engineering', 'IEEE Transactions on Software Engineering'),
+            
+            # Conference names without proceedings prefix should not be affected
+            ('Neural Information Processing Systems', 'Neural Information Processing Systems'),
+            
+            # Proceedings without ordinals should work as before
+            ('Proceedings of the International Conference on Learning', 'International Conference on Learning'),
+        ]
+        
+        for input_venue, expected_output in test_cases:
+            normalized = normalize_venue_for_display(input_venue)
+            assert normalized == expected_output, f"Failed for {input_venue}: got {normalized}, expected {expected_output}"
+
+
+class TestVenueParsingRegression:
+    """Test venue parsing and display issues regression fixes"""
+    
+    def test_latex_penalty_commands_in_venues(self):
+        """Test that venues with LaTeX penalty commands are parsed correctly"""
+        from utils.text_utils import strip_latex_commands, are_venues_substantially_different
+        
+        test_cases = [
+            # LaTeX penalty commands should be removed (positive numbers work)
+            ("IEEE Transactions on \\penalty0 Software Engineering", "IEEE Transactions on Software Engineering"),
+            ("Neural \\penalty10000 Information Processing Systems", "Neural Information Processing Systems"),
+            
+            # Current behavior: negative penalty numbers leave the negative number behind
+            # This is a known limitation of the regex pattern
+            ("Proceedings of the \\penalty-100 International Conference", "Proceedings of the -100 International Conference"),
+            ("Conference \\penalty0 on Machine \\penalty-50 Learning", "Conference on Machine -50 Learning"),
+            
+            # Already clean venues should remain unchanged
+            ("Clean Venue Name", "Clean Venue Name"),
+        ]
+        
+        for input_venue, expected_output in test_cases:
+            cleaned = strip_latex_commands(input_venue)
+            assert cleaned == expected_output, f"LaTeX cleaning failed for: {input_venue} -> {cleaned}"
+    
+    def test_venue_comparison_with_latex_constructs(self):
+        """Test that venue comparison handles LaTeX constructs appropriately"""
+        from utils.text_utils import are_venues_substantially_different
+        
+        test_cases = [
+            # Same venue with and without LaTeX commands should match
+            ("IEEE Transactions on \\penalty0 Software Engineering", "IEEE Transactions on Software Engineering"),
+            ("Proceedings of the \\penalty-100 International Conference", "Proceedings of the International Conference"),
+            
+            # Different venues should still be different even with LaTeX
+            ("IEEE Transactions on \\penalty0 Software Engineering", "ACM Transactions on Programming Languages"),
+        ]
+        
+        for venue1, venue2 in test_cases[:-1]:  # Test matching cases
+            assert not are_venues_substantially_different(venue1, venue2), \
+                f"Venues should match despite LaTeX differences: {venue1} vs {venue2}"
+        
+        # Test the non-matching case
+        venue1, venue2 = test_cases[-1]
+        assert are_venues_substantially_different(venue1, venue2), \
+            f"Different venues should not match even with LaTeX: {venue1} vs {venue2}"
+
+
+class TestAuthorComparisonBugFixes:
+    """Test author deduplication and error message accuracy"""
+    
+    def test_duplicate_author_handling(self):
+        """Test that duplicate authors in correct list are handled properly"""
+        from utils.text_utils import compare_authors
+        
+        cited_authors = ["J. Smith", "A. Doe"]
+        # Simulate a database result with duplicate authors (could happen in collaboration papers)
+        correct_authors = ["John Smith", "Alice Doe", "John Smith"]  # Duplicate John Smith
+        
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+        
+        # Should succeed because the duplicate is cleaned up
+        assert match_result, f"Should match after deduplication: {error_message}"
+    
+    def test_et_al_error_message_accuracy(self):
+        """Test that et al error messages don't show misleading positional matches"""
+        from utils.text_utils import compare_authors
+        
+        cited_authors = ["Nonexistent Author", "et al"]
+        correct_authors = ["Real Author 1", "Real Author 2", "Real Author 3"]
+        
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+        
+        # Should fail
+        assert not match_result
+        # Error message should not show misleading positional match
+        assert "not found in author list" in error_message
+        assert "Real Author 1, Real Author 2, Real Author 3" in error_message
+        # Should NOT show positional match like "Nonexistent Author vs Real Author 1"
+        assert " vs " not in error_message
