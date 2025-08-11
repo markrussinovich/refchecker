@@ -183,6 +183,14 @@ def clean_venue_for_comparison(venue: str) -> str:
     return normalize_venue_for_display(venue)
 
 
+def format_missing_venue(correct_venue: str) -> str:
+    """
+    Format a missing venue message with only the actual value.
+    """
+    # Only show the actual venue; omit the empty cited line
+    return f"Missing venue: '{correct_venue}'"
+
+
 def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]:
     """
     Create a standardized venue warning dictionary.
@@ -197,7 +205,15 @@ def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]
     # Clean both venues for display in the warning
     clean_cited = clean_venue_for_comparison(cited_venue)
     clean_correct = clean_venue_for_comparison(correct_venue)
-    
+
+    # If cited venue cleans to empty, treat as missing venue instead of mismatch
+    if not clean_cited and clean_correct:
+        return {
+            'warning_type': 'venue',
+            'warning_details': format_missing_venue(clean_correct),
+            'ref_venue_correct': correct_venue
+        }
+
     return {
         'warning_type': 'venue',
         'warning_details': format_three_line_mismatch("Venue mismatch", clean_cited, clean_correct),
