@@ -430,11 +430,22 @@ class LocalNonArxivReferenceChecker:
                 logger.debug(f"Local DB: Author mismatch - {author_error}")
                 errors.append(create_author_error(author_error, paper_data.get('authors', [])))
         
-        # Verify year
+        # Verify year (with tolerance)
         paper_year = paper_data.get('year')
-        if year and paper_year and year != paper_year:
-            logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
-            errors.append(create_year_warning(year, paper_year))
+        if year and paper_year:
+            # Get year tolerance from config (default to 1 if not available)
+            year_tolerance = 1  # Default tolerance
+            try:
+                from config.settings import get_config
+                config = get_config()
+                year_tolerance = config.get('text_processing', {}).get('year_tolerance', 1)
+            except (ImportError, Exception):
+                pass  # Use default if config not available
+            
+            # Only flag as mismatch if the difference is greater than tolerance
+            if abs(year - paper_year) > year_tolerance:
+                logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
+                errors.append(create_year_warning(year, paper_year))
         
         # Verify DOI
         paper_doi = None

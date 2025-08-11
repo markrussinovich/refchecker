@@ -99,9 +99,8 @@ def compare_dois(doi1: str, doi2: str) -> bool:
     """
     Compare two DOIs for equality, handling different formats and prefixes.
     
-    This function performs exact matching after normalization, which means
-    DOIs are only considered equal if they are identical after removing
-    prefixes, case differences, and punctuation.
+    This function performs exact matching after normalization, with support
+    for partial DOI citations where a shorter DOI is a valid prefix of a longer one.
     
     Args:
         doi1: First DOI to compare
@@ -117,8 +116,27 @@ def compare_dois(doi1: str, doi2: str) -> bool:
     norm_doi1 = normalize_doi(doi1)
     norm_doi2 = normalize_doi(doi2)
 
-    # DOIs must be exactly identical after normalization
-    return norm_doi1 == norm_doi2
+    # First try exact match
+    if norm_doi1 == norm_doi2:
+        return True
+    
+    # Handle partial DOI citations - if one DOI is a prefix of the other, consider it a match
+    # This handles cases like "10.1007" being cited instead of the full "10.1007/s10458-025-09691-y"
+    if len(norm_doi1) != len(norm_doi2):
+        shorter_doi = norm_doi1 if len(norm_doi1) < len(norm_doi2) else norm_doi2
+        longer_doi = norm_doi2 if len(norm_doi1) < len(norm_doi2) else norm_doi1
+        
+        # Only consider it a valid partial match if:
+        # 1. The shorter DOI is at least 7 characters (e.g., "10.1007")
+        # 2. The longer DOI starts with the shorter DOI
+        # 3. The next character in the longer DOI is '/' or '.' (valid DOI separators)
+        if (len(shorter_doi) >= 7 and 
+            longer_doi.startswith(shorter_doi) and 
+            len(longer_doi) > len(shorter_doi) and
+            longer_doi[len(shorter_doi)] in ['/', '.']):
+            return True
+    
+    return False
 
 
 def construct_doi_url(doi: str) -> str:
