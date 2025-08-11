@@ -24,7 +24,7 @@ try:
         format_year_mismatch,
         format_author_mismatch,
         format_first_author_mismatch,
-        format_two_line_vs,
+        format_three_line_mismatch,
     )
     ERROR_UTILS_AVAILABLE = True
 except ImportError:
@@ -335,78 +335,71 @@ class TestAuthorMismatchFormatting:
     """Test author mismatch formatting consistency."""
     
     def test_format_author_mismatch_alignment(self):
-        """Test that author mismatch messages are aligned consistently."""
+        """Test that author mismatch messages use new three-line format."""
         result = format_author_mismatch(2, "Abdullahi Kana", "Kana A. F. D.")
         lines = result.split('\n')
         
-        # Should have exactly 2 lines
-        assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+        # Should have exactly 3 lines with new format
+        assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}: {result}"
         
-        # First line should start with "Author 2 mismatch:"
-        assert lines[0].startswith("Author 2 mismatch: "), f"First line format wrong: {lines[0]}"
+        # First line should be "Author 2 mismatch:"
+        assert lines[0] == "Author 2 mismatch:", f"First line format wrong: {lines[0]}"
         
-        # Second line should start with appropriate spacing and "vs:"
-        assert "vs: " in lines[1], f"Second line should contain 'vs: ': {lines[1]}"
+        # Second line should start with "cited:  '"
+        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
         
-        # Both values should be quoted
-        assert "Abdullahi Kana" in lines[0], f"Cited author missing from first line: {lines[0]}"
-        assert "Kana A. F. D." in lines[1], f"Correct author missing from second line: {lines[1]}"
+        # Third line should start with "actual: '"
+        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
         
-        # Colons should be vertically aligned
-        colon_pos_1 = lines[0].find(":")
-        colon_pos_2 = lines[1].find(":")
-        assert colon_pos_1 == colon_pos_2, f"Colons not aligned: first at {colon_pos_1}, second at {colon_pos_2}"
+        # Values should be quoted correctly
+        assert "'Abdullahi Kana'" in lines[1], f"Cited author missing from second line: {lines[1]}"
+        assert "'Kana A. F. D.'" in lines[2], f"Correct author missing from third line: {lines[2]}"
     
     def test_format_first_author_mismatch_alignment(self):
-        """Test that first author mismatch messages are aligned consistently."""
+        """Test that first author mismatch messages use new three-line format."""
         result = format_first_author_mismatch("Cited Author", "Correct Author")
         lines = result.split('\n')
         
-        # Should have exactly 2 lines
-        assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+        # Should have exactly 3 lines with new format
+        assert len(lines) == 3, f"Expected 3 lines, got {len(lines)}: {result}"
         
-        # First line should start with "First author mismatch:"
-        assert lines[0].startswith("First author mismatch: "), f"First line format wrong: {lines[0]}"
+        # First line should be "First author mismatch:"
+        assert lines[0] == "First author mismatch:", f"First line format wrong: {lines[0]}"
         
-        # Second line should start with appropriate spacing and "vs:"
-        assert "vs: " in lines[1], f"Second line should contain 'vs: ': {lines[1]}"
+        # Second line should start with "cited:  '"
+        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
         
-        # Both values should be quoted
-        assert "'Cited Author'" in lines[0], f"Cited author missing from first line: {lines[0]}"
-        assert "'Correct Author'" in lines[1], f"Correct author missing from second line: {lines[1]}"
+        # Third line should start with "actual: '"
+        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
         
-        # Colons should be vertically aligned
-        colon_pos_1 = lines[0].find(":")
-        colon_pos_2 = lines[1].find(":")
-        assert colon_pos_1 == colon_pos_2, f"Colons not aligned: first at {colon_pos_1}, second at {colon_pos_2}"
+        # Values should be quoted correctly
+        assert "'Cited Author'" in lines[1], f"Cited author missing from second line: {lines[1]}"
+        assert "'Correct Author'" in lines[2], f"Correct author missing from third line: {lines[2]}"
     
     def test_alignment_consistency_across_functions(self):
-        """Test that all author mismatch formatters produce consistent alignment."""
-        # Test that each formatter produces correct internal alignment
+        """Test that all author mismatch formatters produce consistent three-line format."""
+        # Test that each formatter produces correct new three-line format
         test_cases = [
             (format_author_mismatch(1, "Test Author", "Real Author"), "Author 1 mismatch:"),
             (format_first_author_mismatch("Test Author", "Real Author"), "First author mismatch:"),
-            (format_two_line_vs("Author 1 mismatch:", "Test Author", "Real Author"), "Author 1 mismatch:"),
+            (format_three_line_mismatch("Author 1 mismatch", "Test Author", "Real Author"), "Author 1 mismatch:"),
         ]
         
         for msg, expected_prefix in test_cases:
             lines = msg.split('\n')
-            assert len(lines) == 2, f"Should have 2 lines: {msg}"
+            assert len(lines) == 3, f"Should have 3 lines with new format: {msg}"
             
             # Check that the message starts with the expected prefix
-            assert lines[0].startswith(expected_prefix), f"Should start with '{expected_prefix}': {lines[0]}"
+            assert lines[0] == expected_prefix, f"Should be '{expected_prefix}': {lines[0]}"
             
-            # Find the position of colons in both lines
-            colon_pos_1 = lines[0].find(":")
-            colon_pos_2 = lines[1].find(":")
-            assert colon_pos_1 > 0, f"Colon not found in first line: {lines[0]}"
-            assert colon_pos_2 > 0, f"Colon not found in second line: {lines[1]}"
+            # Second line should be "cited: ..."
+            assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
             
-            # The colons should be vertically aligned
-            assert colon_pos_1 == colon_pos_2, f"Colons not aligned in {expected_prefix}: first at {colon_pos_1}, second at {colon_pos_2}\nMsg: {msg}"
+            # Third line should be "actual: ..."
+            assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
     
     def test_author_formatting_with_various_lengths(self):
-        """Test formatting consistency with various author name lengths."""
+        """Test formatting consistency with various author name lengths using new three-line format."""
         test_cases = [
             (1, "A", "B"),
             (2, "Short Name", "Very Long Author Name Here"),
@@ -418,32 +411,30 @@ class TestAuthorMismatchFormatting:
             result = format_author_mismatch(author_num, cited, correct)
             lines = result.split('\n')
             
-            # Check basic structure
-            assert len(lines) == 2, f"Case {test_cases.index((author_num, cited, correct))}: Expected 2 lines"
-            assert f"Author {author_num} mismatch:" in lines[0], f"Missing proper prefix in: {lines[0]}"
-            assert "vs:" in lines[1], f"Missing 'vs:' in second line: {lines[1]}"
+            # Check basic structure for new three-line format
+            assert len(lines) == 3, f"Case {test_cases.index((author_num, cited, correct))}: Expected 3 lines: {result}"
+            assert lines[0] == f"Author {author_num} mismatch:", f"Missing proper prefix in: {lines[0]}"
+            assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
+            assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
             
-            # Check colon alignment is consistent
-            colon_pos_1 = lines[0].find(":")
-            colon_pos_2 = lines[1].find(":")
-            assert colon_pos_1 == colon_pos_2, f"Colons not aligned for {cited} vs {correct}: first at {colon_pos_1}, second at {colon_pos_2}"
+            # Check values are properly quoted
+            assert f"'{cited}'" in lines[1], f"Cited author not properly quoted: {lines[1]}"
+            assert f"'{correct}'" in lines[2], f"Correct author not properly quoted: {lines[2]}"
     
     def test_colon_alignment_with_leading_prefix(self):
-        """Test that colon alignment works correctly with leading prefixes."""
-        # Test the specific example from the user's requirement
-        result = format_two_line_vs("Year mismatch:", "2021", "2020", "⚠️  Warning: ")
-        full_msg = "⚠️  Warning: " + result
+        """Test that three-line format works correctly with print_labeled_multiline."""
+        # Test the new three-line format (this now uses print_labeled_multiline for display)
+        result = format_three_line_mismatch("Year mismatch", "2021", "2020")
         
-        # Split and check alignment considering the leading prefix
-        lines = full_msg.split('\n')
-        assert len(lines) == 2, f"Expected 2 lines: {full_msg}"
+        # Check basic structure
+        lines = result.split('\n')
+        assert len(lines) == 3, f"Expected 3 lines: {result}"
         
-        # Find the "mismatch:" colon in the first line (skip the "Warning:" colon)
-        mismatch_colon_pos = lines[0].rfind(":")  # Last colon in the line should be the mismatch colon
-        vs_colon_pos = lines[1].find(":")
+        # Check format structure
+        assert lines[0] == "Year mismatch:", f"First line should be 'Year mismatch:': {lines[0]}"
+        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
+        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
         
-        # Colons should be aligned
-        assert mismatch_colon_pos == vs_colon_pos, f"Colons not aligned with leading prefix: mismatch colon at {mismatch_colon_pos}, vs colon at {vs_colon_pos}\nFull message:\n{full_msg}"
-        
-        # Verify that this creates the expected visual alignment
-        assert mismatch_colon_pos > 15, f"Colon position should account for leading prefix length: {mismatch_colon_pos}"
+        # Check values
+        assert "'2021'" in lines[1], f"Cited year not found: {lines[1]}"
+        assert "'2020'" in lines[2], f"Actual year not found: {lines[2]}"
