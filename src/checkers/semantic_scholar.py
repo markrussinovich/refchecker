@@ -543,49 +543,50 @@ class NonArxivReferenceChecker:
         elif paper_venue and not isinstance(paper_venue, str):
             paper_venue = str(paper_venue)
         
+        # Check venue mismatches
         if cited_venue and paper_venue:
             # Use the utility function to check if venues are substantially different
             if are_venues_substantially_different(cited_venue, paper_venue):
                 from utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
-            # Check if this is an arXiv paper first
-            external_ids = paper_data.get('externalIds', {})
-            arxiv_id = external_ids.get('ArXiv') if external_ids else None
-            
-            if arxiv_id:
-                # For arXiv papers, suggest including the arXiv URL instead of venue
-                arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
-                
-                # Check if the reference already includes this ArXiv URL or equivalent DOI
-                reference_url = reference.get('url', '')
-                
-                # Check for direct arXiv URL match
-                has_arxiv_url = arxiv_url in reference_url
-                
-                # Also check for arXiv DOI URL (e.g., https://doi.org/10.48550/arxiv.2505.11595)
-                arxiv_doi_url = f"https://doi.org/10.48550/arxiv.{arxiv_id}"
-                has_arxiv_doi = arxiv_doi_url.lower() in reference_url.lower()
-                
-                if not (has_arxiv_url or has_arxiv_doi):
+            # Original reference has the venue in raw text but not parsed correctly
+            raw_text = reference.get('raw_text', '')
+            if raw_text and '#' in raw_text:
+                # Check if venue might be in the raw text format (author#title#venue#year#url)
+                parts = raw_text.split('#')
+                if len(parts) >= 3 and parts[2].strip():
+                    # Venue is present in raw text but missing from parsed reference
                     errors.append({
                         'warning_type': 'venue',
-                        'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
-                        'ref_url_correct': arxiv_url
+                        'warning_details': f"Venue missing: should include '{paper_venue}'",
+                        'ref_venue_correct': paper_venue
                     })
-            else:
-                # Original reference has the venue in raw text but not parsed correctly
-                raw_text = reference.get('raw_text', '')
-                if raw_text and '#' in raw_text:
-                    # Check if venue might be in the raw text format (author#title#venue#year#url)
-                    parts = raw_text.split('#')
-                    if len(parts) >= 3 and parts[2].strip():
-                        # Venue is present in raw text but missing from parsed reference
-                        errors.append({
-                            'warning_type': 'venue',
-                            'warning_details': f"Venue missing: should include '{paper_venue}'",
-                            'ref_venue_correct': paper_venue
-                        })
+
+        # Always check for missing arXiv URLs when paper has arXiv ID
+        external_ids = paper_data.get('externalIds', {})
+        arxiv_id = external_ids.get('ArXiv') if external_ids else None
+        
+        if arxiv_id:
+            # For arXiv papers, check if reference includes the arXiv URL
+            arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+            
+            # Check if the reference already includes this ArXiv URL or equivalent DOI
+            reference_url = reference.get('url', '')
+            
+            # Check for direct arXiv URL match
+            has_arxiv_url = arxiv_url in reference_url
+            
+            # Also check for arXiv DOI URL (e.g., https://doi.org/10.48550/arxiv.2505.11595)
+            arxiv_doi_url = f"https://doi.org/10.48550/arxiv.{arxiv_id}"
+            has_arxiv_doi = arxiv_doi_url.lower() in reference_url.lower()
+            
+            if not (has_arxiv_url or has_arxiv_doi):
+                errors.append({
+                    'warning_type': 'url',
+                    'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
+                    'ref_url_correct': arxiv_url
+                })
 
         # Verify DOI
         paper_doi = None

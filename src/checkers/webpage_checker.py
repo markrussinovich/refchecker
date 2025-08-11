@@ -71,7 +71,8 @@ class WebPageChecker:
         doc_indicators = [
             'docs', 'documentation', 'readthedocs.io', 'help', 'guide', 'tutorial',
             'reference', 'manual', 'wiki', 'blog', 'api', 'developer', 'platform',
-            'index', 'research', 'news', 'insights', 'whitepaper', 'brief', 'develop'
+            'index', 'research', 'news', 'insights', 'whitepaper', 'brief', 'develop',
+            'posts'  # For blog posts and forum posts like LessWrong
         ]
         
         return any(indicator in url.lower() for indicator in doc_indicators) or self._is_likely_webpage(url)
@@ -84,7 +85,8 @@ class WebPageChecker:
         doc_domains = [
             'pytorch.org', 'tensorflow.org', 'readthedocs.io', 'onnxruntime.ai',
             'deepspeed.ai', 'huggingface.co', 'openai.com', 'microsoft.com',
-            'google.com', 'nvidia.com', 'intel.com', 'langchain.com'
+            'google.com', 'nvidia.com', 'intel.com', 'langchain.com',
+            'lesswrong.com'  # LessWrong rationality and AI safety blog platform
         ]
         
         return any(domain in parsed.netloc for domain in doc_domains)
@@ -394,6 +396,14 @@ class WebPageChecker:
         cited_lower = cited_authors.lower().strip()
         organization = site_info.get('organization', '').lower()
         domain = site_info.get('domain', '').lower()
+        
+        # Accept generic web resource terms - these are valid for any web URL
+        generic_web_terms = [
+            'web resource', 'web site', 'website', 'online resource', 
+            'online', 'web', 'internet resource', 'web page', 'webpage'
+        ]
+        if cited_lower in generic_web_terms:
+            return True
         
         # Direct matches
         if cited_lower in organization or organization in cited_lower:

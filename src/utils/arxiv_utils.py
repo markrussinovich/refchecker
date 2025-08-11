@@ -392,32 +392,29 @@ def get_bibtex_content(paper):
         logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
-        # Choose between .bib and .bbl files based on content richness
-        # Prioritize .bbl if it has more references than filtered .bib, otherwise prefer .bib
+        # Choose between .bib and .bbl files - .bbl files take priority when they contain entries
+        # .bbl files are processed biblatex output that reflects exactly what was cited
         if bib_content and bbl_content:
-            # Count entries in both
+            # Count entries in both for logging
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
             bbl_entry_count = len(re.findall(r'\\bibitem\[', bbl_content))
             
-            # If we have LaTeX content, get filtered BibTeX count
-            filtered_bib_count = bib_entry_count
-            filtered_content = bib_content
-            if tex_content:
-                cited_keys = extract_cited_keys_from_tex({}, tex_content)
-                if cited_keys:
-                    logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
-                    filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
-                    filtered_bib_count = len(re.findall(r'@\w+\s*\{', filtered_content))
+            logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
             
-            logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, filtered .bib has {filtered_bib_count} entries")
-            
-            # Prioritize .bbl if it has significantly more entries
-            if bbl_entry_count > filtered_bib_count * 1.5:  # 50% more entries threshold
-                logger.info(f"Using .bbl files from ArXiv source")
+            # Only use .bbl if it actually contains bibliography entries
+            if bbl_entry_count > 0:
+                logger.info(f"Using .bbl files from ArXiv source (biblatex takes priority over bibtex)")
                 return bbl_content
             else:
-                logger.info(f"Using filtered .bib files")
-                return filtered_content
+                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
+                # If we have LaTeX content, filter BibTeX by cited keys
+                if tex_content:
+                    cited_keys = extract_cited_keys_from_tex({}, tex_content)
+                    if cited_keys:
+                        logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
+                        filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
+                        return filtered_content
+                return bib_content
                     
         elif bib_content:
             logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
