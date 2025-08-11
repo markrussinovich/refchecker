@@ -20,7 +20,11 @@ try:
         create_generic_error,
         create_generic_warning,
         format_authors_list,
-        validate_error_dict
+        validate_error_dict,
+        format_year_mismatch,
+        format_author_mismatch,
+        format_first_author_mismatch,
+        format_two_line_vs,
     )
     ERROR_UTILS_AVAILABLE = True
 except ImportError:
@@ -55,11 +59,10 @@ class TestYearWarning:
     
     def test_create_year_warning(self):
         """Test creating year warning dictionary."""
-        warning = create_year_warning(2020, 2021)
-        
-        assert warning['warning_type'] == 'year'
-        assert warning['warning_details'] == "Year mismatch: cited as 2020 but actually 2021"
-        assert warning['ref_year_correct'] == 2021
+    warning = create_year_warning(2020, 2021)
+    assert warning['warning_type'] == 'year'
+    assert warning['warning_details'] == format_year_mismatch(2020, 2021)
+    assert warning['ref_year_correct'] == 2021
 
 
 @pytest.mark.skipif(not ERROR_UTILS_AVAILABLE, reason="Error utils module not available")
@@ -325,3 +328,122 @@ class TestDoiComparison:
         
         for cited, actual in test_cases:
             assert not compare_dois(cited, actual), f"Different DOIs should not match: {cited} vs {actual}"
+
+
+@pytest.mark.skipif(not ERROR_UTILS_AVAILABLE, reason="Error utils module not available")
+class TestAuthorMismatchFormatting:
+    """Test author mismatch formatting consistency."""
+    
+    def test_format_author_mismatch_alignment(self):
+        """Test that author mismatch messages are aligned consistently."""
+        result = format_author_mismatch(2, "Abdullahi Kana", "Kana A. F. D.")
+        lines = result.split('\n')
+        
+        # Should have exactly 2 lines
+        assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+        
+        # First line should start with "Author 2 mismatch:"
+        assert lines[0].startswith("Author 2 mismatch: "), f"First line format wrong: {lines[0]}"
+        
+        # Second line should start with appropriate spacing and "vs:"
+        assert "vs: " in lines[1], f"Second line should contain 'vs: ': {lines[1]}"
+        
+        # Both values should be quoted
+        assert "Abdullahi Kana" in lines[0], f"Cited author missing from first line: {lines[0]}"
+        assert "Kana A. F. D." in lines[1], f"Correct author missing from second line: {lines[1]}"
+        
+        # Colons should be vertically aligned
+        colon_pos_1 = lines[0].find(":")
+        colon_pos_2 = lines[1].find(":")
+        assert colon_pos_1 == colon_pos_2, f"Colons not aligned: first at {colon_pos_1}, second at {colon_pos_2}"
+    
+    def test_format_first_author_mismatch_alignment(self):
+        """Test that first author mismatch messages are aligned consistently."""
+        result = format_first_author_mismatch("Cited Author", "Correct Author")
+        lines = result.split('\n')
+        
+        # Should have exactly 2 lines
+        assert len(lines) == 2, f"Expected 2 lines, got {len(lines)}"
+        
+        # First line should start with "First author mismatch:"
+        assert lines[0].startswith("First author mismatch: "), f"First line format wrong: {lines[0]}"
+        
+        # Second line should start with appropriate spacing and "vs:"
+        assert "vs: " in lines[1], f"Second line should contain 'vs: ': {lines[1]}"
+        
+        # Both values should be quoted
+        assert "'Cited Author'" in lines[0], f"Cited author missing from first line: {lines[0]}"
+        assert "'Correct Author'" in lines[1], f"Correct author missing from second line: {lines[1]}"
+        
+        # Colons should be vertically aligned
+        colon_pos_1 = lines[0].find(":")
+        colon_pos_2 = lines[1].find(":")
+        assert colon_pos_1 == colon_pos_2, f"Colons not aligned: first at {colon_pos_1}, second at {colon_pos_2}"
+    
+    def test_alignment_consistency_across_functions(self):
+        """Test that all author mismatch formatters produce consistent alignment."""
+        # Test that each formatter produces correct internal alignment
+        test_cases = [
+            (format_author_mismatch(1, "Test Author", "Real Author"), "Author 1 mismatch:"),
+            (format_first_author_mismatch("Test Author", "Real Author"), "First author mismatch:"),
+            (format_two_line_vs("Author 1 mismatch:", "Test Author", "Real Author"), "Author 1 mismatch:"),
+        ]
+        
+        for msg, expected_prefix in test_cases:
+            lines = msg.split('\n')
+            assert len(lines) == 2, f"Should have 2 lines: {msg}"
+            
+            # Check that the message starts with the expected prefix
+            assert lines[0].startswith(expected_prefix), f"Should start with '{expected_prefix}': {lines[0]}"
+            
+            # Find the position of colons in both lines
+            colon_pos_1 = lines[0].find(":")
+            colon_pos_2 = lines[1].find(":")
+            assert colon_pos_1 > 0, f"Colon not found in first line: {lines[0]}"
+            assert colon_pos_2 > 0, f"Colon not found in second line: {lines[1]}"
+            
+            # The colons should be vertically aligned
+            assert colon_pos_1 == colon_pos_2, f"Colons not aligned in {expected_prefix}: first at {colon_pos_1}, second at {colon_pos_2}\nMsg: {msg}"
+    
+    def test_author_formatting_with_various_lengths(self):
+        """Test formatting consistency with various author name lengths."""
+        test_cases = [
+            (1, "A", "B"),
+            (2, "Short Name", "Very Long Author Name Here"),
+            (10, "Medium Length Author", "X"),
+            (99, "José María García-López", "Smith, John A."),
+        ]
+        
+        for author_num, cited, correct in test_cases:
+            result = format_author_mismatch(author_num, cited, correct)
+            lines = result.split('\n')
+            
+            # Check basic structure
+            assert len(lines) == 2, f"Case {test_cases.index((author_num, cited, correct))}: Expected 2 lines"
+            assert f"Author {author_num} mismatch:" in lines[0], f"Missing proper prefix in: {lines[0]}"
+            assert "vs:" in lines[1], f"Missing 'vs:' in second line: {lines[1]}"
+            
+            # Check colon alignment is consistent
+            colon_pos_1 = lines[0].find(":")
+            colon_pos_2 = lines[1].find(":")
+            assert colon_pos_1 == colon_pos_2, f"Colons not aligned for {cited} vs {correct}: first at {colon_pos_1}, second at {colon_pos_2}"
+    
+    def test_colon_alignment_with_leading_prefix(self):
+        """Test that colon alignment works correctly with leading prefixes."""
+        # Test the specific example from the user's requirement
+        result = format_two_line_vs("Year mismatch:", "2021", "2020", "⚠️  Warning: ")
+        full_msg = "⚠️  Warning: " + result
+        
+        # Split and check alignment considering the leading prefix
+        lines = full_msg.split('\n')
+        assert len(lines) == 2, f"Expected 2 lines: {full_msg}"
+        
+        # Find the "mismatch:" colon in the first line (skip the "Warning:" colon)
+        mismatch_colon_pos = lines[0].rfind(":")  # Last colon in the line should be the mismatch colon
+        vs_colon_pos = lines[1].find(":")
+        
+        # Colons should be aligned
+        assert mismatch_colon_pos == vs_colon_pos, f"Colons not aligned with leading prefix: mismatch colon at {mismatch_colon_pos}, vs colon at {vs_colon_pos}\nFull message:\n{full_msg}"
+        
+        # Verify that this creates the expected visual alignment
+        assert mismatch_colon_pos > 15, f"Colon position should account for leading prefix length: {mismatch_colon_pos}"

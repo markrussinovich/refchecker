@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 from utils.text_utils import (
     is_name_match, 
     clean_title,
+    clean_title_for_search,
     normalize_text,
     extract_arxiv_id_from_url,
     clean_author_name,
@@ -339,6 +340,53 @@ class TestTitleCleaning:
         title = clean_title("4th gen intel® xeon® scalable processors")
         assert isinstance(title, str)
         assert len(title) > 0
+    
+    def test_bibtex_publication_type_indicators(self):
+        """Test removal of BibTeX publication type indicators like [J], [C], etc.
+        
+        Regression test for bug where titles like "A self regularized non-monotonic activation function [J]"
+        were not properly cleaned, causing paper verification failures.
+        """
+        test_cases = [
+            # The original problematic case
+            ("A self regularized non-monotonic activation function [J]", 
+             "A self regularized non-monotonic activation function"),
+            
+            # Other publication type indicators  
+            ("Some Conference Paper [C]", "Some Conference Paper"),
+            ("A Book Title [M]", "A Book Title"),
+            ("PhD Dissertation Title [D]", "PhD Dissertation Title"),
+            ("Patent Document Title [P]", "Patent Document Title"),
+            ("Research Report Title [R]", "Research Report Title"),
+            
+            # Should not remove brackets in middle of title
+            ("Title with [brackets] inside [J]", "Title with [brackets] inside"),
+            ("Title [J] in middle", "Title [J] in middle"),
+            
+            # With extra whitespace
+            ("Title with trailing spaces [J]   ", "Title with trailing spaces"),
+            ("Title with leading spaces   [C]", "Title with leading spaces"),
+            
+            # Normal titles should be unchanged
+            ("Normal Title Without Indicators", "Normal Title Without Indicators"),
+            ("Title with [other brackets]", "Title with [other brackets]"),
+        ]
+        
+        for input_title, expected_output in test_cases:
+            cleaned = clean_title(input_title)
+            assert cleaned == expected_output, f"Failed for '{input_title}': got '{cleaned}', expected '{expected_output}'"
+        
+        # Also test clean_title_for_search handles publication type indicators
+        search_test_cases = [
+            ("A self regularized non-monotonic activation function [J]", 
+             "A self regularized non-monotonic activation function"),
+            ("Some Conference Paper [C]", "Some Conference Paper"),
+            ("Normal Title", "Normal Title"),
+        ]
+        
+        for input_title, expected_output in search_test_cases:
+            search_cleaned = clean_title_for_search(input_title)
+            assert search_cleaned == expected_output, f"Search cleaning failed for '{input_title}': got '{search_cleaned}', expected '{expected_output}'"
 
 
 class TestTextNormalization:

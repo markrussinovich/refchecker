@@ -29,6 +29,7 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search
+from utils.error_utils import format_title_mismatch
 from config.settings import get_config
 
 # Set up logging
@@ -37,19 +38,6 @@ logger = logging.getLogger(__name__)
 # Get configuration
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
-
-def format_title_mismatch(cited_title: str, verified_title: str) -> str:
-    """
-    Format a multi-line title mismatch message in a consistent style.
-
-    Example output:
-    Title mismatch: Cited:     '...'
-                                 Verified: '...'
-    """
-    return (
-        f"Title mismatch: Cited:     '{cited_title}'\n"
-        f"                             Verified: '{verified_title}'"
-    )
 
 class NonArxivReferenceChecker:
     """
@@ -538,9 +526,10 @@ class NonArxivReferenceChecker:
             is_different, warning_message = is_year_substantially_different(year, paper_year, context)
             
             if is_different and warning_message:
+                from utils.error_utils import format_year_mismatch
                 errors.append({
                     'warning_type': 'year',
-                    'warning_details': warning_message,
+                    'warning_details': format_year_mismatch(year, paper_year),
                     'ref_year_correct': paper_year
                 })
         
@@ -607,9 +596,10 @@ class NonArxivReferenceChecker:
             # Compare DOIs using the proper comparison function
             from utils.doi_utils import compare_dois
             if doi and paper_doi and not compare_dois(doi, paper_doi):
+                from utils.error_utils import format_doi_mismatch
                 errors.append({
                     'error_type': 'doi',
-                    'error_details': f"DOI mismatch: cited as {doi} but actually {paper_doi}",
+                    'error_details': format_doi_mismatch(doi, paper_doi),
                     'ref_doi_correct': paper_doi
                 })
         

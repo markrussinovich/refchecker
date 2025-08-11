@@ -17,7 +17,9 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
        Verified URL: https://www.semanticscholar.org/paper/5f4ac1ac7ca4b17d3db1b52d9aafd9e8b26c0d7
        ArXiv URL: https://arxiv.org/abs/1610.10099
        DOI URL: https://doi.org/10.48550/arxiv.1610.10099
-      ⚠️  Warning: Year mismatch: cited as 2017 but actually 2016
+      ⚠️  Warning: Year mismatch:
+               cited:  '2017'
+               actual: '2016'
 
 [2/45] Effective approaches to attention-based neural machine translation
        Minh-Thang Luong, Hieu Pham, Christopher D. Manning
@@ -26,7 +28,9 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
        Verified URL: https://www.semanticscholar.org/paper/93499a7c7f699b6630a86fad964536f9423bb6d0
        ArXiv URL: https://arxiv.org/abs/1508.04025
        DOI URL: https://doi.org/10.18653/v1/d15-1166
-      ❌ Error: First author mismatch: 'Minh-Thang Luong' vs 'Thang Luong'
+      ❌ Error: First author mismatch:
+               cited:  'Minh-Thang Luong'
+               actual: 'Thang Luong'
 
 [3/45] Deep Residual Learning for Image Recognition
        Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun
@@ -37,7 +41,9 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
        Verified URL: https://www.semanticscholar.org/paper/2c03df8b48bf3fa39054345bafabfeff15bfd11d
        ArXiv URL: https://arxiv.org/abs/1512.03385
        DOI URL: https://doi.org/10.1109/CVPR.2016.90
-      ❌ Error: DOI mismatch: cited as '10.1109/CVPR.2016.91' but actually '10.1109/CVPR.2016.90'
+      ❌ Error: DOI mismatch:
+               cited:  '10.1109/CVPR.2016.91'
+               actual: '10.1109/CVPR.2016.90'
 
 ============================================================
 📋 SUMMARY
@@ -321,7 +327,9 @@ This enhanced URL display helps users access multiple authoritative sources for 
            Verified URL: https://www.semanticscholar.org/paper/a1b2c3d4e5f6789012345678901234567890abcd
            ArXiv URL: https://arxiv.org/abs/2312.02119
            DOI URL: https://doi.org/10.48550/arxiv.2312.02119
-          ❌ Error: First author mismatch: 'T. Xie' vs 'Zhao Xu'
+          ❌ Error: First author mismatch:
+                   cited:  'T. Xie'
+                   actual: 'Zhao Xu'
     ```
   - `title`: Title discrepancies
     ```
@@ -331,7 +339,9 @@ This enhanced URL display helps users access multiple authoritative sources for 
            Verified URL: https://www.semanticscholar.org/paper/df2b0e26d0599ce3e70df8a9da02e51594e0e992
            ArXiv URL: https://arxiv.org/abs/1810.04805
            DOI URL: https://doi.org/10.18653/v1/n19-1423
-          ❌ Error: Title mismatch: cited as 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding' but actually 'BERT: Pre-training of Deep Bidirectional Transformers for Language Comprehension'
+          ❌ Error: Title mismatch:
+                   cited:  'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding'
+                   actual: 'BERT: Pre-training of Deep Bidirectional Transformers for Language Comprehension'
     ```
   - `arxiv_id`: Incorrect URLs or arXiv IDs
     ```
@@ -354,7 +364,9 @@ This enhanced URL display helps users access multiple authoritative sources for 
            Verified URL: https://www.semanticscholar.org/paper/204e3073870fae3d05bcbc2f6a8e263d9b72e776
            ArXiv URL: https://arxiv.org/abs/1706.03762
            DOI URL: https://doi.org/10.48550/arXiv.1706.03762
-          ❌ Error: DOI mismatch: cited as '10.5555/3295222.3295349' but actually '10.48550/arXiv.1706.03762'
+          ❌ Error: DOI mismatch:
+                   cited:  '10.5555/3295222.3295349'
+                   actual: '10.48550/arXiv.1706.03762'
     ```
 
 - **⚠️ Warnings**: Minor issues that may need attention
@@ -367,7 +379,9 @@ This enhanced URL display helps users access multiple authoritative sources for 
            Verified URL: https://www.semanticscholar.org/paper/f1a2b3c4d5e6f7890123456789012345678901ab
            ArXiv URL: https://arxiv.org/abs/2310.03684
            DOI URL: https://doi.org/10.48550/arxiv.2310.03684
-          ⚠️  Warning: Year mismatch: cited as 2024 but actually 2023
+          ⚠️  Warning: Year mismatch:
+                   cited:  '2024'
+                   actual: '2023'
     ```
   - `venue`: Venue format variations
     ```
@@ -378,7 +392,9 @@ This enhanced URL display helps users access multiple authoritative sources for 
            Verified URL: https://www.semanticscholar.org/paper/c1d2e3f4a5b6c7d8e9f0123456789012345678ab
            ArXiv URL: https://arxiv.org/abs/2403.02151
            DOI URL: https://doi.org/10.48550/arxiv.2403.02151
-          ⚠️  Warning: Venue mismatch: cited as 'arXiv, 2024' but actually 'Neural Information Processing Systems'
+          ⚠️  Warning: Venue mismatch:
+                   cited:  'arXiv, 2024'
+                   actual: 'Neural Information Processing Systems'
     ```
 
 - **❓ Unverified**: References that couldn't be verified with any of the checker APIs

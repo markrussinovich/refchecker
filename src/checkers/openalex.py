@@ -33,6 +33,7 @@ import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
 from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
+from utils.error_utils import format_year_mismatch, format_doi_mismatch
 from config.settings import get_config
 
 # Set up logging
@@ -448,7 +449,7 @@ class OpenAlexReferenceChecker:
         if year and work_year and year != work_year:
             errors.append({
                 'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {year} but actually {work_year}",
+                'warning_details': format_year_mismatch(year, work_year),
                 'ref_year_correct': work_year
             })
         
@@ -463,7 +464,7 @@ class OpenAlexReferenceChecker:
             if not compare_dois(doi, work_doi):
                 errors.append({
                     'error_type': 'doi',
-                    'error_details': f"DOI mismatch: cited as {doi} but actually {work_doi}",
+                    'error_details': format_doi_mismatch(doi, work_doi),
                     'ref_doi_correct': work_doi
                 })
         

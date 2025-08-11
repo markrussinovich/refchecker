@@ -1900,10 +1900,11 @@ class ArxivReferenceChecker:
             db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
             
             if normalized_title != db_title:
+                from utils.error_utils import format_title_mismatch
                 logger.debug(f"DB Verification: Title mismatch - cited: '{title}', actual: '{paper_data.get('title')}'")
                 errors.append({
                     'error_type': 'title',
-                    'error_details': f"Title mismatch: cited as '{title}' but actually '{paper_data.get('title')}'",
+                    'error_details': format_title_mismatch(title, paper_data.get('title')),
                     'ref_title_correct': paper_data.get('title')
                 })
         
@@ -1925,9 +1926,10 @@ class ArxivReferenceChecker:
         paper_year = paper_data.get('year')
         if year and paper_year and year != paper_year:
             logger.debug(f"DB Verification: Year mismatch - cited: {year}, actual: {paper_year}")
+            from utils.error_utils import format_year_mismatch
             errors.append({
                 'warning_type': 'year',
-                'warning_details': f"Year mismatch: cited as {year} but actually {paper_year}",
+                'warning_details': format_year_mismatch(year, paper_year),
                 'ref_year_correct': paper_year
             })
         
@@ -1946,9 +1948,10 @@ class ArxivReferenceChecker:
                 # Only flag as error if it's not a reasonable partial match
                 if not actual_doi_normalized.startswith(cited_doi_normalized.rstrip('.')):
                     logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
+                    from utils.error_utils import format_doi_mismatch
                     errors.append({
                         'error_type': 'doi',
-                        'error_details': f"DOI mismatch: cited as {doi} but actually {external_ids['DOI']}",
+                        'error_details': format_doi_mismatch(doi, external_ids['DOI']),
                         'ref_doi_correct': external_ids['DOI']
                     })
                 else:
@@ -5051,7 +5054,8 @@ class ArxivReferenceChecker:
             correct_first = correct_authors[0]
             
             if not enhanced_name_match(cited_first, correct_first):
-                return False, f"First author mismatch: '{cited_first}' vs '{correct_first}'"
+                from utils.error_utils import format_first_author_mismatch
+                return False, format_first_author_mismatch(cited_first, correct_first)
         
         return True, "Authors match"
     
@@ -5457,12 +5461,14 @@ class ArxivReferenceChecker:
                     error_type = error.get('error_type') or error.get('warning_type')
                     error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
                     
+                    from utils.error_utils import print_labeled_multiline
+
                     if error_type == 'arxiv_id':
                         print(f"      ❌ {error_details}")
                     elif 'error_type' in error:
-                        print(f"      ❌ Error: {error_details}")
+                        print_labeled_multiline("❌ Error", error_details)
                     else:
-                        print(f"      ⚠️  Warning: {error_details}")
+                        print_labeled_multiline("⚠️  Warning", error_details)
 
     def _output_reference_errors(self, reference, errors, url):
         """

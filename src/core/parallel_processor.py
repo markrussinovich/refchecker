@@ -352,12 +352,15 @@ class ParallelReferenceProcessor:
                     error_type = error.get('error_type') or error.get('warning_type')
                     error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
                     
+                    from utils.error_utils import print_labeled_multiline
+
                     if error_type == 'arxiv_id':
+                        # Keep existing style for arXiv ID errors
                         print(f"      ❌ {error_details}")
                     elif 'error_type' in error:
-                        print(f"      ❌ Error: {error_details}")
+                        print_labeled_multiline("❌ Error", error_details)
                     else:
-                        print(f"      ⚠️  Warning: {error_details}")
+                        print_labeled_multiline("⚠️  Warning", error_details)
         
         # Show timing info for slow references
         if result.processing_time > 5.0:

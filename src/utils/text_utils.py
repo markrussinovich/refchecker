@@ -554,6 +554,10 @@ def clean_title_basic(title):
     # Remove trailing punctuation
     title = re.sub(r'[.,;:]+$', '', title)
     
+    # Remove BibTeX publication type indicators at the end (common in Chinese and some international BibTeX styles)
+    # [J] = Journal, [C] = Conference, [M] = Monograph/Book, [D] = Dissertation, [P] = Patent, [R] = Report
+    title = re.sub(r'\s*\[[JCMDPRS]\]\s*$', '', title)
+    
     return title
 
 
@@ -577,6 +581,9 @@ def clean_title_for_search(title):
     # Clean up newlines and normalize whitespace (but preserve other structure)
     title = title.replace('\n', ' ').strip()
     title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
+    
+    # Remove BibTeX publication type indicators that are not part of the actual title
+    title = re.sub(r'\s*\[[JCMDPRS]\]\s*$', '', title)
     
     # Note: We intentionally preserve:
     # - Capitalization (helps with exact matching)
@@ -2088,10 +2095,11 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
                     break
             
             if not author_found:
-                # Create a more informative error message that doesn't assume positional matching
-                # Show the full list of correct authors instead of truncating
+                # Use standardized three-line formatting for author mismatch
+                cited_display = format_author_for_display(cited_author)
                 full_author_list = ', '.join(correct_names)
-                return False, f"Author {i+1} mismatch: '{cited_author}' not found in author list (et al case). Correct authors include: {full_author_list}"
+                error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list - et al case)", f"Correct authors: {full_author_list}")
+                return False, error_msg
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
@@ -2100,7 +2108,8 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         # For non-et-al cases, be more strict about count mismatches
         # Allow minor flexibility (1 author difference) but not more
         if abs(len(cleaned_cited) - len(correct_names)) > 1:
-            return False, f"Author count mismatch: {len(cleaned_cited)} cited vs {len(correct_names)} correct"
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), cleaned_cited, correct_names)
+            return False, error_msg
         
         # Use the shorter list for comparison
         min_len = min(len(cleaned_cited), len(correct_names))
@@ -2110,6 +2119,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         comparison_cited = cleaned_cited
         comparison_correct = correct_names
     
+    # Use shared three-line formatter (imported lazily to avoid circular imports)
+    from utils.error_utils import format_first_author_mismatch, format_author_mismatch, format_author_count_mismatch
+
     # Compare first author (most important) using the enhanced name matching
     if comparison_cited and comparison_correct:
         cited_first = comparison_cited[0]
@@ -2119,7 +2131,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             # Use consistent display format for both names
             cited_display = format_author_for_display(cited_first)
             correct_display = format_author_for_display(correct_first)
-            return False, f"First author mismatch: '{cited_display}' vs '{correct_display}'"
+            return False, format_first_author_mismatch(cited_display, correct_display)
     
     # For complete verification, check all authors if reasonable number
     if len(comparison_cited) <= 5:  # Only do full check for reasonable author counts
@@ -2128,7 +2140,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
                 # Use consistent display format for both names
                 cited_display = format_author_for_display(cited_author)
                 correct_display = format_author_for_display(correct_author)
-                return False, f"Author {i+1} mismatch: '{cited_display}' vs '{correct_display}'"
+                return False, format_author_mismatch(i+1, cited_display, correct_display)
     
     return True, "Authors match"
 

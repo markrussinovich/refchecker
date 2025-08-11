@@ -425,9 +425,11 @@ class OpenReviewReferenceChecker:
         if cited_title and paper_title:
             similarity = calculate_title_similarity(cited_title, paper_title)
             if similarity < 0.7:  # Using a reasonable threshold
+                from utils.error_utils import format_title_mismatch
+                details = format_title_mismatch(cited_title, paper_title) + f" (similarity: {similarity:.2f})"
                 errors.append({
                     "warning_type": "title",
-                    "warning_details": f"Title mismatch: cited as '{cited_title}' but OpenReview shows '{paper_title}' (similarity: {similarity:.2f})"
+                    "warning_details": details
                 })
         
         # Check authors
@@ -460,9 +462,10 @@ class OpenReviewReferenceChecker:
                 
                 is_different, year_message = is_year_substantially_different(cited_year_int, paper_year_int)
                 if is_different and year_message:
+                    from utils.error_utils import format_year_mismatch
                     errors.append({
                         "warning_type": "year",
-                        "warning_details": year_message
+                        "warning_details": format_year_mismatch(cited_year_int, paper_year_int)
                     })
             except (ValueError, TypeError):
                 pass  # Skip year validation if conversion fails
@@ -473,10 +476,10 @@ class OpenReviewReferenceChecker:
         
         if cited_venue and paper_venue:
             if are_venues_substantially_different(cited_venue, paper_venue):
-                from utils.error_utils import clean_venue_for_comparison
+                from utils.error_utils import format_venue_mismatch
                 errors.append({
                     "warning_type": "venue",
-                    "warning_details": f"Venue mismatch: cited as '{clean_venue_for_comparison(cited_venue)}' but OpenReview shows '{clean_venue_for_comparison(paper_venue)}'"
+                    "warning_details": format_venue_mismatch(cited_venue, paper_venue)
                 })
         
         # Create verified data structure
