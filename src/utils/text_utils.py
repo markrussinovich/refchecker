@@ -2111,7 +2111,9 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         # Allow minor flexibility (1 author difference) but not more
         if abs(len(cleaned_cited) - len(correct_names)) > 1:
             from utils.error_utils import format_author_count_mismatch
-            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), cleaned_cited, correct_names)
+            # Convert cited names to display format (First Last) before showing in error
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
         # Use the shorter list for comparison
