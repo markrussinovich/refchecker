@@ -2102,7 +2102,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
                 # Use standardized three-line formatting for author mismatch
                 cited_display = format_author_for_display(cited_author)
                 full_author_list = ', '.join(correct_names)
-                error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list - et al case)", f"Correct authors: {full_author_list}")
+                error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list - et al case)", f"{full_author_list}")
                 return False, error_msg
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
