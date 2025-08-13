@@ -34,6 +34,32 @@ jobs:
       run: |
         pytest tests/ -v --cov=src --cov-report=term-missing
     
+    - name: Sync version with git tags
+      run: |
+        # Get the latest git tag
+        latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.2.47")
+        latest_version=${latest_tag#v}
+        
+        # Read current version from __version__.py
+        current_version=$(python -c "import sys; sys.path.append('src'); from __version__ import __version__; print(__version__)")
+        
+        # If git tag version is newer than __version__.py, update __version__.py
+        if [ "$latest_version" != "$current_version" ]; then
+          echo "Syncing __version__.py ($current_version) with git tag ($latest_version)"
+          sed -i "s/__version__ = \".*\"/__version__ = \"$latest_version\"/" src/__version__.py
+          
+          # Commit the sync if needed
+          if git diff --quiet src/__version__.py; then
+            echo "No version sync needed"
+          else
+            git add src/__version__.py
+            git commit -m "Sync version with git tag v$latest_version"
+            git push
+          fi
+        else
+          echo "Version already in sync: $current_version"
+        fi
+    
     - name: Configure git
       run: |
         git config --local user.email "action@github.com"
@@ -42,12 +68,28 @@ jobs:
     - name: Increment version
       id: increment_version
       run: |
-        # Read current version
+        # Get the latest git tag
+        latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.2.47")
+        echo "Latest git tag: $latest_tag"
+        
+        # Extract version number from tag (remove 'v' prefix if present)
+        latest_version=${latest_tag#v}
+        echo "Latest version from git: $latest_version"
+        
+        # Read current version from __version__.py
         current_version=$(python -c "import sys; sys.path.append('src'); from __version__ import __version__; print(__version__)")
-        echo "Current version: $current_version"
+        echo "Current version in __version__.py: $current_version"
+        
+        # Use the higher version as the base
+        if [ "$latest_version" != "$current_version" ]; then
+          echo "Version mismatch detected. Using git tag version as base."
+          base_version=$latest_version
+        else
+          base_version=$current_version
+        fi
         
         # Parse version parts (assuming semantic versioning: major.minor.patch)
-        IFS='.' read -r major minor patch <<< "$current_version"
+        IFS='.' read -r major minor patch <<< "$base_version"
         
         # Increment patch version
         new_patch=$((patch + 1))
@@ -56,11 +98,11 @@ jobs:
         echo "New version: $new_version"
         
         # Update __version__.py
-        sed -i "s/__version__ = \"$current_version\"/__version__ = \"$new_version\"/" src/__version__.py
+        sed -i "s/__version__ = \".*\"/__version__ = \"$new_version\"/" src/__version__.py
         
         # Set output for later steps
         echo "new_version=$new_version" >> $GITHUB_OUTPUT
-        echo "current_version=$current_version" >> $GITHUB_OUTPUT
+        echo "current_version=$base_version" >> $GITHUB_OUTPUT
     
     - name: Commit version bump
       run: |
@@ -81,18 +123,14 @@ jobs:
         twine upload dist/* --verbose
     
     - name: Create GitHub Release
-      uses: actions/create-release@v1
+      run: |
+        gh release create "v${{ steps.increment_version.outputs.new_version }}" \
+          --title "Release v${{ steps.increment_version.outputs.new_version }}" \
+          --notes "Automated release v${{ steps.increment_version.outputs.new_version }}
+        
+        Previous version: v${{ steps.increment_version.outputs.current_version }}
+        
+        Changes:
+        - Auto-incremented version from ${{ steps.increment_version.outputs.current_version }} to ${{ steps.increment_version.outputs.new_version }}"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v${{ steps.increment_version.outputs.new_version }}
-        release_name: Release v${{ steps.increment_version.outputs.new_version }}
-        body: |
-          Automated release v${{ steps.increment_version.outputs.new_version }}
-          
-          Previous version: v${{ steps.increment_version.outputs.current_version }}
-          
-          Changes:
-          - Auto-incremented version from ${{ steps.increment_version.outputs.current_version }} to ${{ steps.increment_version.outputs.new_version }}
-        draft: false
-        prerelease: false
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
