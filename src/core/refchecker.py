@@ -2637,9 +2637,19 @@ class ArxivReferenceChecker:
             
             # Generate corrected reference using all available corrections
             corrected_data = self._extract_corrected_data_from_error(consolidated_entry, verified_data)
-            corrected_format = format_corrected_reference(reference, corrected_data, consolidated_entry)
-            if corrected_format:
-                consolidated_entry['ref_corrected_format'] = corrected_format
+            
+            # Generate all three formats for user convenience
+            from utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
+            plaintext_format = format_corrected_plaintext(reference, corrected_data, consolidated_entry)
+            bibtex_format = format_corrected_bibtex(reference, corrected_data, consolidated_entry)
+            bibitem_format = format_corrected_bibitem(reference, corrected_data, consolidated_entry)
+            
+            if plaintext_format:
+                consolidated_entry['ref_corrected_plaintext'] = plaintext_format
+            if bibtex_format:
+                consolidated_entry['ref_corrected_bibtex'] = bibtex_format
+            if bibitem_format:
+                consolidated_entry['ref_corrected_bibitem'] = bibitem_format
             
             # Store the consolidated entry (write to file at end of run)
             self.errors.append(consolidated_entry)
@@ -2696,11 +2706,21 @@ class ArxivReferenceChecker:
             if error_type != 'unverified':
                 error_entry['ref_standard_format'] = self.format_standard_reference(error)
                 
-                # Generate corrected reference in original format
+                # Generate corrected reference in all formats for user convenience
                 corrected_data = self._extract_corrected_data_from_error(error, verified_data)
-                corrected_format = format_corrected_reference(reference, corrected_data, error_entry)
-                if corrected_format:
-                    error_entry['ref_corrected_format'] = corrected_format
+                
+                # Generate all three formats
+                from utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
+                plaintext_format = format_corrected_plaintext(reference, corrected_data, error_entry)
+                bibtex_format = format_corrected_bibtex(reference, corrected_data, error_entry)
+                bibitem_format = format_corrected_bibitem(reference, corrected_data, error_entry)
+                
+                if plaintext_format:
+                    error_entry['ref_corrected_plaintext'] = plaintext_format
+                if bibtex_format:
+                    error_entry['ref_corrected_bibtex'] = bibtex_format
+                if bibitem_format:
+                    error_entry['ref_corrected_bibitem'] = bibitem_format
             else:
                 error_entry['ref_standard_format'] = None
             
@@ -2772,8 +2792,29 @@ class ArxivReferenceChecker:
                         f.write(f"  {error_entry['ref_verified_url']}\n")
                         f.write("\n")
                     
-                    # Show corrected reference in original format if available
-                    if error_entry.get('ref_corrected_format'):
+                    # Show corrected reference in all formats if available
+                    formats_written = False
+                    
+                    # Plain text format
+                    if error_entry.get('ref_corrected_plaintext'):
+                        f.write("CORRECTED REFERENCE (Plain Text):\n")
+                        f.write(f"{error_entry['ref_corrected_plaintext']}\n\n")
+                        formats_written = True
+                    
+                    # BibTeX format
+                    if error_entry.get('ref_corrected_bibtex'):
+                        f.write("CORRECTED REFERENCE (BibTeX):\n")
+                        f.write(f"{error_entry['ref_corrected_bibtex']}\n\n")
+                        formats_written = True
+                    
+                    # Bibitem/LaTeX format  
+                    if error_entry.get('ref_corrected_bibitem'):
+                        f.write("CORRECTED REFERENCE (LaTeX/Biblatex):\n")
+                        f.write(f"{error_entry['ref_corrected_bibitem']}\n\n")
+                        formats_written = True
+                    
+                    # Fallback to legacy format if no new formats available
+                    if not formats_written and error_entry.get('ref_corrected_format'):
                         f.write("CORRECTED REFERENCE:\n")
                         f.write(f"{error_entry['ref_corrected_format']}\n\n")
                     

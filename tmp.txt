@@ -1,0 +1,1432 @@
+REFERENCE VERIFICATION ERRORS
+
+PAPER: Learning an Implicit Physics Model for Image-based Fluid Simulation
+ArXiv ID: 2508.08254v1
+URL: https://arxiv.org/abs/2508.08254v1
+Authors: Emily Yue-Ting Jia, Jiageng Mao, Zhiyuan Gao, Yajie Zhao, Yue Wang
+Year: 2025
+--------------------------------------------------------------------------------
+REFERENCE: Videophy: Evaluating physical commonsense for video generation
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2406.0'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Videophy: Evaluating physical commonsense for video generation
+       In arXiv preprint arXiv:2406.03520
+       Hritik Bansal, Zongyu Lin, Tianyi Xie, Zeshun Zong, Michal Yarom, Yonatan Bitton, Chenfanfu Jiang, Yizhou Sun, Kai-Wei Chang, Aditya Grover 2024
+       https://arxiv.org/abs/2406.03520
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/270286215
+
+CORRECTED REFERENCE (Plain Text):
+Hritik Bansal, Zongyu Lin, Tianyi Xie, Zeshun Zong, Michal Yarom, Yonatan Bitton, Chenfanfu Jiang, Yizhou Sun, Kai-Wei Chang, Aditya Grover. (2024). "VideoPhy: Evaluating Physical Commonsense for Video Generation". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/270286215.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Hritik Bansal and Zongyu Lin and Tianyi Xie and Zeshun Zong and Michal Yarom and Yonatan Bitton and Chenfanfu Jiang and Yizhou Sun and Kai-Wei Chang and Aditya Grover},
+  title = {VideoPhy: Evaluating Physical Commonsense for Video Generation},
+  journal = {arXiv preprint arXiv:2406.03520},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/270286215}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Bansal et~al.(2024)Bansal, Lin, Xie, Zong, Yarom, Bitton, Jiang, Sun, Chang, and Grover]{bansal2024videophy}
+Hritik Bansal, Zongyu Lin, Tianyi Xie, Zeshun Zong, Michal Yarom, Yonatan Bitton, Chenfanfu Jiang, Yizhou Sun, Kai-Wei Chang, Aditya Grover. (2024). \textit{VideoPhy: Evaluating Physical Commonsense for Video Generation}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/270286215}.
+
+================================================================================
+REFERENCE: Stable video diffusion: Scaling latent video diffusion models to large datasets
+Type: ❌ author
+Details: Author 7 mismatch:
+cited:  'Yam Levi (not found in author list - et al case)'
+actual: 'A. Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz'
+
+RAW REFERENCE TEXT:
+Stable video diffusion: Scaling latent video diffusion models to large datasets
+       In arXiv preprint arXiv:2311.15127
+       Andreas Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz, Yam Levi, Zion English, Vikram Voleti, Adam Letts, et al 2023
+       https://arxiv.org/abs/2311.15127
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/265312551
+
+CORRECTED REFERENCE (Plain Text):
+A. Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz. (2023). "Stable Video Diffusion: Scaling Latent Video Diffusion Models to Large Datasets". In arXiv.org. https://www.semanticscholar.org/paper/265312551.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {A. Blattmann and Tim Dockhorn and Sumith Kulal and Daniel Mendelevitch and Maciej Kilian and Dominik Lorenz},
+  title = {Stable Video Diffusion: Scaling Latent Video Diffusion Models to Large Datasets},
+  journal = {arXiv preprint arXiv:2311.15127},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/265312551}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Blattmann et~al.(2023)Blattmann, Dockhorn, Kulal, Mendelevitch, Kilian, Lorenz, Levi, English, Voleti, Letts, et~al.]{SVD}
+A. Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Mendelevitch, Maciej Kilian, Dominik Lorenz. (2023). \textit{Stable Video Diffusion: Scaling Latent Video Diffusion Models to Large Datasets}. In \textit{arXiv.org}. \url{https://www.semanticscholar.org/paper/265312551}.
+
+================================================================================
+REFERENCE: Diffdreamer: Towards consistent unsupervised single-view scene extrapolation with conditional diffusion models
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2023'
+actual: '2022'
+- Reference could include arXiv URL: https://arxiv.org/abs/2211.12131
+
+RAW REFERENCE TEXT:
+Diffdreamer: Towards consistent unsupervised single-view scene extrapolation with conditional diffusion models
+       In ICCV
+       Shengqu Cai, Eric Ryan Chan, Songyou Peng, Mohamad Shahbazi, Anton Obukhov, Luc Van Gool, Gordon Wetzstein 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/257631996
+
+CORRECTED REFERENCE (Plain Text):
+Shengqu Cai, Eric Chan, Songyou Peng, Mohamad Shahbazi, Anton Obukhov, L. Gool, Gordon Wetzstein. (2022). "DiffDreamer: Towards Consistent Unsupervised Single-view Scene Extrapolation with Conditional Diffusion Models". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/257631996.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Shengqu Cai and Eric Chan and Songyou Peng and Mohamad Shahbazi and Anton Obukhov and L. Gool and Gordon Wetzstein},
+  title = {DiffDreamer: Towards Consistent Unsupervised Single-view Scene Extrapolation with Conditional Diffusion Models},
+  journal = {In ICCV},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/257631996}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Cai et~al.(2023)Cai, Chan, Peng, Shahbazi, Obukhov, Van~Gool, and Wetzstein]{cai2022diffdreamer}
+Shengqu Cai, Eric Chan, Songyou Peng, Mohamad Shahbazi, Anton Obukhov, L. Gool, Gordon Wetzstein. (2022). \textit{DiffDreamer: Towards Consistent Unsupervised Single-view Scene Extrapolation with Conditional Diffusion Models}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/257631996}.
+
+================================================================================
+REFERENCE: Everybody dance now
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2019'
+actual: '2018'
+- Reference could include arXiv URL: https://arxiv.org/abs/1808.07371
+
+RAW REFERENCE TEXT:
+Everybody dance now
+       In Proceedings of the IEEE/CVF international conference on computer vision, pages 5933--5942
+       Caroline Chan, Shiry Ginosar, Tinghui Zhou, Alexei A Efros 2019
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/52070144
+
+CORRECTED REFERENCE (Plain Text):
+Caroline Chan, Shiry Ginosar, Tinghui Zhou, Alexei A. Efros. (2018). "Everybody Dance Now". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/52070144.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Caroline Chan and Shiry Ginosar and Tinghui Zhou and Alexei A. Efros},
+  title = {Everybody Dance Now},
+  journal = {In Proceedings of the IEEE/CVF international conference on computer vision, pages 5933--5942},
+  year = {2018},
+  url = {https://www.semanticscholar.org/paper/52070144}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Chan et~al.(2019)Chan, Ginosar, Zhou, and Efros]{chan2019everybody}
+Caroline Chan, Shiry Ginosar, Tinghui Zhou, Alexei A. Efros. (2018). \textit{Everybody Dance Now}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/52070144}.
+
+================================================================================
+REFERENCE: Physics informed neural fields for smoke reconstruction with sparse data
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2206.06577
+
+RAW REFERENCE TEXT:
+Physics informed neural fields for smoke reconstruction with sparse data
+       In ACM Transactions on Graphics (ToG), 41 (4): 1--14
+       Mengyu Chu, Lingjie Liu, Quan Zheng, Erik Franz, Hans-Peter Seidel, Christian Theobalt, Rhaleb Zayer 2022
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/248912966
+
+CORRECTED REFERENCE (Plain Text):
+Mengyu Chu, Lingjie Liu, Q. Zheng, Aleksandra Franz, H. Seidel, C. Theobalt, Rhaleb Zayer. (2022). "Physics informed neural fields for smoke reconstruction with sparse data". In ACM Transactions on Graphics. https://www.semanticscholar.org/paper/248912966.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Mengyu Chu and Lingjie Liu and Q. Zheng and Aleksandra Franz and H. Seidel and C. Theobalt and Rhaleb Zayer},
+  title = {Physics informed neural fields for smoke reconstruction with sparse data},
+  journal = {ACM Transactions on Graphics (ToG), 41 (4): 1--14},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/248912966}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Chu et~al.(2022)Chu, Liu, Zheng, Franz, Seidel, Theobalt, and Zayer]{chu2022smoke}
+Mengyu Chu, Lingjie Liu, Q. Zheng, Aleksandra Franz, H. Seidel, C. Theobalt, Rhaleb Zayer. (2022). \textit{Physics informed neural fields for smoke reconstruction with sparse data}. In \textit{ACM Transactions on Graphics}. \url{https://www.semanticscholar.org/paper/248912966}.
+
+================================================================================
+REFERENCE: Fluid simulation on neural flow maps
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2312.14635
+
+RAW REFERENCE TEXT:
+Fluid simulation on neural flow maps
+       In ACM Transactions on Graphics (TOG), 42 (6): 1--21
+       Yitong Deng, Hong-Xing Yu, Diyang Zhang, Jiajun Wu, Bo Zhu 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/264175248
+
+CORRECTED REFERENCE (Plain Text):
+Yitong Deng, Hong-Xing Yu, Diyang Zhang, Jiajun Wu, Bo Zhu. (2023). "Fluid Simulation on Neural Flow Maps". In ACM Transactions on Graphics. https://www.semanticscholar.org/paper/264175248.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Yitong Deng and Hong-Xing Yu and Diyang Zhang and Jiajun Wu and Bo Zhu},
+  title = {Fluid Simulation on Neural Flow Maps},
+  journal = {ACM Transactions on Graphics (TOG), 42 (6): 1--21},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/264175248}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Deng et~al.(2023)Deng, Yu, Zhang, Wu, and Zhu]{deng2023fluid}
+Yitong Deng, Hong-Xing Yu, Diyang Zhang, Jiajun Wu, Bo Zhu. (2023). \textit{Fluid Simulation on Neural Flow Maps}. In \textit{ACM Transactions on Graphics}. \url{https://www.semanticscholar.org/paper/264175248}.
+
+================================================================================
+REFERENCE: Flownet: Learning optical flow with convolutional networks
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/1504.06852
+
+RAW REFERENCE TEXT:
+Flownet: Learning optical flow with convolutional networks
+       In Proceedings of the IEEE international conference on computer vision, pages 2758--2766
+       Alexey Dosovitskiy, Philipp Fischer, Eddy Ilg, Philip Hausser, Caner Hazirbas, Vladimir Golkov, Patrick Van Der Smagt, Daniel Cremers, Thomas Brox 2015
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/12552176
+
+CORRECTED REFERENCE (Plain Text):
+Alexey Dosovitskiy, P. Fischer, Eddy Ilg, Philip Häusser, C. Hazirbas, Vladimir Golkov, Patrick van der Smagt, D. Cremers, T. Brox. (2015). "FlowNet: Learning Optical Flow with Convolutional Networks". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/12552176.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Alexey Dosovitskiy and P. Fischer and Eddy Ilg and Philip Häusser and C. Hazirbas and Vladimir Golkov and Patrick van der Smagt and D. Cremers and T. Brox},
+  title = {FlowNet: Learning Optical Flow with Convolutional Networks},
+  journal = {In Proceedings of the IEEE international conference on computer vision, pages 2758--2766},
+  year = {2015},
+  url = {https://www.semanticscholar.org/paper/12552176}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Dosovitskiy et~al.(2015)Dosovitskiy, Fischer, Ilg, Hausser, Hazirbas, Golkov, Van Der~Smagt, Cremers, and Brox]{dosovitskiy2015flownet}
+Alexey Dosovitskiy, P. Fischer, Eddy Ilg, Philip Häusser, C. Hazirbas, Vladimir Golkov, Patrick van der Smagt, D. Cremers, T. Brox. (2015). \textit{FlowNet: Learning Optical Flow with Convolutional Networks}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/12552176}.
+
+================================================================================
+REFERENCE: Simulating fluids in real-world still images
+Type: ❌ multiple
+Details: - Author 4 mismatch:
+cited:  'Hongsheng Li'
+actual: 'Kwan-Yee Lin'
+- Year mismatch:
+cited:  '2023'
+actual: '2022'
+- Reference could include arXiv URL: https://arxiv.org/abs/2204.11335
+
+RAW REFERENCE TEXT:
+Simulating fluids in real-world still images
+       In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV), pages 15922--15931
+       Siming Fan, Jingtan Piao, Chen Qian, Hongsheng Li, Kwan-Yee Lin 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/248377590
+
+CORRECTED REFERENCE (Plain Text):
+Simin Fan, Jingtan Piao, Chen Qian, Kwan-Yee Lin, Hongsheng Li. (2022). "Simulating Fluids in Real-World Still Images". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/248377590.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Simin Fan and Jingtan Piao and Chen Qian and Kwan-Yee Lin and Hongsheng Li},
+  title = {Simulating Fluids in Real-World Still Images},
+  journal = {In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV), pages 15922--15931},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/248377590}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Fan et~al.(2023)Fan, Piao, Qian, Li, and Lin]{SLR-SFS}
+Simin Fan, Jingtan Piao, Chen Qian, Kwan-Yee Lin, Hongsheng Li. (2022). \textit{Simulating Fluids in Real-World Still Images}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/248377590}.
+
+================================================================================
+REFERENCE: Global transport for fluid reconstruction with learned self-supervision
+Type: ❌ multiple
+Details: - First author mismatch:
+cited:  'Erik Franz'
+actual: 'Aleksandra Franz'
+- Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 1632--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/2104.06031
+
+RAW REFERENCE TEXT:
+Global transport for fluid reconstruction with learned self-supervision
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 1632--1642
+       Erik Franz, Barbara Solenthaler, Nils Thuerey 2021
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/233219695
+
+CORRECTED REFERENCE (Plain Text):
+Aleksandra Franz, B. Solenthaler, Nils Thürey. (2021). "Global Transport for Fluid Reconstruction with Learned Self-Supervision". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/233219695.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Aleksandra Franz and B. Solenthaler and Nils Thürey},
+  title = {Global Transport for Fluid Reconstruction with Learned Self-Supervision},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 1632--1642},
+  year = {2021},
+  url = {https://www.semanticscholar.org/paper/233219695}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Franz et~al.(2021)Franz, Solenthaler, and Thuerey]{franz2021global}
+Aleksandra Franz, B. Solenthaler, Nils Thürey. (2021). \textit{Global Transport for Fluid Reconstruction with Learned Self-Supervision}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/233219695}.
+
+================================================================================
+REFERENCE: Learning to estimate single-view volumetric flow motions without 3d supervision
+Type: ❌ multiple
+Details: - First author mismatch:
+cited:  'Erik Franz'
+actual: 'Aleksandra Franz'
+- Venue mismatch:
+cited:  'arXiv preprint arXiv:2302.1'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Learning to estimate single-view volumetric flow motions without 3d supervision
+       In arXiv preprint arXiv:2302.14470
+       Erik Franz, Barbara Solenthaler, Nils Thuerey 2023
+       https://arxiv.org/abs/2302.14470
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/257232577
+
+CORRECTED REFERENCE (Plain Text):
+Aleksandra Franz, B. Solenthaler, Nils Thürey. (2023). "Learning to Estimate Single-View Volumetric Flow Motions without 3D Supervision". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/257232577.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Aleksandra Franz and B. Solenthaler and Nils Thürey},
+  title = {Learning to Estimate Single-View Volumetric Flow Motions without 3D Supervision},
+  journal = {arXiv preprint arXiv:2302.14470},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/257232577}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Franz et~al.(2023)Franz, Solenthaler, and Thuerey]{franz2023learning}
+Aleksandra Franz, B. Solenthaler, Nils Thürey. (2023). \textit{Learning to Estimate Single-View Volumetric Flow Motions without 3D Supervision}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/257232577}.
+
+================================================================================
+REFERENCE: Cat3d: Create anything in 3d with multi-view diffusion models
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2405.10314
+
+RAW REFERENCE TEXT:
+Cat3d: Create anything in 3d with multi-view diffusion models
+       In Advances in Neural Information Processing Systems
+       Ruiqi Gao, Aleksander Holynski, Philipp Henzler, Arthur Brussee, Ricardo Martin-Brualla, Pratul P. Srinivasan, Jonathan T. Barron, Ben Poole 2024
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/269791465
+
+CORRECTED REFERENCE (Plain Text):
+Ruiqi Gao, Aleksander Holynski, Philipp Henzler, Arthur Brussee, Ricardo Martin-Brualla, Pratul P. Srinivasan, Jonathan T. Barron, Ben Poole. (2024). "CAT3D: Create Anything in 3D with Multi-View Diffusion Models". In Neural Information Processing Systems. https://www.semanticscholar.org/paper/269791465.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Ruiqi Gao and Aleksander Holynski and Philipp Henzler and Arthur Brussee and Ricardo Martin-Brualla and Pratul P. Srinivasan and Jonathan T. Barron and Ben Poole},
+  title = {CAT3D: Create Anything in 3D with Multi-View Diffusion Models},
+  journal = {Advances in Neural Information Processing Systems},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/269791465}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Gao* et~al.(2024)Gao*, Holynski*, Henzler, Brussee, Martin-Brualla, Srinivasan, Barron, and Poole*]{gao2024cat3d}
+Ruiqi Gao, Aleksander Holynski, Philipp Henzler, Arthur Brussee, Ricardo Martin-Brualla, Pratul P. Srinivasan, Jonathan T. Barron, Ben Poole. (2024). \textit{CAT3D: Create Anything in 3D with Multi-View Diffusion Models}. In \textit{Neural Information Processing Systems}. \url{https://www.semanticscholar.org/paper/269791465}.
+
+================================================================================
+REFERENCE: Modeling the dynamics of pde systems with physics-constrained deep auto-regressive networks
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2020'
+actual: '2019'
+- Reference could include arXiv URL: https://arxiv.org/abs/1906.05747
+
+RAW REFERENCE TEXT:
+Modeling the dynamics of pde systems with physics-constrained deep auto-regressive networks
+       In Journal of Computational Physics, 403: 109056
+       Nicholas Geneva, Nicholas Zabaras 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/189762553
+
+CORRECTED REFERENCE (Plain Text):
+N. Geneva, N. Zabaras. (2019). "Modeling the Dynamics of PDE Systems with Physics-Constrained Deep Auto-Regressive Networks". In Journal of Computational Physics. https://www.semanticscholar.org/paper/189762553.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {N. Geneva and N. Zabaras},
+  title = {Modeling the Dynamics of PDE Systems with Physics-Constrained Deep Auto-Regressive Networks},
+  journal = {Journal of Computational Physics, 403: 109056},
+  year = {2019},
+  url = {https://www.semanticscholar.org/paper/189762553}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Geneva and Zabaras(2020)]{geneva2020modeling}
+N. Geneva, N. Zabaras. (2019). \textit{Modeling the Dynamics of PDE Systems with Physics-Constrained Deep Auto-Regressive Networks}. In \textit{Journal of Computational Physics}. \url{https://www.semanticscholar.org/paper/189762553}.
+
+================================================================================
+REFERENCE: Neuroanimator: Fast neural network emulation and control of physics-based models
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'Proceedings of the 25th annual conference on Computer graphics and interactive techniques, pages 9--20'
+actual: 'International Conference on Computer Graphics and Interactive Techniques'
+
+RAW REFERENCE TEXT:
+Neuroanimator: Fast neural network emulation and control of physics-based models
+       In Proceedings of the 25th annual conference on Computer graphics and interactive techniques, pages 9--20
+       Radek Grzeszczuk, Demetri Terzopoulos, Geoffrey Hinton 1998
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/8249460
+
+CORRECTED REFERENCE (Plain Text):
+R. Grzeszczuk, Demetri Terzopoulos, Geoffrey E. Hinton. (1998). "NeuroAnimator: fast neural network emulation and control of physics-based models". In International Conference on Computer Graphics and Interactive Techniques. https://www.semanticscholar.org/paper/8249460.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {R. Grzeszczuk and Demetri Terzopoulos and Geoffrey E. Hinton},
+  title = {NeuroAnimator: fast neural network emulation and control of physics-based models},
+  journal = {In Proceedings of the 25th annual conference on Computer graphics and interactive techniques, pages 9--20},
+  year = {1998},
+  url = {https://www.semanticscholar.org/paper/8249460}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Grzeszczuk et~al.(1998)Grzeszczuk, Terzopoulos, and Hinton]{grzeszczuk1998neuroanimator}
+R. Grzeszczuk, Demetri Terzopoulos, Geoffrey E. Hinton. (1998). \textit{NeuroAnimator: fast neural network emulation and control of physics-based models}. In \textit{International Conference on Computer Graphics and Interactive Techniques}. \url{https://www.semanticscholar.org/paper/8249460}.
+
+================================================================================
+REFERENCE: Neurofluid: Fluid dynamics grounding with particle-driven neural radiance fields
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2203.01762
+
+RAW REFERENCE TEXT:
+Neurofluid: Fluid dynamics grounding with particle-driven neural radiance fields
+       In International Conference on Machine Learning, pages 7919--7929. PMLR
+       Shanyan Guan, Huayu Deng, Yunbo Wang, Xiaokang Yang 2022
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/247223058
+
+CORRECTED REFERENCE (Plain Text):
+Shanyan Guan, Huayu Deng, Yunbo Wang, Xiaokang Yang. (2022). "NeuroFluid: Fluid Dynamics Grounding with Particle-Driven Neural Radiance Fields". In International Conference on Machine Learning. https://www.semanticscholar.org/paper/247223058.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Shanyan Guan and Huayu Deng and Yunbo Wang and Xiaokang Yang},
+  title = {NeuroFluid: Fluid Dynamics Grounding with Particle-Driven Neural Radiance Fields},
+  journal = {In International Conference on Machine Learning, pages 7919--7929. PMLR},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/247223058}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Guan et~al.(2022)Guan, Deng, Wang, and Yang]{guan2022neurofluid}
+Shanyan Guan, Huayu Deng, Yunbo Wang, Xiaokang Yang. (2022). \textit{NeuroFluid: Fluid Dynamics Grounding with Particle-Driven Neural Radiance Fields}. In \textit{International Conference on Machine Learning}. \url{https://www.semanticscholar.org/paper/247223058}.
+
+================================================================================
+REFERENCE: Video diffusion models
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2204.03458
+
+RAW REFERENCE TEXT:
+Video diffusion models
+       In Advances in Neural Information Processing Systems, 35: 8633--8646
+       Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, David J Fleet 2022
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/248006185
+
+CORRECTED REFERENCE (Plain Text):
+Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, David J. Fleet. (2022). "Video Diffusion Models". In Neural Information Processing Systems. https://www.semanticscholar.org/paper/248006185.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Jonathan Ho and Tim Salimans and Alexey Gritsenko and William Chan and Mohammad Norouzi and David J. Fleet},
+  title = {Video Diffusion Models},
+  journal = {Advances in Neural Information Processing Systems, 35: 8633--8646},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/248006185}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Ho et~al.(2022{\natexlab{b}})Ho, Salimans, Gritsenko, Chan, Norouzi, and Fleet]{ho2022video}
+Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, David J. Fleet. (2022). \textit{Video Diffusion Models}. In \textit{Neural Information Processing Systems}. \url{https://www.semanticscholar.org/paper/248006185}.
+
+================================================================================
+REFERENCE: Animating pictures with eulerian motion fields
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2021'
+actual: '2020'
+- Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 5810--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/2011.15128
+
+RAW REFERENCE TEXT:
+Animating pictures with eulerian motion fields
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 5810--5819
+       Aleksander Holynski, Brian L Curless, Steven M Seitz, Richard Szeliski 2021
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/227238903
+
+CORRECTED REFERENCE (Plain Text):
+Aleksander Holynski, B. Curless, S. Seitz, R. Szeliski. (2020). "Animating Pictures with Eulerian Motion Fields". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/227238903.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Aleksander Holynski and B. Curless and S. Seitz and R. Szeliski},
+  title = {Animating Pictures with Eulerian Motion Fields},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 5810--5819},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/227238903}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Holynski et~al.(2021)Holynski, Curless, Seitz, and Szeliski]{holynski}
+Aleksander Holynski, B. Curless, S. Seitz, R. Szeliski. (2020). \textit{Animating Pictures with Eulerian Motion Fields}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/227238903}.
+
+================================================================================
+REFERENCE: Cogvideo: Large-scale pretraining for text-to-video generation via transformers
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2205.1'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Cogvideo: Large-scale pretraining for text-to-video generation via transformers
+       In arXiv preprint arXiv:2205.15868
+       Wenyi Hong, Ming Ding, Wendi Zheng, Xinghan Liu, Jie Tang 2022
+       https://arxiv.org/abs/2205.15868
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/249209614
+
+CORRECTED REFERENCE (Plain Text):
+Wenyi Hong, Ming Ding, Wendi Zheng, Xinghan Liu, Jie Tang. (2022). "CogVideo: Large-scale Pretraining for Text-to-Video Generation via Transformers". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/249209614.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Wenyi Hong and Ming Ding and Wendi Zheng and Xinghan Liu and Jie Tang},
+  title = {CogVideo: Large-scale Pretraining for Text-to-Video Generation via Transformers},
+  journal = {arXiv preprint arXiv:2205.15868},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/249209614}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Hong et~al.(2022)Hong, Ding, Zheng, Liu, and Tang]{hong2022cogvideo}
+Wenyi Hong, Ming Ding, Wendi Zheng, Xinghan Liu, Jie Tang. (2022). \textit{CogVideo: Large-scale Pretraining for Text-to-Video Generation via Transformers}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/249209614}.
+
+================================================================================
+REFERENCE: Animating still landscape photographs through cloud motion creation
+Type: ⚠️ year
+Details: Year mismatch:
+cited:  '2015'
+actual: '2016'
+
+RAW REFERENCE TEXT:
+Animating still landscape photographs through cloud motion creation
+       In IEEE Transactions on Multimedia, 18 (1): 4--13
+       Wei-Cih Jhou, Wen-Huang Cheng 2015
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/25793331
+
+CORRECTED REFERENCE (Plain Text):
+Wei-Cih Jhou, Wen-Huang Cheng. (2016). "Animating Still Landscape Photographs Through Cloud Motion Creation". In IEEE transactions on multimedia. https://www.semanticscholar.org/paper/25793331.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Wei-Cih Jhou and Wen-Huang Cheng},
+  title = {Animating Still Landscape Photographs Through Cloud Motion Creation},
+  journal = {IEEE Transactions on Multimedia, 18 (1): 4--13},
+  year = {2016},
+  url = {https://www.semanticscholar.org/paper/25793331}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Jhou and Cheng(2015)]{jhou2015animating}
+Wei-Cih Jhou, Wen-Huang Cheng. (2016). \textit{Animating Still Landscape Photographs Through Cloud Motion Creation}. In \textit{IEEE transactions on multimedia}. \url{https://www.semanticscholar.org/paper/25793331}.
+
+================================================================================
+REFERENCE: 3d gaussian splatting for real-time radiance field rendering
+Type: ❌ multiple
+Details: - Author 3 mismatch:
+cited:  'Thomas Leimkuhler'
+actual: 'Thomas Leimkuehler'
+- Reference could include arXiv URL: https://arxiv.org/abs/2308.04079
+
+RAW REFERENCE TEXT:
+3d gaussian splatting for real-time radiance field rendering
+       In ACM Trans. Graph., 42 (4): 139--1
+       Bernhard Kerbl, Georgios Kopanas, Thomas Leimkuhler, George Drettakis 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/259267917
+
+CORRECTED REFERENCE (Plain Text):
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkuehler, G. Drettakis. (2023). "3D Gaussian Splatting for Real-Time Radiance Field Rendering". In ACM Transactions on Graphics. https://www.semanticscholar.org/paper/259267917.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Bernhard Kerbl and Georgios Kopanas and Thomas Leimkuehler and G. Drettakis},
+  title = {3D Gaussian Splatting for Real-Time Radiance Field Rendering},
+  journal = {ACM Trans. Graph., 42 (4): 139--1},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/259267917}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Kerbl et~al.(2023)Kerbl, Kopanas, Leimk{\"u}hler, and Drettakis]{3dgs}
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkuehler, G. Drettakis. (2023). \textit{3D Gaussian Splatting for Real-Time Radiance Field Rendering}. In \textit{ACM Transactions on Graphics}. \url{https://www.semanticscholar.org/paper/259267917}.
+
+================================================================================
+REFERENCE: 3d cinemagraphy from a single image
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 4595--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/2303.05724
+
+RAW REFERENCE TEXT:
+3d cinemagraphy from a single image
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 4595--4605
+       Xingyi Li, Zhiguo Cao, Huiqiang Sun, Jianming Zhang, Ke Xian, Guosheng Lin 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/257482728
+
+CORRECTED REFERENCE (Plain Text):
+Xingyi Li, Z. Cao, Huiqiang Sun, Jianming Zhang, Ke Xian, Guo-Shing Lin. (2023). "3D Cinemagraphy from a Single Image". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/257482728.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Xingyi Li and Z. Cao and Huiqiang Sun and Jianming Zhang and Ke Xian and Guo-Shing Lin},
+  title = {3D Cinemagraphy from a Single Image},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 4595--4605},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/257482728}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Li et~al.(2023)Li, Cao, Sun, Zhang, Xian, and Lin]{3d-cinemagraphy}
+Xingyi Li, Z. Cao, Huiqiang Sun, Jianming Zhang, Ke Xian, Guo-Shing Lin. (2023). \textit{3D Cinemagraphy from a Single Image}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/257482728}.
+
+================================================================================
+REFERENCE: Wonderland: Navigating 3d scenes from a single image
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2412.1'
+actual: 'Computer Vision and Pattern Recognition'
+
+RAW REFERENCE TEXT:
+Wonderland: Navigating 3d scenes from a single image
+       In arXiv preprint arXiv:2412.12091
+       Hanwen Liang, Junli Cao, Vidit Goel, Guocheng Qian, Sergei Korolev, Demetri Terzopoulos, Konstantinos N Plataniotis, Sergey Tulyakov, Jian Ren 2024
+       https://arxiv.org/abs/2412.12091
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/274789623
+
+CORRECTED REFERENCE (Plain Text):
+Hanwen Liang, Junli Cao, Vidit Goel, Guocheng Qian, Sergei Korolev, D. Terzopoulos, Konstantinos N. Plataniotis, Sergey Tulyakov, Jian Ren. (2024). "Wonderland: Navigating 3D Scenes from a Single Image". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/274789623.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Hanwen Liang and Junli Cao and Vidit Goel and Guocheng Qian and Sergei Korolev and D. Terzopoulos and Konstantinos N. Plataniotis and Sergey Tulyakov and Jian Ren},
+  title = {Wonderland: Navigating 3D Scenes from a Single Image},
+  journal = {arXiv preprint arXiv:2412.12091},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/274789623}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Liang et~al.(2024)Liang, Cao, Goel, Qian, Korolev, Terzopoulos, Plataniotis, Tulyakov, and Ren]{liang2024wonderland}
+Hanwen Liang, Junli Cao, Vidit Goel, Guocheng Qian, Sergei Korolev, D. Terzopoulos, Konstantinos N. Plataniotis, Sergey Tulyakov, Jian Ren. (2024). \textit{Wonderland: Navigating 3D Scenes from a Single Image}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/274789623}.
+
+================================================================================
+REFERENCE: Physgen: Rigid-body physics-grounded image-to-video generation
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'European Conference on Computer Vision, pages 360--378. Springer'
+actual: 'European Conference on Computer Vision'
+- Reference could include arXiv URL: https://arxiv.org/abs/2409.18964
+
+RAW REFERENCE TEXT:
+Physgen: Rigid-body physics-grounded image-to-video generation
+       In European Conference on Computer Vision, pages 360--378. Springer
+       Shaowei Liu, Zhongzheng Ren, Saurabh Gupta, Shenlong Wang 2024
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/272969474
+
+CORRECTED REFERENCE (Plain Text):
+Shaowei Liu, Zhongzheng Ren, Saurabh Gupta, Shenlong Wang. (2024). "PhysGen: Rigid-Body Physics-Grounded Image-to-Video Generation". In European Conference on Computer Vision. https://www.semanticscholar.org/paper/272969474.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Shaowei Liu and Zhongzheng Ren and Saurabh Gupta and Shenlong Wang},
+  title = {PhysGen: Rigid-Body Physics-Grounded Image-to-Video Generation},
+  journal = {In European Conference on Computer Vision, pages 360--378. Springer},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/272969474}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Liu et~al.(2024)Liu, Ren, Gupta, and Wang]{liu2024physgen}
+Shaowei Liu, Zhongzheng Ren, Saurabh Gupta, Shenlong Wang. (2024). \textit{PhysGen: Rigid-Body Physics-Grounded Image-to-Video Generation}. In \textit{European Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/272969474}.
+
+================================================================================
+REFERENCE: Liquid warping gan: A unified framework for human motion imitation, appearance transfer and novel view synthesis
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/1909.12224
+
+RAW REFERENCE TEXT:
+Liquid warping gan: A unified framework for human motion imitation, appearance transfer and novel view synthesis
+       In Proceedings of the IEEE/CVF international conference on computer vision, pages 5904--5913
+       Wen Liu, Zhixin Piao, Jie Min, Wenhan Luo, Lin Ma, Shenghua Gao 2019
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/202888704
+
+CORRECTED REFERENCE (Plain Text):
+Wen Liu, Zhixin Piao, Jie Min, Wenhan Luo, Lin Ma, Shenghua Gao. (2019). "Liquid Warping GAN: A Unified Framework for Human Motion Imitation, Appearance Transfer and Novel View Synthesis". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/202888704.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Wen Liu and Zhixin Piao and Jie Min and Wenhan Luo and Lin Ma and Shenghua Gao},
+  title = {Liquid Warping GAN: A Unified Framework for Human Motion Imitation, Appearance Transfer and Novel View Synthesis},
+  journal = {In Proceedings of the IEEE/CVF international conference on computer vision, pages 5904--5913},
+  year = {2019},
+  url = {https://www.semanticscholar.org/paper/202888704}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Liu et~al.(2019)Liu, Piao, Min, Luo, Ma, and Gao]{liu2019liquid}
+Wen Liu, Zhixin Piao, Jie Min, Wenhan Luo, Lin Ma, Shenghua Gao. (2019). \textit{Liquid Warping GAN: A Unified Framework for Human Motion Imitation, Appearance Transfer and Novel View Synthesis}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/202888704}.
+
+================================================================================
+REFERENCE: Controllable animation of fluid elements in still images
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2022'
+actual: '2021'
+- Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 3667--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/2112.03051
+
+RAW REFERENCE TEXT:
+Controllable animation of fluid elements in still images
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 3667--3676
+       Aniruddha Mahapatra, Kuldeep Kulkarni 2022
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/244909354
+
+CORRECTED REFERENCE (Plain Text):
+Aniruddha Mahapatra, K. Kulkarni. (2021). "Controllable Animation of Fluid Elements in Still Images". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/244909354.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Aniruddha Mahapatra and K. Kulkarni},
+  title = {Controllable Animation of Fluid Elements in Still Images},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 3667--3676},
+  year = {2021},
+  url = {https://www.semanticscholar.org/paper/244909354}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Mahapatra and Kulkarni(2022)]{mahapatra2022controllable}
+Aniruddha Mahapatra, K. Kulkarni. (2021). \textit{Controllable Animation of Fluid Elements in Still Images}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/244909354}.
+
+================================================================================
+REFERENCE: Nerf: Representing scenes as neural radiance fields for view synthesis
+Type: ❓ unverified
+Details: Reference could not be verified
+
+RAW REFERENCE TEXT:
+Nerf: Representing scenes as neural radiance fields for view synthesis
+       In Communications of the ACM, 65 (1): 99--106
+       Ben Mildenhall, Pratul P Srinivasan, Matthew Tancik, Jonathan T Barron, Ravi Ramamoorthi, Ren Ng 2021
+
+================================================================================
+REFERENCE: Semantic image synthesis with spatially-adaptive normalization
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'Proceedings of the IEEE conference on computer vision and pattern recognition, pages 2337--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/1903.07291
+
+RAW REFERENCE TEXT:
+Semantic image synthesis with spatially-adaptive normalization
+       In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages 2337--2346
+       Taesung Park, Ming-Yu Liu, Ting-Chun Wang, Jun-Yan Zhu 2019
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/81981856
+
+CORRECTED REFERENCE (Plain Text):
+Taesung Park, Ming-Yu Liu, Ting-Chun Wang, Jun-Yan Zhu. (2019). "Semantic Image Synthesis With Spatially-Adaptive Normalization". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/81981856.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Taesung Park and Ming-Yu Liu and Ting-Chun Wang and Jun-Yan Zhu},
+  title = {Semantic Image Synthesis With Spatially-Adaptive Normalization},
+  journal = {In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages 2337--2346},
+  year = {2019},
+  url = {https://www.semanticscholar.org/paper/81981856}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Park et~al.(2019)Park, Liu, Wang, and Zhu]{spade}
+Taesung Park, Ming-Yu Liu, Ting-Chun Wang, Jun-Yan Zhu. (2019). \textit{Semantic Image Synthesis With Spatially-Adaptive Normalization}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/81981856}.
+
+================================================================================
+REFERENCE: Deepmimic: Example-guided deep reinforcement learning of physics-based character skills
+Type: ❌ multiple
+Details: - Title mismatch:
+cited:  'Deepmimic: Example-guided deep reinforcement learning of physics-based character skills'
+actual: 'DeepMimic'
+- Author 4 mismatch:
+cited:  'Michiel Van de Panne'
+actual: 'M. V. D. Panne'
+- Reference could include arXiv URL: https://arxiv.org/abs/1804.02717
+
+RAW REFERENCE TEXT:
+Deepmimic: Example-guided deep reinforcement learning of physics-based character skills
+       In ACM Transactions On Graphics (TOG), 37 (4): 1--14
+       Xue Bin Peng, Pieter Abbeel, Sergey Levine, Michiel Van de Panne 2018
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/4714486
+
+CORRECTED REFERENCE (Plain Text):
+Xue Bin Peng, P. Abbeel, S. Levine, M. V. D. Panne. (2018). "DeepMimic". In ACM Transactions on Graphics. https://www.semanticscholar.org/paper/4714486.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Xue Bin Peng and P. Abbeel and S. Levine and M. V. D. Panne},
+  title = {DeepMimic},
+  journal = {ACM Transactions On Graphics (TOG), 37 (4): 1--14},
+  year = {2018},
+  url = {https://www.semanticscholar.org/paper/4714486}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Peng et~al.(2018)Peng, Abbeel, Levine, and Van~de Panne]{peng2018deepmimic}
+Xue Bin Peng, P. Abbeel, S. Levine, M. V. D. Panne. (2018). \textit{DeepMimic}. In \textit{ACM Transactions on Graphics}. \url{https://www.semanticscholar.org/paper/4714486}.
+
+================================================================================
+REFERENCE: Vision transformers for dense prediction
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2103.13413
+
+RAW REFERENCE TEXT:
+Vision transformers for dense prediction
+       In Proceedings of the IEEE/CVF international conference on computer vision, pages 12179--12188
+       Rene Ranftl, Alexey Bochkovskiy, Vladlen Koltun 2021
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/232352612
+
+CORRECTED REFERENCE (Plain Text):
+René Ranftl, Alexey Bochkovskiy, V. Koltun. (2021). "Vision Transformers for Dense Prediction". In IEEE International Conference on Computer Vision. https://www.semanticscholar.org/paper/232352612.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {René Ranftl and Alexey Bochkovskiy and V. Koltun},
+  title = {Vision Transformers for Dense Prediction},
+  journal = {In Proceedings of the IEEE/CVF international conference on computer vision, pages 12179--12188},
+  year = {2021},
+  url = {https://www.semanticscholar.org/paper/232352612}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Ranftl et~al.(2021)Ranftl, Bochkovskiy, and Koltun]{vit}
+René Ranftl, Alexey Bochkovskiy, V. Koltun. (2021). \textit{Vision Transformers for Dense Prediction}. In \textit{IEEE International Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/232352612}.
+
+================================================================================
+REFERENCE: Deep image spatial transformation for person image generation
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 7690--'
+actual: 'Computer Vision and Pattern Recognition'
+- Reference could include arXiv URL: https://arxiv.org/abs/2003.00696
+
+RAW REFERENCE TEXT:
+Deep image spatial transformation for person image generation
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 7690--7699
+       Yurui Ren, Xiaoming Yu, Junming Chen, Thomas H Li, Ge Li 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/211677243
+
+CORRECTED REFERENCE (Plain Text):
+Yurui Ren, Xiaoming Yu, Junming Chen, Thomas H. Li, Ge Li. (2020). "Deep Image Spatial Transformation for Person Image Generation". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/211677243.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Yurui Ren and Xiaoming Yu and Junming Chen and Thomas H. Li and Ge Li},
+  title = {Deep Image Spatial Transformation for Person Image Generation},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 7690--7699},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/211677243}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Ren et~al.(2020)Ren, Yu, Chen, Li, and Li]{ren2020deep}
+Yurui Ren, Xiaoming Yu, Junming Chen, Thomas H. Li, Ge Li. (2020). \textit{Deep Image Spatial Transformation for Person Image Generation}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/211677243}.
+
+================================================================================
+REFERENCE: Make-it-4d: Synthesizing a consistent long-term dynamic scene video from a single image
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2308.10257
+
+RAW REFERENCE TEXT:
+Make-it-4d: Synthesizing a consistent long-term dynamic scene video from a single image
+       In Proceedings of the 31st ACM International Conference on Multimedia, pages 8167--8175
+       Liao Shen, Xingyi Li, Huiqiang Sun, Juewen Peng, Ke Xian, Zhiguo Cao, Guosheng Lin 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/261049238
+
+CORRECTED REFERENCE (Plain Text):
+Liao Shen, Xingyi Li, Huiqiang Sun, Juewen Peng, Ke Xian, Zhiguo Cao, Guo-Shing Lin. (2023). "Make-It-4D: Synthesizing a Consistent Long-Term Dynamic Scene Video from a Single Image". In ACM Multimedia. https://www.semanticscholar.org/paper/261049238.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Liao Shen and Xingyi Li and Huiqiang Sun and Juewen Peng and Ke Xian and Zhiguo Cao and Guo-Shing Lin},
+  title = {Make-It-4D: Synthesizing a Consistent Long-Term Dynamic Scene Video from a Single Image},
+  journal = {In Proceedings of the 31st ACM International Conference on Multimedia, pages 8167--8175},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/261049238}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Shen et~al.(2023)Shen, Li, Sun, Peng, Xian, Cao, and Lin]{make-it-4d}
+Liao Shen, Xingyi Li, Huiqiang Sun, Juewen Peng, Ke Xian, Zhiguo Cao, Guo-Shing Lin. (2023). \textit{Make-It-4D: Synthesizing a Consistent Long-Term Dynamic Scene Video from a Single Image}. In \textit{ACM Multimedia}. \url{https://www.semanticscholar.org/paper/261049238}.
+
+================================================================================
+REFERENCE: 3d photography using context-aware layered depth inpainting
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2004.04727
+
+RAW REFERENCE TEXT:
+3d photography using context-aware layered depth inpainting
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)
+       Meng-Li Shih, Shih-Yang Su, Johannes Kopf, Jia-Bin Huang 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/215548442
+
+CORRECTED REFERENCE (Plain Text):
+Meng-Li Shih, Shih-Yang Su, J. Kopf, Jia-Bin Huang. (2020). "3D Photography Using Context-Aware Layered Depth Inpainting". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/215548442.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Meng-Li Shih and Shih-Yang Su and J. Kopf and Jia-Bin Huang},
+  title = {3D Photography Using Context-Aware Layered Depth Inpainting},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/215548442}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Shih et~al.(2020)Shih, Su, Kopf, and Huang]{3d-photo}
+Meng-Li Shih, Shih-Yang Su, J. Kopf, Jia-Bin Huang. (2020). \textit{3D Photography Using Context-Aware Layered Depth Inpainting}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/215548442}.
+
+================================================================================
+REFERENCE: First order motion model for image animation
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2019'
+actual: '2020'
+- Reference could include arXiv URL: https://arxiv.org/abs/2003.00196
+
+RAW REFERENCE TEXT:
+First order motion model for image animation
+       In Advances in neural information processing systems, 32
+       Aliaksandr Siarohin, Stephane Lathuiliere, Sergey Tulyakov, Elisa Ricci, Nicu Sebe 2019
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/202767986
+
+CORRECTED REFERENCE (Plain Text):
+Aliaksandr Siarohin, Stéphane Lathuilière, S. Tulyakov, E. Ricci, N. Sebe. (2020). "First Order Motion Model for Image Animation". In Neural Information Processing Systems. https://www.semanticscholar.org/paper/202767986.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Aliaksandr Siarohin and Stéphane Lathuilière and S. Tulyakov and E. Ricci and N. Sebe},
+  title = {First Order Motion Model for Image Animation},
+  journal = {Advances in neural information processing systems, 32},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/202767986}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Siarohin et~al.(2019)Siarohin, Lathuili{\`e}re, Tulyakov, Ricci, and Sebe]{siarohin2019first}
+Aliaksandr Siarohin, Stéphane Lathuilière, S. Tulyakov, E. Ricci, N. Sebe. (2020). \textit{First Order Motion Model for Image Animation}. In \textit{Neural Information Processing Systems}. \url{https://www.semanticscholar.org/paper/202767986}.
+
+================================================================================
+REFERENCE: Very deep convolutional networks for large-scale image recognition
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2015'
+actual: '2014'
+- Reference could include arXiv URL: https://arxiv.org/abs/1409.1556
+
+RAW REFERENCE TEXT:
+Very deep convolutional networks for large-scale image recognition
+       In 3rd International Conference on Learning Representations, ICLR
+       Karen Simonyan, Andrew Zisserman 2015
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/14124313
+
+CORRECTED REFERENCE (Plain Text):
+K. Simonyan, Andrew Zisserman. (2014). "Very Deep Convolutional Networks for Large-Scale Image Recognition". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/14124313.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {K. Simonyan and Andrew Zisserman},
+  title = {Very Deep Convolutional Networks for Large-Scale Image Recognition},
+  journal = {In 3rd International Conference on Learning Representations, ICLR},
+  year = {2014},
+  url = {https://www.semanticscholar.org/paper/14124313}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Simonyan and Zisserman(2015)]{vgg}
+K. Simonyan, Andrew Zisserman. (2014). \textit{Very Deep Convolutional Networks for Large-Scale Image Recognition}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/14124313}.
+
+================================================================================
+REFERENCE: Make-a-video: Text-to-video generation without text-video data
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2209.1'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Make-a-video: Text-to-video generation without text-video data
+       In arXiv preprint arXiv:2209.14792
+       Uriel Singer, Adam Polyak, Thomas Hayes, Xi Yin, Jie An, Songyang Zhang, Qiyuan Hu, Harry Yang, Oron Ashual, Oran Gafni, et al 2022
+       https://arxiv.org/abs/2209.14792
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/252595919
+
+CORRECTED REFERENCE (Plain Text):
+Uriel Singer, Adam Polyak, Thomas Hayes, Xiaoyue Yin, Jie An, Songyang Zhang, Qiyuan Hu, Harry Yang, Oron Ashual, Oran Gafni, Devi Parikh, Sonal Gupta, Yaniv Taigman. (2022). "Make-A-Video: Text-to-Video Generation without Text-Video Data". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/252595919.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Uriel Singer and Adam Polyak and Thomas Hayes and Xiaoyue Yin and Jie An and Songyang Zhang and Qiyuan Hu and Harry Yang and Oron Ashual and Oran Gafni and Devi Parikh and Sonal Gupta and Yaniv Taigman},
+  title = {Make-A-Video: Text-to-Video Generation without Text-Video Data},
+  journal = {arXiv preprint arXiv:2209.14792},
+  year = {2022},
+  url = {https://www.semanticscholar.org/paper/252595919}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Singer et~al.(2022)Singer, Polyak, Hayes, Yin, An, Zhang, Hu, Yang, Ashual, Gafni, et~al.]{singer2022make}
+Uriel Singer, Adam Polyak, Thomas Hayes, Xiaoyue Yin, Jie An, Songyang Zhang, Qiyuan Hu, Harry Yang, Oron Ashual, Oran Gafni, Devi Parikh, Sonal Gupta, Yaniv Taigman. (2022). \textit{Make-A-Video: Text-to-Video Generation without Text-Video Data}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/252595919}.
+
+================================================================================
+REFERENCE: Raft: Recurrent all-pairs field transforms for optical flow
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/2003.12039
+
+RAW REFERENCE TEXT:
+Raft: Recurrent all-pairs field transforms for optical flow
+       In Computer Vision--ECCV
+       Zachary Teed, Jia Deng 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/214667893
+
+CORRECTED REFERENCE (Plain Text):
+Zachary Teed, Jia Deng. (2020). "RAFT: Recurrent All-Pairs Field Transforms for Optical Flow". In European Conference on Computer Vision. https://www.semanticscholar.org/paper/214667893.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Zachary Teed and Jia Deng},
+  title = {RAFT: Recurrent All-Pairs Field Transforms for Optical Flow},
+  journal = {In Computer Vision--ECCV},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/214667893}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Teed and Deng(2020)]{raft}
+Zachary Teed, Jia Deng. (2020). \textit{RAFT: Recurrent All-Pairs Field Transforms for Optical Flow}. In \textit{European Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/214667893}.
+
+================================================================================
+REFERENCE: Accelerating eulerian fluid simulation with convolutional networks
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2017'
+actual: '2016'
+- Reference could include arXiv URL: https://arxiv.org/abs/1607.03597
+
+RAW REFERENCE TEXT:
+Accelerating eulerian fluid simulation with convolutional networks
+       In International conference on machine learning, pages 3424--3433. PMLR
+       Jonathan Tompson, Kristofer Schlachter, Pablo Sprechmann, Ken Perlin 2017
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/41947
+
+CORRECTED REFERENCE (Plain Text):
+Jonathan Tompson, Kristofer Schlachter, P. Sprechmann, K. Perlin. (2016). "Accelerating Eulerian Fluid Simulation With Convolutional Networks". In International Conference on Machine Learning. https://www.semanticscholar.org/paper/41947.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Jonathan Tompson and Kristofer Schlachter and P. Sprechmann and K. Perlin},
+  title = {Accelerating Eulerian Fluid Simulation With Convolutional Networks},
+  journal = {In International conference on machine learning, pages 3424--3433. PMLR},
+  year = {2016},
+  url = {https://www.semanticscholar.org/paper/41947}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Tompson et~al.(2017)Tompson, Schlachter, Sprechmann, and Perlin]{tompson2017accelerating}
+Jonathan Tompson, Kristofer Schlachter, P. Sprechmann, K. Perlin. (2016). \textit{Accelerating Eulerian Fluid Simulation With Convolutional Networks}. In \textit{International Conference on Machine Learning}. \url{https://www.semanticscholar.org/paper/41947}.
+
+================================================================================
+REFERENCE: Learning incompressible fluid dynamics from scratch--towards fast, differentiable fluid models that generalize
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2006.0'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Learning incompressible fluid dynamics from scratch--towards fast, differentiable fluid models that generalize
+       In arXiv preprint arXiv:2006.08762
+       Nils Wandel, Michael Weinmann, Reinhard Klein 2020
+       https://arxiv.org/abs/2006.08762
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/227261682
+
+CORRECTED REFERENCE (Plain Text):
+Nils Wandel, Michael Weinmann, R. Klein. (2020). "Learning Incompressible Fluid Dynamics from Scratch - Towards Fast, Differentiable Fluid Models that Generalize". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/227261682.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Nils Wandel and Michael Weinmann and R. Klein},
+  title = {Learning Incompressible Fluid Dynamics from Scratch - Towards Fast, Differentiable Fluid Models that Generalize},
+  journal = {arXiv preprint arXiv:2006.08762},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/227261682}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Wandel et~al.(2020)Wandel, Weinmann, and Klein]{wandel2020learning}
+Nils Wandel, Michael Weinmann, R. Klein. (2020). \textit{Learning Incompressible Fluid Dynamics from Scratch - Towards Fast, Differentiable Fluid Models that Generalize}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/227261682}.
+
+================================================================================
+REFERENCE: Teaching the incompressible navier--stokes equations to fast neural surrogate models in three dimensions
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2021'
+actual: '2020'
+- Reference could include arXiv URL: https://arxiv.org/abs/2012.11893
+
+RAW REFERENCE TEXT:
+Teaching the incompressible navier--stokes equations to fast neural surrogate models in three dimensions
+       In Physics of Fluids, 33 (4)
+       Nils Wandel, Michael Weinmann, Reinhard Klein 2021
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/234778263
+
+CORRECTED REFERENCE (Plain Text):
+Nils Wandel, Michael Weinmann, R. Klein. (2020). "Teaching the incompressible Navier–Stokes equations to fast neural surrogate models in three dimensions". In The Physics of Fluids. https://www.semanticscholar.org/paper/234778263.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Nils Wandel and Michael Weinmann and R. Klein},
+  title = {Teaching the incompressible Navier–Stokes equations to fast neural surrogate models in three dimensions},
+  journal = {Physics of Fluids, 33 (4)},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/234778263}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Wandel et~al.(2021)Wandel, Weinmann, and Klein]{wandel2021teaching}
+Nils Wandel, Michael Weinmann, R. Klein. (2020). \textit{Teaching the incompressible Navier–Stokes equations to fast neural surrogate models in three dimensions}. In \textit{The Physics of Fluids}. \url{https://www.semanticscholar.org/paper/234778263}.
+
+================================================================================
+REFERENCE: Sv4d: Dynamic 3d content generation with multi-frame and multi-view consistency
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2407.1'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Sv4d: Dynamic 3d content generation with multi-frame and multi-view consistency
+       In arXiv preprint arXiv:2407.17470
+       Yiming Xie, Chun-Han Yao, Vikram Voleti, Huaizu Jiang, Varun Jampani 2024
+       https://arxiv.org/abs/2407.17470
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/271404474
+
+CORRECTED REFERENCE (Plain Text):
+Yiming Xie, Chun-Han Yao, Vikram S. Voleti, Huaizu Jiang, Varun Jampani. (2024). "SV4D: Dynamic 3D Content Generation with Multi-Frame and Multi-View Consistency". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/271404474.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Yiming Xie and Chun-Han Yao and Vikram S. Voleti and Huaizu Jiang and Varun Jampani},
+  title = {SV4D: Dynamic 3D Content Generation with Multi-Frame and Multi-View Consistency},
+  journal = {arXiv preprint arXiv:2407.17470},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/271404474}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Xie et~al.(2024)Xie, Yao, Voleti, Jiang, and Jampani]{xie2024sv4d}
+Yiming Xie, Chun-Han Yao, Vikram S. Voleti, Huaizu Jiang, Varun Jampani. (2024). \textit{SV4D: Dynamic 3D Content Generation with Multi-Frame and Multi-View Consistency}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/271404474}.
+
+================================================================================
+REFERENCE: Motion dreamer: Realizing physically coherent video generation through scene-aware motion reasoning
+Type: ❌ arxiv_id
+Details: Incorrect ArXiv ID: ArXiv ID 2412.00547 points to 'Motion Dreamer: Boundary Conditional Motion Reasoning for Physically Coherent Video Generation'
+
+RAW REFERENCE TEXT:
+Motion dreamer: Realizing physically coherent video generation through scene-aware motion reasoning
+       In arXiv preprint arXiv:2412.00547
+       Tianshuo Xu, Zhifei Chen, Leyi Wu, Hao Lu, Yuying Chen, Lihui Jiang, Bingbing Liu, Yingcong Chen 2024
+       https://arxiv.org/abs/2412.00547
+
+CORRECTED REFERENCE (Plain Text):
+Tianshuo Xu, Zhifei Chen, Leyi Wu, Hao Lu, Yuying Chen, Lihui Jiang, Bingbing Liu, Yingcong Chen. (2024). "Motion Dreamer: Realizing Physically Coherent Video Generation through Scene-Aware Motion Reasoning". In arXiv.org. https://www.semanticscholar.org/paper/efc70e1a7102efc38205310b0a2c12783f3e36cd.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Tianshuo Xu and Zhifei Chen and Leyi Wu and Hao Lu and Yuying Chen and Lihui Jiang and Bingbing Liu and Yingcong Chen},
+  title = {Motion Dreamer: Realizing Physically Coherent Video Generation through Scene-Aware Motion Reasoning},
+  journal = {arXiv preprint arXiv:2412.00547},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/efc70e1a7102efc38205310b0a2c12783f3e36cd}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Xu et~al.(2024)Xu, Chen, Wu, Lu, Chen, Jiang, Liu, and Chen]{xu2024motion}
+Tianshuo Xu, Zhifei Chen, Leyi Wu, Hao Lu, Yuying Chen, Lihui Jiang, Bingbing Liu, Yingcong Chen. (2024). \textit{Motion Dreamer: Realizing Physically Coherent Video Generation through Scene-Aware Motion Reasoning}. In \textit{arXiv.org}. \url{https://www.semanticscholar.org/paper/efc70e1a7102efc38205310b0a2c12783f3e36cd}.
+
+================================================================================
+REFERENCE: Cogvideox: Text-to-video diffusion models with an expert transformer
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'arXiv preprint arXiv:2408.0'
+actual: 'International Conference on Learning Representations'
+
+RAW REFERENCE TEXT:
+Cogvideox: Text-to-video diffusion models with an expert transformer
+       In arXiv preprint arXiv:2408.06072
+       Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiaohan Zhang, Guanyu Feng, et al 2024
+       https://arxiv.org/abs/2408.06072
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/271855655
+
+CORRECTED REFERENCE (Plain Text):
+Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiaohan Zhang, Guanyu Feng, Da Yin, Xiaotao Gu, Yuxuan Zhang, Weihan Wang, Yean Cheng, Ting Liu, Bin Xu, Yuxiao Dong, Jie Tang. (2024). "CogVideoX: Text-to-Video Diffusion Models with An Expert Transformer". In International Conference on Learning Representations. https://www.semanticscholar.org/paper/271855655.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Zhuoyi Yang and Jiayan Teng and Wendi Zheng and Ming Ding and Shiyu Huang and Jiazheng Xu and Yuanming Yang and Wenyi Hong and Xiaohan Zhang and Guanyu Feng and Da Yin and Xiaotao Gu and Yuxuan Zhang and Weihan Wang and Yean Cheng and Ting Liu and Bin Xu and Yuxiao Dong and Jie Tang},
+  title = {CogVideoX: Text-to-Video Diffusion Models with An Expert Transformer},
+  journal = {arXiv preprint arXiv:2408.06072},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/271855655}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Yang et~al.(2024)Yang, Teng, Zheng, Ding, Huang, Xu, Yang, Hong, Zhang, Feng, et~al.]{yang2024cogvideox}
+Zhuoyi Yang, Jiayan Teng, Wendi Zheng, Ming Ding, Shiyu Huang, Jiazheng Xu, Yuanming Yang, Wenyi Hong, Xiaohan Zhang, Guanyu Feng, Da Yin, Xiaotao Gu, Yuxuan Zhang, Weihan Wang, Yean Cheng, Ting Liu, Bin Xu, Yuxiao Dong, Jie Tang. (2024). \textit{CogVideoX: Text-to-Video Diffusion Models with An Expert Transformer}. In \textit{International Conference on Learning Representations}. \url{https://www.semanticscholar.org/paper/271855655}.
+
+================================================================================
+REFERENCE: Inferring hybrid neural fluid fields from videos
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'NeurIPS'
+actual: 'Neural Information Processing Systems'
+- Reference could include arXiv URL: https://arxiv.org/abs/2312.06561
+
+RAW REFERENCE TEXT:
+Inferring hybrid neural fluid fields from videos
+       In NeurIPS
+       Hong-Xing Yu, Yang Zheng, Yuan Gao, Yitong Deng, Bo Zhu, Jiajun Wu 2023
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/266163497
+
+CORRECTED REFERENCE (Plain Text):
+Hong-Xing Yu, Yang Zheng, Yuan Gao, Yitong Deng, Bo Zhu, Jiajun Wu. (2023). "Inferring Hybrid Neural Fluid Fields from Videos". In Neural Information Processing Systems. https://www.semanticscholar.org/paper/266163497.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Hong-Xing Yu and Yang Zheng and Yuan Gao and Yitong Deng and Bo Zhu and Jiajun Wu},
+  title = {Inferring Hybrid Neural Fluid Fields from Videos},
+  journal = {In NeurIPS},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/266163497}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Yu et~al.(2023)Yu, Zheng, Gao, Deng, Zhu, and Wu]{yu2023hyfluid}
+Hong-Xing Yu, Yang Zheng, Yuan Gao, Yitong Deng, Bo Zhu, Jiajun Wu. (2023). \textit{Inferring Hybrid Neural Fluid Fields from Videos}. In \textit{Neural Information Processing Systems}. \url{https://www.semanticscholar.org/paper/266163497}.
+
+================================================================================
+REFERENCE: Wonderjourney: Going from anywhere to everywhere
+Type: ❌ multiple
+Details: - Year mismatch:
+cited:  '2024'
+actual: '2023'
+- Reference could include arXiv URL: https://arxiv.org/abs/2312.03884
+
+RAW REFERENCE TEXT:
+Wonderjourney: Going from anywhere to everywhere
+       In CVPR
+       Hong-Xing Yu, Haoyi Duan, Junhwa Hur, Kyle Sargent, Michael Rubinstein, William T. Freeman, Forrester Cole, Deqing Sun, Noah Snavely, Jiajun Wu, Charles Herrmann 2024
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/266044186
+
+CORRECTED REFERENCE (Plain Text):
+Hong-Xing Yu, Haoyi Duan, Junhwa Hur, Kyle Sargent, Michael Rubinstein, William T. Freeman, Forrester Cole, Deqing Sun, Noah Snavely, Jiajun Wu, Charles Herrmann. (2023). "WonderJourney: Going from Anywhere to Everywhere". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/266044186.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Hong-Xing Yu and Haoyi Duan and Junhwa Hur and Kyle Sargent and Michael Rubinstein and William T. Freeman and Forrester Cole and Deqing Sun and Noah Snavely and Jiajun Wu and Charles Herrmann},
+  title = {WonderJourney: Going from Anywhere to Everywhere},
+  journal = {In CVPR},
+  year = {2023},
+  url = {https://www.semanticscholar.org/paper/266044186}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Yu et~al.(2024{\natexlab{a}})Yu, Duan, Hur, Sargent, Rubinstein, Freeman, Cole, Sun, Snavely, Wu, and Herrmann]{yu2024wonderjourney}
+Hong-Xing Yu, Haoyi Duan, Junhwa Hur, Kyle Sargent, Michael Rubinstein, William T. Freeman, Forrester Cole, Deqing Sun, Noah Snavely, Jiajun Wu, Charles Herrmann. (2023). \textit{WonderJourney: Going from Anywhere to Everywhere}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/266044186}.
+
+================================================================================
+REFERENCE: Tomofluid: Reconstructing dynamic fluid from sparse view videos
+Type: ⚠️ venue
+Details: Venue mismatch:
+cited:  'Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages 1870--'
+actual: 'Computer Vision and Pattern Recognition'
+
+RAW REFERENCE TEXT:
+Tomofluid: Reconstructing dynamic fluid from sparse view videos
+       In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 1870--1879
+       Guangming Zang, Ramzi Idoughi, Congli Wang, Anthony Bennett, Jianguo Du, Scott Skeen, William L Roberts, Peter Wonka, Wolfgang Heidrich 2020
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/214810985
+
+CORRECTED REFERENCE (Plain Text):
+Guangming Zang, R. Idoughi, Congli Wang, A. Bennett, Jianguo Du, S. Skeen, W. Roberts, Peter Wonka, W. Heidrich, 1KAUST 2Sandia. (2020). "TomoFluid: Reconstructing Dynamic Fluid From Sparse View Videos". In Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/214810985.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Guangming Zang and R. Idoughi and Congli Wang and A. Bennett and Jianguo Du and S. Skeen and W. Roberts and Peter Wonka and W. Heidrich and 1KAUST 2Sandia},
+  title = {TomoFluid: Reconstructing Dynamic Fluid From Sparse View Videos},
+  journal = {In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages 1870--1879},
+  year = {2020},
+  url = {https://www.semanticscholar.org/paper/214810985}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Zang et~al.(2020)Zang, Idoughi, Wang, Bennett, Du, Skeen, Roberts, Wonka, and Heidrich]{zang2020tomofluid}
+Guangming Zang, R. Idoughi, Congli Wang, A. Bennett, Jianguo Du, S. Skeen, W. Roberts, Peter Wonka, W. Heidrich, 1KAUST 2Sandia. (2020). \textit{TomoFluid: Reconstructing Dynamic Fluid From Sparse View Videos}. In \textit{Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/214810985}.
+
+================================================================================
+REFERENCE: The unreasonable effectiveness of deep features as a perceptual metric
+Type: ❌ url
+Details: Reference could include arXiv URL: https://arxiv.org/abs/1801.03924
+
+RAW REFERENCE TEXT:
+The unreasonable effectiveness of deep features as a perceptual metric
+       In CVPR
+       Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, Oliver Wang 2018
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/4766599
+
+CORRECTED REFERENCE (Plain Text):
+Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, Oliver Wang. (2018). "The Unreasonable Effectiveness of Deep Features as a Perceptual Metric". In 2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition. https://www.semanticscholar.org/paper/4766599.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Richard Zhang and Phillip Isola and Alexei A. Efros and Eli Shechtman and Oliver Wang},
+  title = {The Unreasonable Effectiveness of Deep Features as a Perceptual Metric},
+  journal = {In CVPR},
+  year = {2018},
+  url = {https://www.semanticscholar.org/paper/4766599}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Zhang et~al.(2018)Zhang, Isola, Efros, Shechtman, and Wang]{lpips}
+Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, Oliver Wang. (2018). \textit{The Unreasonable Effectiveness of Deep Features as a Perceptual Metric}. In \textit{2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition}. \url{https://www.semanticscholar.org/paper/4766599}.
+
+================================================================================
+REFERENCE: Physdreamer: Physics-based interaction with 3d objects via video generation
+Type: ❌ multiple
+Details: - Venue mismatch:
+cited:  'European Conference on Computer Vision, pages 388--406. Springer'
+actual: 'European Conference on Computer Vision'
+- Reference could include arXiv URL: https://arxiv.org/abs/2404.13026
+
+RAW REFERENCE TEXT:
+Physdreamer: Physics-based interaction with 3d objects via video generation
+       In European Conference on Computer Vision, pages 388--406. Springer
+       Tianyuan Zhang, Hong-Xing Yu, Rundi Wu, Brandon Y Feng, Changxi Zheng, Noah Snavely, Jiajun Wu, William T Freeman 2024
+
+VERIFIED URL:
+  https://www.semanticscholar.org/paper/269282774
+
+CORRECTED REFERENCE (Plain Text):
+Tianyuan Zhang, Hong-Xing Yu, Rundi Wu, Brandon Y. Feng, Changxi Zheng, Noah Snavely, Jiajun Wu, William T. Freeman. (2024). "PhysDreamer: Physics-Based Interaction with 3D Objects via Video Generation". In European Conference on Computer Vision. https://www.semanticscholar.org/paper/269282774.
+
+CORRECTED REFERENCE (BibTeX):
+@article{unknown,
+  author = {Tianyuan Zhang and Hong-Xing Yu and Rundi Wu and Brandon Y. Feng and Changxi Zheng and Noah Snavely and Jiajun Wu and William T. Freeman},
+  title = {PhysDreamer: Physics-Based Interaction with 3D Objects via Video Generation},
+  journal = {In European Conference on Computer Vision, pages 388--406. Springer},
+  year = {2024},
+  url = {https://www.semanticscholar.org/paper/269282774}
+}
+
+CORRECTED REFERENCE (LaTeX/Biblatex):
+\bibitem[Zhang et~al.(2024)Zhang, Yu, Wu, Feng, Zheng, Snavely, Wu, and Freeman]{zhang2024physdreamer}
+Tianyuan Zhang, Hong-Xing Yu, Rundi Wu, Brandon Y. Feng, Changxi Zheng, Noah Snavely, Jiajun Wu, William T. Freeman. (2024). \textit{PhysDreamer: Physics-Based Interaction with 3D Objects via Video Generation}. In \textit{European Conference on Computer Vision}. \url{https://www.semanticscholar.org/paper/269282774}.
+
+================================================================================
