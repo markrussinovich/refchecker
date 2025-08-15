@@ -385,7 +385,6 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
             'authors': authors,
             'year': year,
             'journal': journal,
-            'venue': journal,  # Add venue field for compatibility
             'doi': doi,
             'url': publication_url if publication_url else '',
             'type': ref_type,
