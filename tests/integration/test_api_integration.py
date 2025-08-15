@@ -575,11 +575,11 @@ class TestSemanticScholarApiUrlRegression:
             
             if not (has_arxiv_url or has_arxiv_doi):
                 errors.append({
-                    'warning_type': 'venue',
-                    'warning_details': f"Reference should include arXiv URL: {arxiv_url}",
+                    'info_type': 'url',
+                    'info_details': f"Reference could include arXiv URL: {arxiv_url}",
                     'ref_url_correct': arxiv_url
                 })
         
-        # Should NOT have any arXiv URL warnings since we have a valid DOI URL
-        arxiv_warnings = [e for e in errors if 'arXiv URL' in e.get('warning_details', '')]
-        assert len(arxiv_warnings) == 0, f"Should not warn about arXiv URL when DOI URL is present, got: {arxiv_warnings}"
+        # Should NOT have any arXiv URL info messages since we have a valid DOI URL
+        arxiv_info = [e for e in errors if 'arXiv URL' in e.get('info_details', '')]
+        assert len(arxiv_info) == 0, f"Should not inform about arXiv URL when DOI URL is present, got: {arxiv_info}"

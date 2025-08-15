@@ -2033,6 +2033,9 @@ class ArxivReferenceChecker:
                     elif 'warning_type' in error:
                         formatted_error['warning_type'] = error['warning_type']
                         formatted_error['warning_details'] = error['warning_details']
+                    elif 'info_type' in error:
+                        formatted_error['info_type'] = error['info_type']
+                        formatted_error['info_details'] = error['info_details']
                     
                     # Add correct information based on error type
                     if error.get('error_type') == 'author':
@@ -2042,6 +2045,8 @@ class ArxivReferenceChecker:
                     elif error.get('error_type') == 'doi':
                         from utils.doi_utils import construct_doi_url
                         formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
+                    elif error.get('info_type') == 'url':
+                        formatted_error['ref_url_correct'] = error.get('ref_url_correct', '')
                     
                     formatted_errors.append(formatted_error)
                 
@@ -2153,17 +2158,22 @@ class ArxivReferenceChecker:
             for error in errors:
                 formatted_error = {}
                 
-                # Handle error_type and warning_type properly
+                # Handle error_type, warning_type, and info_type properly
                 if 'error_type' in error:
                     formatted_error['error_type'] = error['error_type']
                     formatted_error['error_details'] = error['error_details']
                 elif 'warning_type' in error:
                     formatted_error['warning_type'] = error['warning_type']
                     formatted_error['warning_details'] = error['warning_details']
+                elif 'info_type' in error:
+                    formatted_error['info_type'] = error['info_type']
+                    formatted_error['info_details'] = error['info_details']
                 
                 # Add correct information based on error type
                 if error.get('warning_type') == 'year':
                     formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
+                elif error.get('info_type') == 'url':
+                    formatted_error['ref_url_correct'] = error.get('ref_url_correct', '')
                 
                 formatted_errors.append(formatted_error)
             
@@ -2214,13 +2224,16 @@ class ArxivReferenceChecker:
             for error in errors:
                 formatted_error = {}
                 
-                # Handle error_type and warning_type properly
+                # Handle error_type, warning_type, and info_type properly
                 if 'error_type' in error:
                     formatted_error['error_type'] = error['error_type']
                     formatted_error['error_details'] = error['error_details']
                 elif 'warning_type' in error:
                     formatted_error['warning_type'] = error['warning_type']
                     formatted_error['warning_details'] = error['warning_details']
+                elif 'info_type' in error:
+                    formatted_error['info_type'] = error['info_type']
+                    formatted_error['info_details'] = error['info_details']
                 
                 formatted_errors.append(formatted_error)
             
@@ -2335,13 +2348,16 @@ class ArxivReferenceChecker:
             logger.debug(f"DEBUG: Error {i}: {error}")
             formatted_error = {}
             
-            # Handle error_type and warning_type properly
+            # Handle error_type, warning_type, and info_type properly
             if 'error_type' in error:
                 formatted_error['error_type'] = error['error_type']
                 formatted_error['error_details'] = error['error_details']
             elif 'warning_type' in error:
                 formatted_error['warning_type'] = error['warning_type']
                 formatted_error['warning_details'] = error['warning_details']
+            elif 'info_type' in error:
+                formatted_error['info_type'] = error['info_type']
+                formatted_error['info_details'] = error['info_details']
             
             # Add correct information based on error type
             if error.get('error_type') == 'author':
@@ -2657,8 +2673,8 @@ class ArxivReferenceChecker:
         else:
             # Single error - handle as before
             error = errors[0]
-            error_type = error.get('error_type') or error.get('warning_type', 'unknown')
-            error_details = error.get('error_details') or error.get('warning_details', '')
+            error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type', 'unknown')
+            error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', '')
             
             error_entry = {
                 # Source paper metadata
@@ -2775,7 +2791,9 @@ class ArxivReferenceChecker:
                         emoji = "❓"
                     elif error_type in ['year', 'venue']:  # Warning types
                         emoji = "⚠️"
-                    else:  # Error types (title, author, doi, url, multiple, etc.)
+                    elif error_type == 'url':  # Info type (ArXiv URL suggestion)
+                        emoji = "ℹ️"
+                    else:  # Error types (title, author, doi, multiple, etc.)
                         emoji = "❌"
                     
                     f.write(f"Type: {emoji} {error_entry['error_type']}\n")
@@ -2906,8 +2924,10 @@ class ArxivReferenceChecker:
         self.total_references_processed = 0
         self.papers_with_errors = 0
         self.papers_with_warnings = 0
+        self.papers_with_info = 0
         self.total_errors_found = 0
         self.total_warnings_found = 0
+        self.total_info_found = 0
         self.total_arxiv_refs = 0
         self.total_non_arxiv_refs = 0
         self.total_other_refs = 0
@@ -3066,18 +3086,21 @@ class ArxivReferenceChecker:
                         # Separate actual errors from warnings for paper classification
                         actual_errors = [e for e in paper_errors if 'error_type' in e and e['error_type'] != 'unverified']
                         warnings_only = [e for e in paper_errors if 'warning_type' in e]
+                        info_only = [e for e in paper_errors if 'info_type' in e]
                         
                         if self.single_paper_mode:
                             # Single paper mode - show simple summary
-                            if actual_errors or warnings_only:
+                            if actual_errors or warnings_only or info_only:
                                 summary_parts = []
                                 if actual_errors:
                                     summary_parts.append(f"{len(actual_errors)} errors")
                                 if warnings_only:
                                     summary_parts.append(f"{len(warnings_only)} warnings")
+                                if info_only:
+                                    summary_parts.append(f"{len(info_only)} information")
                         else:
                             # Multi-paper mode - track paper statistics
-                            if actual_errors or warnings_only:
+                            if actual_errors or warnings_only or info_only:
                                 summary_parts = []
                                 if actual_errors:
                                     summary_parts.append(f"{len(actual_errors)} errors")
@@ -3086,6 +3109,10 @@ class ArxivReferenceChecker:
                                     summary_parts.append(f"{len(warnings_only)} warnings")
                                     # Count as paper with warnings if it has warnings (regardless of errors)
                                     self.papers_with_warnings += 1
+                                if info_only:
+                                    summary_parts.append(f"{len(info_only)} information")
+                                    # Count as paper with info if it has info messages (regardless of errors/warnings)
+                                    self.papers_with_info += 1
 
                 except Exception as e:
                     logger.error(f"Error processing paper {paper_id}: {str(e)}")
@@ -3127,9 +3154,11 @@ class ArxivReferenceChecker:
                     print(f"❌ Total errors: {self.total_errors_found}")
                 if self.total_warnings_found > 0:
                     print(f"⚠️  Total warnings: {self.total_warnings_found}")
+                if self.total_info_found > 0:
+                    print(f"ℹ️  Total information: {self.total_info_found}")
                 if self.total_unverified_refs > 0:
                     print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
-                if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_unverified_refs == 0:
+                if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 
                 # Show warning if unreliable extraction was used and there are many errors
@@ -3149,6 +3178,8 @@ class ArxivReferenceChecker:
                 print(f"         Total errors:   {self.total_errors_found}")
                 print(f"⚠️  Papers with warnings: {self.papers_with_warnings}")
                 print(f"         Total warnings: {self.total_warnings_found}")
+                print(f"ℹ️  Papers with information: {self.papers_with_info}")
+                print(f"         Total information: {self.total_info_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
                 
                 # Show warning if unreliable extraction was used and there are many errors
@@ -5348,7 +5379,7 @@ class ArxivReferenceChecker:
         # If errors found, add to dataset and optionally print details
         if errors:
             # Check if there's an unverified error among the errors
-            has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' for e in errors)
+            has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in errors)
             
             if has_unverified_error:
                 self.total_unverified_refs += 1
@@ -5358,11 +5389,13 @@ class ArxivReferenceChecker:
             self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
             paper_errors.extend(errors)
             
-            # Count errors vs warnings
+            # Count errors vs warnings vs info
             error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
             warning_count = sum(1 for e in errors if 'warning_type' in e)
+            info_count = sum(1 for e in errors if 'info_type' in e)
             self.total_errors_found += error_count
             self.total_warnings_found += warning_count
+            self.total_info_found += info_count
             
             # Display all non-unverified errors and warnings
             self._display_non_unverified_errors(errors, debug_mode, print_output)
@@ -5509,9 +5542,9 @@ class ArxivReferenceChecker:
         """Display all non-unverified errors and warnings"""
         if not debug_mode and print_output:
             for error in errors:
-                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified':
-                    error_type = error.get('error_type') or error.get('warning_type')
-                    error_details = error.get('error_details') or error.get('warning_details', 'Unknown error')
+                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified' and error.get('info_type') != 'unverified':
+                    error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
+                    error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
                     
                     from utils.error_utils import print_labeled_multiline
 
@@ -5519,8 +5552,10 @@ class ArxivReferenceChecker:
                         print(f"      ❌ {error_details}")
                     elif 'error_type' in error:
                         print_labeled_multiline("❌ Error", error_details)
-                    else:
+                    elif 'warning_type' in error:
                         print_labeled_multiline("⚠️  Warning", error_details)
+                    else:
+                        print_labeled_multiline("ℹ️  Information", error_details)
 
     def _output_reference_errors(self, reference, errors, url):
         """
