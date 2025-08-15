@@ -312,11 +312,35 @@ class EnhancedHybridReferenceChecker:
         if (self.openreview and 
             hasattr(self.openreview, 'is_openreview_reference') and 
             self.openreview.is_openreview_reference(reference)):
+            logger.debug("Enhanced Hybrid: Trying OpenReview URL-based verification")
             verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
             if success:
                 return verified_data, errors, url
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('openreview', self.openreview, failure_type))
+        
+        # Strategy 5b: Try OpenReview by search if venue suggests it might be there
+        elif (self.openreview and 
+              hasattr(self.openreview, 'verify_reference_by_search')):
+            # Check if venue suggests this might be on OpenReview
+            venue = reference.get('venue', reference.get('journal', '')).lower()
+            openreview_venues = [
+                'iclr', 'icml', 'neurips', 'nips', 'aaai', 'ijcai', 
+                'international conference on learning representations',
+                'international conference on machine learning',
+                'neural information processing systems'
+            ]
+            
+            venue_suggests_openreview = any(or_venue in venue for or_venue in openreview_venues)
+            logger.debug(f"Enhanced Hybrid: OpenReview venue check - venue: '{venue}', suggests: {venue_suggests_openreview}")
+            
+            if venue_suggests_openreview:
+                logger.debug("Enhanced Hybrid: Trying OpenReview search-based verification")
+                verified_data, errors, url, success, failure_type = self._try_openreview_search(reference)
+                if success:
+                    return verified_data, errors, url
+                if failure_type in ['throttled', 'timeout', 'server_error']:
+                    failed_apis.append(('openreview_search', self.openreview, failure_type))
         
         # Strategy 6: Try CrossRef if we haven't already (for non-DOI references)
         if not self._should_try_doi_apis_first(reference) and self.crossref:
@@ -398,6 +422,66 @@ class EnhancedHybridReferenceChecker:
             'error_type': 'unverified',
             'error_details': 'Could not verify reference using any available API'
         }], None
+    
+    def _try_openreview_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
+        """
+        Try to verify reference using OpenReview search
+        
+        Returns:
+            Tuple of (verified_data, errors, url, success, failure_type)
+        """
+        if not self.openreview:
+            return None, [], None, False, 'none'
+        
+        start_time = time.time()
+        failure_type = 'none'
+        
+        try:
+            verified_data, errors, url = self.openreview.verify_reference_by_search(reference)
+            duration = time.time() - start_time
+            
+            # Consider it successful if we found data or verification errors
+            success = verified_data is not None or len(errors) > 0
+            self._update_api_stats('openreview', success, duration)
+            
+            if success:
+                logger.debug(f"Enhanced Hybrid: OpenReview search successful in {duration:.2f}s, URL: {url}")
+                return verified_data, errors, url, True, 'none'
+            else:
+                logger.debug(f"Enhanced Hybrid: OpenReview search found no results in {duration:.2f}s")
+                return None, [], None, False, 'not_found'
+                
+        except requests.exceptions.Timeout as e:
+            duration = time.time() - start_time
+            self._update_api_stats('openreview', False, duration)
+            failure_type = 'timeout'
+            logger.debug(f"Enhanced Hybrid: OpenReview search timed out in {duration:.2f}s: {e}")
+            return None, [], None, False, failure_type
+            
+        except requests.exceptions.RequestException as e:
+            duration = time.time() - start_time
+            self._update_api_stats('openreview', False, duration)
+            
+            # Check if it's a rate limiting error
+            if hasattr(e, 'response') and e.response is not None:
+                if e.response.status_code in [429, 503]:
+                    failure_type = 'throttled'
+                elif e.response.status_code >= 500:
+                    failure_type = 'server_error'
+                else:
+                    failure_type = 'other'
+            else:
+                failure_type = 'other'
+            
+            logger.debug(f"Enhanced Hybrid: OpenReview search failed in {duration:.2f}s: {type(e).__name__}: {e}")
+            return None, [], None, False, failure_type
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            self._update_api_stats('openreview', False, duration)
+            failure_type = 'other'
+            logger.debug(f"Enhanced Hybrid: OpenReview search error in {duration:.2f}s: {type(e).__name__}: {e}")
+            return None, [], None, False, failure_type
     
     def get_performance_stats(self) -> Dict[str, Any]:
         """

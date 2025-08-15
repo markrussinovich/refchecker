@@ -498,6 +498,160 @@ class OpenReviewReferenceChecker:
         logger.debug(f"OpenReview verification completed for: {openreview_url}")
         return verified_data, errors, openreview_url
     
+    def verify_by_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """
+        Verify a reference by searching OpenReview (when no URL is provided)
+        
+        Args:
+            reference: Reference dictionary with title, authors, year, etc.
+            
+        Returns:
+            Tuple of (verified_data, errors, paper_url) where:
+            - verified_data: Dict with verified OpenReview paper data or None
+            - errors: List of error/warning dictionaries  
+            - paper_url: The OpenReview URL if found
+        """
+        logger.debug(f"Searching OpenReview for reference: {reference.get('title', 'Untitled')}")
+        
+        title = reference.get('title', '').strip()
+        authors = reference.get('authors', [])
+        year = reference.get('year')
+        venue = reference.get('venue', '').strip()
+        
+        if not title:
+            return None, [], None
+        
+        # Check if venue suggests this might be on OpenReview
+        if not self._is_likely_openreview_venue(venue):
+            logger.debug(f"Venue '{venue}' doesn't suggest OpenReview, skipping search")
+            return None, [], None
+        
+        # Search for matching papers
+        search_results = self.search_paper(title, authors, year)
+        
+        if not search_results:
+            logger.debug("No matching papers found on OpenReview")
+            return None, [], None
+        
+        # Use the best match (first result, as they're sorted by relevance)
+        best_match = search_results[0]
+        paper_url = best_match.get('forum_url')
+        
+        logger.debug(f"Found OpenReview match: {best_match.get('title', 'Untitled')}")
+        
+        # Verify the reference against the found paper
+        errors = []
+        
+        # Check title match
+        cited_title = reference.get('title', '').strip()
+        paper_title = best_match.get('title', '').strip()
+        
+        if cited_title and paper_title:
+            similarity = calculate_title_similarity(cited_title, paper_title)
+            if similarity < 0.8:  # Slightly higher threshold for search results
+                from utils.error_utils import format_title_mismatch
+                details = format_title_mismatch(cited_title, paper_title) + f" (similarity: {similarity:.2f})"
+                errors.append({
+                    "warning_type": "title",
+                    "warning_details": details
+                })
+        
+        # Check authors
+        cited_authors = reference.get('authors', [])
+        paper_authors = best_match.get('authors', [])
+        
+        if cited_authors and paper_authors:
+            # Convert to list format if needed
+            if isinstance(cited_authors, str):
+                cited_authors = [author.strip() for author in cited_authors.split(',')]
+            if isinstance(paper_authors, str):
+                paper_authors = [author.strip() for author in paper_authors.split(',')]
+            
+            # Use the existing author comparison function
+            match, error_msg = compare_authors(cited_authors, paper_authors)
+            if not match and error_msg:
+                errors.append({
+                    "warning_type": "author", 
+                    "warning_details": error_msg
+                })
+        
+        # Check year
+        cited_year = reference.get('year')
+        paper_year = best_match.get('year')
+        
+        if cited_year and paper_year:
+            try:
+                cited_year_int = int(cited_year)
+                paper_year_int = int(paper_year)
+                
+                is_different, year_message = is_year_substantially_different(cited_year_int, paper_year_int)
+                if is_different and year_message:
+                    from utils.error_utils import format_year_mismatch
+                    errors.append({
+                        "warning_type": "year",
+                        "warning_details": format_year_mismatch(cited_year_int, paper_year_int)
+                    })
+            except (ValueError, TypeError):
+                pass  # Skip year validation if conversion fails
+        
+        # Check venue if provided in reference
+        cited_venue = reference.get('venue', '').strip()
+        paper_venue = best_match.get('venue', '').strip()
+        
+        if cited_venue and paper_venue:
+            if are_venues_substantially_different(cited_venue, paper_venue):
+                from utils.error_utils import format_venue_mismatch
+                errors.append({
+                    "warning_type": "venue",
+                    "warning_details": format_venue_mismatch(cited_venue, paper_venue)
+                })
+        
+        # Create verified data structure
+        verified_data = {
+            'title': best_match.get('title', cited_title),
+            'authors': best_match.get('authors', cited_authors),
+            'year': best_match.get('year', cited_year),
+            'venue': best_match.get('venue', cited_venue),
+            'url': paper_url,
+            'abstract': best_match.get('abstract', ''),
+            'keywords': best_match.get('keywords', []),
+            'openreview_metadata': best_match,
+            'verification_source': 'OpenReview (search)'
+        }
+        
+        logger.debug(f"OpenReview search verification completed for: {paper_url}")
+        return verified_data, errors, paper_url
+    
+    def _is_likely_openreview_venue(self, venue: str) -> bool:
+        """
+        Check if a venue suggests the paper might be on OpenReview
+        
+        Args:
+            venue: Venue string from reference
+            
+        Returns:
+            True if venue suggests OpenReview
+        """
+        if not venue:
+            return False
+        
+        venue_lower = venue.lower()
+        
+        # Common venues that use OpenReview
+        openreview_venues = [
+            'iclr', 'international conference on learning representations',
+            'neurips', 'neural information processing systems', 'nips',
+            'icml', 'international conference on machine learning',
+            'iclr workshop', 'neurips workshop', 'icml workshop',
+            'aaai', 'ijcai', 'aistats'
+        ]
+        
+        for or_venue in openreview_venues:
+            if or_venue in venue_lower:
+                return True
+        
+        return False
+    
     def search_paper(self, title: str, authors: List[str] = None, year: int = None) -> List[Dict[str, Any]]:
         """
         Search for papers on OpenReview by title, authors, and/or year
@@ -510,7 +664,316 @@ class OpenReviewReferenceChecker:
         Returns:
             List of matching paper metadata dictionaries
         """
-        # This would implement search functionality if needed
-        # For now, OpenReview verification is primarily URL-based
-        logger.debug(f"Search functionality not yet implemented for OpenReview")
-        return []
+        if not title or not title.strip():
+            return []
+            
+        logger.debug(f"Searching OpenReview for: {title}")
+        
+        # Clean title for search
+        search_title = clean_title_for_search(title)
+        
+        # Try API search first
+        results = self._search_via_api(search_title, authors, year)
+        if results:
+            return results
+        
+        # If API search fails, try web search as fallback
+        return self._search_via_web(search_title, authors, year)
+    
+    def _search_via_api(self, title: str, authors: List[str] = None, year: int = None) -> List[Dict[str, Any]]:
+        """
+        Search using OpenReview API
+        
+        Args:
+            title: Clean title to search for
+            authors: List of author names (optional)
+            year: Publication year (optional)
+            
+        Returns:
+            List of matching paper dictionaries
+        """
+        try:
+            # The OpenReview API requires specific parameters
+            # We'll search by content.title or content.venue (for venue-based search)
+            search_params = {
+                'limit': 20,  # Limit results to avoid overwhelming the API
+                'details': 'directReplies'  # Get basic details
+            }
+            
+            # Try searching by venue first if year suggests recent conferences
+            if year and year >= 2017:  # OpenReview started around 2017
+                venues_by_year = {
+                    2025: ['ICLR 2025'],
+                    2024: ['ICLR 2024', 'NeurIPS 2024', 'ICML 2024'],
+                    2023: ['ICLR 2023', 'NeurIPS 2023', 'ICML 2023'],
+                    2022: ['ICLR 2022', 'NeurIPS 2022', 'ICML 2022'],
+                    2021: ['ICLR 2021', 'NeurIPS 2021', 'ICML 2021'],
+                    2020: ['ICLR 2020', 'NeurIPS 2020', 'ICML 2020'],
+                    2019: ['ICLR 2019', 'NeurIPS 2019', 'ICML 2019'],
+                    2018: ['ICLR 2018', 'NeurIPS 2018', 'ICML 2018'],
+                    2017: ['ICLR 2017']
+                }
+                
+                possible_venues = venues_by_year.get(year, [])
+                
+                results = []
+                for venue in possible_venues:
+                    # Search by venue and then filter by title
+                    venue_params = search_params.copy()
+                    venue_params['content.venue'] = venue
+                    
+                    api_url = f"{self.api_url}/notes"
+                    response = self._respectful_request(api_url, params=venue_params)
+                    
+                    if response and response.status_code == 200:
+                        try:
+                            data = response.json()
+                            if 'notes' in data and data['notes']:
+                                for note in data['notes']:
+                                    try:
+                                        metadata = self._parse_api_response(note)
+                                        if metadata and self._is_good_match(metadata, title, authors, year):
+                                            results.append(metadata)
+                                            if len(results) >= 5:  # Limit results
+                                                break
+                                    except Exception as e:
+                                        logger.debug(f"Error parsing note: {e}")
+                                        continue
+                                
+                                if results:
+                                    break  # Found results, no need to search other venues
+                                    
+                        except (json.JSONDecodeError, KeyError) as e:
+                            logger.debug(f"Failed to parse venue search response: {e}")
+                            continue
+                    else:
+                        logger.debug(f"Venue search failed for {venue}: {response.status_code if response else 'No response'}")
+                
+                if results:
+                    logger.debug(f"OpenReview API search found {len(results)} matches via venue search")
+                    return results
+            
+            # If venue search didn't work, try other approaches
+            # OpenReview API is quite restrictive, so we might need to fall back to web scraping
+            logger.debug("OpenReview API venue search returned no results, trying web search")
+            return []
+            
+        except Exception as e:
+            logger.debug(f"OpenReview API search error: {e}")
+            return []
+    
+    def _search_via_web(self, title: str, authors: List[str] = None, year: int = None) -> List[Dict[str, Any]]:
+        """
+        Search using OpenReview web interface (fallback)
+        
+        Args:
+            title: Clean title to search for
+            authors: List of author names (optional)
+            year: Publication year (optional)
+            
+        Returns:
+            List of matching paper dictionaries
+        """
+        try:
+            # Build search URL
+            search_query = title.replace(' ', '+')
+            search_url = f"{self.base_url}/search?term={search_query}"
+            
+            response = self._respectful_request(search_url)
+            if not response or response.status_code != 200:
+                return []
+            
+            # Parse search results page
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Look for paper links in search results
+            # OpenReview search results typically contain links to forum pages
+            results = []
+            
+            # Find links that look like OpenReview paper URLs
+            for link in soup.find_all('a', href=True):
+                href = link.get('href', '')
+                if '/forum?id=' in href:
+                    paper_id = self.extract_paper_id(href)
+                    if paper_id:
+                        # Get full metadata for this paper
+                        metadata = self.get_paper_metadata(paper_id)
+                        if metadata and self._is_good_match(metadata, title, authors, year):
+                            results.append(metadata)
+                            if len(results) >= 5:  # Limit results
+                                break
+            
+            logger.debug(f"OpenReview web search found {len(results)} matches")
+            return results
+            
+        except Exception as e:
+            logger.debug(f"OpenReview web search error: {e}")
+            return []
+    
+    def _is_good_match(self, metadata: Dict[str, Any], search_title: str, authors: List[str] = None, year: int = None) -> bool:
+        """
+        Check if the found paper is a good match for the search criteria
+        
+        Args:
+            metadata: Paper metadata from OpenReview
+            search_title: Title we're searching for
+            authors: Authors we're looking for (optional)
+            year: Year we're looking for (optional)
+            
+        Returns:
+            True if it's a good match
+        """
+        paper_title = metadata.get('title', '')
+        if not paper_title:
+            return False
+        
+        # Check title similarity
+        title_similarity = calculate_title_similarity(search_title, paper_title)
+        if title_similarity < 0.7:  # Require at least 70% similarity
+            return False
+        
+        # Check year if provided
+        if year:
+            paper_year = metadata.get('year')
+            if paper_year and abs(int(paper_year) - year) > 1:  # Allow 1 year difference
+                return False
+        
+        # Check authors if provided
+        if authors and len(authors) > 0:
+            paper_authors = metadata.get('authors', [])
+            if paper_authors:
+                # Check if at least one author matches
+                author_match = False
+                for search_author in authors[:2]:  # Check first 2 authors
+                    for paper_author in paper_authors[:3]:  # Check first 3 paper authors
+                        if is_name_match(search_author, paper_author):
+                            author_match = True
+                            break
+                    if author_match:
+                        break
+                
+                if not author_match:
+                    return False
+        
+        return True
+
+    def search_by_title(self, title: str, max_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        Search OpenReview for papers by title using the working search API.
+        
+        Args:
+            title: Paper title to search for
+            max_results: Maximum number of results to return
+            
+        Returns:
+            List of paper data dictionaries
+        """
+        try:
+            # Use OpenReview's search API with term parameter (this works!)
+            params = {
+                'term': title,
+                'limit': max_results
+            }
+            
+            response = self._respectful_request(f"{self.api_url}/notes/search", params=params)
+            if not response or response.status_code != 200:
+                logger.debug(f"OpenReview search API failed with status {response.status_code if response else 'None'}")
+                return []
+            
+            data = response.json()
+            papers = []
+            
+            for note in data.get('notes', []):
+                # Filter to exact or close title matches
+                note_title = note.get('content', {}).get('title', '')
+                if self._is_title_match(title, note_title):
+                    paper_data = self._parse_api_response(note)
+                    if paper_data:
+                        papers.append(paper_data)
+            
+            logger.debug(f"OpenReview search found {len(papers)} matching papers for '{title}'")
+            return papers
+            
+        except Exception as e:
+            logger.error(f"Error searching OpenReview by title '{title}': {e}")
+            return []
+
+    def _is_title_match(self, search_title: str, found_title: str, threshold: float = 0.8) -> bool:
+        """
+        Check if two titles match closely enough.
+        
+        Args:
+            search_title: Title we're searching for
+            found_title: Title found in search results
+            threshold: Similarity threshold (0.0 to 1.0)
+            
+        Returns:
+            True if titles match closely enough
+        """
+        if not search_title or not found_title:
+            return False
+        
+        # Exact match
+        if search_title.lower().strip() == found_title.lower().strip():
+            return True
+        
+        # Check if one contains the other (for cases where one is longer)
+        search_clean = search_title.lower().strip()
+        found_clean = found_title.lower().strip()
+        
+        if search_clean in found_clean or found_clean in search_clean:
+            return True
+        
+        # Use similarity calculation from text_utils
+        try:
+            from utils.text_utils import calculate_title_similarity
+            similarity = calculate_title_similarity(search_title, found_title)
+            return similarity >= threshold
+        except ImportError:
+            # Fallback to simple word matching
+            search_words = set(search_clean.split())
+            found_words = set(found_clean.split())
+            
+            if not search_words or not found_words:
+                return False
+            
+            intersection = search_words.intersection(found_words)
+            union = search_words.union(found_words)
+            
+            jaccard_similarity = len(intersection) / len(union) if union else 0
+            return jaccard_similarity >= threshold
+
+    def verify_reference_by_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """
+        Verify a reference by searching OpenReview (for papers without URLs).
+        
+        Args:
+            reference: Reference data dictionary
+            
+        Returns:
+            Tuple of (verified_data, errors_and_warnings, debug_info)
+        """
+        title = reference.get('title', '').strip()
+        if not title:
+            return None, [], "No title provided for search"
+        
+        # Search for the paper
+        search_results = self.search_by_title(title)
+        
+        if not search_results:
+            return None, [], f"No papers found on OpenReview for title: {title}"
+        
+        # Take the best match (first result, as search is already filtered)
+        best_match = search_results[0]
+        
+        # Use the existing verify_reference method with the found URL
+        forum_url = best_match.get('forum_url')
+        if forum_url:
+            # Create a reference with the OpenReview URL for verification
+            reference_with_url = reference.copy()
+            reference_with_url['url'] = forum_url
+            
+            return self.verify_reference(reference_with_url)
+        
+        # If no URL, return the metadata as verification
+        return best_match, [], f"Found on OpenReview: {best_match.get('title')}"
