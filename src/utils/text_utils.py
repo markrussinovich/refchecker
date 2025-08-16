@@ -2337,6 +2337,9 @@ def format_author_for_display(author_name):
     if not author_name:
         return author_name
     
+    # First clean the author name to remove asterisks and other unwanted characters
+    author_name = clean_author_name(author_name)
+    
     # Clean up any stray punctuation that might have been attached during parsing
     author_name = author_name.strip()
     # Remove trailing semicolons that sometimes get attached during bibliographic parsing
