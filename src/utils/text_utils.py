@@ -2340,6 +2340,10 @@ def format_author_for_display(author_name):
     # First clean the author name to remove asterisks and other unwanted characters
     author_name = clean_author_name(author_name)
     
+    # Remove any braces that might be left from LaTeX/BibTeX parsing
+    author_name = re.sub(r'^{(.*)}$', r'\1', author_name)
+    author_name = re.sub(r'[{}]', '', author_name)
+    
     # Clean up any stray punctuation that might have been attached during parsing
     author_name = author_name.strip()
     # Remove trailing semicolons that sometimes get attached during bibliographic parsing
