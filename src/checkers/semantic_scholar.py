@@ -583,8 +583,8 @@ class NonArxivReferenceChecker:
             
             if not (has_arxiv_url or has_arxiv_doi):
                 errors.append({
-                    'warning_type': 'url',
-                    'warning_details': f"Reference could include arXiv URL: {arxiv_url}",
+                    'info_type': 'url',
+                    'info_details': f"Reference could include arXiv URL: {arxiv_url}",
                     'ref_url_correct': arxiv_url
                 })
 

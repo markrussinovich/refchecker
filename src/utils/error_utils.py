@@ -294,6 +294,39 @@ def create_generic_warning(warning_type: str, warning_details: str, **kwargs) ->
     return warning_dict
 
 
+def create_generic_info(info_type: str, info_details: str, **kwargs) -> Dict[str, Any]:
+    """
+    Create a generic info dictionary with custom fields.
+    
+    Args:
+        info_type: Type of info (e.g., 'url')
+        info_details: Description of the information
+        **kwargs: Additional fields to include in the info dictionary
+        
+    Returns:
+        Standardized info dictionary
+    """
+    info_dict = {
+        'info_type': info_type,
+        'info_details': info_details
+    }
+    
+    info_dict.update(kwargs)
+    return info_dict
+
+
+def create_info_message(reference, reason, arxiv_url=None):
+    """Create a standardized info message structure."""
+    info_msg = {
+        'info_type': 'arxiv_url_available',
+        'reference': reference,
+        'reason': reason
+    }
+    if arxiv_url:
+        info_msg['arxiv_url'] = arxiv_url
+    return info_msg
+
+
 def format_author_mismatch(author_number: int, cited_author: str, correct_author: str) -> str:
     """
     Format a three-line author mismatch message.

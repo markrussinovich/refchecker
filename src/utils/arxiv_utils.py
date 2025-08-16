@@ -392,41 +392,43 @@ def get_bibtex_content(paper):
         logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
-        # Choose between .bib and .bbl files - .bbl files take priority when they contain entries
-        # .bbl files are processed biblatex output that reflects exactly what was cited
+        # Choose between .bib and .bbl files based on what the main TeX file actually uses
+        # Check the main TeX file to see if it uses \bibliography{...} (BibTeX) or not (BBL)
+        uses_bibtex = False
+        if tex_content:
+            # Look for \bibliography{...} commands in the main TeX file
+            bib_pattern = r'\\bibliography\{([^}]+)\}'
+            bib_matches = re.findall(bib_pattern, tex_content)
+            if bib_matches:
+                uses_bibtex = True
+                referenced_bibs = []
+                for match in bib_matches:
+                    bib_names = [name.strip() for name in match.split(',')]
+                    referenced_bibs.extend(bib_names)
+                logger.debug(f"Main TeX file references BibTeX files: {referenced_bibs}")
+        
         if bib_content and bbl_content:
             # Count entries in both for logging
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
-            bbl_entry_count = len(re.findall(r'\\bibitem\[', bbl_content))
+            bbl_entry_count = len(re.findall(r'\\bibitem[\[\{]', bbl_content))
             
             logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
             
-            # Only use .bbl if it actually contains bibliography entries
-            if bbl_entry_count > 0:
-                logger.info(f"Using .bbl files from ArXiv source (biblatex takes priority over bibtex)")
-                return bbl_content
-            else:
-                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
-                # If we have LaTeX content, filter BibTeX by cited keys
-                if tex_content:
-                    cited_keys = extract_cited_keys_from_tex({}, tex_content)
-                    if cited_keys:
-                        logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
-                        filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
-                        return filtered_content
+            if uses_bibtex and bib_entry_count > 0:
+                logger.info(f"Using .bib files from ArXiv source (main TeX uses \\bibliography{{...}})")
                 return bib_content
+            elif bbl_entry_count > 0:
+                logger.info(f"Using .bbl files from ArXiv source (main TeX doesn't use \\bibliography or .bib is empty)")
+                return bbl_content
+            elif bib_entry_count > 0:
+                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
+                return bib_content
+            else:
+                logger.warning(f"Both .bib and .bbl files appear to be empty")
+                return bib_content  # Default to bib_content as fallback
                     
         elif bib_content:
             logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
-            
-            # If we have LaTeX content, filter BibTeX by cited keys
-            if tex_content:
-                cited_keys = extract_cited_keys_from_tex({}, tex_content)
-                if cited_keys:
-                    logger.debug(f"Found {len(cited_keys)} cited keys, filtering BibTeX")
-                    filtered_content = filter_bibtex_by_citations(bib_content, {}, tex_content)
-                    return filtered_content
-            
             return bib_content
             
         elif bbl_content:
