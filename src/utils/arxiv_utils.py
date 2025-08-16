@@ -437,6 +437,20 @@ def get_bibtex_content(paper):
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
         # Choose between .bib and .bbl files based on what the main TeX file actually uses
+        # Check the main TeX file to see if it uses \bibliography{...} (BibTeX) or not (BBL)
+        uses_bibtex = False
+        if tex_content:
+            # Look for \bibliography{...} commands in the main TeX file
+            bib_pattern = r'\\bibliography\{([^}]+)\}'
+            bib_matches = re.findall(bib_pattern, tex_content)
+            if bib_matches:
+                uses_bibtex = True
+                referenced_bibs = []
+                for match in bib_matches:
+                    bib_names = [name.strip() for name in match.split(',')]
+                    referenced_bibs.extend(bib_names)
+                logger.debug(f"Main TeX file references BibTeX files: {referenced_bibs}")
+        
         if bib_content and bbl_content:
             # Count entries in both for logging
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
@@ -444,20 +458,18 @@ def get_bibtex_content(paper):
             
             logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
             
-            # Check if the TeX file explicitly uses \bibliography{...} commands
-            uses_bibtex = tex_content and re.search(r'\\bibliography\{([^}]+)\}', tex_content)
-            
-            if uses_bibtex:
-                # TeX file explicitly references BibTeX files, prefer .bib
-                logger.info(f"Using .bib files from ArXiv source (main TeX file uses \\bibliography{{...}} command)")
+            if uses_bibtex and bib_entry_count > 0:
+                logger.info(f"Using .bib files from ArXiv source (main TeX uses \\bibliography{{...}})")
                 return bib_content
             elif bbl_entry_count > 0:
-                # No explicit \bibliography command, prefer .bbl if it has content
-                logger.info(f"Using .bbl files from ArXiv source (.bbl contains the LaTeX-compiled bibliography with {bbl_entry_count} cited references)")
+                logger.info(f"Using .bbl files from ArXiv source (main TeX doesn't use \\bibliography or .bib is empty)")
                 return bbl_content
-            else:
-                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty, falling back to .bib)")
+            elif bib_entry_count > 0:
+                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
                 return bib_content
+            else:
+                logger.warning(f"Both .bib and .bbl files appear to be empty")
+                return bib_content  # Default to bib_content as fallback
                     
         elif bib_content:
             logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
