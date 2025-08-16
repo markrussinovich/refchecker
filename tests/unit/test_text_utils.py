@@ -852,3 +852,53 @@ class TestAuthorComparisonBugFixes:
         assert "Real Author 1, Real Author 2, Real Author 3" in error_message
         # Should NOT show positional match like "Nonexistent Author vs Real Author 1"
         assert " vs " not in error_message
+
+
+class TestNeurIPSVenueMatching:
+    """Regression test for NeurIPS venue matching issue"""
+    
+    def test_neurips_venue_abbreviation_matching(self):
+        """Test that NeurIPS abbreviation correctly matches full venue name"""
+        from utils.text_utils import are_venues_substantially_different
+        
+        # Test cases for NeurIPS venue matching
+        test_cases = [
+            # NeurIPS variations should all match
+            ("NeurIPS", "Neural Information Processing Systems"),
+            ("neurips", "Neural Information Processing Systems"),
+            ("NEURIPS", "neural information processing systems"),
+            ("NeurIPS", "neural information processing systems"),
+            
+            # NIPS (old name) should also match
+            ("NIPS", "Neural Information Processing Systems"),
+            ("nips", "Neural Information Processing Systems"),
+            
+            # Cross-abbreviation matching
+            ("NeurIPS", "NIPS"),
+            ("neurips", "nips"),
+            
+            # With additional context (years, etc.)
+            ("NeurIPS 2017", "Neural Information Processing Systems"),
+            ("Neural Information Processing Systems, 2017", "NeurIPS"),
+        ]
+        
+        for venue1, venue2 in test_cases:
+            result = are_venues_substantially_different(venue1, venue2)
+            assert not result, f"Venues should match: '{venue1}' vs '{venue2}' (returned {result})"
+    
+    def test_neurips_does_not_falsely_match_different_venues(self):
+        """Test that NeurIPS doesn't incorrectly match unrelated venues"""
+        from utils.text_utils import are_venues_substantially_different
+        
+        # Test cases that should NOT match
+        test_cases = [
+            ("NeurIPS", "International Conference on Machine Learning"),
+            ("NeurIPS", "ICML"),
+            ("Neural Information Processing Systems", "AAAI"),
+            ("NeurIPS", "IEEE Conference on Computer Vision"),
+            ("NIPS", "Nature Machine Intelligence"),
+        ]
+        
+        for venue1, venue2 in test_cases:
+            result = are_venues_substantially_different(venue1, venue2)
+            assert result, f"Different venues should not match: '{venue1}' vs '{venue2}' (returned {result})"

@@ -3906,6 +3906,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 # Handle specific multi-word patterns and well-known acronyms
                 'proc. natl. acad. sci.': 'proceedings of the national academy of sciences',
                 'pnas': 'proceedings of the national academy of sciences',
+                # Special cases that don't follow standard acronym patterns
+                'neurips': 'neural information processing systems',  # Special case
+                'nips': 'neural information processing systems',     # old name for neurips
             }
             # Sort by length (longest first) to ensure longer matches take precedence
             for abbrev, expansion in sorted(common_abbrevs.items(), key=lambda x: len(x[0]), reverse=True):

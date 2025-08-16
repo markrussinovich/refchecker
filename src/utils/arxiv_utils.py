@@ -111,56 +111,8 @@ def download_arxiv_source(arxiv_id):
                     main_tex_content = largest_file[1]
                     logger.debug(f"Using largest tex file: {largest_file[0]}")
             
-            # Find which .bib files are actually referenced in the main tex file
-            bib_content = None
-            if bib_files and main_tex_content:
-                # Extract bibliography references from main tex file
-                referenced_bibs = []
-                bib_pattern = r'\\bibliography\{([^}]+)\}'
-                matches = re.findall(bib_pattern, main_tex_content)
-                
-                for match in matches:
-                    # Handle multiple bib files separated by commas
-                    bib_names = [name.strip() for name in match.split(',')]
-                    for bib_name in bib_names:
-                        # Add .bib extension if not present
-                        if not bib_name.endswith('.bib'):
-                            bib_name += '.bib'
-                        referenced_bibs.append(bib_name)
-                
-                # Use only referenced .bib files, or all if no references found
-                if referenced_bibs:
-                    used_bibs = []
-                    for bib_name in referenced_bibs:
-                        if bib_name in bib_files:
-                            used_bibs.append(bib_files[bib_name])
-                            logger.debug(f"Using referenced .bib file: {bib_name}")
-                        else:
-                            logger.debug(f"Referenced .bib file not found: {bib_name}")
-                    
-                    if used_bibs:
-                        raw_bib_content = '\n\n'.join(used_bibs)
-                        
-                        # Filter BibTeX to only include cited references
-                        bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
-                        
-                        logger.debug(f"Found {len(used_bibs)} referenced .bib files out of {len(bib_files)} total")
-                    else:
-                        # Fallback to all bib files if none of the referenced ones found
-                        raw_bib_content = '\n\n'.join(bib_files.values())
-                        bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
-                        logger.debug(f"No referenced .bib files found, using all {len(bib_files)} .bib files")
-                else:
-                    # No \bibliography command found, use all bib files
-                    raw_bib_content = '\n\n'.join(bib_files.values())
-                    bib_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
-                    logger.debug(f"No \\bibliography command found, using all {len(bib_files)} .bib files")
-            elif bib_files:
-                # No main tex file but have bib files
-                raw_bib_content = '\n\n'.join(bib_files.values())
-                # Can't filter without tex files, so use original content
-                bib_content = raw_bib_content
-                logger.debug(f"Found {len(bib_files)} .bib files (no main tex to filter)")
+            # Process .bib files using shared logic
+            bib_content = select_and_filter_bib_files(bib_files, main_tex_content, tex_files)
             
             # Combine all bbl file contents  
             bbl_content = None
@@ -219,6 +171,78 @@ def download_arxiv_bibtex(arxiv_id):
         return None
 
 
+def select_and_filter_bib_files(bib_files, main_tex_content, tex_files):
+    """
+    Select appropriate .bib files based on main TeX file references and filter by citations.
+    
+    Args:
+        bib_files: Dict of .bib files {filename: content}
+        main_tex_content: Content of main tex file
+        tex_files: Dict of all tex files {filename: content} (for filtering)
+        
+    Returns:
+        Filtered BibTeX content or None if no files available
+    """
+    import re
+    
+    if not bib_files:
+        return None
+        
+    if main_tex_content:
+        # Extract bibliography references from main tex file
+        referenced_bibs = []
+        bib_pattern = r'\\bibliography\{([^}]+)\}'
+        matches = re.findall(bib_pattern, main_tex_content)
+        
+        for match in matches:
+            # Handle multiple bib files separated by commas
+            bib_names = [name.strip() for name in match.split(',')]
+            for bib_name in bib_names:
+                # Add .bib extension if not present
+                if not bib_name.endswith('.bib'):
+                    bib_name += '.bib'
+                referenced_bibs.append(bib_name)
+        
+        # Use only referenced .bib files, or all if no references found
+        if referenced_bibs:
+            used_bibs = []
+            seen_bib_names = set()  # Track which bib files we've already added
+            for bib_name in referenced_bibs:
+                if bib_name in bib_files and bib_name not in seen_bib_names:
+                    used_bibs.append(bib_files[bib_name])
+                    seen_bib_names.add(bib_name)
+                    logger.debug(f"Using referenced .bib file: {bib_name}")
+                elif bib_name in seen_bib_names:
+                    logger.debug(f"Skipping duplicate .bib file: {bib_name}")
+                else:
+                    logger.debug(f"Referenced .bib file not found: {bib_name}")
+            
+            if used_bibs:
+                raw_bib_content = '\n\n'.join(used_bibs)
+                # Filter BibTeX to only include cited references
+                filtered_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+                logger.debug(f"Found {len(used_bibs)} referenced .bib files out of {len(bib_files)} total")
+                return filtered_content
+            else:
+                # Fallback to all bib files if none of the referenced ones found
+                raw_bib_content = '\n\n'.join(bib_files.values())
+                filtered_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+                logger.debug(f"No referenced .bib files found, using all {len(bib_files)} .bib files")
+                return filtered_content
+        else:
+            # No \bibliography command found, use all bib files
+            raw_bib_content = '\n\n'.join(bib_files.values())
+            filtered_content = filter_bibtex_by_citations(raw_bib_content, tex_files, main_tex_content)
+            logger.debug(f"No \\bibliography command found, using all {len(bib_files)} .bib files")
+            return filtered_content
+    else:
+        # No main tex file but have bib files
+        raw_bib_content = '\n\n'.join(bib_files.values())
+        # Can't filter without tex files, so use original content
+        logger.debug(f"Found {len(bib_files)} .bib files (no main tex to filter)")
+        return raw_bib_content
+
+
 def extract_cited_keys_from_tex(tex_files, main_tex_content):
     """
     Extract all citation keys from TeX files.
@@ -261,7 +285,11 @@ def is_reference_used(reference_key, cited_keys):
     Returns:
         True if the reference is cited, False otherwise
     """
-    return reference_key in cited_keys
+    result = reference_key in cited_keys
+    # Add debugging for the first few mismatches to understand the issue
+    if not result and len([k for k in cited_keys if k.startswith('a')]) < 3:  # Limit debug output
+        logger.debug(f"Key '{reference_key}' not found in cited_keys")
+    return result
 
 
 def filter_bibtex_by_citations(bib_content, tex_files, main_tex_content):
@@ -291,14 +319,30 @@ def filter_bibtex_by_citations(bib_content, tex_files, main_tex_content):
         from utils.bibtex_parser import parse_bibtex_entries
         entries = parse_bibtex_entries(bib_content)
         
-        # Filter entries to only cited ones
+        # Filter entries to only cited ones and remove duplicates
         cited_entries = []
+        seen_keys = set()
+        not_cited_count = 0
+        duplicate_count = 0
+        
         for entry in entries:
             entry_key = entry.get('key', '')
             if is_reference_used(entry_key, cited_keys):
-                cited_entries.append(entry)
+                if entry_key not in seen_keys:
+                    cited_entries.append(entry)
+                    seen_keys.add(entry_key)
+                else:
+                    duplicate_count += 1
+                    logger.debug(f"Skipping duplicate entry: '{entry_key}'")
+            else:
+                not_cited_count += 1
+                # Log first few entries that are NOT cited for debugging
+                if not_cited_count <= 5:
+                    logger.debug(f"Entry NOT cited: '{entry_key}'")
                 
-        logger.debug(f"Filtered BibTeX: {len(entries)} total -> {len(cited_entries)} cited")
+        logger.debug(f"Filtered BibTeX: {len(entries)} total -> {len(cited_entries)} cited (removed {duplicate_count} duplicates)")
+        logger.debug(f"Citation keys found: {len(cited_keys)} keys")
+        logger.debug(f"Sample cited keys: {list(cited_keys)[:10]}")
         
         # Reconstruct BibTeX content from cited entries
         if not cited_entries:
@@ -393,20 +437,6 @@ def get_bibtex_content(paper):
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
         # Choose between .bib and .bbl files based on what the main TeX file actually uses
-        # Check the main TeX file to see if it uses \bibliography{...} (BibTeX) or not (BBL)
-        uses_bibtex = False
-        if tex_content:
-            # Look for \bibliography{...} commands in the main TeX file
-            bib_pattern = r'\\bibliography\{([^}]+)\}'
-            bib_matches = re.findall(bib_pattern, tex_content)
-            if bib_matches:
-                uses_bibtex = True
-                referenced_bibs = []
-                for match in bib_matches:
-                    bib_names = [name.strip() for name in match.split(',')]
-                    referenced_bibs.extend(bib_names)
-                logger.debug(f"Main TeX file references BibTeX files: {referenced_bibs}")
-        
         if bib_content and bbl_content:
             # Count entries in both for logging
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
@@ -414,18 +444,20 @@ def get_bibtex_content(paper):
             
             logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
             
-            if uses_bibtex and bib_entry_count > 0:
-                logger.info(f"Using .bib files from ArXiv source (main TeX uses \\bibliography{{...}})")
+            # Check if the TeX file explicitly uses \bibliography{...} commands
+            uses_bibtex = tex_content and re.search(r'\\bibliography\{([^}]+)\}', tex_content)
+            
+            if uses_bibtex:
+                # TeX file explicitly references BibTeX files, prefer .bib
+                logger.info(f"Using .bib files from ArXiv source (main TeX file uses \\bibliography{{...}} command)")
                 return bib_content
             elif bbl_entry_count > 0:
-                logger.info(f"Using .bbl files from ArXiv source (main TeX doesn't use \\bibliography or .bib is empty)")
+                # No explicit \bibliography command, prefer .bbl if it has content
+                logger.info(f"Using .bbl files from ArXiv source (.bbl contains the LaTeX-compiled bibliography with {bbl_entry_count} cited references)")
                 return bbl_content
-            elif bib_entry_count > 0:
-                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
-                return bib_content
             else:
-                logger.warning(f"Both .bib and .bbl files appear to be empty")
-                return bib_content  # Default to bib_content as fallback
+                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty, falling back to .bib)")
+                return bib_content
                     
         elif bib_content:
             logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
