@@ -580,6 +580,9 @@ def clean_title_for_search(title):
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
+    # Strip LaTeX commands to handle math formatting and other LaTeX markup
+    title = strip_latex_commands(title)
+    
     # Clean up newlines and normalize whitespace (but preserve other structure)
     title = title.replace('\n', ' ').strip()
     title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
@@ -753,8 +756,11 @@ def normalize_paper_title(title: str) -> str:
     if not title:
         return ""
     
+    # Strip LaTeX commands first to handle math formatting consistently
+    normalized = strip_latex_commands(title)
+    
     # Convert to lowercase
-    normalized = title.lower()
+    normalized = normalized.lower()
     
     # Remove common prefixes that don't affect the actual title content
     prefixes_to_remove = [
@@ -2107,21 +2113,37 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
+    # Detect if cited authors look like parsing fragments 
+    # (many short single-word entries that might be first/last name fragments)
+    def looks_like_fragments(authors_list):
+        if len(authors_list) < 4:  # Need at least 4 to detect fragment pattern
+            return False
+        single_word_count = sum(1 for author in authors_list if len(author.strip().split()) == 1)
+        return single_word_count >= len(authors_list) * 0.7  # 70% or more are single words
+    
     # Normal case without "et al" - compare all authors
     if len(cleaned_cited) != len(correct_names):
-        # For non-et-al cases, be more strict about count mismatches
-        # Allow minor flexibility (1 author difference) but not more
-        if abs(len(cleaned_cited) - len(correct_names)) > 1:
+        
+        # Check if cited authors look like parsing fragments
+        if looks_like_fragments(cleaned_cited):
             from utils.error_utils import format_author_count_mismatch
-            # Convert cited names to display format (First Last) before showing in error
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
-        # Use the shorter list for comparison
-        min_len = min(len(cleaned_cited), len(correct_names))
-        comparison_cited = cleaned_cited[:min_len]
-        comparison_correct = correct_names[:min_len]
+        # For all count mismatches, show the count mismatch error
+        if len(cleaned_cited) < len(correct_names):
+            from utils.error_utils import format_author_count_mismatch
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+            return False, error_msg
+        
+        # For cases where cited > correct, also show count mismatch
+        elif len(cleaned_cited) > len(correct_names):
+            from utils.error_utils import format_author_count_mismatch
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+            return False, error_msg
     else:
         comparison_cited = cleaned_cited
         comparison_correct = correct_names
@@ -2484,8 +2506,64 @@ def strip_latex_commands(text):
     # Remove font size commands
     text = re.sub(r'\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)\b', '', text)
     
-    # Remove math mode delimiters
-    text = re.sub(r'\$([^$]*)\$', r'\1', text)
+    # Handle complex math mode patterns first
+    # Pattern like $\{$$\mu$second-scale$\}$ should become μsecond-scale
+    def process_complex_math(match):
+        content = match.group(1)
+        # Handle common Greek letters
+        content = re.sub(r'\\mu\b', 'μ', content)  # \mu -> μ
+        content = re.sub(r'\\alpha\b', 'α', content)  # \alpha -> α
+        content = re.sub(r'\\beta\b', 'β', content)   # \beta -> β
+        content = re.sub(r'\\gamma\b', 'γ', content)  # \gamma -> γ
+        content = re.sub(r'\\delta\b', 'δ', content)  # \delta -> δ
+        content = re.sub(r'\\epsilon\b', 'ε', content)  # \epsilon -> ε
+        content = re.sub(r'\\lambda\b', 'λ', content)  # \lambda -> λ
+        content = re.sub(r'\\pi\b', 'π', content)    # \pi -> π
+        content = re.sub(r'\\sigma\b', 'σ', content)  # \sigma -> σ
+        content = re.sub(r'\\theta\b', 'θ', content)  # \theta -> θ
+        # Remove any remaining LaTeX commands and braces from inside math
+        content = re.sub(r'\\[a-zA-Z]+\b', '', content)
+        content = re.sub(r'[{}]', '', content)
+        # Clean up any remaining $ signs
+        content = re.sub(r'\$+', '', content)
+        return content
+    
+    # Handle complex nested math patterns first
+    # Pattern like $\{$$\mu$second-scale$\}$ should become μsecond-scale
+    def process_nested_math_specifically(match):
+        content = match.group(0)
+        # Handle the specific pattern: $\{$$\mu$second-scale$\}$
+        # Extract the meaningful parts
+        if r'\mu' in content:
+            # Replace \mu with μ and extract the surrounding text
+            content = re.sub(r'\\mu\b', 'μ', content)
+        # Remove all LaTeX math markup
+        content = re.sub(r'[\$\{\}\\]+', '', content)
+        return content
+    
+    # Handle the specific problematic pattern
+    text = re.sub(r'\$\\\{[^}]*\\\}\$', process_nested_math_specifically, text)
+    
+    # Handle Greek letters in math mode before removing delimiters
+    def process_standard_math(match):
+        content = match.group(1)
+        # Handle common Greek letters - content has single backslashes
+        content = re.sub(r'\\mu\b', 'μ', content)
+        content = re.sub(r'\\alpha\b', 'α', content)
+        content = re.sub(r'\\beta\b', 'β', content)
+        content = re.sub(r'\\gamma\b', 'γ', content)
+        content = re.sub(r'\\delta\b', 'δ', content)
+        content = re.sub(r'\\epsilon\b', 'ε', content)
+        content = re.sub(r'\\lambda\b', 'λ', content)
+        content = re.sub(r'\\pi\b', 'π', content)
+        content = re.sub(r'\\sigma\b', 'σ', content)
+        content = re.sub(r'\\theta\b', 'θ', content)
+        # Remove any remaining LaTeX commands
+        content = re.sub(r'\\[a-zA-Z]+\b', '', content)
+        return content
+    
+    # Remove standard math mode delimiters with Greek letter processing
+    text = re.sub(r'\$([^$]*)\$', process_standard_math, text)
     text = re.sub(r'\\begin\{equation\}.*?\\end\{equation\}', '', text, flags=re.DOTALL)
     text = re.sub(r'\\begin\{align\}.*?\\end\{align\}', '', text, flags=re.DOTALL)
     
@@ -3369,7 +3447,18 @@ def _extract_corrected_reference_data(error_entry: dict, corrected_data: dict) -
     """
     # Get the corrected information
     correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
+    
+    # Handle authors - can be string or list of dicts from API
+    authors_raw = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
+    if isinstance(authors_raw, list):
+        # Convert list of author dicts to comma-separated string
+        if authors_raw and isinstance(authors_raw[0], dict):
+            correct_authors = ', '.join([author.get('name', '') for author in authors_raw])
+        else:
+            correct_authors = ', '.join(authors_raw)
+    else:
+        correct_authors = str(authors_raw) if authors_raw else ''
+        
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     
     # Prioritize the verified URL that was actually used for verification
@@ -3573,7 +3662,39 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     if correct_url:
         citation_parts.append(f"{correct_url}")
     
-    return '. '.join(citation_parts) + '.'
+    citation_text = '. '.join(citation_parts) + '.'
+    
+    # Add citation key information if available (for easy copying)
+    citation_key = original_reference.get('bibtex_key') or original_reference.get('bibitem_key')
+    if citation_key and citation_key != 'unknown':
+        bibtex_type = original_reference.get('bibtex_type', 'misc')
+        citation_text += f"\n\n% Citation key for BibTeX: @{bibtex_type}{{{citation_key}, ...}}"
+    
+    return citation_text
+
+
+def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) -> float:
+    """
+    Compare two titles with proper LaTeX cleaning for accurate similarity scoring.
+    
+    This function ensures both titles are cleaned of LaTeX commands before comparison
+    to avoid false mismatches due to formatting differences like {LLM}s vs LLMs.
+    
+    Args:
+        cited_title: Title from cited reference (may contain LaTeX)
+        database_title: Title from database (usually already clean)
+        
+    Returns:
+        Similarity score between 0 and 1
+    """
+    if not cited_title or not database_title:
+        return 0.0
+    
+    # Clean LaTeX commands from cited title to match database format
+    clean_cited = strip_latex_commands(cited_title)
+    
+    # Calculate similarity using cleaned titles
+    return calculate_title_similarity(clean_cited, database_title)
 
 
 def calculate_title_similarity(title1: str, title2: str) -> float:

@@ -5,6 +5,7 @@ import re
 import logging
 from urllib.parse import urlparse
 from typing import Dict, Optional, Tuple, List, Any
+from utils.text_utils import strip_latex_commands
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,9 @@ class GitHubChecker:
                 title_match = self._check_title_match(cited_title, actual_name, actual_description)
                 if not title_match:
                     from utils.error_utils import format_title_mismatch
-                    details = format_title_mismatch(cited_title, actual_name)
+                    # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
+                    clean_cited_title = strip_latex_commands(cited_title)
+                    details = format_title_mismatch(clean_cited_title, actual_name)
                     if actual_description:
                         snippet = actual_description[:100] + ('...' if len(actual_description) > 100 else '')
                         details += f" ({snippet})"
