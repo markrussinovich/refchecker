@@ -995,17 +995,18 @@ class TestIncompleteAuthorListHandling:
         
         match_result, message = compare_authors(cited_authors, correct_authors)
         
-        # Should now pass because all cited authors exist in correct list
-        assert match_result, f"Should accept incomplete but accurate author list: {message}"
-        assert "cited 5 of 6 authors correctly" in message
+        # Should now show count mismatch (5 cited vs 6 correct)
+        assert not match_result, f"Should show count mismatch for incomplete author list: {message}"
+        assert "Author count mismatch" in message, f"Should show count mismatch message: {message}"
+        assert "5 cited vs 6 correct" in message
         
     def test_incomplete_author_list_variations(self):
-        """Test various scenarios of incomplete but accurate author lists"""
+        """Test various scenarios of incomplete author lists - all should show count mismatches"""
         from utils.text_utils import compare_authors
         
         base_correct = ['A. Smith', 'B. Jones', 'C. Brown', 'D. Davis', 'E. Wilson']
         
-        # Test cases: incomplete but accurate citations should pass
+        # Test cases: incomplete citations should now show count mismatches
         test_cases = [
             # First 3 authors only
             (['A. Smith', 'B. Jones', 'C. Brown'], "first 3 authors"),
@@ -1019,8 +1020,9 @@ class TestIncompleteAuthorListHandling:
         
         for cited_authors, description in test_cases:
             match_result, message = compare_authors(cited_authors, base_correct)
-            assert match_result, f"Should accept {description}: {message}"
-            assert f"cited {len(cited_authors)} of {len(base_correct)} authors correctly" in message
+            assert not match_result, f"Should show count mismatch for {description}: {message}"
+            assert "Author count mismatch" in message, f"Should show count mismatch message for {description}"
+            assert f"{len(cited_authors)} cited vs {len(base_correct)} correct" in message
     
     def test_actual_author_errors_still_caught(self):
         """Test that actual author errors (wrong names) are still detected"""

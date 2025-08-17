@@ -2113,48 +2113,37 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         
         return True, f"Authors match (verified {len(cleaned_cited)} of {len(correct_names)} with et al)"
     
+    # Detect if cited authors look like parsing fragments 
+    # (many short single-word entries that might be first/last name fragments)
+    def looks_like_fragments(authors_list):
+        if len(authors_list) < 4:  # Need at least 4 to detect fragment pattern
+            return False
+        single_word_count = sum(1 for author in authors_list if len(author.strip().split()) == 1)
+        return single_word_count >= len(authors_list) * 0.7  # 70% or more are single words
+    
     # Normal case without "et al" - compare all authors
     if len(cleaned_cited) != len(correct_names):
         
-        # For incomplete author lists (cited < correct), check if all cited authors 
-        # exist somewhere in the correct list rather than strict positional comparison
-        if len(cleaned_cited) < len(correct_names):
-            # Import here to avoid circular imports  
-            from utils.error_utils import format_author_mismatch
-            # Check if each cited author matches ANY author in the correct list
-            for i, cited_author in enumerate(cleaned_cited):
-                author_found = False
-                for correct_author in correct_names:
-                    if enhanced_name_match(cited_author, correct_author):
-                        author_found = True
-                        break
-                
-                if not author_found:
-                    # Use standardized three-line formatting for author mismatch
-                    cited_display = format_author_for_display(cited_author)
-                    full_author_list = ', '.join(correct_names)
-                    error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list)", f"{full_author_list}")
-                    return False, error_msg
-            
-            return True, f"Authors match (cited {len(cleaned_cited)} of {len(correct_names)} authors correctly)"
+        # Check if cited authors look like parsing fragments
+        if looks_like_fragments(cleaned_cited):
+            from utils.error_utils import format_author_count_mismatch
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+            return False, error_msg
         
-        # For cases where cited > correct, be more strict about count mismatches
+        # For all count mismatches, show the count mismatch error
+        if len(cleaned_cited) < len(correct_names):
+            from utils.error_utils import format_author_count_mismatch
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+            return False, error_msg
+        
+        # For cases where cited > correct, also show count mismatch
         elif len(cleaned_cited) > len(correct_names):
-            # Allow small differences (1-2 authors) but not large ones
-            if abs(len(cleaned_cited) - len(correct_names)) > 2:
-                from utils.error_utils import format_author_count_mismatch
-                display_cited = [format_author_for_display(author) for author in cleaned_cited]
-                error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
-                return False, error_msg
-            
-            # Use the shorter list for comparison
-            min_len = min(len(cleaned_cited), len(correct_names))
-            comparison_cited = cleaned_cited[:min_len]
-            comparison_correct = correct_names[:min_len]
-        else:
-            # This shouldn't happen since we already checked len equality above
-            comparison_cited = cleaned_cited
-            comparison_correct = correct_names
+            from utils.error_utils import format_author_count_mismatch
+            display_cited = [format_author_for_display(author) for author in cleaned_cited]
+            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+            return False, error_msg
     else:
         comparison_cited = cleaned_cited
         comparison_correct = correct_names
@@ -3458,7 +3447,18 @@ def _extract_corrected_reference_data(error_entry: dict, corrected_data: dict) -
     """
     # Get the corrected information
     correct_title = error_entry.get('ref_title_correct') or corrected_data.get('title', '')
-    correct_authors = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
+    
+    # Handle authors - can be string or list of dicts from API
+    authors_raw = error_entry.get('ref_authors_correct') or corrected_data.get('authors', '')
+    if isinstance(authors_raw, list):
+        # Convert list of author dicts to comma-separated string
+        if authors_raw and isinstance(authors_raw[0], dict):
+            correct_authors = ', '.join([author.get('name', '') for author in authors_raw])
+        else:
+            correct_authors = ', '.join(authors_raw)
+    else:
+        correct_authors = str(authors_raw) if authors_raw else ''
+        
     correct_year = error_entry.get('ref_year_correct') or corrected_data.get('year', '')
     
     # Prioritize the verified URL that was actually used for verification
@@ -3662,7 +3662,15 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     if correct_url:
         citation_parts.append(f"{correct_url}")
     
-    return '. '.join(citation_parts) + '.'
+    citation_text = '. '.join(citation_parts) + '.'
+    
+    # Add citation key information if available (for easy copying)
+    citation_key = original_reference.get('bibtex_key') or original_reference.get('bibitem_key')
+    if citation_key and citation_key != 'unknown':
+        bibtex_type = original_reference.get('bibtex_type', 'misc')
+        citation_text += f"\n\n% Citation key for BibTeX: @{bibtex_type}{{{citation_key}, ...}}"
+    
+    return citation_text
 
 
 def calculate_title_similarity(title1: str, title2: str) -> float:

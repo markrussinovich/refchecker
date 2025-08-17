@@ -5243,6 +5243,19 @@ class ArxivReferenceChecker:
             return False
         return True
     
+    def compare_authors(self, authors1, authors2):
+        """
+        Compare authors using the text_utils compare_authors function.
+        
+        Args:
+            authors1: First list of authors
+            authors2: Second list of authors
+            
+        Returns:
+            Tuple of (match_result, error_message)
+        """
+        return compare_authors(authors1, authors2)
+    
     def _verify_references_sequential(self, paper, bibliography, paper_errors, error_types, unverified_count, debug_mode):
         """
         Sequential reference verification (original implementation)
