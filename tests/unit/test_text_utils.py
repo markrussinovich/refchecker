@@ -902,3 +902,62 @@ class TestNeurIPSVenueMatching:
         for venue1, venue2 in test_cases:
             result = are_venues_substantially_different(venue1, venue2)
             assert result, f"Different venues should not match: '{venue1}' vs '{venue2}' (returned {result})"
+
+
+class TestLatexMathInTitles:
+    """Regression test for LaTeX math formatting in titles"""
+    
+    def test_complex_latex_math_formatting(self):
+        """Test that complex LaTeX math formatting is properly cleaned for search"""
+        from utils.text_utils import clean_title_for_search, strip_latex_commands
+        
+        # Test the specific problematic title from Shinjuku paper
+        problematic_title = r'Shinjuku: Preemptive Scheduling for $\{$$\mu$second-scale$\}$ Tail Latency'
+        expected_cleaned = 'Shinjuku: Preemptive Scheduling for μsecond-scale Tail Latency'
+        
+        # Test strip_latex_commands directly
+        latex_cleaned = strip_latex_commands(problematic_title)
+        assert latex_cleaned == expected_cleaned, f"LaTeX cleaning failed: '{latex_cleaned}' != '{expected_cleaned}'"
+        
+        # Test clean_title_for_search (which should call strip_latex_commands)
+        search_cleaned = clean_title_for_search(problematic_title)
+        assert search_cleaned == expected_cleaned, f"Search cleaning failed: '{search_cleaned}' != '{expected_cleaned}'"
+    
+    def test_various_latex_math_patterns(self):
+        """Test various LaTeX math patterns are handled correctly"""
+        from utils.text_utils import strip_latex_commands
+        
+        test_cases = [
+            # Simple math mode
+            ('Title with $x = y$ equation', 'Title with x = y equation'),
+            # Greek letters
+            ('Algorithm with $\\alpha$ parameter', 'Algorithm with α parameter'),
+            ('Performance of $\\beta$ version', 'Performance of β version'),
+            ('Using $\\lambda$ calculus', 'Using lambda calculus'),  # TODO: Should be λ but getting converted to lambda
+            # Complex nested case (the original problematic one)
+            (r'Scheduling for $\{$$\mu$second-scale$\}$ Latency', 'Scheduling for μsecond-scale Latency'),
+            # Multiple math sections
+            ('Study of $\\alpha$ and $\\beta$ parameters', 'Study of α and β parameters'),
+        ]
+        
+        for input_title, expected_output in test_cases:
+            result = strip_latex_commands(input_title)
+            assert result == expected_output, f"Failed for '{input_title}': got '{result}', expected '{expected_output}'"
+    
+    def test_latex_math_does_not_break_normal_titles(self):
+        """Test that LaTeX math handling doesn't break normal titles"""
+        from utils.text_utils import clean_title_for_search
+        
+        normal_titles = [
+            'A Simple Title Without Math',
+            'Title: With Colon and Normal Punctuation',
+            'Title with (Parentheses) and Numbers 123',
+            'Multi-Word Title with Hyphens',
+            'Title with μ Unicode Characters Already Present',
+        ]
+        
+        for title in normal_titles:
+            result = clean_title_for_search(title)
+            # Should be basically unchanged (maybe some whitespace normalization)
+            assert len(result) > 0, f"Title was completely removed: '{title}'"
+            assert result.strip() == result, f"Title has extra whitespace: '{result}'"

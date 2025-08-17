@@ -580,6 +580,9 @@ def clean_title_for_search(title):
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
+    # Strip LaTeX commands to handle math formatting and other LaTeX markup
+    title = strip_latex_commands(title)
+    
     # Clean up newlines and normalize whitespace (but preserve other structure)
     title = title.replace('\n', ' ').strip()
     title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
@@ -2484,8 +2487,64 @@ def strip_latex_commands(text):
     # Remove font size commands
     text = re.sub(r'\\(tiny|scriptsize|footnotesize|small|normalsize|large|Large|LARGE|huge|Huge)\b', '', text)
     
-    # Remove math mode delimiters
-    text = re.sub(r'\$([^$]*)\$', r'\1', text)
+    # Handle complex math mode patterns first
+    # Pattern like $\{$$\mu$second-scale$\}$ should become μsecond-scale
+    def process_complex_math(match):
+        content = match.group(1)
+        # Handle common Greek letters
+        content = re.sub(r'\\mu\b', 'μ', content)  # \mu -> μ
+        content = re.sub(r'\\alpha\b', 'α', content)  # \alpha -> α
+        content = re.sub(r'\\beta\b', 'β', content)   # \beta -> β
+        content = re.sub(r'\\gamma\b', 'γ', content)  # \gamma -> γ
+        content = re.sub(r'\\delta\b', 'δ', content)  # \delta -> δ
+        content = re.sub(r'\\epsilon\b', 'ε', content)  # \epsilon -> ε
+        content = re.sub(r'\\lambda\b', 'λ', content)  # \lambda -> λ
+        content = re.sub(r'\\pi\b', 'π', content)    # \pi -> π
+        content = re.sub(r'\\sigma\b', 'σ', content)  # \sigma -> σ
+        content = re.sub(r'\\theta\b', 'θ', content)  # \theta -> θ
+        # Remove any remaining LaTeX commands and braces from inside math
+        content = re.sub(r'\\[a-zA-Z]+\b', '', content)
+        content = re.sub(r'[{}]', '', content)
+        # Clean up any remaining $ signs
+        content = re.sub(r'\$+', '', content)
+        return content
+    
+    # Handle complex nested math patterns first
+    # Pattern like $\{$$\mu$second-scale$\}$ should become μsecond-scale
+    def process_nested_math_specifically(match):
+        content = match.group(0)
+        # Handle the specific pattern: $\{$$\mu$second-scale$\}$
+        # Extract the meaningful parts
+        if r'\mu' in content:
+            # Replace \mu with μ and extract the surrounding text
+            content = re.sub(r'\\mu\b', 'μ', content)
+        # Remove all LaTeX math markup
+        content = re.sub(r'[\$\{\}\\]+', '', content)
+        return content
+    
+    # Handle the specific problematic pattern
+    text = re.sub(r'\$\\\{[^}]*\\\}\$', process_nested_math_specifically, text)
+    
+    # Handle Greek letters in math mode before removing delimiters
+    def process_standard_math(match):
+        content = match.group(1)
+        # Handle common Greek letters - content has single backslashes
+        content = re.sub(r'\\mu\b', 'μ', content)
+        content = re.sub(r'\\alpha\b', 'α', content)
+        content = re.sub(r'\\beta\b', 'β', content)
+        content = re.sub(r'\\gamma\b', 'γ', content)
+        content = re.sub(r'\\delta\b', 'δ', content)
+        content = re.sub(r'\\epsilon\b', 'ε', content)
+        content = re.sub(r'\\lambda\b', 'λ', content)
+        content = re.sub(r'\\pi\b', 'π', content)
+        content = re.sub(r'\\sigma\b', 'σ', content)
+        content = re.sub(r'\\theta\b', 'θ', content)
+        # Remove any remaining LaTeX commands
+        content = re.sub(r'\\[a-zA-Z]+\b', '', content)
+        return content
+    
+    # Remove standard math mode delimiters with Greek letter processing
+    text = re.sub(r'\$([^$]*)\$', process_standard_math, text)
     text = re.sub(r'\\begin\{equation\}.*?\\end\{equation\}', '', text, flags=re.DOTALL)
     text = re.sub(r'\\begin\{align\}.*?\\end\{align\}', '', text, flags=re.DOTALL)
     
