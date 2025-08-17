@@ -756,8 +756,11 @@ def normalize_paper_title(title: str) -> str:
     if not title:
         return ""
     
+    # Strip LaTeX commands first to handle math formatting consistently
+    normalized = strip_latex_commands(title)
+    
     # Convert to lowercase
-    normalized = title.lower()
+    normalized = normalized.lower()
     
     # Remove common prefixes that don't affect the actual title content
     prefixes_to_remove = [
@@ -2112,19 +2115,46 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     
     # Normal case without "et al" - compare all authors
     if len(cleaned_cited) != len(correct_names):
-        # For non-et-al cases, be more strict about count mismatches
-        # Allow minor flexibility (1 author difference) but not more
-        if abs(len(cleaned_cited) - len(correct_names)) > 1:
-            from utils.error_utils import format_author_count_mismatch
-            # Convert cited names to display format (First Last) before showing in error
-            display_cited = [format_author_for_display(author) for author in cleaned_cited]
-            error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
-            return False, error_msg
         
-        # Use the shorter list for comparison
-        min_len = min(len(cleaned_cited), len(correct_names))
-        comparison_cited = cleaned_cited[:min_len]
-        comparison_correct = correct_names[:min_len]
+        # For incomplete author lists (cited < correct), check if all cited authors 
+        # exist somewhere in the correct list rather than strict positional comparison
+        if len(cleaned_cited) < len(correct_names):
+            # Import here to avoid circular imports  
+            from utils.error_utils import format_author_mismatch
+            # Check if each cited author matches ANY author in the correct list
+            for i, cited_author in enumerate(cleaned_cited):
+                author_found = False
+                for correct_author in correct_names:
+                    if enhanced_name_match(cited_author, correct_author):
+                        author_found = True
+                        break
+                
+                if not author_found:
+                    # Use standardized three-line formatting for author mismatch
+                    cited_display = format_author_for_display(cited_author)
+                    full_author_list = ', '.join(correct_names)
+                    error_msg = format_author_mismatch(i+1, f"{cited_display} (not found in author list)", f"{full_author_list}")
+                    return False, error_msg
+            
+            return True, f"Authors match (cited {len(cleaned_cited)} of {len(correct_names)} authors correctly)"
+        
+        # For cases where cited > correct, be more strict about count mismatches
+        elif len(cleaned_cited) > len(correct_names):
+            # Allow small differences (1-2 authors) but not large ones
+            if abs(len(cleaned_cited) - len(correct_names)) > 2:
+                from utils.error_utils import format_author_count_mismatch
+                display_cited = [format_author_for_display(author) for author in cleaned_cited]
+                error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
+                return False, error_msg
+            
+            # Use the shorter list for comparison
+            min_len = min(len(cleaned_cited), len(correct_names))
+            comparison_cited = cleaned_cited[:min_len]
+            comparison_correct = correct_names[:min_len]
+        else:
+            # This shouldn't happen since we already checked len equality above
+            comparison_cited = cleaned_cited
+            comparison_correct = correct_names
     else:
         comparison_cited = cleaned_cited
         comparison_correct = correct_names

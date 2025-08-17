@@ -961,3 +961,137 @@ class TestLatexMathInTitles:
             # Should be basically unchanged (maybe some whitespace normalization)
             assert len(result) > 0, f"Title was completely removed: '{title}'"
             assert result.strip() == result, f"Title has extra whitespace: '{result}'"
+
+
+class TestIncompleteAuthorListHandling:
+    """Regression tests for handling incomplete but accurate author lists"""
+    
+    def test_shinjuku_paper_author_case(self):
+        """Regression test for Shinjuku paper author mismatch false positive
+        
+        The cited reference had 5 authors but the database had 6 (missing 'David Mazières').
+        Previously this was flagged as "Author 5 mismatch" because it compared positionally.
+        Now it should recognize that all cited authors exist in the correct list.
+        """
+        from utils.text_utils import compare_authors
+        
+        # Actual case from Shinjuku paper 
+        cited_authors = [
+            'Konstantinos Kaffes', 
+            'Timothy Chong', 
+            'Jack Tigar Humphries', 
+            'Adam Belay', 
+            'Christos Kozyrakis'  # This was author 6 in the database, not 5
+        ]
+        
+        correct_authors = [
+            'Konstantinos Kaffes', 
+            'Timothy Chong', 
+            'Jack Tigar Humphries', 
+            'Adam Belay', 
+            'David Mazières',      # Missing from citation
+            'Christos Kozyrakis'
+        ]
+        
+        match_result, message = compare_authors(cited_authors, correct_authors)
+        
+        # Should now pass because all cited authors exist in correct list
+        assert match_result, f"Should accept incomplete but accurate author list: {message}"
+        assert "cited 5 of 6 authors correctly" in message
+        
+    def test_incomplete_author_list_variations(self):
+        """Test various scenarios of incomplete but accurate author lists"""
+        from utils.text_utils import compare_authors
+        
+        base_correct = ['A. Smith', 'B. Jones', 'C. Brown', 'D. Davis', 'E. Wilson']
+        
+        # Test cases: incomplete but accurate citations should pass
+        test_cases = [
+            # First 3 authors only
+            (['A. Smith', 'B. Jones', 'C. Brown'], "first 3 authors"),
+            # First and last author  
+            (['A. Smith', 'E. Wilson'], "first and last author"),
+            # Non-contiguous authors
+            (['A. Smith', 'C. Brown', 'E. Wilson'], "non-contiguous authors"),
+            # Single author
+            (['A. Smith'], "single first author"),
+        ]
+        
+        for cited_authors, description in test_cases:
+            match_result, message = compare_authors(cited_authors, base_correct)
+            assert match_result, f"Should accept {description}: {message}"
+            assert f"cited {len(cited_authors)} of {len(base_correct)} authors correctly" in message
+    
+    def test_actual_author_errors_still_caught(self):
+        """Test that actual author errors (wrong names) are still detected"""
+        from utils.text_utils import compare_authors
+        
+        correct_authors = ['A. Smith', 'B. Jones', 'C. Brown']
+        
+        # Cases that should fail - actual wrong authors
+        error_cases = [
+            # Wrong author name
+            (['A. Smith', 'B. Jones', 'X. Wrong'], "wrong third author"),
+            # Wrong first author (critical)
+            (['X. Wrong', 'B. Jones'], "wrong first author"), 
+            # Completely wrong authors
+            (['X. Wrong', 'Y. Also Wrong'], "all wrong authors"),
+        ]
+        
+        for cited_authors, description in error_cases:
+            match_result, message = compare_authors(cited_authors, correct_authors)
+            assert not match_result, f"Should reject {description}: got {message}"
+            assert "mismatch" in message or "not found in author list" in message
+
+
+class TestLatexTitleNormalizationRegression:
+    """Regression tests for LaTeX title processing consistency"""
+    
+    def test_title_normalization_consistency(self):
+        """Test that normalize_paper_title and clean_title_for_search produce consistent results
+        
+        Previously, clean_title_for_search called strip_latex_commands but normalize_paper_title 
+        didn't, leading to comparison mismatches for titles with LaTeX formatting.
+        """
+        from utils.text_utils import normalize_paper_title, clean_title_for_search
+        
+        latex_titles = [
+            'Shinjuku: Preemptive Scheduling for $\\{$\\mu$second-scale$\\}$ Tail Latency',
+            'Deep Learning with $\\alpha$ Regularization',  
+            'A Survey of $\\beta$-VAE Models',
+            'Graph Neural Networks: $\\gamma$ Analysis',
+            'Title with \\textbf{Bold} and \\textit{Italic}',
+        ]
+        
+        for title in latex_titles:
+            normalized = normalize_paper_title(title)
+            cleaned = clean_title_for_search(title)
+            
+            # Both should strip LaTeX commands consistently
+            assert '\\{' not in normalized, f"normalize_paper_title didn't clean LaTeX: '{normalized}'"
+            assert '\\{' not in cleaned, f"clean_title_for_search didn't clean LaTeX: '{cleaned}'"
+            assert '$' not in normalized, f"normalize_paper_title didn't clean math: '{normalized}'"
+            assert '$' not in cleaned, f"clean_title_for_search didn't clean math: '{cleaned}'"
+            
+    def test_shinjuku_title_case(self):
+        """Specific regression test for Shinjuku paper title LaTeX processing"""
+        from utils.text_utils import normalize_paper_title, clean_title_for_search
+        
+        original_title = 'Shinjuku: Preemptive Scheduling for $\\{$\\mu$second-scale$\\}$ Tail Latency'
+        
+        normalized = normalize_paper_title(original_title)
+        cleaned = clean_title_for_search(original_title)
+        
+        # Both should strip LaTeX commands (though they have different output formats)
+        # The key regression test: LaTeX commands should be removed from both
+        assert '\\{' not in normalized, f"normalize_paper_title didn't strip LaTeX: '{normalized}'"
+        assert '\\{' not in cleaned, f"clean_title_for_search didn't strip LaTeX: '{cleaned}'"
+        assert '$' not in normalized, f"normalize_paper_title didn't strip math: '{normalized}'"
+        assert '$' not in cleaned, f"clean_title_for_search didn't strip math: '{cleaned}'"
+        
+        # Verify the actual expected outputs for this specific case
+        # Note: normalize_paper_title removes "Shinjuku:" prefix per design, so check for other content
+        assert 'preemptive' in normalized.lower(), f"Missing title content in normalized: '{normalized}'"
+        assert 'scheduling' in normalized.lower(), f"Missing title content in normalized: '{normalized}'"
+        assert 'Shinjuku' in cleaned, f"Missing title content in cleaned: '{cleaned}'"
+        assert 'μ' in cleaned or 'mu' in cleaned, f"Greek letter not processed in cleaned: '{cleaned}'"

@@ -151,3 +151,89 @@ class TestEnhancedDeduplication:
         kept_ref = unique_refs[0]
         assert "Qiying Yu" in kept_ref
         assert "Dapo: An open-source llm reinforcement learning system at scale" in kept_ref
+    
+    def test_case_insensitive_title_deduplication(self):
+        """Regression test for case-insensitive title matching in deduplication
+        
+        Previously, "Awq:" and "AWQ:" were treated as different papers due to 
+        case-sensitive comparison, causing duplicate references to appear.
+        """
+        # Create segments with same content but different title capitalization (AWQ example)
+        seg1 = {
+            'title': 'Awq: Activation-aware weight quantization for on-device llm compression and acceleration',
+            'author': 'Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang',
+            'venue': 'Machine Learning and Systems',
+            'year': '2024'
+        }
+        
+        seg2 = {
+            'title': 'AWQ: Activation-aware Weight Quantization for On-Device LLM Compression and Acceleration',
+            'author': 'Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang', 
+            'venue': 'Machine Learning and Systems',
+            'year': '2024'
+        }
+        
+        # Should detect as duplicates despite different capitalization
+        is_duplicate = self.checker._are_references_duplicates(seg1, seg2)
+        assert is_duplicate, "Titles with different capitalization should be detected as duplicates"
+    
+    def test_case_insensitive_author_matching(self):
+        """Test case-insensitive author comparison in duplicate detection"""
+        # Same authors with different case, one title is substring of other
+        seg1 = {
+            'title': 'Neural Networks for NLP',
+            'author': 'John Smith, Jane Doe',
+            'venue': 'Conference',
+            'year': '2024'
+        }
+        
+        seg2 = {
+            'title': 'Neural Networks for NLP: A Comprehensive Survey',
+            'author': 'john smith, jane doe',  # Different case
+            'venue': 'Conference',
+            'year': '2024'
+        }
+        
+        # Should detect as duplicates due to same authors (case-insensitive) and substring titles
+        is_duplicate = self.checker._are_references_duplicates(seg1, seg2)
+        assert is_duplicate, "References with same authors (different case) and substring titles should be duplicates"
+    
+    def test_bibliography_entry_deduplication(self):
+        """Test case-insensitive deduplication of structured bibliography entries
+        
+        This tests the _deduplicate_bibliography_entries function which is applied
+        to all bibliography sources (BibTeX, LaTeX, etc.) to remove duplicates like
+        the AWQ paper appearing as both 'Awq:' and 'AWQ:' in the same bibliography.
+        """
+        bibliography = [
+            {
+                'title': 'Awq: Activation-aware weight quantization for on-device llm compression',
+                'authors': ['Ji Lin', 'Jiaming Tang'],
+                'venue': 'Machine Learning and Systems',
+                'year': '2024'
+            },
+            {
+                'title': 'Different Paper',
+                'authors': ['Other Author'],
+                'venue': 'Other Conference', 
+                'year': '2023'
+            },
+            {
+                # Same paper as first but different capitalization
+                'title': 'AWQ: Activation-aware Weight Quantization for On-Device LLM Compression',
+                'authors': ['Ji Lin', 'Jiaming Tang'],
+                'venue': 'Machine Learning and Systems',
+                'year': '2024'
+            }
+        ]
+        
+        deduplicated = self.checker._deduplicate_bibliography_entries(bibliography)
+        
+        # Should remove the duplicate (3 -> 2)
+        assert len(deduplicated) == 2, f"Expected 2 unique references, got {len(deduplicated)}"
+        
+        # Should keep the first occurrence and the different paper
+        titles = [ref['title'] for ref in deduplicated]
+        assert any('Awq:' in title for title in titles), "Should keep first AWQ occurrence"
+        assert any('Different Paper' in title for title in titles), "Should keep different paper"
+        assert not any(title.startswith('AWQ:') for title in titles), "Should not keep duplicate AWQ"

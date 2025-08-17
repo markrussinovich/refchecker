@@ -50,7 +50,8 @@ from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        detect_latex_bibliography_format, extract_latex_references, 
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
-                       calculate_title_similarity, normalize_arxiv_url, deduplicate_urls)
+                       calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
+                       compare_authors)
 from utils.config_validator import ConfigValidator
 from services.pdf_processor import PDFProcessor
 from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -1789,7 +1790,7 @@ class ArxivReferenceChecker:
                     if authors:
                         db_authors = [author.get('name', '') for author in check_paper_data['authors']]
 
-                        authors_match, author_error = self.compare_authors(authors, db_authors)
+                        authors_match, author_error = compare_authors(authors, db_authors)
                         if authors_match:
                             paper_data = check_paper_data
                             search_strategy = "Normalized title with author match"
@@ -1912,7 +1913,7 @@ class ArxivReferenceChecker:
         if authors and paper_data.get('authors'):
             # Extract author names from database data
             correct_names = [author.get('name', '') for author in paper_data['authors']]
-            authors_match, author_error = self.compare_authors(authors, correct_names)
+            authors_match, author_error = compare_authors(authors, correct_names)
             
             if not authors_match:
                 logger.debug(f"DB Verification: Author mismatch - {author_error}")
@@ -3054,6 +3055,13 @@ class ArxivReferenceChecker:
                 try:
                     # Extract bibliography
                     bibliography = self.extract_bibliography(paper, debug_mode)
+                    
+                    # Apply deduplication to all bibliography sources (not just LLM-extracted)
+                    if len(bibliography) > 1:  # Only deduplicate if we have multiple references
+                        original_count = len(bibliography)
+                        bibliography = self._deduplicate_bibliography_entries(bibliography)
+                        if len(bibliography) < original_count:
+                            logger.debug(f"Deduplicated {original_count} references to {len(bibliography)} unique references")
                                         
                     # Update statistics
                     self.total_papers_processed += 1
@@ -4284,9 +4292,9 @@ class ArxivReferenceChecker:
             # If either has no title, can't reliably determine if duplicate
             return False
             
-        # If titles match exactly, consider them duplicates
-        # This handles the case where the same paper appears multiple times
-        if seg1['title'] == seg2['title']:
+        # If titles match exactly (case-insensitive), consider them duplicates
+        # This handles the case where the same paper appears multiple times with different capitalization
+        if seg1['title'].lower() == seg2['title'].lower():
             return True
             
         # Special case: Check if one title is an arXiv identifier and the other is a real title
@@ -4299,15 +4307,53 @@ class ArxivReferenceChecker:
         author1 = seg1['author']
         author2 = seg2['author']
         
-        if author1 and author2 and author1 == author2:
+        if author1 and author2 and author1.lower() == author2.lower():
             # Same authors - check if one title is substring of other or significant similarity
-            title1 = seg1['title']
-            title2 = seg2['title']
+            title1 = seg1['title'].lower()
+            title2 = seg2['title'].lower()
             
             if (title1 in title2 or title2 in title1):
                 return True
         
         return False
+    
+    def _deduplicate_bibliography_entries(self, bibliography):
+        """
+        Deduplicate bibliography entries using title and author comparison.
+        
+        This works with structured reference dictionaries from BibTeX/LaTeX parsing,
+        as opposed to _deduplicate_references_with_segment_matching which works with raw text.
+        
+        Args:
+            bibliography: List of reference dictionaries with 'title', 'authors', etc.
+            
+        Returns:
+            List of unique reference dictionaries
+        """
+        if len(bibliography) <= 1:
+            return bibliography
+            
+        unique_refs = []
+        seen_titles = set()
+        
+        for ref in bibliography:
+            title = ref.get('title', '').strip()
+            if not title:
+                # Keep references without titles (they can't be deduplicated)
+                unique_refs.append(ref)
+                continue
+                
+            # Normalize title for comparison (case-insensitive, basic cleanup)
+            normalized_title = title.lower().strip()
+            
+            # Check if we've seen this title before (case-insensitive)
+            if normalized_title in seen_titles:
+                logger.debug(f"Skipping duplicate reference: '{title}'")
+            else:
+                unique_refs.append(ref)
+                seen_titles.add(normalized_title)
+                
+        return unique_refs
     
     def _is_arxiv_identifier_title_mismatch(self, seg1, seg2):
         """
@@ -5087,60 +5133,6 @@ class ArxivReferenceChecker:
         
         return references
     
-    def compare_authors(self, cited_authors, correct_authors):
-        """
-        Compare author lists to check if they match using improved name matching.
-        Uses the utility function is_name_match for robust author name comparison.
-        """
-        # Clean up author names
-        cleaned_cited = []
-        for author in cited_authors:
-            # Remove reference numbers (e.g., "[1]")
-            author = re.sub(r'^\[\d+\]', '', author)
-            # Remove line breaks
-            author = author.replace('\n', ' ')
-            
-            # Handle "et al" cases properly
-            author_clean = author.strip()
-            if author_clean.lower() == 'et al':
-                # Skip pure "et al" entries
-                continue
-            elif 'et al' in author_clean.lower():
-                # Remove "et al" from the author name (e.g., "S. M. Lundberg et al" -> "S. M. Lundberg")
-                author_clean = re.sub(r'\s+et\s+al\.?', '', author_clean, flags=re.IGNORECASE).strip()
-                if author_clean:  # Only add if something remains
-                    cleaned_cited.append(author_clean)
-            else:
-                cleaned_cited.append(author_clean)
-        
-        if not cleaned_cited:
-            return True, "No authors to compare"
-        
-        # Handle "et al" cases and length mismatches
-        has_et_al = any('et al' in a.lower() for a in cited_authors)
-        
-        if len(cleaned_cited) < len(correct_authors) and (has_et_al or len(cleaned_cited) <= 3):
-            # Only compare the authors that are listed
-            correct_authors = correct_authors[:len(cleaned_cited)]
-        elif len(cleaned_cited) > len(correct_authors) and len(correct_authors) >= 3:
-            # Use available correct authors
-            cleaned_cited = cleaned_cited[:len(correct_authors)]
-        
-        # If there's a big count mismatch and no "et al", it's likely an error
-        if abs(len(cleaned_cited) - len(correct_authors)) > 3 and not has_et_al:
-            return False, "Author count mismatch"
-        
-        # Compare first author (most important) using the improved utility function
-        if cleaned_cited and correct_authors:
-            # Use raw names for comparison (is_name_match handles normalization internally)
-            cited_first = cleaned_cited[0]
-            correct_first = correct_authors[0]
-            
-            if not enhanced_name_match(cited_first, correct_first):
-                from utils.error_utils import format_first_author_mismatch
-                return False, format_first_author_mismatch(cited_first, correct_first)
-        
-        return True, "Authors match"
     
     def normalize_text(self, text):
         """
@@ -5267,7 +5259,10 @@ class ArxivReferenceChecker:
             ref_id = self.extract_arxiv_id_from_url(reference['url'])
             
             # Print reference info in non-debug mode (improved formatting)
-            title = reference.get('title', 'Untitled')
+            raw_title = reference.get('title', 'Untitled')
+            # Clean LaTeX commands from title for display
+            from utils.text_utils import strip_latex_commands
+            title = strip_latex_commands(raw_title)
             from utils.text_utils import format_authors_for_display
             authors = format_authors_for_display(reference.get('authors', []))
             year = reference.get('year', '')
