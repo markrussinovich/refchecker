@@ -3673,6 +3673,30 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     return citation_text
 
 
+def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) -> float:
+    """
+    Compare two titles with proper LaTeX cleaning for accurate similarity scoring.
+    
+    This function ensures both titles are cleaned of LaTeX commands before comparison
+    to avoid false mismatches due to formatting differences like {LLM}s vs LLMs.
+    
+    Args:
+        cited_title: Title from cited reference (may contain LaTeX)
+        database_title: Title from database (usually already clean)
+        
+    Returns:
+        Similarity score between 0 and 1
+    """
+    if not cited_title or not database_title:
+        return 0.0
+    
+    # Clean LaTeX commands from cited title to match database format
+    clean_cited = strip_latex_commands(cited_title)
+    
+    # Calculate similarity using cleaned titles
+    return calculate_title_similarity(clean_cited, database_title)
+
+
 def calculate_title_similarity(title1: str, title2: str) -> float:
     """
     Calculate similarity between two titles using multiple approaches
