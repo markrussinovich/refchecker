@@ -1902,10 +1902,12 @@ class ArxivReferenceChecker:
             
             if normalized_title != db_title:
                 from utils.error_utils import format_title_mismatch
+                # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
+                clean_cited_title = strip_latex_commands(title)
                 logger.debug(f"DB Verification: Title mismatch - cited: '{title}', actual: '{paper_data.get('title')}'")
                 errors.append({
                     'error_type': 'title',
-                    'error_details': format_title_mismatch(title, paper_data.get('title')),
+                    'error_details': format_title_mismatch(clean_cited_title, paper_data.get('title')),
                     'ref_title_correct': paper_data.get('title')
                 })
         

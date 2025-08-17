@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands
 from utils.error_utils import format_title_mismatch
 from config.settings import get_config
 
@@ -468,11 +468,15 @@ class NonArxivReferenceChecker:
                 return None, [], None
         
         # Check title using similarity function to handle formatting differences
-        title_similarity = calculate_title_similarity(title, found_title) if found_title else 0.0
+        # Clean the title for comparison (same cleaning used in matching logic above)
+        clean_title_for_comparison = strip_latex_commands(title) if title else ''
+        title_similarity = calculate_title_similarity(clean_title_for_comparison, found_title) if found_title else 0.0
         if found_title and title_similarity < SIMILARITY_THRESHOLD:
+            # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
+            clean_cited_title = strip_latex_commands(title)
             errors.append({
                 'error_type': 'title',
-                'error_details': format_title_mismatch(title, found_title),
+                'error_details': format_title_mismatch(clean_cited_title, found_title),
                 'ref_title_correct': paper_data.get('title', '')
             })
         
