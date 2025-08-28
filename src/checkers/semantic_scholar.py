@@ -28,7 +28,7 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search
+from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from utils.error_utils import format_title_mismatch
 from config.settings import get_config
 
@@ -353,7 +353,7 @@ class NonArxivReferenceChecker:
                             cited_title = title.strip()
                             
                             if cited_title and result_title:
-                                title_similarity = calculate_title_similarity(cited_title.lower(), result_title.lower())
+                                title_similarity = compare_titles_with_latex_cleaning(cited_title, result_title)
                                 logger.debug(f"Semantic Scholar ArXiv search title similarity: {title_similarity:.3f}")
                                 logger.debug(f"Cited title: '{cited_title}'")
                                 logger.debug(f"Found title: '{result_title}'")
@@ -385,7 +385,7 @@ class NonArxivReferenceChecker:
                         logger.debug(f"DEBUG: cited_title='{cited_title}', arxiv_title='{arxiv_title}'")
                         
                         if cited_title and arxiv_title:
-                            title_similarity = calculate_title_similarity(cited_title.lower(), arxiv_title.lower())
+                            title_similarity = compare_titles_with_latex_cleaning(cited_title, arxiv_title)
                             logger.debug(f"ArXiv API title similarity: {title_similarity:.3f}")
                             logger.debug(f"Cited title: '{cited_title}'")
                             logger.debug(f"ArXiv title: '{arxiv_title}'")
@@ -419,7 +419,7 @@ class NonArxivReferenceChecker:
                         arxiv_title_check = arxiv_paper_check.get('title', '').strip()
                         cited_title_check = title.strip()
                         if cited_title_check and arxiv_title_check:
-                            title_similarity_check = calculate_title_similarity(cited_title_check.lower(), arxiv_title_check.lower())
+                            title_similarity_check = compare_titles_with_latex_cleaning(cited_title_check, arxiv_title_check)
                             if title_similarity_check < SIMILARITY_THRESHOLD:
                                 logger.debug(f"Detected ArXiv ID mismatch before raw text search - skipping unnecessary searches")
                                 arxiv_id_mismatch_detected = True
@@ -468,11 +468,13 @@ class NonArxivReferenceChecker:
                 return None, [], None
         
         # Check title using similarity function to handle formatting differences
-        title_similarity = calculate_title_similarity(title, found_title) if found_title else 0.0
+        title_similarity = compare_titles_with_latex_cleaning(title, found_title) if found_title else 0.0
         if found_title and title_similarity < SIMILARITY_THRESHOLD:
+            # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
+            clean_cited_title = strip_latex_commands(title)
             errors.append({
                 'error_type': 'title',
-                'error_details': format_title_mismatch(title, found_title),
+                'error_details': format_title_mismatch(clean_cited_title, found_title),
                 'ref_title_correct': paper_data.get('title', '')
             })
         

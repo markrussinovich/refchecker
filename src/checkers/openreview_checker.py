@@ -36,7 +36,8 @@ from utils.text_utils import (
     normalize_text, clean_title_basic, is_name_match, 
     calculate_title_similarity, compare_authors, 
     clean_title_for_search, are_venues_substantially_different,
-    is_year_substantially_different
+    is_year_substantially_different, strip_latex_commands,
+    compare_titles_with_latex_cleaning
 )
 
 # Set up logging
@@ -423,10 +424,12 @@ class OpenReviewReferenceChecker:
         paper_title = paper_data.get('title', '').strip()
         
         if cited_title and paper_title:
-            similarity = calculate_title_similarity(cited_title, paper_title)
+            similarity = compare_titles_with_latex_cleaning(cited_title, paper_title)
             if similarity < 0.7:  # Using a reasonable threshold
                 from utils.error_utils import format_title_mismatch
-                details = format_title_mismatch(cited_title, paper_title) + f" (similarity: {similarity:.2f})"
+                # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
+                clean_cited_title = strip_latex_commands(cited_title)
+                details = format_title_mismatch(clean_cited_title, paper_title) + f" (similarity: {similarity:.2f})"
                 errors.append({
                     "warning_type": "title",
                     "warning_details": details
@@ -547,10 +550,12 @@ class OpenReviewReferenceChecker:
         paper_title = best_match.get('title', '').strip()
         
         if cited_title and paper_title:
-            similarity = calculate_title_similarity(cited_title, paper_title)
+            similarity = compare_titles_with_latex_cleaning(cited_title, paper_title)
             if similarity < 0.8:  # Slightly higher threshold for search results
                 from utils.error_utils import format_title_mismatch
-                details = format_title_mismatch(cited_title, paper_title) + f" (similarity: {similarity:.2f})"
+                # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
+                clean_cited_title = strip_latex_commands(cited_title)
+                details = format_title_mismatch(clean_cited_title, paper_title) + f" (similarity: {similarity:.2f})"
                 errors.append({
                     "warning_type": "title",
                     "warning_details": details

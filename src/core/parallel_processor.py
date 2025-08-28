@@ -275,7 +275,10 @@ class ParallelReferenceProcessor:
         reference = result.reference
         
         # Print reference info in the same format as sequential mode
-        title = reference.get('title', 'Untitled')
+        raw_title = reference.get('title', 'Untitled')
+        # Clean LaTeX commands from title for display
+        from utils.text_utils import strip_latex_commands
+        title = strip_latex_commands(raw_title)
         from utils.text_utils import format_authors_for_display
         authors = format_authors_for_display(reference.get('authors', []))
         year = reference.get('year', '')

@@ -7,6 +7,7 @@ from urllib.parse import urlparse, urljoin
 from typing import Dict, Optional, Tuple, List, Any
 from bs4 import BeautifulSoup
 import time
+from utils.text_utils import strip_latex_commands
 
 logger = logging.getLogger(__name__)
 
@@ -185,9 +186,11 @@ class WebPageChecker:
             if cited_title and page_title:
                 if not self._check_title_match(cited_title, page_title, page_description):
                     from utils.error_utils import format_title_mismatch
+                    # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
+                    clean_cited_title = strip_latex_commands(cited_title)
                     errors.append({
                         "warning_type": "title",
-                        "warning_details": format_title_mismatch(cited_title, page_title)
+                        "warning_details": format_title_mismatch(clean_cited_title, page_title)
                     })
             
             # Check if this is a documentation page for the cited topic
