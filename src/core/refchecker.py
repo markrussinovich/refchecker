@@ -3503,8 +3503,9 @@ class ArxivReferenceChecker:
                 except Exception as e:
                     logger.error(f"LLM fallback failed: {e}")
                     return []
-            logger.debug("Using biblatex file")               
-            return biblatex_refs
+            if len(biblatex_refs) > 0:
+                logger.debug("Using biblatex file")
+                return biblatex_refs
         
         # For non-standard formats, try LLM-based extraction if available
         if self.llm_extractor:
