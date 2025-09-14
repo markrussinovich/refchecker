@@ -2307,7 +2307,24 @@ class ArxivReferenceChecker:
         if not web_url:
             return None, [{"error_type": "unverified", "error_details": "Reference could not be verified"}], None
         
-        # Use webchecker to verify the URL
+        # First try PDF paper checker if URL appears to be a PDF
+        from checkers.pdf_paper_checker import PDFPaperChecker
+        pdf_checker = PDFPaperChecker()
+        
+        if pdf_checker.can_check_reference(reference):
+            logger.debug(f"URL appears to be PDF, trying PDF verification: {web_url}")
+            try:
+                verified_data, errors, url = pdf_checker.verify_reference(reference)
+                if verified_data:
+                    logger.debug(f"PDF verification successful for: {reference.get('title', 'Untitled')}")
+                    return verified_data, errors, url
+                else:
+                    logger.debug(f"PDF verification failed, falling back to web page verification")
+            except Exception as e:
+                logger.error(f"Error in PDF verification: {e}")
+                logger.debug(f"PDF verification error, falling back to web page verification")
+        
+        # Fall back to web page checker
         from checkers.webpage_checker import WebPageChecker
         webpage_checker = WebPageChecker()
         

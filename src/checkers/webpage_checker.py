@@ -812,14 +812,18 @@ class WebPageChecker:
         org_indicators = [
             'government', 'gov', '.org', 'agency', 'department', 'ministry',
             'commission', 'bureau', 'office', 'administration', 'institute',
-            'foundation', 'association', 'society', 'center', 'centre'
+            'foundation', 'association', 'society', 'center', 'centre',
+            'council', 'committee', 'board', 'union', 'federation', 'alliance',
+            'coalition', 'consortium', 'network', 'group', 'organization',
+            'organisation', 'corp', 'corporation', 'company', 'ltd', 'inc'
         ]
         
         # Documentation and technical resources
         tech_resources = [
             'documentation', 'docs', 'api', 'reference', 'guide', 'tutorial',
             'manual', 'readme', 'wiki', 'help', 'support', 'developer',
-            'technical', 'white paper', 'whitepaper', 'brief', 'overview'
+            'technical', 'white paper', 'whitepaper', 'brief', 'overview',
+            'policy', 'strategy', 'report', 'study', 'analysis', 'research'
         ]
         
         # Check URL domain for additional context
@@ -844,7 +848,74 @@ class WebPageChecker:
         url_matches = any(domain in url_lower for domain in web_domains)
         
         # Special case: if URL contains news/blog/docs indicators, lean towards web content
-        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide']
+        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy']
         url_has_content_indicators = any(indicator in url_lower for indicator in url_content_indicators)
         
-        return venue_matches or url_matches or url_has_content_indicators
+        # Special case: Check if venue is an organizational acronym/name that matches the URL domain
+        # This handles cases like "AECEA" on aecea.ca domain
+        organizational_match = self._check_organizational_venue_match(venue, url_lower)
+        
+        return venue_matches or url_matches or url_has_content_indicators or organizational_match
+    
+    def _check_organizational_venue_match(self, venue: str, url_lower: str) -> bool:
+        """
+        Check if the venue represents an organization that matches the URL domain
+        
+        Args:
+            venue: The venue string
+            url_lower: The lowercased URL
+            
+        Returns:
+            True if venue appears to be the organization publishing on their own domain
+        """
+        if not venue or not url_lower:
+            return False
+        
+        venue_lower = venue.lower().strip()
+        
+        # Extract domain from URL
+        from urllib.parse import urlparse
+        try:
+            parsed_url = urlparse(url_lower)
+            domain = parsed_url.netloc.lower()
+            
+            # Remove common prefixes
+            domain = domain.replace('www.', '')
+            
+            # Check if venue is likely an acronym (short, all caps or mixed case)
+            is_likely_acronym = (len(venue) <= 10 and 
+                               (venue.isupper() or 
+                                any(c.isupper() for c in venue) and len(venue.split()) == 1))
+            
+            # Check if venue appears in domain
+            venue_clean = ''.join(c for c in venue_lower if c.isalnum())
+            
+            if venue_clean and venue_clean in domain:
+                return True
+            
+            # For acronyms, check if the acronym could match the domain
+            if is_likely_acronym:
+                # Split venue into words and check if initials match domain
+                venue_words = venue_lower.replace('.', ' ').split()
+                if len(venue_words) == 1 and len(venue_words[0]) <= 6:
+                    # Single word acronym - check if it's in the domain
+                    if venue_words[0] in domain:
+                        return True
+            
+            # Check for educational/professional associations with .ca, .org, .edu domains
+            if any(domain.endswith(tld) for tld in ['.ca', '.org', '.edu', '.gov']):
+                # These domains often host organizational content
+                if any(org_word in venue_lower for org_word in [
+                    'association', 'society', 'institute', 'foundation', 'center',
+                    'centre', 'council', 'committee', 'board', 'agency', 'department'
+                ]):
+                    return True
+                
+                # Check if venue is a short organizational name/acronym
+                if is_likely_acronym:
+                    return True
+            
+            return False
+            
+        except Exception:
+            return False
