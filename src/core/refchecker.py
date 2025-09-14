@@ -2021,8 +2021,20 @@ class ArxivReferenceChecker:
                 logger.debug(f"Database mode: Initial paper_url from database checker: {paper_url}")
                 
                 if not verified_data:
-                    # Mark as unverified but keep the URL if found
-                    return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url, None
+                    # Mark as unverified but check URL for more specific reason or verification
+                    if reference.get('url', '').strip():
+                        # Use raw URL verifier to check if it can be verified or get specific reason
+                        url_verified_data, url_errors, url_checked = self.verify_raw_url_reference(reference)
+                        if url_verified_data:
+                            # URL verification succeeded - return as verified
+                            logger.debug(f"Database mode: URL verification succeeded for unverified reference")
+                            return None, url_checked, url_verified_data
+                        else:
+                            # URL verification failed - use specific error reason
+                            url_error_details = url_errors[0].get('error_details', 'Reference could not be verified in database') if url_errors else 'Reference could not be verified in database'
+                            return [{"error_type": "unverified", "error_details": url_error_details}], paper_url, None
+                    else:
+                        return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url, None
                 
                 # Convert database errors to our format
                 formatted_errors = []
@@ -2118,7 +2130,29 @@ class ArxivReferenceChecker:
                 return [{"error_type": "unverified", "error_details": "Database connection not available"}], None, None
         
         # For non-database mode, use the standard reference verification
-        return self.verify_reference_standard(source_paper, reference)
+        errors, paper_url, verified_data = self.verify_reference_standard(source_paper, reference)
+        
+        # If standard verification failed and the reference has a URL, try raw URL verification
+        if errors and verified_data is None:
+            # Check if there's an unverified error
+            unverified_errors = [e for e in errors if e.get('error_type') == 'unverified']
+            if unverified_errors and reference.get('url', '').strip():
+                # Use raw URL verifier to check if it can be verified or get specific reason
+                url_verified_data, url_errors, url_checked = self.verify_raw_url_reference(reference)
+                if url_verified_data:
+                    # URL verification succeeded - return as verified
+                    logger.debug(f"Non-database mode: URL verification succeeded for unverified reference")
+                    return None, url_checked, url_verified_data
+                else:
+                    # URL verification failed - use specific error reason
+                    url_error_details = url_errors[0].get('error_details', 'Reference could not be verified') if url_errors else 'Reference could not be verified'
+                    # Update the unverified error with the specific reason
+                    for error in errors:
+                        if error.get('error_type') == 'unverified':
+                            error['error_details'] = url_error_details
+                            break
+        
+        return errors, paper_url, verified_data
     
 
     def verify_github_reference(self, reference):
@@ -2253,6 +2287,38 @@ class ArxivReferenceChecker:
                 formatted_errors.append(formatted_error)
             return formatted_errors if formatted_errors else [{"error_type": "unverified", "error_details": "Web page could not be verified"}], page_url, None
 
+    def verify_raw_url_reference(self, reference):
+        """
+        Verify a raw URL from an unverified reference - can return verified data if appropriate
+        
+        Args:
+            reference: The reference to verify (already determined to be unverified by paper validators)
+            
+        Returns:
+            Tuple of (verified_data, errors, url) where:
+            - verified_data: Dict with verified data if URL should be considered verified, None otherwise
+            - errors: List of error dictionaries
+            - url: The URL that was checked
+        """
+        logger.debug(f"Checking raw URL for unverified reference: {reference.get('title', 'Untitled')}")
+        
+        # Extract URL from reference
+        web_url = reference.get('url', '').strip()
+        if not web_url:
+            return None, [{"error_type": "unverified", "error_details": "Reference could not be verified"}], None
+        
+        # Use webchecker to verify the URL
+        from checkers.webpage_checker import WebPageChecker
+        webpage_checker = WebPageChecker()
+        
+        try:
+            verified_data, errors, url = webpage_checker.verify_raw_url_for_unverified_reference(reference)
+            logger.debug(f"Raw URL verification result: verified_data={verified_data is not None}, errors={len(errors)}, url={url}")
+            return verified_data, errors, url
+        except Exception as e:
+            logger.error(f"Error checking raw URL: {e}")
+            return None, [{"error_type": "unverified", "error_details": "Reference could not be verified"}], web_url
+
     def verify_reference_standard(self, source_paper, reference):
         """
         Verify if a reference is accurate using GitHub, Semantic Scholar, or other checkers
@@ -2273,11 +2339,6 @@ class ArxivReferenceChecker:
         github_result = self.verify_github_reference(reference)
         if github_result:
             return github_result
-        
-        # Next, check if this is a web page reference
-        webpage_result = self.verify_webpage_reference(reference)
-        if webpage_result:
-            return webpage_result
         
         # Use the Semantic Scholar client to verify the reference
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
@@ -5514,6 +5575,14 @@ class ArxivReferenceChecker:
     def _categorize_unverified_reason(self, error_details):
         """Categorize the unverified error into checker error or not found"""
         error_details_lower = error_details.lower()
+        
+        # New specific URL-based unverified reasons
+        if error_details_lower == "non-existent web page":
+            return "Non-existent web page"
+        elif error_details_lower == "paper not found and url doesn't reference it":
+            return "Paper not found and URL doesn't reference it"
+        elif error_details_lower == "paper not verified but url references paper":
+            return "Paper not verified but URL references paper"
         
         # Checker/API errors
         api_error_patterns = [
