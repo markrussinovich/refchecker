@@ -2311,7 +2311,7 @@ class ArxivReferenceChecker:
         from checkers.pdf_paper_checker import PDFPaperChecker
         pdf_checker = PDFPaperChecker()
         
-        if pdf_checker.can_check_reference(reference):h
+        if pdf_checker.can_check_reference(reference):
             logger.debug(f"URL appears to be PDF, trying PDF verification: {web_url}")
             try:
                 verified_data, errors, url = pdf_checker.verify_reference(reference)

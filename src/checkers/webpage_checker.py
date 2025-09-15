@@ -785,14 +785,17 @@ class WebPageChecker:
             
         venue_lower = venue.lower().strip()
         
-        # News organizations and media outlets
+        # News organizations and media outlets  
         news_indicators = [
             'news', 'cbc', 'bbc', 'cnn', 'reuters', 'associated press', 'ap news',
             'npr', 'pbs', 'abc news', 'nbc news', 'fox news', 'guardian', 'times',
             'post', 'herald', 'tribune', 'gazette', 'chronicle', 'observer',
-            'journal' if any(word in venue_lower for word in ['wall street', 'wsj']) else '',
             'magazine', 'weekly', 'daily', 'today', 'report', 'wire', 'press'
         ]
+        
+        # Special case for Wall Street Journal
+        if any(word in venue_lower for word in ['wall street', 'wsj']):
+            news_indicators.append('journal')
         
         # Technology and industry publications
         tech_publications = [
@@ -840,6 +843,20 @@ class WebPageChecker:
         
         # Combine all indicators
         all_indicators = news_indicators + tech_publications + blog_platforms + org_indicators + tech_resources
+        
+        # Academic venue indicators that should NOT be considered web content
+        academic_indicators = [
+            'proceedings', 'conference', 'symposium', 'workshop', 'transactions',
+            'journal of', 'international journal', 'acm', 'ieee', 'springer',
+            'nature', 'science', 'cell', 'lancet', 'plos', 'arxiv', 'pubmed',
+            'artificial intelligence', 'machine learning', 'computer vision',
+            'neural', 'computing', 'robotics', 'bioinformatics'
+        ]
+        
+        # Check if venue is clearly academic (should not be treated as web content)
+        is_academic = any(indicator in venue_lower for indicator in academic_indicators)
+        if is_academic:
+            return False
         
         # Check if venue matches any web content indicators
         venue_matches = any(indicator and indicator in venue_lower for indicator in all_indicators)
