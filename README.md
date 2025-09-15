@@ -4,6 +4,14 @@
 
 A comprehensive tool for validating reference accuracy in academic papers, useful for both authors checking their bibliography and conference reviewers ensuring that paper references are authentic and accurate. This tool processes papers from various local and online sources including ArXiv, PDF files, LaTeX documents, and text files to verify the accuracy of references by comparing cited information against authoritative sources.
 
+## 🎥 Project Deep Dive
+
+Learn about RefChecker's design philosophy and development process in this detailed discussion between Mark Russinovich (RefChecker's author) and Scott Hanselman. Mark shares insights into how he leveraged AI coding assistants including Cursor, GitHub Copilot, and Claude to build this comprehensive academic reference validation tool.
+
+**[📺 Watch: "AI Coding with Mark Russinovich: Building RefChecker"](https://www.youtube.com/watch?v=n929Alz-fjo)**
+
+*This video provides valuable insights into modern AI-assisted development workflows and the technical decisions behind RefChecker's architecture.*
+
 ## 📊 Sample Output
 
 ```
@@ -56,6 +64,7 @@ A comprehensive tool for validating reference accuracy in academic papers, usefu
 
 ## 📋 Table of Contents
 
+- [🎥 Project Deep Dive](#-project-deep-dive)
 - [📊 Sample Output](#-sample-output)
 - [🎯 Features](#-features)
 - [🚀 Quick Start](#-quick-start)

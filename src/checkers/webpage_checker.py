@@ -513,3 +513,409 @@ class WebPageChecker:
             })
         
         return verified_data, errors, web_url
+
+    def check_unverified_url_reference(self, reference: Dict[str, Any]) -> str:
+        """
+        Check a URL from an unverified reference to determine the specific unverified reason
+        
+        Args:
+            reference: Reference dictionary with title, authors, year, url, etc.
+            
+        Returns:
+            String with the specific unverified reason:
+            - "non-existent web page" if the page doesn't exist
+            - "paper not found and URL doesn't reference it" if page exists but doesn't contain title
+            - "paper not verified but URL references paper" if page exists and contains title
+        """
+        logger.debug(f"Checking unverified URL reference: {reference.get('title', 'Untitled')}")
+        
+        # Extract URL from reference
+        web_url = reference.get('url', '').strip()
+        if not web_url:
+            return "paper not found and URL doesn't reference it"  # No URL to check
+        
+        # Make request to check if page exists
+        response = self._respectful_request(web_url)
+        if response is None:
+            return "non-existent web page"
+        
+        if response.status_code == 404:
+            return "non-existent web page"
+        elif response.status_code == 403:
+            # For blocked resources, we can't check content but assume page exists
+            return "paper not verified but URL references paper"
+        elif response.status_code != 200:
+            return "non-existent web page"
+        
+        try:
+            # Parse HTML content to search for title
+            content_type = response.headers.get('content-type', '').lower()
+            if 'pdf' in content_type or web_url.lower().endswith('.pdf'):
+                # For PDFs, we can't search content, so assume it's referenced if accessible
+                return "paper not verified but URL references paper"
+            
+            # Parse HTML content
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Extract page content for searching
+            page_title = self._extract_page_title(soup)
+            page_description = self._extract_description(soup)
+            
+            # Get the full page text for comprehensive searching
+            page_text = soup.get_text().lower()
+            
+            # Get the reference title to search for
+            cited_title = reference.get('title', '').strip()
+            if not cited_title:
+                return "paper not found and URL doesn't reference it"
+            
+            # Search for the title in various ways
+            cited_title_lower = cited_title.lower()
+            
+            # Direct search in page text
+            if cited_title_lower in page_text:
+                return "paper not verified but URL references paper"
+            
+            # Search for key words from the title
+            cited_words = set(word.strip('.,;:()[]{}') for word in cited_title_lower.split() 
+                             if len(word.strip('.,;:()[]{}')) > 3)
+            
+            # Check if significant portion of title words appear in page
+            page_words = set(word.strip('.,;:()[]{}') for word in page_text.split() 
+                           if len(word.strip('.,;:()[]{}')) > 3)
+            
+            common_words = cited_words.intersection(page_words)
+            
+            # If most of the title words are found, consider it referenced
+            if len(common_words) >= max(1, len(cited_words) * 0.6):  # At least 60% of words match
+                return "paper not verified but URL references paper"
+            
+            # Also check the extracted title and description specifically
+            if page_title:
+                if self._check_title_match(cited_title, page_title, page_description):
+                    return "paper not verified but URL references paper"
+            
+            # Title not found in page content
+            return "paper not found and URL doesn't reference it"
+            
+        except Exception as e:
+            logger.error(f"Error checking unverified URL {web_url}: {e}")
+            return "paper not found and URL doesn't reference it"
+
+    def verify_raw_url_for_unverified_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """
+        Verify a raw URL from an unverified reference - can return verified data if appropriate
+        
+        Args:
+            reference: Reference dictionary with title, authors, year, url, etc.
+            
+        Returns:
+            Tuple of (verified_data, errors, url) where:
+            - verified_data: Dict with verified data if URL should be considered verified, None otherwise
+            - errors: List of error dictionaries with specific unverified reasons
+            - url: The URL that was checked
+        """
+        logger.debug(f"Verifying raw URL for unverified reference: {reference.get('title', 'Untitled')}")
+        
+        # Extract URL from reference
+        web_url = reference.get('url', '').strip()
+        if not web_url:
+            return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], None
+        
+        # Make request to check if page exists
+        response = self._respectful_request(web_url)
+        if response is None:
+            return None, [{"error_type": "unverified", "error_details": "non-existent web page"}], web_url
+        
+        if response.status_code == 404:
+            return None, [{"error_type": "unverified", "error_details": "non-existent web page"}], web_url
+        elif response.status_code == 403:
+            # For blocked resources, we can't check content but assume page exists
+            # If no venue, treat as verified since URL is accessible
+            if not reference.get('journal') and not reference.get('venue') and not reference.get('booktitle'):
+                verified_data = {
+                    'title': reference.get('title', ''),
+                    'authors': reference.get('authors', []),
+                    'year': reference.get('year'),
+                    'venue': 'Web Page',
+                    'url': web_url,
+                    'web_metadata': {
+                        'status_code': 403,
+                        'access_blocked': True
+                    }
+                }
+                return verified_data, [], web_url
+            else:
+                return None, [{"error_type": "unverified", "error_details": "paper not verified but URL references paper"}], web_url
+        elif response.status_code != 200:
+            return None, [{"error_type": "unverified", "error_details": "non-existent web page"}], web_url
+        
+        try:
+            # Parse HTML content to search for title
+            content_type = response.headers.get('content-type', '').lower()
+            if 'pdf' in content_type or web_url.lower().endswith('.pdf'):
+                # For PDFs, if no venue specified, treat as verified
+                if not reference.get('journal') and not reference.get('venue') and not reference.get('booktitle'):
+                    verified_data = {
+                        'title': reference.get('title', ''),
+                        'authors': reference.get('authors', []),
+                        'year': reference.get('year'),
+                        'venue': 'PDF Document',
+                        'url': web_url,
+                        'web_metadata': {
+                            'content_type': response.headers.get('content-type', ''),
+                            'status_code': response.status_code
+                        }
+                    }
+                    return verified_data, [], web_url
+                else:
+                    return None, [{"error_type": "unverified", "error_details": "paper not verified but URL references paper"}], web_url
+            
+            # Parse HTML content
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Extract page content for searching
+            page_title = self._extract_page_title(soup)
+            page_description = self._extract_description(soup)
+            
+            # Get the full page text for comprehensive searching
+            page_text = soup.get_text().lower()
+            
+            # Get the reference title to search for
+            cited_title = reference.get('title', '').strip()
+            if not cited_title:
+                return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], web_url
+            
+            # Search for the title in various ways
+            cited_title_lower = cited_title.lower()
+            title_found = False
+            
+            # Direct search in page text
+            if cited_title_lower in page_text:
+                title_found = True
+            
+            # Search for key words from the title
+            if not title_found:
+                cited_words = set(word.strip('.,;:()[]{}') for word in cited_title_lower.split() 
+                                 if len(word.strip('.,;:()[]{}')) > 3)
+                
+                # Check if significant portion of title words appear in page
+                page_words = set(word.strip('.,;:()[]{}') for word in page_text.split() 
+                               if len(word.strip('.,;:()[]{}')) > 3)
+                
+                common_words = cited_words.intersection(page_words)
+                
+                # If most of the title words are found, consider it referenced
+                if len(common_words) >= max(1, len(cited_words) * 0.6):  # At least 60% of words match
+                    title_found = True
+            
+            # Also check the extracted title and description specifically
+            if not title_found and page_title:
+                if self._check_title_match(cited_title, page_title, page_description):
+                    title_found = True
+            
+            # Determine if this should be verified or unverified
+            if title_found:
+                # Check if reference should be verified based on venue type
+                venue_field = reference.get('journal') or reference.get('venue') or reference.get('booktitle')
+                
+                if not venue_field:
+                    # No venue specified - verify with URL as venue
+                    site_info = self._extract_site_info(soup, web_url)
+                    venue = site_info.get('organization', 'Web Page') if site_info.get('organization') != site_info.get('domain') else 'Web Page'
+                    
+                    verified_data = {
+                        'title': reference.get('title', ''),
+                        'authors': reference.get('authors', []),
+                        'year': reference.get('year'),
+                        'venue': venue,
+                        'url': web_url,
+                        'web_metadata': {
+                            'page_title': page_title,
+                            'description': page_description,
+                            'site_info': site_info,
+                            'final_url': response.url,
+                            'status_code': response.status_code
+                        }
+                    }
+                    logger.debug(f"URL verified as valid source for reference without venue: {web_url}")
+                    return verified_data, [], web_url
+                elif self._is_web_content_venue(venue_field, web_url):
+                    # Has venue but it's a web content venue (news, blog, etc.) - verify it
+                    verified_data = {
+                        'title': reference.get('title', ''),
+                        'authors': reference.get('authors', []),
+                        'year': reference.get('year'),
+                        'venue': venue_field,  # Keep the original venue
+                        'url': web_url,
+                        'web_metadata': {
+                            'page_title': page_title,
+                            'description': page_description,
+                            'site_info': self._extract_site_info(soup, web_url),
+                            'final_url': response.url,
+                            'status_code': response.status_code
+                        }
+                    }
+                    logger.debug(f"URL verified as valid web content source: {web_url}")
+                    return verified_data, [], web_url
+                else:
+                    # Has academic venue but URL references paper - still unverified (needs proper paper verification)
+                    return None, [{"error_type": "unverified", "error_details": "paper not verified but URL references paper"}], web_url
+            else:
+                # Title not found in page content
+                return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], web_url
+            
+        except Exception as e:
+            logger.error(f"Error checking raw URL {web_url}: {e}")
+            return None, [{"error_type": "unverified", "error_details": "paper not found and URL doesn't reference it"}], web_url
+
+    def _is_web_content_venue(self, venue: str, url: str) -> bool:
+        """
+        Determine if a venue represents web content rather than academic publication
+        
+        Args:
+            venue: The venue string (journal, venue, or booktitle)
+            url: The URL being checked (for additional context)
+            
+        Returns:
+            True if this represents web content that can be verified via URL
+        """
+        if not venue:
+            return False
+            
+        venue_lower = venue.lower().strip()
+        
+        # News organizations and media outlets
+        news_indicators = [
+            'news', 'cbc', 'bbc', 'cnn', 'reuters', 'associated press', 'ap news',
+            'npr', 'pbs', 'abc news', 'nbc news', 'fox news', 'guardian', 'times',
+            'post', 'herald', 'tribune', 'gazette', 'chronicle', 'observer',
+            'journal' if any(word in venue_lower for word in ['wall street', 'wsj']) else '',
+            'magazine', 'weekly', 'daily', 'today', 'report', 'wire', 'press'
+        ]
+        
+        # Technology and industry publications
+        tech_publications = [
+            'techcrunch', 'wired', 'ars technica', 'the verge', 'engadget',
+            'zdnet', 'cnet', 'computerworld', 'infoworld', 'pcmag', 'pcworld',
+            'ieee spectrum', 'mit technology review', 'scientific american'
+        ]
+        
+        # Blogs and web platforms
+        blog_platforms = [
+            'blog', 'medium', 'substack', 'wordpress', 'blogspot', 'tumblr',
+            'linkedin', 'facebook', 'twitter', 'reddit', 'stack overflow',
+            'github pages', 'personal website', 'company blog'
+        ]
+        
+        # Government and organizational websites
+        org_indicators = [
+            'government', 'gov', '.org', 'agency', 'department', 'ministry',
+            'commission', 'bureau', 'office', 'administration', 'institute',
+            'foundation', 'association', 'society', 'center', 'centre',
+            'council', 'committee', 'board', 'union', 'federation', 'alliance',
+            'coalition', 'consortium', 'network', 'group', 'organization',
+            'organisation', 'corp', 'corporation', 'company', 'ltd', 'inc'
+        ]
+        
+        # Documentation and technical resources
+        tech_resources = [
+            'documentation', 'docs', 'api', 'reference', 'guide', 'tutorial',
+            'manual', 'readme', 'wiki', 'help', 'support', 'developer',
+            'technical', 'white paper', 'whitepaper', 'brief', 'overview',
+            'policy', 'strategy', 'report', 'study', 'analysis', 'research'
+        ]
+        
+        # Check URL domain for additional context
+        url_lower = url.lower() if url else ''
+        
+        # Known web content domains in URL
+        web_domains = [
+            'cbc.ca', 'bbc.com', 'cnn.com', 'reuters.com', 'npr.org', 'pbs.org',
+            'nytimes.com', 'washingtonpost.com', 'theguardian.com', 'wsj.com',
+            'techcrunch.com', 'wired.com', 'theverge.com', 'arstechnica.com',
+            'medium.com', 'substack.com', 'linkedin.com', 'github.io',
+            'readthedocs.io', 'stackoverflow.com', 'reddit.com'
+        ]
+        
+        # Combine all indicators
+        all_indicators = news_indicators + tech_publications + blog_platforms + org_indicators + tech_resources
+        
+        # Check if venue matches any web content indicators
+        venue_matches = any(indicator and indicator in venue_lower for indicator in all_indicators)
+        
+        # Check if URL domain suggests web content
+        url_matches = any(domain in url_lower for domain in web_domains)
+        
+        # Special case: if URL contains news/blog/docs indicators, lean towards web content
+        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy']
+        url_has_content_indicators = any(indicator in url_lower for indicator in url_content_indicators)
+        
+        # Special case: Check if venue is an organizational acronym/name that matches the URL domain
+        # This handles cases like "AECEA" on aecea.ca domain
+        organizational_match = self._check_organizational_venue_match(venue, url_lower)
+        
+        return venue_matches or url_matches or url_has_content_indicators or organizational_match
+    
+    def _check_organizational_venue_match(self, venue: str, url_lower: str) -> bool:
+        """
+        Check if the venue represents an organization that matches the URL domain
+        
+        Args:
+            venue: The venue string
+            url_lower: The lowercased URL
+            
+        Returns:
+            True if venue appears to be the organization publishing on their own domain
+        """
+        if not venue or not url_lower:
+            return False
+        
+        venue_lower = venue.lower().strip()
+        
+        # Extract domain from URL
+        from urllib.parse import urlparse
+        try:
+            parsed_url = urlparse(url_lower)
+            domain = parsed_url.netloc.lower()
+            
+            # Remove common prefixes
+            domain = domain.replace('www.', '')
+            
+            # Check if venue is likely an acronym (short, all caps or mixed case)
+            is_likely_acronym = (len(venue) <= 10 and 
+                               (venue.isupper() or 
+                                any(c.isupper() for c in venue) and len(venue.split()) == 1))
+            
+            # Check if venue appears in domain
+            venue_clean = ''.join(c for c in venue_lower if c.isalnum())
+            
+            if venue_clean and venue_clean in domain:
+                return True
+            
+            # For acronyms, check if the acronym could match the domain
+            if is_likely_acronym:
+                # Split venue into words and check if initials match domain
+                venue_words = venue_lower.replace('.', ' ').split()
+                if len(venue_words) == 1 and len(venue_words[0]) <= 6:
+                    # Single word acronym - check if it's in the domain
+                    if venue_words[0] in domain:
+                        return True
+            
+            # Check for educational/professional associations with .ca, .org, .edu domains
+            if any(domain.endswith(tld) for tld in ['.ca', '.org', '.edu', '.gov']):
+                # These domains often host organizational content
+                if any(org_word in venue_lower for org_word in [
+                    'association', 'society', 'institute', 'foundation', 'center',
+                    'centre', 'council', 'committee', 'board', 'agency', 'department'
+                ]):
+                    return True
+                
+                # Check if venue is a short organizational name/acronym
+                if is_likely_acronym:
+                    return True
+            
+            return False
+            
+        except Exception:
+            return False
