@@ -173,6 +173,11 @@ def parse_authors_with_initials(authors_text):
     if stripped_text in ['others', 'and others', 'et al', 'et al.']:
         return []
     
+    # Clean LaTeX commands early to prevent parsing issues
+    # This fixes cases like "Hochreiter, Sepp and Schmidhuber, J{\"u}rgen" 
+    # which should parse as 2 authors, not get split incorrectly due to LaTeX braces
+    authors_text = strip_latex_commands(authors_text)
+    
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
@@ -300,9 +305,9 @@ def parse_authors_with_initials(authors_text):
                     comma_parts = [p.strip() for p in part.split(',')]
                     if len(comma_parts) == 2:
                         lastname, firstname = comma_parts
-                        # Both parts should contain only letters, spaces, hyphens, apostrophes, and periods
-                        if (re.match(r'^[A-Za-z\s\-\'.]+$', lastname) and 
-                            re.match(r'^[A-Za-z\s\-\'.]+$', firstname) and
+                        # Both parts should contain only letters (including Unicode), spaces, hyphens, apostrophes, and periods
+                        if (re.match(r'^[\w\s\-\'.]+$', lastname, re.UNICODE) and 
+                            re.match(r'^[\w\s\-\'.]+$', firstname, re.UNICODE) and
                             lastname and firstname):
                             valid_author_parts.append(part)
             
@@ -313,6 +318,50 @@ def parse_authors_with_initials(authors_text):
     
     # Split on commas first for other formats
     parts = [part.strip() for part in authors_text.split(',') if part.strip()]
+    
+    # Handle single author with "Lastname, Firstname" format (exactly 2 parts)
+    if len(parts) == 2:
+        lastname, firstname = parts
+        # Pattern for surnames: capitalized word(s), possibly hyphenated or compound
+        # But exclude common patterns that suggest multiple authors like "Other Author"
+        surname_pattern = r'^[A-Z][a-zA-Z\-\']+$'  # Single surname word (no spaces to avoid "Other Author")
+        # Pattern for first names or initials: either full names or initials with periods
+        # Accept both full names like "David R" and initials like "A. C"
+        firstname_pattern = r'^[A-Z]([a-zA-Z\s\-\'.]*|\.(\s+[A-Z]\.?)*\s*)$'  # Full names or initials
+        
+        # Additional check: if the "firstname" part looks like "Other Author" or similar, 
+        # it's likely multiple authors, not a single "Lastname, Firstname" pattern
+        # We need to distinguish between:
+        # - "David R" (first name + middle initial - single author) 
+        # - "Other Author" (two separate names - multiple authors)
+        if ' ' in firstname:
+            firstname_parts = firstname.split()
+            if len(firstname_parts) == 2:
+                first_part, second_part = firstname_parts
+                # Pattern 1: "David R" - first name + single letter (middle initial)
+                is_name_plus_initial = (
+                    len(first_part) >= 2 and first_part[0].isupper() and first_part[1:].islower() and
+                    len(second_part) <= 2 and second_part.replace('.', '').isalpha()  # Initial like "R" or "R."
+                )
+                # Pattern 2: "Other Author" - two full capitalized words suggesting separate authors
+                looks_like_separate_authors = (
+                    len(first_part) >= 3 and first_part[0].isupper() and first_part[1:].islower() and
+                    len(second_part) >= 3 and second_part[0].isupper() and second_part[1:].islower()
+                )
+                looks_like_multiple_authors = looks_like_separate_authors and not is_name_plus_initial
+            else:
+                # More than 2 parts with spaces likely indicates multiple authors
+                looks_like_multiple_authors = len(firstname_parts) > 2
+        else:
+            looks_like_multiple_authors = False
+        
+        # Check if this looks like a single author in "Lastname, Firstname" format
+        if (re.match(surname_pattern, lastname) and 
+            re.match(firstname_pattern, firstname) and
+            len(lastname) >= 2 and len(firstname) >= 1 and
+            not looks_like_multiple_authors):
+            # This is a single author, return as "Lastname, Firstname"
+            return [f"{lastname}, {firstname}"]
     
     # Check if this is BibTeX comma-separated format: "Surname, Given, Surname, Given"
     # Enhanced heuristic: even number of parts >= 6, alternating proper surname/given pattern

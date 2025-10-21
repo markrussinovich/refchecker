@@ -267,6 +267,89 @@ class TestAuthorNameProcessing:
             result = parse_authors_with_initials(input_authors)
             assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
     
+    def test_single_author_lastname_firstname_parsing(self):
+        """
+        Regression test for author count mismatch issue.
+        
+        This test ensures that single authors in "Lastname, Firstname" format
+        are correctly parsed as one author, not split into two.
+        
+        Previously, "Krathwohl, David R" was incorrectly parsed as 
+        ["Krathwohl", "David R"] (2 authors) instead of ["Krathwohl, David R"] (1 author).
+        """
+        # Test cases that were causing "Author count mismatch" errors
+        # These are cases where the "firstname" is a single name or name+initial
+        single_author_cases = [
+            ("Krathwohl, David R", ["Krathwohl, David R"]),  # first name + middle initial
+            ("Butler, Andrew C", ["Butler, Andrew C"]),     # first name + middle initial
+            ("Towns, Marcy H", ["Towns, Marcy H"]),         # first name + middle initial
+            ("Smith, John", ["Smith, John"]),               # single first name
+            ("O'Connor, Sean", ["O'Connor, Sean"]),         # single first name with apostrophe
+            ("Li, J.", ["Li, J."]),                         # single initial
+            ("Martinez, A. B.", ["Martinez, A. B."]),       # initials
+        ]
+        
+        for input_author, expected in single_author_cases:
+            result = parse_authors_with_initials(input_author)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_author}'"
+            assert len(result) == 1, f"Expected 1 author but got {len(result)} for '{input_author}'"
+    
+    def test_author_comparison_with_fixed_parsing(self):
+        """
+        Test that author comparison works correctly with the fixed parsing.
+        
+        This ensures that the fix doesn't break the actual comparison logic
+        and that names like "Krathwohl, David R" still match "D. Krathwohl".
+        """
+        # Test cases that were failing due to author count mismatch
+        comparison_cases = [
+            (["Krathwohl, David R"], ["D. Krathwohl"]),
+            (["Butler, Andrew C"], ["A. C. Butler"]),
+            (["Towns, Marcy H"], ["M. Towns"]),
+        ]
+        
+        for cited_authors, correct_authors in comparison_cases:
+            result, error = compare_authors(cited_authors, correct_authors)
+            assert result == True, f"Expected match for {cited_authors} vs {correct_authors}, but got: {error}"
+            assert "Authors match" in error, f"Expected 'Authors match' message but got: {error}"
+    
+    def test_latex_author_parsing_fix(self):
+        """
+        Regression test for LaTeX in author names causing parsing issues.
+        
+        This test ensures that LaTeX commands in author names are cleaned early
+        in the parsing process to prevent incorrect author count detection.
+        
+        Previously, "Hochreiter, Sepp and Schmidhuber, J{\"u}rgen" was incorrectly 
+        parsed as 3 authors instead of 2 due to LaTeX braces interfering with parsing.
+        """
+        # Test the specific case that was failing
+        latex_cases = [
+            ("Hochreiter, Sepp and Schmidhuber, J{\"u}rgen", ["Hochreiter, Sepp", "Schmidhuber, Jurgen"]),
+            ("Smith, John and M{\"u}ller, Hans", ["Smith, John", "Muller, Hans"]),
+            # Test plain Unicode (non-LaTeX) cases - these work better
+            ("García, José and López, María", ["García, José", "López, María"]),
+            ("Müller, Hans and Schmidt, Jürgen", ["Müller, Hans", "Schmidt, Jürgen"]),
+        ]
+        
+        for input_authors, expected in latex_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
+            
+    def test_latex_author_comparison_integration(self):
+        """
+        Test that LaTeX-cleaned author parsing integrates correctly with comparison.
+        
+        This ensures that the LaTeX cleaning fix doesn't break the matching logic.
+        """
+        # Test case from the LSTM paper
+        cited = ["Hochreiter, Sepp", "Schmidhuber, Jurgen"]  # Cleaned LaTeX output
+        correct = ["Sepp Hochreiter", "J. Schmidhuber"]      # Database format
+        
+        result, error = compare_authors(cited, correct)
+        assert result == True, f"Expected match for LSTM authors but got: {error}"
+        assert "Authors match" in error, f"Expected 'Authors match' message but got: {error}"
+    
     def test_author_name_spacing_fixes(self):
         """Test that author names with spacing issues around periods are handled correctly."""
         # Test normalize_author_name with spacing issues
