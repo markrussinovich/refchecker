@@ -173,6 +173,11 @@ def parse_authors_with_initials(authors_text):
     if stripped_text in ['others', 'and others', 'et al', 'et al.']:
         return []
     
+    # Clean LaTeX commands early to prevent parsing issues
+    # This fixes cases like "Hochreiter, Sepp and Schmidhuber, J{\"u}rgen" 
+    # which should parse as 2 authors, not get split incorrectly due to LaTeX braces
+    authors_text = strip_latex_commands(authors_text)
+    
     # Fix spacing around periods in initials (e.g., "Y . Li" -> "Y. Li") before parsing
     authors_text = re.sub(r'(\w)\s+\.', r'\1.', authors_text)
     
@@ -300,9 +305,9 @@ def parse_authors_with_initials(authors_text):
                     comma_parts = [p.strip() for p in part.split(',')]
                     if len(comma_parts) == 2:
                         lastname, firstname = comma_parts
-                        # Both parts should contain only letters, spaces, hyphens, apostrophes, and periods
-                        if (re.match(r'^[A-Za-z\s\-\'.]+$', lastname) and 
-                            re.match(r'^[A-Za-z\s\-\'.]+$', firstname) and
+                        # Both parts should contain only letters (including Unicode), spaces, hyphens, apostrophes, and periods
+                        if (re.match(r'^[\w\s\-\'.]+$', lastname, re.UNICODE) and 
+                            re.match(r'^[\w\s\-\'.]+$', firstname, re.UNICODE) and
                             lastname and firstname):
                             valid_author_parts.append(part)
             

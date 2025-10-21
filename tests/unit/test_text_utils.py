@@ -313,6 +313,43 @@ class TestAuthorNameProcessing:
             assert result == True, f"Expected match for {cited_authors} vs {correct_authors}, but got: {error}"
             assert "Authors match" in error, f"Expected 'Authors match' message but got: {error}"
     
+    def test_latex_author_parsing_fix(self):
+        """
+        Regression test for LaTeX in author names causing parsing issues.
+        
+        This test ensures that LaTeX commands in author names are cleaned early
+        in the parsing process to prevent incorrect author count detection.
+        
+        Previously, "Hochreiter, Sepp and Schmidhuber, J{\"u}rgen" was incorrectly 
+        parsed as 3 authors instead of 2 due to LaTeX braces interfering with parsing.
+        """
+        # Test the specific case that was failing
+        latex_cases = [
+            ("Hochreiter, Sepp and Schmidhuber, J{\"u}rgen", ["Hochreiter, Sepp", "Schmidhuber, Jurgen"]),
+            ("Smith, John and M{\"u}ller, Hans", ["Smith, John", "Muller, Hans"]),
+            # Test plain Unicode (non-LaTeX) cases - these work better
+            ("García, José and López, María", ["García, José", "López, María"]),
+            ("Müller, Hans and Schmidt, Jürgen", ["Müller, Hans", "Schmidt, Jürgen"]),
+        ]
+        
+        for input_authors, expected in latex_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
+            
+    def test_latex_author_comparison_integration(self):
+        """
+        Test that LaTeX-cleaned author parsing integrates correctly with comparison.
+        
+        This ensures that the LaTeX cleaning fix doesn't break the matching logic.
+        """
+        # Test case from the LSTM paper
+        cited = ["Hochreiter, Sepp", "Schmidhuber, Jurgen"]  # Cleaned LaTeX output
+        correct = ["Sepp Hochreiter", "J. Schmidhuber"]      # Database format
+        
+        result, error = compare_authors(cited, correct)
+        assert result == True, f"Expected match for LSTM authors but got: {error}"
+        assert "Authors match" in error, f"Expected 'Authors match' message but got: {error}"
+    
     def test_author_name_spacing_fixes(self):
         """Test that author names with spacing issues around periods are handled correctly."""
         # Test normalize_author_name with spacing issues
