@@ -35,12 +35,12 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
-from utils.error_utils import create_author_error, create_year_warning, create_doi_error
-from utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, extract_arxiv_id_from_url
-from utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
-from utils.url_utils import get_best_available_url
-from config.settings import get_config
+from refchecker.utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
+from refchecker.utils.error_utils import create_author_error, create_year_warning, create_doi_error
+from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, extract_arxiv_id_from_url
+from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
+from refchecker.utils.url_utils import get_best_available_url
+from refchecker.config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)

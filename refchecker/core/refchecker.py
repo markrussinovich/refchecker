@@ -44,23 +44,23 @@ import argparse
 import sys
 import json
 import random
-from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
-from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
+from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
-from utils.config_validator import ConfigValidator
-from services.pdf_processor import PDFProcessor
-from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
-from core.parallel_processor import ParallelReferenceProcessor  
-from core.db_connection_pool import ThreadSafeLocalChecker
+from refchecker.utils.config_validator import ConfigValidator
+from refchecker.services.pdf_processor import PDFProcessor
+from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+from refchecker.core.parallel_processor import ParallelReferenceProcessor  
+from refchecker.core.db_connection_pool import ThreadSafeLocalChecker
 
 # Import version
-from __version__ import __version__
-from llm.base import create_llm_provider, ReferenceExtractor
+from refchecker.__version__ import __version__
+from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 
 def get_llm_api_key_interactive(provider: str) -> str:
     """

@@ -32,7 +32,7 @@ import json
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
-from utils.text_utils import (
+from refchecker.utils.text_utils import (
     normalize_text, clean_title_basic, is_name_match, 
     calculate_title_similarity, compare_authors, 
     clean_title_for_search, are_venues_substantially_different,

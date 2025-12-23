@@ -95,18 +95,20 @@ Learn about RefChecker's design philosophy and development process in this detai
 
 1. **Check a famous paper:**
    ```bash
-   python refchecker.py --paper 1706.03762
+   academic-refchecker --paper 1706.03762
    ```
 
 2. **Check your own PDF:**
    ```bash
-   python refchecker.py --paper /path/to/your/paper.pdf
+   academic-refchecker --paper /path/to/your/paper.pdf
    ```
 
 3. **For faster processing with local database** (see [Local Database Setup](#local-database-setup)):
    ```bash
-   python refchecker.py --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
+   academic-refchecker --paper 1706.03762 --db-path semantic_scholar_db/semantic_scholar.db
    ```
+
+> **💡 Note**: If you installed from source, use `python refchecker.py` instead of `academic-refchecker` in all examples.
 
 > **⚡ Performance Tip**: Reference verification takes 5-10 seconds per reference without a Semantic Scholar API key due to rate limiting. With an API key, verification speeds up to 1-2 seconds per reference. Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--semantic-scholar-api-key` for faster processing.
 
@@ -131,15 +133,15 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
    export REFCHECKER_LLM_PROVIDER=anthropic
    export ANTHROPIC_API_KEY=your_api_key_here
    
-   python refchecker.py --paper 1706.03762
+   academic-refchecker --paper 1706.03762
    ```
 
 2. **Using Command Line Arguments**:
    ```bash
    # Enable LLM with specific provider and model
-   python refchecker.py --paper 1706.03762 \
+   academic-refchecker --paper 1706.03762 \
      --llm-provider anthropic \
-     --llm-model claude-sonnet-4-20250514 \
+     --llm-model claude-sonnet-4-20250514
    ```
    API keys are obtained from environment variables, or if not found, the tool will prompt you interactively to enter them securely.
 
@@ -150,9 +152,9 @@ RefChecker supports AI-powered bibliography parsing using Large Language Models 
 With `OPENAI_API_KEY` environment variable: 
 
 ```bash
-python refchecker.py --paper /path/to/paper.pdf \
+academic-refchecker --paper /path/to/paper.pdf \
   --llm-provider openai \
-  --llm-model gpt-4o \
+  --llm-model gpt-4o
 ```
 
 #### Anthropic Claude
@@ -160,15 +162,15 @@ python refchecker.py --paper /path/to/paper.pdf \
 With `ANTHROPIC_API_KEY` environment variable: 
 
 ```bash
-python refchecker.py --paper https://arxiv.org/abs/1706.03762 \
+academic-refchecker --paper https://arxiv.org/abs/1706.03762 \
   --llm-provider anthropic \
-  --llm-model claude-sonnet-4-20250514 \
+  --llm-model claude-sonnet-4-20250514
 ```
 
 #### Google Gemini
 
 ```bash
-python refchecker.py --paper paper.tex \
+academic-refchecker --paper paper.tex \
   --llm-provider google \
   --llm-model gemini-2.5-flash
 ```
@@ -176,7 +178,7 @@ python refchecker.py --paper paper.tex \
 #### Azure OpenAI
 
 ```bash
-python refchecker.py --paper paper.txt \
+academic-refchecker --paper paper.txt \
   --llm-provider azure \
   --llm-model gpt-4 \
   --llm-endpoint https://your-resource.openai.azure.com/
@@ -188,9 +190,9 @@ For running models locally:
 
 ```bash
 # automatic Huggingface model download with VLLM server launch 
-python refchecker.py --paper paper.pdf \
+academic-refchecker --paper paper.pdf \
   --llm-provider vllm \
-  --llm-model meta-llama/Llama-3.1-8B-Instruct 
+  --llm-model meta-llama/Llama-3.1-8B-Instruct
 ```
 
 You can debug vllm server issues by running refchecker with the `--debug` flag. 
@@ -258,44 +260,46 @@ Check papers in various formats and online locations:
 
 ```bash
 # Check a specific ArXiv paper by ID
-python refchecker.py --paper 1706.03762
+academic-refchecker --paper 1706.03762
 
 # Check by ArXiv URL
-python refchecker.py --paper https://arxiv.org/abs/1706.03762
+academic-refchecker --paper https://arxiv.org/abs/1706.03762
 
 # Check by ArXiv PDF URL
-python refchecker.py --paper https://arxiv.org/pdf/1706.03762.pdf
+academic-refchecker --paper https://arxiv.org/pdf/1706.03762.pdf
 ```
 
 #### Local PDF Files
 
 ```bash
 # Check a local PDF file
-python refchecker.py --paper /path/to/your/paper.pdf
+academic-refchecker --paper /path/to/your/paper.pdf
 
 # Check with offline database for faster processing
-python refchecker.py --paper /path/to/your/paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
+academic-refchecker --paper /path/to/your/paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
 #### LaTeX Files
 
 ```bash
 # Check a LaTeX document
-python refchecker.py --paper /path/to/your/paper.tex
+academic-refchecker --paper /path/to/your/paper.tex
 
 # Check with debug mode for detailed processing info
-python refchecker.py --paper /path/to/your/paper.tex --debug
+academic-refchecker --paper /path/to/your/paper.tex --debug
 ```
 
 #### Text Files
 
 ```bash
 # Check a plain text file containing paper content
-python refchecker.py --paper /path/to/your/paper.txt
+academic-refchecker --paper /path/to/your/paper.txt
 
 # Combine with local database for offline verification
-python refchecker.py --paper /path/to/your/paper.txt --db-path semantic_scholar_db/semantic_scholar.db
+academic-refchecker --paper /path/to/your/paper.txt --db-path semantic_scholar_db/semantic_scholar.db
 ```
+
+> **💡 Source Installation**: If installed from source, replace `academic-refchecker` with `python refchecker.py` in all commands above.
 
 
 ## 📊 Output and Results
@@ -306,10 +310,10 @@ By default, no files are generated. To save detailed results, use the `--output-
 
 ```bash
 # Save to default filename (reference_errors.txt)
-python refchecker.py --paper 1706.03762 --output-file
+academic-refchecker --paper 1706.03762 --output-file
 
 # Save to custom filename
-python refchecker.py --paper 1706.03762 --output-file my_errors.txt
+academic-refchecker --paper 1706.03762 --output-file my_errors.txt
 ```
 
 The output file contains a detailed report of references with errors and warnings, including corrected references.

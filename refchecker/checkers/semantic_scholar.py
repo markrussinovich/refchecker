@@ -28,9 +28,9 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
-from utils.error_utils import format_title_mismatch
-from config.settings import get_config
+from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
+from refchecker.utils.error_utils import format_title_mismatch
+from refchecker.config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)

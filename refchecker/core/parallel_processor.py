@@ -13,7 +13,7 @@ from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple, Callable
-from utils.text_utils import deduplicate_urls
+from refchecker.utils.text_utils import deduplicate_urls
 
 logger = logging.getLogger(__name__)
 

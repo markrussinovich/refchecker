@@ -7,7 +7,7 @@ from urllib.parse import urlparse, urljoin
 from typing import Dict, Optional, Tuple, List, Any
 from bs4 import BeautifulSoup
 import time
-from utils.text_utils import strip_latex_commands
+from refchecker.utils.text_utils import strip_latex_commands
 
 logger = logging.getLogger(__name__)
 
