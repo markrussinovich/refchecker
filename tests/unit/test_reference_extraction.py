@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch, MagicMock
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestReferenceExtraction:
@@ -208,7 +208,7 @@ class TestCitationKeyExtraction:
     
     def test_bibtex_citation_key_preservation(self):
         """Test that BibTeX citation keys are preserved in corrected references"""
-        from utils.text_utils import format_corrected_bibtex
+        from refchecker.utils.text_utils import format_corrected_bibtex
         
         original_reference = {
             'bibtex_key': 'smith2023deep',
@@ -232,7 +232,7 @@ class TestCitationKeyExtraction:
     
     def test_bibitem_citation_key_preservation(self):
         """Test that LaTeX bibitem citation keys are preserved"""
-        from utils.text_utils import format_corrected_bibitem
+        from refchecker.utils.text_utils import format_corrected_bibitem
         
         original_reference = {
             'bibitem_key': 'latex2023paper',
@@ -254,7 +254,7 @@ class TestCitationKeyExtraction:
     
     def test_plaintext_citation_key_inclusion(self):
         """Test that citation keys are included in plaintext format for easy copying"""
-        from utils.text_utils import format_corrected_plaintext
+        from refchecker.utils.text_utils import format_corrected_plaintext
         
         original_reference = {
             'bibtex_key': 'author2023some',

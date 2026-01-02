@@ -164,7 +164,7 @@ def _parse_bibtex_references(bibliography_text):
     Returns:
         List of reference dictionaries
     """
-    from utils.bibtex_parser import parse_bibtex_entries
+    from refchecker.utils.bibtex_parser import parse_bibtex_entries
     return parse_bibtex_entries(bibliography_text)
 
 
@@ -178,7 +178,7 @@ def _parse_biblatex_references(bibliography_text):
     Returns:
         List of reference dictionaries
     """
-    from utils.text_utils import extract_latex_references
+    from refchecker.utils.text_utils import extract_latex_references
     return extract_latex_references(bibliography_text)
 
 
@@ -186,7 +186,7 @@ def _parse_standard_acm_natbib_references(bibliography_text):
     """
     Parse references using regex for standard ACM/natbib format (both ACM Reference Format and simple natbib)
     """
-    from utils.text_utils import detect_standard_acm_natbib_format
+    from refchecker.utils.text_utils import detect_standard_acm_natbib_format
     
     references = []
     
@@ -230,7 +230,7 @@ def _parse_simple_natbib_format(ref_num, content, label):
     Returns:
         Dictionary containing parsed reference information
     """
-    from utils.text_utils import extract_url_from_reference, extract_year_from_reference
+    from refchecker.utils.text_utils import extract_url_from_reference, extract_year_from_reference
     
     # Basic parsing - this could be enhanced with more sophisticated NLP
     reference = {
@@ -288,7 +288,7 @@ def _parse_references_regex(bibliography_text):
         }
         
         # Basic information extraction
-        from utils.text_utils import extract_url_from_reference, extract_year_from_reference
+        from refchecker.utils.text_utils import extract_url_from_reference, extract_year_from_reference
         
         url = extract_url_from_reference(ref_content)
         if url:

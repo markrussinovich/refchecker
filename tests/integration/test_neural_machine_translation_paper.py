@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestNeuralMachineTranslationPaper(unittest.TestCase):
@@ -93,7 +93,7 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
         mock_get.return_value = mock_response
         
         # Test search by title
-        from checkers.semantic_scholar import NonArxivReferenceChecker
+        from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker
         checker = NonArxivReferenceChecker()
         
         verified_data, errors, paper_url = checker.verify_reference(self.reference)

@@ -11,19 +11,19 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 try:
-    from core.refchecker import ArxivReferenceChecker
+    from refchecker.core.refchecker import ArxivReferenceChecker
     REFCHECKER_AVAILABLE = True
 except ImportError:
     REFCHECKER_AVAILABLE = False
 
 try:
-    from checkers.github_checker import GitHubChecker
+    from refchecker.checkers.github_checker import GitHubChecker
     GITHUB_CHECKER_AVAILABLE = True
 except ImportError:
     GITHUB_CHECKER_AVAILABLE = False
 
 try:
-    from checkers.webpage_checker import WebPageChecker
+    from refchecker.checkers.webpage_checker import WebPageChecker
     WEBPAGE_CHECKER_AVAILABLE = True
 except ImportError:
     WEBPAGE_CHECKER_AVAILABLE = False

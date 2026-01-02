@@ -17,7 +17,7 @@ except ImportError:
     LLM_BASE_AVAILABLE = False
 
 try:
-    from core.refchecker import ArxivReferenceChecker
+    from refchecker.core.refchecker import ArxivReferenceChecker
     REFCHECKER_AVAILABLE = True
 except ImportError:
     REFCHECKER_AVAILABLE = False

@@ -10,7 +10,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import parse_bibtex_entries, parse_authors_with_initials
+from refchecker.utils.text_utils import parse_bibtex_entries, parse_authors_with_initials
 
 
 class TestBibTeXParsing(unittest.TestCase):
@@ -140,7 +140,7 @@ url={https://example.com}
     
     def test_latex_comment_removal(self):
         """Test that LaTeX comments are removed but URL encoding is preserved"""
-        from utils.text_utils import strip_latex_commands
+        from refchecker.utils.text_utils import strip_latex_commands
         
         # Test LaTeX comment removal
         text_with_comment = 'This is text % this is a comment'
@@ -215,7 +215,7 @@ url={https://example.com}
     def test_bibtex_quote_stripping(self):
         """Test that quotes are properly stripped from BibTeX field values (regression test)"""
         # Test the specific case that was failing with quotes in field values
-        from core.refchecker import ArxivReferenceChecker
+        from refchecker.core.refchecker import ArxivReferenceChecker
         
         checker = ArxivReferenceChecker()
         
@@ -266,7 +266,7 @@ url={https://example.com}
         self.assertFalse(author_field.endswith('"'))  # No trailing quote
         
         # Test full LaTeX reference extraction
-        from utils.text_utils import extract_latex_references
+        from refchecker.utils.text_utils import extract_latex_references
         refs = extract_latex_references(bib_content)
         self.assertEqual(len(refs), 1)
         
@@ -421,7 +421,7 @@ url={https://example.com}
     
     def test_middle_name_initial_matching(self):
         """Test that middle name vs middle initial matching works (regression test)"""
-        from utils.text_utils import enhanced_name_match
+        from refchecker.utils.text_utils import enhanced_name_match
         
         # The specific case from the user report
         self.assertTrue(enhanced_name_match(
@@ -466,7 +466,7 @@ url={https://example.com}
     
     def test_mixed_name_format_matching(self):
         """Test matching between 2-part and 3-part names"""
-        from utils.text_utils import enhanced_name_match
+        from refchecker.utils.text_utils import enhanced_name_match
         
         # 2-part vs 3-part with initial
         self.assertTrue(enhanced_name_match(
@@ -499,7 +499,7 @@ url={https://example.com}
     
     def test_lastname_firstname_format_matching(self):
         """Test matching between 'Lastname, Firstname' and 'Firstname Lastname' formats (regression test)"""
-        from utils.text_utils import enhanced_name_match, compare_authors
+        from refchecker.utils.text_utils import enhanced_name_match, compare_authors
         
         # The specific failing case from the user report
         self.assertTrue(enhanced_name_match(
@@ -540,7 +540,7 @@ url={https://example.com}
     
     def test_multiline_bibtex_author_formatting_regression(self):
         """Test that multi-line BibTeX author strings with line breaks are parsed correctly (regression test)"""
-        from utils.text_utils import parse_authors_with_initials, format_authors_for_display
+        from refchecker.utils.text_utils import parse_authors_with_initials, format_authors_for_display
         
         # The specific problematic format reported by user
         multiline_author_string = '''Haotian Liu and
@@ -584,7 +584,7 @@ url={https://example.com}
     
     def test_bibtex_whitespace_normalization_regression(self):
         """Test that various whitespace issues in BibTeX are handled correctly (regression test)"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         # Test cases with different whitespace patterns
         test_cases = [
@@ -604,7 +604,7 @@ url={https://example.com}
     
     def test_et_al_parsing_regression(self):
         """Test that 'et al' is correctly separated from single authors (regression test)"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         # Test cases: (input, expected_output)
         et_al_test_cases = [
@@ -638,7 +638,7 @@ url={https://example.com}
     
     def test_biblatex_et_al_integration_regression(self):
         """Test that 'et al' parsing works correctly in full biblatex entries (regression test)"""
-        from utils.biblatex_parser import parse_biblatex_references
+        from refchecker.utils.biblatex_parser import parse_biblatex_references
         
         # Test the specific problematic entries that were failing
         test_entries = [
@@ -677,7 +677,7 @@ url={https://example.com}
     
     def test_semicolon_and_author_parsing_regression(self):
         """Test that semicolon-separated authors with 'and' are parsed correctly (regression test)"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         # The specific problematic case from the user report
         problematic_input = "Snelson, E.; and Ghahramani, Z."
@@ -714,7 +714,7 @@ url={https://example.com}
     
     def test_natbib_format_author_parsing_integration(self):
         """Test that natbib format parsing handles semicolon separators correctly (regression test)"""
-        from core.refchecker import ArxivReferenceChecker
+        from refchecker.core.refchecker import ArxivReferenceChecker
         
         # Create a mock natbib-style reference with semicolon separators
         checker = ArxivReferenceChecker()
@@ -740,9 +740,9 @@ url={https://example.com}
     
     def test_comprehensive_semicolon_parsing_fixes(self):
         """Test that all semicolon parsing issues are fixed across the codebase (regression test)"""
-        from utils.text_utils import parse_authors_with_initials
-        from utils.biblatex_parser import parse_biblatex_references
-        from core.refchecker import ArxivReferenceChecker
+        from refchecker.utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.biblatex_parser import parse_biblatex_references
+        from refchecker.core.refchecker import ArxivReferenceChecker
         
         # Test case from the user report: Yuan, Z.; and Zhu, M.
         problematic_cases = [
@@ -796,7 +796,7 @@ url={https://example.com}
     
     def test_no_malformed_authors_in_error_messages(self):
         """Test that author comparison error messages don't contain malformed authors (regression test)"""
-        from utils.text_utils import compare_authors, format_author_for_display
+        from refchecker.utils.text_utils import compare_authors, format_author_for_display
         
         # Test the specific error pattern from the user report
         malformed_authors = [
@@ -835,7 +835,7 @@ url={https://example.com}
     
     def test_latex_thebibliography_semicolon_parsing_regression(self):
         """Test LaTeX thebibliography format with semicolon authors (Yuan, Zhu case regression test)"""
-        from utils.text_utils import extract_latex_references
+        from refchecker.utils.text_utils import extract_latex_references
         
         # This is the exact format from the user's paper that was causing "Z.; and Zhu"
         latex_content = r'''\begin{thebibliography}{35}
@@ -868,7 +868,7 @@ Yuan, Z.; and Zhu, M. 2024.
             self.assertFalse(author.startswith('Z.; and'), f"Malformed author pattern found: {repr(author)}")
         
         # Test author comparison to ensure it doesn't fail
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         
         # Mock correct authors based on the user's error scenario
         correct_authors = [{'name': 'Yuan Zhang'}, {'name': 'Minghui Zhu'}]
@@ -883,7 +883,7 @@ Yuan, Z.; and Zhu, M. 2024.
     
     def test_apostrophe_and_trailing_period_name_matching_regression(self):
         """Test apostrophe names and trailing period handling (D'Amato case regression test)"""
-        from utils.text_utils import enhanced_name_match, compare_authors
+        from refchecker.utils.text_utils import enhanced_name_match, compare_authors
         
         # Test cases with apostrophes and various formatting issues
         apostrophe_test_cases = [
@@ -929,7 +929,7 @@ Yuan, Z.; and Zhu, M. 2024.
     
     def test_trailing_period_normalization_edge_cases(self):
         """Test that trailing period removal doesn't break valid initials"""
-        from utils.text_utils import enhanced_name_match
+        from refchecker.utils.text_utils import enhanced_name_match
         
         # Cases where trailing periods should be removed
         should_match_cases = [

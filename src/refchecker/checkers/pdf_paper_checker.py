@@ -15,7 +15,7 @@ from pypdf import PdfReader
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 
-from utils.text_utils import normalize_text, calculate_title_similarity
+from refchecker.utils.text_utils import normalize_text, calculate_title_similarity
 
 logger = logging.getLogger(__name__)
 

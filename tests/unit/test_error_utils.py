@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 try:
-    from utils.error_utils import (
+    from refchecker.utils.error_utils import (
         create_author_error,
         create_year_warning,
         create_doi_error,
@@ -59,10 +59,10 @@ class TestYearWarning:
     
     def test_create_year_warning(self):
         """Test creating year warning dictionary."""
-    warning = create_year_warning(2020, 2021)
-    assert warning['warning_type'] == 'year'
-    assert warning['warning_details'] == format_year_mismatch(2020, 2021)
-    assert warning['ref_year_correct'] == 2021
+        warning = create_year_warning(2020, 2021)
+        assert warning['warning_type'] == 'year'
+        assert warning['warning_details'] == format_year_mismatch(2020, 2021)
+        assert warning['ref_year_correct'] == 2021
 
 
 @pytest.mark.skipif(not ERROR_UTILS_AVAILABLE, reason="Error utils module not available")
@@ -230,7 +230,7 @@ class TestDoiComparison:
     
     def test_case_insensitive_comparison(self):
         """Test that DOI comparison is case-insensitive"""
-        from utils.doi_utils import compare_dois
+        from refchecker.utils.doi_utils import compare_dois
         
         test_cases = [
             # Case differences in journal abbreviations
@@ -246,7 +246,7 @@ class TestDoiComparison:
     
     def test_url_vs_raw_doi_comparison(self):
         """Test comparison between DOI URLs and raw DOIs"""
-        from utils.doi_utils import compare_dois
+        from refchecker.utils.doi_utils import compare_dois
         
         test_cases = [
             # URL vs raw DOI (from the actual error messages)
@@ -264,7 +264,7 @@ class TestDoiComparison:
     
     def test_doi_normalization(self):
         """Test that DOI normalization produces consistent results"""
-        from utils.doi_utils import normalize_doi
+        from refchecker.utils.doi_utils import normalize_doi
         
         test_cases = [
             # Different prefixes should normalize to same result
@@ -285,7 +285,7 @@ class TestDoiComparison:
     
     def test_doi_fragments_and_parameters(self):
         """Test that DOI comparison handles URL fragments and parameters correctly"""
-        from utils.doi_utils import compare_dois
+        from refchecker.utils.doi_utils import compare_dois
         
         test_cases = [
             # Hash fragments should be ignored
@@ -300,7 +300,7 @@ class TestDoiComparison:
     
     def test_invalid_doi_comparisons(self):
         """Test that invalid or empty DOIs are handled correctly"""
-        from utils.doi_utils import compare_dois
+        from refchecker.utils.doi_utils import compare_dois
         
         test_cases = [
             # Empty DOIs
@@ -318,7 +318,7 @@ class TestDoiComparison:
     
     def test_different_dois_not_matching(self):
         """Test that genuinely different DOIs don't match"""
-        from utils.doi_utils import compare_dois
+        from refchecker.utils.doi_utils import compare_dois
         
         test_cases = [
             ('10.1016/j.pmcj.2020.101221', '10.1016/j.pmcj.2020.101222'),  # Different number

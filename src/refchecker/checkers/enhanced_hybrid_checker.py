@@ -542,7 +542,7 @@ class EnhancedHybridReferenceChecker:
         """
         Compare author lists (delegates to shared utility)
         """
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         return compare_authors(cited_authors, correct_authors)
 
 # Backward compatibility alias

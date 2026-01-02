@@ -57,7 +57,7 @@ type-check:
 
 # Run with example
 run:
-	python refchecker.py --paper 1706.03762 --debug
+	python run_refchecker.py --paper 1706.03762 --debug
 
 # Download database
 download-db:

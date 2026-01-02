@@ -200,8 +200,8 @@ def parse_biblatex_references(text: str) -> List[Dict[str, Any]]:
         List of structured reference dictionaries, or empty list if 
         parsing quality is poor (to trigger LLM fallback)
     """
-    from utils.text_utils import parse_authors_with_initials, clean_title
-    from utils.doi_utils import construct_doi_url, is_valid_doi_format
+    from refchecker.utils.text_utils import parse_authors_with_initials, clean_title
+    from refchecker.utils.doi_utils import construct_doi_url, is_valid_doi_format
     
     if not text or not detect_biblatex_format(text):
         return []
@@ -300,8 +300,8 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
     Returns:
         Dictionary with parsed entry data
     """
-    from utils.text_utils import parse_authors_with_initials, clean_title
-    from utils.doi_utils import construct_doi_url, is_valid_doi_format
+    from refchecker.utils.text_utils import parse_authors_with_initials, clean_title
+    from refchecker.utils.doi_utils import construct_doi_url, is_valid_doi_format
     
     # Initialize default values
     title = ""

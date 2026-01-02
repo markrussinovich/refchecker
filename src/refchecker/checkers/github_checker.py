@@ -5,7 +5,7 @@ import re
 import logging
 from urllib.parse import urlparse
 from typing import Dict, Optional, Tuple, List, Any
-from utils.text_utils import strip_latex_commands
+from refchecker.utils.text_utils import strip_latex_commands
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class GitHubChecker:
             if cited_title:
                 title_match = self._check_title_match(cited_title, actual_name, actual_description)
                 if not title_match:
-                    from utils.error_utils import format_title_mismatch
+                    from refchecker.utils.error_utils import format_title_mismatch
                     # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
                     clean_cited_title = strip_latex_commands(cited_title)
                     details = format_title_mismatch(clean_cited_title, actual_name)
@@ -188,7 +188,7 @@ class GitHubChecker:
                 author_str = ', '.join(cited_authors) if isinstance(cited_authors, list) else str(cited_authors)
                 author_match = self._check_author_match(author_str, actual_owner, actual_owner_name)
                 if not author_match:
-                    from utils.error_utils import format_three_line_mismatch
+                    from refchecker.utils.error_utils import format_three_line_mismatch
                     left = author_str
                     right = f"{actual_owner} ({actual_owner_name})" if actual_owner_name else actual_owner
                     details = format_three_line_mismatch("Author mismatch", left, right)
@@ -203,7 +203,7 @@ class GitHubChecker:
                 try:
                     cited_year_int = int(cited_year)
                     if cited_year_int < creation_year:
-                        from utils.error_utils import format_year_mismatch
+                        from refchecker.utils.error_utils import format_year_mismatch
                         errors.append({
                             "warning_type": "year",
                             "warning_details": format_year_mismatch(cited_year, creation_year),

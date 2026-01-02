@@ -4,7 +4,7 @@ Basic functionality tests for RefChecker components.
 
 import pytest
 from unittest.mock import Mock, patch
-from src.core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestBasicFunctionality:
@@ -165,11 +165,11 @@ class TestSystemStability:
         """Test that core imports work without circular dependencies."""
         try:
             # Import all major components to check for circular imports
-            from core.refchecker import ArxivReferenceChecker
-            from core.parallel_processor import ParallelReferenceProcessor
-            from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
-            from checkers.semantic_scholar import NonArxivReferenceChecker
-            from utils.text_utils import normalize_author_name, parse_authors_with_initials
+            from refchecker.core.refchecker import ArxivReferenceChecker
+            from refchecker.core.parallel_processor import ParallelReferenceProcessor
+            from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+            from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker
+            from refchecker.utils.text_utils import normalize_author_name, parse_authors_with_initials
             
             # Try to instantiate key components
             checker = ArxivReferenceChecker()
@@ -189,7 +189,7 @@ class TestSystemStability:
     
     def test_author_processing_functions_available(self):
         """Test that author processing functions are available and working."""
-        from utils.text_utils import parse_authors_with_initials, normalize_author_name, clean_author_name
+        from refchecker.utils.text_utils import parse_authors_with_initials, normalize_author_name, clean_author_name
         
         # Test basic functionality
         test_authors = "A. Smith, B . Jones"

@@ -13,8 +13,8 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from llm.providers import LLMProviderMixin
-from utils.text_utils import strip_latex_commands, compare_authors, are_venues_substantially_different
+from refchecker.llm.providers import LLMProviderMixin
+from refchecker.utils.text_utils import strip_latex_commands, compare_authors, are_venues_substantially_different
 
 
 class TestBibTeXCleaning(unittest.TestCase):
@@ -272,7 +272,7 @@ class TestRegressionScenarios(unittest.TestCase):
         import os
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
         
-        from core.refchecker import ArxivReferenceChecker
+        from refchecker.core.refchecker import ArxivReferenceChecker
         
         # Create checker instance
         checker = ArxivReferenceChecker()

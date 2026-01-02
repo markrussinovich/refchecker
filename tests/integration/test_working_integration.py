@@ -10,16 +10,16 @@ from unittest.mock import Mock, patch
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 try:
-    from checkers.github_checker import GitHubChecker
+    from refchecker.checkers.github_checker import GitHubChecker
     GITHUB_AVAILABLE = True
 except ImportError:
     GITHUB_AVAILABLE = False
 
 try:
-    from checkers.webpage_checker import WebPageChecker
+    from refchecker.checkers.webpage_checker import WebPageChecker
     WEBPAGE_AVAILABLE = True
 except ImportError:
     WEBPAGE_AVAILABLE = False

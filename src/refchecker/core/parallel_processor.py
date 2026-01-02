@@ -13,7 +13,7 @@ from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple, Callable
-from utils.text_utils import deduplicate_urls
+from refchecker.utils.text_utils import deduplicate_urls
 
 logger = logging.getLogger(__name__)
 
@@ -277,15 +277,15 @@ class ParallelReferenceProcessor:
         # Print reference info in the same format as sequential mode
         raw_title = reference.get('title', 'Untitled')
         # Clean LaTeX commands from title for display
-        from utils.text_utils import strip_latex_commands
+        from refchecker.utils.text_utils import strip_latex_commands
         title = strip_latex_commands(raw_title)
-        from utils.text_utils import format_authors_for_display
+        from refchecker.utils.text_utils import format_authors_for_display
         authors = format_authors_for_display(reference.get('authors', []))
         year = reference.get('year', '')
         # Get venue from either 'venue' or 'journal' field and clean it up
         venue = reference.get('venue', '') or reference.get('journal', '')
         if venue:
-            from utils.error_utils import clean_venue_for_comparison
+            from refchecker.utils.error_utils import clean_venue_for_comparison
             venue = clean_venue_for_comparison(venue)
         url = reference.get('url', '')
         doi = reference.get('doi', '')
@@ -331,7 +331,7 @@ class ParallelReferenceProcessor:
             
             # Show DOI URL if available and different from what's already shown
             if external_ids.get('DOI'):
-                from utils.doi_utils import construct_doi_url
+                from refchecker.utils.doi_utils import construct_doi_url
                 doi_url = construct_doi_url(external_ids['DOI'])
                 if doi_url != verified_url_to_show and doi_url != url:
                     print(f"       DOI URL: {doi_url}")
@@ -355,7 +355,7 @@ class ParallelReferenceProcessor:
                     error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
                     error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
                     
-                    from utils.error_utils import print_labeled_multiline
+                    from refchecker.utils.error_utils import print_labeled_multiline
 
                     if error_type == 'arxiv_id':
                         # Keep existing style for arXiv ID errors

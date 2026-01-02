@@ -16,7 +16,7 @@ from io import StringIO
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestResultDisplayLogic(unittest.TestCase):

@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 try:
-    from utils.text_utils import is_name_match, clean_title
+    from refchecker.utils.text_utils import is_name_match, clean_title
     TEXT_UTILS_AVAILABLE = True
 except ImportError:
     TEXT_UTILS_AVAILABLE = False

@@ -9,7 +9,7 @@ import os
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import validate_parsed_references, extract_latex_references
+from refchecker.utils.text_utils import validate_parsed_references, extract_latex_references
 
 
 class TestBibTeXValidationFallback(unittest.TestCase):

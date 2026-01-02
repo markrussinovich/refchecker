@@ -1,6 +1,6 @@
 import pytest
 
-from utils.text_utils import clean_author_name, enhanced_name_match, format_author_for_display
+from refchecker.utils.text_utils import clean_author_name, enhanced_name_match, format_author_for_display
 
 
 def test_honorific_not_stripped_inside_name():

@@ -11,7 +11,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import extract_bibinfo_person_content, strip_latex_commands
+from refchecker.utils.text_utils import extract_bibinfo_person_content, strip_latex_commands
 
 
 class TestLatexAccentAuthorParsing(unittest.TestCase):
@@ -123,7 +123,7 @@ class TestLatexAccentAuthorParsing(unittest.TestCase):
 
     def test_venue_field_extraction_with_nested_braces(self):
         """Test venue/journal extraction with nested braces (like LaTeX formatting commands)."""
-        from utils.text_utils import extract_bibinfo_field_content, strip_latex_commands
+        from refchecker.utils.text_utils import extract_bibinfo_field_content, strip_latex_commands
         
         # Test the exact case from Denning paper that was failing
         test_cases = [
@@ -143,7 +143,7 @@ class TestLatexAccentAuthorParsing(unittest.TestCase):
 
     def test_field_extraction_with_various_types(self):
         """Test the generic field extraction function with different field types."""
-        from utils.text_utils import extract_bibinfo_field_content
+        from refchecker.utils.text_utils import extract_bibinfo_field_content
         
         test_input = r'''
         \bibinfo{title}{My {Title} with {Braces}}

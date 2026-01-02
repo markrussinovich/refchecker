@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from core.refchecker import ArxivReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestArXivIDVerification(unittest.TestCase):
@@ -158,7 +158,7 @@ class TestArXivIDVerification(unittest.TestCase):
     
     def test_url_construction_with_versions(self):
         """Test that URL construction handles version numbers correctly"""
-        from utils.url_utils import construct_arxiv_url
+        from refchecker.utils.url_utils import construct_arxiv_url
         
         test_cases = [
             ("1610.10099v2", "https://arxiv.org/abs/1610.10099"),

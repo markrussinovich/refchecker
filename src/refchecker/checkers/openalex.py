@@ -32,9 +32,9 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
-from utils.error_utils import format_year_mismatch, format_doi_mismatch
-from config.settings import get_config
+from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
+from refchecker.utils.error_utils import format_year_mismatch, format_doi_mismatch
+from refchecker.config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -343,7 +343,7 @@ class OpenAlexReferenceChecker:
         # Fall back to DOI URL
         doi = work_data.get('doi')
         if doi:
-            from utils.doi_utils import construct_doi_url
+            from refchecker.utils.doi_utils import construct_doi_url
             doi_url = construct_doi_url(doi)
             logger.debug(f"Generated DOI URL: {doi_url}")
             return doi_url
@@ -351,7 +351,7 @@ class OpenAlexReferenceChecker:
         # Check ids for other identifiers
         ids = work_data.get('ids', {})
         if ids.get('doi'):
-            from utils.doi_utils import construct_doi_url
+            from refchecker.utils.doi_utils import construct_doi_url
             doi_url = construct_doi_url(ids['doi'])
             logger.debug(f"Generated DOI URL from ids: {doi_url}")
             return doi_url
@@ -460,7 +460,7 @@ class OpenAlexReferenceChecker:
         
         if doi and work_doi:
             # Compare DOIs using the proper comparison function
-            from utils.doi_utils import compare_dois
+            from refchecker.utils.doi_utils import compare_dois
             if not compare_dois(doi, work_doi):
                 errors.append({
                     'error_type': 'doi',

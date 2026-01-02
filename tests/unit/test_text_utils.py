@@ -9,7 +9,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import (
+from refchecker.utils.text_utils import (
     is_name_match, 
     clean_title,
     clean_title_for_search,
@@ -191,7 +191,7 @@ class TestNameMatching:
 
     def test_author_display_consistency_in_errors(self):
         """Test that author error messages show names in consistent 'First Last' format"""
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         
         # Test with comma format vs regular format - should show both in "First Last" format
         cited = ["Koundinyan, Srivathsan"] 
@@ -652,7 +652,7 @@ class TestAndOthersHandling:
     
     def test_and_others_in_bibtex_format(self):
         """Test 'and others' in BibTeX comma-separated format"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         test_cases = [
             # Basic case
@@ -676,7 +676,7 @@ class TestAndOthersHandling:
     
     def test_and_others_edge_cases(self):
         """Test edge cases for 'and others' handling"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         test_cases = [
             # Case sensitivity
@@ -698,7 +698,7 @@ class TestAndOthersHandling:
     
     def test_backwards_compatibility_et_al(self):
         """Ensure existing 'et al' handling still works correctly"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         test_cases = [
             # Various 'et al' formats should still work
@@ -713,7 +713,7 @@ class TestAndOthersHandling:
     
     def test_no_false_positives(self):
         """Ensure words containing 'others' are not falsely converted"""
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         test_cases = [
             # Author names that contain 'others' should not be converted
@@ -737,7 +737,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_acm_sigops_29th_symposium(self):
         """Test the specific case that was failing"""
-        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        from refchecker.utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
         
         cited_venue = 'Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles'
         actual_venue = 'Symposium on Operating Systems Principles'
@@ -755,14 +755,14 @@ class TestProceedingsOrdinalNormalization:
             "These venues should be considered the same after normalization"
         
         # Test that no venue warning would be generated (simulating the checker logic)
-        from utils.error_utils import create_venue_warning
+        from refchecker.utils.error_utils import create_venue_warning
         should_create_warning = are_venues_substantially_different(cited_venue, actual_venue)
         assert not should_create_warning, \
             "No venue warning should be generated for properly normalized venues"
     
     def test_ieee_ordinal_conference(self):
         """Test IEEE proceedings with ordinals"""
-        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        from refchecker.utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
         
         cited_venue = 'Proceedings of the IEEE 25th International Conference on Computer Vision'
         actual_venue = 'International Conference on Computer Vision'
@@ -778,7 +778,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_usenix_osdi_ordinal(self):
         """Test USENIX OSDI with ordinals"""
-        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        from refchecker.utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
         
         cited_venue = 'Proceedings of the USENIX OSDI 15th Symposium on Operating Systems Design'
         actual_venue = 'Symposium on Operating Systems Design'
@@ -794,7 +794,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_simple_ordinal_proceedings(self):
         """Test proceedings with simple ordinals (no org names)"""
-        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        from refchecker.utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
         
         cited_venue = 'Proceedings of the 29th Conference on Machine Learning'
         actual_venue = 'Conference on Machine Learning'
@@ -810,7 +810,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_neurips_preserved(self):
         """Test that proceedings without org prefixes are preserved correctly"""
-        from utils.text_utils import normalize_venue_for_display
+        from refchecker.utils.text_utils import normalize_venue_for_display
         
         # This case should NOT be over-processed
         venue = 'Proceedings of Neural Information Processing Systems'
@@ -821,7 +821,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_multiple_organization_names(self):
         """Test proceedings with multiple organization acronyms"""
-        from utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
+        from refchecker.utils.text_utils import normalize_venue_for_display, are_venues_substantially_different
         
         cited_venue = 'Proceedings of the ACM SIGCOMM 45th Annual Conference on Data Communication'
         actual_venue = 'Annual Conference on Data Communication'
@@ -837,7 +837,7 @@ class TestProceedingsOrdinalNormalization:
     
     def test_edge_cases(self):
         """Test edge cases that should not be affected"""
-        from utils.text_utils import normalize_venue_for_display
+        from refchecker.utils.text_utils import normalize_venue_for_display
         
         test_cases = [
             # Regular journals should not be affected
@@ -860,7 +860,7 @@ class TestVenueParsingRegression:
     
     def test_latex_penalty_commands_in_venues(self):
         """Test that venues with LaTeX penalty commands are parsed correctly"""
-        from utils.text_utils import strip_latex_commands, are_venues_substantially_different
+        from refchecker.utils.text_utils import strip_latex_commands, are_venues_substantially_different
         
         test_cases = [
             # LaTeX penalty commands should be removed (positive numbers work)
@@ -882,7 +882,7 @@ class TestVenueParsingRegression:
     
     def test_venue_comparison_with_latex_constructs(self):
         """Test that venue comparison handles LaTeX constructs appropriately"""
-        from utils.text_utils import are_venues_substantially_different
+        from refchecker.utils.text_utils import are_venues_substantially_different
         
         test_cases = [
             # Same venue with and without LaTeX commands should match
@@ -908,7 +908,7 @@ class TestAuthorComparisonBugFixes:
     
     def test_duplicate_author_handling(self):
         """Test that duplicate authors in correct list are handled properly"""
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         
         cited_authors = ["J. Smith", "A. Doe"]
         # Simulate a database result with duplicate authors (could happen in collaboration papers)
@@ -921,7 +921,7 @@ class TestAuthorComparisonBugFixes:
     
     def test_et_al_error_message_accuracy(self):
         """Test that et al error messages don't show misleading positional matches"""
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         
         cited_authors = ["Nonexistent Author", "et al"]
         correct_authors = ["Real Author 1", "Real Author 2", "Real Author 3"]
@@ -942,7 +942,7 @@ class TestNeurIPSVenueMatching:
     
     def test_neurips_venue_abbreviation_matching(self):
         """Test that NeurIPS abbreviation correctly matches full venue name"""
-        from utils.text_utils import are_venues_substantially_different
+        from refchecker.utils.text_utils import are_venues_substantially_different
         
         # Test cases for NeurIPS venue matching
         test_cases = [
@@ -971,7 +971,7 @@ class TestNeurIPSVenueMatching:
     
     def test_neurips_does_not_falsely_match_different_venues(self):
         """Test that NeurIPS doesn't incorrectly match unrelated venues"""
-        from utils.text_utils import are_venues_substantially_different
+        from refchecker.utils.text_utils import are_venues_substantially_different
         
         # Test cases that should NOT match
         test_cases = [

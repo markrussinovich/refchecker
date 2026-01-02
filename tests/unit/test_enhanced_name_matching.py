@@ -16,7 +16,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import enhanced_name_match, surname_similarity
+from refchecker.utils.text_utils import enhanced_name_match, surname_similarity
 
 
 class TestEnhancedNameMatching(unittest.TestCase):

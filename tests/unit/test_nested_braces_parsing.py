@@ -13,7 +13,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.bibtex_parser import parse_bibtex_references, parse_bibtex_entry_content
+from refchecker.utils.bibtex_parser import parse_bibtex_references, parse_bibtex_entry_content
 
 
 class TestNestedBraceParsing(unittest.TestCase):

@@ -11,13 +11,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 try:
-    from checkers.semantic_scholar import NonArxivReferenceChecker as SemanticScholarChecker
+    from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker as SemanticScholarChecker
     SEMANTIC_SCHOLAR_AVAILABLE = True
 except ImportError:
     SEMANTIC_SCHOLAR_AVAILABLE = False
 
 try:
-    from checkers.openalex import OpenAlexReferenceChecker as OpenAlexChecker
+    from refchecker.checkers.openalex import OpenAlexReferenceChecker as OpenAlexChecker
     OPENALEX_AVAILABLE = True
 except ImportError:
     try:
@@ -27,7 +27,7 @@ except ImportError:
         OPENALEX_AVAILABLE = False
 
 try:
-    from checkers.crossref import CrossRefReferenceChecker as CrossRefChecker
+    from refchecker.checkers.crossref import CrossRefReferenceChecker as CrossRefChecker
     CROSSREF_AVAILABLE = True
 except ImportError:
     try:
@@ -37,13 +37,13 @@ except ImportError:
         CROSSREF_AVAILABLE = False
 
 try:
-    from checkers.github_checker import GitHubChecker
+    from refchecker.checkers.github_checker import GitHubChecker
     GITHUB_CHECKER_AVAILABLE = True
 except ImportError:
     GITHUB_CHECKER_AVAILABLE = False
 
 try:
-    from checkers.webpage_checker import WebPageChecker
+    from refchecker.checkers.webpage_checker import WebPageChecker
     WEBPAGE_CHECKER_AVAILABLE = True
 except ImportError:
     WEBPAGE_CHECKER_AVAILABLE = False
@@ -384,7 +384,7 @@ class TestMultiAPIVerification:
     @pytest.fixture
     def ref_checker(self):
         """Create ArxivReferenceChecker with multiple APIs."""
-        from core.refchecker import ArxivReferenceChecker
+        from refchecker.core.refchecker import ArxivReferenceChecker
         return ArxivReferenceChecker()
     
     @patch('checkers.semantic_scholar.NonArxivReferenceChecker.search_paper')

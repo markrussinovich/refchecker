@@ -77,17 +77,15 @@ Repository = "https://github.com/markrussinovich/refchecker"
 "Bug Tracker" = "https://github.com/markrussinovich/refchecker/issues"
 
 [project.scripts]
-academic-refchecker = "core.refchecker:main"
+academic-refchecker = "refchecker.core.refchecker:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools]
-py-modules = ["__version__"]
+include = ["refchecker*"]
 
 [tool.setuptools.dynamic]
-version = {attr = "__version__.__version__"}
+version = {attr = "refchecker.__version__.__version__"}
 
 [tool.setuptools.package-data]
-"*" = ["*.txt", "*.md", "*.conf", "*.py"]
-"scripts" = ["*.py"]
+"refchecker" = ["*.txt", "*.md", "*.conf"]
+"refchecker.config" = ["*.conf"]

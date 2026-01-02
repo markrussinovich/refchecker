@@ -9,7 +9,7 @@ import os
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.arxiv_utils import extract_cited_keys_from_tex, is_reference_used, filter_bibtex_by_citations
+from refchecker.utils.arxiv_utils import extract_cited_keys_from_tex, is_reference_used, filter_bibtex_by_citations
 
 
 class TestCitationFunctions(unittest.TestCase):

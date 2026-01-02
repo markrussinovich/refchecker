@@ -1,4 +1,4 @@
-from utils.text_utils import normalize_venue_for_display
+from refchecker.utils.text_utils import normalize_venue_for_display
 
 
 def test_strip_leading_editors_from_venue():

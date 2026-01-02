@@ -11,8 +11,8 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.biblatex_parser import parse_biblatex_references
-from utils.text_utils import is_name_match, compare_authors, normalize_apostrophes
+from refchecker.utils.biblatex_parser import parse_biblatex_references
+from refchecker.utils.text_utils import is_name_match, compare_authors, normalize_apostrophes
 
 
 class TestTitleAuthorParsingIntegration(unittest.TestCase):
@@ -173,7 +173,7 @@ class TestTitleAuthorParsingIntegration(unittest.TestCase):
         semantic_scholar_title = "Formalizing and Benchmarking Prompt Injection Attacks and Defenses"
         
         # The titles should be equivalent after normalization
-        from utils.text_utils import calculate_title_similarity
+        from refchecker.utils.text_utils import calculate_title_similarity
         similarity = calculate_title_similarity(ref['title'], semantic_scholar_title)
         self.assertGreaterEqual(similarity, 0.95)  # Should be very high similarity
 

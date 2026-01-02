@@ -214,8 +214,8 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
     Returns:
         List of structured reference dictionaries
     """
-    from utils.text_utils import parse_authors_with_initials, clean_title
-    from utils.doi_utils import construct_doi_url, is_valid_doi_format
+    from refchecker.utils.text_utils import parse_authors_with_initials, clean_title
+    from refchecker.utils.doi_utils import construct_doi_url, is_valid_doi_format
     
     entries = parse_bibtex_entries(bibliography_text)
     references = []
@@ -291,7 +291,7 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
         # Extract other URLs
         url = fields.get('url', '')
         if url:
-            from utils.url_utils import clean_url
+            from refchecker.utils.url_utils import clean_url
             url = clean_url(url)
         
         # Handle special @misc entries with only howpublished field
@@ -318,7 +318,7 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
                             url = howpublished
                         
                         # Clean the reconstructed URL
-                        from utils.url_utils import clean_url
+                        from refchecker.utils.url_utils import clean_url
                         url = clean_url(url)
                         
                         # Generate title from domain/path
@@ -350,7 +350,7 @@ def parse_bibtex_references(bibliography_text: str) -> List[Dict[str, Any]]:
             
         # Clean any URL we extracted
         if url:
-            from utils.url_utils import clean_url
+            from refchecker.utils.url_utils import clean_url
             url = clean_url(url)
         
         # Construct ArXiv URL from eprint field if no URL present

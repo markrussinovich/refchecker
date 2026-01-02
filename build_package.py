@@ -128,10 +128,10 @@ class PackageBuilder:
                 self.print_status(f"Required file missing: {file}", "ERROR")
                 return False
         
-        # Check src directory structure
-        src_dir = self.project_root / "src"
-        if not src_dir.exists():
-            self.print_status("src/ directory not found", "ERROR")
+        # Check src/refchecker directory structure (proper namespace)
+        refchecker_pkg = self.project_root / "src" / "refchecker"
+        if not refchecker_pkg.exists():
+            self.print_status("src/refchecker/ package directory not found", "ERROR")
             return False
         
         self.print_status("Package configuration valid", "SUCCESS")

@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch, MagicMock
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from checkers.pdf_paper_checker import PDFPaperChecker
+from refchecker.checkers.pdf_paper_checker import PDFPaperChecker
 
 
 class TestPDFPaperChecker(unittest.TestCase):

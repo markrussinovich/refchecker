@@ -28,9 +28,9 @@ import time
 import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
-from utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
-from utils.error_utils import format_title_mismatch
-from config.settings import get_config
+from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
+from refchecker.utils.error_utils import format_title_mismatch
+from refchecker.config.settings import get_config
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -523,12 +523,12 @@ class NonArxivReferenceChecker:
                     arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
             
             # Use flexible year validation
-            from utils.text_utils import is_year_substantially_different
+            from refchecker.utils.text_utils import is_year_substantially_different
             context = {'arxiv_match': arxiv_id_match}
             is_different, warning_message = is_year_substantially_different(year, paper_year, context)
             
             if is_different and warning_message:
-                from utils.error_utils import format_year_mismatch
+                from refchecker.utils.error_utils import format_year_mismatch
                 errors.append({
                     'warning_type': 'year',
                     'warning_details': format_year_mismatch(year, paper_year),
@@ -549,7 +549,7 @@ class NonArxivReferenceChecker:
         if cited_venue and paper_venue:
             # Use the utility function to check if venues are substantially different
             if are_venues_substantially_different(cited_venue, paper_venue):
-                from utils.error_utils import create_venue_warning
+                from refchecker.utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
             # Original reference has the venue in raw text but not parsed correctly
@@ -597,9 +597,9 @@ class NonArxivReferenceChecker:
             paper_doi = external_ids['DOI']
             
             # Compare DOIs using the proper comparison function
-            from utils.doi_utils import compare_dois
+            from refchecker.utils.doi_utils import compare_dois
             if doi and paper_doi and not compare_dois(doi, paper_doi):
-                from utils.error_utils import format_doi_mismatch
+                from refchecker.utils.error_utils import format_doi_mismatch
                 errors.append({
                     'error_type': 'doi',
                     'error_details': format_doi_mismatch(doi, paper_doi),
@@ -614,13 +614,13 @@ class NonArxivReferenceChecker:
         # Return the Semantic Scholar URL that was actually used for verification
         # First priority: Semantic Scholar URL since that's what we used for verification
         if external_ids.get('CorpusId'):
-            from utils.url_utils import construct_semantic_scholar_url
+            from refchecker.utils.url_utils import construct_semantic_scholar_url
             paper_url = construct_semantic_scholar_url(external_ids['CorpusId'])
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         
         # Second priority: DOI URL (if this was verified through DOI)
         elif external_ids.get('DOI'):
-            from utils.doi_utils import construct_doi_url
+            from refchecker.utils.doi_utils import construct_doi_url
             paper_url = construct_doi_url(external_ids['DOI'])
             logger.debug(f"Using DOI URL for verification: {paper_url}")
         

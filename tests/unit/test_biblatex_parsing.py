@@ -10,7 +10,7 @@ import os
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.biblatex_parser import detect_biblatex_format, parse_biblatex_references, parse_biblatex_entry_content
+from refchecker.utils.biblatex_parser import detect_biblatex_format, parse_biblatex_references, parse_biblatex_entry_content
 
 
 class TestBiblatexParsing(unittest.TestCase):
@@ -575,7 +575,7 @@ assisted question-answering with human feedback". In: arXiv preprint arXiv:2112.
     
     def test_hyphen_handling_various_cases(self):
         """Test various hyphen handling scenarios to ensure correct compound vs syllable detection"""
-        from utils.biblatex_parser import _handle_hyphenated_line_breaks
+        from refchecker.utils.biblatex_parser import _handle_hyphenated_line_breaks
         
         # Test cases: (input, expected_output)
         test_cases = [
@@ -615,7 +615,7 @@ assisted question-answering with human feedback". In: arXiv preprint arXiv:2112.
     
     def test_hyphen_boundary_conditions(self):
         """Test edge cases and boundary conditions for hyphen handling"""
-        from utils.biblatex_parser import _handle_hyphenated_line_breaks, _is_syllable_break
+        from refchecker.utils.biblatex_parser import _handle_hyphenated_line_breaks, _is_syllable_break
         
         # Test the decision function directly
         self.assertTrue(_is_syllable_break("Christo", "pher"))      # Name syllable break

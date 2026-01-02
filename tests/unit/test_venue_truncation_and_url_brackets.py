@@ -14,8 +14,8 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.bibtex_parser import parse_bibtex_references
-from utils.url_utils import clean_url
+from refchecker.utils.bibtex_parser import parse_bibtex_references
+from refchecker.utils.url_utils import clean_url
 
 
 class TestVenueTruncationAndUrlBrackets(unittest.TestCase):

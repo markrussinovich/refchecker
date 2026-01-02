@@ -12,8 +12,8 @@ from unittest.mock import Mock, patch, MagicMock
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from checkers.webpage_checker import WebPageChecker
-from core.refchecker import ArxivReferenceChecker
+from refchecker.checkers.webpage_checker import WebPageChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 
 
 class TestRawUrlVerification(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.webpage_checker = WebPageChecker()
         self.refchecker = ArxivReferenceChecker()
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_nonexistent_page_returns_correct_error(self, mock_request):
         """Test that non-existent pages return the correct error message."""
         # Mock a 404 response
@@ -44,7 +44,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(errors[0]['error_details'], 'non-existent web page')
         self.assertEqual(url, 'https://example.com/nonexistent')
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_existing_page_no_title_match_no_venue(self, mock_request):
         """Test existing page without title match and no venue specified."""
         # Mock a successful response
@@ -71,7 +71,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(errors[0]['error_details'], "paper not found and URL doesn't reference it")
         self.assertEqual(url, 'https://example.com/page')
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_existing_page_title_match_no_venue_verified(self, mock_request):
         """Test existing page with title match and no venue - should be verified."""
         # Mock a successful response with title match
@@ -101,7 +101,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(verified_data['url'], 'https://example.com/page')
         self.assertEqual(url, 'https://example.com/page')
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_existing_page_title_match_with_venue_unverified(self, mock_request):
         """Test existing page with title match but venue specified - should remain unverified."""
         # Mock a successful response with title match
@@ -128,7 +128,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(errors[0]['error_details'], 'paper not verified but URL references paper')
         self.assertEqual(url, 'https://example.com/page')
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_pdf_document_no_venue_verified(self, mock_request):
         """Test PDF document without venue specified - should be verified."""
         # Mock a PDF response
@@ -154,7 +154,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(verified_data['venue'], 'PDF Document')
         self.assertEqual(verified_data['url'], 'https://example.com/paper.pdf')
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_403_blocked_no_venue_verified(self, mock_request):
         """Test 403 blocked resource without venue - should be verified."""
         # Mock a 403 response
@@ -207,7 +207,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(errors[0]['error_details'], "paper not found and URL doesn't reference it")
         self.assertIsNone(url)
     
-    @patch('checkers.webpage_checker.WebPageChecker._respectful_request')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
     def test_partial_title_match_no_venue_verified(self, mock_request):
         """Test partial title match (60% threshold) without venue - should be verified."""
         # Mock a successful response with partial title match
@@ -233,7 +233,7 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(len(errors), 0)
         self.assertIn(verified_data['venue'], ['Web Page', 'Example'])  # Can be either depending on organization extraction
     
-    @patch('checkers.webpage_checker.WebPageChecker.verify_raw_url_for_unverified_reference')
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker.verify_raw_url_for_unverified_reference')
     def test_integration_with_main_verifier(self, mock_url_verify):
         """Test integration with the main reference verifier."""
         # Mock URL verification returning verified data

@@ -9,7 +9,7 @@ import os
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import extract_latex_references
+from refchecker.utils.text_utils import extract_latex_references
 
 class TestLatexAuthorExtraction(unittest.TestCase):
     """Test LaTeX author extraction functionality"""
@@ -246,7 +246,7 @@ Ban, T., Chen, L., Wang, X., and Chen, H. (2023).
 
     def test_name_matching_last_first_middle_format(self):
         """Test that 'Last, First Middle' format matches 'First Middle Last' format"""
-        from utils.text_utils import is_name_match
+        from refchecker.utils.text_utils import is_name_match
         
         # Test cases that should match
         test_cases = [

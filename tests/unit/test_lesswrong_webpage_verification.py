@@ -10,7 +10,7 @@ import os
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from checkers.webpage_checker import WebPageChecker
+from refchecker.checkers.webpage_checker import WebPageChecker
 
 
 class TestLessWrongWebpageVerification(unittest.TestCase):

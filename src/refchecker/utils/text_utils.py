@@ -689,7 +689,7 @@ def extract_arxiv_id_from_url(url):
     Returns:
         ArXiv ID or None if not found
     """
-    from utils.url_utils import extract_arxiv_id_from_url as common_extract
+    from refchecker.utils.url_utils import extract_arxiv_id_from_url as common_extract
     return common_extract(url)
 
 def extract_year_from_text(text):
@@ -2141,7 +2141,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     # and not penalize for the authoritative source having more authors
     if has_et_al:
         # Import here to avoid circular imports
-        from utils.error_utils import format_author_mismatch
+        from refchecker.utils.error_utils import format_author_mismatch
         # For et al cases, check if each cited author matches ANY author in the correct list
         # rather than comparing positionally, since author order can vary
         for i, cited_author in enumerate(cleaned_cited):
@@ -2175,21 +2175,21 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         
         # Check if cited authors look like parsing fragments
         if looks_like_fragments(cleaned_cited):
-            from utils.error_utils import format_author_count_mismatch
+            from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
         # For all count mismatches, show the count mismatch error
         if len(cleaned_cited) < len(correct_names):
-            from utils.error_utils import format_author_count_mismatch
+            from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
         # For cases where cited > correct, also show count mismatch
         elif len(cleaned_cited) > len(correct_names):
-            from utils.error_utils import format_author_count_mismatch
+            from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
@@ -2198,7 +2198,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         comparison_correct = correct_names
     
     # Use shared three-line formatter (imported lazily to avoid circular imports)
-    from utils.error_utils import format_first_author_mismatch, format_author_mismatch
+    from refchecker.utils.error_utils import format_first_author_mismatch, format_author_mismatch
 
     # Compare first author (most important) using the enhanced name matching
     if comparison_cited and comparison_correct:
@@ -2806,7 +2806,7 @@ def filter_bibtex_by_cited_keys(bib_content, cited_keys):
         return bib_content
     
     # Parse entries and filter
-    from utils.bibtex_parser import parse_bibtex_entries
+    from refchecker.utils.bibtex_parser import parse_bibtex_entries
     entries = parse_bibtex_entries(bib_content)
     filtered_entries = []
     
@@ -3118,7 +3118,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
     
     if format_info['format_type'] == 'bibtex':
         # Use the dedicated BibTeX parser for consistent results
-        from utils.bibtex_parser import parse_bibtex_references
+        from refchecker.utils.bibtex_parser import parse_bibtex_references
         return parse_bibtex_references(text)
     
     elif format_info['format_type'] == 'thebibliography':
@@ -3322,7 +3322,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                 # Extract URL if present
                 url_match = re.search(r'\\url\{([^}]+)\}', content)
                 if url_match:
-                    from utils.url_utils import clean_url_punctuation
+                    from refchecker.utils.url_utils import clean_url_punctuation
                     ref['url'] = clean_url_punctuation(url_match.group(1))
             
             # Extract title from \showarticletitle{} or \bibinfo{title}{}
@@ -3384,7 +3384,7 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
             if not ref['url']:
                 url_match = re.search(r'\\url\{([^}]+)\}', content)
                 if url_match:
-                    from utils.url_utils import clean_url_punctuation
+                    from refchecker.utils.url_utils import clean_url_punctuation
                     ref['url'] = clean_url_punctuation(url_match.group(1))
             
             # Extract DOI from \href{https://doi.org/...}

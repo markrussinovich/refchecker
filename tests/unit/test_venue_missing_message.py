@@ -1,4 +1,4 @@
-from utils.error_utils import create_venue_warning
+from refchecker.utils.error_utils import create_venue_warning
 
 
 def test_missing_venue_message_format():

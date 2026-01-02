@@ -179,7 +179,7 @@ def clean_venue_for_comparison(venue: str) -> str:
     Returns:
         Cleaned venue name suitable for display
     """
-    from utils.text_utils import normalize_venue_for_display
+    from refchecker.utils.text_utils import normalize_venue_for_display
     return normalize_venue_for_display(venue)
 
 

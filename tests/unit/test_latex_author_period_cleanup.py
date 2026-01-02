@@ -15,7 +15,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.text_utils import clean_author_name, extract_latex_references
+from refchecker.utils.text_utils import clean_author_name, extract_latex_references
 
 
 class TestAuthorPeriodCleanup(unittest.TestCase):

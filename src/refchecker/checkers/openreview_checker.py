@@ -32,7 +32,7 @@ import json
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
-from utils.text_utils import (
+from refchecker.utils.text_utils import (
     normalize_text, clean_title_basic, is_name_match, 
     calculate_title_similarity, compare_authors, 
     clean_title_for_search, are_venues_substantially_different,
@@ -426,7 +426,7 @@ class OpenReviewReferenceChecker:
         if cited_title and paper_title:
             similarity = compare_titles_with_latex_cleaning(cited_title, paper_title)
             if similarity < 0.7:  # Using a reasonable threshold
-                from utils.error_utils import format_title_mismatch
+                from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(cited_title)
                 details = format_title_mismatch(clean_cited_title, paper_title) + f" (similarity: {similarity:.2f})"
@@ -465,7 +465,7 @@ class OpenReviewReferenceChecker:
                 
                 is_different, year_message = is_year_substantially_different(cited_year_int, paper_year_int)
                 if is_different and year_message:
-                    from utils.error_utils import format_year_mismatch
+                    from refchecker.utils.error_utils import format_year_mismatch
                     errors.append({
                         "warning_type": "year",
                         "warning_details": format_year_mismatch(cited_year_int, paper_year_int)
@@ -479,7 +479,7 @@ class OpenReviewReferenceChecker:
         
         if cited_venue and paper_venue:
             if are_venues_substantially_different(cited_venue, paper_venue):
-                from utils.error_utils import format_venue_mismatch
+                from refchecker.utils.error_utils import format_venue_mismatch
                 errors.append({
                     "warning_type": "venue",
                     "warning_details": format_venue_mismatch(cited_venue, paper_venue)
@@ -552,7 +552,7 @@ class OpenReviewReferenceChecker:
         if cited_title and paper_title:
             similarity = compare_titles_with_latex_cleaning(cited_title, paper_title)
             if similarity < 0.8:  # Slightly higher threshold for search results
-                from utils.error_utils import format_title_mismatch
+                from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(cited_title)
                 details = format_title_mismatch(clean_cited_title, paper_title) + f" (similarity: {similarity:.2f})"
@@ -591,7 +591,7 @@ class OpenReviewReferenceChecker:
                 
                 is_different, year_message = is_year_substantially_different(cited_year_int, paper_year_int)
                 if is_different and year_message:
-                    from utils.error_utils import format_year_mismatch
+                    from refchecker.utils.error_utils import format_year_mismatch
                     errors.append({
                         "warning_type": "year",
                         "warning_details": format_year_mismatch(cited_year_int, paper_year_int)
@@ -605,7 +605,7 @@ class OpenReviewReferenceChecker:
         
         if cited_venue and paper_venue:
             if are_venues_substantially_different(cited_venue, paper_venue):
-                from utils.error_utils import format_venue_mismatch
+                from refchecker.utils.error_utils import format_venue_mismatch
                 errors.append({
                     "warning_type": "venue",
                     "warning_details": format_venue_mismatch(cited_venue, paper_venue)
@@ -931,7 +931,7 @@ class OpenReviewReferenceChecker:
         
         # Use similarity calculation from text_utils
         try:
-            from utils.text_utils import calculate_title_similarity
+            from refchecker.utils.text_utils import calculate_title_similarity
             similarity = calculate_title_similarity(search_title, found_title)
             return similarity >= threshold
         except ImportError:

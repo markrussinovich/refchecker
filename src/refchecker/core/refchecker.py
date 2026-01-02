@@ -11,7 +11,7 @@ For arXiv references, it uses the arXiv API to verify metadata.
 For non-arXiv references, it uses the local Semantic Scholar database for verification.
 
 Usage:
-    python refchecker.py --paper PAPER_SPEC [--db-path PATH] [--output-file [PATH]] [--debug]
+    python run_refchecker.py --paper PAPER_SPEC [--db-path PATH] [--output-file [PATH]] [--debug]
 
 Options:
     --paper PAPER_SPEC            Validate a specific paper by:
@@ -44,23 +44,23 @@ import argparse
 import sys
 import json
 import random
-from checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
-from utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
+from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        extract_arxiv_id_from_url, normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
-from utils.config_validator import ConfigValidator
-from services.pdf_processor import PDFProcessor
-from checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
-from core.parallel_processor import ParallelReferenceProcessor  
-from core.db_connection_pool import ThreadSafeLocalChecker
+from refchecker.utils.config_validator import ConfigValidator
+from refchecker.services.pdf_processor import PDFProcessor
+from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+from refchecker.core.parallel_processor import ParallelReferenceProcessor  
+from refchecker.core.db_connection_pool import ThreadSafeLocalChecker
 
 # Import version
-from __version__ import __version__
-from llm.base import create_llm_provider, ReferenceExtractor
+from refchecker.__version__ import __version__
+from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 
 def get_llm_api_key_interactive(provider: str) -> str:
     """
@@ -453,7 +453,7 @@ class ArxivReferenceChecker:
     def extract_arxiv_id_from_url(self, url):
         """
         Extract ArXiv ID from a URL or text containing ArXiv reference.
-        Uses the common extraction function from utils.url_utils.
+        Uses the common extraction function from refchecker.utils.url_utils.
         """
         return extract_arxiv_id_from_url(url)
     
@@ -1189,7 +1189,7 @@ class ArxivReferenceChecker:
             last_author = and_parts[1].strip()
             
             # Split the main list by commas, handling initials properly
-            from utils.text_utils import parse_authors_with_initials
+            from refchecker.utils.text_utils import parse_authors_with_initials
             authors = parse_authors_with_initials(main_list)
             
             # Add the last author
@@ -1197,7 +1197,7 @@ class ArxivReferenceChecker:
                 authors.append(last_author)
         else:
             # No "and" found, use smart comma parsing for initials
-            from utils.text_utils import parse_authors_with_initials
+            from refchecker.utils.text_utils import parse_authors_with_initials
             authors = parse_authors_with_initials(authors_text)
         
         # Clean up each author name
@@ -1679,7 +1679,7 @@ class ArxivReferenceChecker:
         if not title and not authors_text:
             # Try to detect a list of names
             if re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
-                from utils.text_utils import parse_authors_with_initials
+                from refchecker.utils.text_utils import parse_authors_with_initials
                 authors = parse_authors_with_initials(cleaned_ref)
                 return authors, ""
         
@@ -1693,7 +1693,7 @@ class ArxivReferenceChecker:
         
         # Final fallback: if the reference is just a list of names, return as authors
         if not title and cleaned_ref and re.match(r'^[A-Z][a-zA-Z\-\.]+(,\s*[A-Z][a-zA-Z\-\.]+)+$', cleaned_ref):
-            from utils.text_utils import parse_authors_with_initials
+            from refchecker.utils.text_utils import parse_authors_with_initials
             authors = parse_authors_with_initials(cleaned_ref)
             return authors, ""
         
@@ -1901,7 +1901,7 @@ class ArxivReferenceChecker:
             db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
             
             if normalized_title != db_title:
-                from utils.error_utils import format_title_mismatch
+                from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(title)
                 logger.debug(f"DB Verification: Title mismatch - cited: '{title}', actual: '{paper_data.get('title')}'")
@@ -1940,7 +1940,7 @@ class ArxivReferenceChecker:
             # Only flag as mismatch if the difference is greater than tolerance
             if abs(year - paper_year) > year_tolerance:
                 logger.debug(f"DB Verification: Year mismatch - cited: {year}, actual: {paper_year}")
-                from utils.error_utils import format_year_mismatch
+                from refchecker.utils.error_utils import format_year_mismatch
                 errors.append({
                     'warning_type': 'year',
                     'warning_details': format_year_mismatch(year, paper_year),
@@ -1949,7 +1949,7 @@ class ArxivReferenceChecker:
         
         # Verify DOI
         if doi and external_ids.get('DOI'):
-            from utils.doi_utils import compare_dois, normalize_doi
+            from refchecker.utils.doi_utils import compare_dois, normalize_doi
             
             # Use proper DOI comparison first
             if not compare_dois(doi, external_ids['DOI']):
@@ -1962,7 +1962,7 @@ class ArxivReferenceChecker:
                 # Only flag as error if it's not a reasonable partial match
                 if not actual_doi_normalized.startswith(cited_doi_normalized.rstrip('.')):
                     logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
-                    from utils.error_utils import format_doi_mismatch
+                    from refchecker.utils.error_utils import format_doi_mismatch
                     errors.append({
                         'error_type': 'doi',
                         'error_details': format_doi_mismatch(doi, external_ids['DOI']),
@@ -2058,7 +2058,7 @@ class ArxivReferenceChecker:
                     elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
                         formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
                     elif error.get('error_type') == 'doi':
-                        from utils.doi_utils import construct_doi_url
+                        from refchecker.utils.doi_utils import construct_doi_url
                         formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
                     elif error.get('info_type') == 'url':
                         formatted_error['ref_url_correct'] = error.get('ref_url_correct', '')
@@ -2091,7 +2091,7 @@ class ArxivReferenceChecker:
                                 # Use the CORRECT paper's Semantic Scholar URL
                                 correct_external_ids = correct_paper_data.get('externalIds', {})
                                 if correct_external_ids.get('CorpusId'):
-                                    from utils.url_utils import construct_semantic_scholar_url
+                                    from refchecker.utils.url_utils import construct_semantic_scholar_url
                                     correct_paper_url = construct_semantic_scholar_url(correct_external_ids['CorpusId'])
                                     paper_url = correct_paper_url  # Update the main URL
                                     logger.debug(f"Database mode: Using correct paper's Semantic Scholar URL for ArXiv ID mismatch: {paper_url}")
@@ -2118,7 +2118,7 @@ class ArxivReferenceChecker:
                     
                     # Fallback to wrong paper's URL if we couldn't find the correct one
                     if not correct_paper_data and verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
-                        from utils.url_utils import construct_semantic_scholar_url
+                        from refchecker.utils.url_utils import construct_semantic_scholar_url
                         paper_url = construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
                         logger.debug(f"Database mode: Fallback to wrong paper's Semantic Scholar URL: {paper_url}")
                     elif not correct_paper_data:
@@ -2184,7 +2184,7 @@ class ArxivReferenceChecker:
         logger.debug(f"Detected GitHub URL, using GitHub verification: {github_url}")
         
         # Import and use GitHub checker
-        from checkers.github_checker import GitHubChecker
+        from refchecker.checkers.github_checker import GitHubChecker
         github_checker = GitHubChecker()
         verified_data, errors, paper_url = github_checker.verify_reference(reference)
         
@@ -2244,7 +2244,7 @@ class ArxivReferenceChecker:
             return None  # No URL to check
         
         # Import and use web page checker
-        from checkers.webpage_checker import WebPageChecker
+        from refchecker.checkers.webpage_checker import WebPageChecker
         webpage_checker = WebPageChecker()
         
         if not webpage_checker.is_web_page_url(web_url):
@@ -2308,7 +2308,7 @@ class ArxivReferenceChecker:
             return None, [{"error_type": "unverified", "error_details": "Reference could not be verified"}], None
         
         # First try PDF paper checker if URL appears to be a PDF
-        from checkers.pdf_paper_checker import PDFPaperChecker
+        from refchecker.checkers.pdf_paper_checker import PDFPaperChecker
         pdf_checker = PDFPaperChecker()
         
         if pdf_checker.can_check_reference(reference):
@@ -2325,7 +2325,7 @@ class ArxivReferenceChecker:
                 logger.debug(f"PDF verification error, falling back to web page verification")
         
         # Fall back to web page checker
-        from checkers.pdf_paper_checker import PDFPaperChecker
+        from refchecker.checkers.pdf_paper_checker import PDFPaperChecker
         pdf_checker = PDFPaperChecker()
         
         if pdf_checker.can_check_reference(reference):
@@ -2342,7 +2342,7 @@ class ArxivReferenceChecker:
                 logger.debug(f"PDF verification error, falling back to web page verification")
         
         # Fall back to web page checker
-        from checkers.webpage_checker import WebPageChecker
+        from refchecker.checkers.webpage_checker import WebPageChecker
         webpage_checker = WebPageChecker()
         
         try:
@@ -2463,7 +2463,7 @@ class ArxivReferenceChecker:
             elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
                 formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
             elif error.get('error_type') == 'doi':
-                from utils.doi_utils import construct_doi_url
+                from refchecker.utils.doi_utils import construct_doi_url
                 formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
             
             formatted_errors.append(formatted_error)
@@ -2753,7 +2753,7 @@ class ArxivReferenceChecker:
             corrected_data = self._extract_corrected_data_from_error(consolidated_entry, verified_data)
             
             # Generate all three formats for user convenience
-            from utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
+            from refchecker.utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
             plaintext_format = format_corrected_plaintext(reference, corrected_data, consolidated_entry)
             bibtex_format = format_corrected_bibtex(reference, corrected_data, consolidated_entry)
             bibitem_format = format_corrected_bibitem(reference, corrected_data, consolidated_entry)
@@ -2824,7 +2824,7 @@ class ArxivReferenceChecker:
                 corrected_data = self._extract_corrected_data_from_error(error, verified_data)
                 
                 # Generate all three formats
-                from utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
+                from refchecker.utils.text_utils import format_corrected_plaintext, format_corrected_bibtex, format_corrected_bibitem
                 plaintext_format = format_corrected_plaintext(reference, corrected_data, error_entry)
                 bibtex_format = format_corrected_bibtex(reference, corrected_data, error_entry)
                 bibitem_format = format_corrected_bibitem(reference, corrected_data, error_entry)
@@ -3326,7 +3326,7 @@ class ArxivReferenceChecker:
             
             if authors:
                 # Limit to first 3 authors for readability
-                from utils.text_utils import parse_authors_with_initials
+                from refchecker.utils.text_utils import parse_authors_with_initials
                 author_list = parse_authors_with_initials(authors)
                 if len(author_list) > 3:
                     formatted += ", ".join(author_list[:3]) + " et al."
@@ -3568,7 +3568,7 @@ class ArxivReferenceChecker:
             return self._parse_standard_acm_natbib_references(bibliography_text)
         
         # Check if this is BibTeX format
-        from utils.bibtex_parser import detect_bibtex_format
+        from refchecker.utils.bibtex_parser import detect_bibtex_format
         if detect_bibtex_format(bibliography_text):
             logger.info("Detected BibTeX format, using BibTeX parser")
             self.used_regex_extraction = True
@@ -3576,7 +3576,7 @@ class ArxivReferenceChecker:
             return self._parse_bibtex_references(bibliography_text)
         
         # Check if this is biblatex format  
-        from utils.biblatex_parser import detect_biblatex_format
+        from refchecker.utils.biblatex_parser import detect_biblatex_format
         if detect_biblatex_format(bibliography_text):
             logger.debug("Detected biblatex format")
             self.used_regex_extraction = True
@@ -3686,7 +3686,7 @@ class ArxivReferenceChecker:
         if author_field_match:
             author_content = author_field_match.group(1)
             # Find all \bibinfo{person}{Name} entries using balanced brace extraction
-            from utils.text_utils import extract_bibinfo_person_content
+            from refchecker.utils.text_utils import extract_bibinfo_person_content
             person_matches = extract_bibinfo_person_content(author_content)
             if person_matches:
                 authors = []
@@ -3700,7 +3700,7 @@ class ArxivReferenceChecker:
                 ref['authors'] = authors
         
         # Import balanced brace extraction function
-        from utils.text_utils import extract_bibinfo_field_content
+        from refchecker.utils.text_utils import extract_bibinfo_field_content
         
         # Extract title from \bibinfo{title}{Title} using balanced brace extraction
         title_content = extract_bibinfo_field_content(content, 'title')
@@ -3758,7 +3758,7 @@ class ArxivReferenceChecker:
                 author_part_clean = strip_latex_commands(author_part).strip()
                 if author_part_clean and not author_part_clean.startswith('\\'):
                     # Parse author names using the robust author parsing function
-                    from utils.text_utils import parse_authors_with_initials
+                    from refchecker.utils.text_utils import parse_authors_with_initials
                     author_names = parse_authors_with_initials(author_part_clean)
                     
                     # Clean up author names
@@ -3812,14 +3812,14 @@ class ArxivReferenceChecker:
         self.used_regex_extraction = True
         
         # Check if this is BibTeX format first
-        from utils.bibtex_parser import detect_bibtex_format
+        from refchecker.utils.bibtex_parser import detect_bibtex_format
         if detect_bibtex_format(bibliography_text):
             logger.debug("Detected BibTeX format, using BibTeX-specific parsing")
             # BibTeX parsing is robust, so we don't set used_unreliable_extraction
             return self._parse_bibtex_references(bibliography_text)
         
         # Check if this is biblatex format
-        from utils.biblatex_parser import detect_biblatex_format  
+        from refchecker.utils.biblatex_parser import detect_biblatex_format  
         if detect_biblatex_format(bibliography_text):
             logger.debug("Detected biblatex format, using biblatex-specific parsing")
             # biblatex parsing is also robust, so we don't set used_unreliable_extraction
@@ -4105,7 +4105,7 @@ class ArxivReferenceChecker:
                     if doi_match:
                         doi = clean_doi(doi_match.group(1))
                         if doi:
-                            from utils.doi_utils import construct_doi_url
+                            from refchecker.utils.doi_utils import construct_doi_url
                             url = construct_doi_url(doi)
                         else:
                             url = ''
@@ -4265,7 +4265,7 @@ class ArxivReferenceChecker:
             List of structured reference dictionaries
         """
         # Use the dedicated BibTeX parser
-        from utils.bibtex_parser import parse_bibtex_references
+        from refchecker.utils.bibtex_parser import parse_bibtex_references
         
         # Extract references using the BibTeX parser
         references = parse_bibtex_references(bibliography_text)
@@ -4284,7 +4284,7 @@ class ArxivReferenceChecker:
             List of structured reference dictionaries
         """
         # Use the dedicated biblatex parser
-        from utils.biblatex_parser import parse_biblatex_references
+        from refchecker.utils.biblatex_parser import parse_biblatex_references
         
         # Extract references using the biblatex parser
         references = parse_biblatex_references(bibliography_text)
@@ -4484,7 +4484,7 @@ class ArxivReferenceChecker:
             return True
             
         # Also check if authors have significant overlap (at least 50% of the shorter author list)
-        from utils.text_utils import parse_authors_with_initials
+        from refchecker.utils.text_utils import parse_authors_with_initials
         
         if '*' in seg1['author']:
             author1_parts = seg1['author'].split('*')
@@ -4553,7 +4553,7 @@ class ArxivReferenceChecker:
             parsed_authors = []
             for author in raw_authors:
                 # Clean up the author entry and strip LaTeX commands
-                from utils.text_utils import strip_latex_commands
+                from refchecker.utils.text_utils import strip_latex_commands
                 author_cleaned = strip_latex_commands(author.rstrip('.'))
                 
                 # Skip special indicators like "others", "et al", etc.
@@ -4571,14 +4571,14 @@ class ArxivReferenceChecker:
             return parsed_authors
         else:
             # Fallback to original logic for backward compatibility
-            from utils.text_utils import parse_authors_with_initials
+            from refchecker.utils.text_utils import parse_authors_with_initials
             
             cleaned_text = author_text.rstrip('.')
             authors = parse_authors_with_initials(cleaned_text)
             authors = [a.rstrip('.').strip() for a in authors if a.strip()]
             
             # Handle "others" and similar indicators in fallback logic too
-            from utils.text_utils import strip_latex_commands
+            from refchecker.utils.text_utils import strip_latex_commands
             processed_authors = []
             for author in authors:
                 # Apply LaTeX cleaning to each author
@@ -4706,7 +4706,7 @@ class ArxivReferenceChecker:
                 if '*' in doi:
                     doi = doi.split('*')[0]
                 
-                from utils.doi_utils import construct_doi_url
+                from refchecker.utils.doi_utils import construct_doi_url
                 url = construct_doi_url(doi)
                 break
         
@@ -4714,7 +4714,7 @@ class ArxivReferenceChecker:
         if not url and not arxiv_url:
             url_match = re.search(r'https?://(?!arxiv\.org)[^\s,]+', ref_text)
             if url_match:
-                from utils.url_utils import clean_url_punctuation
+                from refchecker.utils.url_utils import clean_url_punctuation
                 url = clean_url_punctuation(url_match.group(0))
         
         # Extract year - will be determined from structured parts below
@@ -4808,7 +4808,7 @@ class ArxivReferenceChecker:
                 if 'arxiv' in url_part.lower():
                     arxiv_url = url_part
                 else:
-                    from utils.url_utils import clean_url_punctuation
+                    from refchecker.utils.url_utils import clean_url_punctuation
                     url = clean_url_punctuation(url_part)
         else:
             # Fallback for other formats or malformed input
@@ -4829,7 +4829,7 @@ class ArxivReferenceChecker:
                     if 'arxiv' in url_part.lower():
                         arxiv_url = url_part
                     else:
-                        from utils.url_utils import clean_url_punctuation
+                        from refchecker.utils.url_utils import clean_url_punctuation
                         url = clean_url_punctuation(url_part)
             if len(parts) > 5:
                 # For cases with more than 5 parts, combine the remaining parts as additional info
@@ -4966,7 +4966,7 @@ class ArxivReferenceChecker:
                 if '*' in doi:
                     doi = doi.split('*')[0]
                 
-                from utils.doi_utils import construct_doi_url
+                from refchecker.utils.doi_utils import construct_doi_url
                 url = construct_doi_url(doi)
                 break
         
@@ -4974,7 +4974,7 @@ class ArxivReferenceChecker:
         if not url and not arxiv_url:
             url_match = re.search(r'https?://(?!arxiv\.org)[^\s,\)]+', ref_text)
             if url_match:
-                from utils.url_utils import clean_url_punctuation
+                from refchecker.utils.url_utils import clean_url_punctuation
                 url = clean_url_punctuation(url_match.group(0))
         
         # Extract year
@@ -5023,7 +5023,7 @@ class ArxivReferenceChecker:
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
         
         # Check if we can get BibTeX content for this paper (ArXiv or other sources)
-        from utils.arxiv_utils import get_bibtex_content
+        from refchecker.utils.arxiv_utils import get_bibtex_content
         bibtex_content = get_bibtex_content(paper)
         if bibtex_content:
             logger.debug(f"Found BibTeX content for {paper_id}, using structured bibliography")
@@ -5047,7 +5047,7 @@ class ArxivReferenceChecker:
                 references = extract_latex_references(bibtex_content, None)
                 
                 # Validate the parsed references and fallback to LLM if needed
-                from utils.text_utils import validate_parsed_references
+                from refchecker.utils.text_utils import validate_parsed_references
                 validation = validate_parsed_references(references)
                 
                 if not validation['is_valid']:
@@ -5372,9 +5372,9 @@ class ArxivReferenceChecker:
             # Print reference info in non-debug mode (improved formatting)
             raw_title = reference.get('title', 'Untitled')
             # Clean LaTeX commands from title for display
-            from utils.text_utils import strip_latex_commands
+            from refchecker.utils.text_utils import strip_latex_commands
             title = strip_latex_commands(raw_title)
-            from utils.text_utils import format_authors_for_display
+            from refchecker.utils.text_utils import format_authors_for_display
             authors = format_authors_for_display(reference.get('authors', []))
             year = reference.get('year', '')
             venue = reference.get('venue', '') or reference.get('journal', '')
@@ -5424,7 +5424,7 @@ class ArxivReferenceChecker:
                 
                 # Show DOI URL if available and different from what's already shown
                 if external_ids.get('DOI'):
-                    from utils.doi_utils import construct_doi_url
+                    from refchecker.utils.doi_utils import construct_doi_url
                     doi_url = construct_doi_url(external_ids['DOI'])
                     if doi_url != verified_url_to_show and doi_url != url:
                         print(f"       DOI URL: {doi_url}")
@@ -5523,19 +5523,19 @@ class ArxivReferenceChecker:
         
         # Second priority: Semantic Scholar URL from CorpusId (if no direct URL available)
         if verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
-            from utils.url_utils import construct_semantic_scholar_url
+            from refchecker.utils.url_utils import construct_semantic_scholar_url
             return construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
         
         # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
         if verified_data and verified_data.get('externalIds', {}).get('DOI'):
-            from utils.doi_utils import construct_doi_url
+            from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(verified_data['externalIds']['DOI'])
         
         # Fourth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
         if verified_data and verified_data.get('externalIds', {}).get('ArXiv'):
             # Only show ArXiv URL as verified URL if there's no ArXiv ID mismatch
             if not self._has_arxiv_id_error(errors):
-                from utils.url_utils import construct_arxiv_url
+                from refchecker.utils.url_utils import construct_arxiv_url
                 correct_arxiv_id = verified_data['externalIds']['ArXiv']
                 return construct_arxiv_url(correct_arxiv_id)
         
@@ -5556,7 +5556,7 @@ class ArxivReferenceChecker:
             external_ids = verified_data.get('externalIds', {})
             if external_ids.get('ArXiv'):
                 # Extract ArXiv ID from the URL using shared utility
-                from utils.url_utils import extract_arxiv_id_from_url
+                from refchecker.utils.url_utils import extract_arxiv_id_from_url
                 url_arxiv_id = extract_arxiv_id_from_url(reference_url)
                 if url_arxiv_id:
                     correct_arxiv_id = external_ids['ArXiv']
@@ -5579,10 +5579,10 @@ class ArxivReferenceChecker:
     def _get_fallback_url(self, external_ids):
         """Get fallback URL from external IDs (Semantic Scholar or DOI)"""
         if external_ids.get('CorpusId'):
-            from utils.url_utils import construct_semantic_scholar_url
+            from refchecker.utils.url_utils import construct_semantic_scholar_url
             return construct_semantic_scholar_url(external_ids['CorpusId'])
         elif external_ids.get('DOI'):
-            from utils.doi_utils import construct_doi_url
+            from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(external_ids['DOI'])
         return None
     
@@ -5660,7 +5660,7 @@ class ArxivReferenceChecker:
                     error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
                     error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
                     
-                    from utils.error_utils import print_labeled_multiline
+                    from refchecker.utils.error_utils import print_labeled_multiline
 
                     if error_type == 'arxiv_id':
                         print(f"      ❌ {error_details}")

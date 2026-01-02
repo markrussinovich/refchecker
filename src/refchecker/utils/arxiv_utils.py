@@ -32,7 +32,7 @@ def extract_arxiv_id_from_paper(paper):
     
     if hasattr(paper, 'pdf_url') and paper.pdf_url:
         # Try to extract ArXiv ID from the PDF URL
-        from utils.url_utils import extract_arxiv_id_from_url
+        from refchecker.utils.url_utils import extract_arxiv_id_from_url
         arxiv_id = extract_arxiv_id_from_url(paper.pdf_url)
     elif hasattr(paper, 'get_short_id'):
         # Check if the paper ID itself is an ArXiv ID
@@ -316,7 +316,7 @@ def filter_bibtex_by_citations(bib_content, tex_files, main_tex_content):
             return bib_content
             
         # Parse BibTeX entries and filter
-        from utils.bibtex_parser import parse_bibtex_entries
+        from refchecker.utils.bibtex_parser import parse_bibtex_entries
         entries = parse_bibtex_entries(bib_content)
         
         # Filter entries to only cited ones and remove duplicates
@@ -481,7 +481,7 @@ def get_bibtex_content(paper):
             
         elif tex_content:
             # Check for embedded bibliography in LaTeX
-            from utils.text_utils import detect_latex_bibliography_format
+            from refchecker.utils.text_utils import detect_latex_bibliography_format
             latex_format = detect_latex_bibliography_format(tex_content)
             if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
                 logger.info(f"Found embedded bibliography in ArXiv LaTeX source, but skipping due to formatting incompatibility")

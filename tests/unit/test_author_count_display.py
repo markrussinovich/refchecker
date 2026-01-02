@@ -13,7 +13,7 @@ import os
 # Add the src directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from utils.error_utils import format_author_count_mismatch
+from refchecker.utils.error_utils import format_author_count_mismatch
 
 
 class TestAuthorCountDisplay(unittest.TestCase):
@@ -38,7 +38,7 @@ class TestAuthorCountDisplay(unittest.TestCase):
         ]
         
         # Test using the compare_authors function which should convert format before display
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         match_result, error_msg = compare_authors(cited_last_first, correct_authors)
         
         # Should not match due to count difference
@@ -72,7 +72,7 @@ class TestAuthorCountDisplay(unittest.TestCase):
         correct_authors = ["Mishaal Kazmi", "H. Lautraite", "Alireza Akbari", "Someone Else"]
         
         # Test using compare_authors which does the conversion
-        from utils.text_utils import compare_authors
+        from refchecker.utils.text_utils import compare_authors
         match_result, error_msg = compare_authors(cited_fragments, correct_authors)
         
         self.assertFalse(match_result)

@@ -1,6 +1,6 @@
 import pytest
 
-from utils.text_utils import calculate_title_similarity, normalize_venue_for_display
+from refchecker.utils.text_utils import calculate_title_similarity, normalize_venue_for_display
 
 
 def test_title_similarity_ignores_trailing_year():

@@ -7,7 +7,7 @@ from urllib.parse import urlparse, urljoin
 from typing import Dict, Optional, Tuple, List, Any
 from bs4 import BeautifulSoup
 import time
-from utils.text_utils import strip_latex_commands
+from refchecker.utils.text_utils import strip_latex_commands
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +185,7 @@ class WebPageChecker:
             # Check title match
             if cited_title and page_title:
                 if not self._check_title_match(cited_title, page_title, page_description):
-                    from utils.error_utils import format_title_mismatch
+                    from refchecker.utils.error_utils import format_title_mismatch
                     # Clean the cited title for display (remove LaTeX commands like {LLM}s -> LLMs)
                     clean_cited_title = strip_latex_commands(cited_title)
                     errors.append({
@@ -207,7 +207,7 @@ class WebPageChecker:
             if cited_authors:
                 author_str = ', '.join(cited_authors) if isinstance(cited_authors, list) else str(cited_authors)
                 if not self._check_author_match(author_str, site_info, web_url):
-                    from utils.error_utils import format_three_line_mismatch
+                    from refchecker.utils.error_utils import format_three_line_mismatch
                     left = author_str
                     right = site_info.get('organization', 'unknown')
                     details = format_three_line_mismatch("Author/organization mismatch", left, right)
