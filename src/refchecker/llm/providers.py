@@ -318,7 +318,23 @@ class GoogleProvider(LLMProvider, LLMProviderMixin):
                 }
             )
             
-            return response.text or ""
+            # Handle empty responses (content safety filter or other issues)
+            if not response.candidates:
+                logger.warning("Google API returned empty candidates (possibly content filtered)")
+                return ""
+            
+            # Safely access the text
+            try:
+                return response.text or ""
+            except (ValueError, AttributeError) as e:
+                # response.text raises ValueError if multiple candidates or no text
+                logger.warning(f"Could not get text from Google response: {e}")
+                # Try to extract text from first candidate manually
+                if response.candidates and hasattr(response.candidates[0], 'content'):
+                    content = response.candidates[0].content
+                    if hasattr(content, 'parts') and content.parts:
+                        return content.parts[0].text or ""
+                return ""
             
         except Exception as e:
             logger.error(f"Google API call failed: {e}")

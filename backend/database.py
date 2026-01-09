@@ -1,0 +1,362 @@
+"""
+Database module for storing check history and LLM configurations
+"""
+import aiosqlite
+import json
+import os
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+from pathlib import Path
+from cryptography.fernet import Fernet
+
+
+def get_encryption_key() -> bytes:
+    """Get or create encryption key for API keys"""
+    key_file = Path(__file__).parent / ".encryption_key"
+    if key_file.exists():
+        return key_file.read_bytes()
+    else:
+        key = Fernet.generate_key()
+        key_file.write_bytes(key)
+        return key
+
+
+class Database:
+    """Handles SQLite database operations for check history and LLM configs"""
+
+    def __init__(self, db_path: str = "refchecker_history.db"):
+        self.db_path = db_path
+        self._fernet = Fernet(get_encryption_key())
+
+    def _encrypt(self, value: str) -> str:
+        """Encrypt a string value"""
+        return self._fernet.encrypt(value.encode()).decode()
+
+    def _decrypt(self, value: str) -> str:
+        """Decrypt a string value"""
+        return self._fernet.decrypt(value.encode()).decode()
+
+    async def init_db(self):
+        """Initialize database schema"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Check history table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS check_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_title TEXT NOT NULL,
+                    paper_source TEXT NOT NULL,
+                    source_type TEXT DEFAULT 'url',
+                    custom_label TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    total_refs INTEGER,
+                    errors_count INTEGER,
+                    warnings_count INTEGER,
+                    unverified_count INTEGER,
+                    results_json TEXT,
+                    llm_provider TEXT,
+                    llm_model TEXT,
+                    status TEXT DEFAULT 'completed'
+                )
+            """)
+
+            # LLM configurations table
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS llm_configs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT,
+                    api_key_encrypted TEXT,
+                    endpoint TEXT,
+                    is_default BOOLEAN DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # App settings table (for Semantic Scholar key, etc.)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value_encrypted TEXT,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            await self._ensure_columns(db)
+            await db.commit()
+
+    async def _ensure_columns(self, db: aiosqlite.Connection):
+        """Ensure new columns exist for older databases."""
+        async with db.execute("PRAGMA table_info(check_history)") as cursor:
+            columns = {row[1] async for row in cursor}
+        if "source_type" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN source_type TEXT DEFAULT 'url'")
+        if "custom_label" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN custom_label TEXT")
+
+    async def save_check(self,
+                         paper_title: str,
+                         paper_source: str,
+                         source_type: str,
+                         total_refs: int,
+                         errors_count: int,
+                         warnings_count: int,
+                         unverified_count: int,
+                         results: List[Dict[str, Any]],
+                         llm_provider: Optional[str] = None,
+                         llm_model: Optional[str] = None) -> int:
+        """Save a check result to database"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO check_history
+                (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
+                 unverified_count, results_json, llm_provider, llm_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                paper_title,
+                paper_source,
+                source_type,
+                total_refs,
+                errors_count,
+                warnings_count,
+                unverified_count,
+                json.dumps(results),
+                llm_provider,
+                llm_model
+            ))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recent check history"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, unverified_count,
+                       llm_provider, llm_model, status, source_type
+                FROM check_history
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """, (limit,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_check_by_id(self, check_id: int) -> Optional[Dict[str, Any]]:
+        """Get specific check result by ID"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM check_history WHERE id = ?
+            """, (check_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    result = dict(row)
+                    # Parse JSON results
+                    if result['results_json']:
+                        result['results'] = json.loads(result['results_json'])
+                    return result
+                return None
+
+    async def delete_check(self, check_id: int) -> bool:
+        """Delete a check from history"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
+            await db.commit()
+            return True
+
+    async def update_check_label(self, check_id: int, label: str) -> bool:
+        """Update the custom label for a check"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE check_history SET custom_label = ? WHERE id = ?",
+                (label, check_id)
+            )
+            await db.commit()
+            return True
+
+    # LLM Configuration methods
+
+    async def get_llm_configs(self) -> List[Dict[str, Any]]:
+        """Get all LLM configurations (API keys redacted)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT id, name, provider, model, endpoint, is_default, created_at
+                FROM llm_configs
+                ORDER BY created_at DESC
+            """) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_llm_config_by_id(self, config_id: int) -> Optional[Dict[str, Any]]:
+        """Get a specific LLM config by ID (includes decrypted API key)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM llm_configs WHERE id = ?
+            """, (config_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    result = dict(row)
+                    # Decrypt API key if present
+                    if result.get('api_key_encrypted'):
+                        try:
+                            result['api_key'] = self._decrypt(result['api_key_encrypted'])
+                        except Exception:
+                            result['api_key'] = None
+                    del result['api_key_encrypted']
+                    return result
+                return None
+
+    async def create_llm_config(self,
+                                 name: str,
+                                 provider: str,
+                                 model: Optional[str] = None,
+                                 api_key: Optional[str] = None,
+                                 endpoint: Optional[str] = None) -> int:
+        """Create a new LLM configuration"""
+        encrypted_key = self._encrypt(api_key) if api_key else None
+
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO llm_configs (name, provider, model, api_key_encrypted, endpoint)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, provider, model, encrypted_key, endpoint))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def update_llm_config(self,
+                                 config_id: int,
+                                 name: Optional[str] = None,
+                                 provider: Optional[str] = None,
+                                 model: Optional[str] = None,
+                                 api_key: Optional[str] = None,
+                                 endpoint: Optional[str] = None) -> bool:
+        """Update an existing LLM configuration"""
+        updates = []
+        params = []
+
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if provider is not None:
+            updates.append("provider = ?")
+            params.append(provider)
+        if model is not None:
+            updates.append("model = ?")
+            params.append(model)
+        if api_key is not None:
+            updates.append("api_key_encrypted = ?")
+            params.append(self._encrypt(api_key))
+        if endpoint is not None:
+            updates.append("endpoint = ?")
+            params.append(endpoint)
+
+        if not updates:
+            return False
+
+        params.append(config_id)
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                f"UPDATE llm_configs SET {', '.join(updates)} WHERE id = ?",
+                params
+            )
+            await db.commit()
+            return True
+
+    async def delete_llm_config(self, config_id: int) -> bool:
+        """Delete an LLM configuration"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM llm_configs WHERE id = ?", (config_id,))
+            await db.commit()
+            return True
+
+    async def set_default_llm_config(self, config_id: int) -> bool:
+        """Set an LLM config as the default (unsets others)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Unset all defaults
+            await db.execute("UPDATE llm_configs SET is_default = 0")
+            # Set the new default
+            await db.execute(
+                "UPDATE llm_configs SET is_default = 1 WHERE id = ?",
+                (config_id,)
+            )
+            await db.commit()
+            return True
+
+    async def get_default_llm_config(self) -> Optional[Dict[str, Any]]:
+        """Get the default LLM configuration (with decrypted API key)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT * FROM llm_configs WHERE is_default = 1
+            """) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    result = dict(row)
+                    if result.get('api_key_encrypted'):
+                        try:
+                            result['api_key'] = self._decrypt(result['api_key_encrypted'])
+                        except Exception:
+                            result['api_key'] = None
+                    if 'api_key_encrypted' in result:
+                        del result['api_key_encrypted']
+                    return result
+                return None
+
+    # App Settings methods (for Semantic Scholar key, etc.)
+
+    async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
+        """Get an app setting value (optionally decrypted)"""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT value_encrypted FROM app_settings WHERE key = ?",
+                (key,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row['value_encrypted']:
+                    if decrypt:
+                        try:
+                            return self._decrypt(row['value_encrypted'])
+                        except Exception:
+                            return None
+                    return row['value_encrypted']
+                return None
+
+    async def set_setting(self, key: str, value: str) -> bool:
+        """Set an app setting value (encrypted)"""
+        encrypted = self._encrypt(value) if value else None
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO app_settings (key, value_encrypted, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET
+                    value_encrypted = excluded.value_encrypted,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (key, encrypted))
+            await db.commit()
+            return True
+
+    async def delete_setting(self, key: str) -> bool:
+        """Delete an app setting"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM app_settings WHERE key = ?", (key,))
+            await db.commit()
+            return True
+
+    async def has_setting(self, key: str) -> bool:
+        """Check if an app setting exists"""
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT 1 FROM app_settings WHERE key = ? AND value_encrypted IS NOT NULL",
+                (key,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row is not None
+
+
+# Global database instance
+db = Database()
