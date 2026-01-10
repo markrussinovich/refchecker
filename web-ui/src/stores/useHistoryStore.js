@@ -130,6 +130,7 @@ export const useHistoryStore = create((set, get) => ({
       const statusPriority = { 'completed': 3, 'error': 2, 'cancelled': 2, 'in_progress': 1, 'idle': 0 }
       const currentHistory = get().history
       
+      // First, merge fetched items with existing in-memory state
       const mergedHistory = historyWithActive.map(fetched => {
         const existing = currentHistory.find(h => h.id === fetched.id)
         if (!existing) return fetched
@@ -147,6 +148,15 @@ export const useHistoryStore = create((set, get) => ({
         }
         return fetched
       })
+      
+      // Also preserve any locally-added items (e.g., just-started checks) that aren't in the fetch results yet
+      const fetchedIds = new Set(historyWithActive.map(h => h.id))
+      const localOnlyItems = currentHistory.filter(h => h.id !== -1 && !fetchedIds.has(h.id))
+      if (localOnlyItems.length > 0) {
+        logger.info('HistoryStore', `Preserving ${localOnlyItems.length} locally-added items not yet in API`)
+        // Add them at the beginning (most recent first)
+        mergedHistory.unshift(...localOnlyItems)
+      }
       
       set({ history: mergedHistory, isLoading: false })
       logger.info('HistoryStore', `Set ${mergedHistory.length} history items (merged)`)
@@ -330,7 +340,10 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   updateHistoryProgress: (id, payload = {}) => {
-    if (!id) return
+    if (!id) {
+      logger.warn('HistoryStore', 'updateHistoryProgress called with no id')
+      return
+    }
     set(state => ({
       history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
       selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,

@@ -100,8 +100,25 @@ export default function InputSection() {
       // Initialize check state with the check_id and source
       startCheck(session_id, check_id, displaySource)
 
-      // Refresh history immediately to show the new in-progress entry
-      fetchHistory()
+      // IMPORTANT: Add to history IMMEDIATELY so WebSocket updates have a target
+      // This prevents race conditions where messages arrive before fetchHistory completes
+      const { addToHistory } = useHistoryStore.getState()
+      addToHistory({
+        id: check_id,
+        paper_title: displaySource,
+        paper_source: displaySource,
+        custom_label: null,
+        timestamp: new Date().toISOString(),
+        total_refs: 0,
+        errors_count: 0,
+        warnings_count: 0,
+        unverified_count: 0,
+        llm_provider: config?.provider || null,
+        llm_model: config?.model || null,
+        status: 'in_progress',
+        source_type: inputMode === 'url' ? 'url' : inputMode === 'file' ? 'file' : 'text',
+        session_id: session_id,
+      })
       
       // Select the current check in history so user can navigate away and back
       selectCheck(check_id)
