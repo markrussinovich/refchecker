@@ -69,10 +69,30 @@ class PDFProcessor:
             with open(pdf_path, 'rb') as file:
                 pdf_reader = pypdf.PdfReader(file)
                 text = ""
+                failed_pages = []
                 
                 for page_num in range(len(pdf_reader.pages)):
-                    page = pdf_reader.pages[page_num]
-                    text += page.extract_text() + "\n"
+                    try:
+                        page = pdf_reader.pages[page_num]
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                    except TypeError as e:
+                        # Handle pypdf errors like "NumberObject is not iterable"
+                        # which can occur with malformed PDF pages
+                        failed_pages.append(page_num + 1)  # 1-indexed for logging
+                        logger.warning(f"Skipping page {page_num + 1} due to PDF parsing error: {e}")
+                        continue
+                    except Exception as e:
+                        failed_pages.append(page_num + 1)
+                        logger.warning(f"Error extracting text from page {page_num + 1}: {e}")
+                        continue
+                
+                if failed_pages:
+                    logger.warning(f"Failed to extract text from {len(failed_pages)} pages: {failed_pages[:10]}{'...' if len(failed_pages) > 10 else ''}")
+                
+                if not text.strip():
+                    raise ValueError(f"No text could be extracted from any pages of {pdf_path}")
                 
                 # Cache the result
                 self.cache[pdf_path] = text
