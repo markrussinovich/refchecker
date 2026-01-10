@@ -10,29 +10,53 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
  * Main panel containing input, status, stats, and references
  */
 export default function MainPanel() {
-  const { status: checkStatus, references, stats } = useCheckStore()
-  const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
+  const { 
+    status: checkStatus, 
+    references, 
+    stats, 
+    currentCheckId,
+    clearStatusFilter 
+  } = useCheckStore()
+  const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
 
-  // Determine what to display: current check or historical check
-  const isViewingHistory = selectedCheckId && checkStatus === 'idle'
+  // Determine what to display:
+  // - If a history item is selected that's NOT the current running check, show history
+  // - Otherwise show the current check state
+  // Note: Check selectedCheckId first, then loading state, then selectedCheck
+  const isViewingHistory = selectedCheckId !== null && selectedCheckId !== -1 && selectedCheckId !== currentCheckId
   const displayData = isViewingHistory ? selectedCheck : null
+  
+  // Clear status filter when switching views
+  useEffect(() => {
+    clearStatusFilter()
+  }, [selectedCheckId, clearStatusFilter])
+
+  // Show something if we're checking OR viewing history (or loading history)
+  const showContent = checkStatus !== 'idle' || isViewingHistory
+  const showInput = !isViewingHistory && checkStatus === 'idle'
+
+  const handleReturnToActiveCheck = () => {
+    if (currentCheckId) {
+      selectCheck(currentCheckId)
+    }
+  }
 
   return (
     <main 
-      className="flex-1 overflow-y-auto"
-      style={{ backgroundColor: 'var(--color-bg-primary)' }}
+      className="flex-1"
+      style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         {/* Input Section */}
-        <InputSection />
+        {showInput && <InputSection />}
 
-        {/* Status Section - only show when checking */}
-        {(checkStatus !== 'idle' || isViewingHistory) && (
-          <StatusSection />
+        {/* Status Section - only show when checking or viewing history */}
+        {showContent && (
+          <StatusSection isViewingHistory={isViewingHistory} />
         )}
 
         {/* Stats Section */}
-        {(checkStatus !== 'idle' || isViewingHistory) && (
+        {showContent && (
           <StatsSection 
             stats={isViewingHistory ? {
               total_refs: displayData?.total_refs || 0,
@@ -48,7 +72,7 @@ export default function MainPanel() {
         )}
 
         {/* References List */}
-        {(checkStatus !== 'idle' || isViewingHistory) && (
+        {showContent && (
           <ReferenceList 
             references={isViewingHistory ? (displayData?.results || []) : references}
             isLoading={isLoadingDetail}

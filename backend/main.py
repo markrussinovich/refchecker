@@ -12,10 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 
-from database import db
-from websocket_manager import manager
-from refchecker_wrapper import ProgressRefChecker
-from models import CheckRequest, CheckHistoryItem
+from .database import db
+from .websocket_manager import manager
+from .refchecker_wrapper import ProgressRefChecker
+from .models import CheckRequest, CheckHistoryItem
 
 # Configure logging
 logging.basicConfig(
@@ -74,6 +74,13 @@ active_checks = {}
 async def startup_event():
     """Initialize database on startup"""
     await db.init_db()
+    # Mark any previously in-progress checks as cancelled (e.g., after restart)
+    try:
+        stale = await db.cancel_stale_in_progress()
+        if stale:
+            logger.info(f"Cancelled {stale} stale in-progress checks on startup")
+    except Exception as e:
+        logger.error(f"Failed to cancel stale checks: {e}")
     logger.info("Database initialized")
 
 
@@ -148,6 +155,7 @@ async def start_check(
 
         # Handle file upload or pasted text
         paper_source = source_value
+        paper_title = "Processing..."  # Placeholder title until we parse the paper
         if source_type == "file" and file:
             # Save uploaded file to temp directory
             temp_dir = tempfile.gettempdir()
@@ -156,23 +164,38 @@ async def start_check(
                 content = await file.read()
                 f.write(content)
             paper_source = str(file_path)
+            paper_title = file.filename
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")
             paper_source = source_text
+            paper_title = "Pasted Text"
+        elif source_type == "url":
+            paper_title = source_value
 
         if not paper_source:
             raise HTTPException(status_code=400, detail="No source provided")
 
+        # Create history entry immediately (in_progress status)
+        check_id = await db.create_pending_check(
+            paper_title=paper_title,
+            paper_source=paper_source,
+            source_type=source_type,
+            llm_provider=llm_provider if use_llm else None,
+            llm_model=llm_model if use_llm else None
+        )
+        logger.info(f"Created pending check with ID {check_id}")
+
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, paper_source, source_type, llm_provider, llm_model, api_key, use_llm, cancel_event)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, api_key, use_llm, cancel_event)
         )
-        active_checks[session_id] = {"task": task, "cancel_event": cancel_event}
+        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id}
 
         return {
             "session_id": session_id,
+            "check_id": check_id,
             "message": "Check started",
             "source": paper_source
         }
@@ -184,6 +207,7 @@ async def start_check(
 
 async def run_check(
     session_id: str,
+    check_id: int,
     paper_source: str,
     source_type: str,
     llm_provider: str,
@@ -197,6 +221,7 @@ async def run_check(
 
     Args:
         session_id: Unique session ID
+        check_id: Database ID for this check
         paper_source: Paper URL, ArXiv ID, or file path
         source_type: 'url' or 'file'
         llm_provider: LLM provider
@@ -215,9 +240,41 @@ async def run_check(
         else:
             logger.warning(f"WebSocket not connected after 3s for session {session_id}, proceeding anyway")
 
-        # Create progress callback
+        # Track accumulated results for incremental saving
+        accumulated_results = []
+        last_save_count = 0  # Track when we last saved to reduce lock contention
+
+        # Create progress callback that also saves to DB
         async def progress_callback(event_type: str, data: dict):
+            nonlocal accumulated_results, last_save_count
             await manager.send_message(session_id, event_type, data)
+            
+            # Save reference results to DB as they come in
+            if event_type == "reference_result":
+                accumulated_results.append(data)
+            
+            # Save progress to DB every 3 references to reduce lock contention
+            if event_type == "summary_update":
+                current_count = len(accumulated_results)
+                # Save every 3 references, or on first result
+                if current_count - last_save_count >= 3 or (current_count == 1 and last_save_count == 0):
+                    try:
+                        await db.update_check_progress(
+                            check_id=check_id,
+                            total_refs=data.get("total_refs", 0),
+                            errors_count=data.get("errors_count", 0),
+                            warnings_count=data.get("warnings_count", 0),
+                            unverified_count=data.get("unverified_count", 0),
+                            results=accumulated_results
+                        )
+                        last_save_count = current_count
+                    except Exception as e:
+                        logger.warning(f"Failed to save progress: {e}")
+
+        # Create title update callback
+        async def title_update_callback(check_id: int, paper_title: str):
+            await db.update_check_title(check_id, paper_title)
+            logger.info(f"Updated paper title for check {check_id}: {paper_title}")
 
         # Create checker with progress callback
         checker = ProgressRefChecker(
@@ -226,24 +283,24 @@ async def run_check(
             api_key=api_key,
             use_llm=use_llm,
             progress_callback=progress_callback,
-            cancel_event=cancel_event
+            cancel_event=cancel_event,
+            check_id=check_id,
+            title_update_callback=title_update_callback
         )
 
         # Run the check
         result = await checker.check_paper(paper_source, source_type)
 
-        # Save to database
-        await db.save_check(
+        # Update the existing check entry with results
+        await db.update_check_results(
+            check_id=check_id,
             paper_title=result["paper_title"],
-            paper_source=result["paper_source"],
-            source_type=source_type,
             total_refs=result["summary"]["total_refs"],
             errors_count=result["summary"]["errors_count"],
             warnings_count=result["summary"]["warnings_count"],
             unverified_count=result["summary"]["unverified_count"],
             results=result["references"],
-            llm_provider=llm_provider,
-            llm_model=llm_model
+            status='completed'
         )
 
         # Cleanup temp file if it was uploaded
@@ -255,9 +312,11 @@ async def run_check(
 
     except asyncio.CancelledError:
         logger.info(f"Check cancelled: {session_id}")
+        await db.update_check_status(check_id, 'cancelled')
         await manager.send_message(session_id, "cancelled", {"message": "Check cancelled"})
     except Exception as e:
         logger.error(f"Error in run_check: {e}", exc_info=True)
+        await db.update_check_status(check_id, 'error')
         await manager.broadcast_error(
             session_id,
             f"Check failed: {str(e)}",
@@ -310,24 +369,39 @@ async def recheck(check_id: int):
         source_type = original.get("source_type") or (
             "url" if source.startswith("http") or "arxiv" in source.lower() else "file"
         )
+        
+        llm_provider = original.get("llm_provider", "anthropic")
+        llm_model = original.get("llm_model")
+        
+        # Create history entry immediately
+        new_check_id = await db.create_pending_check(
+            paper_title=original.get("paper_title", "Re-checking..."),
+            paper_source=source,
+            source_type=source_type,
+            llm_provider=llm_provider,
+            llm_model=llm_model
+        )
 
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
             run_check(
                 session_id,
+                new_check_id,
                 source,
                 source_type,
-                original.get("llm_provider", "anthropic"),
-                original.get("llm_model"),
+                llm_provider,
+                llm_model,
+                None,  # API key will need to be retrieved separately
                 True,
                 cancel_event
             )
         )
-        active_checks[session_id] = {"task": task, "cancel_event": cancel_event}
+        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": new_check_id}
 
         return {
             "session_id": session_id,
+            "check_id": new_check_id,
             "message": "Re-check started",
             "original_id": check_id
         }

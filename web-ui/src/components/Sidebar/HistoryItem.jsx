@@ -15,6 +15,8 @@ export default function HistoryItem({ item, isSelected }) {
 
   const displayLabel = item.custom_label || item.paper_title || 'Untitled Check'
 
+  const isPlaceholder = item.id === -1
+
   const handleClick = () => {
     if (!isEditing) {
       logger.info('HistoryItem', `Selecting check ${item.id}`)
@@ -73,15 +75,25 @@ export default function HistoryItem({ item, isSelected }) {
     setIsConfirmingDelete(false)
   }
 
-  // Status indicator based on errors
+  // Status indicator based on errors or in-progress state
   const getStatusIndicator = () => {
+    // Check if this is an in-progress check
+    if (item.status === 'in_progress') {
+      return { color: 'var(--color-accent)', label: 'In progress', isAnimated: true }
+    }
+    if (item.status === 'cancelled') {
+      return { color: 'var(--color-warning)', label: 'Cancelled', isAnimated: false }
+    }
+    if (item.status === 'error') {
+      return { color: 'var(--color-error)', label: 'Error', isAnimated: false }
+    }
     if (item.errors_count > 0) {
-      return { color: 'var(--color-error)', label: `${item.errors_count} errors` }
+      return { color: 'var(--color-error)', label: `${item.errors_count} errors`, isAnimated: false }
     }
     if (item.warnings_count > 0) {
-      return { color: 'var(--color-warning)', label: `${item.warnings_count} warnings` }
+      return { color: 'var(--color-warning)', label: `${item.warnings_count} warnings`, isAnimated: false }
     }
-    return { color: 'var(--color-success)', label: 'All verified' }
+    return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
   }
 
   const status = getStatusIndicator()
@@ -135,13 +147,15 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
         
-        {/* Date */}
-        <div 
-          className="text-xs mt-1"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          {formatDate(item.timestamp)}
-        </div>
+        {/* Date (hide for placeholder or missing timestamp) */}
+        {item.timestamp && !isPlaceholder && (
+          <div 
+            className="text-xs mt-1"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {formatDate(item.timestamp)}
+          </div>
+        )}
 
         {/* Stats summary */}
         <div className="flex items-center gap-2 mt-1">
@@ -149,13 +163,27 @@ export default function HistoryItem({ item, isSelected }) {
             className="text-xs"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            {item.total_refs} refs
+            {isPlaceholder ? 'Start a new check' : (item.status === 'in_progress' ? 'Checking...' : `${item.total_refs} refs`)}
           </span>
-          <span 
-            className="w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: status.color }}
-            title={status.label}
-          />
+          {!isPlaceholder && status.isAnimated ? (
+            <svg 
+              className="w-3 h-3 animate-spin"
+              fill="none" 
+              viewBox="0 0 24 24"
+              style={{ color: status.color }}
+            >
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          ) : (
+            !isPlaceholder && (
+              <span 
+                className="w-1.5 h-1.5 rounded-full"
+                style={{ backgroundColor: status.color }}
+                title={status.label}
+              />
+            )
+          )}
         </div>
       </div>
 

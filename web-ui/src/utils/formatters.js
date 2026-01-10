@@ -35,11 +35,18 @@ export function formatDate(date) {
  * @param {string[]} authors - Array of author names
  * @returns {string} Formatted author string
  */
-export function formatAuthors(authors) {
+export function formatAuthors(authors, truncate = false) {
   if (!authors || authors.length === 0) return 'Unknown authors'
   if (authors.length === 1) return authors[0]
   if (authors.length === 2) return `${authors[0]} and ${authors[1]}`
-  return `${authors[0]} et al.`
+  if (truncate) {
+    return `${authors[0]} et al.`
+  }
+  // Show all authors with "et al." suffix if list is very long
+  if (authors.length > 10) {
+    return `${authors.slice(0, 10).join(', ')}, et al.`
+  }
+  return authors.join(', ')
 }
 
 /**

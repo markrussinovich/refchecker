@@ -1,23 +1,55 @@
 import { formatAuthors } from '../../utils/formatters'
 
+const urlPattern = /https?:\/\/[^\s]+/g
+
+// Render text with clickable URLs, preserving surrounding text
+const renderTextWithLinks = (text) => {
+  if (!text) return null
+
+  const parts = []
+  let lastIndex = 0
+  let match
+
+  while ((match = urlPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index))
+    }
+    const url = match[0]
+    parts.push({ type: 'link', url })
+    lastIndex = match.index + url.length
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex))
+  }
+
+  return parts.map((part, idx) => {
+    if (typeof part === 'string') {
+      return <span key={`txt-${idx}`}>{part}</span>
+    }
+    return (
+      <a
+        key={`url-${idx}`}
+        href={part.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:underline"
+        style={{ color: 'var(--color-accent)' }}
+      >
+        {part.url}
+      </a>
+    )
+  })
+}
+
 /**
  * Individual reference card matching CLI output format
  */
-export default function ReferenceCard({ reference, index, totalRefs }) {
-  const getStatusEmoji = () => {
-    switch (reference.status) {
-      case 'verified': return '✓'
-      case 'warning': return '⚠️'
-      case 'error': return '❌'
-      case 'unverified': return '❓'
-      case 'checking': return null // Will use spinner
-      case 'pending': return null // Will use circle
-      default: return '○'
-    }
-  }
-
+export default function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
+  const numberToShow = typeof displayIndex === 'number' ? displayIndex : index
+  const status = (reference.status || '').toLowerCase()
   const getStatusColor = () => {
-    switch (reference.status) {
+    switch (status) {
       case 'verified': return 'var(--color-success)'
       case 'warning': return 'var(--color-warning)'
       case 'error': return 'var(--color-error)'
@@ -29,15 +61,16 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
   }
 
   const renderStatusIndicator = () => {
-    if (reference.status === 'checking') {
-      // Spinning animation for actively checking
+    const commonSize = 'w-7 h-7'
+
+    if (status === 'checking') {
       return (
         <span 
-          className="flex-shrink-0 inline-block w-5 h-5 mr-1"
+          className="flex-shrink-0 inline-block"
           title="Checking..."
         >
           <svg 
-            className="animate-spin" 
+            className={`${commonSize} animate-spin`} 
             viewBox="0 0 24 24" 
             fill="none"
             style={{ color: getStatusColor() }}
@@ -60,37 +93,74 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
       )
     }
     
-    if (reference.status === 'pending') {
-      // Clock icon for waiting in queue
+    if (status === 'pending') {
       return (
         <span 
-          className="flex-shrink-0 inline-block w-5 h-5 mr-1"
+          className="flex-shrink-0 inline-block"
           title="Waiting in queue"
         >
           <svg 
+            className={commonSize}
             viewBox="0 0 24 24" 
             fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ color: getStatusColor() }}
           >
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
+            <circle cx="12" cy="12" r="10" fill="var(--color-bg-tertiary)" stroke={getStatusColor()} strokeWidth="2" />
+            <path d="M12 7v5l3 2" stroke={getStatusColor()} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </span>
       )
     }
 
-    // Default emoji-based status
+    if (status === 'error') {
+      return (
+        <span 
+          className="flex-shrink-0 inline-block"
+          title="Error"
+        >
+          <svg 
+            className={commonSize}
+            viewBox="0 0 24 24" 
+            fill="none"
+          >
+            <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
+            <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+          </svg>
+        </span>
+      )
+    }
+
+    if (status === 'verified') {
+      return (
+        <span className="flex-shrink-0 inline-block" title="Verified">
+          <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
+            <path d="M8.5 12.5l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      )
+    }
+
+    if (status === 'warning') {
+      return (
+        <span className="flex-shrink-0 inline-block" title="Warning">
+          <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-warning)" />
+            <path d="M12 7.5v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+          </svg>
+        </span>
+      )
+    }
+
+    // unverified/default
     return (
-      <span 
-        className="flex-shrink-0 text-lg"
-        style={{ color: getStatusColor() }}
-        title={reference.status}
-      >
-        {getStatusEmoji()}
+      <span className="flex-shrink-0 inline-block" title="Unverified">
+        <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
+          <path d="M10.75 9.5c.1-1.1.95-2 2.2-2 1.21 0 2.2.89 2.2 1.99 0 .86-.56 1.6-1.4 1.83-.55.15-.95.63-.95 1.2v.23" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+          <circle cx="12" cy="16" r="1" fill="#fff" />
+        </svg>
       </span>
     )
   }
@@ -122,27 +192,35 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
       className="py-4 border-b font-mono text-sm"
       style={{ borderColor: 'var(--color-border)' }}
     >
-      {/* Reference header: [1/14] Title */}
-      <div className="flex items-start gap-2">
+      {/* Reference with status column on left */}
+      <div className="flex items-start gap-3 pl-4">
+        {/* Status indicator column - fixed width */}
+        <div className="flex-shrink-0 w-8 flex justify-center pt-0.5">
+          {renderStatusIndicator()}
+        </div>
+        
+        {/* Reference number */}
         <span 
-          className="flex-shrink-0 font-bold"
+          className="flex-shrink-0 w-8 text-right"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          [{index + 1}/{totalRefs}]
+          {(numberToShow ?? 0) + 1}.
         </span>
+        
+        {/* Reference content */}
         <div className="flex-1 min-w-0">
           {/* Title */}
-          <div className="flex items-start justify-between gap-2">
-            <span style={{ color: 'var(--color-text-primary)' }}>
-              {reference.title || 'Unknown Title'}
-            </span>
-            {renderStatusIndicator()}
+          <div 
+            className="font-bold"
+            style={{ color: 'var(--color-text-primary)' }}
+          >
+            {reference.title || 'Unknown Title'}
           </div>
           
           {/* Authors */}
           {reference.authors?.length > 0 && (
             <div 
-              className="mt-1 pl-6"
+              className="mt-1"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {formatAuthors(reference.authors)}
@@ -152,7 +230,6 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {/* Venue */}
           {reference.venue && (
             <div 
-              className="pl-6"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {reference.venue}
@@ -162,7 +239,6 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {/* Year */}
           {reference.year && (
             <div 
-              className="pl-6"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {reference.year}
@@ -171,7 +247,7 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           
           {/* Cited URL */}
           {reference.cited_url && (
-            <div className="pl-6">
+            <div>
               <a
                 href={reference.cited_url}
                 target="_blank"
@@ -194,7 +270,7 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
 
           {/* Authoritative URLs */}
           {reference.authoritative_urls?.map((urlObj, i) => (
-            <div key={i} className="pl-6">
+            <div key={i}>
               <span style={{ color: 'var(--color-text-secondary)' }}>
                 {formatUrlType(urlObj.type)}:{' '}
               </span>
@@ -213,15 +289,15 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {/* Unverified message */}
           {reference.status === 'unverified' && (
             <div 
-              className="pl-6 flex items-start gap-2"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="flex items-start gap-2"
+              style={{ color: 'var(--color-text-muted)', wordBreak: 'break-word' }}
             >
               <span>❓</span>
               <div>
                 <div>Could not verify: {reference.title || 'Unknown'}</div>
                 {reference.errors?.find(e => e.error_type === 'unverified') && (
-                  <div className="pl-3">
-                    Subreason: {reference.errors.find(e => e.error_type === 'unverified')?.error_details || 'Paper not found by any checker'}
+                  <div>
+                    Subreason: {renderTextWithLinks(reference.errors.find(e => e.error_type === 'unverified')?.error_details || 'Paper not found by any checker')}
                   </div>
                 )}
               </div>
@@ -232,19 +308,29 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {reference.warnings?.map((warning, i) => (
             <div 
               key={`warning-${i}`}
-              className="pl-6 flex items-start gap-2"
-              style={{ color: 'var(--color-warning)' }}
+              className="flex items-start gap-2"
+              style={{ color: 'var(--color-warning)', wordBreak: 'break-word' }}
             >
               <span>⚠️</span>
               <div>
                 <div>Warning: {formatWarningType(warning.error_type)} mismatch:</div>
+                {warning.error_details && (
+                  <div 
+                    style={{ 
+                      color: 'var(--color-warning)', 
+                      whiteSpace: 'pre-line' 
+                    }}
+                  >
+                    {renderTextWithLinks(warning.error_details)}
+                  </div>
+                )}
                 {warning.cited_value && (
-                  <div className="pl-8" style={{ color: 'var(--color-text-secondary)' }}>
+                  <div style={{ color: 'var(--color-text-secondary)' }}>
                     cited: '{warning.cited_value}'
                   </div>
                 )}
                 {warning.actual_value && (
-                  <div className="pl-8" style={{ color: 'var(--color-text-secondary)' }}>
+                  <div style={{ color: 'var(--color-text-secondary)' }}>
                     actual: '{warning.actual_value}'
                   </div>
                 )}
@@ -256,19 +342,43 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {reference.errors?.filter(e => e.error_type !== 'unverified').map((error, i) => (
             <div 
               key={`error-${i}`}
-              className="pl-6 flex items-start gap-2"
-              style={{ color: 'var(--color-error)' }}
+              className="flex items-start gap-2"
+              style={{ color: 'var(--color-error)', wordBreak: 'break-word' }}
             >
-              <span>❌</span>
+              <span className="pt-0.5 inline-block">
+                <svg 
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24" 
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M9.172 4.172a4 4 0 015.656 0l2.828 2.828a4 4 0 010 5.656l-2.828 2.828a4 4 0 01-5.656 0L6.343 12.656a4 4 0 010-5.656l2.829-2.828z" />
+                  <path d="M12 8v5" />
+                  <path d="M12 16h.01" />
+                </svg>
+              </span>
               <div>
-                <div>Error: {error.error_details || error.error_type}</div>
+                <div 
+                  style={{ whiteSpace: 'pre-line' }}
+                >
+                  Error: {renderTextWithLinks(error.error_details || error.error_type)}
+                </div>
                 {error.cited_value && (
-                  <div className="pl-8" style={{ color: 'var(--color-text-secondary)' }}>
+                  <div 
+                    className="pl-8" 
+                    style={{ color: 'var(--color-text-secondary)', whiteSpace: 'pre-line' }}
+                  >
                     cited: '{error.cited_value}'
                   </div>
                 )}
                 {error.actual_value && (
-                  <div className="pl-8" style={{ color: 'var(--color-text-secondary)' }}>
+                  <div 
+                    className="pl-8" 
+                    style={{ color: 'var(--color-text-secondary)', whiteSpace: 'pre-line' }}
+                  >
                     actual: '{error.actual_value}'
                   </div>
                 )}
@@ -280,11 +390,11 @@ export default function ReferenceCard({ reference, index, totalRefs }) {
           {reference.info_messages?.map((info, i) => (
             <div 
               key={`info-${i}`}
-              className="pl-6 flex items-start gap-2"
-              style={{ color: 'var(--color-accent)' }}
+              className="flex items-start gap-2"
+              style={{ color: 'var(--color-accent)', wordBreak: 'break-word' }}
             >
               <span>ℹ️</span>
-              <span>{info}</span>
+              <span>{renderTextWithLinks(info)}</span>
             </div>
           ))}
         </div>

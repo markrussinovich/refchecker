@@ -16,9 +16,36 @@ from refchecker.utils.text_utils import extract_arxiv_id_from_url
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+from refchecker.core.refchecker import ArxivReferenceChecker
 import arxiv
 
 logger = logging.getLogger(__name__)
+
+
+def _process_llm_references_cli_style(references: List[Any]) -> List[Dict[str, Any]]:
+    """Use the CLI's post-processing logic to structure LLM references.
+
+    We intentionally reuse the exact methods from the CLI's ArxivReferenceChecker
+    (without running its heavy __init__) to avoid diverging behavior between
+    CLI and Web extraction.
+    """
+    cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    return cli_checker._process_llm_extracted_references(references)
+
+
+def _make_cli_checker(llm_provider):
+    """Create a lightweight ArxivReferenceChecker instance for parsing only.
+
+    We bypass __init__ to avoid heavy setup and set just the fields needed for
+    bibliography finding and reference parsing so that logic/order matches CLI.
+    """
+    cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    cli_checker.llm_extractor = ReferenceExtractor(llm_provider) if llm_provider else None
+    cli_checker.llm_enabled = bool(llm_provider)
+    cli_checker.used_regex_extraction = False
+    cli_checker.used_unreliable_extraction = False
+    cli_checker.fatal_error = False
+    return cli_checker
 
 # Max concurrent reference checks (similar to CLI default)
 MAX_CONCURRENT_CHECKS = 6
@@ -35,7 +62,9 @@ class ProgressRefChecker:
                  api_key: Optional[str] = None,
                  use_llm: bool = True,
                  progress_callback: Optional[Callable] = None,
-                 cancel_event: Optional[asyncio.Event] = None):
+                 cancel_event: Optional[asyncio.Event] = None,
+                 check_id: Optional[int] = None,
+                 title_update_callback: Optional[Callable] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -45,6 +74,8 @@ class ProgressRefChecker:
             api_key: API key for the LLM provider
             use_llm: Whether to use LLM for reference extraction
             progress_callback: Async callback for progress updates
+            check_id: Database ID for this check (for updating title)
+            title_update_callback: Async callback to update title in DB
         """
         self.llm_provider = llm_provider
         self.llm_model = llm_model
@@ -52,6 +83,8 @@ class ProgressRefChecker:
         self.use_llm = use_llm
         self.progress_callback = progress_callback
         self.cancel_event = cancel_event
+        self.check_id = check_id
+        self.title_update_callback = title_update_callback
 
         # Initialize LLM if requested
         self.llm = None
@@ -76,6 +109,142 @@ class ProgressRefChecker:
             semantic_scholar_api_key=os.getenv('SEMANTIC_SCHOLAR_API_KEY'),
             debug_mode=False
         )
+
+    def _format_verification_result(
+        self,
+        reference: Dict[str, Any],
+        index: int,
+        verified_data: Optional[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        url: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Format verification result into a standardized response.
+        
+        Shared by both async and sync verification methods.
+        """
+        # Normalize errors to align with CLI behavior
+        sanitized = []
+        for err in errors:
+            e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
+            details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
+            if not e_type and not details:
+                continue
+            sanitized.append({
+                "error_type": e_type or err.get('error_type') or 'info',
+                "error_details": details or '',
+                "cited_value": err.get('cited_value'),
+                "actual_value": err.get('actual_value'),
+            })
+
+        # Determine status - author mismatches are warnings, not errors (matching CLI behavior)
+        warning_types = ['year', 'venue', 'author']
+        has_errors = any(e.get('error_type') not in ['unverified', 'info'] + warning_types for e in sanitized)
+        has_warnings = any(e.get('error_type') in warning_types for e in sanitized)
+        is_unverified = any(e.get('error_type') == 'unverified' for e in sanitized)
+
+        if has_errors:
+            status = 'error'
+        elif has_warnings:
+            status = 'warning'
+        elif is_unverified:
+            status = 'unverified'
+        else:
+            status = 'verified'
+
+        # Extract authoritative URLs with proper type detection
+        authoritative_urls = []
+        if url:
+            url_type = "other"
+            if "semanticscholar.org" in url:
+                url_type = "semantic_scholar"
+            elif "openalex.org" in url:
+                url_type = "openalex"
+            elif "crossref.org" in url or "doi.org" in url:
+                url_type = "doi"
+            elif "openreview.net" in url:
+                url_type = "openreview"
+            elif "arxiv.org" in url:
+                url_type = "arxiv"
+            authoritative_urls.append({"type": url_type, "url": url})
+
+        # Extract external IDs from verified data (Semantic Scholar format)
+        if verified_data:
+            external_ids = verified_data.get('externalIds', {})
+
+            # Add ArXiv URL if available
+            arxiv_id = external_ids.get('ArXiv') or verified_data.get('arxiv_id')
+            if arxiv_id:
+                arxiv_url = f"https://arxiv.org/abs/{arxiv_id}"
+                if not any(u.get('url') == arxiv_url for u in authoritative_urls):
+                    authoritative_urls.append({"type": "arxiv", "url": arxiv_url})
+
+            # Add DOI URL if available
+            doi = external_ids.get('DOI') or verified_data.get('doi')
+            if doi:
+                doi_url = f"https://doi.org/{doi}"
+                if not any(u.get('url') == doi_url for u in authoritative_urls):
+                    authoritative_urls.append({"type": "doi", "url": doi_url})
+
+        # Format errors, warnings, and info messages
+        formatted_errors = []
+        formatted_warnings = []
+        formatted_info = []
+        for err in sanitized:
+            err_obj = {
+                "error_type": err.get('error_type', 'unknown'),
+                "error_details": err.get('error_details', ''),
+                "cited_value": err.get('cited_value'),
+                "actual_value": err.get('actual_value')
+            }
+            if err.get('error_type') in ['year', 'venue', 'author']:
+                formatted_warnings.append(err_obj)
+            elif err.get('error_type') == 'unverified':
+                formatted_errors.append({**err_obj, "error_type": 'unverified'})
+            elif err.get('error_type') == 'info' or 'info_type' in err:
+                formatted_info.append(err.get('error_details') or err.get('info_details', ''))
+            else:
+                formatted_errors.append(err_obj)
+
+        return {
+            "index": index,
+            "title": reference.get('title', 'Unknown Title'),
+            "authors": reference.get('authors', []),
+            "year": reference.get('year'),
+            "venue": reference.get('venue'),
+            "cited_url": reference.get('url'),
+            "status": status,
+            "errors": formatted_errors,
+            "warnings": formatted_warnings,
+            "info_messages": formatted_info,
+            "authoritative_urls": authoritative_urls,
+            "corrected_reference": None
+        }
+
+    def _format_error_result(
+        self,
+        reference: Dict[str, Any],
+        index: int,
+        error: Exception
+    ) -> Dict[str, Any]:
+        """Format an error result when verification fails."""
+        return {
+            "index": index,
+            "title": reference.get('title', 'Unknown'),
+            "authors": reference.get('authors', []),
+            "year": reference.get('year'),
+            "venue": reference.get('venue'),
+            "cited_url": reference.get('url'),
+            "status": "error",
+            "errors": [{
+                "error_type": "check_failed",
+                "error_details": str(error)
+            }],
+            "warnings": [],
+            "info_messages": [],
+            "authoritative_urls": [],
+            "corrected_reference": None
+        }
 
     async def emit_progress(self, event_type: str, data: Dict[str, Any]):
         """Emit progress event to callback"""
@@ -107,6 +276,16 @@ class ProgressRefChecker:
 
             paper_title = "Unknown Paper"
             paper_text = ""
+            title_updated = False
+
+            async def update_title_if_needed(title: str):
+                nonlocal title_updated
+                if not title_updated and title and title != "Unknown Paper":
+                    title_updated = True
+                    if self.title_update_callback and self.check_id:
+                        await self.title_update_callback(self.check_id, title)
+                    # Also emit via WebSocket so frontend can update
+                    await self.emit_progress("title_updated", {"paper_title": title})
 
             await self._check_cancelled()
             if source_type == "url":
@@ -119,33 +298,41 @@ class ProgressRefChecker:
                     "message": f"Fetching ArXiv paper {arxiv_id}..."
                 })
 
-                # Download from ArXiv
-                search = arxiv.Search(id_list=[arxiv_id])
-                paper = next(search.results())
+                # Download from ArXiv - run in thread to avoid blocking event loop
+                def fetch_arxiv():
+                    search = arxiv.Search(id_list=[arxiv_id])
+                    return next(search.results())
+                
+                paper = await asyncio.to_thread(fetch_arxiv)
                 paper_title = paper.title
+                await update_title_if_needed(paper_title)
 
-                # Download PDF
+                # Download PDF - run in thread
                 pdf_path = f"/tmp/arxiv_{arxiv_id}.pdf"
-                paper.download_pdf(filename=pdf_path)
+                await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
 
-                # Extract text from PDF
+                # Extract text from PDF - run in thread
                 pdf_processor = PDFProcessor()
-                paper_text = pdf_processor.extract_text_from_pdf(pdf_path)
+                paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
 
             elif source_type == "file":
                 await self.emit_progress("extracting", {
                     "message": "Extracting text from file..."
                 })
 
-                # Handle uploaded file
+                # Handle uploaded file - run PDF processing in thread
                 if paper_source.lower().endswith('.pdf'):
                     pdf_processor = PDFProcessor()
-                    paper_text = pdf_processor.extract_text_from_pdf(paper_source)
+                    paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                     paper_title = Path(paper_source).stem
+                    await update_title_if_needed(paper_title)
                 elif paper_source.lower().endswith(('.tex', '.txt')):
-                    with open(paper_source, 'r', encoding='utf-8') as f:
-                        paper_text = f.read()
+                    def read_file():
+                        with open(paper_source, 'r', encoding='utf-8') as f:
+                            return f.read()
+                    paper_text = await asyncio.to_thread(read_file)
                     paper_title = Path(paper_source).stem
+                    await update_title_if_needed(paper_title)
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
             elif source_type == "text":
@@ -154,6 +341,7 @@ class ProgressRefChecker:
                 })
                 paper_text = paper_source
                 paper_title = "Pasted Text"
+                # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
 
@@ -387,48 +575,27 @@ class ProgressRefChecker:
             }
 
     async def _extract_references(self, paper_text: str) -> List[Dict[str, Any]]:
-        """Extract references from paper text"""
+        """Extract references using the same pipeline/order as the CLI."""
         try:
-            # First, extract just the bibliography section from the full paper text
-            from refchecker.utils.bibliography_utils import find_bibliography_section, parse_references
-            
-            bib_section = find_bibliography_section(paper_text)
+            cli_checker = _make_cli_checker(self.llm)
+
+            # Step 1: find bibliography section (CLI logic) - run in thread
+            bib_section = await asyncio.to_thread(cli_checker.find_bibliography_section, paper_text)
             if not bib_section:
                 logger.warning("Could not find bibliography section in paper")
-                # Fall back to trying the full text (might work for short texts or pasted bibliographies)
-                bib_section = paper_text
-            else:
-                logger.info(f"Found bibliography section ({len(bib_section)} chars)")
-            
-            if self.llm:
-                # Use LLM for extraction on the bibliography section only
-                extractor = ReferenceExtractor(self.llm)
-                refs = extractor.extract_references(bib_section)
-                if refs:
-                    # LLM returns strings in Author#Title#Venue#Year#URL format
-                    # Convert to dicts
-                    parsed_refs = []
-                    for ref in refs:
-                        if isinstance(ref, dict):
-                            parsed_refs.append(ref)
-                        else:
-                            parsed = self._parse_llm_reference(ref)
-                            if parsed:
-                                parsed_refs.append(parsed)
-                    
-                    if parsed_refs:
-                        logger.info(f"LLM extraction found {len(parsed_refs)} references")
-                        return parsed_refs
-                # LLM returned nothing, try fallback
-                logger.warning("LLM returned no references, trying regex fallback")
-            
-            # Fall back to regex-based extraction
-            if bib_section:
-                refs = parse_references(bib_section)
-                if refs:
-                    logger.info(f"Regex extraction found {len(refs)} references")
-                    return refs
-            
+                return []
+
+            logger.info(f"Found bibliography section ({len(bib_section)} chars)")
+
+            # Step 2: parse references (CLI logic, including LLM and post-processing) - run in thread
+            refs = await asyncio.to_thread(cli_checker.parse_references, bib_section)
+            if cli_checker.fatal_error:
+                logger.error("Reference parsing failed (CLI fatal_error)")
+                return []
+            if refs:
+                logger.info(f"Extracted {len(refs)} references via CLI parser")
+                return refs
+
             logger.warning("No references could be extracted")
             return []
         except Exception as e:
@@ -460,188 +627,22 @@ class ProgressRefChecker:
                 errors = [{"error_type": "timeout", "error_details": "Verification timed out after 60 seconds"}]
                 url = None
 
-            # Determine status
-            has_errors = any(e.get('error_type') not in ['unverified'] for e in errors)
-            has_warnings = any(e.get('error_type') in ['year', 'venue'] for e in errors)
-            is_unverified = any(e.get('error_type') == 'unverified' for e in errors)
-
-            if has_errors:
-                status = 'error'
-            elif has_warnings:
-                status = 'warning'
-            elif is_unverified:
-                status = 'unverified'
-            else:
-                status = 'verified'
-
-            # Extract authoritative URLs with proper type detection
-            authoritative_urls = []
-            if url:
-                # Detect URL type from URL pattern
-                url_type = "other"
-                if "semanticscholar.org" in url:
-                    url_type = "semantic_scholar"
-                elif "openalex.org" in url:
-                    url_type = "openalex"
-                elif "crossref.org" in url or "doi.org" in url:
-                    url_type = "doi"
-                elif "openreview.net" in url:
-                    url_type = "openreview"
-                elif "arxiv.org" in url:
-                    url_type = "arxiv"
-                authoritative_urls.append({"type": url_type, "url": url})
-            if verified_data and verified_data.get('arxiv_id'):
-                authoritative_urls.append({
-                    "type": "arxiv",
-                    "url": f"https://arxiv.org/abs/{verified_data['arxiv_id']}"
-                })
-            if verified_data and verified_data.get('doi'):
-                authoritative_urls.append({
-                    "type": "doi",
-                    "url": f"https://doi.org/{verified_data['doi']}"
-                })
-
-            # Format errors and warnings
-            formatted_errors = []
-            formatted_warnings = []
-            for err in errors:
-                err_obj = {
-                    "error_type": err.get('error_type', 'unknown'),
-                    "error_details": err.get('error_details', ''),
-                    "cited_value": err.get('cited_value'),
-                    "actual_value": err.get('actual_value')
-                }
-                if err.get('error_type') in ['year', 'venue']:
-                    formatted_warnings.append(err_obj)
-                else:
-                    formatted_errors.append(err_obj)
-
-            return {
-                "index": index,
-                "title": reference.get('title', 'Unknown Title'),
-                "authors": reference.get('authors', []),
-                "year": reference.get('year'),
-                "venue": reference.get('venue'),
-                "cited_url": reference.get('url'),
-                "status": status,
-                "errors": formatted_errors,
-                "warnings": formatted_warnings,
-                "authoritative_urls": authoritative_urls,
-                "corrected_reference": None  # TODO: Generate corrected reference
-            }
+            return self._format_verification_result(reference, index, verified_data, errors, url)
 
         except Exception as e:
             logger.error(f"Error checking reference {index}: {e}")
-            return {
-                "index": index,
-                "title": reference.get('title', 'Unknown'),
-                "authors": reference.get('authors', []),
-                "year": reference.get('year'),
-                "venue": reference.get('venue'),
-                "cited_url": reference.get('url'),
-                "status": "error",
-                "errors": [{
-                    "error_type": "check_failed",
-                    "error_details": str(e)
-                }],
-                "warnings": [],
-                "authoritative_urls": [],
-                "corrected_reference": None
-            }
+            return self._format_error_result(reference, index, e)
 
     def _check_reference_sync(self, reference: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Synchronous version of reference checking for thread pool"""
         try:
             # Run verification with timeout (handled by caller)
             verified_data, errors, url = self.checker.verify_reference(reference)
-
-            # Determine status
-            has_errors = any(e.get('error_type') not in ['unverified'] for e in errors)
-            has_warnings = any(e.get('error_type') in ['year', 'venue'] for e in errors)
-            is_unverified = any(e.get('error_type') == 'unverified' for e in errors)
-
-            if has_errors:
-                status = 'error'
-            elif has_warnings:
-                status = 'warning'
-            elif is_unverified:
-                status = 'unverified'
-            else:
-                status = 'verified'
-
-            # Extract authoritative URLs with proper type detection
-            authoritative_urls = []
-            if url:
-                url_type = "other"
-                if "semanticscholar.org" in url:
-                    url_type = "semantic_scholar"
-                elif "openalex.org" in url:
-                    url_type = "openalex"
-                elif "crossref.org" in url or "doi.org" in url:
-                    url_type = "doi"
-                elif "openreview.net" in url:
-                    url_type = "openreview"
-                elif "arxiv.org" in url:
-                    url_type = "arxiv"
-                authoritative_urls.append({"type": url_type, "url": url})
-            if verified_data and verified_data.get('arxiv_id'):
-                authoritative_urls.append({
-                    "type": "arxiv",
-                    "url": f"https://arxiv.org/abs/{verified_data['arxiv_id']}"
-                })
-            if verified_data and verified_data.get('doi'):
-                authoritative_urls.append({
-                    "type": "doi",
-                    "url": f"https://doi.org/{verified_data['doi']}"
-                })
-
-            # Format errors and warnings
-            formatted_errors = []
-            formatted_warnings = []
-            for err in errors:
-                err_obj = {
-                    "error_type": err.get('error_type', 'unknown'),
-                    "error_details": err.get('error_details', ''),
-                    "cited_value": err.get('cited_value'),
-                    "actual_value": err.get('actual_value')
-                }
-                if err.get('error_type') in ['year', 'venue']:
-                    formatted_warnings.append(err_obj)
-                else:
-                    formatted_errors.append(err_obj)
-
-            return {
-                "index": index,
-                "title": reference.get('title', 'Unknown Title'),
-                "authors": reference.get('authors', []),
-                "year": reference.get('year'),
-                "venue": reference.get('venue'),
-                "cited_url": reference.get('url'),
-                "status": status,
-                "errors": formatted_errors,
-                "warnings": formatted_warnings,
-                "authoritative_urls": authoritative_urls,
-                "corrected_reference": None
-            }
+            return self._format_verification_result(reference, index, verified_data, errors, url)
 
         except Exception as e:
             logger.error(f"Error checking reference {index}: {e}")
-            return {
-                "index": index,
-                "title": reference.get('title', 'Unknown'),
-                "authors": reference.get('authors', []),
-                "year": reference.get('year'),
-                "venue": reference.get('venue'),
-                "cited_url": reference.get('url'),
-                "status": "error",
-                "errors": [{
-                    "error_type": "check_failed",
-                    "error_details": str(e)
-                }],
-                "warnings": [],
-                "authoritative_urls": [],
-                "corrected_reference": None
-            }
+            return self._format_error_result(reference, index, e)
 
     async def _check_references_parallel(
         self,

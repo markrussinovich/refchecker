@@ -4,6 +4,7 @@ import SemanticScholarConfig from './SemanticScholarConfig'
 import HistoryList from './HistoryList'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useCheckStore } from '../../stores/useCheckStore'
 import { logger } from '../../utils/logger'
 
 const MIN_WIDTH = 220
@@ -16,7 +17,8 @@ const STORAGE_KEY = 'refchecker-sidebar-width'
  */
 export default function Sidebar() {
   const { fetchConfigs } = useConfigStore()
-  const { fetchHistory } = useHistoryStore()
+  const { initializeWithPlaceholder, ensureNewRefcheckItem, selectCheck } = useHistoryStore()
+  const { reset } = useCheckStore()
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parseInt(saved, 10))) : DEFAULT_WIDTH
@@ -27,8 +29,9 @@ export default function Sidebar() {
   useEffect(() => {
     logger.info('Sidebar', 'Initializing sidebar data')
     fetchConfigs()
-    fetchHistory()
-  }, [fetchConfigs, fetchHistory])
+    // Use initializeWithPlaceholder for startup - adds placeholder and selects it
+    initializeWithPlaceholder()
+  }, [fetchConfigs, initializeWithPlaceholder])
 
   // Save width to localStorage when it changes
   useEffect(() => {
@@ -80,6 +83,40 @@ export default function Sidebar() {
         backgroundColor: 'var(--color-bg-secondary)',
       }}
     >
+      {/* New version badge */}
+      <div 
+        className="px-4 py-2 border-b flex items-center justify-between"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
+      >
+        <span 
+          className="text-xs font-semibold uppercase tracking-wide"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          New refcheck
+        </span>
+        <button
+          onClick={() => {
+            ensureNewRefcheckItem()
+            reset()
+            selectCheck(-1)
+          }}
+          className="text-[11px] px-3 py-1 rounded-full font-medium transition-colors flex items-center gap-1 cursor-pointer hover:opacity-80"
+          style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff' }}
+          title="Create new refcheck"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-3.5 h-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+      </div>
+
       {/* LLM Configuration Section */}
       <div 
         className="p-4 border-b"

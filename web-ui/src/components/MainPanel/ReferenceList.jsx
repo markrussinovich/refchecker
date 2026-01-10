@@ -1,9 +1,73 @@
+import { useMemo } from 'react'
 import ReferenceCard from '../ReferenceCard/ReferenceCard'
+import { useCheckStore } from '../../stores/useCheckStore'
+
+/**
+ * Derive status from reference data, trusting backend final statuses
+ */
+const computeDerivedStatus = (ref) => {
+  const baseStatus = (ref.status || '').trim().toLowerCase()
+  
+  // Trust backend's final status values
+  if (['error', 'warning', 'unverified', 'verified'].includes(baseStatus)) {
+    return baseStatus
+  }
+  
+  // For in-progress states, derive from errors/warnings arrays
+  const hasErrors = Array.isArray(ref.errors) && ref.errors.some(
+    e => (e?.error_type || '').toLowerCase() !== 'unverified'
+  )
+  const hasWarnings = !hasErrors && Array.isArray(ref.warnings) && ref.warnings.length > 0
+
+  if (hasErrors) return 'error'
+  if (hasWarnings) return 'warning'
+  if (['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) return 'checking'
+  // No status and no issues = verified
+  return 'verified'
+}
 
 /**
  * List of references being checked
  */
 export default function ReferenceList({ references, isLoading }) {
+  const { statusFilter } = useCheckStore()
+
+  // Memoize all derived data to ensure consistency within a render
+  const { sortedReferences, filteredReferences, normalizedFilters } = useMemo(() => {
+    const filters = statusFilter.map(f => f.toLowerCase())
+    
+    const sorted = (references || []).slice().sort((a, b) => {
+      const aIndex = typeof a?.index === 'number' ? a.index : Number.MAX_SAFE_INTEGER
+      const bIndex = typeof b?.index === 'number' ? b.index : Number.MAX_SAFE_INTEGER
+      return aIndex - bIndex
+    })
+
+    const normalized = sorted.map(ref => ({
+      ...ref,
+      status: computeDerivedStatus(ref),
+      errors: Array.isArray(ref.errors) ? ref.errors : [],
+      warnings: Array.isArray(ref.warnings) ? ref.warnings : [],
+    }))
+
+    const filtered = normalized.filter(ref => {
+      const status = (ref.status || '').toLowerCase()
+      // If no filter, show all references
+      if (filters.length === 0) {
+        return true
+      }
+      
+      // When filtering, exclude pending/checking references
+      if (status === 'pending' || status === 'checking') {
+        return false
+      }
+      
+      // Match filter to status (any of the selected filters)
+      return filters.includes(status)
+    })
+
+    return { sortedReferences: sorted, filteredReferences: filtered, normalizedFilters: filters }
+  }, [references, statusFilter])
+
   if (isLoading) {
     return (
       <div 
@@ -69,25 +133,37 @@ export default function ReferenceList({ references, isLoading }) {
       }}
     >
       <div 
-        className="px-4 py-3 border-b"
+        className="px-4 py-3 border-b flex items-center justify-between"
         style={{ borderColor: 'var(--color-border)' }}
       >
         <h3 
           className="font-semibold"
           style={{ color: 'var(--color-text-primary)' }}
         >
-          References ({references.length})
+          References ({sortedReferences.length})
         </h3>
+        {statusFilter.length > 0 && (
+          <span 
+            className="text-sm px-2 py-1 rounded"
+            style={{ 
+              backgroundColor: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-secondary)' 
+            }}
+          >
+            Showing {filteredReferences.length} ({statusFilter.join(', ')})
+          </span>
+        )}
       </div>
 
       <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-        {references.map((ref, index) => (
-          <ReferenceCard 
-            key={ref.index ?? index} 
-            reference={ref} 
-            index={ref.index ?? index}
-            totalRefs={references.length}
-          />
+        {filteredReferences.map((ref, displayIndex) => (
+            <ReferenceCard 
+              key={`ref-${ref.index ?? displayIndex}-${displayIndex}`} 
+              reference={ref} 
+              index={ref.index ?? displayIndex}
+              displayIndex={displayIndex}
+              totalRefs={sortedReferences.length}
+            />
         ))}
       </div>
     </div>

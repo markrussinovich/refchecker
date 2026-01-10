@@ -8,7 +8,9 @@ export const useCheckStore = create((set, get) => ({
   // State
   status: 'idle', // idle, checking, completed, cancelled, error
   sessionId: null,
+  currentCheckId: null, // ID of the check in history (created immediately)
   paperTitle: null,
+  paperSource: null, // URL or filename being checked
   statusMessage: '',
   progress: 0,
   references: [],
@@ -23,14 +25,17 @@ export const useCheckStore = create((set, get) => ({
   },
   error: null,
   completedCheckId: null,
+  statusFilter: [], // empty = show all, or array of ['verified', 'error', 'warning', 'unverified']
 
   // Actions
-  startCheck: (sessionId) => {
-    logger.info('CheckStore', `Starting check with session ${sessionId}`)
+  startCheck: (sessionId, checkId = null, paperSource = null) => {
+    logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}`)
     set({
       status: 'checking',
       sessionId,
+      currentCheckId: checkId,
       paperTitle: null,
+      paperSource,
       statusMessage: 'Starting check...',
       progress: 0,
       references: [],
@@ -45,7 +50,26 @@ export const useCheckStore = create((set, get) => ({
       },
       error: null,
       completedCheckId: null,
+      statusFilter: [],
     })
+  },
+
+  setCurrentCheckId: (checkId) => {
+    set({ currentCheckId: checkId })
+  },
+
+  setStatusFilter: (filter) => {
+    const currentFilters = get().statusFilter
+    // Toggle: add if not present, remove if present
+    if (currentFilters.includes(filter)) {
+      set({ statusFilter: currentFilters.filter(f => f !== filter) })
+    } else {
+      set({ statusFilter: [...currentFilters, filter] })
+    }
+  },
+
+  clearStatusFilter: () => {
+    set({ statusFilter: [] })
   },
 
   setStatusMessage: (message) => {
@@ -78,9 +102,10 @@ export const useCheckStore = create((set, get) => ({
 
   updateReference: (index, data) => {
     logger.debug('CheckStore', `Reference ${index} updated`, data)
+    const normalizedStatus = data?.status ? data.status.toLowerCase() : null
     set(state => ({
       references: state.references.map((ref, i) => 
-        i === index ? { ...ref, ...data } : ref
+        i === index ? { ...ref, ...data, ...(normalizedStatus ? { status: normalizedStatus } : {}) } : ref
       )
     }))
   },
@@ -121,7 +146,9 @@ export const useCheckStore = create((set, get) => ({
     set({
       status: 'idle',
       sessionId: null,
+      currentCheckId: null,
       paperTitle: null,
+      paperSource: null,
       statusMessage: '',
       progress: 0,
       references: [],
@@ -136,6 +163,7 @@ export const useCheckStore = create((set, get) => ({
       },
       error: null,
       completedCheckId: null,
+      statusFilter: [],
     })
   },
 
@@ -157,6 +185,12 @@ export const useCheckStore = create((set, get) => ({
           store.setPaperTitle(data.paper_title)
         }
         break
+
+      case 'title_updated':
+        if (data.paper_title) {
+          store.setPaperTitle(data.paper_title)
+        }
+        break
         
       case 'references_extracted':
         store.setStatusMessage(`Found ${data.total_refs || data.count || 0} references, starting verification...`)
@@ -166,9 +200,10 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'checking_reference':
-        const refTitle = data.title ? ` - "${data.title.substring(0, 40)}..."` : ''
-        store.setStatusMessage(`Checking reference ${data.index} of ${data.total || '?'}${refTitle}`)
-        store.updateReference(data.index - 1, { status: 'checking' })
+        store.setStatusMessage(`Verifying references in parallel (${data.total || '?'} total)...`)
+        if (typeof data.index === 'number') {
+          store.updateReference(data.index - 1, { status: 'checking' })
+        }
         break
         
       case 'reference_result':
@@ -180,7 +215,7 @@ export const useCheckStore = create((set, get) => ({
         
       case 'summary_update':
         store.updateStats(data)
-        store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references (${data.progress_percent}%)`)
+        store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references`)
         break
         
       case 'progress':

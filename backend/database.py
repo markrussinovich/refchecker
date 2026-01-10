@@ -36,9 +36,21 @@ class Database:
         """Decrypt a string value"""
         return self._fernet.decrypt(value.encode()).decode()
 
+    async def _get_connection(self):
+        """Get a database connection with proper settings for concurrent access"""
+        db = await aiosqlite.connect(self.db_path)
+        # Enable WAL mode for better concurrent read/write
+        await db.execute("PRAGMA journal_mode=WAL")
+        # Set busy timeout to 5 seconds
+        await db.execute("PRAGMA busy_timeout=5000")
+        return db
+
     async def init_db(self):
         """Initialize database schema"""
         async with aiosqlite.connect(self.db_path) as db:
+            # Enable WAL mode for better concurrent access
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA busy_timeout=5000")
             # Check history table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS check_history (
@@ -130,6 +142,7 @@ class Database:
     async def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent check history"""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
@@ -145,6 +158,7 @@ class Database:
     async def get_check_by_id(self, check_id: int) -> Optional[Dict[str, Any]]:
         """Get specific check result by ID"""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT * FROM check_history WHERE id = ?
@@ -161,6 +175,7 @@ class Database:
     async def delete_check(self, check_id: int) -> bool:
         """Delete a check from history"""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
             await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
             await db.commit()
             return True
@@ -168,12 +183,125 @@ class Database:
     async def update_check_label(self, check_id: int, label: str) -> bool:
         """Update the custom label for a check"""
         async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
             await db.execute(
                 "UPDATE check_history SET custom_label = ? WHERE id = ?",
                 (label, check_id)
             )
             await db.commit()
             return True
+
+    async def update_check_title(self, check_id: int, paper_title: str) -> bool:
+        """Update the paper title for a check"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute(
+                "UPDATE check_history SET paper_title = ? WHERE id = ?",
+                (paper_title, check_id)
+            )
+            await db.commit()
+            return True
+
+    async def create_pending_check(self,
+                                    paper_title: str,
+                                    paper_source: str,
+                                    source_type: str,
+                                    llm_provider: Optional[str] = None,
+                                    llm_model: Optional[str] = None) -> int:
+        """Create a pending check entry before verification starts"""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("""
+                INSERT INTO check_history
+                (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
+                 unverified_count, results_json, llm_provider, llm_model, status)
+                VALUES (?, ?, ?, 0, 0, 0, 0, '[]', ?, ?, 'in_progress')
+            """, (
+                paper_title,
+                paper_source,
+                source_type,
+                llm_provider,
+                llm_model
+            ))
+            await db.commit()
+            return cursor.lastrowid
+
+    async def update_check_results(self,
+                                    check_id: int,
+                                    paper_title: str,
+                                    total_refs: int,
+                                    errors_count: int,
+                                    warnings_count: int,
+                                    unverified_count: int,
+                                    results: List[Dict[str, Any]],
+                                    status: str = 'completed') -> bool:
+        """Update a check with its results"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                UPDATE check_history
+                SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
+                    unverified_count = ?, results_json = ?, status = ?
+                WHERE id = ?
+            """, (
+                paper_title,
+                total_refs,
+                errors_count,
+                warnings_count,
+                unverified_count,
+                json.dumps(results),
+                status,
+                check_id
+            ))
+            await db.commit()
+            return True
+
+    async def update_check_progress(self,
+                                     check_id: int,
+                                     total_refs: int,
+                                     errors_count: int,
+                                     warnings_count: int,
+                                     unverified_count: int,
+                                     results: List[Dict[str, Any]]) -> bool:
+        """Incrementally update a check's results as references are verified.
+        
+        This is called after each reference is checked to persist progress,
+        so interrupted checks retain their partial results.
+        """
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute("""
+                UPDATE check_history
+                SET total_refs = ?, errors_count = ?, warnings_count = ?,
+                    unverified_count = ?, results_json = ?
+                WHERE id = ?
+            """, (
+                total_refs,
+                errors_count,
+                warnings_count,
+                unverified_count,
+                json.dumps(results),
+                check_id
+            ))
+            await db.commit()
+            return True
+
+    async def update_check_status(self, check_id: int, status: str) -> bool:
+        """Update just the status of a check"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE check_history SET status = ? WHERE id = ?",
+                (status, check_id)
+            )
+            await db.commit()
+            return True
+
+    async def cancel_stale_in_progress(self) -> int:
+        """Mark any in-progress checks as cancelled (e.g., after a server restart)."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute(
+                "UPDATE check_history SET status = 'cancelled' WHERE status = 'in_progress'"
+            )
+            await db.commit()
+            return cursor.rowcount
 
     # LLM Configuration methods
 

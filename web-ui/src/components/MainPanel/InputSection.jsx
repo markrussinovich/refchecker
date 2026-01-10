@@ -21,18 +21,21 @@ export default function InputSection() {
   const { 
     status, 
     sessionId,
+    currentCheckId,
     startCheck, 
     reset,
     cancelCheck: storeCancelCheck,
     handleWebSocketMessage,
     setError,
+    setCurrentCheckId,
   } = useCheckStore()
   
   const { getSelectedConfig } = useConfigStore()
-  const { fetchHistory, clearSelection } = useHistoryStore()
+  const { fetchHistory, clearSelection, selectCheck, updateHistoryItemTitle } = useHistoryStore()
   
   const fileUpload = useFileUpload()
   const wsRef = useRef(null)
+  const currentCheckIdRef = useRef(null)
 
   // WebSocket handlers
   const wsHandlers = {
@@ -42,6 +45,11 @@ export default function InputSection() {
     onMessage: (data) => {
       logger.info('WebSocket', `Message received: ${data.type}`, data)
       handleWebSocketMessage(data)
+      
+      // Update history item title when paper title is received
+      if (data.type === 'title_updated' && data.paper_title && currentCheckIdRef.current) {
+        updateHistoryItemTitle(currentCheckIdRef.current, data.paper_title)
+      }
     },
     onError: (error) => {
       logger.error('WebSocket', 'Connection error', { error: error.toString() })
@@ -109,15 +117,29 @@ export default function InputSection() {
         source: inputMode === 'url' ? inputValue.trim() : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
       })
 
+      // Determine the source for display
+      const displaySource = inputMode === 'url' 
+        ? inputValue.trim() 
+        : (inputMode === 'file' ? fileUpload.file?.name : 'Pasted text')
+
       // Start the check
       logger.info('API', 'Sending POST /api/check')
       const response = await api.startCheck(formData)
-      const { session_id, message } = response.data
+      const { session_id, check_id, message } = response.data
       
-      logger.info('API', 'Check started successfully', { session_id, message })
+      logger.info('API', 'Check started successfully', { session_id, check_id, message })
 
-      // Initialize check state
-      startCheck(session_id)
+      // Store the check_id for WebSocket handler to use
+      currentCheckIdRef.current = check_id
+
+      // Initialize check state with the check_id and source
+      startCheck(session_id, check_id, displaySource)
+      
+      // Refresh history immediately to show the new in-progress entry
+      fetchHistory()
+      
+      // Select the current check in history so user can navigate away and back
+      selectCheck(check_id)
 
       // Connect WebSocket
       logger.info('WebSocket', `Connecting to session ${session_id}`)
@@ -269,15 +291,6 @@ export default function InputSection() {
             }
           >
             Check References
-          </Button>
-        )}
-
-        {isChecking && (
-          <Button 
-            variant="danger"
-            onClick={handleCancel}
-          >
-            Cancel
           </Button>
         )}
 
