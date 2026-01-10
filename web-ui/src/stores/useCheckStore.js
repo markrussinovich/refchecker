@@ -169,8 +169,14 @@ export const useCheckStore = create((set, get) => ({
 
   // Handle WebSocket messages
   handleWebSocketMessage: (message) => {
-    const { type, ...data } = message
+    const { type, session_id: messageSessionId, ...data } = message
     const store = get()
+
+    // Ignore messages from stale sessions
+    if (messageSessionId && store.sessionId && messageSessionId !== store.sessionId) {
+      logger.debug('CheckStore', `Ignoring message for stale session ${messageSessionId}`)
+      return
+    }
     
     logger.debug('CheckStore', `Processing message type: ${type}`)
     

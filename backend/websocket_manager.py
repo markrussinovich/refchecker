@@ -39,8 +39,9 @@ class ConnectionManager:
             logger.debug(f"No active connections for session: {session_id}")
             return
 
-        # Flatten structure: frontend expects {type, ...data}
-        message = {"type": message_type, **data}
+        # Flatten structure: frontend expects {type, session_id, ...data}
+        # Include session_id so the client can ignore stale messages from old sessions
+        message = {"type": message_type, "session_id": session_id, **data}
         message_json = json.dumps(message)
         
         logger.debug(f"Sending {message_type} to session {session_id}: {message_json[:200]}...")
