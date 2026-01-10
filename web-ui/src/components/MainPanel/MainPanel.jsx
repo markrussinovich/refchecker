@@ -20,10 +20,13 @@ export default function MainPanel() {
   const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
 
   // Determine what to display:
+  // - If selectedCheckId === -1, user clicked "New refcheck" -> show input form
   // - If a history item is selected that's NOT the current running check, show history
+  // - If viewing the current running check, show its live state
   // - Otherwise show the current check state
-  // Note: Check selectedCheckId first, then loading state, then selectedCheck
+  const isNewRefcheckSelected = selectedCheckId === -1
   const isViewingHistory = selectedCheckId !== null && selectedCheckId !== -1 && selectedCheckId !== currentCheckId
+  const isViewingCurrentCheck = selectedCheckId !== null && selectedCheckId === currentCheckId
   const displayData = isViewingHistory ? selectedCheck : null
   
   // Clear status filter when switching views
@@ -31,9 +34,16 @@ export default function MainPanel() {
     clearStatusFilter()
   }, [selectedCheckId, clearStatusFilter])
 
-  // Show something if we're checking OR viewing history (or loading history)
-  const showContent = checkStatus !== 'idle' || isViewingHistory
-  const showInput = !isViewingHistory && checkStatus === 'idle'
+  // Show input when:
+  // 1. "New refcheck" placeholder is selected (selectedCheckId === -1), OR
+  // 2. No check is running and not viewing history
+  const showInput = isNewRefcheckSelected || (!isViewingHistory && checkStatus === 'idle')
+  
+  // Show content (status, stats, refs) when:
+  // 1. Viewing a history item, OR
+  // 2. Viewing the current running check, OR
+  // 3. A check is running/completed and we're not on the "New refcheck" placeholder
+  const showContent = isViewingHistory || isViewingCurrentCheck || (checkStatus !== 'idle' && !isNewRefcheckSelected)
 
   const handleReturnToActiveCheck = () => {
     if (currentCheckId) {
