@@ -18,7 +18,7 @@ const STORAGE_KEY = 'refchecker-sidebar-width'
 export default function Sidebar() {
   const { fetchConfigs } = useConfigStore()
   const { initializeWithPlaceholder, ensureNewRefcheckItem, selectCheck } = useHistoryStore()
-  const { reset } = useCheckStore()
+  const { status, reset } = useCheckStore()
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parseInt(saved, 10))) : DEFAULT_WIDTH
@@ -97,7 +97,10 @@ export default function Sidebar() {
         <button
           onClick={() => {
             ensureNewRefcheckItem()
-            reset()
+            // Only reset if not currently checking - don't interrupt running checks
+            if (status !== 'checking') {
+              reset()
+            }
             selectCheck(-1)
           }}
           className="text-[11px] px-3 py-1 rounded-full font-medium transition-colors flex items-center gap-1 cursor-pointer hover:opacity-80"
