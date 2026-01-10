@@ -66,6 +66,13 @@ export default function InputSection() {
     // Clear any previous history selection
     clearSelection()
     
+    // Close any existing WebSocket connection from a previous check
+    if (wsRef.current) {
+      logger.info('WebSocket', 'Closing previous WebSocket connection before starting new check')
+      wsRef.current.close()
+      wsRef.current = null
+    }
+    
     // Validate input
     if (inputMode === 'url' && !inputValue.trim()) {
       logger.warn('InputSection', 'No URL/ArXiv ID provided')
