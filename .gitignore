@@ -114,6 +114,9 @@ semantic_scholar_db/
 *.log
 *.csv
 *.json
+refchecker_history.db
+refchecker_history.db-wal
+refchecker_history.db-shm
 
 # Temporary files
 temp/
