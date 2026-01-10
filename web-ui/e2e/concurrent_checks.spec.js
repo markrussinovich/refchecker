@@ -38,7 +38,7 @@ test.describe('Concurrent Paper Checks', () => {
 
     // Start first check
     console.log('=== Starting first check ===');
-    const newRefcheckBtn = page.locator('button').filter({ hasText: /^\+$/ }).first();
+    const newRefcheckBtn = page.getByRole('button', { name: /new refcheck/i }).first();
     if (await newRefcheckBtn.isVisible()) {
       await newRefcheckBtn.click();
       await page.waitForTimeout(300);
@@ -147,7 +147,7 @@ test.describe('Concurrent Paper Checks', () => {
   test('switching between active check and history preserves state', async ({ page }) => {
     // Start a check
     console.log('=== Starting check ===');
-    const newRefcheckBtn = page.locator('button').filter({ hasText: /^\+$/ }).first();
+    const newRefcheckBtn = page.getByRole('button', { name: /new refcheck/i }).first();
     if (await newRefcheckBtn.isVisible()) {
       await newRefcheckBtn.click();
       await page.waitForTimeout(300);
@@ -221,7 +221,7 @@ test.describe('Concurrent Paper Checks', () => {
   test('second check runs independently and completes with results', async ({ page }) => {
     // Start first check
     console.log('=== Starting first check ===');
-    const newRefcheckBtn = page.locator('button').filter({ hasText: /^\+$/ }).first();
+    const newRefcheckBtn = page.getByRole('button', { name: /new refcheck/i }).first();
     if (await newRefcheckBtn.isVisible()) {
       await newRefcheckBtn.click();
       await page.waitForTimeout(300);

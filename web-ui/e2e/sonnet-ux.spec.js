@@ -1,6 +1,9 @@
 ﻿import { test, expect } from '@playwright/test';
 
 test('sonnet 4.5 arxiv check - setup and run', async ({ page }) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  test.skip(!apiKey, 'Skip Sonnet UX test when ANTHROPIC_API_KEY is not set');
+
   // Navigate to the app
   await page.goto('http://localhost:5173', { waitUntil: 'networkidle' });
   
@@ -23,10 +26,6 @@ test('sonnet 4.5 arxiv check - setup and run', async ({ page }) => {
   await page.fill('input#model', 'claude-sonnet-4-20250514');
   
   // Get API key from environment
-  const apiKey = process.env.ANTHROPIC_API_KEY || '';
-  if (!apiKey) {
-    console.log('Warning: ANTHROPIC_API_KEY not set, test may fail');
-  }
   await page.fill('input#api_key', apiKey);
   
   // Click "Add Configuration" button (not Save - that's for editing)

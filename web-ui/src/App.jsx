@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar/Sidebar'
 import MainPanel from './components/MainPanel/MainPanel'
 import ThemeToggle from './components/common/ThemeToggle'
 import DebugPanel from './components/DebugPanel'
+import LiveWebSocketManager from './components/LiveWebSocketManager'
 import { useCheckStore } from './stores/useCheckStore'
 import { useHistoryStore } from './stores/useHistoryStore'
 import { logger } from './utils/logger'
@@ -41,6 +42,7 @@ function App() {
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        <LiveWebSocketManager />
         {/* Header */}
         <header 
           className="h-14 flex items-center justify-between px-6 border-b"

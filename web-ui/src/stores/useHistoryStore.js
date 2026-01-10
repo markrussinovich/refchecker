@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { logger } from '../utils/logger'
 import * as api from '../utils/api'
+import { useCheckStore } from './useCheckStore'
 
 /**
  * Store for check history management
@@ -23,12 +24,145 @@ export const useHistoryStore = create((set, get) => ({
     try {
       const response = await api.getHistory(limit)
       const fetched = response.data
+      let historyWorking = Array.isArray(fetched) ? [...fetched] : []
+      const checkState = useCheckStore.getState()
+      const hasActiveCheck = checkState.status === 'checking' && !!checkState.currentCheckId
+      const activeInList = hasActiveCheck && historyWorking.some(item => item.id === checkState.currentCheckId)
+
+      // If backend now shows the current check as finished, hydrate CheckStore with the latest detail
+      const currentItem = historyWorking.find(item => item.id === checkState.currentCheckId)
+      if (currentItem && hasActiveCheck && currentItem.status !== 'in_progress') {
+        logger.info('HistoryStore', 'Detected completed/non-in-progress state for current check, hydrating detail', { id: currentItem.id, status: currentItem.status })
+        try {
+          const detail = (await api.getCheckDetail(currentItem.id)).data
+
+          const verifiedCount = Math.max((detail.total_refs || 0) - (detail.errors_count || 0) - (detail.warnings_count || 0) - (detail.unverified_count || 0), 0)
+
+          useCheckStore.setState({
+            status: detail.status || 'completed',
+            statusMessage: detail.status === 'completed' ? 'Check completed' : `Status: ${detail.status || ''}`,
+            currentCheckId: detail.id,
+            paperTitle: detail.paper_title,
+            paperSource: detail.paper_source,
+            references: Array.isArray(detail.results)
+              ? detail.results.map((ref, index) => ({
+                  ...ref,
+                  index,
+                  status: ref.status || 'checked',
+                  errors: ref.errors || [],
+                  warnings: ref.warnings || [],
+                  authoritative_urls: ref.authoritative_urls || [],
+                }))
+              : [],
+            stats: {
+              total_refs: detail.total_refs || 0,
+              processed_refs: detail.total_refs || 0,
+              verified_count: verifiedCount,
+              errors_count: detail.errors_count || 0,
+              warnings_count: detail.warnings_count || 0,
+              unverified_count: detail.unverified_count || 0,
+              progress_percent: 100,
+            },
+            completedCheckId: detail.status === 'completed' ? detail.id : null,
+          })
+        } catch (hydrateErr) {
+          logger.error('HistoryStore', 'Failed to hydrate current check detail', hydrateErr)
+        }
+      }
+
+      // Opportunistically fix stale in_progress items (no active session) by reconciling detail or marking as completed
+      const staleInProgress = historyWorking
+        .filter(item => item.status === 'in_progress')
+        .slice(0, 3) // cap to avoid excessive calls
+
+      for (const item of staleInProgress) {
+        try {
+          const detail = (await api.getCheckDetail(item.id)).data
+          if (detail.status && detail.status !== item.status) {
+            logger.info('HistoryStore', 'Updating stale history item from detail', { id: item.id, status: detail.status })
+            historyWorking = historyWorking.map(h => h.id === item.id
+              ? {
+                  ...h,
+                  status: detail.status,
+                  total_refs: detail.total_refs,
+                  errors_count: detail.errors_count,
+                  warnings_count: detail.warnings_count,
+                  unverified_count: detail.unverified_count,
+                }
+              : h)
+            continue
+          }
+
+          // If detail still reports in_progress but there is no session_id, treat as completed using current counts
+          if ((!detail.session_id && !item.session_id) && detail.status === 'in_progress') {
+            logger.info('HistoryStore', 'Marking in_progress without session as completed (best-effort)', { id: item.id })
+            historyWorking = historyWorking.map(h => h.id === item.id
+              ? {
+                  ...h,
+                  status: 'completed',
+                  total_refs: detail.total_refs ?? h.total_refs,
+                  errors_count: detail.errors_count ?? h.errors_count,
+                  warnings_count: detail.warnings_count ?? h.warnings_count,
+                  unverified_count: detail.unverified_count ?? h.unverified_count,
+                }
+              : h)
+          }
+        } catch (err) {
+          logger.warn('HistoryStore', 'Failed to refresh stale in_progress item', { id: item.id, error: err?.message })
+        }
+      }
+
+
+      // If backend didn't return the active check yet, inject a client-side placeholder
+      const historyWithActive = (!activeInList && hasActiveCheck)
+        ? [{
+            id: checkState.currentCheckId,
+            paper_title: checkState.paperTitle || checkState.paperSource || 'In-progress check',
+            paper_source: checkState.paperSource || '',
+            custom_label: null,
+            timestamp: new Date().toISOString(),
+            total_refs: checkState.stats?.total_refs || 0,
+            errors_count: checkState.stats?.errors_count || 0,
+            warnings_count: checkState.stats?.warnings_count || 0,
+            unverified_count: checkState.stats?.unverified_count || 0,
+            llm_provider: null,
+            llm_model: null,
+            status: 'in_progress',
+            source_type: 'url',
+            placeholder: false,
+          }, ...historyWorking]
+        : historyWorking
+      if (!activeInList && hasActiveCheck) {
+        logger.info('HistoryStore', 'Injected active check into history', { id: checkState.currentCheckId })
+      }
       
-      logger.info('HistoryStore', `Fetched ${fetched.length} items from API`)
+      logger.info('HistoryStore', `Fetched ${historyWithActive.length} items (including injected) from API`)
       
       // Just set the fetched history - placeholder logic is handled separately
-      set({ history: fetched, isLoading: false })
-      logger.info('HistoryStore', `Set ${fetched.length} history items`)
+      set({ history: historyWithActive, isLoading: false })
+      logger.info('HistoryStore', `Set ${historyWithActive.length} history items`)
+
+      // Keep selected check detail in sync with updated history status
+      const { selectedCheckId, selectedCheck } = get()
+      const selectedFromList = historyWithActive.find(h => h.id === selectedCheckId)
+      const statusChanged = selectedFromList && selectedCheck && selectedFromList.status !== selectedCheck.status
+      const needsDetailRefresh = selectedCheckId !== null && selectedCheckId !== -1 && (statusChanged || !selectedCheck)
+
+      if (needsDetailRefresh) {
+        logger.info('HistoryStore', `Refreshing selected check ${selectedCheckId} after history fetch`)
+        try {
+          const detailResp = await api.getCheckDetail(selectedCheckId)
+          const check = detailResp.data
+
+          if (check.status === 'in_progress' && check.session_id) {
+            useCheckStore.getState().adoptSession(check)
+          }
+
+          set({ selectedCheck: check })
+        } catch (err) {
+          logger.error('HistoryStore', `Failed to refresh selected check ${selectedCheckId}`, err)
+        }
+      }
     } catch (error) {
       logger.error('HistoryStore', 'Failed to fetch history', error)
       set({ error: error.message, isLoading: false })
@@ -49,8 +183,50 @@ export const useHistoryStore = create((set, get) => ({
     try {
       const response = await api.getHistory(limit)
       const fetched = response.data
-      
-      logger.info('HistoryStore', `Fetched ${fetched.length} items, adding placeholder`)
+      let historyWorking = Array.isArray(fetched) ? [...fetched] : []
+
+      // Reconcile stale in-progress items on startup as well
+      const staleInProgress = historyWorking
+        .filter(item => item.status === 'in_progress')
+        .slice(0, 3)
+
+      for (const item of staleInProgress) {
+        try {
+          const detail = (await api.getCheckDetail(item.id)).data
+          if (detail.status && detail.status !== item.status) {
+            logger.info('HistoryStore', 'Startup reconcile: updating stale item from detail', { id: item.id, status: detail.status })
+            historyWorking = historyWorking.map(h => h.id === item.id
+              ? {
+                  ...h,
+                  status: detail.status,
+                  total_refs: detail.total_refs,
+                  errors_count: detail.errors_count,
+                  warnings_count: detail.warnings_count,
+                  unverified_count: detail.unverified_count,
+                }
+              : h)
+            continue
+          }
+
+          if ((!detail.session_id && !item.session_id) && detail.status === 'in_progress') {
+            logger.info('HistoryStore', 'Startup reconcile: marking in_progress without session as completed (best-effort)', { id: item.id })
+            historyWorking = historyWorking.map(h => h.id === item.id
+              ? {
+                  ...h,
+                  status: 'completed',
+                  total_refs: detail.total_refs ?? h.total_refs,
+                  errors_count: detail.errors_count ?? h.errors_count,
+                  warnings_count: detail.warnings_count ?? h.warnings_count,
+                  unverified_count: detail.unverified_count ?? h.unverified_count,
+                }
+              : h)
+          }
+        } catch (err) {
+          logger.warn('HistoryStore', 'Startup reconcile failed for in_progress item', { id: item.id, error: err?.message })
+        }
+      }
+
+      logger.info('HistoryStore', `Fetched ${historyWorking.length} items, adding placeholder`)
       
       const placeholder = {
         id: -1,
@@ -70,12 +246,12 @@ export const useHistoryStore = create((set, get) => ({
       }
       
       set({
-        history: [placeholder, ...fetched],
+        history: [placeholder, ...historyWorking],
         isLoading: false,
         selectedCheckId: -1,
         selectedCheck: null,
       })
-      logger.info('HistoryStore', `Initialized with placeholder and ${fetched.length} history items`)
+      logger.info('HistoryStore', `Initialized with placeholder and ${historyWorking.length} history items`)
     } catch (error) {
       logger.error('HistoryStore', 'Failed to initialize history', error)
       set({ error: error.message, isLoading: false })
@@ -97,7 +273,11 @@ export const useHistoryStore = create((set, get) => ({
       const response = await api.getCheckDetail(id)
       const check = response.data
       
-      set({ selectedCheck: check, isLoadingDetail: false })
+      if (check.status === 'in_progress' && check.session_id) {
+        useCheckStore.getState().adoptSession(check)
+      }
+
+      set({ selectedCheck: check, isLoadingDetail: false, selectedCheckId: id })
       logger.info('HistoryStore', 'Check details loaded', { 
         title: check.paper_title,
         refs: check.total_refs 

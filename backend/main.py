@@ -70,6 +70,14 @@ app.add_middleware(
 active_checks = {}
 
 
+def _session_id_for_check(check_id: int) -> Optional[str]:
+    """Helper to find the session_id for an in-progress check."""
+    for session_id, meta in active_checks.items():
+        if meta.get("check_id") == check_id:
+            return session_id
+    return None
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database on startup"""
@@ -331,7 +339,16 @@ async def get_history(limit: int = 50):
     """Get check history"""
     try:
         history = await db.get_history(limit)
-        return history  # Return array directly
+
+        enriched = []
+        for item in history:
+            if item.get("status") == "in_progress":
+                session_id = _session_id_for_check(item["id"])
+                if session_id:
+                    item["session_id"] = session_id
+            enriched.append(item)
+
+        return enriched  # Return array directly
     except Exception as e:
         logger.error(f"Error getting history: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -344,6 +361,11 @@ async def get_check_detail(check_id: int):
         check = await db.get_check_by_id(check_id)
         if not check:
             raise HTTPException(status_code=404, detail="Check not found")
+
+        if check.get("status") == "in_progress":
+            session_id = _session_id_for_check(check_id)
+            if session_id:
+                check["session_id"] = session_id
         return check
     except HTTPException:
         raise

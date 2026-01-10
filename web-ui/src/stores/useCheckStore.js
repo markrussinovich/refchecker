@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { logger } from '../utils/logger'
+import { useHistoryStore } from './useHistoryStore'
 
 /**
  * Store for current check state management
@@ -47,6 +48,51 @@ export const useCheckStore = create((set, get) => ({
         warnings_count: 0,
         unverified_count: 0,
         progress_percent: 0,
+      },
+      error: null,
+      completedCheckId: null,
+      statusFilter: [],
+    })
+  },
+
+  adoptSession: (payload) => {
+    const {
+      session_id,
+      id,
+      paper_title,
+      paper_source,
+      results = [],
+      total_refs = 0,
+      errors_count = 0,
+      warnings_count = 0,
+      unverified_count = 0,
+    } = payload || {}
+
+    const processed_refs = Array.isArray(results) ? results.length : 0
+    const verified_count = Math.max(total_refs - errors_count - warnings_count - unverified_count, 0)
+    const progress_percent = total_refs > 0 ? Math.min((processed_refs / total_refs) * 100, 100) : 0
+
+    logger.info('CheckStore', `Adopting in-progress session ${session_id} for check ${id}`)
+
+    set({
+      status: 'checking',
+      sessionId: session_id,
+      currentCheckId: id,
+      paperTitle: paper_title,
+      paperSource: paper_source,
+      statusMessage: 'Reconnected to in-progress check',
+      progress: progress_percent,
+      references: Array.isArray(results)
+        ? results.map((ref, index) => ({ ...ref, index, status: ref.status || 'pending' }))
+        : [],
+      stats: {
+        total_refs,
+        processed_refs,
+        verified_count,
+        errors_count,
+        warnings_count,
+        unverified_count,
+        progress_percent,
       },
       error: null,
       completedCheckId: null,
@@ -189,12 +235,14 @@ export const useCheckStore = create((set, get) => ({
         store.setStatusMessage(data.message || 'Extracting references...')
         if (data.paper_title) {
           store.setPaperTitle(data.paper_title)
+          useHistoryStore.getState().updateHistoryItemTitle(store.currentCheckId, data.paper_title)
         }
         break
 
       case 'title_updated':
         if (data.paper_title) {
           store.setPaperTitle(data.paper_title)
+          useHistoryStore.getState().updateHistoryItemTitle(store.currentCheckId, data.paper_title)
         }
         break
         
