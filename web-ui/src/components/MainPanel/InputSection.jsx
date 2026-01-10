@@ -183,8 +183,14 @@ export default function InputSection() {
     fetchHistory()
   }
 
-  const isChecking = status === 'checking'
-  const isComplete = status === 'completed' || status === 'cancelled' || status === 'error'
+  // Get selectedCheckId to determine if we're on the "New refcheck" placeholder
+  const { selectedCheckId } = useHistoryStore.getState()
+  const isNewRefcheckMode = selectedCheckId === -1
+  
+  // Only consider it "checking" if we're not in "new refcheck" mode
+  // This allows starting a new check while another is running
+  const isChecking = status === 'checking' && !isNewRefcheckMode
+  const isComplete = (status === 'completed' || status === 'cancelled' || status === 'error') && !isNewRefcheckMode
 
   return (
     <div 

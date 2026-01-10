@@ -171,7 +171,7 @@ export default function HistoryItem({ item, isSelected }) {
             {isPlaceholder 
               ? 'Start a new check' 
               : (item.status === 'in_progress' 
-                  ? (item.total_refs > 0 ? `Checking ${item.total_refs} refs...` : 'Starting...') 
+                  ? (item.total_refs > 0 ? `Verifying ${item.total_refs} refs...` : 'Extracting refs...') 
                   : `${item.total_refs || 0} refs`)}
           </span>
           {!isPlaceholder && status.isAnimated ? (
