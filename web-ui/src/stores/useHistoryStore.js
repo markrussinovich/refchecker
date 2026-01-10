@@ -93,20 +93,7 @@ export const useHistoryStore = create((set, get) => ({
             continue
           }
 
-          // If detail still reports in_progress but there is no session_id, treat as completed using current counts
-          if ((!detail.session_id && !item.session_id) && detail.status === 'in_progress') {
-            logger.info('HistoryStore', 'Marking in_progress without session as completed (best-effort)', { id: item.id })
-            historyWorking = historyWorking.map(h => h.id === item.id
-              ? {
-                  ...h,
-                  status: 'completed',
-                  total_refs: detail.total_refs ?? h.total_refs,
-                  errors_count: detail.errors_count ?? h.errors_count,
-                  warnings_count: detail.warnings_count ?? h.warnings_count,
-                  unverified_count: detail.unverified_count ?? h.unverified_count,
-                }
-              : h)
-          }
+          // Do not override active in-progress items; keep status as-is even if session_id is missing
         } catch (err) {
           logger.warn('HistoryStore', 'Failed to refresh stale in_progress item', { id: item.id, error: err?.message })
         }
@@ -208,19 +195,7 @@ export const useHistoryStore = create((set, get) => ({
             continue
           }
 
-          if ((!detail.session_id && !item.session_id) && detail.status === 'in_progress') {
-            logger.info('HistoryStore', 'Startup reconcile: marking in_progress without session as completed (best-effort)', { id: item.id })
-            historyWorking = historyWorking.map(h => h.id === item.id
-              ? {
-                  ...h,
-                  status: 'completed',
-                  total_refs: detail.total_refs ?? h.total_refs,
-                  errors_count: detail.errors_count ?? h.errors_count,
-                  warnings_count: detail.warnings_count ?? h.warnings_count,
-                  unverified_count: detail.unverified_count ?? h.unverified_count,
-                }
-              : h)
-          }
+          // Avoid force-completing items that still report in_progress but lack a session_id
         } catch (err) {
           logger.warn('HistoryStore', 'Startup reconcile failed for in_progress item', { id: item.id, error: err?.message })
         }
@@ -265,8 +240,7 @@ export const useHistoryStore = create((set, get) => ({
       return
     }
 
-    if (get().selectedCheckId === id) return
-    
+    // Always fetch fresh data to ensure history stays in sync with source of truth
     set({ selectedCheckId: id, isLoadingDetail: true, error: null })
     try {
       logger.info('HistoryStore', `Loading check details for ${id}`)
@@ -277,10 +251,29 @@ export const useHistoryStore = create((set, get) => ({
         useCheckStore.getState().adoptSession(check)
       }
 
-      set({ selectedCheck: check, isLoadingDetail: false, selectedCheckId: id })
-      logger.info('HistoryStore', 'Check details loaded', { 
+      // Sync history list item with the authoritative detail (source of truth)
+      set(state => ({
+        selectedCheck: check,
+        isLoadingDetail: false,
+        selectedCheckId: id,
+        history: state.history.map(h =>
+          h.id === id
+            ? {
+                ...h,
+                status: check.status,
+                total_refs: check.total_refs,
+                errors_count: check.errors_count,
+                warnings_count: check.warnings_count,
+                unverified_count: check.unverified_count,
+                paper_title: check.paper_title || h.paper_title,
+              }
+            : h
+        ),
+      }))
+      logger.info('HistoryStore', 'Check details loaded and history synced', { 
         title: check.paper_title,
-        refs: check.total_refs 
+        refs: check.total_refs,
+        status: check.status,
       })
     } catch (error) {
       logger.error('HistoryStore', 'Failed to load check details', error)
@@ -312,6 +305,14 @@ export const useHistoryStore = create((set, get) => ({
       logger.error('HistoryStore', 'Failed to update label', error)
       throw error
     }
+  },
+
+  updateHistoryProgress: (id, payload = {}) => {
+    if (!id) return
+    set(state => ({
+      history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
+      selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
+    }))
   },
 
   deleteCheck: async (id) => {

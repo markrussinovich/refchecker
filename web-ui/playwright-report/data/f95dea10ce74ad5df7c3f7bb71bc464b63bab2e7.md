@@ -1,0 +1,382 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: New refcheck
+      - button "Create new refcheck" [ref=e7] [cursor=pointer]:
+        - img [ref=e8]
+    - generic [ref=e10]:
+      - heading "LLM Configuration" [level=2] [ref=e11]
+      - generic [ref=e12]:
+        - button "anthropic-claude-sonnet-4-5-20250929" [ref=e13]:
+          - generic [ref=e14]: anthropic-claude-sonnet-4-5-20250929
+          - img [ref=e15]
+        - dialog "Add LLM Configuration" [ref=e18]:
+          - generic [ref=e19]:
+            - heading "Add LLM Configuration" [level=2] [ref=e20]
+            - button "Close modal" [ref=e21]:
+              - img [ref=e22]
+          - generic [ref=e25]:
+            - generic [ref=e26]:
+              - generic [ref=e27]: Configuration Name
+              - textbox "Configuration Name" [ref=e28]:
+                - /placeholder: e.g., My GPT-4
+                - text: Sonnet 4.5 Test
+            - generic [ref=e29]:
+              - generic [ref=e30]: Provider
+              - combobox "Provider" [ref=e31]:
+                - option "OpenAI"
+                - option "Anthropic" [selected]
+                - option "Google"
+                - option "Azure OpenAI"
+                - option "vLLM (Local)"
+            - generic [ref=e32]:
+              - generic [ref=e33]: Model(optional)
+              - textbox "Model(optional)" [ref=e34]:
+                - /placeholder: claude-3-5-sonnet-latest
+                - text: claude-sonnet-4-20250514
+              - paragraph [ref=e35]: "Default: claude-3-5-sonnet-latest"
+            - generic [ref=e36]:
+              - generic [ref=e37]: API Key
+              - textbox "API Key" [ref=e38]:
+                - /placeholder: Enter API key
+              - paragraph [ref=e39]: Stored securely and never shown again
+            - generic [ref=e40]: API key is required
+            - generic [ref=e41]:
+              - button "Cancel" [ref=e42] [cursor=pointer]
+              - button "Add Configuration" [active] [ref=e43] [cursor=pointer]
+    - generic [ref=e45]:
+      - heading "Semantic Scholar" [level=2] [ref=e46]
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - generic [ref=e49]: "API Key:"
+          - generic [ref=e50]: Not set
+        - button "Add" [ref=e51]
+      - generic [ref=e52]: Optional. Increases rate limits.
+    - generic [ref=e53]:
+      - heading "History" [level=2] [ref=e55]
+      - generic [ref=e56]:
+        - generic [ref=e58] [cursor=pointer]:
+          - generic "New refcheck" [ref=e59]
+          - generic [ref=e61]: Start a new check
+        - generic [ref=e63] [cursor=pointer]:
+          - generic "https://arxiv.org/abs/2311.12022" [ref=e64]
+          - generic [ref=e65]: Saturday 08:33 PM
+          - generic [ref=e66]:
+            - generic [ref=e67]: Extracting refs...
+            - img [ref=e68]
+        - generic [ref=e72] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e73]'
+          - generic [ref=e74]: Saturday 08:33 PM
+          - generic [ref=e75]:
+            - generic [ref=e76]: 0 refs
+            - generic "All verified" [ref=e77]
+        - generic [ref=e79] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e80]'
+          - generic [ref=e81]: Saturday 08:33 PM
+          - generic [ref=e82]:
+            - generic [ref=e83]: Extracting refs...
+            - img [ref=e84]
+        - generic [ref=e88] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e89]'
+          - generic [ref=e90]: Saturday 08:33 PM
+          - generic [ref=e91]:
+            - generic [ref=e92]: Extracting refs...
+            - img [ref=e93]
+        - generic [ref=e97] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e98]'
+          - generic [ref=e99]: Saturday 08:33 PM
+          - generic [ref=e100]:
+            - generic [ref=e101]: Extracting refs...
+            - img [ref=e102]
+        - generic [ref=e106] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e107]'
+          - generic [ref=e108]: Saturday 08:32 PM
+          - generic [ref=e109]:
+            - generic [ref=e110]: Extracting refs...
+            - img [ref=e111]
+        - generic [ref=e115] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e116]'
+          - generic [ref=e117]: Saturday 08:32 PM
+          - generic [ref=e118]:
+            - generic [ref=e119]: Extracting refs...
+            - img [ref=e120]
+        - generic [ref=e124] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e125]'
+          - generic [ref=e126]: Saturday 08:32 PM
+          - generic [ref=e127]:
+            - generic [ref=e128]: Extracting refs...
+            - img [ref=e129]
+        - generic [ref=e133] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e134]'
+          - generic [ref=e135]: Saturday 08:32 PM
+          - generic [ref=e136]:
+            - generic [ref=e137]: Extracting refs...
+            - img [ref=e138]
+        - generic [ref=e142] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e143]'
+          - generic [ref=e144]: Saturday 08:32 PM
+          - generic [ref=e145]:
+            - generic [ref=e146]: Extracting refs...
+            - img [ref=e147]
+        - generic [ref=e151] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e152]'
+          - generic [ref=e153]: Saturday 08:27 PM
+          - generic [ref=e154]:
+            - generic [ref=e155]: 0 refs
+            - generic "All verified" [ref=e156]
+        - generic [ref=e158] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e159]'
+          - generic [ref=e160]: Saturday 08:27 PM
+          - generic [ref=e161]:
+            - generic [ref=e162]: Verifying 36 refs...
+            - img [ref=e163]
+        - generic [ref=e167] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e168]'
+          - generic [ref=e169]: Saturday 08:27 PM
+          - generic [ref=e170]:
+            - generic [ref=e171]: 6 refs
+            - generic "6 unverified" [ref=e172]
+        - generic [ref=e174] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e175]'
+          - generic [ref=e176]: Saturday 08:27 PM
+          - generic [ref=e177]:
+            - generic [ref=e178]: 3 refs
+            - generic "3 unverified" [ref=e179]
+        - generic [ref=e181] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e182]'
+          - generic [ref=e183]: Saturday 08:27 PM
+          - generic [ref=e184]:
+            - generic [ref=e185]: 0 refs
+            - generic "All verified" [ref=e186]
+        - generic [ref=e188] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e189]'
+          - generic [ref=e190]: Saturday 08:25 PM
+          - generic [ref=e191]:
+            - generic [ref=e192]: Verifying 36 refs...
+            - img [ref=e193]
+        - generic [ref=e197] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e198]'
+          - generic [ref=e199]: Saturday 08:25 PM
+          - generic [ref=e200]:
+            - generic [ref=e201]: Verifying 36 refs...
+            - img [ref=e202]
+        - generic [ref=e206] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e207]'
+          - generic [ref=e208]: Saturday 08:25 PM
+          - generic [ref=e209]:
+            - generic [ref=e210]: Verifying 36 refs...
+            - img [ref=e211]
+        - generic [ref=e215] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e216]'
+          - generic [ref=e217]: Saturday 08:25 PM
+          - generic [ref=e218]:
+            - generic [ref=e219]: 0 refs
+            - generic "All verified" [ref=e220]
+        - generic [ref=e222] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e223]'
+          - generic [ref=e224]: Saturday 08:25 PM
+          - generic [ref=e225]:
+            - generic [ref=e226]: 0 refs
+            - generic "All verified" [ref=e227]
+        - generic [ref=e229] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e230]
+          - generic [ref=e231]: Saturday 08:07 PM
+          - generic [ref=e232]:
+            - generic [ref=e233]: 14 refs
+            - generic "2 errors" [ref=e234]
+        - generic [ref=e236] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e237]'
+          - generic [ref=e238]: Saturday 08:06 PM
+          - generic [ref=e239]:
+            - generic [ref=e240]: 36 refs
+            - generic "6 errors" [ref=e241]
+        - generic [ref=e243] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e244]
+          - generic [ref=e245]: Saturday 08:00 PM
+          - generic [ref=e246]:
+            - generic [ref=e247]: 14 refs
+            - generic "2 errors" [ref=e248]
+        - generic [ref=e250] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e251]'
+          - generic [ref=e252]: Saturday 07:59 PM
+          - generic [ref=e253]:
+            - generic [ref=e254]: 36 refs
+            - generic "14 errors" [ref=e255]
+        - generic [ref=e257] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e258]'
+          - generic [ref=e259]: Saturday 07:54 PM
+          - generic [ref=e260]:
+            - generic [ref=e261]: 36 refs
+            - generic "16 errors" [ref=e262]
+        - generic [ref=e264] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e265]
+          - generic [ref=e266]: Saturday 07:48 PM
+          - generic [ref=e267]:
+            - generic [ref=e268]: 14 refs
+            - generic "3 errors" [ref=e269]
+        - generic [ref=e271] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e272]
+          - generic [ref=e273]: Saturday 07:43 PM
+          - generic [ref=e274]:
+            - generic [ref=e275]: 14 refs
+            - generic "3 errors" [ref=e276]
+        - generic [ref=e278] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e279]'
+          - generic [ref=e280]: Saturday 06:55 PM
+          - generic [ref=e281]:
+            - generic [ref=e282]: 0 refs
+            - generic "All verified" [ref=e283]
+        - generic [ref=e285] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e286]'
+          - generic [ref=e287]: Saturday 06:55 PM
+          - generic [ref=e288]:
+            - generic [ref=e289]: 36 refs
+            - generic "7 errors" [ref=e290]
+        - generic [ref=e292] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e293]'
+          - generic [ref=e294]: Saturday 06:50 PM
+          - generic [ref=e295]:
+            - generic [ref=e296]: 0 refs
+            - generic "Cancelled" [ref=e297]
+        - generic [ref=e299] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e300]'
+          - generic [ref=e301]: Saturday 06:50 PM
+          - generic [ref=e302]:
+            - generic [ref=e303]: 0 refs
+            - generic "Cancelled" [ref=e304]
+        - generic [ref=e306] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e307]'
+          - generic [ref=e308]: Saturday 06:50 PM
+          - generic [ref=e309]:
+            - generic [ref=e310]: 0 refs
+            - generic "Cancelled" [ref=e311]
+        - generic [ref=e313] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e314]'
+          - generic [ref=e315]: Saturday 06:50 PM
+          - generic [ref=e316]:
+            - generic [ref=e317]: 0 refs
+            - generic "Error" [ref=e318]
+        - generic [ref=e320] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e321]'
+          - generic [ref=e322]: Saturday 06:50 PM
+          - generic [ref=e323]:
+            - generic [ref=e324]: 0 refs
+            - generic "Error" [ref=e325]
+        - generic [ref=e327] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e328]'
+          - generic [ref=e329]: Saturday 06:50 PM
+          - generic [ref=e330]:
+            - generic [ref=e331]: 0 refs
+            - generic "Cancelled" [ref=e332]
+        - generic [ref=e334] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e335]'
+          - generic [ref=e336]: Saturday 06:47 PM
+          - generic [ref=e337]:
+            - generic [ref=e338]: 0 refs
+            - generic "Cancelled" [ref=e339]
+        - generic [ref=e341] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e342]'
+          - generic [ref=e343]: Saturday 06:47 PM
+          - generic [ref=e344]:
+            - generic [ref=e345]: 0 refs
+            - generic "Error" [ref=e346]
+        - generic [ref=e348] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e349]'
+          - generic [ref=e350]: Saturday 06:47 PM
+          - generic [ref=e351]:
+            - generic [ref=e352]: 0 refs
+            - generic "Error" [ref=e353]
+        - generic [ref=e355] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e356]'
+          - generic [ref=e357]: Saturday 06:47 PM
+          - generic [ref=e358]:
+            - generic [ref=e359]: 0 refs
+            - generic "Error" [ref=e360]
+        - generic [ref=e362] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e363]'
+          - generic [ref=e364]: Saturday 06:47 PM
+          - generic [ref=e365]:
+            - generic [ref=e366]: 0 refs
+            - generic "Error" [ref=e367]
+        - generic [ref=e369] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e370]'
+          - generic [ref=e371]: Saturday 06:47 PM
+          - generic [ref=e372]:
+            - generic [ref=e373]: 0 refs
+            - generic "Cancelled" [ref=e374]
+        - generic [ref=e376] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e377]'
+          - generic [ref=e378]: Saturday 06:47 PM
+          - generic [ref=e379]:
+            - generic [ref=e380]: 0 refs
+            - generic "Cancelled" [ref=e381]
+        - generic [ref=e383] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e384]'
+          - generic [ref=e385]: Saturday 06:47 PM
+          - generic [ref=e386]:
+            - generic [ref=e387]: 0 refs
+            - generic "Error" [ref=e388]
+        - generic [ref=e390] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e391]'
+          - generic [ref=e392]: Saturday 06:47 PM
+          - generic [ref=e393]:
+            - generic [ref=e394]: 0 refs
+            - generic "Cancelled" [ref=e395]
+        - generic [ref=e397] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e398]
+          - generic [ref=e399]: Saturday 06:44 PM
+          - generic [ref=e400]:
+            - generic [ref=e401]: 14 refs
+            - generic "Cancelled" [ref=e402]
+        - generic [ref=e404] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e405]'
+          - generic [ref=e406]: Saturday 06:44 PM
+          - generic [ref=e407]:
+            - generic [ref=e408]: 36 refs
+            - generic "Cancelled" [ref=e409]
+        - generic [ref=e411] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e412]
+          - generic [ref=e413]: Saturday 06:41 PM
+          - generic [ref=e414]:
+            - generic [ref=e415]: 14 refs
+            - generic "3 errors" [ref=e416]
+        - generic [ref=e418] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e419]'
+          - generic [ref=e420]: Today at 01:54 AM
+          - generic [ref=e421]:
+            - generic [ref=e422]: 36 refs
+            - generic "3 warnings" [ref=e423]
+        - generic [ref=e425] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e426]'
+          - generic [ref=e427]: Today at 01:53 AM
+          - generic [ref=e428]:
+            - generic [ref=e429]: 36 refs
+            - generic "4 errors" [ref=e430]
+        - generic [ref=e432] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e433]'
+          - generic [ref=e434]: Today at 01:53 AM
+          - generic [ref=e435]:
+            - generic [ref=e436]: 36 refs
+            - generic "3 errors" [ref=e437]
+  - generic [ref=e439]:
+    - banner [ref=e440]:
+      - heading "RefChecker" [level=1] [ref=e441]
+      - button "Switch to dark mode" [ref=e442]:
+        - img [ref=e443]
+    - main [ref=e445]:
+      - generic [ref=e447]:
+        - heading "Check Paper References" [level=2] [ref=e448]
+        - generic [ref=e449]:
+          - button "URL / ArXiv ID" [ref=e450] [cursor=pointer]
+          - button "Upload File" [ref=e451] [cursor=pointer]
+          - button "Paste Text" [ref=e452] [cursor=pointer]
+        - textbox "Enter ArXiv ID (e.g., 2401.12345) or URL" [ref=e454]
+        - generic [ref=e455]:
+          - button "Check References" [disabled] [ref=e456]
+          - generic [ref=e457]: Using Anthropic (anthropic)
+  - button "Show Debug Panel" [ref=e458]:
+    - img [ref=e459]
+```

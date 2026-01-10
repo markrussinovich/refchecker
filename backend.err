@@ -1,0 +1,26 @@
+INFO:     Started server process [96200]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8003 (Press CTRL+C to quit)
+INFO:     127.0.0.1:52574 - "WebSocket /api/ws/be50113a-dbc4-4558-a326-d272f172d693" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:52577 - "WebSocket /api/ws/07d4ef1e-93d3-418d-a306-4fdb64155d9a" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:62145 - "WebSocket /api/ws/1a3c7c53-f5eb-44b2-9360-457531cbae24" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:51366 - "WebSocket /api/ws/88fa58f7-39d4-430d-8da2-e4c4137ce231" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:58361 - "WebSocket /api/ws/3d93f01c-2f8e-4cfb-8a12-4104e8af76e3" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:58370 - "WebSocket /api/ws/bc97911e-497a-4091-9a38-41befcf1c1a9" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     Shutting down
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [96200]

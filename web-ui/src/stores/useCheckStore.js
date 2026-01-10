@@ -10,6 +10,7 @@ export const useCheckStore = create((set, get) => ({
   status: 'idle', // idle, checking, completed, cancelled, error
   sessionId: null,
   currentCheckId: null, // ID of the check in history (created immediately)
+  sessionToCheckMap: {}, // Maps session_id -> check_id for tracking stale sessions
   paperTitle: null,
   paperSource: null, // URL or filename being checked
   statusMessage: '',
@@ -31,10 +32,14 @@ export const useCheckStore = create((set, get) => ({
   // Actions
   startCheck: (sessionId, checkId = null, paperSource = null) => {
     logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}`)
+    // Record session→check mapping before overwriting state
+    const prevMap = get().sessionToCheckMap
+    const newMap = checkId ? { ...prevMap, [sessionId]: checkId } : prevMap
     set({
       status: 'checking',
       sessionId,
       currentCheckId: checkId,
+      sessionToCheckMap: newMap,
       paperTitle: null,
       paperSource,
       statusMessage: 'Starting check...',
@@ -189,10 +194,13 @@ export const useCheckStore = create((set, get) => ({
 
   reset: () => {
     logger.info('CheckStore', 'Reset state')
+    // Preserve sessionToCheckMap so we can still process stale session messages
+    const prevMap = get().sessionToCheckMap
     set({
       status: 'idle',
       sessionId: null,
       currentCheckId: null,
+      sessionToCheckMap: prevMap,
       paperTitle: null,
       paperSource: null,
       statusMessage: '',
@@ -215,12 +223,30 @@ export const useCheckStore = create((set, get) => ({
 
   // Handle WebSocket messages
   handleWebSocketMessage: (message) => {
-    const { type, session_id: messageSessionId, ...data } = message
+    const { type, session_id: messageSessionId, check_id: messageCheckId, ...data } = message
     const store = get()
+    const historyStore = useHistoryStore.getState()
 
-    // Ignore messages from stale sessions
+    // If this message is for a different session, only process history-affecting terminal updates
     if (messageSessionId && store.sessionId && messageSessionId !== store.sessionId) {
-      logger.debug('CheckStore', `Ignoring message for stale session ${messageSessionId}`)
+      if (type === 'completed') {
+        // Look up check_id from message or our session→check map
+        const checkId = messageCheckId || store.sessionToCheckMap[messageSessionId]
+        if (checkId) {
+          logger.info('CheckStore', `Applying completed update for prior session ${messageSessionId}`, { checkId })
+          historyStore.updateHistoryProgress(checkId, {
+            status: 'completed',
+            total_refs: data.total_refs,
+            errors_count: data.errors_count,
+            warnings_count: data.warnings_count,
+            unverified_count: data.unverified_count,
+          })
+        } else {
+          logger.warn('CheckStore', `Cannot apply completed update - no check_id for session ${messageSessionId}`)
+        }
+      } else {
+        logger.debug('CheckStore', `Ignoring message for stale session ${messageSessionId}`)
+      }
       return
     }
     
@@ -229,6 +255,7 @@ export const useCheckStore = create((set, get) => ({
     switch (type) {
       case 'started':
         store.setStatusMessage(`Check started: ${data.message || 'Initializing...'}`)
+        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, { status: 'in_progress' })
         break
         
       case 'extracting':
@@ -237,6 +264,7 @@ export const useCheckStore = create((set, get) => ({
           store.setPaperTitle(data.paper_title)
           useHistoryStore.getState().updateHistoryItemTitle(store.currentCheckId, data.paper_title)
         }
+        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, { status: 'in_progress' })
         break
 
       case 'title_updated':
@@ -250,6 +278,12 @@ export const useCheckStore = create((set, get) => ({
         store.setStatusMessage(`Found ${data.total_refs || data.count || 0} references, starting verification...`)
         if (data.references) {
           store.setReferences(data.references)
+        }
+        if (typeof data.total_refs === 'number') {
+          useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
+            status: 'in_progress',
+            total_refs: data.total_refs,
+          })
         }
         break
         
@@ -270,6 +304,13 @@ export const useCheckStore = create((set, get) => ({
       case 'summary_update':
         store.updateStats(data)
         store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references`)
+        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
+          status: 'in_progress',
+          total_refs: data.total_refs,
+          errors_count: data.errors_count,
+          warnings_count: data.warnings_count,
+          unverified_count: data.unverified_count,
+        })
         break
         
       case 'progress':
@@ -281,6 +322,13 @@ export const useCheckStore = create((set, get) => ({
         
       case 'completed':
         store.completeCheck(data.check_id)
+        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
+          status: 'completed',
+          total_refs: data.total_refs,
+          errors_count: data.errors_count,
+          warnings_count: data.warnings_count,
+          unverified_count: data.unverified_count,
+        })
         break
         
       case 'cancelled':
