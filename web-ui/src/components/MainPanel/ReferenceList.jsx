@@ -13,7 +13,13 @@ const computeDerivedStatus = (ref) => {
     return baseStatus
   }
   
-  // For in-progress states, derive from errors/warnings arrays
+  // Keep pending and checking distinct so UI shows appropriate icons
+  // - pending: clock icon (waiting in queue)
+  // - checking: spinner (actively being verified)
+  if (baseStatus === 'pending') return 'pending'
+  if (['checking', 'in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) return 'checking'
+  
+  // For unknown states, derive from errors/warnings arrays
   const hasErrors = Array.isArray(ref.errors) && ref.errors.some(
     e => (e?.error_type || '').toLowerCase() !== 'unverified'
   )
@@ -21,7 +27,6 @@ const computeDerivedStatus = (ref) => {
 
   if (hasErrors) return 'error'
   if (hasWarnings) return 'warning'
-  if (['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) return 'checking'
   // No status and no issues = verified
   return 'verified'
 }
@@ -51,12 +56,12 @@ export default function ReferenceList({ references, isLoading }) {
 
     const filtered = normalized.filter(ref => {
       const status = (ref.status || '').toLowerCase()
-      // If no filter, show all references
+      // If no filter, show all references including pending/checking
       if (filters.length === 0) {
         return true
       }
       
-      // When filtering, exclude pending/checking references
+      // When filtering by status, hide pending/checking since they don't have a final status yet
       if (status === 'pending' || status === 'checking') {
         return false
       }

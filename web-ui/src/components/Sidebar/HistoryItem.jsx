@@ -77,7 +77,8 @@ export default function HistoryItem({ item, isSelected }) {
 
   // Status indicator based on errors or in-progress state
   const getStatusIndicator = () => {
-    // Check if this is an in-progress check
+    // Check if this is an in-progress check (only show spinner if status is explicitly in_progress)
+    // status will be 'completed', 'cancelled', 'error', or 'in_progress'
     if (item.status === 'in_progress') {
       return { color: 'var(--color-accent)', label: 'In progress', isAnimated: true }
     }
@@ -87,11 +88,15 @@ export default function HistoryItem({ item, isSelected }) {
     if (item.status === 'error') {
       return { color: 'var(--color-error)', label: 'Error', isAnimated: false }
     }
+    // For completed checks, show status based on counts
     if (item.errors_count > 0) {
       return { color: 'var(--color-error)', label: `${item.errors_count} errors`, isAnimated: false }
     }
     if (item.warnings_count > 0) {
       return { color: 'var(--color-warning)', label: `${item.warnings_count} warnings`, isAnimated: false }
+    }
+    if (item.unverified_count > 0) {
+      return { color: 'var(--color-text-muted)', label: `${item.unverified_count} unverified`, isAnimated: false }
     }
     return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
   }
@@ -163,7 +168,11 @@ export default function HistoryItem({ item, isSelected }) {
             className="text-xs"
             style={{ color: 'var(--color-text-muted)' }}
           >
-            {isPlaceholder ? 'Start a new check' : (item.status === 'in_progress' ? 'Checking...' : `${item.total_refs} refs`)}
+            {isPlaceholder 
+              ? 'Start a new check' 
+              : (item.status === 'in_progress' 
+                  ? (item.total_refs > 0 ? `Checking ${item.total_refs} refs...` : 'Starting...') 
+                  : `${item.total_refs || 0} refs`)}
           </span>
           {!isPlaceholder && status.isAnimated ? (
             <svg 
