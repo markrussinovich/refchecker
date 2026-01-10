@@ -227,25 +227,55 @@ export const useCheckStore = create((set, get) => ({
     const store = get()
     const historyStore = useHistoryStore.getState()
 
-    // If this message is for a different session, only process history-affecting terminal updates
-    if (messageSessionId && store.sessionId && messageSessionId !== store.sessionId) {
-      if (type === 'completed') {
-        // Look up check_id from message or our session→check map
-        const checkId = messageCheckId || store.sessionToCheckMap[messageSessionId]
-        if (checkId) {
-          logger.info('CheckStore', `Applying completed update for prior session ${messageSessionId}`, { checkId })
-          historyStore.updateHistoryProgress(checkId, {
+    // Determine which check_id this message belongs to
+    const checkIdForMessage = messageCheckId || store.sessionToCheckMap[messageSessionId] || store.currentCheckId
+
+    // If this message is for a different session than the current one, route updates to history only
+    const isStaleSession = messageSessionId && store.sessionId && messageSessionId !== store.sessionId
+    
+    if (isStaleSession) {
+      if (!checkIdForMessage) {
+        logger.warn('CheckStore', `Cannot route stale session message - no check_id for session ${messageSessionId}`)
+        return
+      }
+
+      // Route stale session updates to history
+      switch (type) {
+        case 'started':
+        case 'extracting':
+          historyStore.updateHistoryProgress(checkIdForMessage, { status: 'in_progress' })
+          if (data.paper_title) {
+            historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
+          }
+          break
+        case 'references_extracted':
+          historyStore.updateHistoryProgress(checkIdForMessage, {
+            status: 'in_progress',
+            total_refs: data.total_refs || data.count || 0,
+          })
+          break
+        case 'summary_update':
+          historyStore.updateHistoryProgress(checkIdForMessage, {
+            status: 'in_progress',
+            total_refs: data.total_refs,
+            errors_count: data.errors_count,
+            warnings_count: data.warnings_count,
+            unverified_count: data.unverified_count,
+          })
+          break
+        case 'completed':
+          logger.info('CheckStore', `Applying completed update for prior session ${messageSessionId}`, { checkId: checkIdForMessage })
+          historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'completed',
             total_refs: data.total_refs,
             errors_count: data.errors_count,
             warnings_count: data.warnings_count,
             unverified_count: data.unverified_count,
           })
-        } else {
-          logger.warn('CheckStore', `Cannot apply completed update - no check_id for session ${messageSessionId}`)
-        }
-      } else {
-        logger.debug('CheckStore', `Ignoring message for stale session ${messageSessionId}`)
+          break
+        default:
+          // Ignore other message types for stale sessions (checking_reference, reference_result, etc.)
+          logger.debug('CheckStore', `Ignoring ${type} message for stale session ${messageSessionId}`)
       }
       return
     }
