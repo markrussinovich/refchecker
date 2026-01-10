@@ -125,9 +125,31 @@ export const useHistoryStore = create((set, get) => ({
       
       logger.info('HistoryStore', `Fetched ${historyWithActive.length} items (including injected) from API`)
       
-      // Just set the fetched history - placeholder logic is handled separately
-      set({ history: historyWithActive, isLoading: false })
-      logger.info('HistoryStore', `Set ${historyWithActive.length} history items`)
+      // Merge fetched history with in-memory state, preserving WebSocket-provided updates
+      // that are "more complete" (e.g., completed > in_progress)
+      const statusPriority = { 'completed': 3, 'error': 2, 'cancelled': 2, 'in_progress': 1, 'idle': 0 }
+      const currentHistory = get().history
+      
+      const mergedHistory = historyWithActive.map(fetched => {
+        const existing = currentHistory.find(h => h.id === fetched.id)
+        if (!existing) return fetched
+        
+        // If in-memory status is "more complete" than fetched, preserve in-memory data
+        const existingPriority = statusPriority[existing.status] ?? 0
+        const fetchedPriority = statusPriority[fetched.status] ?? 0
+        
+        if (existingPriority > fetchedPriority) {
+          logger.info('HistoryStore', `Preserving in-memory status for ${fetched.id}`, { 
+            inMemory: existing.status, 
+            fetched: fetched.status 
+          })
+          return { ...fetched, ...existing }
+        }
+        return fetched
+      })
+      
+      set({ history: mergedHistory, isLoading: false })
+      logger.info('HistoryStore', `Set ${mergedHistory.length} history items (merged)`)
 
       // Keep selected check detail in sync with updated history status
       const { selectedCheckId, selectedCheck } = get()
