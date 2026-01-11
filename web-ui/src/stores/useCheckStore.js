@@ -11,6 +11,7 @@ export const useCheckStore = create((set, get) => ({
   sessionId: null,
   currentCheckId: null, // ID of the check in history (created immediately)
   sessionToCheckMap: {}, // Maps session_id -> check_id for routing concurrent session messages
+  activeSessions: [], // List of all active session IDs (for WebSocket connections)
   paperTitle: null,
   paperSource: null, // URL or filename being checked
   statusMessage: '',
@@ -35,11 +36,16 @@ export const useCheckStore = create((set, get) => ({
     // Record session→check mapping before overwriting state
     const prevMap = get().sessionToCheckMap
     const newMap = checkId ? { ...prevMap, [sessionId]: checkId } : prevMap
+    // Add to active sessions
+    const activeSessions = get().activeSessions.includes(sessionId) 
+      ? get().activeSessions 
+      : [...get().activeSessions, sessionId]
     set({
       status: 'checking',
       sessionId,
       currentCheckId: checkId,
       sessionToCheckMap: newMap,
+      activeSessions,
       paperTitle: null,
       paperSource,
       statusMessage: 'Starting check...',
@@ -57,6 +63,30 @@ export const useCheckStore = create((set, get) => ({
       error: null,
       completedCheckId: null,
       statusFilter: [],
+    })
+  },
+
+  // Register a session from page refresh (in_progress items with session_id)
+  registerSession: (sessionId, checkId) => {
+    if (!sessionId) return
+    const { sessionToCheckMap, activeSessions } = get()
+    const alreadyActive = activeSessions.includes(sessionId)
+    logger.info('CheckStore', `Registering session ${sessionId} for check ${checkId}, alreadyActive=${alreadyActive}`)
+    set({
+      sessionToCheckMap: { ...sessionToCheckMap, [sessionId]: checkId },
+      activeSessions: alreadyActive ? activeSessions : [...activeSessions, sessionId],
+    })
+  },
+
+  // Remove a session when it completes
+  unregisterSession: (sessionId) => {
+    if (!sessionId) return
+    const { sessionToCheckMap, activeSessions } = get()
+    const newMap = { ...sessionToCheckMap }
+    delete newMap[sessionId]
+    set({
+      sessionToCheckMap: newMap,
+      activeSessions: activeSessions.filter(s => s !== sessionId),
     })
   },
 

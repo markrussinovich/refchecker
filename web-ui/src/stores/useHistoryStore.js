@@ -74,32 +74,48 @@ export const useHistoryStore = create((set, get) => ({
         }
       }
 
-      // Opportunistically fix stale in_progress items (no active session) by reconciling detail or marking as completed
-      const staleInProgress = historyWorking
+      // For in_progress items, fetch detail to get current progress and results
+      const inProgressItems = historyWorking
         .filter(item => item.status === 'in_progress')
-        .slice(0, 3) // cap to avoid excessive calls
+        .slice(0, 5) // cap to avoid excessive calls
 
-      for (const item of staleInProgress) {
+      for (const item of inProgressItems) {
         try {
           const detail = (await api.getCheckDetail(item.id)).data
-          if (detail.status && detail.status !== item.status) {
-            logger.info('HistoryStore', 'Updating stale history item from detail', { id: item.id, status: detail.status })
-            historyWorking = historyWorking.map(h => h.id === item.id
-              ? {
-                  ...h,
-                  status: detail.status,
-                  total_refs: detail.total_refs,
-                  errors_count: detail.errors_count,
-                  warnings_count: detail.warnings_count,
-                  unverified_count: detail.unverified_count,
-                }
-              : h)
-            continue
+          
+          // Calculate processed_refs from results array (completed checks have status != pending/checking)
+          const results = Array.isArray(detail.results) ? detail.results : []
+          const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+          
+          // Update the item with full progress info
+          historyWorking = historyWorking.map(h => h.id === item.id
+            ? {
+                ...h,
+                status: detail.status || 'in_progress',
+                total_refs: detail.total_refs || 0,
+                processed_refs: processedRefs,
+                errors_count: detail.errors_count || 0,
+                warnings_count: detail.warnings_count || 0,
+                unverified_count: detail.unverified_count || 0,
+                results: results, // Store results for display
+                session_id: item.session_id, // Preserve session_id from history API
+              }
+            : h)
+          
+          // Register this session for WebSocket reconnection
+          if (item.session_id && detail.status === 'in_progress') {
+            useCheckStore.getState().registerSession(item.session_id, item.id)
           }
-
-          // Do not override active in-progress items; keep status as-is even if session_id is missing
+          
+          logger.info('HistoryStore', 'Loaded progress for in_progress item', { 
+            id: item.id, 
+            status: detail.status, 
+            total_refs: detail.total_refs,
+            processed_refs: processedRefs,
+            session_id: item.session_id
+          })
         } catch (err) {
-          logger.warn('HistoryStore', 'Failed to refresh stale in_progress item', { id: item.id, error: err?.message })
+          logger.warn('HistoryStore', 'Failed to load in_progress item detail', { id: item.id, error: err?.message })
         }
       }
 
@@ -216,32 +232,48 @@ export const useHistoryStore = create((set, get) => ({
       const fetched = response.data
       let historyWorking = Array.isArray(fetched) ? [...fetched] : []
 
-      // Reconcile stale in-progress items on startup as well
-      const staleInProgress = historyWorking
+      // For in_progress items, fetch detail to get current progress and results
+      const inProgressItems = historyWorking
         .filter(item => item.status === 'in_progress')
-        .slice(0, 3)
+        .slice(0, 5)
 
-      for (const item of staleInProgress) {
+      for (const item of inProgressItems) {
         try {
           const detail = (await api.getCheckDetail(item.id)).data
-          if (detail.status && detail.status !== item.status) {
-            logger.info('HistoryStore', 'Startup reconcile: updating stale item from detail', { id: item.id, status: detail.status })
-            historyWorking = historyWorking.map(h => h.id === item.id
-              ? {
-                  ...h,
-                  status: detail.status,
-                  total_refs: detail.total_refs,
-                  errors_count: detail.errors_count,
-                  warnings_count: detail.warnings_count,
-                  unverified_count: detail.unverified_count,
-                }
-              : h)
-            continue
+          
+          // Calculate processed_refs from results array
+          const results = Array.isArray(detail.results) ? detail.results : []
+          const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+          
+          // Update the item with full progress info
+          historyWorking = historyWorking.map(h => h.id === item.id
+            ? {
+                ...h,
+                status: detail.status || 'in_progress',
+                total_refs: detail.total_refs || 0,
+                processed_refs: processedRefs,
+                errors_count: detail.errors_count || 0,
+                warnings_count: detail.warnings_count || 0,
+                unverified_count: detail.unverified_count || 0,
+                results: results,
+                session_id: item.session_id,
+              }
+            : h)
+          
+          // Register this session for WebSocket reconnection
+          if (item.session_id && detail.status === 'in_progress') {
+            useCheckStore.getState().registerSession(item.session_id, item.id)
           }
-
-          // Avoid force-completing items that still report in_progress but lack a session_id
+          
+          logger.info('HistoryStore', 'Startup: loaded progress for in_progress item', { 
+            id: item.id, 
+            status: detail.status, 
+            total_refs: detail.total_refs,
+            processed_refs: processedRefs,
+            session_id: item.session_id
+          })
         } catch (err) {
-          logger.warn('HistoryStore', 'Startup reconcile failed for in_progress item', { id: item.id, error: err?.message })
+          logger.warn('HistoryStore', 'Startup: failed to load in_progress item detail', { id: item.id, error: err?.message })
         }
       }
 
