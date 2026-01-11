@@ -37,7 +37,7 @@ export default function StatusSection() {
     cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore()
-  const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
+  const { selectedCheck, selectedCheckId, isLoadingDetail, updateHistoryProgress } = useHistoryStore()
 
   // Determine if we're viewing a check (either the current session's check or any history item)
   const isViewingCheck = selectedCheckId !== null && selectedCheckId !== -1
@@ -61,6 +61,8 @@ export default function StatusSection() {
   let displayProgress = 0
   let displayTotalRefs = 0
   let displayProcessedRefs = 0
+  let displayLlmProvider = null
+  let displayLlmModel = null
   
   if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
     // Current session: use live WebSocket data from checkStore
@@ -71,6 +73,9 @@ export default function StatusSection() {
     displayProgress = checkStoreProgress
     displayTotalRefs = checkStoreStats?.total_refs || 0
     displayProcessedRefs = checkStoreStats?.processed_refs || 0
+    // Get LLM info from selectedCheck (history) since it's not in checkStore
+    displayLlmProvider = selectedCheck?.llm_provider
+    displayLlmModel = selectedCheck?.llm_model
   } else if (isViewingCheck && selectedCheck) {
     // Other checks: use selectedCheck data from history
     displayStatus = selectedCheck.status || 'idle'
@@ -79,6 +84,8 @@ export default function StatusSection() {
     displayTotalRefs = selectedCheck.total_refs || 0
     displayProcessedRefs = selectedCheck.processed_refs || 0
     displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
+    displayLlmProvider = selectedCheck.llm_provider
+    displayLlmModel = selectedCheck.llm_model
     
     // Build status message based on state
     if (displayStatus === 'in_progress') {
@@ -256,6 +263,14 @@ export default function StatusSection() {
               )}
             </p>
           )}
+          {displayLlmModel && (
+            <p 
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Model: {displayLlmProvider ? `${displayLlmProvider} / ` : ''}{displayLlmModel}
+            </p>
+          )}
           <p 
             className="text-sm"
             style={{ color: 'var(--color-text-muted)' }}
@@ -270,22 +285,38 @@ export default function StatusSection() {
               try {
                 logger.info('StatusSection', `Cancelling check ${viewedCheckSessionId}`)
                 await api.cancelCheck(viewedCheckSessionId)
+                // Update history item status
+                if (selectedCheckId) {
+                  updateHistoryProgress(selectedCheckId, { status: 'cancelled' })
+                }
                 // Only update checkStore if cancelling the current session
                 if (viewedCheckSessionId === sessionId) {
                   storeCancelCheck()
                 }
               } catch (error) {
                 logger.error('StatusSection', 'Failed to cancel', error)
+                // Still mark as cancelled since the check may have already finished
+                if (selectedCheckId) {
+                  updateHistoryProgress(selectedCheckId, { status: 'cancelled' })
+                }
                 if (viewedCheckSessionId === sessionId) {
                   storeCancelCheck()
                 }
                 setError(error.response?.data?.detail || error.message || 'Failed to cancel')
               }
             }}
-            className="px-3 py-2 text-sm font-medium rounded transition-colors"
+            className="px-3 py-2 text-sm font-medium rounded transition-colors cursor-pointer hover:opacity-80"
             style={{
               backgroundColor: 'var(--color-error-bg)',
               color: 'var(--color-error)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-error)'
+              e.currentTarget.style.color = 'white'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
+              e.currentTarget.style.color = 'var(--color-error)'
             }}
           >
             Cancel

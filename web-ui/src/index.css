@@ -20,6 +20,8 @@
   --color-info: #6366f1;
   --color-info-bg: #eef2ff;
   --color-link: #2563eb;
+  --color-suggestion: #8b5cf6;
+  --color-suggestion-bg: #f5f3ff;
   
   /* Sidebar */
   --sidebar-width: 280px;
@@ -45,6 +47,8 @@
   --color-info: #818cf8;
   --color-info-bg: #1e1b4b;
   --color-link: #60a5fa;
+  --color-suggestion: #a78bfa;
+  --color-suggestion-bg: #2e1f4d;
   --sidebar-bg: #171717;
 }
 

@@ -3,10 +3,31 @@ import { formatAuthors } from '../../utils/formatters'
 const urlPattern = /https?:\/\/[^\s]+/g
 
 // Parse error_details to extract cited/actual values and format on separate lines
+// Handles new format: "Title mismatch:\n       cited:  value\n       actual: value"
 const parseErrorDetails = (details) => {
   if (!details) return null
   
-  // Match patterns like "cited: 'value' actual: 'value'" or "cited: 'value'" or "actual: 'value'"
+  // Split by newlines to handle multiline format
+  const lines = details.split('\n')
+  
+  if (lines.length >= 3) {
+    // New three-line format: prefix on first line, cited on second, actual on third
+    const prefix = lines[0].replace(/:$/, '').trim() // Remove trailing colon
+    
+    // Extract value after "cited:" (with any amount of whitespace)
+    const citedLine = lines[1]
+    const citedMatch = citedLine.match(/cited:\s*(.*)/)
+    const cited = citedMatch ? citedMatch[1].trim() : null
+    
+    // Extract value after "actual:" (with any amount of whitespace)  
+    const actualLine = lines[2]
+    const actualMatch = actualLine.match(/actual:\s*(.*)/)
+    const actual = actualMatch ? actualMatch[1].trim() : null
+    
+    return { prefix, cited, actual, isMultiline: true }
+  }
+  
+  // Legacy format: "prefix cited: 'value' actual: 'value'" on one line (with quotes)
   const citedMatch = details.match(/cited:\s*'([^']*)'/)
   const actualMatch = details.match(/actual:\s*'([^']*)'/)
   
@@ -22,7 +43,8 @@ const parseErrorDetails = (details) => {
   return {
     prefix,
     cited: citedMatch ? citedMatch[1] : null,
-    actual: actualMatch ? actualMatch[1] : null
+    actual: actualMatch ? actualMatch[1] : null,
+    isMultiline: false
   }
 }
 
@@ -70,14 +92,17 @@ const renderTextWithLinks = (text) => {
  * Individual reference card matching CLI output format
  */
 export default function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
-  const numberToShow = typeof displayIndex === 'number' ? displayIndex : index
+  // Always use the original index for consistent numbering, even when filtered
+  const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const status = (reference.status || '').toLowerCase()
   const getStatusColor = () => {
     switch (status) {
       case 'verified': return 'var(--color-success)'
       case 'warning': return 'var(--color-warning)'
       case 'error': return 'var(--color-error)'
+      case 'suggestion': return 'var(--color-suggestion)'
       case 'unverified': return 'var(--color-text-muted)'
+      case 'unchecked': return 'var(--color-text-muted)'
       case 'checking': return 'var(--color-accent)'
       case 'pending': return 'var(--color-text-muted)'
       default: return 'var(--color-text-muted)'
@@ -169,9 +194,32 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
       return (
         <span className="flex-shrink-0 inline-block" title="Warning">
           <svg className={commonSize} viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" fill="var(--color-warning)" />
-            <path d="M12 7.5v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <path d="M12 2L2 20h20L12 2z" fill="var(--color-warning)" />
+            <path d="M12 9v4" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="15.5" r="1" fill="#fff" />
+          </svg>
+        </span>
+      )
+    }
+
+    if (status === 'suggestion') {
+      return (
+        <span className="flex-shrink-0 inline-block" title="Suggestion">
+          <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-suggestion)" />
+            <path d="M12 7v4m0 0l-2-2m2 2l2-2" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+          </svg>
+        </span>
+      )
+    }
+
+    if (status === 'unchecked') {
+      return (
+        <span className="flex-shrink-0 inline-block" title="Not checked (check cancelled or timed out)">
+          <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
+            <path d="M8 12h8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
           </svg>
         </span>
       )
@@ -385,15 +433,15 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 </div>
                 {/* Show parsed cited/actual on separate lines, or use direct fields */}
                 {(parsedDetails?.cited || warning.cited_value) && (
-                  <div className="flex">
-                    <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">cited:</span></span>
-                    <span>'{parsedDetails?.cited || warning.cited_value}'</span>
+                  <div className="flex ml-6">
+                    <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">cited:</span></span>
+                    <span>{renderTextWithLinks(parsedDetails?.cited || warning.cited_value)}</span>
                   </div>
                 )}
                 {(parsedDetails?.actual || warning.actual_value) && (
-                  <div className="flex">
-                    <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">actual:</span></span>
-                    <span>'{parsedDetails?.actual || warning.actual_value}'</span>
+                  <div className="flex ml-6">
+                    <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">actual:</span></span>
+                    <span>{renderTextWithLinks(parsedDetails?.actual || warning.actual_value)}</span>
                   </div>
                 )}
               </div>
@@ -401,10 +449,58 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           })}
 
           {/* Errors (non-unverified) */}
-          {reference.errors?.filter(e => e.error_type !== 'unverified').map((error, i) => (
+          {reference.errors?.filter(e => e.error_type !== 'unverified').map((error, i) => {
+            const parsedDetails = parseErrorDetails(error.error_details)
+            const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
+            
+            // Use the specific prefix from error_details if available, otherwise fall back to raw details
+            const errorText = (hasParsedCitedActual && parsedDetails?.prefix) 
+              ? parsedDetails.prefix
+              : (error.error_details || error.error_type)
+            
+            return (
+              <div 
+                key={`error-${i}`}
+                style={{ color: 'var(--color-error)', wordBreak: 'break-word' }}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="pt-0.5 inline-block flex-shrink-0">
+                    <svg 
+                      className="w-4 h-4"
+                      viewBox="0 0 24 24" 
+                      fill="currentColor"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+                      <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+                    </svg>
+                  </span>
+                  <span>
+                    <span className="font-bold">Error:</span> {hasParsedCitedActual ? errorText : renderTextWithLinks(errorText)}
+                  </span>
+                </div>
+                {/* Show parsed cited/actual on separate lines, or use direct fields */}
+                {(parsedDetails?.cited || error.cited_value) && (
+                  <div className="flex ml-6">
+                    <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">cited:</span></span>
+                    <span>{renderTextWithLinks(parsedDetails?.cited || error.cited_value)}</span>
+                  </div>
+                )}
+                {(parsedDetails?.actual || error.actual_value) && (
+                  <div className="flex ml-6">
+                    <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">actual:</span></span>
+                    <span>{renderTextWithLinks(parsedDetails?.actual || error.actual_value)}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Information messages (e.g., missing arXiv URL) - rendered as suggestions */}
+          {reference.suggestions?.map((suggestion, i) => (
             <div 
-              key={`error-${i}`}
-              style={{ color: 'var(--color-error)', wordBreak: 'break-word' }}
+              key={`suggestion-${i}`}
+              style={{ color: 'var(--color-suggestion)', wordBreak: 'break-word' }}
             >
               <div className="flex items-start gap-2">
                 <span className="pt-0.5 inline-block flex-shrink-0">
@@ -414,38 +510,12 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                     fill="currentColor"
                   >
                     <circle cx="12" cy="12" r="10" />
-                    <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+                    <path d="M12 7v4m0 0l-2-2m2 2l2-2" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
                   </svg>
                 </span>
-                <span style={{ whiteSpace: 'pre-line' }}>
-                  <span className="font-bold">Error:</span> {renderTextWithLinks(error.error_details || error.error_type)}
-                </span>
+                <span><span className="font-bold">Suggestion:</span> {renderTextWithLinks(suggestion.suggestion_details || suggestion)}</span>
               </div>
-              {error.cited_value && (
-                <div className="flex" style={{ whiteSpace: 'pre-line' }}>
-                  <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">cited:</span></span>
-                  <span>'{error.cited_value}'</span>
-                </div>
-              )}
-              {error.actual_value && (
-                <div className="flex" style={{ whiteSpace: 'pre-line' }}>
-                  <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">actual:</span></span>
-                  <span>'{error.actual_value}'</span>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Information messages (e.g., missing arXiv URL) */}
-          {reference.info_messages?.map((info, i) => (
-            <div 
-              key={`info-${i}`}
-              className="flex items-start gap-2"
-              style={{ color: 'var(--color-accent)', wordBreak: 'break-word' }}
-            >
-              <span>ℹ️</span>
-              <span>{renderTextWithLinks(info)}</span>
             </div>
           ))}
         </div>

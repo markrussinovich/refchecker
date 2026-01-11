@@ -335,7 +335,7 @@ class TestAuthorMismatchFormatting:
     """Test author mismatch formatting consistency."""
     
     def test_format_author_mismatch_alignment(self):
-        """Test that author mismatch messages use new three-line format."""
+        """Test that author mismatch messages use new three-line format with indentation."""
         result = format_author_mismatch(2, "Abdullahi Kana", "Kana A. F. D.")
         lines = result.split('\n')
         
@@ -345,18 +345,20 @@ class TestAuthorMismatchFormatting:
         # First line should be "Author 2 mismatch:"
         assert lines[0] == "Author 2 mismatch:", f"First line format wrong: {lines[0]}"
         
-        # Second line should start with "cited:  '"
-        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
+        # Second line should have indentation and start with "cited:"
+        assert "cited:" in lines[1], f"Second line should contain 'cited:': {lines[1]}"
+        assert lines[1].strip().startswith("cited:"), f"Second line should start with 'cited:' after stripping: {lines[1]}"
         
-        # Third line should start with "actual: '"
-        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
+        # Third line should have indentation and start with "actual:"
+        assert "actual:" in lines[2], f"Third line should contain 'actual:': {lines[2]}"
+        assert lines[2].strip().startswith("actual:"), f"Third line should start with 'actual:' after stripping: {lines[2]}"
         
-        # Values should be quoted correctly
-        assert "'Abdullahi Kana'" in lines[1], f"Cited author missing from second line: {lines[1]}"
-        assert "'Kana A. F. D.'" in lines[2], f"Correct author missing from third line: {lines[2]}"
+        # Values should be present
+        assert "Abdullahi Kana" in lines[1], f"Cited author missing from second line: {lines[1]}"
+        assert "Kana A. F. D." in lines[2], f"Correct author missing from third line: {lines[2]}"
     
     def test_format_first_author_mismatch_alignment(self):
-        """Test that first author mismatch messages use new three-line format."""
+        """Test that first author mismatch messages use new three-line format with indentation."""
         result = format_first_author_mismatch("Cited Author", "Correct Author")
         lines = result.split('\n')
         
@@ -366,15 +368,17 @@ class TestAuthorMismatchFormatting:
         # First line should be "First author mismatch:"
         assert lines[0] == "First author mismatch:", f"First line format wrong: {lines[0]}"
         
-        # Second line should start with "cited:  '"
-        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
+        # Second line should have indentation and contain "cited:"
+        assert "cited:" in lines[1], f"Second line should contain 'cited:': {lines[1]}"
+        assert lines[1].strip().startswith("cited:"), f"Second line should start with 'cited:' after stripping: {lines[1]}"
         
-        # Third line should start with "actual: '"
-        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
+        # Third line should have indentation and contain "actual:"
+        assert "actual:" in lines[2], f"Third line should contain 'actual:': {lines[2]}"
+        assert lines[2].strip().startswith("actual:"), f"Third line should start with 'actual:' after stripping: {lines[2]}"
         
-        # Values should be quoted correctly
-        assert "'Cited Author'" in lines[1], f"Cited author missing from second line: {lines[1]}"
-        assert "'Correct Author'" in lines[2], f"Correct author missing from third line: {lines[2]}"
+        # Values should be present
+        assert "Cited Author" in lines[1], f"Cited author missing from second line: {lines[1]}"
+        assert "Correct Author" in lines[2], f"Correct author missing from third line: {lines[2]}"
     
     def test_alignment_consistency_across_functions(self):
         """Test that all author mismatch formatters produce consistent three-line format."""
@@ -392,11 +396,13 @@ class TestAuthorMismatchFormatting:
             # Check that the message starts with the expected prefix
             assert lines[0] == expected_prefix, f"Should be '{expected_prefix}': {lines[0]}"
             
-            # Second line should be "cited: ..."
-            assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
+            # Second line should contain "cited:" with indentation
+            assert "cited:" in lines[1], f"Second line should contain 'cited:': {lines[1]}"
+            assert lines[1].strip().startswith("cited:"), f"Second line should start with 'cited:' after stripping: {lines[1]}"
             
-            # Third line should be "actual: ..."
-            assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
+            # Third line should contain "actual:" with indentation
+            assert "actual:" in lines[2], f"Third line should contain 'actual:': {lines[2]}"
+            assert lines[2].strip().startswith("actual:"), f"Third line should start with 'actual:' after stripping: {lines[2]}"
     
     def test_author_formatting_with_various_lengths(self):
         """Test formatting consistency with various author name lengths using new three-line format."""
@@ -414,12 +420,14 @@ class TestAuthorMismatchFormatting:
             # Check basic structure for new three-line format
             assert len(lines) == 3, f"Case {test_cases.index((author_num, cited, correct))}: Expected 3 lines: {result}"
             assert lines[0] == f"Author {author_num} mismatch:", f"Missing proper prefix in: {lines[0]}"
-            assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
-            assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
+            assert "cited:" in lines[1], f"Second line should contain 'cited:': {lines[1]}"
+            assert lines[1].strip().startswith("cited:"), f"Second line should start with 'cited:' after stripping: {lines[1]}"
+            assert "actual:" in lines[2], f"Third line should contain 'actual:': {lines[2]}"
+            assert lines[2].strip().startswith("actual:"), f"Third line should start with 'actual:' after stripping: {lines[2]}"
             
-            # Check values are properly quoted
-            assert f"'{cited}'" in lines[1], f"Cited author not properly quoted: {lines[1]}"
-            assert f"'{correct}'" in lines[2], f"Correct author not properly quoted: {lines[2]}"
+            # Check values are present
+            assert cited in lines[1], f"Cited author not found: {lines[1]}"
+            assert correct in lines[2], f"Correct author not found: {lines[2]}"
     
     def test_colon_alignment_with_leading_prefix(self):
         """Test that three-line format works correctly with print_labeled_multiline."""
@@ -432,9 +440,11 @@ class TestAuthorMismatchFormatting:
         
         # Check format structure
         assert lines[0] == "Year mismatch:", f"First line should be 'Year mismatch:': {lines[0]}"
-        assert lines[1].startswith("cited:  '"), f"Second line should start with 'cited:  ': {lines[1]}"
-        assert lines[2].startswith("actual: '"), f"Third line should start with 'actual: ': {lines[2]}"
+        assert "cited:" in lines[1], f"Second line should contain 'cited:': {lines[1]}"
+        assert lines[1].strip().startswith("cited:"), f"Second line should start with 'cited:' after stripping: {lines[1]}"
+        assert "actual:" in lines[2], f"Third line should contain 'actual:': {lines[2]}"
+        assert lines[2].strip().startswith("actual:"), f"Third line should start with 'actual:' after stripping: {lines[2]}"
         
         # Check values
-        assert "'2021'" in lines[1], f"Cited year not found: {lines[1]}"
-        assert "'2020'" in lines[2], f"Actual year not found: {lines[2]}"
+        assert "2021" in lines[1], f"Cited year not found: {lines[1]}"
+        assert "2020" in lines[2], f"Actual year not found: {lines[2]}"

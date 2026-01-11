@@ -150,14 +150,13 @@ export default function HistoryItem({ item, isSelected }) {
       onClick={handleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="px-4 py-3 cursor-pointer transition-colors border-b relative"
+      className="px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative"
       style={{
         backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : 'transparent',
-        borderColor: 'var(--color-border)',
       }}
       onMouseOver={(e) => {
         if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)'
+          e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
         }
       }}
       onMouseOut={(e) => {
@@ -329,7 +328,7 @@ export default function HistoryItem({ item, isSelected }) {
             </svg>
           </button>
         </div>
-      ) : isHovered && !isEditing && (
+      ) : isHovered && !isEditing && !isPlaceholder && (
         <div 
           className="absolute top-2 right-2 flex items-center"
         >

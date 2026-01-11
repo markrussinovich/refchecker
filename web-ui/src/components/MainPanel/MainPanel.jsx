@@ -50,9 +50,15 @@ export default function MainPanel() {
     : (isCurrentCheck ? checkStoreStatus : 'idle')
   
   const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
-  const isComplete = displayStatus === 'completed'
-
-  // Build unified references list
+  const isComplete = displayStatus === 'completed' || displayStatus === 'cancelled'
+  // Get paper title and source for export
+  const displayPaperTitle = hasSelectedCheckData 
+    ? (selectedCheck.custom_label || selectedCheck.paper_title)
+    : null
+  const displayPaperSource = hasSelectedCheckData 
+    ? selectedCheck.paper_source 
+    : null
+  // Build unified references list FIRST (needed by buildStats)
   // For current check, prefer live checkStore data; for other checks, use selectedCheck
   const getReferences = () => {
     // Current check: use live WebSocket data from checkStore
@@ -68,6 +74,8 @@ export default function MainPanel() {
     return []
   }
 
+  const displayRefs = getReferences()
+
   // Build unified stats
   // For current check, prefer live checkStore stats; for other checks, compute from selectedCheck
   const buildStats = () => {
@@ -81,21 +89,41 @@ export default function MainPanel() {
       const processedRefs = selectedCheck.processed_refs || 0
       const errorsCount = selectedCheck.errors_count || 0
       const warningsCount = selectedCheck.warnings_count || 0
+      const suggestionsCount = selectedCheck.suggestions_count || 0
       const unverifiedCount = selectedCheck.unverified_count || 0
       
-      // For in-progress checks, verified = processed - errors - warnings - unverified
-      // For completed checks, verified = total - errors - warnings - unverified
-      const verifiedCount = isInProgress
-        ? Math.max(0, processedRefs - errorsCount - warningsCount - unverifiedCount)
-        : Math.max(0, totalRefs - errorsCount - warningsCount - unverifiedCount)
+      // Use stored refs_verified if available, otherwise calculate
+      const verifiedCount = selectedCheck.refs_verified ?? selectedCheck.verified_count ?? 
+        Math.max(0, (isInProgress ? processedRefs : totalRefs) - errorsCount - warningsCount - unverifiedCount)
+      
+      // Use stored paper-level counts if available, otherwise compute from results
+      let refsWithErrors = selectedCheck.refs_with_errors
+      let refsWithWarningsOnly = selectedCheck.refs_with_warnings_only
+      
+      // If not stored, compute from results
+      if (refsWithErrors === undefined && displayRefs?.length > 0) {
+        refsWithErrors = displayRefs.filter(r => 
+          r.status === 'error' || (r.errors?.some(e => e.error_type !== 'unverified'))
+        ).length
+      }
+      if (refsWithWarningsOnly === undefined && displayRefs?.length > 0) {
+        refsWithWarningsOnly = displayRefs.filter(r => 
+          (r.status === 'warning' || r.warnings?.length > 0) && 
+          r.status !== 'error' && !r.errors?.some(e => e.error_type !== 'unverified')
+        ).length
+      }
       
       return {
         total_refs: totalRefs,
         processed_refs: processedRefs,
         verified_count: verifiedCount,
+        refs_verified: verifiedCount,
         errors_count: errorsCount,
         warnings_count: warningsCount,
+        suggestions_count: suggestionsCount,
         unverified_count: unverifiedCount,
+        refs_with_errors: refsWithErrors ?? 0,
+        refs_with_warnings_only: refsWithWarningsOnly ?? 0,
         progress_percent: totalRefs > 0 ? (processedRefs / totalRefs) * 100 : 0,
       }
     }
@@ -110,20 +138,18 @@ export default function MainPanel() {
       total_refs: 0,
       processed_refs: 0,
       verified_count: 0,
+      refs_verified: 0,
       errors_count: 0,
       warnings_count: 0,
+      suggestions_count: 0,
       unverified_count: 0,
+      refs_with_errors: 0,
+      refs_with_warnings_only: 0,
       progress_percent: 0,
     }
   }
 
   const displayStats = buildStats()
-  const displayRefs = getReferences()
-
-  // Debug: log what we're displaying
-  console.log(`[DEBUG-MAINPANEL] selectedCheckId=${selectedCheckId} currentCheckId=${currentCheckId} isCurrentCheck=${isCurrentCheck}`)
-  console.log(`[DEBUG-MAINPANEL] hasSelectedCheckData=${hasSelectedCheckData} selectedCheck.results=${selectedCheck?.results?.length} checkStoreRefs=${checkStoreRefs?.length}`)
-  console.log(`[DEBUG-MAINPANEL] displayRefs.length=${displayRefs?.length}`)
 
   return (
     <main 
@@ -144,6 +170,9 @@ export default function MainPanel() {
           <StatsSection 
             stats={displayStats}
             isComplete={isComplete}
+            references={displayRefs}
+            paperTitle={displayPaperTitle}
+            paperSource={displayPaperSource}
           />
         )}
 
@@ -152,6 +181,7 @@ export default function MainPanel() {
           <ReferenceList 
             references={displayRefs}
             isLoading={isLoadingDetail}
+            isCheckComplete={isComplete}
           />
         )}
       </div>

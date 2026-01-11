@@ -4,29 +4,40 @@ import { useCheckStore } from '../../stores/useCheckStore'
 
 /**
  * Derive status from reference data, trusting backend final statuses
+ * @param {Object} ref - Reference object
+ * @param {boolean} isCheckComplete - Whether the overall check has completed/cancelled
  */
-const computeDerivedStatus = (ref) => {
+const computeDerivedStatus = (ref, isCheckComplete = false) => {
   const baseStatus = (ref.status || '').trim().toLowerCase()
   
   // Trust backend's final status values
-  if (['error', 'warning', 'unverified', 'verified'].includes(baseStatus)) {
+  if (['error', 'warning', 'suggestion', 'unverified', 'verified'].includes(baseStatus)) {
     return baseStatus
   }
   
   // Keep pending and checking distinct so UI shows appropriate icons
   // - pending: clock icon (waiting in queue)
   // - checking: spinner (actively being verified)
-  if (baseStatus === 'pending') return 'pending'
-  if (['checking', 'in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) return 'checking'
+  // - unchecked: grey X (never checked due to cancellation/timeout)
+  if (baseStatus === 'pending' || baseStatus === 'checking' || 
+      ['in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) {
+    // If check is complete but this ref wasn't processed, mark as unchecked
+    if (isCheckComplete) {
+      return 'unchecked'
+    }
+    return baseStatus === 'pending' ? 'pending' : 'checking'
+  }
   
-  // For unknown states, derive from errors/warnings arrays
+  // For unknown states, derive from errors/warnings/suggestions arrays
   const hasErrors = Array.isArray(ref.errors) && ref.errors.some(
     e => (e?.error_type || '').toLowerCase() !== 'unverified'
   )
   const hasWarnings = !hasErrors && Array.isArray(ref.warnings) && ref.warnings.length > 0
+  const hasSuggestions = !hasErrors && !hasWarnings && Array.isArray(ref.suggestions) && ref.suggestions.length > 0
 
   if (hasErrors) return 'error'
   if (hasWarnings) return 'warning'
+  if (hasSuggestions) return 'suggestion'
   // No status and no issues = verified
   return 'verified'
 }
@@ -34,7 +45,7 @@ const computeDerivedStatus = (ref) => {
 /**
  * List of references being checked
  */
-export default function ReferenceList({ references, isLoading }) {
+export default function ReferenceList({ references, isLoading, isCheckComplete = false }) {
   const { statusFilter } = useCheckStore()
 
   // Memoize all derived data to ensure consistency within a render
@@ -49,29 +60,46 @@ export default function ReferenceList({ references, isLoading }) {
 
     const normalized = sorted.map(ref => ({
       ...ref,
-      status: computeDerivedStatus(ref),
+      status: computeDerivedStatus(ref, isCheckComplete),
       errors: Array.isArray(ref.errors) ? ref.errors : [],
       warnings: Array.isArray(ref.warnings) ? ref.warnings : [],
     }))
 
     const filtered = normalized.filter(ref => {
       const status = (ref.status || '').toLowerCase()
-      // If no filter, show all references including pending/checking
+      // If no filter, show all references including pending/checking/unchecked
       if (filters.length === 0) {
         return true
       }
       
-      // When filtering by status, hide pending/checking since they don't have a final status yet
-      if (status === 'pending' || status === 'checking') {
-        return false
-      }
-      
-      // Match filter to status (any of the selected filters)
-      return filters.includes(status)
+      // Inclusive filtering: show refs that HAVE the selected issue type
+      // (even if they also have other issues)
+      return filters.some(filter => {
+        switch (filter) {
+          case 'verified':
+            // Verified includes both pure verified AND those with only suggestions
+            // (suggestions are for verified papers that could be improved)
+            return status === 'verified' || status === 'suggestion'
+          case 'error':
+            // Has any error (non-unverified)
+            return ref.errors?.some(e => e.error_type !== 'unverified')
+          case 'warning':
+            // Has any warning
+            return ref.warnings?.length > 0
+          case 'suggestion':
+            // Has any suggestion
+            return ref.suggestions?.length > 0
+          case 'unverified':
+            return status === 'unverified' || ref.errors?.some(e => e.error_type === 'unverified')
+          default:
+            // For other statuses (pending, checking, unchecked), match exactly
+            return status === filter
+        }
+      })
     })
 
     return { sortedReferences: sorted, filteredReferences: filtered, normalizedFilters: filters }
-  }, [references, statusFilter])
+  }, [references, statusFilter, isCheckComplete])
 
   if (isLoading) {
     return (
@@ -138,8 +166,8 @@ export default function ReferenceList({ references, isLoading }) {
       }}
     >
       <div 
-        className="px-4 py-3 border-b flex items-center justify-between"
-        style={{ borderColor: 'var(--color-border)' }}
+        className="px-4 py-3 border-b flex items-center justify-between relative"
+        style={{ borderColor: 'var(--color-border)', minHeight: '48px' }}
       >
         <h3 
           className="font-semibold"
@@ -149,7 +177,7 @@ export default function ReferenceList({ references, isLoading }) {
         </h3>
         {statusFilter.length > 0 && (
           <span 
-            className="text-sm px-2 py-1 rounded"
+            className="absolute right-4 text-sm px-2 py-1 rounded"
             style={{ 
               backgroundColor: 'var(--color-bg-tertiary)',
               color: 'var(--color-text-secondary)' 

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 
+import aiosqlite
 from .database import db
 from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
@@ -284,7 +285,11 @@ async def run_check(
                             total_refs=data.get("total_refs", 0),
                             errors_count=data.get("errors_count", 0),
                             warnings_count=data.get("warnings_count", 0),
+                            suggestions_count=data.get("suggestions_count", 0),
                             unverified_count=data.get("unverified_count", 0),
+                            refs_with_errors=data.get("refs_with_errors", 0),
+                            refs_with_warnings_only=data.get("refs_with_warnings_only", 0),
+                            refs_verified=data.get("refs_verified", 0),
                             results=accumulated_results
                         )
                         last_save_count = current_count
@@ -318,7 +323,11 @@ async def run_check(
             total_refs=result["summary"]["total_refs"],
             errors_count=result["summary"]["errors_count"],
             warnings_count=result["summary"]["warnings_count"],
+            suggestions_count=result["summary"].get("suggestions_count", 0),
             unverified_count=result["summary"]["unverified_count"],
+            refs_with_errors=result["summary"].get("refs_with_errors", 0),
+            refs_with_warnings_only=result["summary"].get("refs_with_warnings_only", 0),
+            refs_verified=result["summary"].get("refs_verified", 0),
             results=result["references"],
             status='completed'
         )
@@ -766,6 +775,46 @@ async def update_setting(setting_key: str, update: SettingUpdate):
         raise
     except Exception as e:
         logger.error(f"Error updating setting: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Debug/Admin endpoints
+
+@app.delete("/api/admin/cache")
+async def clear_verification_cache():
+    """Clear the verification cache"""
+    try:
+        count = await db.clear_verification_cache()
+        logger.info(f"Cleared {count} entries from verification cache")
+        return {"message": f"Cleared {count} cached verification results", "count": count}
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/database")
+async def clear_database():
+    """Clear all data (cache + history) but keep settings and LLM configs"""
+    try:
+        # Clear verification cache
+        cache_count = await db.clear_verification_cache()
+        
+        # Clear check history
+        async with aiosqlite.connect(db.db_path) as conn:
+            await conn.execute("DELETE FROM check_history")
+            await conn.commit()
+            cursor = await conn.execute("SELECT changes()")
+            row = await cursor.fetchone()
+            history_count = row[0] if row else 0
+        
+        logger.info(f"Cleared database: {cache_count} cache entries, {history_count} history entries")
+        return {
+            "message": f"Cleared {cache_count} cache entries and {history_count} history entries",
+            "cache_count": cache_count,
+            "history_count": history_count
+        }
+    except Exception as e:
+        logger.error(f"Error clearing database: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

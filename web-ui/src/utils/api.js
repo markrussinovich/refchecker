@@ -61,6 +61,10 @@ export const deleteCheck = (id) => api.delete(`/history/${id}`)
 export const updateCheckLabel = (id, label) => api.patch(`/history/${id}`, { custom_label: label })
 export const recheck = (id) => api.post(`/recheck/${id}`)
 
+// Admin operations
+export const clearCache = () => api.delete('/admin/cache')
+export const clearDatabase = () => api.delete('/admin/database')
+
 // WebSocket connection factory
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -117,4 +121,6 @@ export default {
   updateCheckLabel,
   recheck,
   createWebSocket,
+  clearCache,
+  clearDatabase,
 }

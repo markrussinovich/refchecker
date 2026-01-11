@@ -69,7 +69,11 @@ async function setupApiMock(page, serverState) {
         total_refs: next.totalRefs,
         errors_count: next.stats?.errors_count ?? 0,
         warnings_count: next.stats?.warnings_count ?? 0,
+        suggestions_count: next.stats?.suggestions_count ?? 0,
         unverified_count: next.stats?.unverified_count ?? 0,
+        refs_with_errors: next.stats?.refs_with_errors ?? 0,
+        refs_with_warnings_only: next.stats?.refs_with_warnings_only ?? 0,
+        refs_verified: next.stats?.refs_verified ?? 0,
         status: 'in_progress',
         session_id: next.sessionId,
       };
@@ -227,7 +231,8 @@ test.describe('RefChecker Web UI', () => {
     await page.getByRole('button', { name: 'Check References' }).click();
 
     await expect(sidebar.getByText('Paper One', { exact: true })).toBeVisible();
-    await expect(sidebar.getByText('Verifying 2 refs...')).toBeVisible();
+    // During in-progress, the sidebar shows "X/Y refs" or "Extracting refs..."
+    await expect(sidebar.getByText(/\d+\/\d+ refs|Extracting refs/)).toBeVisible();
 
     // Start second check while first is in progress
     await page.getByRole('button', { name: 'New refcheck' }).click();
@@ -235,7 +240,8 @@ test.describe('RefChecker Web UI', () => {
     await page.getByRole('button', { name: 'Check References' }).click();
 
     await expect(sidebar.getByText('Paper Two', { exact: true })).toBeVisible();
-    await expect(sidebar.getByText('Verifying 1 refs...')).toBeVisible();
+    // Second check also shows similar progress format
+    await expect(sidebar.getByText(/\d+\/\d+ refs|Extracting refs/).first()).toBeVisible();
 
     // Switch to Paper Two and confirm its data
     await sidebar.getByText('Paper Two', { exact: true }).click();
@@ -555,5 +561,190 @@ test.describe('RefChecker Web UI', () => {
     // Edit and delete buttons should be visible on hover
     await expect(page.getByTitle('Edit label')).toBeVisible();
     await expect(page.getByTitle('Delete')).toBeVisible();
+  });
+
+  test('summary section height stays constant when filter is toggled', async ({ page }) => {
+    // Set up a completed check with some warnings so we have filter buttons
+    const serverState = {
+      startQueue: [
+        {
+          sessionId: 'sess-height-test',
+          checkId: 999,
+          paperTitle: 'Height Test Paper',
+          paperSource: 'height-test.pdf',
+          totalRefs: 3,
+          stats: { 
+            errors_count: 1, 
+            warnings_count: 1, 
+            unverified_count: 0,
+            refs_with_errors: 1,
+            refs_with_warnings_only: 1,
+            refs_verified: 1
+          },
+          results: [
+            { index: 1, title: 'Ref A', status: 'verified', errors: [], warnings: [], suggestions: [], authoritative_urls: [] },
+            { index: 2, title: 'Ref B', status: 'warning', errors: [], warnings: [{ warning_type: 'year', warning_details: 'Year mismatch' }], suggestions: [], authoritative_urls: [] },
+            { index: 3, title: 'Ref C', status: 'error', errors: [{ error_type: 'title', error_details: 'Title mismatch' }], warnings: [], suggestions: [], authoritative_urls: [] },
+          ],
+        },
+      ],
+      history: [],
+      details: {},
+    };
+
+    await setupApiMock(page, serverState);
+    await setupWebSocketMock(page);
+
+    await page.goto('/');
+
+    // Start check
+    await page.getByPlaceholder(/Enter ArXiv ID/i).fill('http://height-test.example');
+    await page.getByRole('button', { name: 'Check References' }).click();
+
+    // Wait for completion - summary should be visible
+    await expect(page.getByText('Summary')).toBeVisible();
+    
+    // Find the summary section container and measure its height
+    const summarySection = page.locator('.rounded-lg.border.p-3').first();
+    await expect(summarySection).toBeVisible();
+    
+    const initialBoundingBox = await summarySection.boundingBox();
+    const initialHeight = initialBoundingBox.height;
+
+    // Click on the warnings filter to activate it
+    const warningsButton = page.getByTitle('Filter by warnings only');
+    if (await warningsButton.isVisible()) {
+      await warningsButton.click();
+      
+      // Wait a moment for any re-render
+      await page.waitForTimeout(100);
+      
+      // Filter indicator should be visible
+      await expect(page.getByText(/Showing warnings/i)).toBeVisible();
+      
+      // Measure height again
+      const filteredBoundingBox = await summarySection.boundingBox();
+      const filteredHeight = filteredBoundingBox.height;
+      
+      // Height should remain constant (within 2px tolerance for sub-pixel rendering)
+      expect(Math.abs(filteredHeight - initialHeight)).toBeLessThanOrEqual(2);
+      
+      // Click again to toggle off
+      await page.getByText(/Showing warnings/i).click();
+      
+      // Wait a moment
+      await page.waitForTimeout(100);
+      
+      // Measure height after clearing filter
+      const clearedBoundingBox = await summarySection.boundingBox();
+      const clearedHeight = clearedBoundingBox.height;
+      
+      // Height should still be constant
+      expect(Math.abs(clearedHeight - initialHeight)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test('paper-level counts are correct and suggestions display properly', async ({ page }) => {
+    // Set up a check with specific issue counts to validate
+    const serverState = {
+      startQueue: [
+        {
+          sessionId: 'sess-counts-test',
+          checkId: 1000,
+          paperTitle: 'Counts Test Paper',
+          paperSource: 'counts-test.pdf',
+          totalRefs: 4,
+          stats: { 
+            errors_count: 1, 
+            warnings_count: 2, 
+            suggestions_count: 1,
+            unverified_count: 0,
+            refs_with_errors: 1,
+            refs_with_warnings_only: 1,
+            refs_verified: 2
+          },
+          results: [
+            { index: 1, title: 'Verified Ref', status: 'verified', errors: [], warnings: [], suggestions: [], authoritative_urls: [] },
+            { index: 2, title: 'Warning Only Ref', status: 'warning', errors: [], warnings: [{ warning_type: 'author', warning_details: 'Author mismatch' }], suggestions: [], authoritative_urls: [] },
+            { index: 3, title: 'Error Ref', status: 'error', errors: [{ error_type: 'title', error_details: 'Title mismatch' }], warnings: [{ warning_type: 'year', warning_details: 'Year mismatch' }], suggestions: [], authoritative_urls: [] },
+            { index: 4, title: 'Suggestion Ref', status: 'suggestion', errors: [], warnings: [], suggestions: [{ suggestion_type: 'url', suggestion_details: 'Reference could include arXiv URL: https://arxiv.org/abs/1234.5678' }], authoritative_urls: [] },
+          ],
+        },
+      ],
+      history: [],
+      details: {},
+    };
+
+    await setupApiMock(page, serverState);
+    const { emit } = await setupWebSocketMock(page);
+
+    await page.goto('/');
+
+    // Start check
+    await page.getByPlaceholder(/Enter ArXiv ID/i).fill('http://counts-test.example');
+    await page.getByRole('button', { name: 'Check References' }).click();
+
+    // Wait for check to start - use the Cancel button in main panel, not sidebar
+    await expect(page.getByRole('main').getByRole('button', { name: 'Cancel' })).toBeVisible();
+
+    // Emit WebSocket messages to simulate check completion
+    const sessionId = 'sess-counts-test';
+
+    // Emit stats_update with suggestions_count
+    await emit(sessionId, {
+      type: 'stats_update',
+      stats: {
+        total_refs: 4,
+        processed_refs: 4,
+        errors_count: 1,
+        warnings_count: 2,
+        suggestions_count: 1,
+        unverified_count: 0,
+        refs_with_errors: 1,
+        refs_with_warnings_only: 1,
+        refs_verified: 2,
+      }
+    });
+
+    // Emit reference results - results are in the details object after api mock processes them
+    const results = [
+      { index: 1, title: 'Verified Ref', status: 'verified', errors: [], warnings: [], suggestions: [], authoritative_urls: [] },
+      { index: 2, title: 'Warning Only Ref', status: 'warning', errors: [], warnings: [{ warning_type: 'author', warning_details: 'Author mismatch' }], suggestions: [], authoritative_urls: [] },
+      { index: 3, title: 'Error Ref', status: 'error', errors: [{ error_type: 'title', error_details: 'Title mismatch' }], warnings: [{ warning_type: 'year', warning_details: 'Year mismatch' }], suggestions: [], authoritative_urls: [] },
+      { index: 4, title: 'Suggestion Ref', status: 'suggestion', errors: [], warnings: [], suggestions: [{ suggestion_type: 'url', suggestion_details: 'Reference could include arXiv URL: https://arxiv.org/abs/1234.5678' }], authoritative_urls: [] },
+    ];
+    for (const ref of results) {
+      await emit(sessionId, { type: 'reference_result', result: ref });
+    }
+
+    // Emit completion
+    await emit(sessionId, { type: 'complete' });
+
+    // Wait for summary to be visible
+    await expect(page.getByText('Summary')).toBeVisible();
+    
+    // Verify the issue chips show correct counts (the rounded pill buttons with "X Errors", "X Warnings", etc.)
+    // These are the chips on the right side of the StatsSection
+    // Use getByRole with exact name to target the correct buttons
+    await expect(page.getByRole('button', { name: '1 Errors', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '2 Warnings', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '1 Suggestions', exact: true })).toBeVisible();
+    
+    // Verify suggestion is displayed as "Suggestion:" not "Error:"
+    await expect(page.getByText('Suggestion Ref')).toBeVisible();
+    // Click to expand if needed
+    const suggestionRef = page.getByText('Suggestion Ref');
+    await suggestionRef.click();
+    
+    // The suggestion should show "Suggestion:" label with the arXiv URL
+    await expect(page.getByText(/Suggestion:.*arXiv/i)).toBeVisible();
+    
+    // Verify the suggestion ref card specifically doesn't have "Error:" for the arXiv content
+    // Get the parent container of the Suggestion Ref and verify it doesn't contain "Error:" before "arXiv"
+    const suggestionCard = page.locator('.divide-y > div').filter({ hasText: 'Suggestion Ref' });
+    // The suggestion card should contain "Suggestion:" but NOT "Error:" before the arXiv URL
+    await expect(suggestionCard.getByText(/Suggestion:.*arXiv/i)).toBeVisible();
+    // The arXiv text should not be labeled as "Error" in this card
+    await expect(suggestionCard.locator('text=/^Error:.*arXiv/i')).not.toBeVisible();
   });
 });

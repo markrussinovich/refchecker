@@ -33,9 +33,12 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
   // Reset form when modal opens/closes or editConfig changes
   useEffect(() => {
     if (isOpen) {
+      const defaultProvider = editConfig?.provider || 'anthropic'
+      const providerInfo = PROVIDERS.find(p => p.id === defaultProvider)
+      const defaultModel = providerInfo?.defaultModel || ''
       setFormData({
-        name: editConfig?.name || '',
-        provider: editConfig?.provider || 'anthropic',
+        name: editConfig?.name || defaultModel,
+        provider: defaultProvider,
         model: editConfig?.model || '',
         api_key: '',
         endpoint: editConfig?.endpoint || '',
@@ -48,19 +51,35 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => ({ ...prev, [name]: value }))
+    setFormData(prev => {
+      const updated = { ...prev, [name]: value }
+      // Auto-update config name when model changes (only if name is empty or matches old model)
+      if (name === 'model' && !editConfig) {
+        const oldModel = prev.model || selectedProvider?.defaultModel || ''
+        if (!prev.name || prev.name === oldModel) {
+          updated.name = value || selectedProvider?.defaultModel || ''
+        }
+      }
+      return updated
+    })
     setError(null)
   }
 
   const handleProviderChange = (e) => {
     const provider = e.target.value
     const providerInfo = PROVIDERS.find(p => p.id === provider)
-    setFormData(prev => ({
-      ...prev,
-      provider,
-      model: '', // Reset model when provider changes
-      endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
-    }))
+    setFormData(prev => {
+      const oldModel = prev.model || selectedProvider?.defaultModel || ''
+      const newDefaultModel = providerInfo?.defaultModel || ''
+      return {
+        ...prev,
+        provider,
+        model: '', // Reset model when provider changes
+        // Auto-update name if it was empty or matched the old model
+        name: (!prev.name || prev.name === oldModel) ? newDefaultModel : prev.name,
+        endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
+      }
+    })
     setError(null)
   }
 

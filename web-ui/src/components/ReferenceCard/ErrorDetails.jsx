@@ -29,17 +29,19 @@ export default function ErrorDetails({ title, items, type }) {
             </div>
             {(item.cited_value || item.actual_value) && (
               <div 
-                className="mt-1 text-xs space-y-1"
+                className="mt-1 text-xs space-y-1 ml-4"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
                 {item.cited_value && (
-                  <div>
-                    <span className="font-medium">Cited:</span> {item.cited_value}
+                  <div className="flex">
+                    <span className="font-medium flex-shrink-0" style={{ width: '60px' }}>cited:</span>
+                    <span>{item.cited_value}</span>
                   </div>
                 )}
                 {item.actual_value && (
-                  <div>
-                    <span className="font-medium">Actual:</span> {item.actual_value}
+                  <div className="flex">
+                    <span className="font-medium flex-shrink-0" style={{ width: '60px' }}>actual:</span>
+                    <span>{item.actual_value}</span>
                   </div>
                 )}
               </div>

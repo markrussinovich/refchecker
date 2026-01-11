@@ -30,9 +30,14 @@ describe('formatters', () => {
       expect(formatAuthors(['John Smith'])).toBe('John Smith')
     })
 
-    it('should handle three+ authors with et al', () => {
+    it('should handle three+ authors by showing all', () => {
       const authors = ['John Smith', 'Jane Doe', 'Bob Johnson']
-      expect(formatAuthors(authors)).toBe('John Smith et al.')
+      expect(formatAuthors(authors)).toBe('John Smith, Jane Doe, Bob Johnson')
+    })
+
+    it('should handle three+ authors with et al when truncate=true', () => {
+      const authors = ['John Smith', 'Jane Doe', 'Bob Johnson']
+      expect(formatAuthors(authors, true)).toBe('John Smith et al.')
     })
 
     it('should handle empty array', () => {

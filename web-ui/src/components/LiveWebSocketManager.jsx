@@ -27,18 +27,15 @@ export default function LiveWebSocketManager() {
         continue // Already connected
       }
 
-      console.log(`[DEBUG-WS-MGR] Creating WebSocket for session ${sessionId?.slice(0,8)}`)
       logger.info('LiveWebSocketManager', `Creating WebSocket for session ${sessionId}`)
 
       const ws = createWebSocket(sessionId, {
         onOpen: () => {
-          console.log(`[DEBUG-WS-MGR] WebSocket CONNECTED for session ${sessionId?.slice(0,8)}`)
           logger.info('WebSocket', `Connected to session ${sessionId}`)
         },
         onMessage: (data) => {
           // Inject session_id into the message so the handler knows which session it's from
           const messageWithSession = { ...data, session_id: sessionId }
-          console.log(`[DEBUG-WS-MGR] Message from ${sessionId?.slice(0,8)}: type=${data.type}`)
           logger.info('WebSocket', `Message from ${sessionId}: ${data.type}`, data)
           handleWebSocketMessage(messageWithSession)
         },

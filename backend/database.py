@@ -63,7 +63,11 @@ class Database:
                     total_refs INTEGER,
                     errors_count INTEGER,
                     warnings_count INTEGER,
+                    suggestions_count INTEGER DEFAULT 0,
                     unverified_count INTEGER,
+                    refs_with_errors INTEGER DEFAULT 0,
+                    refs_with_warnings_only INTEGER DEFAULT 0,
+                    refs_verified INTEGER DEFAULT 0,
                     results_json TEXT,
                     llm_provider TEXT,
                     llm_model TEXT,
@@ -94,6 +98,15 @@ class Database:
                 )
             """)
 
+            # Verification cache table - stores results keyed by reference content hash
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS verification_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    result_json TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             await self._ensure_columns(db)
             await db.commit()
 
@@ -105,6 +118,14 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN source_type TEXT DEFAULT 'url'")
         if "custom_label" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN custom_label TEXT")
+        if "suggestions_count" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN suggestions_count INTEGER DEFAULT 0")
+        if "refs_with_errors" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_errors INTEGER DEFAULT 0")
+        if "refs_with_warnings_only" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_warnings_only INTEGER DEFAULT 0")
+        if "refs_verified" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN refs_verified INTEGER DEFAULT 0")
 
     async def save_check(self,
                          paper_title: str,
@@ -113,7 +134,11 @@ class Database:
                          total_refs: int,
                          errors_count: int,
                          warnings_count: int,
+                         suggestions_count: int,
                          unverified_count: int,
+                         refs_with_errors: int,
+                         refs_with_warnings_only: int,
+                         refs_verified: int,
                          results: List[Dict[str, Any]],
                          llm_provider: Optional[str] = None,
                          llm_model: Optional[str] = None) -> int:
@@ -122,8 +147,9 @@ class Database:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
-                 unverified_count, results_json, llm_provider, llm_model)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 suggestions_count, unverified_count, refs_with_errors, refs_with_warnings_only,
+                 refs_verified, results_json, llm_provider, llm_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -131,7 +157,11 @@ class Database:
                 total_refs,
                 errors_count,
                 warnings_count,
+                suggestions_count,
                 unverified_count,
+                refs_with_errors,
+                refs_with_warnings_only,
+                refs_verified,
                 json.dumps(results),
                 llm_provider,
                 llm_model
@@ -146,7 +176,7 @@ class Database:
             db.row_factory = aiosqlite.Row
             async with db.execute("""
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
-                       total_refs, errors_count, warnings_count, unverified_count,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        llm_provider, llm_model, status, source_type
                 FROM check_history
                 ORDER BY timestamp DESC
@@ -213,8 +243,8 @@ class Database:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
-                 unverified_count, results_json, llm_provider, llm_model, status)
-                VALUES (?, ?, ?, 0, 0, 0, 0, '[]', ?, ?, 'in_progress')
+                 suggestions_count, unverified_count, results_json, llm_provider, llm_model, status)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress')
             """, (
                 paper_title,
                 paper_source,
@@ -231,7 +261,11 @@ class Database:
                                     total_refs: int,
                                     errors_count: int,
                                     warnings_count: int,
+                                    suggestions_count: int,
                                     unverified_count: int,
+                                    refs_with_errors: int,
+                                    refs_with_warnings_only: int,
+                                    refs_verified: int,
                                     results: List[Dict[str, Any]],
                                     status: str = 'completed') -> bool:
         """Update a check with its results"""
@@ -239,14 +273,19 @@ class Database:
             await db.execute("""
                 UPDATE check_history
                 SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
-                    unverified_count = ?, results_json = ?, status = ?
+                    suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
+                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?
                 WHERE id = ?
             """, (
                 paper_title,
                 total_refs,
                 errors_count,
                 warnings_count,
+                suggestions_count,
                 unverified_count,
+                refs_with_errors,
+                refs_with_warnings_only,
+                refs_verified,
                 json.dumps(results),
                 status,
                 check_id
@@ -259,7 +298,11 @@ class Database:
                                      total_refs: int,
                                      errors_count: int,
                                      warnings_count: int,
+                                     suggestions_count: int,
                                      unverified_count: int,
+                                     refs_with_errors: int,
+                                     refs_with_warnings_only: int,
+                                     refs_verified: int,
                                      results: List[Dict[str, Any]]) -> bool:
         """Incrementally update a check's results as references are verified.
         
@@ -271,13 +314,18 @@ class Database:
             await db.execute("""
                 UPDATE check_history
                 SET total_refs = ?, errors_count = ?, warnings_count = ?,
-                    unverified_count = ?, results_json = ?
+                    suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
+                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?
                 WHERE id = ?
             """, (
                 total_refs,
                 errors_count,
                 warnings_count,
+                suggestions_count,
                 unverified_count,
+                refs_with_errors,
+                refs_with_warnings_only,
+                refs_verified,
                 json.dumps(results),
                 check_id
             ))
@@ -484,6 +532,87 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 return row is not None
+
+    # Verification cache methods
+
+    def _compute_reference_cache_key(self, reference: Dict[str, Any]) -> str:
+        """
+        Compute a cache key from reference data.
+        
+        Key is based on: title, authors (sorted), year, venue, url
+        All normalized to lowercase and stripped.
+        """
+        import hashlib
+        
+        title = (reference.get('title') or '').strip().lower()
+        authors = reference.get('authors') or []
+        # Normalize authors: lowercase, stripped, sorted for consistency
+        authors_normalized = sorted([a.strip().lower() for a in authors if a])
+        authors_str = '|'.join(authors_normalized)
+        year = str(reference.get('year') or '')
+        venue = (reference.get('venue') or '').strip().lower()
+        url = (reference.get('url') or '').strip().lower()
+        
+        # Create a deterministic string from reference fields
+        cache_input = f"title:{title}|authors:{authors_str}|year:{year}|venue:{venue}|url:{url}"
+        
+        # Hash it for a fixed-length key
+        return hashlib.sha256(cache_input.encode('utf-8')).hexdigest()
+
+    async def get_cached_verification(self, reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Get cached verification result for a reference.
+        
+        Returns the cached result if found, None otherwise.
+        """
+        cache_key = self._compute_reference_cache_key(reference)
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT result_json FROM verification_cache WHERE cache_key = ?",
+                (cache_key,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row['result_json']:
+                    try:
+                        return json.loads(row['result_json'])
+                    except json.JSONDecodeError:
+                        return None
+                return None
+
+    async def store_cached_verification(self, reference: Dict[str, Any], result: Dict[str, Any]) -> bool:
+        """
+        Store a verification result in the cache.
+        
+        Only caches successful verifications (not errors/timeouts).
+        """
+        # Don't cache error results or timeouts - only cache verified/warning/suggestion/unverified
+        status = result.get('status', '').lower()
+        if status in ('error', 'cancelled', 'timeout', 'checking', 'pending'):
+            return False
+        
+        cache_key = self._compute_reference_cache_key(reference)
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute("""
+                INSERT INTO verification_cache (cache_key, result_json, created_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    result_json = excluded.result_json,
+                    created_at = CURRENT_TIMESTAMP
+            """, (cache_key, json.dumps(result)))
+            await db.commit()
+            return True
+
+    async def clear_verification_cache(self) -> int:
+        """Clear all cached verification results. Returns count of deleted entries."""
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("DELETE FROM verification_cache")
+            await db.commit()
+            return cursor.rowcount
 
 
 # Global database instance

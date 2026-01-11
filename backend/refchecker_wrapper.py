@@ -127,29 +127,43 @@ class ProgressRefChecker:
         Shared by both async and sync verification methods.
         """
         # Normalize errors to align with CLI behavior
+        logger.info(f"_format_verification_result: raw errors={errors}")
         sanitized = []
         for err in errors:
             e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
             details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
             if not e_type and not details:
                 continue
+            # Track if this was originally an info_type (suggestion, not error)
+            is_info = 'info_type' in err
+            logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, keys={list(err.keys())}")
             sanitized.append({
-                "error_type": e_type or err.get('error_type') or 'info',
+                # If it was info_type, store as 'info' to ensure proper categorization
+                "error_type": 'info' if is_info else (e_type or 'unknown'),
                 "error_details": details or '',
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value'),
+                "is_suggestion": is_info,  # Preserve info_type as suggestion flag
             })
 
         # Determine status - author mismatches are warnings, not errors (matching CLI behavior)
         warning_types = ['year', 'venue', 'author']
-        has_errors = any(e.get('error_type') not in ['unverified', 'info'] + warning_types for e in sanitized)
-        has_warnings = any(e.get('error_type') in warning_types for e in sanitized)
+        # Items originally from info_type are suggestions, not errors
+        has_errors = any(
+            e.get('error_type') not in ['unverified', 'info'] + warning_types 
+            and not e.get('is_suggestion')
+            for e in sanitized
+        )
+        has_warnings = any(e.get('error_type') in warning_types and not e.get('is_suggestion') for e in sanitized)
+        has_suggestions = any(e.get('is_suggestion') or e.get('error_type') == 'info' for e in sanitized)
         is_unverified = any(e.get('error_type') == 'unverified' for e in sanitized)
 
         if has_errors:
             status = 'error'
         elif has_warnings:
             status = 'warning'
+        elif has_suggestions:
+            status = 'suggestion'
         elif is_unverified:
             status = 'unverified'
         else:
@@ -189,10 +203,10 @@ class ProgressRefChecker:
                 if not any(u.get('url') == doi_url for u in authoritative_urls):
                     authoritative_urls.append({"type": "doi", "url": doi_url})
 
-        # Format errors, warnings, and info messages
+        # Format errors, warnings, and suggestions
         formatted_errors = []
         formatted_warnings = []
-        formatted_info = []
+        formatted_suggestions = []
         for err in sanitized:
             err_obj = {
                 "error_type": err.get('error_type', 'unknown'),
@@ -200,16 +214,21 @@ class ProgressRefChecker:
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value')
             }
-            if err.get('error_type') in ['year', 'venue', 'author']:
+            # Check is_suggestion flag (set when original had info_type)
+            if err.get('is_suggestion') or err.get('error_type') == 'info':
+                # Store as suggestion with full details
+                formatted_suggestions.append({
+                    "suggestion_type": err.get('error_type') or 'info',
+                    "suggestion_details": err.get('error_details', '')
+                })
+            elif err.get('error_type') in ['year', 'venue', 'author']:
                 formatted_warnings.append(err_obj)
             elif err.get('error_type') == 'unverified':
                 formatted_errors.append({**err_obj, "error_type": 'unverified'})
-            elif err.get('error_type') == 'info' or 'info_type' in err:
-                formatted_info.append(err.get('error_details') or err.get('info_details', ''))
             else:
                 formatted_errors.append(err_obj)
 
-        return {
+        result = {
             "index": index,
             "title": reference.get('title', 'Unknown Title'),
             "authors": reference.get('authors', []),
@@ -219,10 +238,12 @@ class ProgressRefChecker:
             "status": status,
             "errors": formatted_errors,
             "warnings": formatted_warnings,
-            "info_messages": formatted_info,
+            "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
             "corrected_reference": None
         }
+        logger.info(f"_format_verification_result output: suggestions={formatted_suggestions}, status={status}")
+        return result
 
     def _format_error_result(
         self,
@@ -244,7 +265,7 @@ class ProgressRefChecker:
                 "error_details": str(error)
             }],
             "warnings": [],
-            "info_messages": [],
+            "suggestions": [],
             "authoritative_urls": [],
             "corrected_reference": None
         }
@@ -365,6 +386,7 @@ class ProgressRefChecker:
                         "total_refs": 0,
                         "errors_count": 0,
                         "warnings_count": 0,
+                        "suggestions_count": 0,
                         "unverified_count": 0,
                         "verified_count": 0
                     }
@@ -393,7 +415,7 @@ class ProgressRefChecker:
             })
 
             # Process references in parallel
-            results, errors_count, warnings_count, unverified_count, verified_count = \
+            results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified = \
                 await self._check_references_parallel(references, total_refs)
 
             # Step 4: Return final results
@@ -406,8 +428,12 @@ class ProgressRefChecker:
                     "processed_refs": total_refs,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
+                    "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
                     "verified_count": verified_count,
+                    "refs_with_errors": refs_with_errors,
+                    "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_verified": refs_verified,
                     "progress_percent": 100.0
                 }
             }
@@ -658,9 +684,20 @@ class ProgressRefChecker:
         """
         Check a single reference with global concurrency limiting.
         
+        First checks the verification cache for a previous result.
         Acquires a slot from the global limiter before starting the check,
-        and releases it when done.
+        and releases it when done. Stores result in cache on success.
         """
+        from .database import db
+        
+        # Check cache first
+        cached_result = await db.get_cached_verification(reference)
+        if cached_result:
+            # Update the index to match current position
+            cached_result['index'] = idx + 1
+            logger.info(f"Cache hit for reference {idx + 1}: {reference.get('title', 'Unknown')[:50]}")
+            return cached_result
+        
         limiter = get_limiter()
         
         # Wait for a slot in the global queue
@@ -724,6 +761,12 @@ class ProgressRefChecker:
                     "corrected_reference": None
                 }
         
+        # Store successful results in cache (db.store_cached_verification filters out errors)
+        try:
+            await db.store_cached_verification(reference, result)
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache verification result: {cache_error}")
+        
         return result
 
     async def _check_references_parallel(
@@ -744,8 +787,12 @@ class ProgressRefChecker:
         results = {}
         errors_count = 0
         warnings_count = 0
+        suggestions_count = 0
         unverified_count = 0
         verified_count = 0
+        refs_with_errors = 0
+        refs_with_warnings_only = 0
+        refs_verified = 0
         processed_count = 0
         
         loop = asyncio.get_event_loop()
@@ -823,15 +870,33 @@ class ProgressRefChecker:
                 results[idx] = result
                 processed_count += 1
                 
-                # Update counts
-                if result['status'] == 'error':
-                    errors_count += 1
-                elif result['status'] == 'warning':
-                    warnings_count += 1
-                elif result['status'] == 'unverified':
+                # Count individual issues (not just references)
+                # Exclude 'unverified' from error count since it has its own category
+                real_errors = [e for e in result.get('errors', []) if e.get('error_type') != 'unverified']
+                num_errors = len(real_errors)
+                num_warnings = len(result.get('warnings', []))
+                num_suggestions = len(result.get('suggestions', []))
+                
+                errors_count += num_errors
+                warnings_count += num_warnings
+                suggestions_count += num_suggestions
+                
+                # Count references by status for filtering
+                if result['status'] == 'unverified':
                     unverified_count += 1
                 elif result['status'] == 'verified':
                     verified_count += 1
+                    refs_verified += 1
+                elif result['status'] == 'suggestion':
+                    # Suggestion-only refs are considered verified (no errors or warnings)
+                    verified_count += 1
+                    refs_verified += 1
+                
+                # Track references by issue type (excluding unverified from error check)
+                if result['status'] == 'error' or num_errors > 0:
+                    refs_with_errors += 1
+                elif result['status'] == 'warning' or num_warnings > 0:
+                    refs_with_warnings_only += 1
                 
                 # Emit result immediately
                 await self.emit_progress("reference_result", result)
@@ -844,12 +909,16 @@ class ProgressRefChecker:
                     "processed_refs": processed_count,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
+                    "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
                     "verified_count": verified_count,
+                    "refs_with_errors": refs_with_errors,
+                    "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_verified": refs_verified,
                     "progress_percent": round((processed_count / total_refs) * 100, 1)
                 })
         
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
         
-        return results_list, errors_count, warnings_count, unverified_count, verified_count
+        return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified

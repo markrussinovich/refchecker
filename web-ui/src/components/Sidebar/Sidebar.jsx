@@ -1,6 +1,4 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
-import LLMSelector from './LLMSelector'
-import SemanticScholarConfig from './SemanticScholarConfig'
 import HistoryList from './HistoryList'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -85,18 +83,9 @@ export default function Sidebar() {
         backgroundColor: 'var(--color-bg-secondary)',
       }}
     >
-      {/* New version badge */}
-      <div 
-        className="px-4 py-2 border-b flex items-center justify-between"
-        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
-      >
-        <span 
-          className="text-xs font-semibold uppercase tracking-wide"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          New refcheck
-        </span>
-        <button
+      {/* New Refcheck button - fixed at top */}
+      <div className="flex-shrink-0 px-3 py-2">
+        <button 
           onClick={() => {
             ensureNewRefcheckItem()
             // Only reset if not currently checking - don't interrupt running checks
@@ -105,54 +94,39 @@ export default function Sidebar() {
             }
             selectCheck(-1)
           }}
-          className="text-[11px] px-3 py-1 rounded-full font-medium transition-colors flex items-center gap-1 cursor-pointer hover:opacity-80"
-          style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff' }}
+          className="w-full px-3 py-2 flex items-center gap-2 cursor-pointer transition-colors rounded-md hover:bg-[var(--color-bg-tertiary)]"
           title="Create new refcheck"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="w-3.5 h-3.5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
+          <span
+            className="w-6 h-6 rounded-full font-medium flex items-center justify-center flex-shrink-0"
+            style={{ backgroundColor: 'var(--color-accent)', color: '#ffffff' }}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-3.5 h-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2.5}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+          </span>
+          <span 
+            className="text-sm font-medium"
+            style={{ color: 'var(--color-text-primary)' }}
+          >
+            New Refcheck
+          </span>
         </button>
       </div>
 
-      {/* LLM Configuration Section */}
-      <div 
-        className="p-4 border-b"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        <h2 
-          className="text-sm font-semibold mb-3 uppercase tracking-wide"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          LLM Configuration
-        </h2>
-        <LLMSelector />
-      </div>
-
-      {/* Semantic Scholar Configuration Section */}
-      <div 
-        className="p-4 border-b"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        <SemanticScholarConfig />
-      </div>
-
-      {/* History Section */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div 
-          className="px-4 py-3 border-b"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
+      {/* History Section - scrollable */}
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        <div className="px-4 py-2">
           <h2 
-            className="text-sm font-semibold uppercase tracking-wide"
-            style={{ color: 'var(--color-text-secondary)' }}
+            className="text-xs font-semibold uppercase tracking-wide"
+            style={{ color: 'var(--color-text-muted)' }}
           >
             History
           </h2>
@@ -161,17 +135,11 @@ export default function Sidebar() {
       </div>
 
       {/* Settings button */}
-      <div 
-        className="px-4 py-3 border-t"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
+      <div className="flex-shrink-0 px-3 py-2">
         <button
           onClick={toggleSettings}
-          className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm transition-colors cursor-pointer hover:opacity-80"
-          style={{ 
-            color: 'var(--color-text-secondary)',
-            backgroundColor: 'var(--color-bg-tertiary)'
-          }}
+          className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-sm transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+          style={{ color: 'var(--color-text-secondary)' }}
           title="Settings"
         >
           <svg
@@ -198,7 +166,7 @@ export default function Sidebar() {
         onMouseDown={startResizing}
         className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
         style={{
-          backgroundColor: isResizing ? 'var(--color-accent)' : 'var(--color-border)',
+          backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
         }}
       />
     </aside>

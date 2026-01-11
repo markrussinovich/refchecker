@@ -85,7 +85,7 @@ class NonArxivReferenceChecker:
         params = {
             "query": query,
             "limit": 10,
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal",
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal",
             "sort": "relevance"  # Ensure consistent ordering
         }
         
@@ -135,7 +135,7 @@ class NonArxivReferenceChecker:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
         
         params = {
-            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"
+            "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"
         }
         
         # Make the request with retries and backoff
@@ -260,7 +260,7 @@ class NonArxivReferenceChecker:
                 corpus_id = corpus_match.group(1)
                 # Try to get the paper directly by CorpusID
                 endpoint = f"{self.base_url}/paper/CorpusId:{corpus_id}"
-                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,journal"}
+                params = {"fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"}
                 
                 for attempt in range(self.max_retries):
                     try:
@@ -537,12 +537,33 @@ class NonArxivReferenceChecker:
         
         # Verify venue
         cited_venue = reference.get('journal', '') or reference.get('venue', '')
-        paper_venue = paper_data.get('venue') or paper_data.get('journal')
         
-        # Ensure paper_venue is a string (sometimes it can be a dict)
-        if isinstance(paper_venue, dict):
-            paper_venue = paper_venue.get('name', '') if paper_venue else ''
-        elif paper_venue and not isinstance(paper_venue, str):
+        # Extract venue from paper_data - check multiple fields since Semantic Scholar
+        # returns venue info in different fields depending on publication type
+        paper_venue = None
+        
+        # First try the simple 'venue' field (string)
+        if paper_data.get('venue'):
+            paper_venue = paper_data.get('venue')
+        
+        # If no venue, try publicationVenue object
+        if not paper_venue and paper_data.get('publicationVenue'):
+            pub_venue = paper_data.get('publicationVenue')
+            if isinstance(pub_venue, dict):
+                paper_venue = pub_venue.get('name', '')
+            elif isinstance(pub_venue, str):
+                paper_venue = pub_venue
+        
+        # If still no venue, try journal object
+        if not paper_venue and paper_data.get('journal'):
+            journal = paper_data.get('journal')
+            if isinstance(journal, dict):
+                paper_venue = journal.get('name', '')
+            elif isinstance(journal, str):
+                paper_venue = journal
+        
+        # Ensure paper_venue is a string
+        if paper_venue and not isinstance(paper_venue, str):
             paper_venue = str(paper_venue)
         
         # Check venue mismatches
@@ -552,18 +573,12 @@ class NonArxivReferenceChecker:
                 from refchecker.utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
-            # Original reference has the venue in raw text but not parsed correctly
-            raw_text = reference.get('raw_text', '')
-            if raw_text and '#' in raw_text:
-                # Check if venue might be in the raw text format (author#title#venue#year#url)
-                parts = raw_text.split('#')
-                if len(parts) >= 3 and parts[2].strip():
-                    # Venue is present in raw text but missing from parsed reference
-                    errors.append({
-                        'warning_type': 'venue',
-                        'warning_details': f"Venue missing: should include '{paper_venue}'",
-                        'ref_venue_correct': paper_venue
-                    })
+            # Reference has no venue but paper has one - always warn about missing venue
+            errors.append({
+                'warning_type': 'venue',
+                'warning_details': f"Venue missing: should include '{paper_venue}'",
+                'ref_venue_correct': paper_venue
+            })
 
         # Always check for missing arXiv URLs when paper has arXiv ID
         external_ids = paper_data.get('externalIds', {})

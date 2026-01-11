@@ -5,8 +5,10 @@ import { logger } from '../../utils/logger'
 
 /**
  * LLM configuration selector with dropdown
+ * @param {Object} props
+ * @param {boolean} props.compact - If true, shows a more compact version for the header
  */
-export default function LLMSelector() {
+export default function LLMSelector({ compact = false }) {
   const { configs, selectedConfigId, selectConfig, deleteConfig, isLoading } = useConfigStore()
   const [isOpen, setIsOpen] = useState(false)
   const [showModal, setShowModal] = useState(false)

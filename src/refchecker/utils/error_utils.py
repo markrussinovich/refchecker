@@ -42,8 +42,8 @@ def format_three_line_mismatch(mismatch_type: str, left: str, right: str) -> str
 
     Example:
     Title mismatch:
-        'Cited Title'
-    vs: 'Correct Title'
+           cited:  'Cited Title'
+           actual: 'Correct Title'
 
     Args:
         mismatch_type: The type of mismatch (e.g., "Author 2 mismatch", "Title mismatch")
@@ -57,11 +57,10 @@ def format_three_line_mismatch(mismatch_type: str, left: str, right: str) -> str
     if not mismatch_type.endswith(":"):
         mismatch_type = mismatch_type.rstrip() + ":"
     
-    # Use fixed indentation for clean, consistent alignment
-    indent = ""  # spaces for content indentation
-    vs_indent = ""   # vs: starts at column 0 for clear visual separation
+    # Use fixed indentation for labels, keeping detail column aligned
+    label_indent = "       "  # 7 spaces to indent labels
     
-    return f"{mismatch_type}\n{indent}cited:  '{left}'\n{vs_indent}actual: '{right}'"
+    return f"{mismatch_type}\n{label_indent}cited:  {left}\n{label_indent}actual: {right}"
 
 
 def format_title_mismatch(cited_title: str, verified_title: str) -> str:
@@ -187,8 +186,9 @@ def format_missing_venue(correct_venue: str) -> str:
     """
     Format a missing venue message with only the actual value.
     """
-    # Only show the actual venue; omit the empty cited line
-    return f"Missing venue: '{correct_venue}'"
+    # Only show the actual venue with indented label
+    label_indent = "       "  # 7 spaces to indent labels
+    return f"Missing venue:\n{label_indent}actual: {correct_venue}"
 
 
 def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]:

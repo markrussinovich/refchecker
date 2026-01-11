@@ -18,12 +18,7 @@ export const useHistoryStore = create((set, get) => ({
 
   // Actions
   fetchHistory: async (limit = 50) => {
-    console.log(`[DEBUG-FETCH] fetchHistory START`)
     logger.info('HistoryStore', 'fetchHistory called')
-    
-    const beforeIds = get().history.map(h => h.id)
-    console.log(`[DEBUG-FETCH] Before fetch, history ids: ${JSON.stringify(beforeIds.slice(0, 10))}`)
-    
     set({ isLoading: true, error: null })
     try {
       const response = await api.getHistory(limit)
@@ -40,7 +35,7 @@ export const useHistoryStore = create((set, get) => ({
         try {
           const detail = (await api.getCheckDetail(currentItem.id)).data
 
-          const verifiedCount = Math.max((detail.total_refs || 0) - (detail.errors_count || 0) - (detail.warnings_count || 0) - (detail.unverified_count || 0), 0)
+          const verifiedCount = Math.max((detail.total_refs || 0) - (detail.errors_count || 0) - (detail.warnings_count || 0) - (detail.suggestions_count || 0) - (detail.unverified_count || 0), 0)
 
           useCheckStore.setState({
             status: detail.status || 'completed',
@@ -64,7 +59,10 @@ export const useHistoryStore = create((set, get) => ({
               verified_count: verifiedCount,
               errors_count: detail.errors_count || 0,
               warnings_count: detail.warnings_count || 0,
+              suggestions_count: detail.suggestions_count || 0,
               unverified_count: detail.unverified_count || 0,
+              refs_with_issues: detail.refs_with_issues || 0,
+              refs_verified: detail.refs_verified || verifiedCount,
               progress_percent: 100,
             },
             completedCheckId: detail.status === 'completed' ? detail.id : null,
@@ -96,6 +94,7 @@ export const useHistoryStore = create((set, get) => ({
                 processed_refs: processedRefs,
                 errors_count: detail.errors_count || 0,
                 warnings_count: detail.warnings_count || 0,
+                suggestions_count: detail.suggestions_count || 0,
                 unverified_count: detail.unverified_count || 0,
                 results: results, // Store results for display
                 session_id: item.session_id, // Preserve session_id from history API
@@ -131,6 +130,7 @@ export const useHistoryStore = create((set, get) => ({
             total_refs: checkState.stats?.total_refs || 0,
             errors_count: checkState.stats?.errors_count || 0,
             warnings_count: checkState.stats?.warnings_count || 0,
+            suggestions_count: checkState.stats?.suggestions_count || 0,
             unverified_count: checkState.stats?.unverified_count || 0,
             llm_provider: null,
             llm_model: null,
@@ -177,15 +177,12 @@ export const useHistoryStore = create((set, get) => ({
         !fetchedIds.has(h.id) && 
         h.status === 'in_progress'  // Only preserve in-progress items (newly started checks)
       )
-      console.log(`[DEBUG-FETCH] localOnlyItems count=${localOnlyItems.length} ids=${JSON.stringify(localOnlyItems.map(h=>h.id))}`)
       if (localOnlyItems.length > 0) {
         logger.info('HistoryStore', `Preserving ${localOnlyItems.length} locally-added items not yet in API`)
         // Add them at the beginning (most recent first)
         mergedHistory.unshift(...localOnlyItems)
       }
       
-      const finalIds = mergedHistory.map(h => h.id)
-      console.log(`[DEBUG-FETCH] FINAL history ids: ${JSON.stringify(finalIds.slice(0, 10))}`)
       set({ history: mergedHistory, isLoading: false })
       logger.info('HistoryStore', `Set ${mergedHistory.length} history items (merged)`)
 
@@ -201,7 +198,9 @@ export const useHistoryStore = create((set, get) => ({
           const detailResp = await api.getCheckDetail(selectedCheckId)
           const check = detailResp.data
 
-          if (check.status === 'in_progress' && check.session_id) {
+          // Only adopt session if this is a reconnection (not the session we just started)
+          const currentSessionId = useCheckStore.getState().sessionId
+          if (check.status === 'in_progress' && check.session_id && check.session_id !== currentSessionId) {
             useCheckStore.getState().adoptSession(check)
           }
 
@@ -254,6 +253,7 @@ export const useHistoryStore = create((set, get) => ({
                 processed_refs: processedRefs,
                 errors_count: detail.errors_count || 0,
                 warnings_count: detail.warnings_count || 0,
+                suggestions_count: detail.suggestions_count || 0,
                 unverified_count: detail.unverified_count || 0,
                 results: results,
                 session_id: item.session_id,
@@ -288,6 +288,7 @@ export const useHistoryStore = create((set, get) => ({
         total_refs: 0,
         errors_count: 0,
         warnings_count: 0,
+        suggestions_count: 0,
         unverified_count: 0,
         llm_provider: null,
         llm_model: null,
@@ -310,7 +311,6 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   selectCheck: async (id) => {
-    console.log(`[DEBUG-SELECT] selectCheck called with id=${id}`)
     // Special placeholder for starting a new check without hitting the API
     if (id === -1) {
       set({ selectedCheckId: -1, selectedCheck: null, isLoadingDetail: false, error: null })
@@ -320,18 +320,9 @@ export const useHistoryStore = create((set, get) => ({
     // Check if we already have in-memory data for an in-progress check (from WebSocket updates)
     const existingHistoryItem = get().history.find(h => h.id === id)
     const hasLiveUpdates = existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.total_refs > 0
-    
-    console.log(`[DEBUG-SELECT] id=${id} hasLiveUpdates=${hasLiveUpdates}`)
-    console.log(`[DEBUG-SELECT] existingHistoryItem:`, existingHistoryItem ? {
-      status: existingHistoryItem.status,
-      total_refs: existingHistoryItem.total_refs,
-      processed_refs: existingHistoryItem.processed_refs,
-      results_length: existingHistoryItem.results?.length,
-    } : null)
 
     // If we have an in-progress check with results in memory, use that directly without API call
     if (existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.results?.length > 0) {
-      console.log(`[DEBUG-SELECT] Using in-memory data directly, skipping API call. results=${existingHistoryItem.results.length}`)
       set({ 
         selectedCheckId: id, 
         selectedCheck: existingHistoryItem, 
@@ -344,13 +335,13 @@ export const useHistoryStore = create((set, get) => ({
     // Set selectedCheckId immediately so UI can react
     set({ selectedCheckId: id, isLoadingDetail: true, error: null })
     try {
-      console.log(`[DEBUG-SELECT] Loading check details for ${id}`)
       logger.info('HistoryStore', `Loading check details for ${id}`)
       const response = await api.getCheckDetail(id)
       const check = response.data
-      console.log(`[DEBUG-SELECT] Got check detail: id=${check.id} status=${check.status} total_refs=${check.total_refs}`)
       
-      if (check.status === 'in_progress' && check.session_id) {
+      // Only adopt session if this is a reconnection (not the session we just started)
+      const currentSessionId = useCheckStore.getState().sessionId
+      if (check.status === 'in_progress' && check.session_id && check.session_id !== currentSessionId) {
         useCheckStore.getState().adoptSession(check)
       }
 
@@ -371,8 +362,6 @@ export const useHistoryStore = create((set, get) => ({
           (existingPriority === fetchedPriority && existingItem.status === 'in_progress' && existingProcessed > fetchedProcessed)
         )
         
-        console.log(`[DEBUG-SELECT] Sync decision: existingStatus=${existingItem?.status} fetchedStatus=${check.status} existingProcessed=${existingProcessed} fetchedProcessed=${fetchedProcessed} existingResults=${existingItem?.results?.length} fetchedResults=${check.results?.length} keepExisting=${keepExisting}`)
-        
         // For selectedCheck, merge in-memory data into fetched results
         // Preserve in-memory results if they exist and have more data than API results
         const existingResults = existingItem?.results || []
@@ -388,6 +377,7 @@ export const useHistoryStore = create((set, get) => ({
               processed_refs: existingItem.processed_refs || check.processed_refs,
               errors_count: existingItem.errors_count ?? check.errors_count,
               warnings_count: existingItem.warnings_count ?? check.warnings_count,
+              suggestions_count: existingItem.suggestions_count ?? check.suggestions_count,
               unverified_count: existingItem.unverified_count ?? check.unverified_count,
               results: useExistingResults ? existingResults : fetchedResults,
             }
@@ -396,8 +386,6 @@ export const useHistoryStore = create((set, get) => ({
               // Even if not keeping existing status, preserve results if in-memory has more
               results: useExistingResults ? existingResults : fetchedResults,
             }
-        
-        console.log(`[DEBUG-SELECT] Setting selectedCheck: status=${mergedSelectedCheck.status} processed=${mergedSelectedCheck.processed_refs}/${mergedSelectedCheck.total_refs} results=${mergedSelectedCheck.results?.length}`)
         
         return {
           selectedCheck: mergedSelectedCheck,
@@ -414,6 +402,7 @@ export const useHistoryStore = create((set, get) => ({
                     processed_refs: check.processed_refs,
                     errors_count: check.errors_count,
                     warnings_count: check.warnings_count,
+                    suggestions_count: check.suggestions_count,
                     unverified_count: check.unverified_count,
                     paper_title: check.paper_title || h.paper_title,
                   }
@@ -463,17 +452,10 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryProgress called with no id')
       return
     }
-    const currentHistory = get().history
-    const existingItem = currentHistory.find(h => h.id === id)
-    console.log(`[DEBUG-HISTORY] updateHistoryProgress BEFORE: id=${id} payload_keys=${Object.keys(payload)} existing={status:${existingItem?.status}, total_refs:${existingItem?.total_refs}, results_count:${existingItem?.results?.length}}`)
     set(state => ({
       history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
       selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
     }))
-    // Log AFTER state
-    const afterHistory = get().history
-    const afterItem = afterHistory.find(h => h.id === id)
-    console.log(`[DEBUG-HISTORY] updateHistoryProgress AFTER: id=${id} result={status:${afterItem?.status}, total_refs:${afterItem?.total_refs}, results_count:${afterItem?.results?.length}}`)
   },
 
   // Update a single reference result within a history item (for concurrent session updates)
@@ -536,16 +518,12 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   addToHistory: (check) => {
-    const currentIds = get().history.map(h => h.id)
-    console.log(`[DEBUG-HISTORY] addToHistory id=${check.id} currentIds=${JSON.stringify(currentIds.slice(0, 10))}`)
     logger.info('HistoryStore', 'Adding check to history', { id: check.id })
     set(state => ({
       // Remove placeholder when a real check is added
       history: [check, ...state.history.filter(h => h.id !== -1)],
       // Keep placeholderAdded true so placeholder doesn't auto-appear; user must click "New refcheck" button
     }))
-    const newIds = get().history.map(h => h.id)
-    console.log(`[DEBUG-HISTORY] addToHistory AFTER: newIds=${JSON.stringify(newIds.slice(0, 10))}`)
   },
 
   ensureNewRefcheckItem: () => {
@@ -561,6 +539,7 @@ export const useHistoryStore = create((set, get) => ({
         total_refs: 0,
         errors_count: 0,
         warnings_count: 0,
+        suggestions_count: 0,
         unverified_count: 0,
         llm_provider: null,
         llm_model: null,

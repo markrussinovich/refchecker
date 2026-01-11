@@ -85,7 +85,11 @@ async def run_check():
             total_refs=result['summary']['total_refs'],
             errors_count=result['summary']['errors_count'],
             warnings_count=result['summary']['warnings_count'],
+            suggestions_count=result['summary'].get('suggestions_count', 0),
             unverified_count=result['summary']['unverified_count'],
+            refs_with_errors=result['summary'].get('refs_with_errors', 0),
+            refs_with_warnings_only=result['summary'].get('refs_with_warnings_only', 0),
+            refs_verified=result['summary'].get('refs_verified', 0),
             results=result['references'],
             llm_provider=config['provider'],
             llm_model=config['model']

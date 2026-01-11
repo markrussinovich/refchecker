@@ -1,11 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDebugStore } from '../stores/useDebugStore'
+import { clearCache, clearDatabase } from '../utils/api'
 
 /**
  * Debug log panel that shows real-time logs
  */
 export default function DebugPanel() {
   const { logs, isEnabled, isVisible, filter, toggleEnabled, toggleVisible, setFilter, clearLogs } = useDebugStore()
+  const [clearing, setClearing] = useState(null)
   const logsEndRef = useRef(null)
 
   // Auto-scroll to bottom when new logs arrive
@@ -36,6 +38,34 @@ export default function DebugPanel() {
       case 'WARN': return 'rgba(245, 158, 11, 0.1)'
       case 'INFO': return 'rgba(59, 130, 246, 0.1)'
       default: return 'transparent'
+    }
+  }
+
+  const handleClearCache = async () => {
+    if (!confirm('Clear all cached verification results?')) return
+    setClearing('cache')
+    try {
+      const response = await clearCache()
+      alert(response.data.message)
+    } catch (err) {
+      alert('Failed to clear cache: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setClearing(null)
+    }
+  }
+
+  const handleClearDatabase = async () => {
+    if (!confirm('Clear all data (cache + history)? This cannot be undone.')) return
+    setClearing('database')
+    try {
+      const response = await clearDatabase()
+      alert(response.data.message)
+      // Reload to refresh history panel
+      window.location.reload()
+    } catch (err) {
+      alert('Failed to clear database: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setClearing(null)
     }
   }
 
@@ -86,6 +116,30 @@ export default function DebugPanel() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {/* Clear Cache button */}
+            <button
+              onClick={handleClearCache}
+              disabled={clearing !== null}
+              className="text-xs px-2 py-1 rounded"
+              style={{ backgroundColor: '#374151', color: '#9ca3af' }}
+              title="Clear verification cache"
+            >
+              {clearing === 'cache' ? '...' : 'Clear Cache'}
+            </button>
+
+            {/* Clear All button */}
+            <button
+              onClick={handleClearDatabase}
+              disabled={clearing !== null}
+              className="text-xs px-2 py-1 rounded"
+              style={{ backgroundColor: '#7f1d1d', color: '#fca5a5' }}
+              title="Clear all data (cache + history)"
+            >
+              {clearing === 'database' ? '...' : 'Clear All'}
+            </button>
+
+            <div className="w-px h-4 bg-gray-600" />
+
             {/* Filter dropdown */}
             <select
               value={filter}
@@ -112,13 +166,13 @@ export default function DebugPanel() {
               {isEnabled ? 'ON' : 'OFF'}
             </button>
 
-            {/* Clear button */}
+            {/* Clear logs button */}
             <button
               onClick={clearLogs}
               className="text-xs px-2 py-1 rounded"
               style={{ backgroundColor: '#374151', color: '#9ca3af' }}
             >
-              Clear
+              Clear Logs
             </button>
 
             {/* Close button */}
