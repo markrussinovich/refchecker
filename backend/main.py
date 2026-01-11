@@ -16,6 +16,7 @@ from .database import db
 from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
+from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
 
 # Configure logging
 logging.basicConfig(
@@ -80,8 +81,19 @@ def _session_id_for_check(check_id: int) -> Optional[str]:
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database and settings on startup"""
     await db.init_db()
+    
+    # Initialize global concurrency limiter with saved setting
+    try:
+        concurrency_setting = await db.get_setting("max_concurrent_checks")
+        max_concurrent = int(concurrency_setting) if concurrency_setting else DEFAULT_MAX_CONCURRENT
+        await init_limiter(max_concurrent)
+        logger.info(f"Initialized global concurrency limiter with max={max_concurrent}")
+    except Exception as e:
+        logger.warning(f"Failed to load concurrency setting, using default: {e}")
+        await init_limiter(DEFAULT_MAX_CONCURRENT)
+    
     # Mark any previously in-progress checks as cancelled (e.g., after restart)
     try:
         stale = await db.cancel_stale_in_progress()
@@ -667,6 +679,93 @@ async def delete_semantic_scholar_key():
         return {"message": "Semantic Scholar API key deleted", "has_key": False}
     except Exception as e:
         logger.error(f"Error deleting Semantic Scholar key: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# General Settings endpoints
+
+class SettingUpdate(BaseModel):
+    value: str
+
+
+@app.get("/api/settings")
+async def get_all_settings():
+    """Get all application settings"""
+    try:
+        # Define all settings with their defaults and metadata
+        settings_config = {
+            "max_concurrent_checks": {
+                "default": str(DEFAULT_MAX_CONCURRENT),
+                "type": "number",
+                "label": "Max Concurrent Checks",
+                "description": "Maximum number of references to check simultaneously across all papers",
+                "min": 1,
+                "max": 50,
+                "section": "Performance"
+            }
+        }
+        
+        # Get current values from database
+        settings = {}
+        for key, config in settings_config.items():
+            value = await db.get_setting(key)
+            settings[key] = {
+                "value": value if value is not None else config["default"],
+                "default": config["default"],
+                "type": config["type"],
+                "label": config["label"],
+                "description": config["description"],
+                "section": config["section"]
+            }
+            # Include extra metadata for number types
+            if config["type"] == "number":
+                settings[key]["min"] = config.get("min")
+                settings[key]["max"] = config.get("max")
+        
+        return settings
+    except Exception as e:
+        logger.error(f"Error getting settings: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/settings/{setting_key}")
+async def update_setting(setting_key: str, update: SettingUpdate):
+    """Update a specific setting"""
+    try:
+        # Validate the setting key
+        valid_keys = {"max_concurrent_checks"}
+        if setting_key not in valid_keys:
+            raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
+        
+        # Apply setting-specific validation
+        if setting_key == "max_concurrent_checks":
+            try:
+                value = int(update.value)
+                if value < 1:
+                    value = 1
+                if value > 50:
+                    value = 50
+                
+                # Update the global limiter immediately
+                limiter = get_limiter()
+                await limiter.set_max_concurrent(value)
+                logger.info(f"Updated global concurrency limit to {value}")
+                
+                # Store the validated value
+                await db.set_setting(setting_key, str(value))
+                
+                return {"key": setting_key, "value": str(value), "message": "Setting updated"}
+            except ValueError:
+                raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
+        
+        # For other settings, just store the value
+        await db.set_setting(setting_key, update.value)
+        return {"key": setting_key, "value": update.value, "message": "Setting updated"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating setting: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

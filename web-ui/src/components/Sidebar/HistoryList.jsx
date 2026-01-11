@@ -7,6 +7,9 @@ import HistoryItem from './HistoryItem'
 export default function HistoryList() {
   const { history, selectedCheckId, isLoading } = useHistoryStore()
 
+  // Debug: log when component re-renders with history state
+  console.log(`[DEBUG-RENDER] HistoryList rendering: ${history.length} items, first few: ${history.slice(0, 3).map(h => `${h.id}:${h.status}:${h.total_refs}`).join(', ')}`)
+
   if (isLoading && history.length === 0) {
     return (
       <div 

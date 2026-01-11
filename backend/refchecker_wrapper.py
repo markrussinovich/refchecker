@@ -5,12 +5,14 @@ import sys
 import os
 import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 
 # Add src to path to import refchecker
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from backend.concurrency import get_limiter
 
 from refchecker.utils.text_utils import extract_arxiv_id_from_url
 from refchecker.services.pdf_processor import PDFProcessor
@@ -47,8 +49,9 @@ def _make_cli_checker(llm_provider):
     cli_checker.fatal_error = False
     return cli_checker
 
-# Max concurrent reference checks (similar to CLI default)
-MAX_CONCURRENT_CHECKS = 6
+# Default max concurrent reference checks (similar to CLI default)
+# This value is now managed by the global concurrency limiter
+DEFAULT_MAX_CONCURRENT_CHECKS = 6
 
 
 class ProgressRefChecker:
@@ -382,10 +385,11 @@ class ProgressRefChecker:
                     for idx, ref in enumerate(references, 1)
                 ]
             })
+            limiter = get_limiter()
             await self.emit_progress("progress", {
                 "current": 0,
                 "total": total_refs,
-                "message": f"Checking {total_refs} references with {MAX_CONCURRENT_CHECKS} parallel workers..."
+                "message": f"Checking {total_refs} references (max {limiter.max_concurrent} concurrent)..."
             })
 
             # Process references in parallel
@@ -644,19 +648,100 @@ class ProgressRefChecker:
             logger.error(f"Error checking reference {index}: {e}")
             return self._format_error_result(reference, index, e)
 
+    async def _check_single_reference_with_limit(
+        self,
+        reference: Dict[str, Any],
+        idx: int,
+        total_refs: int,
+        loop: asyncio.AbstractEventLoop
+    ) -> Dict[str, Any]:
+        """
+        Check a single reference with global concurrency limiting.
+        
+        Acquires a slot from the global limiter before starting the check,
+        and releases it when done.
+        """
+        limiter = get_limiter()
+        
+        # Wait for a slot in the global queue
+        async with limiter:
+            # Check for cancellation before starting
+            await self._check_cancelled()
+            
+            # Emit that this reference is now being checked
+            await self.emit_progress("checking_reference", {
+                "index": idx + 1,
+                "title": reference.get("title", "Unknown Title"),
+                "total": total_refs
+            })
+            
+            try:
+                # Run the sync check in a thread
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,  # Use default executor
+                        self._check_reference_sync,
+                        reference,
+                        idx + 1
+                    ),
+                    timeout=120.0  # 2 minute timeout per reference
+                )
+            except asyncio.TimeoutError:
+                result = {
+                    "index": idx + 1,
+                    "title": reference.get('title', 'Unknown'),
+                    "authors": reference.get('authors', []),
+                    "year": reference.get('year'),
+                    "venue": reference.get('venue'),
+                    "cited_url": reference.get('url'),
+                    "status": "error",
+                    "errors": [{
+                        "error_type": "timeout",
+                        "error_details": "Verification timed out after 120 seconds"
+                    }],
+                    "warnings": [],
+                    "authoritative_urls": [],
+                    "corrected_reference": None
+                }
+            except asyncio.CancelledError:
+                raise  # Re-raise cancellation
+            except Exception as e:
+                logger.error(f"Error checking reference {idx + 1}: {e}")
+                result = {
+                    "index": idx + 1,
+                    "title": reference.get('title', 'Unknown'),
+                    "authors": reference.get('authors', []),
+                    "year": reference.get('year'),
+                    "venue": reference.get('venue'),
+                    "cited_url": reference.get('url'),
+                    "status": "error",
+                    "errors": [{
+                        "error_type": "check_failed",
+                        "error_details": str(e)
+                    }],
+                    "warnings": [],
+                    "authoritative_urls": [],
+                    "corrected_reference": None
+                }
+        
+        return result
+
     async def _check_references_parallel(
         self,
         references: List[Dict[str, Any]],
         total_refs: int
     ) -> tuple:
         """
-        Check references in parallel using ThreadPoolExecutor.
+        Check references in parallel using global concurrency limiting.
+        
+        All papers share the same global limit, so if you have 3 papers checking
+        and concurrency is 6, each paper gets a share of the 6 slots.
         
         Emits progress updates as results come in.
         Only marks references as 'checking' when they actually start.
         Returns results list and counts.
         """
-        results = [None] * total_refs  # Pre-allocate for ordered results
+        results = {}
         errors_count = 0
         warnings_count = 0
         unverified_count = 0
@@ -665,143 +750,106 @@ class ProgressRefChecker:
         
         loop = asyncio.get_event_loop()
         
-        # Track which references are currently being checked
-        active_indices = set()
-        next_to_submit = 0
+        # Create tasks for all references - they will be rate-limited by the global semaphore
+        tasks = []
+        for idx, ref in enumerate(references):
+            task = asyncio.create_task(
+                self._check_single_reference_with_limit(ref, idx, total_refs, loop),
+                name=f"ref-check-{idx}"
+            )
+            tasks.append((idx, task))
         
-        # Create a thread pool executor
-        with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_CHECKS, thread_name_prefix="RefCheck") as executor:
-            future_to_index = {}
-            pending = set()
+        # Process results as they complete
+        pending_tasks = {task for _, task in tasks}
+        task_to_idx = {task: idx for idx, task in tasks}
+        
+        while pending_tasks:
+            # Check for cancellation
+            try:
+                await self._check_cancelled()
+            except asyncio.CancelledError:
+                # Cancel all pending tasks
+                for task in pending_tasks:
+                    task.cancel()
+                raise
             
-            # Submit initial batch (up to MAX_CONCURRENT_CHECKS)
-            while next_to_submit < total_refs and len(pending) < MAX_CONCURRENT_CHECKS:
-                idx = next_to_submit
-                ref = references[idx]
+            # Wait for some tasks to complete
+            done, pending_tasks = await asyncio.wait(
+                pending_tasks,
+                timeout=0.5,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in done:
+                idx = task_to_idx[task]
                 
-                # Mark reference as checking when it actually starts
-                await self.emit_progress("checking_reference", {
-                    "index": idx + 1,
-                    "title": ref.get("title", "Unknown Title"),
+                try:
+                    result = task.result()
+                except asyncio.CancelledError:
+                    # Task was cancelled, create cancelled result
+                    result = {
+                        "index": idx + 1,
+                        "title": references[idx].get('title', 'Unknown'),
+                        "authors": references[idx].get('authors', []),
+                        "year": references[idx].get('year'),
+                        "venue": references[idx].get('venue'),
+                        "cited_url": references[idx].get('url'),
+                        "status": "cancelled",
+                        "errors": [],
+                        "warnings": [],
+                        "authoritative_urls": [],
+                        "corrected_reference": None
+                    }
+                except Exception as e:
+                    logger.error(f"Unexpected error for reference {idx + 1}: {e}")
+                    result = {
+                        "index": idx + 1,
+                        "title": references[idx].get('title', 'Unknown'),
+                        "authors": references[idx].get('authors', []),
+                        "year": references[idx].get('year'),
+                        "venue": references[idx].get('venue'),
+                        "cited_url": references[idx].get('url'),
+                        "status": "error",
+                        "errors": [{
+                            "error_type": "unexpected_error",
+                            "error_details": str(e)
+                        }],
+                        "warnings": [],
+                        "authoritative_urls": [],
+                        "corrected_reference": None
+                    }
+                
+                # Store result
+                results[idx] = result
+                processed_count += 1
+                
+                # Update counts
+                if result['status'] == 'error':
+                    errors_count += 1
+                elif result['status'] == 'warning':
+                    warnings_count += 1
+                elif result['status'] == 'unverified':
+                    unverified_count += 1
+                elif result['status'] == 'verified':
+                    verified_count += 1
+                
+                # Emit result immediately
+                await self.emit_progress("reference_result", result)
+                await self.emit_progress("progress", {
+                    "current": processed_count,
                     "total": total_refs
                 })
-                active_indices.add(idx)
-                
-                future = loop.run_in_executor(
-                    executor,
-                    self._check_reference_sync,
-                    ref,
-                    idx + 1
-                )
-                future_to_index[future] = idx
-                pending.add(future)
-                next_to_submit += 1
-            
-            # Process results as they complete and submit more
-            while pending:
-                # Check for cancellation
-                await self._check_cancelled()
-                
-                # Wait for the next result with a short timeout to allow cancellation checks
-                done, pending = await asyncio.wait(
-                    pending,
-                    timeout=0.5,
-                    return_when=asyncio.FIRST_COMPLETED
-                )
-                
-                for future in done:
-                    idx = future_to_index[future]
-                    active_indices.discard(idx)
-                    
-                    try:
-                        result = await asyncio.wait_for(asyncio.shield(future), timeout=60.0)
-                    except asyncio.TimeoutError:
-                        result = {
-                            "index": idx + 1,
-                            "title": references[idx].get('title', 'Unknown'),
-                            "authors": references[idx].get('authors', []),
-                            "year": references[idx].get('year'),
-                            "venue": references[idx].get('venue'),
-                            "cited_url": references[idx].get('url'),
-                            "status": "error",
-                            "errors": [{
-                                "error_type": "timeout",
-                                "error_details": "Verification timed out after 60 seconds"
-                            }],
-                            "warnings": [],
-                            "authoritative_urls": [],
-                            "corrected_reference": None
-                        }
-                    except Exception as e:
-                        logger.error(f"Error in parallel check for reference {idx + 1}: {e}")
-                        result = {
-                            "index": idx + 1,
-                            "title": references[idx].get('title', 'Unknown'),
-                            "authors": references[idx].get('authors', []),
-                            "year": references[idx].get('year'),
-                            "venue": references[idx].get('venue'),
-                            "cited_url": references[idx].get('url'),
-                            "status": "error",
-                            "errors": [{
-                                "error_type": "check_failed",
-                                "error_details": str(e)
-                            }],
-                            "warnings": [],
-                            "authoritative_urls": [],
-                            "corrected_reference": None
-                        }
-                    
-                    # Store result in ordered position
-                    results[idx] = result
-                    processed_count += 1
-                    
-                    # Update counts
-                    if result['status'] == 'error':
-                        errors_count += 1
-                    elif result['status'] == 'warning':
-                        warnings_count += 1
-                    elif result['status'] == 'unverified':
-                        unverified_count += 1
-                    elif result['status'] == 'verified':
-                        verified_count += 1
-                    
-                    # Emit result immediately
-                    await self.emit_progress("reference_result", result)
-                    await self.emit_progress("progress", {
-                        "current": processed_count,
-                        "total": total_refs
-                    })
-                    await self.emit_progress("summary_update", {
-                        "total_refs": total_refs,
-                        "processed_refs": processed_count,
-                        "errors_count": errors_count,
-                        "warnings_count": warnings_count,
-                        "unverified_count": unverified_count,
-                        "verified_count": verified_count,
-                        "progress_percent": round((processed_count / total_refs) * 100, 1)
-                    })
-                    
-                    # Submit next reference if there are more
-                    if next_to_submit < total_refs:
-                        next_idx = next_to_submit
-                        next_ref = references[next_idx]
-                        
-                        # Mark as checking when it starts
-                        await self.emit_progress("checking_reference", {
-                            "index": next_idx + 1,
-                            "title": next_ref.get("title", "Unknown Title"),
-                            "total": total_refs
-                        })
-                        active_indices.add(next_idx)
-                        
-                        next_future = loop.run_in_executor(
-                            executor,
-                            self._check_reference_sync,
-                            next_ref,
-                            next_idx + 1
-                        )
-                        future_to_index[next_future] = next_idx
-                        pending.add(next_future)
-                        next_to_submit += 1
+                await self.emit_progress("summary_update", {
+                    "total_refs": total_refs,
+                    "processed_refs": processed_count,
+                    "errors_count": errors_count,
+                    "warnings_count": warnings_count,
+                    "unverified_count": unverified_count,
+                    "verified_count": verified_count,
+                    "progress_percent": round((processed_count / total_refs) * 100, 1)
+                })
         
-        return results, errors_count, warnings_count, unverified_count, verified_count
+        # Convert dict to ordered list
+        results_list = [results.get(i) for i in range(total_refs)]
+        
+        return results_list, errors_count, warnings_count, unverified_count, verified_count

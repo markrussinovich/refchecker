@@ -10,7 +10,7 @@ export const useCheckStore = create((set, get) => ({
   status: 'idle', // idle, checking, completed, cancelled, error
   sessionId: null,
   currentCheckId: null, // ID of the check in history (created immediately)
-  sessionToCheckMap: {}, // Maps session_id -> check_id for tracking stale sessions
+  sessionToCheckMap: {}, // Maps session_id -> check_id for routing concurrent session messages
   paperTitle: null,
   paperSource: null, // URL or filename being checked
   statusMessage: '',
@@ -194,7 +194,7 @@ export const useCheckStore = create((set, get) => ({
 
   reset: () => {
     logger.info('CheckStore', 'Reset state')
-    // Preserve sessionToCheckMap so we can still process stale session messages
+    // Preserve sessionToCheckMap so we can still process concurrent session messages
     const prevMap = get().sessionToCheckMap
     set({
       status: 'idle',
@@ -231,51 +231,95 @@ export const useCheckStore = create((set, get) => ({
     const checkIdForMessage = messageCheckId || store.sessionToCheckMap[messageSessionId] || store.currentCheckId
 
     // If this message is for a different session than the current one, route updates to history only
-    const isStaleSession = messageSessionId && store.sessionId && messageSessionId !== store.sessionId
+    const isOtherSession = messageSessionId && store.sessionId && messageSessionId !== store.sessionId
     
-    if (isStaleSession) {
+    // DEBUG: Log all incoming messages with routing info
+    console.log(`[DEBUG-WS] type=${type} msgSession=${messageSessionId?.slice(0,8)} currentSession=${store.sessionId?.slice(0,8)} isOther=${isOtherSession} checkIdForMsg=${checkIdForMessage} currentCheckId=${store.currentCheckId}`)
+    
+    if (isOtherSession) {
+      console.log(`[DEBUG-WS] OTHER SESSION: Routing ${type} to history for check ${checkIdForMessage}`)
       if (!checkIdForMessage) {
-        logger.warn('CheckStore', `Cannot route stale session message - no check_id for session ${messageSessionId}`)
+        logger.warn('CheckStore', `Cannot route message - no check_id for session ${messageSessionId}`)
         return
       }
 
-      // Route stale session updates to history
+      // Route concurrent session updates to history - all checks are peers
       switch (type) {
         case 'started':
         case 'extracting':
+          console.log(`[DEBUG-WS] OTHER ${type}: checkId=${checkIdForMessage}`)
           historyStore.updateHistoryProgress(checkIdForMessage, { status: 'in_progress' })
           if (data.paper_title) {
             historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
           }
           break
         case 'references_extracted':
+          console.log(`[DEBUG-WS] OTHER references_extracted: checkId=${checkIdForMessage} total_refs=${data.total_refs} count=${data.count} refs_count=${data.references?.length}`)
+          // Store the extracted references so they can be displayed
+          const extractedRefs = data.references 
+            ? data.references.map((ref, index) => ({
+                ...ref,
+                index,
+                status: 'pending',
+                errors: [],
+                warnings: [],
+                authoritative_urls: [],
+              }))
+            : []
+          console.log(`[DEBUG-WS] OTHER references_extracted: storing ${extractedRefs.length} refs for check ${checkIdForMessage}`)
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'in_progress',
             total_refs: data.total_refs || data.count || 0,
+            processed_refs: 0, // Reset to 0 when refs first extracted
+            results: extractedRefs, // Store the full reference list
+          })
+          // Verify it was stored
+          const afterUpdate = historyStore.history.find(h => h.id === checkIdForMessage)
+          console.log(`[DEBUG-WS] OTHER references_extracted AFTER: check ${checkIdForMessage} now has results=${afterUpdate?.results?.length}`)
+          break
+        case 'checking_reference':
+          // Mark reference as 'checking' in the history store for concurrent sessions
+          console.log(`[DEBUG-WS] OTHER checking_reference: checkId=${checkIdForMessage} index=${data.index} title=${data.title}`)
+          if (typeof data.index === 'number') {
+            historyStore.updateHistoryReference(checkIdForMessage, data.index - 1, { 
+              status: 'checking' 
+            })
+          }
+          break
+        case 'reference_result':
+          // Update individual reference result for concurrent session
+          console.log(`[DEBUG-WS] OTHER reference_result: checkId=${checkIdForMessage} index=${data.index} status=${data.status}`)
+          historyStore.updateHistoryReference(checkIdForMessage, data.index - 1, {
+            ...data,
+            status: data.status || 'checked',
           })
           break
         case 'summary_update':
+          console.log(`[DEBUG-WS] OTHER summary_update: checkId=${checkIdForMessage} processed=${data.processed_refs}/${data.total_refs}`)
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'in_progress',
             total_refs: data.total_refs,
+            processed_refs: data.processed_refs,
             errors_count: data.errors_count,
             warnings_count: data.warnings_count,
             unverified_count: data.unverified_count,
           })
           break
         case 'completed':
-          logger.info('CheckStore', `Applying completed update for prior session ${messageSessionId}`, { checkId: checkIdForMessage })
+          console.log(`[DEBUG-WS] OTHER completed: checkId=${checkIdForMessage} total_refs=${data.total_refs} errors=${data.errors_count} warnings=${data.warnings_count}`)
+          logger.info('CheckStore', `Check ${checkIdForMessage} completed (concurrent session ${messageSessionId?.slice(0,8)})`)
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'completed',
             total_refs: data.total_refs,
+            processed_refs: data.total_refs, // All refs processed when completed
             errors_count: data.errors_count,
             warnings_count: data.warnings_count,
             unverified_count: data.unverified_count,
           })
           break
         default:
-          // Ignore other message types for stale sessions (checking_reference, reference_result, etc.)
-          logger.debug('CheckStore', `Ignoring ${type} message for stale session ${messageSessionId}`)
+          // Log but don't process other message types for concurrent sessions
+          console.log(`[DEBUG-WS] OTHER ${type}: checkId=${checkIdForMessage} (not updating progress)`)
       }
       return
     }
@@ -313,6 +357,7 @@ export const useCheckStore = create((set, get) => ({
           useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
             status: 'in_progress',
             total_refs: data.total_refs,
+            processed_refs: 0, // Reset to 0 when refs first extracted
           })
         }
         break
@@ -337,6 +382,7 @@ export const useCheckStore = create((set, get) => ({
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'in_progress',
           total_refs: data.total_refs,
+          processed_refs: data.processed_refs,
           errors_count: data.errors_count,
           warnings_count: data.warnings_count,
           unverified_count: data.unverified_count,
@@ -355,6 +401,7 @@ export const useCheckStore = create((set, get) => ({
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'completed',
           total_refs: data.total_refs,
+          processed_refs: data.total_refs, // All refs processed when completed
           errors_count: data.errors_count,
           warnings_count: data.warnings_count,
           unverified_count: data.unverified_count,

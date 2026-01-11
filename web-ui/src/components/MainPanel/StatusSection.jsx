@@ -21,30 +21,90 @@ function formatSource(source) {
 }
 
 /**
- * Status section showing current check progress
- * @param {Object} props
- * @param {boolean} props.isViewingHistory - Whether viewing a history item
+ * Status section showing check progress - treats all checks as peers
  */
-export default function StatusSection({ isViewingHistory = false }) {
+export default function StatusSection() {
   const { 
-    status, 
-    statusMessage, 
-    progress, 
-    paperTitle, 
-    paperSource, 
+    status: checkStoreStatus, 
+    statusMessage: checkStoreMessage,
+    progress: checkStoreProgress,
+    paperTitle: checkStorePaperTitle, 
+    paperSource: checkStorePaperSource, 
     currentCheckId,
     sessionId,
+    stats: checkStoreStats,
     cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore()
   const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
+
+  // Determine if we're viewing a check (either the current session's check or any history item)
+  const isViewingCheck = selectedCheckId !== null && selectedCheckId !== -1
   
-  const sourceInfo = isViewingHistory 
-    ? formatSource(selectedCheck?.paper_source) 
-    : formatSource(paperSource)
+  // Get the session_id for the currently viewed check (if any) to enable cancel
+  // For current session check, we use sessionId from checkStore
+  // For other checks, we'd need the session_id from selectedCheck (if still running)
+  const viewedCheckSessionId = selectedCheckId === currentCheckId ? sessionId : selectedCheck?.session_id
+
+  // Unify data source: prefer selectedCheck (from history store) when viewing any check
+  // Fall back to checkStore for the current session if selectedCheck isn't loaded yet
+  const isCurrentSessionCheck = selectedCheckId === currentCheckId
   
-  // Show loading state when switching to a history item
-  if (isViewingHistory && isLoadingDetail) {
+  // Derive display values
+  // For current session: prefer checkStore (has live WebSocket data)
+  // For other checks: use selectedCheck (has history data)
+  let displayStatus = 'idle'
+  let displayTitle = null
+  let displaySource = null
+  let displayMessage = ''
+  let displayProgress = 0
+  let displayTotalRefs = 0
+  let displayProcessedRefs = 0
+  
+  if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
+    // Current session: use live WebSocket data from checkStore
+    displayStatus = checkStoreStatus
+    displayTitle = checkStorePaperTitle
+    displaySource = checkStorePaperSource
+    displayMessage = checkStoreMessage
+    displayProgress = checkStoreProgress
+    displayTotalRefs = checkStoreStats?.total_refs || 0
+    displayProcessedRefs = checkStoreStats?.processed_refs || 0
+  } else if (isViewingCheck && selectedCheck) {
+    // Other checks: use selectedCheck data from history
+    displayStatus = selectedCheck.status || 'idle'
+    displayTitle = selectedCheck.custom_label || selectedCheck.paper_title
+    displaySource = selectedCheck.paper_source
+    displayTotalRefs = selectedCheck.total_refs || 0
+    displayProcessedRefs = selectedCheck.processed_refs || 0
+    displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
+    
+    // Build status message based on state
+    if (displayStatus === 'in_progress') {
+      if (displayProcessedRefs > 0) {
+        displayMessage = `Checking ${displayProcessedRefs} of ${displayTotalRefs} references...`
+      } else if (displayTotalRefs > 0) {
+        displayMessage = `Found ${displayTotalRefs} references, starting verification...`
+      } else {
+        displayMessage = 'Extracting references...'
+      }
+    } else if (displayStatus === 'completed') {
+      displayMessage = `Completed • ${displayTotalRefs} references checked`
+    } else if (displayStatus === 'cancelled') {
+      displayMessage = 'Check cancelled'
+    } else if (displayStatus === 'error') {
+      displayMessage = 'Check failed'
+    }
+  }
+
+  const sourceInfo = formatSource(displaySource)
+  const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
+  const isCompleted = displayStatus === 'completed'
+  const isCancelled = displayStatus === 'cancelled'
+  const isError = displayStatus === 'error'
+
+  // Show loading state when switching to a check
+  if (isViewingCheck && isLoadingDetail) {
     return (
       <div 
         className="rounded-lg border p-4"
@@ -75,141 +135,79 @@ export default function StatusSection({ isViewingHistory = false }) {
       </div>
     )
   }
-  
-  if (isViewingHistory && selectedCheck) {
-    return (
-      <div 
-        className="rounded-lg border p-4"
-        style={{
-          backgroundColor: 'var(--color-bg-secondary)',
-          borderColor: 'var(--color-border)',
-        }}
-      >
-        <div className="flex items-center gap-3">
-          <div 
-            className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: 'var(--color-success-bg)' }}
-          >
-            <svg 
-              className="w-5 h-5" 
-              fill="none" 
-              viewBox="0 0 24 24" 
-              stroke="currentColor"
-              style={{ color: 'var(--color-success)' }}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 
-              className="font-medium truncate"
-              style={{ color: 'var(--color-text-primary)' }}
-            >
-              {selectedCheck.custom_label || selectedCheck.paper_title || 'Check Results'}
-            </h3>
-            {sourceInfo && (
-              <p 
-                className="text-sm truncate"
-                style={{ color: 'var(--color-text-muted)' }}
-                title={sourceInfo.value}
-              >
-                {sourceInfo.type === 'url' ? (
-                  <a 
-                    href={sourceInfo.value} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="hover:underline"
-                    style={{ color: 'var(--color-accent)' }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {sourceInfo.display}
-                  </a>
-                ) : (
-                  sourceInfo.display
-                )}
-              </p>
-            )}
-            <p 
-              className="text-sm"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              Completed • {selectedCheck.total_refs} references checked
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
 
-  // Not checking
-  if (status === 'idle') {
+  // Not viewing any check
+  if (!isViewingCheck || displayStatus === 'idle') {
     return null
   }
 
   // Status icon based on state
   const getStatusIcon = () => {
-    switch (status) {
-      case 'checking':
-        return (
-          <svg 
-            className="w-7 h-7 animate-spin" 
-            fill="none" 
-            viewBox="0 0 24 24"
-            style={{ color: 'var(--color-accent)' }}
-          >
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
-        )
-      case 'completed':
-        return (
-          <svg 
-            className="w-7 h-7" 
-            viewBox="0 0 24 24" 
-            fill="none"
-          >
-            <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
-            <path d="M8.5 12.5l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )
-      case 'cancelled':
-        return (
-          <svg 
-            className="w-7 h-7" 
-            viewBox="0 0 24 24" 
-            fill="none"
-          >
-            <circle cx="12" cy="12" r="10" fill="var(--color-warning)" />
-            <path d="M12 7.5v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
-          </svg>
-        )
-      case 'error':
-        return (
-          <svg 
-            className="w-7 h-7" 
-            viewBox="0 0 24 24" 
-            fill="none"
-          >
-            <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
-            <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
-          </svg>
-        )
-      default:
-        return null
+    if (isInProgress) {
+      return (
+        <svg 
+          className="w-6 h-6 animate-spin" 
+          fill="none" 
+          viewBox="0 0 24 24"
+          style={{ color: 'var(--color-accent)' }}
+        >
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+      )
     }
+    if (isCompleted) {
+      return (
+        <svg 
+          className="w-6 h-6" 
+          fill="none" 
+          viewBox="0 0 24 24" 
+          stroke="currentColor"
+          style={{ color: 'var(--color-success)' }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      )
+    }
+    if (isCancelled) {
+      return (
+        <svg 
+          className="w-6 h-6" 
+          viewBox="0 0 24 24" 
+          fill="none"
+          stroke="currentColor"
+          style={{ color: 'var(--color-warning)' }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      )
+    }
+    if (isError) {
+      return (
+        <svg 
+          className="w-6 h-6" 
+          viewBox="0 0 24 24" 
+          fill="none"
+          stroke="currentColor"
+          style={{ color: 'var(--color-error)' }}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )
+    }
+    return null
   }
 
   const getStatusBgColor = () => {
-    switch (status) {
-      case 'checking': return 'var(--color-info-bg)'
-      case 'completed': return 'var(--color-success-bg)'
-      case 'cancelled': return 'var(--color-warning-bg)'
-      case 'error': return 'var(--color-error-bg)'
-      default: return 'var(--color-bg-tertiary)'
-    }
+    if (isInProgress) return 'var(--color-info-bg)'
+    if (isCompleted) return 'var(--color-success-bg)'
+    if (isCancelled) return 'var(--color-warning-bg)'
+    if (isError) return 'var(--color-error-bg)'
+    return 'var(--color-bg-tertiary)'
   }
+
+  // Can cancel if this check is in progress AND we have a session_id for it
+  const canCancel = isInProgress && viewedCheckSessionId
 
   return (
     <div 
@@ -221,18 +219,18 @@ export default function StatusSection({ isViewingHistory = false }) {
     >
       <div className="flex items-center gap-3">
         <div 
-          className="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
-          style={{ backgroundColor: 'transparent' }}
+          className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: getStatusBgColor() }}
         >
           {getStatusIcon()}
         </div>
         <div className="flex-1 min-w-0">
-          {paperTitle && (
+          {displayTitle && (
             <h3 
               className="font-medium truncate"
               style={{ color: 'var(--color-text-primary)' }}
             >
-              {paperTitle}
+              {displayTitle}
             </h3>
           )}
           {sourceInfo && (
@@ -259,22 +257,27 @@ export default function StatusSection({ isViewingHistory = false }) {
           )}
           <p 
             className="text-sm"
-            style={{ color: 'var(--color-text-secondary)' }}
+            style={{ color: 'var(--color-text-muted)' }}
           >
-            {statusMessage}
+            {displayMessage}
           </p>
         </div>
-        {status === 'checking' && (
+        {canCancel && (
           <button
             onClick={async () => {
-              if (!sessionId) return
+              if (!viewedCheckSessionId) return
               try {
-                logger.info('StatusSection', `Cancelling check ${sessionId}`)
-                await api.cancelCheck(sessionId)
-                storeCancelCheck()
+                logger.info('StatusSection', `Cancelling check ${viewedCheckSessionId}`)
+                await api.cancelCheck(viewedCheckSessionId)
+                // Only update checkStore if cancelling the current session
+                if (viewedCheckSessionId === sessionId) {
+                  storeCancelCheck()
+                }
               } catch (error) {
                 logger.error('StatusSection', 'Failed to cancel', error)
-                storeCancelCheck()
+                if (viewedCheckSessionId === sessionId) {
+                  storeCancelCheck()
+                }
                 setError(error.response?.data?.detail || error.message || 'Failed to cancel')
               }
             }}
@@ -289,8 +292,8 @@ export default function StatusSection({ isViewingHistory = false }) {
         )}
       </div>
 
-      {/* Progress bar */}
-      {status === 'checking' && (
+      {/* Progress bar for in-progress checks */}
+      {isInProgress && (
         <div className="mt-4">
           <div 
             className="h-2 rounded-full overflow-hidden"
@@ -299,10 +302,18 @@ export default function StatusSection({ isViewingHistory = false }) {
             <div 
               className="h-full rounded-full transition-all duration-300 progress-bar"
               style={{ 
-                width: `${progress}%`,
+                width: `${Math.round(displayProgress)}%`,
               }}
             />
           </div>
+          <p 
+            className="text-xs mt-1"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {displayTotalRefs > 0 
+              ? `${Math.round(displayProgress)}% complete`
+              : 'Starting...'}
+          </p>
         </div>
       )}
     </div>

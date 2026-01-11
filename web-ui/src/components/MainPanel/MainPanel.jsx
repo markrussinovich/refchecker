@@ -8,48 +8,122 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 
 /**
  * Main panel containing input, status, stats, and references
+ * All checks are treated as peers - no special handling for "current" vs "history"
  */
 export default function MainPanel() {
   const { 
-    status: checkStatus, 
-    references, 
-    stats, 
+    status: checkStoreStatus, 
+    references: checkStoreRefs, 
+    stats: checkStoreStats, 
     currentCheckId,
     clearStatusFilter 
   } = useCheckStore()
   const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
 
   // Determine what to display:
-  // - If selectedCheckId === -1, user clicked "New refcheck" -> show input form
-  // - If a history item is selected that's NOT the current running check, show history
-  // - If viewing the current running check, show its live state
-  // - Otherwise show the current check state
+  // - selectedCheckId === -1: "New refcheck" placeholder -> show input form
+  // - selectedCheckId is set: show that check's data from selectedCheck
+  // - No selection but check running: show input (shouldn't happen normally)
   const isNewRefcheckSelected = selectedCheckId === -1
-  const isViewingHistory = selectedCheckId !== null && selectedCheckId !== -1 && selectedCheckId !== currentCheckId
-  const isViewingCurrentCheck = selectedCheckId !== null && selectedCheckId === currentCheckId
-  const displayData = isViewingHistory ? selectedCheck : null
-  
+  const isViewingCheck = selectedCheckId !== null && selectedCheckId !== -1
+
   // Clear status filter when switching views
   useEffect(() => {
     clearStatusFilter()
   }, [selectedCheckId, clearStatusFilter])
 
-  // Show input when:
-  // 1. "New refcheck" placeholder is selected (selectedCheckId === -1), OR
-  // 2. No check is running and not viewing history
-  const showInput = isNewRefcheckSelected || (!isViewingHistory && checkStatus === 'idle')
+  // Show input when "New refcheck" is selected OR no check and idle
+  const showInput = isNewRefcheckSelected || (!isViewingCheck && checkStoreStatus === 'idle')
   
-  // Show content (status, stats, refs) when:
-  // 1. Viewing a history item, OR
-  // 2. Viewing the current running check, OR
-  // 3. A check is running/completed and we're not on the "New refcheck" placeholder
-  const showContent = isViewingHistory || isViewingCurrentCheck || (checkStatus !== 'idle' && !isNewRefcheckSelected)
+  // Show content when viewing any check
+  const showContent = isViewingCheck
 
-  const handleReturnToActiveCheck = () => {
-    if (currentCheckId) {
-      selectCheck(currentCheckId)
+  // Unified data source - all checks treated equally
+  // Source from selectedCheck for ANY selected check (current or not)
+  // Fall back to checkStore only if selectedCheck isn't loaded yet for current check
+  const isCurrentCheck = selectedCheckId === currentCheckId
+  const hasSelectedCheckData = selectedCheck && selectedCheck.id === selectedCheckId
+  
+  // Determine status
+  const displayStatus = hasSelectedCheckData 
+    ? selectedCheck.status 
+    : (isCurrentCheck ? checkStoreStatus : 'idle')
+  
+  const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
+  const isComplete = displayStatus === 'completed'
+
+  // Build unified references list
+  // For current check, prefer live checkStore data; for other checks, use selectedCheck
+  const getReferences = () => {
+    // Current check: use live WebSocket data from checkStore
+    if (isCurrentCheck && checkStoreRefs && checkStoreRefs.length > 0) {
+      return checkStoreRefs
+    }
+    
+    // Other checks or current check without live data: use selectedCheck
+    if (hasSelectedCheckData && selectedCheck.results) {
+      return selectedCheck.results
+    }
+    
+    return []
+  }
+
+  // Build unified stats
+  // For current check, prefer live checkStore stats; for other checks, compute from selectedCheck
+  const buildStats = () => {
+    // Current check: use live WebSocket data from checkStore
+    if (isCurrentCheck && checkStoreStats && checkStoreStats.total_refs > 0) {
+      return checkStoreStats
+    }
+    
+    if (hasSelectedCheckData) {
+      const totalRefs = selectedCheck.total_refs || 0
+      const processedRefs = selectedCheck.processed_refs || 0
+      const errorsCount = selectedCheck.errors_count || 0
+      const warningsCount = selectedCheck.warnings_count || 0
+      const unverifiedCount = selectedCheck.unverified_count || 0
+      
+      // For in-progress checks, verified = processed - errors - warnings - unverified
+      // For completed checks, verified = total - errors - warnings - unverified
+      const verifiedCount = isInProgress
+        ? Math.max(0, processedRefs - errorsCount - warningsCount - unverifiedCount)
+        : Math.max(0, totalRefs - errorsCount - warningsCount - unverifiedCount)
+      
+      return {
+        total_refs: totalRefs,
+        processed_refs: processedRefs,
+        verified_count: verifiedCount,
+        errors_count: errorsCount,
+        warnings_count: warningsCount,
+        unverified_count: unverifiedCount,
+        progress_percent: totalRefs > 0 ? (processedRefs / totalRefs) * 100 : 0,
+      }
+    }
+    
+    // Fallback to checkStore 
+    if (checkStoreStats) {
+      return checkStoreStats
+    }
+    
+    // Default empty stats
+    return {
+      total_refs: 0,
+      processed_refs: 0,
+      verified_count: 0,
+      errors_count: 0,
+      warnings_count: 0,
+      unverified_count: 0,
+      progress_percent: 0,
     }
   }
+
+  const displayStats = buildStats()
+  const displayRefs = getReferences()
+
+  // Debug: log what we're displaying
+  console.log(`[DEBUG-MAINPANEL] selectedCheckId=${selectedCheckId} currentCheckId=${currentCheckId} isCurrentCheck=${isCurrentCheck}`)
+  console.log(`[DEBUG-MAINPANEL] hasSelectedCheckData=${hasSelectedCheckData} selectedCheck.results=${selectedCheck?.results?.length} checkStoreRefs=${checkStoreRefs?.length}`)
+  console.log(`[DEBUG-MAINPANEL] displayRefs.length=${displayRefs?.length}`)
 
   return (
     <main 
@@ -60,31 +134,23 @@ export default function MainPanel() {
         {/* Input Section */}
         {showInput && <InputSection />}
 
-        {/* Status Section - only show when checking or viewing history */}
+        {/* Status Section */}
         {showContent && (
-          <StatusSection isViewingHistory={isViewingHistory} />
+          <StatusSection />
         )}
 
         {/* Stats Section */}
         {showContent && (
           <StatsSection 
-            stats={isViewingHistory ? {
-              total_refs: displayData?.total_refs || 0,
-              verified_count: (displayData?.total_refs || 0) - (displayData?.errors_count || 0) - (displayData?.warnings_count || 0) - (displayData?.unverified_count || 0),
-              errors_count: displayData?.errors_count || 0,
-              warnings_count: displayData?.warnings_count || 0,
-              unverified_count: displayData?.unverified_count || 0,
-              processed_refs: displayData?.total_refs || 0,
-              progress_percent: 100,
-            } : stats}
-            isComplete={isViewingHistory || checkStatus === 'completed'}
+            stats={displayStats}
+            isComplete={isComplete}
           />
         )}
 
         {/* References List */}
         {showContent && (
           <ReferenceList 
-            references={isViewingHistory ? (displayData?.results || []) : references}
+            references={displayRefs}
             isLoading={isLoadingDetail}
           />
         )}

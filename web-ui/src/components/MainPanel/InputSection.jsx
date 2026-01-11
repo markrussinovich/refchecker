@@ -95,10 +95,12 @@ export default function InputSection() {
       const response = await api.startCheck(formData)
       const { session_id, check_id, message } = response.data
       
+      console.log(`[DEBUG-START] Check started: session=${session_id?.slice(0,8)} check_id=${check_id}`)
       logger.info('API', 'Check started successfully', { session_id, check_id, message })
 
       // Initialize check state with the check_id and source
       startCheck(session_id, check_id, displaySource)
+      console.log(`[DEBUG-START] startCheck called, now adding to history...`)
 
       // IMPORTANT: Add to history IMMEDIATELY so WebSocket updates have a target
       // This prevents race conditions where messages arrive before fetchHistory completes
@@ -119,9 +121,11 @@ export default function InputSection() {
         source_type: inputMode === 'url' ? 'url' : inputMode === 'file' ? 'file' : 'text',
         session_id: session_id,
       })
+      console.log(`[DEBUG-START] addToHistory complete, selecting check...`)
       
       // Select the current check in history so user can navigate away and back
       selectCheck(check_id)
+      console.log(`[DEBUG-START] selectCheck complete for check_id=${check_id}`)
 
     } catch (error) {
       logger.error('InputSection', 'Failed to start check', error)

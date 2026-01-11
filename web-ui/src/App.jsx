@@ -4,6 +4,7 @@ import MainPanel from './components/MainPanel/MainPanel'
 import ThemeToggle from './components/common/ThemeToggle'
 import DebugPanel from './components/DebugPanel'
 import LiveWebSocketManager from './components/LiveWebSocketManager'
+import SettingsPanel from './components/Settings/SettingsPanel'
 import { logger } from './utils/logger'
 
 function App() {
@@ -53,6 +54,9 @@ function App() {
 
       {/* Debug Panel */}
       <DebugPanel />
+
+      {/* Settings Panel Modal */}
+      <SettingsPanel />
     </div>
   )
 }

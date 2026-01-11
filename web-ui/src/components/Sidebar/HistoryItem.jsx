@@ -13,6 +13,9 @@ export default function HistoryItem({ item, isSelected }) {
   const [isHovered, setIsHovered] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
 
+  // Debug: log each item render with key data
+  console.log(`[DEBUG-ITEM] Rendering item ${item.id}: status=${item.status} total_refs=${item.total_refs}`)
+
   const displayLabel = item.custom_label || item.paper_title || 'Untitled Check'
 
   const isPlaceholder = item.id === -1
