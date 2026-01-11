@@ -1,47 +1,51 @@
 @import "tailwindcss";
 
-/* Theme variables */
+/* Theme variables - ChatGPT-inspired palette */
 :root {
   --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f3f4f6;
-  --color-bg-tertiary: #e5e7eb;
-  --color-text-primary: #111827;
-  --color-text-secondary: #6b7280;
-  --color-text-muted: #9ca3af;
-  --color-border: #d1d5db;
-  --color-accent: #3b82f6;
-  --color-accent-hover: #2563eb;
-  --color-error: #ef4444;
+  --color-bg-secondary: #f7f7f8;
+  --color-bg-tertiary: #ececf1;
+  --color-text-primary: #0d0d0d;
+  --color-text-secondary: #676767;
+  --color-text-muted: #8e8ea0;
+  --color-border: #e5e5e5;
+  --color-accent: #10a37f;
+  --color-accent-hover: #0d8a6f;
+  --color-error: #ef4146;
   --color-error-bg: #fef2f2;
   --color-warning: #f59e0b;
   --color-warning-bg: #fffbeb;
-  --color-success: #10b981;
+  --color-success: #10a37f;
   --color-success-bg: #ecfdf5;
   --color-info: #6366f1;
   --color-info-bg: #eef2ff;
+  --color-link: #2563eb;
   
   /* Sidebar */
   --sidebar-width: 280px;
+  --sidebar-bg: #f9f9f9;
 }
 
 .dark {
-  --color-bg-primary: #111827;
-  --color-bg-secondary: #1f2937;
-  --color-bg-tertiary: #374151;
-  --color-text-primary: #f9fafb;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
-  --color-border: #4b5563;
-  --color-accent: #60a5fa;
-  --color-accent-hover: #3b82f6;
+  --color-bg-primary: #212121;
+  --color-bg-secondary: #2f2f2f;
+  --color-bg-tertiary: #424242;
+  --color-text-primary: #ececec;
+  --color-text-secondary: #b4b4b4;
+  --color-text-muted: #8e8e8e;
+  --color-border: #444444;
+  --color-accent: #10a37f;
+  --color-accent-hover: #1a7f64;
   --color-error: #f87171;
-  --color-error-bg: #450a0a;
+  --color-error-bg: #3b1818;
   --color-warning: #fbbf24;
-  --color-warning-bg: #451a03;
-  --color-success: #34d399;
-  --color-success-bg: #022c22;
+  --color-warning-bg: #3b2f05;
+  --color-success: #10a37f;
+  --color-success-bg: #052e22;
   --color-info: #818cf8;
   --color-info-bg: #1e1b4b;
+  --color-link: #60a5fa;
+  --sidebar-bg: #171717;
 }
 
 /* Base styles */

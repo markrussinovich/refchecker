@@ -612,10 +612,9 @@ class NonArxivReferenceChecker:
         logger.debug(f"Semantic Scholar - Extracting URL from paper data: {list(paper_data.keys())}")
         
         # Return the Semantic Scholar URL that was actually used for verification
-        # First priority: Semantic Scholar URL since that's what we used for verification
-        if external_ids.get('CorpusId'):
-            from refchecker.utils.url_utils import construct_semantic_scholar_url
-            paper_url = construct_semantic_scholar_url(external_ids['CorpusId'])
+        # First priority: Semantic Scholar URL using paperId (SHA hash, works in web URLs)
+        if paper_data.get('paperId'):
+            paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         
         # Second priority: DOI URL (if this was verified through DOI)

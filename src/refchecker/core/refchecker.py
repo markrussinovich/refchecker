@@ -2089,14 +2089,12 @@ class ArxivReferenceChecker:
                             if correct_paper_data:
                                 logger.debug(f"Database mode: Found correct paper: '{correct_paper_data.get('title', '')}'")
                                 # Use the CORRECT paper's Semantic Scholar URL
-                                correct_external_ids = correct_paper_data.get('externalIds', {})
-                                if correct_external_ids.get('CorpusId'):
-                                    from refchecker.utils.url_utils import construct_semantic_scholar_url
-                                    correct_paper_url = construct_semantic_scholar_url(correct_external_ids['CorpusId'])
+                                if correct_paper_data.get('paperId'):
+                                    correct_paper_url = f"https://www.semanticscholar.org/paper/{correct_paper_data['paperId']}"
                                     paper_url = correct_paper_url  # Update the main URL
                                     logger.debug(f"Database mode: Using correct paper's Semantic Scholar URL for ArXiv ID mismatch: {paper_url}")
                                 else:
-                                    logger.debug("Database mode: Correct paper found but no CorpusId available")
+                                    logger.debug("Database mode: Correct paper found but no paperId available")
                             else:
                                 logger.debug("Database mode: Could not find correct paper by title/authors")
                     except Exception as e:
@@ -2117,12 +2115,11 @@ class ArxivReferenceChecker:
                         formatted_errors.append(formatted_error)
                     
                     # Fallback to wrong paper's URL if we couldn't find the correct one
-                    if not correct_paper_data and verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
-                        from refchecker.utils.url_utils import construct_semantic_scholar_url
-                        paper_url = construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
+                    if not correct_paper_data and verified_data and verified_data.get('paperId'):
+                        paper_url = f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
                         logger.debug(f"Database mode: Fallback to wrong paper's Semantic Scholar URL: {paper_url}")
                     elif not correct_paper_data:
-                        logger.debug(f"Database mode: No CorpusId available for Semantic Scholar URL construction. verified_data keys: {list(verified_data.keys()) if verified_data else 'None'}")
+                        logger.debug(f"Database mode: No paperId available for Semantic Scholar URL construction. verified_data keys: {list(verified_data.keys()) if verified_data else 'None'}")
                 
                 return formatted_errors if formatted_errors else None, paper_url, verified_data
             else:
@@ -5521,10 +5518,9 @@ class ArxivReferenceChecker:
         if verified_data and verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
             return verified_data['url']
         
-        # Second priority: Semantic Scholar URL from CorpusId (if no direct URL available)
-        if verified_data and verified_data.get('externalIds', {}).get('CorpusId'):
-            from refchecker.utils.url_utils import construct_semantic_scholar_url
-            return construct_semantic_scholar_url(verified_data['externalIds']['CorpusId'])
+        # Second priority: Semantic Scholar URL from paperId (if no direct URL available)
+        if verified_data and verified_data.get('paperId'):
+            return f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
         
         # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
         if verified_data and verified_data.get('externalIds', {}).get('DOI'):
@@ -5576,11 +5572,11 @@ class ArxivReferenceChecker:
             # Non-ArXiv URL, probably safe to use
             return reference_url
     
-    def _get_fallback_url(self, external_ids):
+    def _get_fallback_url(self, external_ids, verified_data=None):
         """Get fallback URL from external IDs (Semantic Scholar or DOI)"""
-        if external_ids.get('CorpusId'):
-            from refchecker.utils.url_utils import construct_semantic_scholar_url
-            return construct_semantic_scholar_url(external_ids['CorpusId'])
+        # Prefer paperId for Semantic Scholar URLs
+        if verified_data and verified_data.get('paperId'):
+            return f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
         elif external_ids.get('DOI'):
             from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(external_ids['DOI'])

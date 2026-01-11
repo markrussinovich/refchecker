@@ -128,7 +128,7 @@ export default function SemanticScholarConfig() {
           </div>
           <button
             onClick={() => setIsEditing(true)}
-            className="text-sm px-2 py-1 rounded transition-colors"
+            className="text-sm px-2 py-1 rounded transition-colors cursor-pointer"
             style={{ color: 'var(--color-accent)' }}
           >
             {hasKey ? 'Edit' : 'Add'}

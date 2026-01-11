@@ -700,7 +700,7 @@ async def get_all_settings():
                 "label": "Max Concurrent Checks",
                 "description": "Maximum number of references to check simultaneously across all papers",
                 "min": 1,
-                "max": 50,
+                "max": 20,
                 "section": "Performance"
             }
         }

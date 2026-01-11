@@ -1,12 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { logger } from '../../utils/logger'
 
 /**
- * Settings panel component - opens as a modal overlay
- * Designed for extensibility with sections for different setting categories
+ * Settings panel component - ChatGPT-style with left navigation
  */
-export default function SettingsPanel() {
+export default function SettingsPanel({ theme, onThemeChange }) {
   const { 
     settings, 
     isLoading, 
@@ -15,6 +14,7 @@ export default function SettingsPanel() {
     updateSetting 
   } = useSettingsStore()
   const panelRef = useRef(null)
+  const [activeSection, setActiveSection] = useState('General')
 
   // Close on escape key
   useEffect(() => {
@@ -35,7 +35,6 @@ export default function SettingsPanel() {
       }
     }
     if (isSettingsOpen) {
-      // Delay to prevent immediate close from the gear icon click
       setTimeout(() => {
         document.addEventListener('mousedown', handleClickOutside)
       }, 100)
@@ -45,175 +44,158 @@ export default function SettingsPanel() {
 
   if (!isSettingsOpen) return null
 
-  // Group settings by section
-  const sections = {}
-  Object.entries(settings).forEach(([key, setting]) => {
-    const section = setting.section || 'General'
-    if (!sections[section]) {
-      sections[section] = []
-    }
-    sections[section].push({ key, ...setting })
-  })
-
   const handleSettingChange = (key, value) => {
     logger.info('SettingsPanel', `Updating setting ${key} to ${value}`)
     updateSetting(key, value)
   }
 
-  const renderSettingInput = (setting) => {
-    const { key, value, type, min, max, label, description } = setting
+  const navItems = [
+    { id: 'General', label: 'General', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    )},
+  ]
 
-    switch (type) {
-      case 'number':
-        return (
-          <div key={key} className="mb-4">
-            <label className="block mb-1.5" style={{ color: 'var(--color-text-primary)' }}>
-              <span className="font-medium text-sm">{label}</span>
-              {description && (
-                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {description}
-                </p>
-              )}
-            </label>
-            <input
-              type="number"
-              value={value}
-              min={min}
-              max={max}
-              onChange={(e) => handleSettingChange(key, e.target.value)}
-              className="w-full px-3 py-2 rounded-md border text-sm"
-              style={{
-                backgroundColor: 'var(--color-bg-primary)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)'
-              }}
-            />
-          </div>
-        )
+  const renderGeneralSection = () => (
+    <div className="space-y-1">
+      {/* Theme Setting */}
+      <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Theme</div>
+        </div>
+        <div className="relative">
+          <select
+            value={theme}
+            onChange={(e) => onThemeChange(e.target.value)}
+            className="appearance-none px-4 py-2 pr-8 rounded-lg border text-sm cursor-pointer"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              minWidth: '120px'
+            }}
+          >
+            <option value="system">System</option>
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+          <svg 
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </div>
 
-      case 'boolean':
-        return (
-          <div key={key} className="mb-4 flex items-start gap-3">
-            <label className="relative inline-flex items-center cursor-pointer mt-0.5">
-              <input
-                type="checkbox"
-                checked={value === 'true'}
-                onChange={(e) => handleSettingChange(key, e.target.checked ? 'true' : 'false')}
-                className="sr-only peer"
-              />
-              <div 
-                className="w-9 h-5 rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-offset-2 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"
-                style={{
-                  backgroundColor: value === 'true' ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
-                }}
-              />
-            </label>
-            <div>
-              <span className="font-medium text-sm" style={{ color: 'var(--color-text-primary)' }}>{label}</span>
-              {description && (
-                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {description}
-                </p>
-              )}
-            </div>
+      {/* Concurrency Setting */}
+      <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            {settings.max_concurrent_checks?.label || 'Concurrent Checks'}
           </div>
-        )
-
-      case 'string':
-      default:
-        return (
-          <div key={key} className="mb-4">
-            <label className="block mb-1.5" style={{ color: 'var(--color-text-primary)' }}>
-              <span className="font-medium text-sm">{label}</span>
-              {description && (
-                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {description}
-                </p>
-              )}
-            </label>
-            <input
-              type="text"
-              value={value}
-              onChange={(e) => handleSettingChange(key, e.target.value)}
-              className="w-full px-3 py-2 rounded-md border text-sm"
-              style={{
-                backgroundColor: 'var(--color-bg-primary)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)'
-              }}
-            />
+          <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {settings.max_concurrent_checks?.description || 'Maximum number of references to check simultaneously'}
           </div>
-        )
-    }
-  }
+        </div>
+        <input
+          type="number"
+          value={settings.max_concurrent_checks?.value ?? 6}
+          min={settings.max_concurrent_checks?.min ?? 1}
+          max={settings.max_concurrent_checks?.max ?? 20}
+          onChange={(e) => handleSettingChange('max_concurrent_checks', e.target.value)}
+          className="px-3 py-2 rounded-lg border text-sm text-center"
+          style={{
+            backgroundColor: 'var(--color-bg-primary)',
+            borderColor: 'var(--color-border)',
+            color: 'var(--color-text-primary)',
+            width: '80px'
+          }}
+        />
+      </div>
+    </div>
+  )
 
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: 'rgba(0, 0, 0, 0.5)' }}
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.6)' }}
     >
       <div
         ref={panelRef}
-        className="rounded-lg shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col"
-        style={{ backgroundColor: 'var(--color-bg-secondary)' }}
+        className="rounded-2xl shadow-2xl overflow-hidden flex"
+        style={{ 
+          backgroundColor: 'var(--color-bg-secondary)',
+          width: '680px',
+          maxWidth: '90vw',
+          maxHeight: '80vh',
+        }}
       >
-        {/* Header */}
+        {/* Left Navigation */}
         <div 
-          className="px-6 py-4 border-b flex items-center justify-between"
-          style={{ borderColor: 'var(--color-border)' }}
+          className="w-48 flex-shrink-0 border-r py-4"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
         >
-          <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-            Settings
-          </h2>
-          <button
-            onClick={closeSettings}
-            className="p-1 rounded-md transition-colors cursor-pointer"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <svg className="animate-spin h-6 w-6" style={{ color: 'var(--color-accent)' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          {/* Header with close */}
+          <div className="px-4 mb-4 flex items-center gap-2">
+            <button
+              onClick={closeSettings}
+              className="p-1.5 rounded-lg transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </div>
-          ) : (
-            <>
-              {Object.entries(sections).map(([sectionName, sectionSettings]) => (
-                <div key={sectionName} className="mb-6 last:mb-0">
-                  <h3 
-                    className="text-xs font-semibold uppercase tracking-wide mb-3"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                  >
-                    {sectionName}
-                  </h3>
-                  {sectionSettings.map(renderSettingInput)}
-                </div>
-              ))}
-              
-              {Object.keys(sections).length === 0 && (
-                <p className="text-center py-4" style={{ color: 'var(--color-text-secondary)' }}>
-                  No settings available
-                </p>
-              )}
-            </>
-          )}
+            </button>
+            <span className="font-semibold" style={{ color: 'var(--color-text-primary)' }}>Settings</span>
+          </div>
+          
+          {/* Nav items */}
+          <nav className="space-y-1 px-3">
+            {navItems.map(item => (
+              <button
+                key={item.id}
+                onClick={() => setActiveSection(item.id)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                style={{
+                  backgroundColor: activeSection === item.id ? 'var(--color-bg-tertiary)' : 'transparent',
+                  color: activeSection === item.id ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </button>
+            ))}
+          </nav>
         </div>
 
-        {/* Footer */}
-        <div 
-          className="px-6 py-3 border-t text-xs"
-          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-tertiary)' }}
-        >
-          Settings are saved automatically
+        {/* Right Content */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Header */}
+          <div className="px-6 py-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+            <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+              {activeSection}
+            </h2>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {isLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <svg className="animate-spin h-6 w-6" style={{ color: 'var(--color-accent)' }} fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            ) : (
+              activeSection === 'General' && renderGeneralSection()
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -102,7 +102,9 @@ def construct_semantic_scholar_url(paper_id: str) -> str:
     Construct a Semantic Scholar URL from a paper ID.
     
     Args:
-        paper_id: Semantic Scholar paper ID
+        paper_id: Semantic Scholar paper ID (SHA hash, NOT CorpusId)
+                  The paperId is the 40-character hex hash that works in web URLs.
+                  CorpusId (numeric) does NOT work in web URLs.
         
     Returns:
         Full Semantic Scholar URL
@@ -151,7 +153,7 @@ def construct_pubmed_url(pmid: str) -> str:
     return f"https://pubmed.ncbi.nlm.nih.gov/{clean_pmid}/"
 
 
-def get_best_available_url(external_ids: dict, open_access_pdf: Optional[str] = None) -> Optional[str]:
+def get_best_available_url(external_ids: dict, open_access_pdf: Optional[str] = None, paper_id: Optional[str] = None) -> Optional[str]:
     """
     Get the best available URL from a paper's external IDs and open access information.
     Priority: Open Access PDF > DOI > ArXiv > Semantic Scholar > OpenAlex > PubMed
@@ -159,6 +161,7 @@ def get_best_available_url(external_ids: dict, open_access_pdf: Optional[str] = 
     Args:
         external_ids: Dictionary of external identifiers
         open_access_pdf: Open access PDF URL if available
+        paper_id: Semantic Scholar paperId (SHA hash) if available
         
     Returns:
         Best available URL or None if no valid URL found
@@ -175,9 +178,9 @@ def get_best_available_url(external_ids: dict, open_access_pdf: Optional[str] = 
     if external_ids.get('ArXiv'):
         return construct_arxiv_url(external_ids['ArXiv'])
     
-    # Priority 4: Semantic Scholar URL
-    if external_ids.get('CorpusId'):
-        return construct_semantic_scholar_url(external_ids['CorpusId'])
+    # Priority 4: Semantic Scholar URL (using paperId, not CorpusId)
+    if paper_id:
+        return construct_semantic_scholar_url(paper_id)
     
     # Priority 5: OpenAlex URL
     if external_ids.get('OpenAlex'):

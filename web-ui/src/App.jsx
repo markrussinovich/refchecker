@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar/Sidebar'
 import MainPanel from './components/MainPanel/MainPanel'
-import ThemeToggle from './components/common/ThemeToggle'
 import DebugPanel from './components/DebugPanel'
 import LiveWebSocketManager from './components/LiveWebSocketManager'
 import SettingsPanel from './components/Settings/SettingsPanel'
@@ -10,17 +9,36 @@ import { logger } from './utils/logger'
 function App() {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('refchecker-theme')
-    return saved || 'light'
+    return saved || 'system'
   })
 
   useEffect(() => {
     logger.debug('App', `Theme changed to: ${theme}`)
-    document.documentElement.classList.toggle('dark', theme === 'dark')
+    
+    // Determine the actual theme (dark or light) based on setting
+    let actualTheme = theme
+    if (theme === 'system') {
+      actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+    }
+    
+    document.documentElement.classList.toggle('dark', actualTheme === 'dark')
     localStorage.setItem('refchecker-theme', theme)
   }, [theme])
 
-  const toggleTheme = () => {
-    setTheme(prev => prev === 'light' ? 'dark' : 'light')
+  // Listen for system theme changes when in 'system' mode
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleChange = () => {
+      if (theme === 'system') {
+        document.documentElement.classList.toggle('dark', mediaQuery.matches)
+      }
+    }
+    mediaQuery.addEventListener('change', handleChange)
+    return () => mediaQuery.removeEventListener('change', handleChange)
+  }, [theme])
+
+  const handleThemeChange = (newTheme) => {
+    setTheme(newTheme)
   }
 
   return (
@@ -45,7 +63,6 @@ function App() {
           >
             RefChecker
           </h1>
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
         </header>
         
         {/* Main Panel */}
@@ -56,7 +73,7 @@ function App() {
       <DebugPanel />
 
       {/* Settings Panel Modal */}
-      <SettingsPanel />
+      <SettingsPanel theme={theme} onThemeChange={handleThemeChange} />
     </div>
   )
 }

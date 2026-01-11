@@ -12,9 +12,10 @@ function formatSource(source) {
   if (source.startsWith('http://') || source.startsWith('https://')) {
     return { type: 'url', value: source, display: source.length > 60 ? source.substring(0, 60) + '...' : source }
   }
-  // ArXiv IDs
+  // ArXiv IDs - show full URL
   if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(source)) {
-    return { type: 'url', value: `https://arxiv.org/abs/${source}`, display: `arXiv:${source}` }
+    const fullUrl = `https://arxiv.org/abs/${source}`
+    return { type: 'url', value: fullUrl, display: fullUrl }
   }
   // Filename or other
   return { type: 'text', value: source, display: source }
@@ -245,7 +246,7 @@ export default function StatusSection() {
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="hover:underline"
-                  style={{ color: 'var(--color-accent)' }}
+                  style={{ color: 'var(--color-link)' }}
                   onClick={(e) => e.stopPropagation()}
                 >
                   {sourceInfo.display}

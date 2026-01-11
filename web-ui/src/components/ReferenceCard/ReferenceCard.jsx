@@ -2,6 +2,30 @@ import { formatAuthors } from '../../utils/formatters'
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
+// Parse error_details to extract cited/actual values and format on separate lines
+const parseErrorDetails = (details) => {
+  if (!details) return null
+  
+  // Match patterns like "cited: 'value' actual: 'value'" or "cited: 'value'" or "actual: 'value'"
+  const citedMatch = details.match(/cited:\s*'([^']*)'/)
+  const actualMatch = details.match(/actual:\s*'([^']*)'/)
+  
+  // Get the prefix (everything before "cited:" if it exists)
+  let prefix = details
+  const citedIndex = details.indexOf('cited:')
+  if (citedIndex > 0) {
+    prefix = details.substring(0, citedIndex).trim()
+  } else if (citedIndex === 0) {
+    prefix = null
+  }
+  
+  return {
+    prefix,
+    cited: citedMatch ? citedMatch[1] : null,
+    actual: actualMatch ? actualMatch[1] : null
+  }
+}
+
 // Render text with clickable URLs, preserving surrounding text
 const renderTextWithLinks = (text) => {
   if (!text) return null
@@ -34,7 +58,7 @@ const renderTextWithLinks = (text) => {
         target="_blank"
         rel="noopener noreferrer"
         className="hover:underline"
-        style={{ color: 'var(--color-accent)' }}
+        style={{ color: 'var(--color-link)' }}
       >
         {part.url}
       </a>
@@ -193,7 +217,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
       style={{ borderColor: 'var(--color-border)' }}
     >
       {/* Reference with status column on left */}
-      <div className="flex items-start gap-3 pl-4">
+      <div className="flex items-start gap-3 pl-4 pr-8">
         {/* Status indicator column - fixed width */}
         <div className="flex-shrink-0 w-8 flex justify-center pt-0.5">
           {renderStatusIndicator()}
@@ -253,38 +277,65 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:underline"
-                style={{ color: 'var(--color-accent)' }}
+                style={{ color: 'var(--color-link)' }}
               >
                 {reference.cited_url}
               </a>
             </div>
           )}
 
-          {/* Blank line before verification results */}
+          {/* Divider before verification results */}
           {(reference.authoritative_urls?.length > 0 || 
             reference.errors?.length > 0 || 
             reference.warnings?.length > 0 ||
             reference.status === 'unverified') && (
-            <div className="h-3" />
+            <div className="my-3 flex items-center gap-3">
+              <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                Verification
+              </span>
+              <div className="flex-1 border-t" style={{ borderColor: 'var(--color-border)' }} />
+            </div>
           )}
 
-          {/* Authoritative URLs */}
-          {reference.authoritative_urls?.map((urlObj, i) => (
-            <div key={i}>
-              <span style={{ color: 'var(--color-text-secondary)' }}>
-                {formatUrlType(urlObj.type)}:{' '}
-              </span>
-              <a
-                href={urlObj.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
-                style={{ color: 'var(--color-accent)' }}
-              >
-                {urlObj.url}
-              </a>
-            </div>
-          ))}
+          {/* Authoritative URLs - deduplicate arxiv URLs (prefer abs over pdf) */}
+          {(() => {
+            const urls = reference.authoritative_urls || []
+            // Group by type and deduplicate arxiv
+            const seenTypes = new Set()
+            const filteredUrls = urls.filter(urlObj => {
+              // For arxiv, only show abs URL (skip pdf if we already have abs)
+              if (urlObj.type === 'arxiv') {
+                if (seenTypes.has('arxiv')) return false
+                // Prefer abs URL over pdf
+                const hasAbsUrl = urls.some(u => u.type === 'arxiv' && u.url?.includes('/abs/'))
+                if (hasAbsUrl && urlObj.url?.includes('/pdf/')) return false
+                seenTypes.add('arxiv')
+                return true
+              }
+              // For other types, show all
+              return true
+            })
+            
+            return filteredUrls.map((urlObj, i) => (
+              <div key={i} className="flex">
+                <span 
+                  className="flex-shrink-0"
+                  style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+                >
+                  {formatUrlType(urlObj.type)}:
+                </span>
+                <a
+                  href={urlObj.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline"
+                  style={{ color: 'var(--color-link)' }}
+                >
+                  {urlObj.url}
+                </a>
+              </div>
+            ))
+          })()}
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
@@ -292,7 +343,16 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
               className="flex items-start gap-2"
               style={{ color: 'var(--color-text-muted)', wordBreak: 'break-word' }}
             >
-              <span>❓</span>
+              <span className="pt-0.5 inline-block flex-shrink-0">
+                <svg 
+                  className="w-4 h-4"
+                  viewBox="0 0 24 24" 
+                  fill="currentColor"
+                >
+                  <circle cx="12" cy="12" r="10" />
+                  <text x="12" y="16" textAnchor="middle" fill="#fff" fontSize="14" fontWeight="bold">?</text>
+                </svg>
+              </span>
               <div>
                 <div>Could not verify: {reference.title || 'Unknown'}</div>
                 {reference.errors?.find(e => e.error_type === 'unverified') && (
@@ -305,84 +365,75 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           )}
 
           {/* Warnings */}
-          {reference.warnings?.map((warning, i) => (
-            <div 
-              key={`warning-${i}`}
-              className="flex items-start gap-2"
-              style={{ color: 'var(--color-warning)', wordBreak: 'break-word' }}
-            >
-              <span>⚠️</span>
-              <div>
-                <div>Warning: {formatWarningType(warning.error_type)} mismatch:</div>
-                {warning.error_details && (
-                  <div 
-                    style={{ 
-                      color: 'var(--color-warning)', 
-                      whiteSpace: 'pre-line' 
-                    }}
-                  >
-                    {renderTextWithLinks(warning.error_details)}
+          {reference.warnings?.map((warning, i) => {
+            const parsedDetails = parseErrorDetails(warning.error_details)
+            const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
+            
+            // Use the specific prefix from error_details if available, otherwise fall back to generic type
+            const warningText = (hasParsedCitedActual && parsedDetails?.prefix) 
+              ? parsedDetails.prefix.replace(/:$/, '') // Remove trailing colon if present
+              : (warning.error_details || `${formatWarningType(warning.error_type)} mismatch`)
+            
+            return (
+              <div 
+                key={`warning-${i}`}
+                style={{ color: 'var(--color-warning)', wordBreak: 'break-word' }}
+              >
+                <div className="flex items-start gap-2">
+                  <span>⚠️</span>
+                  <span><span className="font-bold">Warning:</span> {warningText}</span>
+                </div>
+                {/* Show parsed cited/actual on separate lines, or use direct fields */}
+                {(parsedDetails?.cited || warning.cited_value) && (
+                  <div className="flex">
+                    <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">cited:</span></span>
+                    <span>'{parsedDetails?.cited || warning.cited_value}'</span>
                   </div>
                 )}
-                {warning.cited_value && (
-                  <div style={{ color: 'var(--color-text-secondary)' }}>
-                    cited: '{warning.cited_value}'
-                  </div>
-                )}
-                {warning.actual_value && (
-                  <div style={{ color: 'var(--color-text-secondary)' }}>
-                    actual: '{warning.actual_value}'
+                {(parsedDetails?.actual || warning.actual_value) && (
+                  <div className="flex">
+                    <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">actual:</span></span>
+                    <span>'{parsedDetails?.actual || warning.actual_value}'</span>
                   </div>
                 )}
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           {/* Errors (non-unverified) */}
           {reference.errors?.filter(e => e.error_type !== 'unverified').map((error, i) => (
             <div 
               key={`error-${i}`}
-              className="flex items-start gap-2"
               style={{ color: 'var(--color-error)', wordBreak: 'break-word' }}
             >
-              <span className="pt-0.5 inline-block">
-                <svg 
-                  className="w-4 h-4"
-                  viewBox="0 0 24 24" 
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M9.172 4.172a4 4 0 015.656 0l2.828 2.828a4 4 0 010 5.656l-2.828 2.828a4 4 0 01-5.656 0L6.343 12.656a4 4 0 010-5.656l2.829-2.828z" />
-                  <path d="M12 8v5" />
-                  <path d="M12 16h.01" />
-                </svg>
-              </span>
-              <div>
-                <div 
-                  style={{ whiteSpace: 'pre-line' }}
-                >
-                  Error: {renderTextWithLinks(error.error_details || error.error_type)}
-                </div>
-                {error.cited_value && (
-                  <div 
-                    className="pl-8" 
-                    style={{ color: 'var(--color-text-secondary)', whiteSpace: 'pre-line' }}
+              <div className="flex items-start gap-2">
+                <span className="pt-0.5 inline-block flex-shrink-0">
+                  <svg 
+                    className="w-4 h-4"
+                    viewBox="0 0 24 24" 
+                    fill="currentColor"
                   >
-                    cited: '{error.cited_value}'
-                  </div>
-                )}
-                {error.actual_value && (
-                  <div 
-                    className="pl-8" 
-                    style={{ color: 'var(--color-text-secondary)', whiteSpace: 'pre-line' }}
-                  >
-                    actual: '{error.actual_value}'
-                  </div>
-                )}
+                    <circle cx="12" cy="12" r="10" />
+                    <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+                    <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+                  </svg>
+                </span>
+                <span style={{ whiteSpace: 'pre-line' }}>
+                  <span className="font-bold">Error:</span> {renderTextWithLinks(error.error_details || error.error_type)}
+                </span>
               </div>
+              {error.cited_value && (
+                <div className="flex" style={{ whiteSpace: 'pre-line' }}>
+                  <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">cited:</span></span>
+                  <span>'{error.cited_value}'</span>
+                </div>
+              )}
+              {error.actual_value && (
+                <div className="flex" style={{ whiteSpace: 'pre-line' }}>
+                  <span className="flex-shrink-0" style={{ width: '120px' }}><span className="font-bold">actual:</span></span>
+                  <span>'{error.actual_value}'</span>
+                </div>
+              )}
             </div>
           ))}
 

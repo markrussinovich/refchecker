@@ -113,12 +113,13 @@ export default function StatsSection({ stats, isComplete }) {
             <button
               key={card.label}
               onClick={() => handleCardClick(card.id)}
-              className="rounded-lg p-3 text-center transition-all cursor-pointer hover:opacity-80"
+              className="rounded-xl p-3 text-center transition-all cursor-pointer border-2 hover:scale-[1.02] active:scale-[0.98]"
               style={{ 
-                backgroundColor: card.bgColor,
-                outline: isSelected ? `2px solid ${card.color}` : 'none',
-                outlineOffset: '2px',
+                backgroundColor: isSelected ? card.bgColor : 'var(--color-bg-primary)',
+                borderColor: isSelected ? card.color : 'var(--color-border)',
+                boxShadow: isSelected ? `0 0 0 1px ${card.color}` : 'none',
               }}
+              title={`Click to filter by ${card.label.toLowerCase()}`}
             >
               <div 
                 className="flex justify-center mb-2"

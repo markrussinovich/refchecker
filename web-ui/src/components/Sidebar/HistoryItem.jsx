@@ -1,24 +1,33 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
+import * as api from '../../utils/api'
 
 /**
  * Individual history item in the sidebar
  */
 export default function HistoryItem({ item, isSelected }) {
-  const { selectCheck, updateLabel, deleteCheck } = useHistoryStore()
+  const { selectCheck, updateLabel, deleteCheck, updateHistoryProgress } = useHistoryStore()
+  // Only subscribe to the specific values we need to minimize re-renders
+  const currentSessionId = useCheckStore(state => state.sessionId)
+  const storeCancelCheck = useCheckStore(state => state.cancelCheck)
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
   const [isHovered, setIsHovered] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
-
-  // Debug: log each item render with key data
-  console.log(`[DEBUG-ITEM] Rendering item ${item.id}: status=${item.status} total_refs=${item.total_refs}`)
+  const [isCancelling, setIsCancelling] = useState(false)
 
   const displayLabel = item.custom_label || item.paper_title || 'Untitled Check'
 
   const isPlaceholder = item.id === -1
+  const isInProgress = item.status === 'in_progress'
+  
+  // Calculate progress percentage
+  const totalRefs = item.total_refs || 0
+  const processedRefs = item.processed_refs || 0
+  const progressPercent = totalRefs > 0 ? Math.min((processedRefs / totalRefs) * 100, 100) : 0
 
   const handleClick = () => {
     if (!isEditing) {
@@ -76,6 +85,36 @@ export default function HistoryItem({ item, isSelected }) {
   const handleCancelDelete = (e) => {
     e.stopPropagation()
     setIsConfirmingDelete(false)
+  }
+
+  const handleCancelCheck = async (e) => {
+    e.stopPropagation()
+    if (!item.session_id || isCancelling) return
+    
+    setIsCancelling(true)
+    try {
+      logger.info('HistoryItem', `Cancelling check ${item.session_id}`)
+      await api.cancelCheck(item.session_id)
+      
+      // Update history item status
+      updateHistoryProgress(item.id, { status: 'cancelled' })
+      
+      // If this is the current session, also update check store
+      if (item.session_id === currentSessionId) {
+        storeCancelCheck()
+      }
+      
+      logger.info('HistoryItem', `Check ${item.id} cancelled`)
+    } catch (error) {
+      logger.error('HistoryItem', 'Failed to cancel check', error)
+      // Still mark as cancelled since the check may have already finished
+      updateHistoryProgress(item.id, { status: 'cancelled' })
+      if (item.session_id === currentSessionId) {
+        storeCancelCheck()
+      }
+    } finally {
+      setIsCancelling(false)
+    }
   }
 
   // Status indicator based on errors or in-progress state
@@ -173,9 +212,9 @@ export default function HistoryItem({ item, isSelected }) {
           >
             {isPlaceholder 
               ? 'Start a new check' 
-              : (item.status === 'in_progress' 
-                  ? (item.total_refs > 0 ? `Verifying ${item.total_refs} refs...` : 'Extracting refs...') 
-                  : `${item.total_refs || 0} refs`)}
+              : (isInProgress 
+                  ? (totalRefs > 0 ? `${processedRefs}/${totalRefs} refs` : 'Extracting refs...') 
+                  : `${totalRefs} refs`)}
           </span>
           {!isPlaceholder && status.isAnimated ? (
             <svg 
@@ -196,7 +235,57 @@ export default function HistoryItem({ item, isSelected }) {
               />
             )
           )}
+          {/* Cancel button for in-progress checks */}
+          {isInProgress && item.session_id && (
+            <button
+              onClick={handleCancelCheck}
+              disabled={isCancelling}
+              className="ml-auto text-xs px-2 py-0.5 rounded transition-colors"
+              style={{
+                backgroundColor: 'var(--color-error-bg)',
+                color: 'var(--color-error)',
+                opacity: isCancelling ? 0.5 : 1,
+                cursor: isCancelling ? 'wait' : 'pointer',
+              }}
+              onMouseEnter={(e) => {
+                if (!isCancelling) {
+                  e.currentTarget.style.backgroundColor = 'var(--color-error)'
+                  e.currentTarget.style.color = 'white'
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
+                e.currentTarget.style.color = 'var(--color-error)'
+              }}
+              title="Cancel this check"
+            >
+              {isCancelling ? 'Cancelling...' : 'Cancel'}
+            </button>
+          )}
         </div>
+        
+        {/* Progress bar for in-progress checks */}
+        {isInProgress && totalRefs > 0 && (
+          <div className="mt-2">
+            <div 
+              className="h-1 rounded-full overflow-hidden"
+              style={{ backgroundColor: 'var(--color-bg-tertiary)' }}
+            >
+              <div 
+                className="h-full rounded-full transition-all duration-300 progress-bar"
+                style={{ 
+                  width: `${Math.round(progressPercent)}%`,
+                }}
+              />
+            </div>
+            <p 
+              className="text-xs mt-0.5"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              {Math.round(progressPercent)}% complete
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Action buttons - positioned absolutely to overlay title */}

@@ -141,11 +141,13 @@ export const useCheckStore = create((set, get) => ({
 
   setStatusFilter: (filter) => {
     const currentFilters = get().statusFilter
-    // Toggle: add if not present, remove if present
-    if (currentFilters.includes(filter)) {
-      set({ statusFilter: currentFilters.filter(f => f !== filter) })
+    // Single-select: clicking active filter clears it, clicking another sets only that one
+    if (currentFilters.includes(filter) && currentFilters.length === 1) {
+      // Clicking the only active filter clears it
+      set({ statusFilter: [] })
     } else {
-      set({ statusFilter: [...currentFilters, filter] })
+      // Set only this filter (single-select)
+      set({ statusFilter: [filter] })
     }
   },
 

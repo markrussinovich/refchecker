@@ -469,15 +469,14 @@ class LocalNonArxivReferenceChecker:
         # since this is a Semantic Scholar database checker
         external_ids = paper_data.get('externalIds', {})
         
-        # First try to get the Semantic Scholar URL since that's what we used for verification
-        if external_ids.get('CorpusId'):
-            from refchecker.utils.url_utils import construct_semantic_scholar_url
-            paper_url = construct_semantic_scholar_url(external_ids['CorpusId'])
+        # First try to get the Semantic Scholar URL using paperId (SHA hash)
+        if paper_data.get('paperId'):
+            paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         else:
             # Fallback to best available URL if Semantic Scholar URL not available
             open_access_pdf = paper_data.get('openAccessPdf')
-            paper_url = get_best_available_url(external_ids, open_access_pdf)
+            paper_url = get_best_available_url(external_ids, open_access_pdf, paper_data.get('paperId'))
             if paper_url:
                 logger.debug(f"Using fallback URL: {paper_url}")
         
