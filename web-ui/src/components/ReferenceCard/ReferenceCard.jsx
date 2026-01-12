@@ -383,7 +383,6 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           {/* Authors */}
           {reference.authors?.length > 0 && (
             <div 
-              className="mt-1"
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {formatAuthors(reference.authors)}

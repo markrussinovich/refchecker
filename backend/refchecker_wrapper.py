@@ -5,6 +5,7 @@ import sys
 import os
 import asyncio
 import logging
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
@@ -331,8 +332,8 @@ class ProgressRefChecker:
                 paper_title = paper.title
                 await update_title_if_needed(paper_title)
 
-                # Download PDF - run in thread
-                pdf_path = f"/tmp/arxiv_{arxiv_id}.pdf"
+                # Download PDF - run in thread (use cross-platform temp directory)
+                pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
                 await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
 
                 # Extract text from PDF - run in thread

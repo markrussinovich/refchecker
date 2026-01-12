@@ -651,6 +651,65 @@ class SemanticScholarKeyUpdate(BaseModel):
     api_key: str
 
 
+class SemanticScholarKeyValidate(BaseModel):
+    api_key: str
+
+
+@app.post("/api/settings/semantic-scholar/validate")
+async def validate_semantic_scholar_key(data: SemanticScholarKeyValidate):
+    """
+    Validate a Semantic Scholar API key by making a test API call.
+    Returns success or error message.
+    """
+    import httpx
+    
+    try:
+        if not data.api_key or not data.api_key.strip():
+            raise HTTPException(status_code=400, detail="API key cannot be empty")
+        
+        api_key = data.api_key.strip()
+        
+        # Test the API key by making a simple search query
+        # Using the paper search endpoint with a minimal query
+        url = "https://api.semanticscholar.org/graph/v1/paper/search"
+        headers = {
+            "Accept": "application/json",
+            "x-api-key": api_key
+        }
+        params = {
+            "query": "test",
+            "limit": 1,
+            "fields": "title"
+        }
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            return {"valid": True, "message": "API key is valid"}
+        elif response.status_code == 401 or response.status_code == 403:
+            raise HTTPException(status_code=400, detail="Invalid API key")
+        elif response.status_code == 429:
+            # Rate limited but key is valid
+            return {"valid": True, "message": "API key is valid (rate limited)"}
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"API validation failed with status {response.status_code}"
+            )
+            
+    except HTTPException:
+        raise
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=400, detail="Connection timed out. Please try again.")
+    except httpx.RequestError as e:
+        logger.error(f"Semantic Scholar validation request error: {e}")
+        raise HTTPException(status_code=400, detail=f"Connection error: {str(e)}")
+    except Exception as e:
+        logger.error(f"Semantic Scholar validation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=f"Validation failed: {str(e)}")
+
+
 @app.get("/api/settings/semantic-scholar")
 async def get_semantic_scholar_key_status():
     """Check if Semantic Scholar API key is configured (does not return the key)"""

@@ -45,6 +45,7 @@ export const validateLLMConfig = (config) => api.post('/llm-configs/validate', c
 export const getSemanticScholarKeyStatus = () => api.get('/settings/semantic-scholar')
 export const setSemanticScholarKey = (apiKey) => api.put('/settings/semantic-scholar', { api_key: apiKey })
 export const deleteSemanticScholarKey = () => api.delete('/settings/semantic-scholar')
+export const validateSemanticScholarKey = (apiKey) => api.post('/settings/semantic-scholar/validate', { api_key: apiKey })
 
 // Check operations
 export const startCheck = (formData) => api.post('/check', formData, {
@@ -113,6 +114,7 @@ export default {
   getSemanticScholarKeyStatus,
   setSemanticScholarKey,
   deleteSemanticScholarKey,
+  validateSemanticScholarKey,
   startCheck,
   cancelCheck,
   getHistory,

@@ -4,10 +4,20 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 /**
- * Format a source for display - truncate long URLs/paths
+ * Format a source for display - extract just the URL if title+URL are combined
  */
-function formatSource(source) {
+function formatSource(source, title) {
   if (!source) return null
+  
+  // If source contains the title at the beginning followed by a URL, extract just the URL
+  // This handles cases where paper_source was incorrectly stored as "Title URL"
+  if (title && source.startsWith(title)) {
+    const remainder = source.substring(title.length).trim()
+    if (remainder.startsWith('http://') || remainder.startsWith('https://')) {
+      source = remainder
+    }
+  }
+  
   // If it's a URL, show it as a link
   if (source.startsWith('http://') || source.startsWith('https://')) {
     return { type: 'url', value: source, display: source.length > 60 ? source.substring(0, 60) + '...' : source }
@@ -105,7 +115,7 @@ export default function StatusSection() {
     }
   }
 
-  const sourceInfo = formatSource(displaySource)
+  const sourceInfo = formatSource(displaySource, displayTitle)
   const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
   const isCompleted = displayStatus === 'completed'
   const isCancelled = displayStatus === 'cancelled'
@@ -235,7 +245,7 @@ export default function StatusSection() {
         <div className="flex-1 min-w-0">
           {displayTitle && (
             <h3 
-              className="font-medium truncate"
+              className="font-medium"
               style={{ color: 'var(--color-text-primary)' }}
             >
               {displayTitle}

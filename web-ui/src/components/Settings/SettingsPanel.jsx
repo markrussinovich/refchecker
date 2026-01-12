@@ -23,6 +23,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [ssApiKey, setSsApiKey] = useState('')
   const [ssIsLoading, setSsIsLoading] = useState(true)
   const [ssIsSaving, setSsIsSaving] = useState(false)
+  const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
 
   // Load Semantic Scholar key status when panel opens
@@ -86,8 +87,23 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       return
     }
     try {
-      setSsIsSaving(true)
+      // First validate the API key
+      setSsIsValidating(true)
       setSsError(null)
+      
+      const validationResponse = await api.validateSemanticScholarKey(ssApiKey.trim())
+      
+      if (!validationResponse.data.valid) {
+        setSsError(validationResponse.data.message || 'Invalid API key')
+        setSsIsValidating(false)
+        return
+      }
+      
+      logger.info('SettingsPanel', 'SS API key validated successfully')
+      setSsIsValidating(false)
+      
+      // Now save the key
+      setSsIsSaving(true)
       await api.setSemanticScholarKey(ssApiKey.trim())
       setSsHasKey(true)
       setSsIsEditing(false)
@@ -95,8 +111,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       logger.info('SettingsPanel', 'SS API key saved')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to save SS key', err)
-      setSsError(err.response?.data?.detail || 'Failed to save API key')
+      setSsError(err.response?.data?.detail || 'Failed to validate API key')
     } finally {
+      setSsIsValidating(false)
       setSsIsSaving(false)
     }
   }
@@ -258,7 +275,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 borderColor: ssError ? 'var(--color-error)' : 'var(--color-border)',
                 color: 'var(--color-text-primary)',
               }}
-              disabled={ssIsSaving}
+              disabled={ssIsSaving || ssIsValidating}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSsSave()
@@ -275,25 +292,25 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             <div className="flex gap-2">
               <button
                 onClick={handleSsSave}
-                disabled={ssIsSaving || !ssApiKey.trim()}
+                disabled={ssIsSaving || ssIsValidating || !ssApiKey.trim()}
                 className="px-4 py-1.5 text-sm rounded cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-accent)',
                   color: 'white',
-                  opacity: ssIsSaving || !ssApiKey.trim() ? 0.5 : 1,
+                  opacity: ssIsSaving || ssIsValidating || !ssApiKey.trim() ? 0.5 : 1,
                 }}
               >
-                {ssIsSaving ? 'Saving...' : 'Save'}
+                {ssIsValidating ? 'Validating...' : ssIsSaving ? 'Saving...' : 'Save'}
               </button>
               {ssHasKey && (
                 <button
                   onClick={handleSsDelete}
-                  disabled={ssIsSaving}
+                  disabled={ssIsSaving || ssIsValidating}
                   className="px-4 py-1.5 text-sm rounded cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-error-bg)',
                     color: 'var(--color-error)',
-                    opacity: ssIsSaving ? 0.5 : 1,
+                    opacity: ssIsSaving || ssIsValidating ? 0.5 : 1,
                   }}
                 >
                   Delete
@@ -301,7 +318,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               )}
               <button
                 onClick={handleSsCancel}
-                disabled={ssIsSaving}
+                disabled={ssIsSaving || ssIsValidating}
                 className="px-4 py-1.5 text-sm rounded border cursor-pointer"
                 style={{
                   borderColor: 'var(--color-border)',

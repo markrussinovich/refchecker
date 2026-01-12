@@ -3,6 +3,7 @@
 import asyncio
 import sys
 import os
+import tempfile
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -34,7 +35,7 @@ async def test():
     paper = next(search.results())
     print(f"Title: {paper.title}")
     
-    pdf_path = f"/tmp/arxiv_{arxiv_id}.pdf"
+    pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
     paper.download_pdf(filename=pdf_path)
     
     pdf_processor = PDFProcessor()

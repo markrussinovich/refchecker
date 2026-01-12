@@ -11,6 +11,7 @@ export default function SemanticScholarConfig() {
   const [apiKey, setApiKey] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState(null)
 
   // Load initial status
@@ -39,17 +40,36 @@ export default function SemanticScholarConfig() {
     }
 
     try {
-      setIsSaving(true)
+      // First validate the API key
+      setIsValidating(true)
       setError(null)
+      console.log('[SemanticScholarConfig] Starting validation...')
+      
+      const validationResponse = await api.validateSemanticScholarKey(apiKey.trim())
+      console.log('[SemanticScholarConfig] Validation response:', validationResponse.data)
+      
+      if (!validationResponse.data.valid) {
+        setError(validationResponse.data.message || 'Invalid API key')
+        setIsValidating(false)
+        return
+      }
+      
+      logger.info('SemanticScholarConfig', 'API key validated successfully')
+      setIsValidating(false)
+      
+      // Now save the key
+      setIsSaving(true)
       await api.setSemanticScholarKey(apiKey.trim())
       setHasKey(true)
       setIsEditing(false)
       setApiKey('')
       logger.info('SemanticScholarConfig', 'API key saved')
     } catch (err) {
+      console.error('[SemanticScholarConfig] Validation/save error:', err)
       logger.error('SemanticScholarConfig', 'Failed to save key', err)
-      setError(err.response?.data?.detail || 'Failed to save API key')
+      setError(err.response?.data?.detail || 'Failed to validate API key')
     } finally {
+      setIsValidating(false)
       setIsSaving(false)
     }
   }
@@ -152,7 +172,7 @@ export default function SemanticScholarConfig() {
               borderColor: error ? 'var(--color-error)' : 'var(--color-border)',
               color: 'var(--color-text-primary)',
             }}
-            disabled={isSaving}
+            disabled={isSaving || isValidating}
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSave()
@@ -172,25 +192,25 @@ export default function SemanticScholarConfig() {
           <div className="flex gap-2">
             <button
               onClick={handleSave}
-              disabled={isSaving || !apiKey.trim()}
+              disabled={isSaving || isValidating || !apiKey.trim()}
               className="flex-1 px-3 py-1.5 text-sm rounded"
               style={{
                 backgroundColor: 'var(--color-accent)',
                 color: 'white',
-                opacity: isSaving || !apiKey.trim() ? 0.5 : 1,
+                opacity: isSaving || isValidating || !apiKey.trim() ? 0.5 : 1,
               }}
             >
-              {isSaving ? 'Saving...' : 'Save'}
+              {isValidating ? 'Validating...' : isSaving ? 'Saving...' : 'Save'}
             </button>
             {hasKey && (
               <button
                 onClick={handleDelete}
-                disabled={isSaving}
+                disabled={isSaving || isValidating}
                 className="px-3 py-1.5 text-sm rounded"
                 style={{
                   backgroundColor: 'var(--color-error-bg)',
                   color: 'var(--color-error)',
-                  opacity: isSaving ? 0.5 : 1,
+                  opacity: isSaving || isValidating ? 0.5 : 1,
                 }}
               >
                 Delete
@@ -198,7 +218,7 @@ export default function SemanticScholarConfig() {
             )}
             <button
               onClick={handleCancel}
-              disabled={isSaving}
+              disabled={isSaving || isValidating}
               className="px-3 py-1.5 text-sm rounded border"
               style={{
                 borderColor: 'var(--color-border)',
