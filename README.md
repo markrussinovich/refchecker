@@ -68,6 +68,7 @@ Learn about RefChecker's design philosophy and development process in this detai
 - [📊 Sample Output](#-sample-output)
 - [🎯 Features](#-features)
 - [🚀 Quick Start](#-quick-start)
+- [🌐 Web UI](#-web-ui)
 - [🤖 LLM-Enhanced Reference Extraction](#-llm-enhanced-reference-extraction)
 - [📦 Installation](#-installation)
 - [📖 Usage](#-usage)
@@ -109,6 +110,31 @@ Learn about RefChecker's design philosophy and development process in this detai
    ```
 
 > **⚡ Performance Tip**: Reference verification takes 5-10 seconds per reference without a Semantic Scholar API key due to rate limiting. With an API key, verification speeds up to 1-2 seconds per reference. Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--semantic-scholar-api-key` for faster processing.
+
+## 🌐 Web UI
+
+RefChecker also includes a modern web interface with real-time progress updates, check history, and export options.
+
+### Quick Start (Web UI)
+
+```bash
+cd web-ui
+npm install    # First time only
+npm start      # Starts both backend and frontend
+```
+
+Then open **http://localhost:5173** in your browser.
+
+### Features
+
+- ✨ Real-time validation with live progress updates
+- 📄 Support for ArXiv URLs and file uploads (PDF, LaTeX, text)
+- 📊 Live statistics with filtering by status
+- 📋 Export references as Markdown, plain text, or BibTeX (with corrected values)
+- 📚 Persistent check history
+- 🌓 Automatic dark/light mode
+
+For complete Web UI documentation, see **[web-ui/README.md](web-ui/README.md)**.
 
 ## 🤖 LLM-Enhanced Reference Extraction
 

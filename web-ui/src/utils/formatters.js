@@ -692,7 +692,7 @@ export function exportReferenceAsPlainText(ref) {
 }
 
 /**
- * Export a single reference as Markdown (ACM format with formatting)
+ * Export a single reference as Markdown with elements on separate lines
  * Uses corrected values from verification when available
  * @param {object} ref - Reference object
  * @returns {string} Markdown citation
@@ -700,39 +700,33 @@ export function exportReferenceAsPlainText(ref) {
 export function exportReferenceAsMarkdown(ref) {
   // Get corrected data (uses actual values from errors/warnings)
   const corrected = getCorrectedReferenceData(ref)
-  const parts = []
+  const lines = []
+  
+  // Title (bold) - first line
+  if (corrected.title) {
+    lines.push(`**${corrected.title}**`)
+  }
   
   // Authors
   if (corrected.authors?.length > 0) {
-    parts.push(formatAuthors(corrected.authors))
+    lines.push(`**Authors:** ${formatAuthors(corrected.authors)}`)
   }
   
   // Year
   if (corrected.year) {
-    parts.push(corrected.year)
-  }
-  
-  // Title (bold)
-  if (corrected.title) {
-    parts.push(`**${corrected.title}**`)
+    lines.push(`**Year:** ${corrected.year}`)
   }
   
   // Venue (italic)
   if (corrected.venue) {
-    parts.push(`*${corrected.venue}*`)
-  }
-  
-  // Build citation
-  let citation = parts.join('. ')
-  if (citation && !citation.endsWith('.')) {
-    citation += '.'
+    lines.push(`**Venue:** *${corrected.venue}*`)
   }
   
   // Add arXiv URL if suggested, otherwise use authoritative URL
   const url = corrected.arxivUrl || corrected.url
   if (url) {
-    citation += ` [Link](${url})`
+    lines.push(`**URL:** ${url}`)
   }
   
-  return citation
+  return lines.join('\n')
 }
