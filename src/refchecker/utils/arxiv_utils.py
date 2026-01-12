@@ -458,7 +458,16 @@ def get_bibtex_content(paper):
             
             logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
             
-            if uses_bibtex and bib_entry_count > 0:
+            # IMPORTANT: Prefer .bbl when .bib is excessively large (e.g., includes full ACL Anthology)
+            # The .bbl file contains only the actually-cited references, while .bib may contain
+            # entire bibliography databases. Parsing 80k+ entries would cause the tool to hang.
+            # Use .bbl if: (1) .bbl has entries AND (2) .bib has >10x more entries than .bbl OR >1000 entries
+            excessive_bib = bib_entry_count > 1000 or (bbl_entry_count > 0 and bib_entry_count > bbl_entry_count * 10)
+            
+            if bbl_entry_count > 0 and excessive_bib:
+                logger.info(f"Using .bbl files from ArXiv source (.bib has {bib_entry_count} entries which is excessive, .bbl has {bbl_entry_count})")
+                return bbl_content
+            elif uses_bibtex and bib_entry_count > 0 and not excessive_bib:
                 logger.info(f"Using .bib files from ArXiv source (main TeX uses \\bibliography{{...}})")
                 return bib_content
             elif bbl_entry_count > 0:
