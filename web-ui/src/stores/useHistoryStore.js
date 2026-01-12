@@ -199,8 +199,11 @@ export const useHistoryStore = create((set, get) => ({
           const check = detailResp.data
 
           // Only adopt session if this is a reconnection (not the session we just started)
-          const currentSessionId = useCheckStore.getState().sessionId
-          if (check.status === 'in_progress' && check.session_id && check.session_id !== currentSessionId) {
+          // Don't adopt if we're already checking (means we just started a new check)
+          const checkStoreState = useCheckStore.getState()
+          const isAlreadyChecking = checkStoreState.status === 'checking'
+          const isSameSession = checkStoreState.sessionId === check.session_id
+          if (check.status === 'in_progress' && check.session_id && !isAlreadyChecking && !isSameSession) {
             useCheckStore.getState().adoptSession(check)
           }
 
@@ -340,8 +343,11 @@ export const useHistoryStore = create((set, get) => ({
       const check = response.data
       
       // Only adopt session if this is a reconnection (not the session we just started)
-      const currentSessionId = useCheckStore.getState().sessionId
-      if (check.status === 'in_progress' && check.session_id && check.session_id !== currentSessionId) {
+      // Don't adopt if we're already checking (means we just started a new check)
+      const checkStoreState = useCheckStore.getState()
+      const isAlreadyChecking = checkStoreState.status === 'checking'
+      const isSameSession = checkStoreState.sessionId === check.session_id
+      if (check.status === 'in_progress' && check.session_id && !isAlreadyChecking && !isSameSession) {
         useCheckStore.getState().adoptSession(check)
       }
 

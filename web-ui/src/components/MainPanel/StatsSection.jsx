@@ -62,10 +62,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsWithErrors = stats.refs_with_errors ?? 0
   const refsWithWarningsOnly = stats.refs_with_warnings_only ?? 0
   const refsVerified = stats.refs_verified ?? stats.verified_count ?? 0
+  const refsUnverified = stats.unverified_count ?? 0
   const processedRefs = stats.processed_refs ?? 0
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')
+  const isUnverifiedSelected = statusFilter.includes('unverified')
 
   // Handle export to markdown
   const handleExportMarkdown = () => {
@@ -148,106 +150,116 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         </div>
       </div>
 
-      {/* Main stats row */}
-      <div className="flex items-center gap-4">
-        {/* Reference counts - left side, clickable */}
-        <div className="flex items-center gap-3 pr-4 border-r" style={{ borderColor: 'var(--color-border)' }}>
+      {/* Main stats row - single compact row */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {/* Verified */}
+        <button
+          onClick={() => handleFilterClick('verified')}
+          className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
+            isVerifiedSelected ? 'ring-1' : ''
+          }`}
+          style={{ 
+            backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
+            ringColor: 'var(--color-success)',
+          }}
+          title="Filter by verified"
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
+            <path d="M8.5 12.5l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="text-sm font-bold" style={{ color: 'var(--color-success)' }}>{refsVerified}</span>
+        </button>
+
+        {/* Errors */}
+        <button
+          onClick={() => handleFilterClick('error')}
+          disabled={refsWithErrors === 0}
+          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
+            refsWithErrors > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
+          } ${isErrorSelected ? 'ring-1' : ''}`}
+          style={{ 
+            backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
+            ringColor: 'var(--color-error)',
+          }}
+          title={refsWithErrors > 0 ? 'Filter by errors' : 'No errors'}
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
+            <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
+          </svg>
+          <span className="text-sm font-bold" style={{ color: refsWithErrors > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>{refsWithErrors}</span>
+        </button>
+
+        {/* Warnings */}
+        <button
+          onClick={() => handleFilterClick('warning')}
+          disabled={refsWithWarningsOnly === 0}
+          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
+            refsWithWarningsOnly > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
+          } ${isWarningSelected ? 'ring-1' : ''}`}
+          style={{ 
+            backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
+            ringColor: 'var(--color-warning)',
+          }}
+          title={refsWithWarningsOnly > 0 ? 'Filter by warnings' : 'No warnings'}
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2L2 20h20L12 2z" fill="var(--color-warning)" />
+            <path d="M12 9v4" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="15.5" r="1" fill="#fff" />
+          </svg>
+          <span className="text-sm font-bold" style={{ color: refsWithWarningsOnly > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>{refsWithWarningsOnly}</span>
+        </button>
+
+        {/* Unverified - only show if > 0 */}
+        {refsUnverified > 0 && (
           <button
-            onClick={() => handleFilterClick('verified')}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all hover:scale-105 active:scale-95 ${
-              isVerifiedSelected ? 'ring-2' : ''
+            onClick={() => handleFilterClick('unverified')}
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
+              isUnverifiedSelected ? 'ring-1' : ''
             }`}
             style={{ 
-              backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
-              ringColor: 'var(--color-success)',
+              backgroundColor: isUnverifiedSelected ? 'var(--color-bg-tertiary)' : 'transparent',
+              ringColor: 'var(--color-text-muted)',
             }}
-            title="Filter by verified"
+            title="Filter by unverified"
           >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
-              <path d="M8.5 12.5l2.5 2.5 4.5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
+              <text x="12" y="16" textAnchor="middle" fill="#fff" fontSize="12" fontWeight="bold">?</text>
             </svg>
-            <span className="text-lg font-bold" style={{ color: 'var(--color-success)' }}>
-              {refsVerified}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>verified</span>
+            <span className="text-sm font-bold" style={{ color: 'var(--color-text-muted)' }}>{refsUnverified}</span>
           </button>
-          <button
-            onClick={() => handleFilterClick('error')}
-            disabled={refsWithErrors === 0}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all ${
-              refsWithErrors > 0 ? 'hover:scale-105 active:scale-95 cursor-pointer' : 'cursor-default opacity-50'
-            } ${isErrorSelected ? 'ring-2' : ''}`}
-            style={{ 
-              backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
-              ringColor: 'var(--color-error)',
-            }}
-            title={refsWithErrors > 0 ? 'Filter by errors' : 'No errors'}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
-              <path d="M12 7v6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-              <circle cx="12" cy="15.5" r="1.2" fill="#fff" />
-            </svg>
-            <span className="text-lg font-bold" style={{ color: refsWithErrors > 0 ? 'var(--color-error)' : 'var(--color-text-muted)' }}>
-              {refsWithErrors}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>errors</span>
-          </button>
-          <button
-            onClick={() => handleFilterClick('warning')}
-            disabled={refsWithWarningsOnly === 0}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md transition-all ${
-              refsWithWarningsOnly > 0 ? 'hover:scale-105 active:scale-95 cursor-pointer' : 'cursor-default opacity-50'
-            } ${isWarningSelected ? 'ring-2' : ''}`}
-            style={{ 
-              backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
-              ringColor: 'var(--color-warning)',
-            }}
-            title={refsWithWarningsOnly > 0 ? 'Filter by warnings only' : 'No warnings-only refs'}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L2 20h20L12 2z" fill="var(--color-warning)" />
-              <path d="M12 9v4" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-              <circle cx="12" cy="15.5" r="1" fill="#fff" />
-            </svg>
-            <span className="text-lg font-bold" style={{ color: refsWithWarningsOnly > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>
-              {refsWithWarningsOnly}
-            </span>
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>warnings</span>
-          </button>
-          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            of {processedRefs}
-          </span>
-        </div>
+        )}
 
-        {/* Issue type filters - right side, clickable chips */}
-        <div className="flex items-center gap-2 flex-1">
-          {issueFilters.map(filter => {
-            const isSelected = statusFilter.includes(filter.id)
-            const hasValue = filter.value > 0
-            
-            return (
-              <button
-                key={filter.id}
-                onClick={() => handleFilterClick(filter.id)}
-                disabled={!hasValue}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all border ${
-                  hasValue ? 'cursor-pointer hover:scale-105 active:scale-95' : 'cursor-default opacity-50'
-                }`}
-                style={{ 
-                  backgroundColor: isSelected ? filter.bgColor : 'transparent',
-                  borderColor: isSelected ? filter.color : 'var(--color-border)',
-                  color: hasValue ? filter.color : 'var(--color-text-muted)',
-                }}
-                title={hasValue ? `Filter by ${filter.label.toLowerCase()}` : `No ${filter.label.toLowerCase()}`}
-              >
-                <span className="font-bold">{filter.value}</span>
-                <span>{filter.label}</span>
-              </button>
-            )
-          })}
-        </div>
+        {/* Separator and total */}
+        <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
+
+        {/* Divider */}
+        <div className="w-px h-4 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
+
+        {/* Issue counts as compact chips */}
+        {issueFilters.filter(f => f.value > 0).map(filter => {
+          const isSelected = statusFilter.includes(filter.id)
+          return (
+            <button
+              key={filter.id}
+              onClick={() => handleFilterClick(filter.id)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer hover:opacity-80 border"
+              style={{ 
+                backgroundColor: isSelected ? filter.bgColor : 'transparent',
+                borderColor: isSelected ? filter.color : 'var(--color-border)',
+                color: filter.color,
+              }}
+              title={`Filter by ${filter.label.toLowerCase()}`}
+            >
+              <span className="font-bold">{filter.value}</span>
+              <span>{filter.label}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

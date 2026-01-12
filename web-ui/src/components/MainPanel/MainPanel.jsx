@@ -86,7 +86,11 @@ export default function MainPanel() {
     
     if (hasSelectedCheckData) {
       const totalRefs = selectedCheck.total_refs || 0
-      const processedRefs = selectedCheck.processed_refs || 0
+      // For cancelled checks, processed_refs may be 0 but we have results - use results length
+      const resultsCount = displayRefs?.filter(r => 
+        r.status && !['pending', 'checking'].includes(r.status.toLowerCase())
+      ).length || 0
+      const processedRefs = selectedCheck.processed_refs || resultsCount || 0
       const errorsCount = selectedCheck.errors_count || 0
       const warningsCount = selectedCheck.warnings_count || 0
       const suggestionsCount = selectedCheck.suggestions_count || 0
