@@ -612,14 +612,23 @@ class NonArxivReferenceChecker:
             paper_doi = external_ids['DOI']
             
             # Compare DOIs using the proper comparison function
-            from refchecker.utils.doi_utils import compare_dois
+            from refchecker.utils.doi_utils import compare_dois, validate_doi_resolves
             if doi and paper_doi and not compare_dois(doi, paper_doi):
                 from refchecker.utils.error_utils import format_doi_mismatch
-                errors.append({
-                    'error_type': 'doi',
-                    'error_details': format_doi_mismatch(doi, paper_doi),
-                    'ref_doi_correct': paper_doi
-                })
+                # If cited DOI resolves, it's likely a valid alternate DOI (e.g., arXiv vs conference)
+                # Treat as warning instead of error
+                if validate_doi_resolves(doi):
+                    errors.append({
+                        'warning_type': 'doi',
+                        'warning_details': format_doi_mismatch(doi, paper_doi),
+                        'ref_doi_correct': paper_doi
+                    })
+                else:
+                    errors.append({
+                        'error_type': 'doi',
+                        'error_details': format_doi_mismatch(doi, paper_doi),
+                        'ref_doi_correct': paper_doi
+                    })
         
         # Extract URL from paper data - prioritize arXiv URLs when available
         paper_url = None

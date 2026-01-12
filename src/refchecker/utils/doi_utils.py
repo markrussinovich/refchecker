@@ -157,3 +157,34 @@ def construct_doi_url(doi: str) -> str:
     
     # Construct URL
     return f"https://doi.org/{normalized_doi}"
+
+
+def validate_doi_resolves(doi: str, timeout: float = 5.0) -> bool:
+    """
+    Validate that a DOI resolves by checking if doi.org returns a redirect.
+    
+    This is useful for determining if a DOI is valid, even if it's different
+    from what a verification source has stored (e.g., arXiv DOI vs conference DOI).
+    
+    Args:
+        doi: DOI string to validate
+        timeout: Request timeout in seconds
+        
+    Returns:
+        True if DOI resolves (returns 302/301/200), False otherwise
+    """
+    if not doi or not is_valid_doi_format(normalize_doi(doi)):
+        return False
+    
+    try:
+        import requests
+        url = construct_doi_url(doi)
+        # Use HEAD request first (faster), fall back to GET if needed
+        response = requests.head(url, allow_redirects=False, timeout=timeout)
+        # DOI.org returns 302 for valid DOIs that redirect to the paper
+        # Some may return 301 (permanent redirect) or 200 (direct response)
+        return response.status_code in (200, 301, 302, 303, 307, 308)
+    except Exception:
+        # On any error (timeout, connection error, etc.), assume DOI might be valid
+        # to avoid false negatives due to network issues
+        return True

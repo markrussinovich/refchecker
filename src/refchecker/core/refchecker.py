@@ -1963,11 +1963,21 @@ class ArxivReferenceChecker:
                 if not actual_doi_normalized.startswith(cited_doi_normalized.rstrip('.')):
                     logger.debug(f"DB Verification: DOI mismatch - cited: {doi}, actual: {external_ids['DOI']}")
                     from refchecker.utils.error_utils import format_doi_mismatch
-                    errors.append({
-                        'error_type': 'doi',
-                        'error_details': format_doi_mismatch(doi, external_ids['DOI']),
-                        'ref_doi_correct': external_ids['DOI']
-                    })
+                    from refchecker.utils.doi_utils import validate_doi_resolves
+                    # If cited DOI resolves, it's likely a valid alternate DOI (e.g., arXiv vs conference)
+                    # Treat as warning instead of error
+                    if validate_doi_resolves(doi):
+                        errors.append({
+                            'warning_type': 'doi',
+                            'warning_details': format_doi_mismatch(doi, external_ids['DOI']),
+                            'ref_doi_correct': external_ids['DOI']
+                        })
+                    else:
+                        errors.append({
+                            'error_type': 'doi',
+                            'error_details': format_doi_mismatch(doi, external_ids['DOI']),
+                            'ref_doi_correct': external_ids['DOI']
+                        })
                 else:
                     logger.debug(f"DB Verification: DOI partial match - cited: {doi}, actual: {external_ids['DOI']} (acceptable)")
 

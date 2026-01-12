@@ -460,13 +460,22 @@ class OpenAlexReferenceChecker:
         
         if doi and work_doi:
             # Compare DOIs using the proper comparison function
-            from refchecker.utils.doi_utils import compare_dois
+            from refchecker.utils.doi_utils import compare_dois, validate_doi_resolves
             if not compare_dois(doi, work_doi):
-                errors.append({
-                    'error_type': 'doi',
-                    'error_details': format_doi_mismatch(doi, work_doi),
-                    'ref_doi_correct': work_doi
-                })
+                # If cited DOI resolves, it's likely a valid alternate DOI (e.g., arXiv vs conference)
+                # Treat as warning instead of error
+                if validate_doi_resolves(doi):
+                    errors.append({
+                        'warning_type': 'doi',
+                        'warning_details': format_doi_mismatch(doi, work_doi),
+                        'ref_doi_correct': work_doi
+                    })
+                else:
+                    errors.append({
+                        'error_type': 'doi',
+                        'error_details': format_doi_mismatch(doi, work_doi),
+                        'ref_doi_correct': work_doi
+                    })
         
         # Extract URL from work data
         work_url = self.extract_url_from_work(work_data)

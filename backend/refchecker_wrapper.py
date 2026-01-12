@@ -138,7 +138,9 @@ class ProgressRefChecker:
                 continue
             # Track if this was originally an info_type (suggestion, not error)
             is_info = 'info_type' in err
-            logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, keys={list(err.keys())}")
+            # Track if this was originally a warning_type (warning, not error)
+            is_warning = 'warning_type' in err
+            logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
             sanitized.append({
                 # If it was info_type, store as 'info' to ensure proper categorization
                 "error_type": 'info' if is_info else (e_type or 'unknown'),
@@ -146,17 +148,24 @@ class ProgressRefChecker:
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value'),
                 "is_suggestion": is_info,  # Preserve info_type as suggestion flag
+                "is_warning": is_warning,  # Preserve warning_type as warning flag
             })
 
-        # Determine status - author mismatches are warnings, not errors (matching CLI behavior)
+        # Determine status - items with warning_type or certain error types are warnings, not errors
         warning_types = ['year', 'venue', 'author']
         # Items originally from info_type are suggestions, not errors
+        # Items originally from warning_type are warnings, not errors
         has_errors = any(
             e.get('error_type') not in ['unverified', 'info'] + warning_types 
             and not e.get('is_suggestion')
+            and not e.get('is_warning')
             for e in sanitized
         )
-        has_warnings = any(e.get('error_type') in warning_types and not e.get('is_suggestion') for e in sanitized)
+        has_warnings = any(
+            (e.get('error_type') in warning_types or e.get('is_warning'))
+            and not e.get('is_suggestion') 
+            for e in sanitized
+        )
         has_suggestions = any(e.get('is_suggestion') or e.get('error_type') == 'info' for e in sanitized)
         is_unverified = any(e.get('error_type') == 'unverified' for e in sanitized)
 
@@ -223,7 +232,8 @@ class ProgressRefChecker:
                     "suggestion_type": err.get('error_type') or 'info',
                     "suggestion_details": err.get('error_details', '')
                 })
-            elif err.get('error_type') in ['year', 'venue', 'author']:
+            elif err.get('is_warning') or err.get('error_type') in ['year', 'venue', 'author']:
+                # Items with is_warning flag or known warning types go to warnings
                 formatted_warnings.append(err_obj)
             elif err.get('error_type') == 'unverified':
                 formatted_errors.append({**err_obj, "error_type": 'unverified'})

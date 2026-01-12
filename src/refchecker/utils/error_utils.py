@@ -126,26 +126,40 @@ def create_year_warning(cited_year: int, correct_year: int) -> Dict[str, Any]:
 
 def create_doi_error(cited_doi: str, correct_doi: str) -> Optional[Dict[str, str]]:
     """
-    Create a standardized DOI error dictionary.
+    Create a standardized DOI error or warning dictionary.
+    
+    If the cited DOI resolves (is valid), this returns a warning instead of an error,
+    since papers can have multiple valid DOIs (e.g., arXiv DOI vs conference DOI).
     
     Args:
         cited_doi: DOI as cited in the reference
         correct_doi: Correct DOI from database
         
     Returns:
-        Standardized error dictionary if DOIs differ, None if they match after cleaning
+        Standardized error/warning dictionary if DOIs differ, None if they match after cleaning
     """
+    from refchecker.utils.doi_utils import validate_doi_resolves
+    
     # Strip trailing periods before comparison to avoid false mismatches
     cited_doi_clean = cited_doi.rstrip('.')
     correct_doi_clean = correct_doi.rstrip('.')
     
-    # Only create error if DOIs are actually different after cleaning
+    # Only create error/warning if DOIs are actually different after cleaning
     if cited_doi_clean != correct_doi_clean:
-        return {
-            'error_type': 'doi',
-            'error_details': format_doi_mismatch(cited_doi, correct_doi),
-            'ref_doi_correct': correct_doi
-        }
+        # If cited DOI resolves, it's likely a valid alternate DOI
+        # Treat as warning instead of error
+        if validate_doi_resolves(cited_doi):
+            return {
+                'warning_type': 'doi',
+                'warning_details': format_doi_mismatch(cited_doi, correct_doi),
+                'ref_doi_correct': correct_doi
+            }
+        else:
+            return {
+                'error_type': 'doi',
+                'error_details': format_doi_mismatch(cited_doi, correct_doi),
+                'ref_doi_correct': correct_doi
+            }
     
     return None
 
