@@ -126,6 +126,16 @@ tmp/
 models/
 reference_errors.txt
 
+# Debug/test output files
+*.err
+**/extraction_test.txt
+**/history_output.txt
+test_paper.pdf
+tmp_playwright*
+
+# Sensitive files
+backend/.encryption_key
+
 # IDE
 .vscode/
 .idea/
