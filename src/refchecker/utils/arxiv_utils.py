@@ -422,6 +422,10 @@ def get_bibtex_content(paper):
     """
     Try to get BibTeX content for a paper from various sources.
     
+    For ArXiv papers, prefer .bbl files (compiled bibliography) over .bib files.
+    The .bbl file contains only the actually-cited references, while .bib may contain
+    entire bibliography databases (e.g., full ACL Anthology with 80k+ entries).
+    
     Args:
         paper: Paper object
         
@@ -436,59 +440,28 @@ def get_bibtex_content(paper):
         logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
-        # Choose between .bib and .bbl files based on what the main TeX file actually uses
-        # Check the main TeX file to see if it uses \bibliography{...} (BibTeX) or not (BBL)
-        uses_bibtex = False
-        if tex_content:
-            # Look for \bibliography{...} commands in the main TeX file
-            bib_pattern = r'\\bibliography\{([^}]+)\}'
-            bib_matches = re.findall(bib_pattern, tex_content)
-            if bib_matches:
-                uses_bibtex = True
-                referenced_bibs = []
-                for match in bib_matches:
-                    bib_names = [name.strip() for name in match.split(',')]
-                    referenced_bibs.extend(bib_names)
-                logger.debug(f"Main TeX file references BibTeX files: {referenced_bibs}")
-        
-        if bib_content and bbl_content:
-            # Count entries in both for logging
-            bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
+        # Prefer .bbl files over .bib for ArXiv papers
+        # The .bbl file contains only the actually-cited references, making it more reliable
+        if bbl_content:
             bbl_entry_count = len(re.findall(r'\\bibitem[\[\{]', bbl_content))
-            
-            logger.debug(f"Bibliography comparison: .bbl has {bbl_entry_count} entries, .bib has {bib_entry_count} entries")
-            
-            # IMPORTANT: Prefer .bbl when .bib is excessively large (e.g., includes full ACL Anthology)
-            # The .bbl file contains only the actually-cited references, while .bib may contain
-            # entire bibliography databases. Parsing 80k+ entries would cause the tool to hang.
-            # Use .bbl if: (1) .bbl has entries AND (2) .bib has >10x more entries than .bbl OR >1000 entries
-            excessive_bib = bib_entry_count > 1000 or (bbl_entry_count > 0 and bib_entry_count > bbl_entry_count * 10)
-            
-            if bbl_entry_count > 0 and excessive_bib:
-                logger.info(f"Using .bbl files from ArXiv source (.bib has {bib_entry_count} entries which is excessive, .bbl has {bbl_entry_count})")
+            if bbl_entry_count > 0:
+                logger.info(f"Using .bbl files from ArXiv source ({bbl_entry_count} entries)")
                 return bbl_content
-            elif uses_bibtex and bib_entry_count > 0 and not excessive_bib:
-                logger.info(f"Using .bib files from ArXiv source (main TeX uses \\bibliography{{...}})")
-                return bib_content
-            elif bbl_entry_count > 0:
-                logger.info(f"Using .bbl files from ArXiv source (main TeX doesn't use \\bibliography or .bib is empty)")
-                return bbl_content
-            elif bib_entry_count > 0:
-                logger.info(f"Using .bib files from ArXiv source (.bbl file is empty)")
-                return bib_content
             else:
-                logger.warning(f"Both .bib and .bbl files appear to be empty")
-                return bib_content  # Default to bib_content as fallback
-                    
-        elif bib_content:
-            logger.info(f"Found .bib files in ArXiv source for {arxiv_id}")
-            return bib_content
+                logger.debug(f"Found .bbl file but it appears empty")
+        
+        # Only fall back to .bib if no .bbl is present
+        if bib_content:
+            bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
+            if bib_entry_count > 0:
+                # Warn if .bib is excessively large (may cause performance issues)
+                if bib_entry_count > 500:
+                    logger.warning(f"Using large .bib file with {bib_entry_count} entries (no .bbl available) - this may be slow")
+                else:
+                    logger.info(f"Using .bib files from ArXiv source ({bib_entry_count} entries, no .bbl available)")
+                return bib_content
             
-        elif bbl_content:
-            logger.info(f"Found .bbl files in ArXiv source for {arxiv_id}")
-            return bbl_content
-            
-        elif tex_content:
+        if tex_content:
             # Check for embedded bibliography in LaTeX
             from refchecker.utils.text_utils import detect_latex_bibliography_format
             latex_format = detect_latex_bibliography_format(tex_content)
