@@ -95,7 +95,7 @@ class NonArxivReferenceChecker:
         # Make the request with retries and backoff
         for attempt in range(max_retries_for_this_query):
             try:
-                response = requests.get(endpoint, headers=self.headers, params=params)
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
                 
                 # Check for rate limiting
                 if response.status_code == 429:
@@ -141,7 +141,7 @@ class NonArxivReferenceChecker:
         # Make the request with retries and backoff
         for attempt in range(self.max_retries):
             try:
-                response = requests.get(endpoint, headers=self.headers, params=params)
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
                 
                 # Check for rate limiting
                 if response.status_code == 429:
@@ -264,7 +264,7 @@ class NonArxivReferenceChecker:
                 
                 for attempt in range(self.max_retries):
                     try:
-                        response = requests.get(endpoint, headers=self.headers, params=params)
+                        response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
                         
                         if response.status_code == 429:
                             wait_time = self.request_delay * (self.backoff_factor ** attempt)
