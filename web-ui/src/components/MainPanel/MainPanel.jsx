@@ -67,8 +67,12 @@ export default function MainPanel() {
     }
     
     // Other checks or current check without live data: use selectedCheck
+    // Remap to 0-based indices since backend may send 1-based indices
     if (hasSelectedCheckData && selectedCheck.results) {
-      return selectedCheck.results
+      return selectedCheck.results.map((ref, idx) => ({
+        ...ref,
+        index: idx  // Override with 0-based index
+      }))
     }
     
     return []
