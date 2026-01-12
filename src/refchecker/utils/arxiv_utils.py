@@ -422,9 +422,10 @@ def get_bibtex_content(paper):
     """
     Try to get BibTeX content for a paper from various sources.
     
-    For ArXiv papers, prefer .bbl files (compiled bibliography) over .bib files.
-    The .bbl file contains only the actually-cited references, while .bib may contain
-    entire bibliography databases (e.g., full ACL Anthology with 80k+ entries).
+    For ArXiv papers, only use .bbl files (compiled bibliography).
+    The .bbl file contains only the actually-cited references, while .bib files
+    are unreliable - they may contain entire bibliography databases (e.g., full 
+    ACL Anthology with 80k+ entries) or unfiltered reference collections.
     
     Args:
         paper: Paper object
@@ -437,11 +438,10 @@ def get_bibtex_content(paper):
     # Try ArXiv source if it's an ArXiv paper
     arxiv_id = extract_arxiv_id_from_paper(paper)
     if arxiv_id:
-        logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for structured bibliography")
+        logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for .bbl bibliography")
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
-        # Prefer .bbl files over .bib for ArXiv papers
-        # The .bbl file contains only the actually-cited references, making it more reliable
+        # Only use .bbl files for ArXiv papers (.bib files are unreliable)
         if bbl_content:
             bbl_entry_count = len(re.findall(r'\\bibitem[\[\{]', bbl_content))
             if bbl_entry_count > 0:
@@ -450,27 +450,12 @@ def get_bibtex_content(paper):
             else:
                 logger.debug(f"Found .bbl file but it appears empty")
         
-        # Only fall back to .bib if no .bbl is present
+        # No .bbl available - return None to trigger PDF fallback
         if bib_content:
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
-            if bib_entry_count > 0:
-                # Warn if .bib is excessively large (may cause performance issues)
-                if bib_entry_count > 500:
-                    logger.warning(f"Using large .bib file with {bib_entry_count} entries (no .bbl available) - this may be slow")
-                else:
-                    logger.info(f"Using .bib files from ArXiv source ({bib_entry_count} entries, no .bbl available)")
-                return bib_content
-            
-        if tex_content:
-            # Check for embedded bibliography in LaTeX
-            from refchecker.utils.text_utils import detect_latex_bibliography_format
-            latex_format = detect_latex_bibliography_format(tex_content)
-            if latex_format['is_latex'] and ('\\bibitem' in tex_content or '@' in tex_content):
-                logger.info(f"Found embedded bibliography in ArXiv LaTeX source, but skipping due to formatting incompatibility")
-                # Skip embedded bibliography and return None to trigger fallback methods
-                return None
-    
-    # Could add other BibTeX sources here (e.g., direct BibTeX URLs, etc.)
+            logger.debug(f"Skipping .bib file ({bib_entry_count} entries) - unreliable, falling back to PDF extraction")
+        
+        logger.debug(f"No usable .bbl file found for ArXiv paper {arxiv_id}")
     
     return None
 
