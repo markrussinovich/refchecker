@@ -114,6 +114,12 @@ function killProcessOnPort(port) {
           try {
             execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
           } catch (e) { /* ignore */ }
+          // Also kill any Python uvicorn processes that might be orphaned
+          if (port === 8000) {
+            try {
+              execSync(`powershell -Command "Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'uvicorn' } | Stop-Process -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
+            } catch (e) { /* ignore */ }
+          }
           resolve();
         });
       } else {
