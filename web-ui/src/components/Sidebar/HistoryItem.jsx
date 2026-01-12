@@ -345,13 +345,15 @@ export default function HistoryItem({ item, isSelected }) {
           >
             <button
               onClick={handleEditStart}
-              className="p-1 rounded transition-colors"
+              className="p-1 rounded transition-colors cursor-pointer"
               style={{ color: 'var(--color-text-secondary)' }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+                e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                e.currentTarget.style.color = 'white'
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor = 'transparent'
+                e.currentTarget.style.color = 'var(--color-text-secondary)'
               }}
               title="Edit label"
             >
@@ -361,7 +363,7 @@ export default function HistoryItem({ item, isSelected }) {
             </button>
             <button
               onClick={handleDelete}
-              className="p-1 rounded transition-colors"
+              className="p-1 rounded transition-colors cursor-pointer"
               style={{ color: 'var(--color-error)' }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'

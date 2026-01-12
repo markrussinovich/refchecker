@@ -149,13 +149,15 @@ export default function LLMSelector({ compact = false }) {
                         setShowModal(true)
                         setIsOpen(false)
                       }}
-                      className="p-1 rounded transition-colors"
+                      className="p-1 rounded transition-colors cursor-pointer"
                       style={{ color: 'var(--color-text-secondary)' }}
                       onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+                        e.currentTarget.style.backgroundColor = 'var(--color-accent)'
+                        e.currentTarget.style.color = 'white'
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.backgroundColor = 'transparent'
+                        e.currentTarget.style.color = 'var(--color-text-secondary)'
                       }}
                       title="Edit configuration"
                     >
@@ -165,7 +167,7 @@ export default function LLMSelector({ compact = false }) {
                     </button>
                     <button
                       onClick={(e) => handleDelete(e, config.id)}
-                      className="p-1 rounded transition-colors"
+                      className="p-1 rounded transition-colors cursor-pointer"
                       style={{ color: 'var(--color-error)' }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
