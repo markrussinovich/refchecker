@@ -129,6 +129,8 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_verified INTEGER DEFAULT 0")
         if "extraction_method" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN extraction_method TEXT")
+        if "thumbnail_path" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN thumbnail_path TEXT")
 
     async def save_check(self,
                          paper_title: str,
@@ -356,6 +358,16 @@ class Database:
             await db.execute(
                 "UPDATE check_history SET extraction_method = ? WHERE id = ?",
                 (extraction_method, check_id)
+            )
+            await db.commit()
+            return True
+
+    async def update_check_thumbnail(self, check_id: int, thumbnail_path: str) -> bool:
+        """Update the thumbnail path for a check"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE check_history SET thumbnail_path = ? WHERE id = ?",
+                (thumbnail_path, check_id)
             )
             await db.commit()
             return True

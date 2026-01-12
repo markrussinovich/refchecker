@@ -14,6 +14,7 @@ cryptography>=42.0.0  # For API key encryption in web UI
 # Additional core dependencies found in codebase
 pandas>=1.3.0
 pdfplumber>=0.6.0
+pymupdf>=1.23.0  # For PDF thumbnail generation
 
 # Optional dependencies for LLM providers
 openai>=1.0.0

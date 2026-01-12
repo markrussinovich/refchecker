@@ -138,30 +138,27 @@ def create_doi_error(cited_doi: str, correct_doi: str) -> Optional[Dict[str, str
     Returns:
         Standardized error/warning dictionary if DOIs differ, None if they match after cleaning
     """
-    from refchecker.utils.doi_utils import validate_doi_resolves
+    from refchecker.utils.doi_utils import validate_doi_resolves, compare_dois
     
-    # Strip trailing periods before comparison to avoid false mismatches
-    cited_doi_clean = cited_doi.rstrip('.')
-    correct_doi_clean = correct_doi.rstrip('.')
+    # Use compare_dois which handles normalization (case, prefixes, trailing punctuation)
+    if compare_dois(cited_doi, correct_doi):
+        return None
     
-    # Only create error/warning if DOIs are actually different after cleaning
-    if cited_doi_clean != correct_doi_clean:
-        # If cited DOI resolves, it's likely a valid alternate DOI
-        # Treat as warning instead of error
-        if validate_doi_resolves(cited_doi):
-            return {
-                'warning_type': 'doi',
-                'warning_details': format_doi_mismatch(cited_doi, correct_doi),
-                'ref_doi_correct': correct_doi
-            }
-        else:
-            return {
-                'error_type': 'doi',
-                'error_details': format_doi_mismatch(cited_doi, correct_doi),
-                'ref_doi_correct': correct_doi
-            }
-    
-    return None
+    # DOIs are different - determine if this should be error or warning
+    # If cited DOI resolves, it's likely a valid alternate DOI
+    # Treat as warning instead of error
+    if validate_doi_resolves(cited_doi):
+        return {
+            'warning_type': 'doi',
+            'warning_details': format_doi_mismatch(cited_doi, correct_doi),
+            'ref_doi_correct': correct_doi
+        }
+    else:
+        return {
+            'error_type': 'doi',
+            'error_details': format_doi_mismatch(cited_doi, correct_doi),
+            'ref_doi_correct': correct_doi
+        }
 
 
 def create_title_error(error_details: str, correct_title: str) -> Dict[str, str]:

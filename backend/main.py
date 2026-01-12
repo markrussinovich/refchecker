@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 import logging
 
@@ -18,6 +19,12 @@ from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
+from .thumbnail import (
+    generate_arxiv_thumbnail_async,
+    generate_pdf_thumbnail_async,
+    get_text_thumbnail_async,
+    get_thumbnail_cache_path
+)
 
 # Configure logging
 logging.basicConfig(
@@ -393,6 +400,79 @@ async def get_check_detail(check_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting check detail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/thumbnail/{check_id}")
+async def get_thumbnail(check_id: int):
+    """
+    Get or generate a thumbnail for a check.
+    
+    Returns the thumbnail image file if available, or generates one on-demand.
+    For ArXiv papers, downloads the PDF and generates a thumbnail of the first page.
+    For uploaded PDFs, generates a thumbnail from the file.
+    For pasted text, returns a placeholder thumbnail.
+    """
+    try:
+        check = await db.get_check_by_id(check_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        
+        # Check if we already have a cached thumbnail path
+        thumbnail_path = check.get('thumbnail_path')
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            return FileResponse(
+                thumbnail_path,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
+            )
+        
+        # Generate thumbnail based on source type
+        paper_source = check.get('paper_source', '')
+        source_type = check.get('source_type', 'url')
+        
+        # Try to extract ArXiv ID
+        import re
+        arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
+        arxiv_match = re.search(arxiv_id_pattern, paper_source)
+        
+        if arxiv_match:
+            # Generate thumbnail from ArXiv paper
+            arxiv_id = arxiv_match.group(1)
+            logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
+            thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id)
+        elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
+            # Generate thumbnail from uploaded PDF
+            if os.path.exists(paper_source):
+                logger.info(f"Generating thumbnail from PDF: {paper_source}")
+                thumbnail_path = await generate_pdf_thumbnail_async(paper_source)
+            else:
+                # PDF file no longer exists, use placeholder
+                thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+        elif source_type == 'text':
+            # Generate placeholder for pasted text
+            logger.info(f"Generating text placeholder thumbnail for check {check_id}")
+            thumbnail_path = await get_text_thumbnail_async(check_id)
+        else:
+            # Default placeholder for other sources
+            thumbnail_path = await get_text_thumbnail_async(check_id, source_type)
+        
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            # Cache the thumbnail path in the database
+            await db.update_check_thumbnail(check_id, thumbnail_path)
+            
+            return FileResponse(
+                thumbnail_path,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"}
+            )
+        else:
+            raise HTTPException(status_code=404, detail="Could not generate thumbnail")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting thumbnail: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

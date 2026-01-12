@@ -1,0 +1,287 @@
+"""
+Thumbnail generation utilities for PDF and web page previews.
+
+Uses PyMuPDF (fitz) to extract the first page of PDFs as thumbnails.
+Thumbnails are cached on disk to avoid regeneration.
+"""
+import os
+import hashlib
+import logging
+import tempfile
+from pathlib import Path
+from typing import Optional
+import asyncio
+
+logger = logging.getLogger(__name__)
+
+# Default thumbnail cache directory
+THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / "refchecker_thumbnails"
+
+# Thumbnail settings
+THUMBNAIL_WIDTH = 200  # Target width in pixels
+THUMBNAIL_DPI = 72  # DPI for rendering
+
+
+def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
+    """
+    Get the cache path for a thumbnail.
+    
+    Args:
+        source_identifier: A unique identifier for the source (URL, file path, or hash)
+        check_id: Optional check ID for more unique naming
+        
+    Returns:
+        Path to the thumbnail file (may not exist yet)
+    """
+    # Create cache directory if it doesn't exist
+    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Create a hash of the source for the filename
+    source_hash = hashlib.md5(source_identifier.encode()).hexdigest()[:12]
+    
+    if check_id:
+        filename = f"thumb_{check_id}_{source_hash}.png"
+    else:
+        filename = f"thumb_{source_hash}.png"
+    
+    return THUMBNAIL_CACHE_DIR / filename
+
+
+def generate_pdf_thumbnail(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """
+    Generate a thumbnail from the first page of a PDF.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        output_path: Optional path for the output thumbnail. If not provided,
+                     uses the cache directory.
+                     
+    Returns:
+        Path to the generated thumbnail, or None if generation failed
+    """
+    try:
+        import fitz  # PyMuPDF
+        
+        if not os.path.exists(pdf_path):
+            logger.error(f"PDF file not found: {pdf_path}")
+            return None
+        
+        # Determine output path
+        if output_path is None:
+            output_path = str(get_thumbnail_cache_path(pdf_path))
+        
+        # Check if thumbnail already exists
+        if os.path.exists(output_path):
+            logger.debug(f"Thumbnail already exists: {output_path}")
+            return output_path
+        
+        # Open the PDF
+        doc = fitz.open(pdf_path)
+        
+        if len(doc) == 0:
+            logger.warning(f"PDF has no pages: {pdf_path}")
+            doc.close()
+            return None
+        
+        # Get the first page
+        page = doc[0]
+        
+        # Calculate zoom factor to get desired width
+        page_width = page.rect.width
+        zoom = THUMBNAIL_WIDTH / page_width
+        
+        # Create transformation matrix
+        mat = fitz.Matrix(zoom, zoom)
+        
+        # Render page to pixmap
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        
+        # Save as PNG
+        pix.save(output_path)
+        
+        doc.close()
+        
+        logger.info(f"Generated thumbnail: {output_path} ({pix.width}x{pix.height})")
+        return output_path
+        
+    except ImportError:
+        logger.error("PyMuPDF (fitz) is not installed. Install with: pip install pymupdf")
+        return None
+    except Exception as e:
+        logger.error(f"Error generating PDF thumbnail: {e}")
+        return None
+
+
+async def generate_pdf_thumbnail_async(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """
+    Async wrapper for PDF thumbnail generation.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        output_path: Optional path for the output thumbnail
+        
+    Returns:
+        Path to the generated thumbnail, or None if generation failed
+    """
+    return await asyncio.to_thread(generate_pdf_thumbnail, pdf_path, output_path)
+
+
+def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+    """
+    Generate a thumbnail for an ArXiv paper.
+    
+    Downloads the PDF and generates a thumbnail of the first page.
+    
+    Args:
+        arxiv_id: ArXiv paper ID (e.g., "2311.12022")
+        check_id: Optional check ID for cache naming
+        
+    Returns:
+        Path to the generated thumbnail, or None if generation failed
+    """
+    try:
+        import arxiv as arxiv_lib
+        
+        # Check if thumbnail already exists
+        output_path = get_thumbnail_cache_path(f"arxiv_{arxiv_id}", check_id)
+        if output_path.exists():
+            logger.debug(f"ArXiv thumbnail already exists: {output_path}")
+            return str(output_path)
+        
+        # Download the PDF to a temporary location
+        pdf_dir = Path(tempfile.gettempdir()) / "refchecker_pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
+        
+        # Check if PDF is already downloaded
+        if not pdf_path.exists():
+            logger.info(f"Downloading ArXiv PDF: {arxiv_id}")
+            search = arxiv_lib.Search(id_list=[arxiv_id])
+            paper = next(search.results())
+            paper.download_pdf(filename=str(pdf_path))
+        
+        # Generate thumbnail from the PDF
+        return generate_pdf_thumbnail(str(pdf_path), str(output_path))
+        
+    except Exception as e:
+        logger.error(f"Error generating ArXiv thumbnail: {e}")
+        return None
+
+
+async def generate_arxiv_thumbnail_async(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+    """
+    Async wrapper for ArXiv thumbnail generation.
+    
+    Args:
+        arxiv_id: ArXiv paper ID
+        check_id: Optional check ID for cache naming
+        
+    Returns:
+        Path to the generated thumbnail, or None if generation failed
+    """
+    return await asyncio.to_thread(generate_arxiv_thumbnail, arxiv_id, check_id)
+
+
+def get_text_thumbnail(check_id: int, text_preview: str = "") -> Optional[str]:
+    """
+    Generate a simple thumbnail for pasted text.
+    
+    Creates a placeholder image with a text icon or preview.
+    
+    Args:
+        check_id: Check ID for naming
+        text_preview: Optional first few lines of text to display
+        
+    Returns:
+        Path to the generated thumbnail, or None if generation failed
+    """
+    try:
+        import fitz
+        
+        output_path = get_thumbnail_cache_path(f"text_{check_id}", check_id)
+        
+        if output_path.exists():
+            return str(output_path)
+        
+        # Create a simple document-like image
+        # Create a new PDF in memory with a single page
+        doc = fitz.open()
+        page = doc.new_page(width=THUMBNAIL_WIDTH, height=int(THUMBNAIL_WIDTH * 1.4))
+        
+        # Fill with white background
+        page.draw_rect(page.rect, color=(0.95, 0.95, 0.95), fill=(0.98, 0.98, 0.98))
+        
+        # Draw border
+        page.draw_rect(page.rect, color=(0.8, 0.8, 0.8), width=2)
+        
+        # Draw some lines to represent text
+        margin = 20
+        line_height = 12
+        y = margin + 30
+        
+        # Draw a "T" icon at top
+        text_rect = fitz.Rect(margin, margin, margin + 30, margin + 25)
+        page.insert_textbox(text_rect, "T", fontsize=20, color=(0.4, 0.4, 0.6))
+        
+        # Draw placeholder lines
+        for i in range(10):
+            line_width = THUMBNAIL_WIDTH - 2 * margin
+            if i % 3 == 2:
+                line_width = line_width * 0.7  # Some shorter lines
+            
+            page.draw_line(
+                fitz.Point(margin, y),
+                fitz.Point(margin + line_width, y),
+                color=(0.7, 0.7, 0.7),
+                width=2
+            )
+            y += line_height
+        
+        # Render to pixmap and save
+        pix = page.get_pixmap(alpha=False)
+        pix.save(str(output_path))
+        doc.close()
+        
+        logger.info(f"Generated text thumbnail: {output_path}")
+        return str(output_path)
+        
+    except ImportError:
+        logger.error("PyMuPDF (fitz) is not installed")
+        return None
+    except Exception as e:
+        logger.error(f"Error generating text thumbnail: {e}")
+        return None
+
+
+async def get_text_thumbnail_async(check_id: int, text_preview: str = "") -> Optional[str]:
+    """Async wrapper for text thumbnail generation."""
+    return await asyncio.to_thread(get_text_thumbnail, check_id, text_preview)
+
+
+def cleanup_old_thumbnails(max_age_days: int = 30):
+    """
+    Clean up old thumbnails from the cache.
+    
+    Args:
+        max_age_days: Maximum age in days before thumbnails are deleted
+    """
+    try:
+        import time
+        
+        if not THUMBNAIL_CACHE_DIR.exists():
+            return
+        
+        max_age_seconds = max_age_days * 24 * 60 * 60
+        current_time = time.time()
+        
+        for thumb_path in THUMBNAIL_CACHE_DIR.glob("thumb_*.png"):
+            try:
+                file_age = current_time - thumb_path.stat().st_mtime
+                if file_age > max_age_seconds:
+                    thumb_path.unlink()
+                    logger.debug(f"Deleted old thumbnail: {thumb_path}")
+            except Exception as e:
+                logger.warning(f"Error deleting thumbnail {thumb_path}: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error cleaning up thumbnails: {e}")

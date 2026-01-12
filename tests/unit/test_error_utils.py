@@ -84,10 +84,11 @@ class TestDoiError:
         error = create_doi_error("10.1162/tacl_a_00562.", "10.1162/tacl_a_00562")
         assert error is None
         
-        # Actually different DOIs should still create an error
+        # Actually different DOIs should still create an error or warning
         error = create_doi_error("10.1162/tacl_a_00562.", "10.1162/tacl_a_00999")
         assert error is not None
-        assert error['error_type'] == 'doi'
+        # Can be either error_type or warning_type depending on DOI resolution
+        assert error.get('error_type') == 'doi' or error.get('warning_type') == 'doi'
 
 
 class TestTitleError:
