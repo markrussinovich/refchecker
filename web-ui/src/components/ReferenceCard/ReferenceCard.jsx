@@ -1,4 +1,11 @@
-import { formatAuthors } from '../../utils/formatters'
+import { useState, useRef, useEffect } from 'react'
+import { 
+  formatAuthors, 
+  exportReferenceAsMarkdown, 
+  exportReferenceAsPlainText, 
+  exportReferenceAsBibtex,
+  copyToClipboard 
+} from '../../utils/formatters'
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
@@ -95,6 +102,44 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const status = (reference.status || '').toLowerCase()
+  
+  // Export menu state
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const exportMenuRef = useRef(null)
+  
+  // Close export menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setShowExportMenu(false)
+      }
+    }
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showExportMenu])
+  
+  // Handle export for this single reference
+  const handleExport = async (format) => {
+    let content
+    switch (format) {
+      case 'markdown':
+        content = exportReferenceAsMarkdown(reference)
+        break
+      case 'plaintext':
+        content = exportReferenceAsPlainText(reference)
+        break
+      case 'bibtex':
+        content = exportReferenceAsBibtex(reference)
+        break
+      default:
+        content = exportReferenceAsMarkdown(reference)
+    }
+    await copyToClipboard(content)
+    setShowExportMenu(false)
+  }
+  
   const getStatusColor = () => {
     switch (status) {
       case 'verified': return 'var(--color-success)'
@@ -281,12 +326,58 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
         
         {/* Reference content */}
         <div className="flex-1 min-w-0">
-          {/* Title */}
-          <div 
-            className="font-bold"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            {reference.title || 'Unknown Title'}
+          {/* Title row with export button */}
+          <div className="flex items-start justify-between gap-2">
+            <div 
+              className="font-bold flex-1"
+              style={{ color: 'var(--color-text-primary)' }}
+            >
+              {reference.title || 'Unknown Title'}
+            </div>
+            
+            {/* Export button */}
+            <div className="relative flex-shrink-0" ref={exportMenuRef}>
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="p-1 rounded opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+                title="Copy reference"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+              
+              {/* Export dropdown menu */}
+              {showExportMenu && (
+                <div 
+                  className="absolute right-0 top-full mt-1 py-1 rounded-md shadow-lg z-50 min-w-[140px]"
+                  style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+                >
+                  <button
+                    onClick={() => handleExport('markdown')}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer flex items-center gap-2"
+                    style={{ color: 'var(--color-text-primary)' }}
+                  >
+                    <span>📝</span> Markdown
+                  </button>
+                  <button
+                    onClick={() => handleExport('plaintext')}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer flex items-center gap-2"
+                    style={{ color: 'var(--color-text-primary)' }}
+                  >
+                    <span>📄</span> Plain Text
+                  </button>
+                  <button
+                    onClick={() => handleExport('bibtex')}
+                    className="w-full px-3 py-1.5 text-left text-xs hover:bg-black/10 dark:hover:bg-white/10 cursor-pointer flex items-center gap-2"
+                    style={{ color: 'var(--color-text-primary)' }}
+                  >
+                    <span>📚</span> BibTeX
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           
           {/* Authors */}

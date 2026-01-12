@@ -1,5 +1,11 @@
+import { useState, useRef, useEffect } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { exportResultsAsMarkdown, downloadAsFile } from '../../utils/formatters'
+import { 
+  exportResultsAsMarkdown, 
+  exportResultsAsPlainText, 
+  exportResultsAsBibtex,
+  downloadAsFile 
+} from '../../utils/formatters'
 
 /**
  * Stats section showing reference check summary with clickable filters
@@ -7,6 +13,19 @@ import { exportResultsAsMarkdown, downloadAsFile } from '../../utils/formatters'
  */
 export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource }) {
   const { statusFilter, setStatusFilter } = useCheckStore()
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const exportMenuRef = useRef(null)
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target)) {
+        setShowExportMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // All filter types including verified
   const allFilters = {
@@ -69,16 +88,25 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const isWarningSelected = statusFilter.includes('warning')
   const isUnverifiedSelected = statusFilter.includes('unverified')
 
-  // Handle export to markdown
-  const handleExportMarkdown = () => {
-    const markdown = exportResultsAsMarkdown({
-      paperTitle,
-      paperSource,
-      stats,
-      references,
-    })
-    const filename = `refchecker-${(paperTitle || 'report').replace(/[^a-z0-9]/gi, '_').substring(0, 50)}.md`
-    downloadAsFile(markdown, filename)
+  // Base filename for exports
+  const baseFilename = `refchecker-${(paperTitle || 'report').replace(/[^a-z0-9]/gi, '_').substring(0, 50)}`
+
+  // Export handlers
+  const handleExport = (format) => {
+    setShowExportMenu(false)
+    const exportData = { paperTitle, paperSource, stats, references }
+    
+    switch (format) {
+      case 'markdown':
+        downloadAsFile(exportResultsAsMarkdown(exportData), `${baseFilename}.md`, 'text/markdown')
+        break
+      case 'text':
+        downloadAsFile(exportResultsAsPlainText(exportData), `${baseFilename}.txt`, 'text/plain')
+        break
+      case 'bibtex':
+        downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
+        break
+    }
   }
 
   return (
@@ -125,28 +153,65 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               </svg>
             </button>
           )}
-          {/* Export button - only enabled when check is complete */}
-          <button
-            onClick={handleExportMarkdown}
-            disabled={!isComplete}
-            className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition-all ${
-              isComplete 
-                ? 'cursor-pointer hover:opacity-80' 
-                : 'cursor-not-allowed opacity-40'
-            }`}
-            style={{ 
-              backgroundColor: isComplete ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
-              color: isComplete ? 'white' : 'var(--color-text-muted)',
-            }}
-            title={isComplete ? 'Export results as Markdown' : 'Export available when check completes'}
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
-              <polyline points="7,10 12,15 17,10" strokeLinecap="round" strokeLinejoin="round" />
-              <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>Export</span>
-          </button>
+          {/* Export dropdown - only enabled when check is complete */}
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => isComplete && setShowExportMenu(!showExportMenu)}
+              disabled={!isComplete}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition-all ${
+                isComplete 
+                  ? 'cursor-pointer hover:opacity-80' 
+                  : 'cursor-not-allowed opacity-40'
+              }`}
+              style={{ 
+                backgroundColor: isComplete ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
+                color: isComplete ? 'white' : 'var(--color-text-muted)',
+              }}
+              title={isComplete ? 'Export results' : 'Export available when check completes'}
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" strokeLinecap="round" strokeLinejoin="round" />
+                <polyline points="7,10 12,15 17,10" strokeLinecap="round" strokeLinejoin="round" />
+                <line x1="12" y1="15" x2="12" y2="3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>Export</span>
+              <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {showExportMenu && (
+              <div 
+                className="absolute right-0 top-full mt-1 py-1 rounded-lg border shadow-lg z-50"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  minWidth: '140px',
+                }}
+              >
+                <button
+                  onClick={() => handleExport('markdown')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📝 Markdown (.md)
+                </button>
+                <button
+                  onClick={() => handleExport('text')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📄 Plain Text (.txt)
+                </button>
+                <button
+                  onClick={() => handleExport('bibtex')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📚 BibTeX (.bib)
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

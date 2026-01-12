@@ -169,6 +169,73 @@ function parseErrorDetailsForMarkdown(details) {
 }
 
 /**
+ * Extract corrected reference data from errors and warnings
+ * Uses 'actual' values from mismatches when available
+ * @param {object} ref - Reference object with errors/warnings
+ * @returns {object} Corrected reference data
+ */
+function getCorrectedReferenceData(ref) {
+  const corrected = {
+    title: ref.title,
+    authors: ref.authors,
+    year: ref.year,
+    venue: ref.venue,
+    url: ref.authoritative_urls?.[0]?.url || ref.cited_url
+  }
+  
+  // Check errors and warnings for 'actual' values
+  const allIssues = [...(ref.errors || []), ...(ref.warnings || [])]
+  
+  for (const issue of allIssues) {
+    const errorType = (issue.error_type || '').toLowerCase()
+    const parsed = parseErrorDetailsForMarkdown(issue.error_details)
+    const actualValue = parsed?.actual || issue.actual_value
+    
+    if (actualValue) {
+      switch (errorType) {
+        case 'title':
+          corrected.title = actualValue
+          break
+        case 'author':
+        case 'authors':
+          // Parse author string into array if it's a string
+          if (typeof actualValue === 'string') {
+            // Split on common author separators
+            corrected.authors = actualValue.split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
+              .map(a => a.trim())
+              .filter(a => a.length > 0)
+          } else if (Array.isArray(actualValue)) {
+            corrected.authors = actualValue
+          }
+          break
+        case 'year':
+          corrected.year = actualValue
+          break
+        case 'venue':
+          corrected.venue = actualValue
+          break
+      }
+    }
+  }
+  
+  // Check for arXiv suggestion and extract URL
+  if (ref.suggestions?.length > 0) {
+    for (const suggestion of ref.suggestions) {
+      const details = suggestion.suggestion_details || suggestion
+      if (typeof details === 'string') {
+        // Look for arXiv URL in the suggestion
+        const arxivMatch = details.match(/https?:\/\/arxiv\.org\/abs\/[\w.]+/)
+        if (arxivMatch) {
+          corrected.arxivUrl = arxivMatch[0]
+        }
+      }
+    }
+  }
+  
+  return corrected
+}
+
+/**
  * Export check results as markdown
  * @param {object} params - Export parameters
  * @param {string} params.paperTitle - Title of the paper
@@ -359,4 +426,313 @@ export function downloadAsFile(content, filename, mimeType = 'text/markdown') {
   link.click()
   document.body.removeChild(link)
   URL.revokeObjectURL(url)
+}
+
+/**
+ * Copy text to clipboard
+ * @param {string} text - Text to copy
+ * @returns {Promise<boolean>} Whether copy was successful
+ */
+export async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch (err) {
+    console.error('Failed to copy to clipboard:', err)
+    return false
+  }
+}
+
+/**
+ * Export check results as plain text
+ * @param {object} params - Export parameters
+ * @returns {string} Plain text formatted report
+ */
+export function exportResultsAsPlainText({ paperTitle, paperSource, stats, references }) {
+  const lines = []
+  
+  lines.push('REFCHECKER REPORT')
+  lines.push('='.repeat(50))
+  lines.push('')
+  lines.push(`Paper: ${paperTitle || 'Unknown'}`)
+  if (paperSource) {
+    lines.push(`Source: ${paperSource}`)
+  }
+  lines.push(`Date: ${new Date().toLocaleString()}`)
+  lines.push('')
+  lines.push('SUMMARY')
+  lines.push('-'.repeat(30))
+  lines.push(`Total References: ${stats.total_refs || 0}`)
+  lines.push(`Verified: ${stats.refs_verified ?? stats.verified_count ?? 0}`)
+  lines.push(`Errors: ${stats.errors_count || 0}`)
+  lines.push(`Warnings: ${stats.warnings_count || 0}`)
+  lines.push(`Unverified: ${stats.unverified_count ?? 0}`)
+  lines.push('')
+  lines.push('REFERENCES')
+  lines.push('-'.repeat(30))
+  
+  if (!references || references.length === 0) {
+    lines.push('No references found.')
+  } else {
+    references.forEach((ref, index) => {
+      const status = (ref.status || 'unknown').toUpperCase()
+      lines.push('')
+      lines.push(`[${index + 1}] ${ref.title || 'Unknown Title'} [${status}]`)
+      if (ref.authors?.length > 0) {
+        lines.push(`    Authors: ${formatAuthors(ref.authors)}`)
+      }
+      if (ref.year) lines.push(`    Year: ${ref.year}`)
+      if (ref.venue) lines.push(`    Venue: ${ref.venue}`)
+      
+      if (ref.errors?.length > 0) {
+        ref.errors.filter(e => e.error_type !== 'unverified').forEach(e => {
+          lines.push(`    ERROR: ${e.error_details || e.error_type}`)
+        })
+      }
+      if (ref.warnings?.length > 0) {
+        ref.warnings.forEach(w => {
+          lines.push(`    WARNING: ${w.error_details || w.error_type}`)
+        })
+      }
+    })
+  }
+  
+  return lines.join('\n')
+}
+
+/**
+ * Generate a BibTeX key from reference data
+ * @param {object} ref - Reference object
+ * @param {number} index - Reference index for fallback
+ * @returns {string} BibTeX key
+ */
+function generateBibtexKey(ref, index) {
+  // Try to create key from first author last name + year
+  let key = ''
+  if (ref.authors?.length > 0) {
+    const firstAuthor = ref.authors[0]
+    // Extract last name (last word before any comma, or last word)
+    const parts = firstAuthor.split(/[,\s]+/)
+    key = parts[parts.length > 1 ? parts.length - 1 : 0] || ''
+    key = key.replace(/[^a-zA-Z]/g, '').toLowerCase()
+  }
+  if (ref.year) {
+    key += ref.year
+  }
+  // Add first word of title for uniqueness
+  if (ref.title) {
+    const titleWord = ref.title.split(/\s+/)[0].replace(/[^a-zA-Z]/g, '').toLowerCase()
+    key += titleWord
+  }
+  return key || `ref${index + 1}`
+}
+
+/**
+ * Escape special BibTeX characters
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+function escapeBibtex(text) {
+  if (!text) return ''
+  return text
+    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/[&%$#_{}]/g, match => '\\' + match)
+    .replace(/~/g, '\\textasciitilde{}')
+    .replace(/\^/g, '\\textasciicircum{}')
+}
+
+/**
+ * Export a single reference as BibTeX
+ * Uses corrected values from verification when available
+ * @param {object} ref - Reference object
+ * @param {number} index - Reference index
+ * @returns {string} BibTeX entry
+ */
+export function exportReferenceAsBibtex(ref, index = 0) {
+  // Get corrected data (uses actual values from errors/warnings)
+  const corrected = getCorrectedReferenceData(ref)
+  
+  const key = generateBibtexKey({ ...ref, ...corrected, authors: corrected.authors }, index)
+  const lines = []
+  
+  // Determine entry type
+  const venue = (corrected.venue || '').toLowerCase()
+  let entryType = 'article'
+  if (venue.includes('conference') || venue.includes('proceedings') || venue.includes('workshop')) {
+    entryType = 'inproceedings'
+  } else if (venue.includes('arxiv') || corrected.arxivUrl || ref.cited_url?.includes('arxiv')) {
+    entryType = 'misc'
+  }
+  
+  lines.push(`@${entryType}{${key},`)
+  
+  // Title
+  if (corrected.title) {
+    lines.push(`  title = {${escapeBibtex(corrected.title)}},`)
+  }
+  
+  // Authors
+  if (corrected.authors?.length > 0) {
+    const authorStr = corrected.authors.map(a => escapeBibtex(a)).join(' and ')
+    lines.push(`  author = {${authorStr}},`)
+  }
+  
+  // Year
+  if (corrected.year) {
+    lines.push(`  year = {${corrected.year}},`)
+  }
+  
+  // Venue
+  if (corrected.venue) {
+    if (entryType === 'inproceedings') {
+      lines.push(`  booktitle = {${escapeBibtex(corrected.venue)}},`)
+    } else if (entryType === 'article') {
+      lines.push(`  journal = {${escapeBibtex(corrected.venue)}},`)
+    }
+  }
+  
+  // URL - prefer arXiv from suggestions, then DOI, then authoritative URLs, then cited URL
+  if (corrected.arxivUrl) {
+    lines.push(`  url = {${corrected.arxivUrl}},`)
+    // Extract arXiv ID
+    const arxivMatch = corrected.arxivUrl.match(/arxiv\.org\/abs\/(.+)/)
+    if (arxivMatch) {
+      lines.push(`  eprint = {${arxivMatch[1]}},`)
+      lines.push(`  archiveprefix = {arXiv},`)
+    }
+  } else {
+    const doiUrl = ref.authoritative_urls?.find(u => u.type === 'doi')
+    const arxivUrl = ref.authoritative_urls?.find(u => u.type === 'arxiv')
+    
+    if (doiUrl) {
+      // Extract DOI from URL
+      const doiMatch = doiUrl.url.match(/doi\.org\/(.+)/)
+      if (doiMatch) {
+        lines.push(`  doi = {${doiMatch[1]}},`)
+      } else {
+        lines.push(`  url = {${doiUrl.url}},`)
+      }
+    } else if (arxivUrl) {
+      lines.push(`  url = {${arxivUrl.url}},`)
+      // Extract arXiv ID
+      const arxivMatch = arxivUrl.url.match(/arxiv\.org\/abs\/(.+)/)
+      if (arxivMatch) {
+        lines.push(`  eprint = {${arxivMatch[1]}},`)
+        lines.push(`  archiveprefix = {arXiv},`)
+      }
+    } else if (ref.cited_url) {
+      lines.push(`  url = {${ref.cited_url}},`)
+    }
+  }
+  
+  lines.push('}')
+  
+  return lines.join('\n')
+}
+
+/**
+ * Export all references as BibTeX
+ * @param {object} params - Export parameters
+ * @returns {string} BibTeX formatted entries
+ */
+export function exportResultsAsBibtex({ references }) {
+  if (!references || references.length === 0) {
+    return '% No references found'
+  }
+  
+  const entries = references.map((ref, index) => exportReferenceAsBibtex(ref, index))
+  return entries.join('\n\n')
+}
+
+/**
+ * Export a single reference as plain text (ACM format)
+ * Uses corrected values from verification when available
+ * Format: Authors. Year. Title. Venue. URL
+ * @param {object} ref - Reference object
+ * @returns {string} Plain text citation
+ */
+export function exportReferenceAsPlainText(ref) {
+  // Get corrected data (uses actual values from errors/warnings)
+  const corrected = getCorrectedReferenceData(ref)
+  const parts = []
+  
+  // Authors (required or placeholder)
+  if (corrected.authors?.length > 0) {
+    parts.push(formatAuthors(corrected.authors))
+  }
+  
+  // Year
+  if (corrected.year) {
+    parts.push(corrected.year)
+  }
+  
+  // Title (required)
+  if (corrected.title) {
+    parts.push(corrected.title)
+  }
+  
+  // Venue
+  if (corrected.venue) {
+    parts.push(corrected.venue)
+  }
+  
+  // Build citation
+  let citation = parts.join('. ')
+  if (citation && !citation.endsWith('.')) {
+    citation += '.'
+  }
+  
+  // Add arXiv URL if suggested, otherwise use authoritative URL
+  const url = corrected.arxivUrl || corrected.url
+  if (url) {
+    citation += ` ${url}`
+  }
+  
+  return citation
+}
+
+/**
+ * Export a single reference as Markdown (ACM format with formatting)
+ * Uses corrected values from verification when available
+ * @param {object} ref - Reference object
+ * @returns {string} Markdown citation
+ */
+export function exportReferenceAsMarkdown(ref) {
+  // Get corrected data (uses actual values from errors/warnings)
+  const corrected = getCorrectedReferenceData(ref)
+  const parts = []
+  
+  // Authors
+  if (corrected.authors?.length > 0) {
+    parts.push(formatAuthors(corrected.authors))
+  }
+  
+  // Year
+  if (corrected.year) {
+    parts.push(corrected.year)
+  }
+  
+  // Title (bold)
+  if (corrected.title) {
+    parts.push(`**${corrected.title}**`)
+  }
+  
+  // Venue (italic)
+  if (corrected.venue) {
+    parts.push(`*${corrected.venue}*`)
+  }
+  
+  // Build citation
+  let citation = parts.join('. ')
+  if (citation && !citation.endsWith('.')) {
+    citation += '.'
+  }
+  
+  // Add arXiv URL if suggested, otherwise use authoritative URL
+  const url = corrected.arxivUrl || corrected.url
+  if (url) {
+    citation += ` [Link](${url})`
+  }
+  
+  return citation
 }
