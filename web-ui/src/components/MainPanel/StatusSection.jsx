@@ -227,8 +227,8 @@ export default function StatusSection() {
     if (!selectedCheckId || selectedCheckId === -1) return null
     
     const thumbnailStyle = {
-      width: '64px',
-      height: '80px',
+      width: '80px',
+      height: '100px',
       flexShrink: 0,
       borderRadius: '4px',
       overflow: 'hidden',
@@ -253,6 +253,9 @@ export default function StatusSection() {
       linkUrl = thumbnailInfo.url
     } else if (thumbnailInfo?.type === 'pdf' && thumbnailInfo?.url) {
       linkUrl = thumbnailInfo.url
+    } else if (thumbnailInfo?.type === 'text' && selectedCheckId) {
+      // For pasted text, link to the text content endpoint
+      linkUrl = `${API_BASE}/api/text/${selectedCheckId}`
     }
     
     // If we have a thumbnail URL and it hasn't errored, show the actual image
@@ -375,21 +378,41 @@ export default function StatusSection() {
     }
     
     if (thumbnailInfo?.type === 'text') {
-      return (
-        <div style={thumbnailStyle}>
-          <div style={{ textAlign: 'center' }}>
-            <svg style={iconStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-              <path d="M14 2v6h6"/>
-              <line x1="16" y1="13" x2="8" y2="13"/>
-              <line x1="16" y1="17" x2="8" y2="17"/>
-            </svg>
-            <div style={{ fontSize: '8px', marginTop: '2px', color: 'var(--color-text-muted)' }}>
-              Text
-            </div>
+      const textLinkUrl = selectedCheckId ? `${API_BASE}/api/text/${selectedCheckId}` : null
+      const content = (
+        <div style={{ textAlign: 'center' }}>
+          <svg style={iconStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
+            <path d="M14 2v6h6"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <div style={{ fontSize: '8px', marginTop: '2px', color: 'var(--color-text-muted)' }}>
+            Text
           </div>
         </div>
       )
+      
+      if (textLinkUrl) {
+        return (
+          <a 
+            href={textLinkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View pasted text"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              ...thumbnailStyle,
+              textDecoration: 'none',
+              cursor: 'pointer',
+            }}
+            className="hover:border-blue-400"
+          >
+            {content}
+          </a>
+        )
+      }
+      return <div style={thumbnailStyle}>{content}</div>
     }
     
     if (thumbnailInfo?.type === 'file') {
@@ -572,7 +595,8 @@ export default function StatusSection() {
               {displayTitle}
             </h3>
           )}
-          {sourceInfo && (
+          {/* Hide source info for pasted text since it shows the file path or text content */}
+          {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 
               className="text-sm truncate"
               style={{ color: 'var(--color-text-muted)' }}

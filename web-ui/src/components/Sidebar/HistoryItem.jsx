@@ -193,8 +193,8 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
         
-        {/* Paper source URL (always show if available) */}
-        {!isPlaceholder && item.paper_source && (
+        {/* Paper source URL (show if available, but not for pasted text which shows a file path) */}
+        {!isPlaceholder && item.paper_source && item.source_type !== 'text' && (
           <div 
             className="text-xs mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
             style={{ color: 'var(--color-text-muted)' }}
@@ -243,7 +243,7 @@ export default function HistoryItem({ item, isSelected }) {
                 </span>
               )}
               {(item.suggestions_count || 0) > 0 && (
-                <span className="flex items-center" style={{ color: 'var(--color-accent)' }} title={`${item.suggestions_count} suggestion${item.suggestions_count === 1 ? '' : 's'}`}>
+                <span className="flex items-center" style={{ color: 'var(--color-suggestion)' }} title={`${item.suggestions_count} suggestion${item.suggestions_count === 1 ? '' : 's'}`}>
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
                   </svg>

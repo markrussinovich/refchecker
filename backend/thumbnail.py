@@ -182,15 +182,16 @@ async def generate_arxiv_thumbnail_async(arxiv_id: str, check_id: Optional[int] 
     return await asyncio.to_thread(generate_arxiv_thumbnail, arxiv_id, check_id)
 
 
-def get_text_thumbnail(check_id: int, text_preview: str = "") -> Optional[str]:
+def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
     """
-    Generate a simple thumbnail for pasted text.
+    Generate a thumbnail for pasted text showing actual content.
     
-    Creates a placeholder image with a text icon or preview.
+    Creates an image with the first few lines of the text content.
     
     Args:
         check_id: Check ID for naming
         text_preview: Optional first few lines of text to display
+        text_file_path: Optional path to the text file to read content from
         
     Returns:
         Path to the generated thumbnail, or None if generation failed
@@ -203,39 +204,65 @@ def get_text_thumbnail(check_id: int, text_preview: str = "") -> Optional[str]:
         if output_path.exists():
             return str(output_path)
         
-        # Create a simple document-like image
-        # Create a new PDF in memory with a single page
+        # Try to read text content from file
+        text_content = text_preview
+        if text_file_path and os.path.exists(text_file_path):
+            try:
+                with open(text_file_path, 'r', encoding='utf-8') as f:
+                    text_content = f.read()
+            except Exception as e:
+                logger.warning(f"Could not read text file: {e}")
+        
+        # Create a document-like image with actual text content
         doc = fitz.open()
         page = doc.new_page(width=THUMBNAIL_WIDTH, height=int(THUMBNAIL_WIDTH * 1.4))
         
-        # Fill with white background
-        page.draw_rect(page.rect, color=(0.95, 0.95, 0.95), fill=(0.98, 0.98, 0.98))
+        # Fill with white/off-white background
+        page.draw_rect(page.rect, color=(0.95, 0.95, 0.95), fill=(0.99, 0.99, 0.99))
         
         # Draw border
-        page.draw_rect(page.rect, color=(0.8, 0.8, 0.8), width=2)
+        page.draw_rect(page.rect, color=(0.8, 0.8, 0.8), width=1)
         
-        # Draw some lines to represent text
-        margin = 20
-        line_height = 12
-        y = margin + 30
-        
-        # Draw a "T" icon at top
-        text_rect = fitz.Rect(margin, margin, margin + 30, margin + 25)
-        page.insert_textbox(text_rect, "T", fontsize=20, color=(0.4, 0.4, 0.6))
-        
-        # Draw placeholder lines
-        for i in range(10):
-            line_width = THUMBNAIL_WIDTH - 2 * margin
-            if i % 3 == 2:
-                line_width = line_width * 0.7  # Some shorter lines
+        # Draw actual text content if available
+        margin = 10
+        if text_content:
+            # Create a text box for the content
+            text_rect = fitz.Rect(margin, margin, THUMBNAIL_WIDTH - margin, int(THUMBNAIL_WIDTH * 1.4) - margin)
             
-            page.draw_line(
-                fitz.Point(margin, y),
-                fitz.Point(margin + line_width, y),
-                color=(0.7, 0.7, 0.7),
-                width=2
+            # Truncate to first ~500 chars for thumbnail
+            display_text = text_content[:500]
+            if len(text_content) > 500:
+                display_text += "..."
+            
+            # Insert text with small font
+            page.insert_textbox(
+                text_rect,
+                display_text,
+                fontsize=6,
+                color=(0.2, 0.2, 0.2),
+                fontname="helv"
             )
-            y += line_height
+        else:
+            # Fallback: Draw placeholder lines
+            line_height = 12
+            y = margin + 30
+            
+            # Draw a "T" icon at top
+            text_rect = fitz.Rect(margin, margin, margin + 30, margin + 25)
+            page.insert_textbox(text_rect, "T", fontsize=20, color=(0.4, 0.4, 0.6))
+            
+            for i in range(10):
+                line_width = THUMBNAIL_WIDTH - 2 * margin
+                if i % 3 == 2:
+                    line_width = line_width * 0.7
+                
+                page.draw_line(
+                    fitz.Point(margin, y),
+                    fitz.Point(margin + line_width, y),
+                    color=(0.7, 0.7, 0.7),
+                    width=2
+                )
+                y += line_height
         
         # Render to pixmap and save
         pix = page.get_pixmap(alpha=False)
@@ -253,9 +280,9 @@ def get_text_thumbnail(check_id: int, text_preview: str = "") -> Optional[str]:
         return None
 
 
-async def get_text_thumbnail_async(check_id: int, text_preview: str = "") -> Optional[str]:
+async def get_text_thumbnail_async(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
     """Async wrapper for text thumbnail generation."""
-    return await asyncio.to_thread(get_text_thumbnail, check_id, text_preview)
+    return await asyncio.to_thread(get_text_thumbnail, check_id, text_preview, text_file_path)
 
 
 def cleanup_old_thumbnails(max_age_days: int = 30):

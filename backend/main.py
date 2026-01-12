@@ -196,7 +196,13 @@ async def start_check(
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")
-            paper_source = source_text
+            # Save pasted text to a file for later retrieval and thumbnail generation
+            text_dir = Path(tempfile.gettempdir()) / "refchecker_texts"
+            text_dir.mkdir(parents=True, exist_ok=True)
+            text_file_path = text_dir / f"pasted_{session_id}.txt"
+            with open(text_file_path, "w", encoding="utf-8") as f:
+                f.write(source_text)
+            paper_source = str(text_file_path)
             paper_title = "Pasted Text"
         elif source_type == "url":
             paper_title = source_value
@@ -450,9 +456,10 @@ async def get_thumbnail(check_id: int):
                 # PDF file no longer exists, use placeholder
                 thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
         elif source_type == 'text':
-            # Generate placeholder for pasted text
-            logger.info(f"Generating text placeholder thumbnail for check {check_id}")
-            thumbnail_path = await get_text_thumbnail_async(check_id)
+            # Generate thumbnail with actual text content for pasted text
+            logger.info(f"Generating text content thumbnail for check {check_id}")
+            # paper_source is now a file path for text sources
+            thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
         else:
             # Default placeholder for other sources
             thumbnail_path = await get_text_thumbnail_async(check_id, source_type)
@@ -473,6 +480,50 @@ async def get_thumbnail(check_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting thumbnail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/text/{check_id}")
+async def get_pasted_text(check_id: int):
+    """
+    Get the pasted text content for a check.
+    
+    Returns the text file content as plain text for viewing.
+    """
+    try:
+        check = await db.get_check_by_id(check_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        
+        source_type = check.get('source_type', '')
+        paper_source = check.get('paper_source', '')
+        
+        if source_type != 'text':
+            raise HTTPException(status_code=400, detail="This check is not from pasted text")
+        
+        # paper_source should now be a file path
+        if os.path.exists(paper_source):
+            return FileResponse(
+                paper_source,
+                media_type="text/plain; charset=utf-8",
+                filename="pasted_bibliography.txt",
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        else:
+            # Fallback: if paper_source is the actual text content (legacy)
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(
+                paper_source,
+                headers={"Cache-Control": "public, max-age=3600"}
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting pasted text: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
