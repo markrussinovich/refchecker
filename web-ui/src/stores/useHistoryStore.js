@@ -96,6 +96,8 @@ export const useHistoryStore = create((set, get) => ({
                 warnings_count: detail.warnings_count || 0,
                 suggestions_count: detail.suggestions_count || 0,
                 unverified_count: detail.unverified_count || 0,
+                refs_with_errors: detail.refs_with_errors || 0,
+                refs_with_warnings_only: detail.refs_with_warnings_only || 0,
                 results: results, // Store results for display
                 session_id: item.session_id, // Preserve session_id from history API
               }
@@ -258,6 +260,8 @@ export const useHistoryStore = create((set, get) => ({
                 warnings_count: detail.warnings_count || 0,
                 suggestions_count: detail.suggestions_count || 0,
                 unverified_count: detail.unverified_count || 0,
+                refs_with_errors: detail.refs_with_errors || 0,
+                refs_with_warnings_only: detail.refs_with_warnings_only || 0,
                 results: results,
                 session_id: item.session_id,
               }
@@ -410,6 +414,8 @@ export const useHistoryStore = create((set, get) => ({
                     warnings_count: check.warnings_count,
                     suggestions_count: check.suggestions_count,
                     unverified_count: check.unverified_count,
+                    refs_with_errors: check.refs_with_errors,
+                    refs_with_warnings_only: check.refs_with_warnings_only,
                     paper_title: check.paper_title || h.paper_title,
                   }
               : h

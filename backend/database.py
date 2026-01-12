@@ -184,6 +184,7 @@ class Database:
             async with db.execute("""
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
                        llm_provider, llm_model, status, source_type
                 FROM check_history
                 ORDER BY timestamp DESC

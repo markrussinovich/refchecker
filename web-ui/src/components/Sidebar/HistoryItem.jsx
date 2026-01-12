@@ -203,62 +203,56 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
 
-        {/* Stats summary */}
-        <div className="flex items-center gap-2 mt-1 flex-wrap">
-          <span 
-            className="text-xs"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
+        {/* Stats summary - compact layout */}
+        <div className="flex items-center gap-1.5 mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          <span>
             {isPlaceholder 
               ? 'Start a new check' 
               : (isInProgress 
-                  ? (totalRefs > 0 ? `${processedRefs}/${totalRefs} refs` : 'Extracting refs...') 
+                  ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
                   : `${totalRefs} refs`)}
           </span>
-          {/* Show error/warning counts (paper counts, not detail counts) */}
-          {!isPlaceholder && ((item.refs_with_errors || 0) > 0 || (item.refs_with_warnings_only || 0) > 0) && (
-            <span className="text-xs flex items-center gap-1.5">
+          {/* Show error/warning/suggestion counts with compact icons */}
+          {!isPlaceholder && !isInProgress && (
+            <>
               {(item.refs_with_errors || 0) > 0 && (
-                <span className="flex items-center gap-0.5" style={{ color: 'var(--color-error)' }} title={`${item.refs_with_errors} ${item.refs_with_errors === 1 ? 'reference with errors' : 'references with errors'}`}>
+                <span className="flex items-center" style={{ color: 'var(--color-error)' }} title={`${item.refs_with_errors} ref${item.refs_with_errors === 1 ? '' : 's'} with errors`}>
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                   </svg>
-                  {item.refs_with_errors}
+                  <span className="ml-0.5">{item.refs_with_errors}</span>
                 </span>
               )}
               {(item.refs_with_warnings_only || 0) > 0 && (
-                <span className="flex items-center gap-0.5" style={{ color: 'var(--color-warning)' }} title={`${item.refs_with_warnings_only} ${item.refs_with_warnings_only === 1 ? 'reference with warnings' : 'references with warnings'}`}>
+                <span className="flex items-center" style={{ color: 'var(--color-warning)' }} title={`${item.refs_with_warnings_only} ref${item.refs_with_warnings_only === 1 ? '' : 's'} with warnings`}>
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                   </svg>
-                  {item.refs_with_warnings_only}
+                  <span className="ml-0.5">{item.refs_with_warnings_only}</span>
                 </span>
               )}
-            </span>
+              {(item.suggestions_count || 0) > 0 && (
+                <span className="flex items-center" style={{ color: 'var(--color-accent)' }} title={`${item.suggestions_count} suggestion${item.suggestions_count === 1 ? '' : 's'}`}>
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
+                  </svg>
+                  <span className="ml-0.5">{item.suggestions_count}</span>
+                </span>
+              )}
+              {/* Green check only when no issues at all */}
+              {(item.refs_with_errors || 0) === 0 && (item.refs_with_warnings_only || 0) === 0 && (item.suggestions_count || 0) === 0 && item.status === 'completed' && (
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-success)' }} title="All references verified">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              )}
+            </>
           )}
-          {/* Show spinner for in-progress, green check for all verified (when no errors/warnings shown) */}
-          {!isPlaceholder && status.isAnimated ? (
-            <svg 
-              className="w-3 h-3 animate-spin"
-              fill="none" 
-              viewBox="0 0 24 24"
-              style={{ color: status.color }}
-            >
+          {/* Show spinner for in-progress */}
+          {!isPlaceholder && status.isAnimated && (
+            <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" style={{ color: status.color }}>
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
-          ) : (
-            !isPlaceholder && !isInProgress && (item.refs_with_errors || 0) === 0 && (item.refs_with_warnings_only || 0) === 0 && item.status === 'completed' && (
-              <svg 
-                className="w-3 h-3" 
-                fill="currentColor" 
-                viewBox="0 0 20 20"
-                style={{ color: 'var(--color-success)' }}
-                title="All references verified"
-              >
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-              </svg>
-            )
           )}
           {/* Cancel button for in-progress checks */}
           {isInProgress && item.session_id && (
