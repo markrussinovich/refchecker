@@ -204,7 +204,7 @@ export default function HistoryItem({ item, isSelected }) {
         )}
 
         {/* Stats summary */}
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
           <span 
             className="text-xs"
             style={{ color: 'var(--color-text-muted)' }}
@@ -215,6 +215,21 @@ export default function HistoryItem({ item, isSelected }) {
                   ? (totalRefs > 0 ? `${processedRefs}/${totalRefs} refs` : 'Extracting refs...') 
                   : `${totalRefs} refs`)}
           </span>
+          {/* Show real-time error/warning counts during check */}
+          {!isPlaceholder && isInProgress && (item.errors_count > 0 || item.warnings_count > 0) && (
+            <span className="text-xs flex items-center gap-1.5">
+              {item.errors_count > 0 && (
+                <span style={{ color: 'var(--color-error)' }}>
+                  {item.errors_count} {item.errors_count === 1 ? 'error' : 'errors'}
+                </span>
+              )}
+              {item.warnings_count > 0 && (
+                <span style={{ color: 'var(--color-warning)' }}>
+                  {item.warnings_count} {item.warnings_count === 1 ? 'warning' : 'warnings'}
+                </span>
+              )}
+            </span>
+          )}
           {!isPlaceholder && status.isAnimated ? (
             <svg 
               className="w-3 h-3 animate-spin"
