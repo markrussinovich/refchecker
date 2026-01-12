@@ -7,8 +7,10 @@
  * Usage:
  *   npm start              # Start servers (skip if already running)
  *   npm start -- --restart # Kill existing and restart
+ *   npm start -- --debug   # Show server output
  *   node start.js          # Start servers
  *   node start.js --restart # Kill existing and restart
+ *   node start.js --debug   # Show verbose server output
  */
 
 import { spawn, exec, execSync } from 'child_process';
@@ -24,6 +26,7 @@ const backendDir = join(rootDir, 'backend');
 const isWindows = process.platform === 'win32';
 const args = process.argv.slice(2);
 const shouldRestart = args.includes('--restart') || args.includes('-r');
+const debugMode = args.includes('--debug') || args.includes('-d');
 
 // Colors for console output
 const colors = {
@@ -167,6 +170,7 @@ function startBackend() {
   });
   
   backend.stdout.on('data', (data) => {
+    if (!debugMode) return;
     const lines = data.toString().trim().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
@@ -179,10 +183,10 @@ function startBackend() {
     const lines = data.toString().trim().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
-        // Uvicorn logs to stderr
+        // Always show errors, only show other output in debug mode
         if (line.includes('ERROR') || line.includes('Traceback')) {
           console.log(`${colors.red}[Backend]${colors.reset} ${line}`);
-        } else {
+        } else if (debugMode) {
           console.log(`${colors.green}[Backend]${colors.reset} ${line}`);
         }
       }
@@ -208,6 +212,7 @@ function startFrontend() {
   });
   
   frontend.stdout.on('data', (data) => {
+    if (!debugMode) return;
     const lines = data.toString().trim().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
@@ -217,6 +222,7 @@ function startFrontend() {
   });
   
   frontend.stderr.on('data', (data) => {
+    if (!debugMode) return;
     const lines = data.toString().trim().split('\n');
     lines.forEach(line => {
       if (line.trim()) {
