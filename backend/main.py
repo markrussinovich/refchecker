@@ -329,7 +329,8 @@ async def run_check(
             refs_with_warnings_only=result["summary"].get("refs_with_warnings_only", 0),
             refs_verified=result["summary"].get("refs_verified", 0),
             results=result["references"],
-            status='completed'
+            status='completed',
+            extraction_method=result.get("extraction_method")
         )
 
         # Cleanup temp file if it was uploaded

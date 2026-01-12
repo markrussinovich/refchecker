@@ -71,6 +71,7 @@ class Database:
                     results_json TEXT,
                     llm_provider TEXT,
                     llm_model TEXT,
+                    extraction_method TEXT,
                     status TEXT DEFAULT 'completed'
                 )
             """)
@@ -126,6 +127,8 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_warnings_only INTEGER DEFAULT 0")
         if "refs_verified" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_verified INTEGER DEFAULT 0")
+        if "extraction_method" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN extraction_method TEXT")
 
     async def save_check(self,
                          paper_title: str,
@@ -141,15 +144,16 @@ class Database:
                          refs_verified: int,
                          results: List[Dict[str, Any]],
                          llm_provider: Optional[str] = None,
-                         llm_model: Optional[str] = None) -> int:
+                         llm_model: Optional[str] = None,
+                         extraction_method: Optional[str] = None) -> int:
         """Save a check result to database"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, refs_with_errors, refs_with_warnings_only,
-                 refs_verified, results_json, llm_provider, llm_model)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 refs_verified, results_json, llm_provider, llm_model, extraction_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -164,7 +168,8 @@ class Database:
                 refs_verified,
                 json.dumps(results),
                 llm_provider,
-                llm_model
+                llm_model,
+                extraction_method
             ))
             await db.commit()
             return cursor.lastrowid
@@ -267,14 +272,16 @@ class Database:
                                     refs_with_warnings_only: int,
                                     refs_verified: int,
                                     results: List[Dict[str, Any]],
-                                    status: str = 'completed') -> bool:
+                                    status: str = 'completed',
+                                    extraction_method: Optional[str] = None) -> bool:
         """Update a check with its results"""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 UPDATE check_history
                 SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
                     suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
-                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?
+                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
+                    extraction_method = ?
                 WHERE id = ?
             """, (
                 paper_title,
@@ -288,6 +295,7 @@ class Database:
                 refs_verified,
                 json.dumps(results),
                 status,
+                extraction_method,
                 check_id
             ))
             await db.commit()
@@ -338,6 +346,16 @@ class Database:
             await db.execute(
                 "UPDATE check_history SET status = ? WHERE id = ?",
                 (status, check_id)
+            )
+            await db.commit()
+            return True
+
+    async def update_check_extraction_method(self, check_id: int, extraction_method: str) -> bool:
+        """Update the extraction method for a check"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE check_history SET extraction_method = ? WHERE id = ?",
+                (extraction_method, check_id)
             )
             await db.commit()
             return True

@@ -73,6 +73,7 @@ export default function StatusSection() {
   let displayProcessedRefs = 0
   let displayLlmProvider = null
   let displayLlmModel = null
+  let displayExtractionMethod = null
   
   if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
     // Current session: use live WebSocket data from checkStore
@@ -83,9 +84,10 @@ export default function StatusSection() {
     displayProgress = checkStoreProgress
     displayTotalRefs = checkStoreStats?.total_refs || 0
     displayProcessedRefs = checkStoreStats?.processed_refs || 0
-    // Get LLM info from selectedCheck (history) since it's not in checkStore
+    // Get LLM info and extraction method from selectedCheck (history) since it's not in checkStore
     displayLlmProvider = selectedCheck?.llm_provider
     displayLlmModel = selectedCheck?.llm_model
+    displayExtractionMethod = selectedCheck?.extraction_method || checkStoreStats?.extraction_method
   } else if (isViewingCheck && selectedCheck) {
     // Other checks: use selectedCheck data from history
     displayStatus = selectedCheck.status || 'idle'
@@ -96,6 +98,7 @@ export default function StatusSection() {
     displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
+    displayExtractionMethod = selectedCheck.extraction_method
     
     // Build status message based on state
     if (displayStatus === 'in_progress') {
@@ -273,7 +276,22 @@ export default function StatusSection() {
               )}
             </p>
           )}
-          {displayLlmModel && (
+          {/* Show extraction source or LLM model */}
+          {displayExtractionMethod && ['bbl', 'bib'].includes(displayExtractionMethod) ? (
+            <p 
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Source: ArXiv .{displayExtractionMethod} file
+            </p>
+          ) : displayExtractionMethod === 'pdf' ? (
+            <p 
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Source: PDF extraction
+            </p>
+          ) : displayLlmModel && (
             <p 
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}

@@ -346,6 +346,7 @@ export const useCheckStore = create((set, get) => ({
             total_refs: data.total_refs || data.count || 0,
             processed_refs: 0, // Reset to 0 when refs first extracted
             results: extractedRefs, // Store the full reference list
+            extraction_method: data.extraction_method,
           })
           break
         case 'checking_reference':
@@ -392,6 +393,7 @@ export const useCheckStore = create((set, get) => ({
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
             refs_verified: data.refs_verified,
+            extraction_method: data.extraction_method,
           })
           break
         default:
@@ -435,7 +437,12 @@ export const useCheckStore = create((set, get) => ({
             status: 'in_progress',
             total_refs: data.total_refs,
             processed_refs: 0, // Reset to 0 when refs first extracted
+            extraction_method: data.extraction_method,
           })
+        }
+        // Store extraction_method in stats for real-time display
+        if (data.extraction_method) {
+          store.updateStats({ ...get().stats, extraction_method: data.extraction_method })
         }
         break
         
@@ -492,6 +499,7 @@ export const useCheckStore = create((set, get) => ({
           refs_with_errors: data.refs_with_errors,
           refs_with_warnings_only: data.refs_with_warnings_only,
           refs_verified: data.refs_verified,
+          extraction_method: data.extraction_method,
         })
         break
         

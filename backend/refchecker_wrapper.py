@@ -314,8 +314,9 @@ class ProgressRefChecker:
                     await self.emit_progress("title_updated", {"paper_title": title})
 
             await self._check_cancelled()
-            # Track if we got references from ArXiv source files
+            # Track if we got references from ArXiv source files and the extraction method
             arxiv_source_references = None
+            extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', or None
             
             if source_type == "url":
                 # Handle ArXiv URLs/IDs
@@ -346,15 +347,17 @@ class ProgressRefChecker:
                 
                 if bibtex_content:
                     logger.info(f"Found BibTeX/BBL content from ArXiv source for {arxiv_id}")
-                    # Extract references from the BibTeX content
-                    arxiv_source_references = await self._extract_references_from_bibtex(bibtex_content)
+                    # Extract references from the BibTeX content (returns tuple)
+                    result = await self._extract_references_from_bibtex(bibtex_content)
+                    arxiv_source_references, extraction_method = result
                     if arxiv_source_references:
-                        logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files")
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files (method: {extraction_method})")
                     else:
                         logger.warning("Could not extract references from ArXiv source, falling back to PDF")
                 
                 # Fall back to PDF extraction if no references from source files
                 if not arxiv_source_references:
+                    extraction_method = 'pdf'
                     # Download PDF - run in thread (use cross-platform temp directory)
                     pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
                     await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
@@ -366,6 +369,7 @@ class ProgressRefChecker:
                     paper_text = ""  # Not needed since we have references
 
             elif source_type == "file":
+                extraction_method = 'file'
                 await self.emit_progress("extracting", {
                     "message": "Extracting text from file..."
                 })
@@ -391,6 +395,7 @@ class ProgressRefChecker:
                 })
                 paper_text = paper_source
                 paper_title = "Pasted Text"
+                extraction_method = 'text'
                 # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
@@ -398,20 +403,25 @@ class ProgressRefChecker:
             # Step 2: Extract references
             await self.emit_progress("extracting", {
                 "message": "Extracting references from paper...",
-                "paper_title": paper_title
+                "paper_title": paper_title,
+                "extraction_method": extraction_method
             })
 
             # Use ArXiv source references if available, otherwise extract from text
             if arxiv_source_references:
                 references = arxiv_source_references
-                logger.info(f"Using {len(references)} references from ArXiv source files")
+                logger.info(f"Using {len(references)} references from ArXiv source files (method: {extraction_method})")
             else:
                 references = await self._extract_references(paper_text)
+                # If we used PDF/file extraction and LLM was configured, mark as LLM-assisted
+                if self.llm and extraction_method in ('pdf', 'file', 'text'):
+                    extraction_method = 'llm'
 
             if not references:
                 return {
                     "paper_title": paper_title,
                     "paper_source": paper_source,
+                    "extraction_method": extraction_method,
                     "references": [],
                     "summary": {
                         "total_refs": 0,
@@ -427,6 +437,7 @@ class ProgressRefChecker:
             total_refs = len(references)
             await self.emit_progress("references_extracted", {
                 "total_refs": total_refs,
+                "extraction_method": extraction_method,
                 "references": [
                     {
                         "index": idx,
@@ -453,6 +464,7 @@ class ProgressRefChecker:
             final_result = {
                 "paper_title": paper_title,
                 "paper_source": paper_source,
+                "extraction_method": extraction_method,
                 "references": results,
                 "summary": {
                     "total_refs": total_refs,
@@ -465,7 +477,8 @@ class ProgressRefChecker:
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
                     "refs_verified": refs_verified,
-                    "progress_percent": 100.0
+                    "progress_percent": 100.0,
+                    "extraction_method": extraction_method
                 }
             }
 
@@ -669,10 +682,14 @@ class ProgressRefChecker:
             })
             raise
 
-    async def _extract_references_from_bibtex(self, bibtex_content: str) -> List[Dict[str, Any]]:
+    async def _extract_references_from_bibtex(self, bibtex_content: str) -> tuple:
         """Extract references from BibTeX/BBL content (from ArXiv source files).
         
         This mirrors the CLI's extract_bibliography logic for handling BibTeX content.
+        
+        Returns:
+            Tuple of (references list, extraction_method string)
+            extraction_method is one of: 'bbl', 'bib', 'llm', or None if extraction failed
         """
         try:
             cli_checker = _make_cli_checker(self.llm)
@@ -698,27 +715,27 @@ class ProgressRefChecker:
                                 llm_validation = await asyncio.to_thread(validate_parsed_references, processed_refs)
                                 if llm_validation['quality_score'] > validation['quality_score']:
                                     logger.info(f"LLM extraction improved quality ({llm_validation['quality_score']:.2f})")
-                                    return processed_refs
+                                    return (processed_refs, 'llm')
                         except Exception as e:
                             logger.warning(f"LLM fallback failed: {e}")
                     
                     logger.info(f"Extracted {len(refs)} references from .bbl content")
-                    return refs
+                    return (refs, 'bbl')
             else:
                 # Parse as BibTeX format
                 logger.info("Detected BibTeX format from .bib file")
                 refs = await asyncio.to_thread(cli_checker.parse_references, bibtex_content)
                 if cli_checker.fatal_error:
                     logger.error("BibTeX parsing failed")
-                    return []
+                    return ([], None)
                 if refs:
                     logger.info(f"Extracted {len(refs)} references from .bib content")
-                    return refs
+                    return (refs, 'bib')
             
-            return []
+            return ([], None)
         except Exception as e:
             logger.error(f"Error extracting references from BibTeX: {e}")
-            return []
+            return ([], None)
 
     async def _check_reference(self, reference: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Check a single reference and format result"""
