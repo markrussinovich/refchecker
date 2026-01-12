@@ -272,5 +272,83 @@ Ban, T., Chen, L., Wang, X., and Chen, H. (2023).
                                 f"'{cited}' should NOT match '{correct}'")
 
 
+class TestLatexYearExtraction(unittest.TestCase):
+    """Test LaTeX year extraction from BBL files"""
+    
+    def test_arxiv_id_not_confused_with_year(self):
+        """Test that ArXiv IDs like 1907.10641 don't get parsed as year 1907.
+        
+        This is a regression test for a bug where the year regex would match
+        the first 4-digit number in content, grabbing 1907 from arXiv:1907.10641
+        instead of the actual publication year 2019 at the end.
+        """
+        bbl_content = r"""
+\begin{thebibliography}{ZFBH+23}
+
+\bibitem[SLBBC19]{sakaguchi2019winogrande}
+Keisuke Sakaguchi, Ronan Le~Bras, Chandra Bhagavatula, and Yejin Choi.
+\newblock Winogrande: An adversarial winograd schema challenge at scale.
+\newblock {\em arXiv preprint arXiv:1907.10641}, 2019.
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 1)
+        ref = references[0]
+        
+        # The year should be 2019, NOT 1907 from the ArXiv ID
+        self.assertEqual(ref['year'], 2019,
+                         f"Expected year 2019 but got {ref['year']} - ArXiv ID was incorrectly parsed as year")
+    
+    def test_year_extraction_with_various_arxiv_ids(self):
+        """Test year extraction with various ArXiv ID formats that could be confused with years."""
+        test_cases = [
+            # (ArXiv ID, actual year)
+            ("1907.10641", 2019),  # 1907 could look like a year
+            ("2001.08361", 2020),  # 2001 could look like a year
+            ("1911.11641", 2019),  # 1911 could look like a year
+            ("2012.15828", 2021),  # 2012 could look like a year
+        ]
+        
+        for arxiv_id, expected_year in test_cases:
+            with self.subTest(arxiv_id=arxiv_id, expected_year=expected_year):
+                bbl_content = f"""
+\\begin{{thebibliography}}{{X}}
+
+\\bibitem[Test19]{{test2019}}
+Author Name.
+\\newblock Test Paper Title.
+\\newblock {{\\em arXiv preprint arXiv:{arxiv_id}}}, {expected_year}.
+
+\\end{{thebibliography}}
+"""
+                references = extract_latex_references(bbl_content)
+                
+                self.assertEqual(len(references), 1)
+                ref = references[0]
+                self.assertEqual(ref['year'], expected_year,
+                                 f"For ArXiv:{arxiv_id}, expected year {expected_year} but got {ref['year']}")
+    
+    def test_year_at_end_of_venue(self):
+        """Test that year is correctly extracted from standard venue format."""
+        bbl_content = r"""
+\begin{thebibliography}{X}
+
+\bibitem[ZHB+19]{zellers2019hellaswag}
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi.
+\newblock Hellaswag: Can a machine really finish your sentence?
+\newblock In {\em Proceedings of the 57th Annual Meeting of the Association for
+  Computational Linguistics}, pages 4791--4800, 2019.
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 1)
+        ref = references[0]
+        self.assertEqual(ref['year'], 2019)
+
+
 if __name__ == '__main__':
     unittest.main()

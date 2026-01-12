@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
 Test cases for bibliography selection logic based on main TeX file content.
+
+Note: As of January 2026, we ONLY use .bbl files from ArXiv sources.
+We deliberately skip .bib files because they are often unreliable 
+(containing 80k+ entries from shared reference databases).
 """
 
 import unittest
@@ -18,7 +22,7 @@ from unittest.mock import patch, MagicMock
 
 
 class TestBibliographySelection(unittest.TestCase):
-    """Test bibliography selection based on main TeX file content."""
+    """Test bibliography selection - now only uses .bbl files, never .bib."""
     
     def setUp(self):
         """Set up test fixtures."""
@@ -52,8 +56,8 @@ Jane Smith.
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')
-    def test_prefers_bibtex_when_tex_uses_bibliography(self, mock_extract_id, mock_download):
-        """Test that BibTeX is preferred when main TeX file uses \\bibliography{...}."""
+    def test_uses_bbl_even_when_tex_uses_bibliography(self, mock_extract_id, mock_download):
+        """Test that BBL is used even when main TeX file uses \\bibliography{...}."""
         # Mock ArXiv ID extraction
         mock_extract_id.return_value = "2404.01833"
         
@@ -73,8 +77,8 @@ Content here.
         # Call the function
         result = get_bibtex_content(paper)
         
-        # Should return BibTeX content because TeX uses \bibliography{...}
-        self.assertEqual(result, self.sample_bibtex)
+        # Should return BBL content - we now ONLY use .bbl, never .bib
+        self.assertEqual(result, self.sample_bbl)
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')
@@ -105,8 +109,8 @@ Content here.
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')
-    def test_fallback_to_bibtex_when_bbl_empty(self, mock_extract_id, mock_download):
-        """Test fallback to BibTeX when BBL is empty or malformed."""
+    def test_returns_none_when_bbl_empty(self, mock_extract_id, mock_download):
+        """Test returns None when BBL is empty (no fallback to BibTeX)."""
         # Mock ArXiv ID extraction
         mock_extract_id.return_value = "2404.01833"
         
@@ -127,13 +131,13 @@ Content here.
         # Call the function
         result = get_bibtex_content(paper)
         
-        # Should return BibTeX content as fallback when BBL is empty
-        self.assertEqual(result, self.sample_bibtex)
+        # Should return None - we don't fallback to .bib files anymore
+        self.assertIsNone(result)
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')
-    def test_handles_multiple_bibliography_files(self, mock_extract_id, mock_download):
-        """Test handling of multiple bibliography files in \\bibliography{...}."""
+    def test_uses_bbl_with_multiple_bibliography_files(self, mock_extract_id, mock_download):
+        """Test uses BBL even when multiple bibliography files are referenced."""
         # Mock ArXiv ID extraction
         mock_extract_id.return_value = "2404.01833"
         
@@ -153,13 +157,13 @@ Content here.
         # Call the function
         result = get_bibtex_content(paper)
         
-        # Should return BibTeX content because TeX uses \bibliography{...}
-        self.assertEqual(result, self.sample_bibtex)
+        # Should return BBL content - we now ONLY use .bbl, never .bib
+        self.assertEqual(result, self.sample_bbl)
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')
-    def test_bibtex_only_available(self, mock_extract_id, mock_download):
-        """Test when only BibTeX file is available."""
+    def test_returns_none_when_only_bibtex_available(self, mock_extract_id, mock_download):
+        """Test returns None when only BibTeX file is available (no .bbl)."""
         # Mock ArXiv ID extraction
         mock_extract_id.return_value = "2404.01833"
         
@@ -179,8 +183,8 @@ Content here.
         # Call the function
         result = get_bibtex_content(paper)
         
-        # Should return BibTeX content
-        self.assertEqual(result, self.sample_bibtex)
+        # Should return None - we don't use .bib files anymore
+        self.assertIsNone(result)
 
     @patch('refchecker.utils.arxiv_utils.download_arxiv_source')
     @patch('refchecker.utils.arxiv_utils.extract_arxiv_id_from_paper')

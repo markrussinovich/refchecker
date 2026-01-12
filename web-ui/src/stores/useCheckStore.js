@@ -212,6 +212,11 @@ export const useCheckStore = create((set, get) => ({
     set({ paperTitle: title })
   },
 
+  setPaperSource: (source) => {
+    logger.info('CheckStore', `Paper source: ${source}`)
+    set({ paperSource: source })
+  },
+
   setReferences: (references) => {
     logger.info('CheckStore', `References extracted: ${references.length}`)
     const mappedRefs = references.map((ref, index) => ({
@@ -408,7 +413,14 @@ export const useCheckStore = create((set, get) => ({
     switch (type) {
       case 'started':
         store.setStatusMessage(`Check started: ${data.message || 'Initializing...'}`)
-        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, { status: 'in_progress' })
+        // Pass paper_source from the websocket message (sent as 'source')
+        if (data.source) {
+          store.setPaperSource(data.source)
+        }
+        useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, { 
+          status: 'in_progress',
+          paper_source: data.source || store.paperSource || '',
+        })
         break
         
       case 'extracting':
@@ -447,7 +459,7 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'checking_reference':
-        store.setStatusMessage(`Verifying references in parallel (${data.total || '?'} total)...`)
+        // Don't update status message here - it causes flashing. Let summary_update handle it.
         if (typeof data.index === 'number') {
           store.updateReference(data.index - 1, { status: 'checking' })
         }
@@ -462,7 +474,7 @@ export const useCheckStore = create((set, get) => ({
         
       case 'summary_update':
         store.updateStats(data)
-        store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references`)
+        store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references...`)
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'in_progress',
           total_refs: data.total_refs,

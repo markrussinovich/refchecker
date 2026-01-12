@@ -193,6 +193,17 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
         
+        {/* Paper source URL (always show if available) */}
+        {!isPlaceholder && item.paper_source && (
+          <div 
+            className="text-xs mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
+            style={{ color: 'var(--color-text-muted)' }}
+            title={item.paper_source}
+          >
+            {item.paper_source}
+          </div>
+        )}
+        
         {/* Date (hide for placeholder or missing timestamp) */}
         {item.timestamp && !isPlaceholder && (
           <div 
@@ -212,8 +223,8 @@ export default function HistoryItem({ item, isSelected }) {
                   ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
                   : `${totalRefs} refs`)}
           </span>
-          {/* Show error/warning/suggestion counts with compact icons */}
-          {!isPlaceholder && !isInProgress && (
+          {/* Show error/warning/suggestion counts with compact icons (including during in-progress) */}
+          {!isPlaceholder && (
             <>
               {(item.refs_with_errors || 0) > 0 && (
                 <span className="flex items-center" style={{ color: 'var(--color-error)' }} title={`${item.refs_with_errors} ref${item.refs_with_errors === 1 ? '' : 's'} with errors`}>
@@ -239,8 +250,8 @@ export default function HistoryItem({ item, isSelected }) {
                   <span className="ml-0.5">{item.suggestions_count}</span>
                 </span>
               )}
-              {/* Green check only when no issues at all */}
-              {(item.refs_with_errors || 0) === 0 && (item.refs_with_warnings_only || 0) === 0 && (item.suggestions_count || 0) === 0 && item.status === 'completed' && (
+              {/* Green check only when completed with no issues at all */}
+              {!isInProgress && (item.refs_with_errors || 0) === 0 && (item.refs_with_warnings_only || 0) === 0 && (item.suggestions_count || 0) === 0 && item.status === 'completed' && (
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-success)' }} title="All references verified">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                 </svg>

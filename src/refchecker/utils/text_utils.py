@@ -3196,10 +3196,21 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     if label_year_match:
                         ref['year'] = int(label_year_match.group(1))
                     else:
-                        # Try to extract from content
-                        content_year_match = re.search(r'\b(19|20)\d{2}\b', content)
-                        if content_year_match:
-                            ref['year'] = int(content_year_match.group())
+                        # Try to extract from content - be careful to avoid ArXiv IDs like 1907.10641
+                        # Look for year at end of content or after a comma (typical citation format)
+                        # Pattern: standalone year after comma/space, not followed by a dot and more digits (ArXiv ID)
+                        year_patterns = [
+                            r',\s*((?:19|20)\d{2})\s*\.$',  # Year at end after comma: ", 2019."
+                            r',\s*((?:19|20)\d{2})\s*$',     # Year at end after comma: ", 2019"
+                            r'\s+((?:19|20)\d{2})\s*\.$',    # Year at end after space: " 2019."
+                            r'\s+((?:19|20)\d{2})\s*$',      # Year at end after space: " 2019"
+                            r'\b((?:19|20)\d{2})(?!\.\d)',   # Year not followed by decimal (avoid ArXiv IDs)
+                        ]
+                        for pattern in year_patterns:
+                            content_year_match = re.search(pattern, content)
+                            if content_year_match:
+                                ref['year'] = int(content_year_match.group(1))
+                                break
                 
                 # Parse natbib format: usually has author line, then \newblock title, then \newblock venue
                 parts = re.split(r'\\newblock', content, flags=re.IGNORECASE)

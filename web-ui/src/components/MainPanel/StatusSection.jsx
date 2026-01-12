@@ -174,7 +174,7 @@ export default function StatusSection() {
     // Build status message based on state
     if (displayStatus === 'in_progress') {
       if (displayProcessedRefs > 0) {
-        displayMessage = `Checking ${displayProcessedRefs} of ${displayTotalRefs} references...`
+        displayMessage = `Processed ${displayProcessedRefs} of ${displayTotalRefs} references...`
       } else if (displayTotalRefs > 0) {
         displayMessage = `Found ${displayTotalRefs} references, starting verification...`
       } else {
