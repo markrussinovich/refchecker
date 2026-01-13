@@ -123,7 +123,6 @@ export default function InputSection() {
         llm_provider: config?.provider || null,
         llm_model: config?.model || null,
         status: 'in_progress',
-        source_type: inputMode === 'url' ? 'url' : inputMode === 'file' ? 'file' : 'text',
         session_id: session_id,
       })
       

@@ -102,7 +102,7 @@ function App() {
       {/* Debug Panel */}
       <DebugPanel />
 
-      {/* Settings Panel Modal */}}
+      {/* Settings Panel Modal */}
       <SettingsPanel theme={theme} onThemeChange={handleThemeChange} />
     </div>
   )

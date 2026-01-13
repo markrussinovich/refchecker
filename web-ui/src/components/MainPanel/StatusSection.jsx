@@ -226,23 +226,29 @@ export default function StatusSection() {
   const [thumbnailUrl, setThumbnailUrl] = useState(null)
   const [thumbnailError, setThumbnailError] = useState(false)
   const [thumbnailLoading, setThumbnailLoading] = useState(false)
+  const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState(null)
   
   // Fetch thumbnail when check ID changes
   useEffect(() => {
     if (!selectedCheckId || selectedCheckId === -1) {
       setThumbnailUrl(null)
+      setPreviewUrl(null)
       setThumbnailError(false)
       return
     }
     
     // Reset state for new check
     setThumbnailUrl(null)
+    setPreviewUrl(null)
     setThumbnailError(false)
     setThumbnailLoading(true)
     
     // Set the thumbnail URL - let the img element handle loading
     const url = `${API_BASE}/api/thumbnail/${selectedCheckId}`
     setThumbnailUrl(url)
+    // Set the high-resolution preview URL for overlay
+    setPreviewUrl(`${API_BASE}/api/preview/${selectedCheckId}`)
     setThumbnailLoading(false)
     
   }, [selectedCheckId])
@@ -304,18 +310,21 @@ export default function StatusSection() {
         />
       )
       
-      const wrapper = linkUrl ? (
-        <a
-          href={linkUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={thumbnailInfo?.type === 'arxiv' ? `View PDF: arXiv ${thumbnailInfo.arxivId}` : 'Open source'}
-          onClick={(e) => e.stopPropagation()}
+      // Always use button to show overlay on click
+      return (
+        <button
+          type="button"
+          title="Click to enlarge"
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowThumbnailOverlay(true)
+          }}
           style={{
             ...thumbnailStyle,
-            textDecoration: 'none',
             cursor: 'pointer',
             transition: 'border-color 0.2s, box-shadow 0.2s',
+            padding: 0,
+            background: 'none',
           }}
           className="hover:border-blue-400 hover:shadow-md"
         >
@@ -325,19 +334,8 @@ export default function StatusSection() {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
           ) : imgElement}
-        </a>
-      ) : (
-        <div style={thumbnailStyle}>
-          {thumbnailLoading ? (
-            <svg className="w-6 h-6 animate-spin" fill="none" viewBox="0 0 24 24" style={{ color: 'var(--color-text-muted)' }}>
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          ) : imgElement}
-        </div>
+        </button>
       )
-      
-      return wrapper
     }
     
     // Fallback to icons if thumbnail fails or is loading
@@ -749,7 +747,7 @@ export default function StatusSection() {
           <p 
             className="text-sm"
             style={{ 
-              color: 'var(--color-text-muted)',
+              color: isError ? 'var(--color-error)' : 'var(--color-text-muted)',
               wordBreak: 'break-word',
               overflowWrap: 'anywhere',
             }}
@@ -825,6 +823,41 @@ export default function StatusSection() {
               ? `${Math.round(displayProgress)}% complete`
               : 'Starting...'}
           </p>
+        </div>
+      )}
+
+      {/* Thumbnail overlay modal */}
+      {showThumbnailOverlay && (previewUrl || thumbnailUrl) && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}
+          onClick={() => setShowThumbnailOverlay(false)}
+        >
+          <div className="relative w-full h-full flex items-center justify-center p-8">
+            <button
+              type="button"
+              onClick={() => setShowThumbnailOverlay(false)}
+              className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+              title="Close (Esc)"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <img
+              src={previewUrl || thumbnailUrl}
+              alt="Paper preview"
+              style={{ maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain' }}
+              className="rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+              onError={(e) => {
+                // Fall back to thumbnail if preview fails
+                if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
+                  e.target.src = thumbnailUrl
+                }
+              }}
+            />
+          </div>
         </div>
       )}
     </div>

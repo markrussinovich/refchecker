@@ -18,8 +18,11 @@ logger = logging.getLogger(__name__)
 THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / "refchecker_thumbnails"
 
 # Thumbnail settings
-THUMBNAIL_WIDTH = 200  # Target width in pixels
+THUMBNAIL_WIDTH = 200  # Target width in pixels for small thumbnails
 THUMBNAIL_DPI = 150  # Higher DPI for sharper text rendering
+
+# Preview settings (larger image for overlay view)
+PREVIEW_WIDTH = 1600  # Target width in pixels for preview/overlay
 
 
 def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
@@ -43,6 +46,31 @@ def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = N
         filename = f"thumb_{check_id}_{source_hash}.png"
     else:
         filename = f"thumb_{source_hash}.png"
+    
+    return THUMBNAIL_CACHE_DIR / filename
+
+
+def get_preview_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
+    """
+    Get the cache path for a preview (larger image for overlay).
+    
+    Args:
+        source_identifier: A unique identifier for the source (URL, file path, or hash)
+        check_id: Optional check ID for more unique naming
+        
+    Returns:
+        Path to the preview file (may not exist yet)
+    """
+    # Create cache directory if it doesn't exist
+    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Create a hash of the source for the filename
+    source_hash = hashlib.md5(source_identifier.encode()).hexdigest()[:12]
+    
+    if check_id:
+        filename = f"preview_{check_id}_{source_hash}.png"
+    else:
+        filename = f"preview_{source_hash}.png"
     
     return THUMBNAIL_CACHE_DIR / filename
 
@@ -146,6 +174,105 @@ async def generate_pdf_thumbnail_async(pdf_path: str, output_path: Optional[str]
     return await asyncio.to_thread(generate_pdf_thumbnail, pdf_path, output_path)
 
 
+def generate_pdf_preview(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """
+    Generate a high-resolution preview from the first page of a PDF.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        output_path: Optional path for the output preview. If not provided,
+                     uses the cache directory.
+                     
+    Returns:
+        Path to the generated preview, or None if generation failed
+    """
+    try:
+        import fitz  # PyMuPDF
+        
+        if not os.path.exists(pdf_path):
+            logger.error(f"PDF file not found: {pdf_path}")
+            return None
+        
+        # Determine output path
+        if output_path is None:
+            output_path = str(get_preview_cache_path(pdf_path))
+        
+        # Check if preview already exists
+        if os.path.exists(output_path):
+            logger.debug(f"Preview already exists: {output_path}")
+            return output_path
+        
+        # Open the PDF
+        doc = fitz.open(pdf_path)
+        
+        if len(doc) == 0:
+            logger.warning(f"PDF has no pages: {pdf_path}")
+            doc.close()
+            return None
+        
+        # Get the first page
+        page = doc[0]
+        
+        # Calculate zoom factor to get desired width (larger for preview)
+        page_width = page.rect.width
+        zoom = PREVIEW_WIDTH / page_width
+        
+        # Create transformation matrix
+        mat = fitz.Matrix(zoom, zoom)
+        
+        # Render page to pixmap with higher quality
+        pix = page.get_pixmap(matrix=mat, alpha=False)
+        
+        # Enhance contrast to make text darker/more readable
+        try:
+            from PIL import Image, ImageEnhance
+            import io
+            
+            # Convert pixmap to PIL Image
+            img_data = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Increase contrast (1.2 = 20% more contrast)
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.2)
+            
+            # Slightly increase sharpness
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(1.1)
+            
+            # Save enhanced image
+            img.save(output_path, "PNG", optimize=True)
+        except ImportError:
+            # Fallback: save without enhancement if PIL not available
+            pix.save(output_path)
+        
+        doc.close()
+        
+        logger.info(f"Generated preview: {output_path} ({pix.width}x{pix.height})")
+        return output_path
+        
+    except ImportError:
+        logger.error("PyMuPDF (fitz) is not installed. Install with: pip install pymupdf")
+        return None
+    except Exception as e:
+        logger.error(f"Error generating PDF preview: {e}")
+        return None
+
+
+async def generate_pdf_preview_async(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """
+    Async wrapper for PDF preview generation.
+    
+    Args:
+        pdf_path: Path to the PDF file
+        output_path: Optional path for the output preview
+        
+    Returns:
+        Path to the generated preview, or None if generation failed
+    """
+    return await asyncio.to_thread(generate_pdf_preview, pdf_path, output_path)
+
+
 def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
     """
     Generate a thumbnail for an ArXiv paper.
@@ -200,6 +327,62 @@ async def generate_arxiv_thumbnail_async(arxiv_id: str, check_id: Optional[int] 
         Path to the generated thumbnail, or None if generation failed
     """
     return await asyncio.to_thread(generate_arxiv_thumbnail, arxiv_id, check_id)
+
+
+def generate_arxiv_preview(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+    """
+    Generate a high-resolution preview for an ArXiv paper.
+    
+    Downloads the PDF and generates a preview of the first page.
+    
+    Args:
+        arxiv_id: ArXiv paper ID (e.g., "2311.12022")
+        check_id: Optional check ID for cache naming
+        
+    Returns:
+        Path to the generated preview, or None if generation failed
+    """
+    try:
+        import arxiv as arxiv_lib
+        
+        # Check if preview already exists
+        output_path = get_preview_cache_path(f"arxiv_{arxiv_id}", check_id)
+        if output_path.exists():
+            logger.debug(f"ArXiv preview already exists: {output_path}")
+            return str(output_path)
+        
+        # Download the PDF to a temporary location
+        pdf_dir = Path(tempfile.gettempdir()) / "refchecker_pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
+        
+        # Check if PDF is already downloaded
+        if not pdf_path.exists():
+            logger.info(f"Downloading ArXiv PDF: {arxiv_id}")
+            search = arxiv_lib.Search(id_list=[arxiv_id])
+            paper = next(search.results())
+            paper.download_pdf(filename=str(pdf_path))
+        
+        # Generate preview from the PDF
+        return generate_pdf_preview(str(pdf_path), str(output_path))
+        
+    except Exception as e:
+        logger.error(f"Error generating ArXiv preview: {e}")
+        return None
+
+
+async def generate_arxiv_preview_async(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+    """
+    Async wrapper for ArXiv preview generation.
+    
+    Args:
+        arxiv_id: ArXiv paper ID
+        check_id: Optional check ID for cache naming
+        
+    Returns:
+        Path to the generated preview, or None if generation failed
+    """
+    return await asyncio.to_thread(generate_arxiv_preview, arxiv_id, check_id)
 
 
 def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:

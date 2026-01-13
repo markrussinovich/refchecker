@@ -21,9 +21,12 @@ from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
 from .thumbnail import (
     generate_arxiv_thumbnail_async,
+    generate_arxiv_preview_async,
     generate_pdf_thumbnail_async,
+    generate_pdf_preview_async,
     get_text_thumbnail_async,
-    get_thumbnail_cache_path
+    get_thumbnail_cache_path,
+    get_preview_cache_path
 )
 
 # Configure logging
@@ -521,6 +524,59 @@ async def get_thumbnail(check_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting thumbnail: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/preview/{check_id}")
+async def get_preview(check_id: int):
+    """
+    Get or generate a high-resolution preview for a check.
+    
+    Returns a larger preview image suitable for overlay display.
+    For ArXiv papers, downloads the PDF and generates a preview of the first page.
+    For uploaded PDFs, generates a preview from the file.
+    """
+    try:
+        check = await db.get_check_by_id(check_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        
+        # Generate preview based on source type
+        paper_source = check.get('paper_source', '')
+        source_type = check.get('source_type', 'url')
+        
+        # Try to extract ArXiv ID
+        import re
+        arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
+        arxiv_match = re.search(arxiv_id_pattern, paper_source)
+        
+        preview_path = None
+        
+        if arxiv_match:
+            # Generate preview from ArXiv paper
+            arxiv_id = arxiv_match.group(1)
+            logger.info(f"Generating preview for ArXiv paper: {arxiv_id}")
+            preview_path = await generate_arxiv_preview_async(arxiv_id, check_id)
+        elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
+            # Generate preview from uploaded PDF
+            if os.path.exists(paper_source):
+                logger.info(f"Generating preview from PDF: {paper_source}")
+                preview_path = await generate_pdf_preview_async(paper_source)
+        
+        if preview_path and os.path.exists(preview_path):
+            return FileResponse(
+                preview_path,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
+            )
+        else:
+            # Fall back to thumbnail if preview can't be generated
+            raise HTTPException(status_code=404, detail="Could not generate preview")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting preview: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
