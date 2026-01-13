@@ -4,9 +4,10 @@ Utility functions for text processing, author comparison, mocking, and configura
 
 from .text_utils import (
     clean_author_name, clean_title, normalize_text, 
-    extract_arxiv_id_from_url, clean_conference_markers_from_title,
+    clean_conference_markers_from_title,
     remove_year_from_title
 )
+from .url_utils import extract_arxiv_id_from_url
 from .author_utils import compare_authors, levenshtein_distance, extract_authors_list
 from .mock_objects import (
     MockPaper, MockReference, MockLLMProvider, MockSemanticScholarAPI, MockArxivAPI,

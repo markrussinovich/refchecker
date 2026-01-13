@@ -46,12 +46,13 @@ import json
 import random
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
-                       extract_arxiv_id_from_url, normalize_text as common_normalize_text,
+                       normalize_text as common_normalize_text,
                        detect_latex_bibliography_format, extract_latex_references, 
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
+from refchecker.utils.url_utils import extract_arxiv_id_from_url
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker

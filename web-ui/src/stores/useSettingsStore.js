@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { logger } from '../utils/logger'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// Use relative path to go through Vite proxy
+const API_BASE = ''
 
 /**
  * Settings store for application-wide settings

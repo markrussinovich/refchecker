@@ -14,7 +14,6 @@ from refchecker.utils.text_utils import (
     clean_title,
     clean_title_for_search,
     normalize_text,
-    extract_arxiv_id_from_url,
     clean_author_name,
     normalize_author_name,
     calculate_title_similarity,
@@ -24,6 +23,7 @@ from refchecker.utils.text_utils import (
     normalize_diacritics,
     compare_authors
 )
+from refchecker.utils.url_utils import extract_arxiv_id_from_url
 
 
 class TestNameMatching:

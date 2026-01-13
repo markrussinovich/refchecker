@@ -231,8 +231,19 @@ export const useHistoryStore = create((set, get) => ({
     // Mark as added immediately to prevent duplicate calls
     set({ placeholderAdded: true, isLoading: true, error: null })
     
+    logger.info('HistoryStore', 'Starting initializeWithPlaceholder API call')
+    
+    // Create a timeout promise to prevent indefinite waiting
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Connection timeout - backend may not be running')), 10000)
+    )
+    
     try {
-      const response = await api.getHistory(limit)
+      // Race between the API call and the timeout
+      const response = await Promise.race([
+        api.getHistory(limit),
+        timeoutPromise
+      ])
       const fetched = response.data
       let historyWorking = Array.isArray(fetched) ? [...fetched] : []
 
@@ -313,7 +324,34 @@ export const useHistoryStore = create((set, get) => ({
       logger.info('HistoryStore', `Initialized with placeholder and ${historyWorking.length} history items`)
     } catch (error) {
       logger.error('HistoryStore', 'Failed to initialize history', error)
-      set({ error: error.message, isLoading: false })
+      
+      // Even on error, initialize with placeholder so user can still use the app
+      const placeholder = {
+        id: -1,
+        paper_title: 'New refcheck',
+        paper_source: '',
+        custom_label: null,
+        timestamp: null,
+        total_refs: 0,
+        errors_count: 0,
+        warnings_count: 0,
+        suggestions_count: 0,
+        unverified_count: 0,
+        llm_provider: null,
+        llm_model: null,
+        status: 'idle',
+        source_type: 'url',
+        placeholder: true,
+      }
+      
+      set({ 
+        history: [placeholder],
+        error: error.message, 
+        isLoading: false,
+        selectedCheckId: -1,
+        selectedCheck: null,
+      })
+      logger.info('HistoryStore', 'Initialized with placeholder only (API error)')
     }
   },
 

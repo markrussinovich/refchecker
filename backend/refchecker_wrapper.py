@@ -15,7 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from backend.concurrency import get_limiter
 
-from refchecker.utils.text_utils import extract_arxiv_id_from_url, extract_latex_references
+from refchecker.utils.text_utils import extract_latex_references
+from refchecker.utils.url_utils import extract_arxiv_id_from_url
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker

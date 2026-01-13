@@ -4,8 +4,8 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
-// API base URL for thumbnails
-const API_BASE = 'http://localhost:8000'
+// API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
+const API_BASE = ''
 
 /**
  * Extract ArXiv ID from a URL or source string
@@ -89,7 +89,7 @@ function formatSource(source, title, sourceType, checkId) {
   if (sourceType === 'file' && title && checkId) {
     return { 
       type: 'file', 
-      value: `http://localhost:8000/api/file/${checkId}`, 
+      value: `/api/file/${checkId}`, 
       display: title,
       checkId: checkId
     }
@@ -172,7 +172,8 @@ export default function StatusSection() {
     displayTitle = checkStorePaperTitle && checkStorePaperTitle !== 'Unknown Paper' 
       ? checkStorePaperTitle 
       : (historyItem?.paper_title || selectedCheck?.paper_title || checkStorePaperTitle)
-    displaySource = checkStorePaperSource
+    // Use checkStore source if available, else fall back to history item or selectedCheck
+    displaySource = checkStorePaperSource || historyItem?.paper_source || selectedCheck?.paper_source
     displayMessage = checkStoreMessage
     displayProgress = checkStoreProgress
     displayTotalRefs = checkStoreStats?.total_refs || 0
