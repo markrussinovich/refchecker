@@ -193,8 +193,8 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
         
-        {/* Paper source URL (show if available, but not for pasted text which shows a file path) */}
-        {!isPlaceholder && item.paper_source && item.source_type !== 'text' && (
+        {/* Paper source URL (show if available, but not for pasted text or file uploads which use temp paths) */}
+        {!isPlaceholder && item.paper_source && item.source_type !== 'text' && item.source_type !== 'file' && (
           <div 
             className="text-xs mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
             style={{ color: 'var(--color-text-muted)' }}
@@ -216,12 +216,28 @@ export default function HistoryItem({ item, isSelected }) {
 
         {/* Stats summary - compact layout */}
         <div className="flex items-center gap-1.5 mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          <span>
+          {/* Error icon for failed checks */}
+          {item.status === 'error' && (
+            <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-error)' }}>
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+          )}
+          {/* Warning icon for cancelled checks */}
+          {item.status === 'cancelled' && (
+            <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-warning)' }}>
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1zm4 0a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+            </svg>
+          )}
+          <span style={{ color: item.status === 'error' ? 'var(--color-error)' : (item.status === 'cancelled' ? 'var(--color-warning)' : undefined) }}>
             {isPlaceholder 
               ? 'Start a new check' 
-              : (isInProgress 
-                  ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
-                  : `${totalRefs} refs`)}
+              : (item.status === 'error'
+                  ? 'Check failed'
+                  : (item.status === 'cancelled'
+                      ? 'Cancelled'
+                      : (isInProgress 
+                          ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
+                          : `${totalRefs} refs`)))}
           </span>
           {/* Show error/warning/suggestion counts with compact icons (including during in-progress) */}
           {!isPlaceholder && (

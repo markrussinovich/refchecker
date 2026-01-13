@@ -77,8 +77,23 @@ function getThumbnailInfo(source, sourceType) {
 /**
  * Format a source for display - extract just the URL if title+URL are combined
  */
-function formatSource(source, title) {
+function formatSource(source, title, sourceType, checkId) {
   if (!source) return null
+  
+  // For pasted text, don't show the temp file path - we'll show extraction method as source instead
+  if (sourceType === 'text') {
+    return null
+  }
+  
+  // For file uploads, show the original filename (stored in title) instead of temp path
+  if (sourceType === 'file' && title && checkId) {
+    return { 
+      type: 'file', 
+      value: `http://localhost:8000/api/file/${checkId}`, 
+      display: title,
+      checkId: checkId
+    }
+  }
   
   // If source contains the title at the beginning followed by a URL, extract just the URL
   // This handles cases where paper_source was incorrectly stored as "Title URL"
@@ -89,9 +104,9 @@ function formatSource(source, title) {
     }
   }
   
-  // If it's a URL, show it as a link
+  // If it's a URL, show it as a link (full URL, will word-wrap in display)
   if (source.startsWith('http://') || source.startsWith('https://')) {
-    return { type: 'url', value: source, display: source.length > 60 ? source.substring(0, 60) + '...' : source }
+    return { type: 'url', value: source, display: source }
   }
   // ArXiv IDs - show full URL
   if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(source)) {
@@ -111,14 +126,18 @@ export default function StatusSection() {
     statusMessage: checkStoreMessage,
     progress: checkStoreProgress,
     paperTitle: checkStorePaperTitle, 
-    paperSource: checkStorePaperSource, 
+    paperSource: checkStorePaperSource,
+    sourceType: checkStoreSourceType,
     currentCheckId,
     sessionId,
     stats: checkStoreStats,
     cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore()
-  const { selectedCheck, selectedCheckId, isLoadingDetail, updateHistoryProgress } = useHistoryStore()
+  const { selectedCheck, selectedCheckId, isLoadingDetail, updateHistoryProgress, history } = useHistoryStore()
+
+  // Get the history item for the current check (may have the correct title from addToHistory)
+  const historyItem = history.find(h => h.id === selectedCheckId)
 
   // Determine if we're viewing a check (either the current session's check or any history item)
   const isViewingCheck = selectedCheckId !== null && selectedCheckId !== -1
@@ -149,7 +168,10 @@ export default function StatusSection() {
   if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
     // Current session: use live WebSocket data from checkStore
     displayStatus = checkStoreStatus
-    displayTitle = checkStorePaperTitle
+    // Use checkStore title if available and not "Unknown Paper", else fall back to history item or selectedCheck
+    displayTitle = checkStorePaperTitle && checkStorePaperTitle !== 'Unknown Paper' 
+      ? checkStorePaperTitle 
+      : (historyItem?.paper_title || selectedCheck?.paper_title || checkStorePaperTitle)
     displaySource = checkStorePaperSource
     displayMessage = checkStoreMessage
     displayProgress = checkStoreProgress
@@ -189,8 +211,11 @@ export default function StatusSection() {
     }
   }
 
-  const sourceInfo = formatSource(displaySource, displayTitle)
-  const thumbnailInfo = getThumbnailInfo(displaySource, selectedCheck?.source_type)
+  // Determine the source type - prefer selectedCheck, fall back to checkStore for current session
+  const displaySourceType = selectedCheck?.source_type || (isCurrentSessionCheck ? checkStoreSourceType : null)
+  
+  const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId)
+  const thumbnailInfo = getThumbnailInfo(displaySource, displaySourceType)
   const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
   const isCompleted = displayStatus === 'completed'
   const isCancelled = displayStatus === 'cancelled'
@@ -256,6 +281,9 @@ export default function StatusSection() {
     } else if (thumbnailInfo?.type === 'text' && selectedCheckId) {
       // For pasted text, link to the text content endpoint
       linkUrl = `${API_BASE}/api/text/${selectedCheckId}`
+    } else if (thumbnailInfo?.type === 'file' && selectedCheckId) {
+      // For uploaded files, link to the file endpoint
+      linkUrl = `${API_BASE}/api/file/${selectedCheckId}`
     }
     
     // If we have a thumbnail URL and it hasn't errored, show the actual image
@@ -416,19 +444,39 @@ export default function StatusSection() {
     }
     
     if (thumbnailInfo?.type === 'file') {
-      return (
-        <div style={thumbnailStyle}>
-          <div style={{ textAlign: 'center' }}>
-            <svg style={iconStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
-              <path d="M14 2v6h6"/>
-            </svg>
-            <div style={{ fontSize: '8px', marginTop: '2px', color: 'var(--color-text-muted)' }}>
-              File
-            </div>
+      const fileLinkUrl = selectedCheckId ? `${API_BASE}/api/file/${selectedCheckId}` : null
+      const content = (
+        <div style={{ textAlign: 'center' }}>
+          <svg style={iconStyle} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
+            <path d="M14 2v6h6"/>
+          </svg>
+          <div style={{ fontSize: '8px', marginTop: '2px', color: 'var(--color-text-muted)' }}>
+            File
           </div>
         </div>
       )
+      
+      if (fileLinkUrl) {
+        return (
+          <a 
+            href={fileLinkUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View uploaded file"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              ...thumbnailStyle,
+              textDecoration: 'none',
+              cursor: 'pointer',
+            }}
+            className="hover:border-blue-400"
+          >
+            {content}
+          </a>
+        )
+      }
+      return <div style={thumbnailStyle}>{content}</div>
     }
     
     if (thumbnailInfo?.type === 'url') {
@@ -590,7 +638,11 @@ export default function StatusSection() {
           {displayTitle && (
             <h3 
               className="font-medium"
-              style={{ color: 'var(--color-text-primary)' }}
+              style={{ 
+                color: 'var(--color-text-primary)',
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
+              }}
             >
               {displayTitle}
             </h3>
@@ -598,11 +650,15 @@ export default function StatusSection() {
           {/* Hide source info for pasted text since it shows the file path or text content */}
           {sourceInfo && thumbnailInfo?.type !== 'text' && (
             <p 
-              className="text-sm truncate"
-              style={{ color: 'var(--color-text-muted)' }}
+              className="text-sm"
+              style={{ 
+                color: 'var(--color-text-muted)',
+                wordBreak: 'break-all',
+                overflowWrap: 'anywhere',
+              }}
               title={sourceInfo.value}
             >
-              {sourceInfo.type === 'url' ? (
+              {sourceInfo.type === 'url' || sourceInfo.type === 'file' ? (
                 <a 
                   href={sourceInfo.value} 
                   target="_blank" 
@@ -618,13 +674,27 @@ export default function StatusSection() {
               )}
             </p>
           )}
-          {/* Show extraction source or LLM model */}
+          {/* Show extraction source - clickable for text sources */}
           {displayExtractionMethod && ['bbl', 'bib'].includes(displayExtractionMethod) ? (
             <p 
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Source: ArXiv .{displayExtractionMethod} file
+              Source:{' '}
+              {displaySourceType === 'text' && selectedCheckId ? (
+                <a 
+                  href={`${API_BASE}/api/text/${selectedCheckId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline"
+                  style={{ color: 'var(--color-link)' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Pasted .{displayExtractionMethod} file
+                </a>
+              ) : (
+                `ArXiv .${displayExtractionMethod} file`
+              )}
             </p>
           ) : displayExtractionMethod === 'pdf' ? (
             <p 
@@ -632,6 +702,40 @@ export default function StatusSection() {
               style={{ color: 'var(--color-text-muted)' }}
             >
               Source: PDF extraction
+            </p>
+          ) : displaySourceType === 'text' && selectedCheckId ? (
+            <p 
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Source:{' '}
+              <a 
+                href={`${API_BASE}/api/text/${selectedCheckId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+                style={{ color: 'var(--color-link)' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                Pasted text
+              </a>
+            </p>
+          ) : displaySourceType === 'file' && selectedCheckId ? (
+            <p 
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Source:{' '}
+              <a 
+                href={`${API_BASE}/api/file/${selectedCheckId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+                style={{ color: 'var(--color-link)' }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                Uploaded file
+              </a>
             </p>
           ) : displayLlmModel && (
             <p 
@@ -643,7 +747,11 @@ export default function StatusSection() {
           )}
           <p 
             className="text-sm"
-            style={{ color: 'var(--color-text-muted)' }}
+            style={{ 
+              color: 'var(--color-text-muted)',
+              wordBreak: 'break-word',
+              overflowWrap: 'anywhere',
+            }}
           >
             {displayMessage}
           </p>

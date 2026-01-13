@@ -185,9 +185,12 @@ async def start_check(
         paper_source = source_value
         paper_title = "Processing..."  # Placeholder title until we parse the paper
         if source_type == "file" and file:
-            # Save uploaded file to temp directory
-            temp_dir = tempfile.gettempdir()
-            file_path = Path(temp_dir) / f"refchecker_{session_id}_{file.filename}"
+            # Save uploaded file to permanent uploads directory
+            uploads_dir = Path(__file__).parent / "uploads"
+            uploads_dir.mkdir(parents=True, exist_ok=True)
+            # Use check-specific naming to avoid conflicts
+            safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+            file_path = uploads_dir / f"{session_id}_{safe_filename}"
             with open(file_path, "wb") as f:
                 content = await file.read()
                 f.write(content)
@@ -329,10 +332,16 @@ async def run_check(
         # Run the check
         result = await checker.check_paper(paper_source, source_type)
 
+        # For file uploads, don't overwrite the original filename with "Unknown Paper"
+        # The correct title was already set in the database when the check was created
+        result_title = result["paper_title"]
+        if source_type == "file" and result_title == "Unknown Paper":
+            result_title = None  # Don't update title
+        
         # Update the existing check entry with results
         await db.update_check_results(
             check_id=check_id,
-            paper_title=result["paper_title"],
+            paper_title=result_title,
             total_refs=result["summary"]["total_refs"],
             errors_count=result["summary"]["errors_count"],
             warnings_count=result["summary"]["warnings_count"],
@@ -346,25 +355,34 @@ async def run_check(
             extraction_method=result.get("extraction_method")
         )
 
-        # Cleanup temp file if it was uploaded
-        if source_type == "file" and paper_source.startswith(tempfile.gettempdir()):
+        # Generate thumbnail for file uploads
+        if source_type == "file":
             try:
-                os.unlink(paper_source)
-            except:
-                pass
+                # Generate and cache thumbnail
+                if paper_source.lower().endswith('.pdf'):
+                    thumbnail_path = await generate_pdf_thumbnail_async(paper_source)
+                else:
+                    thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
+                if thumbnail_path:
+                    await db.update_check_thumbnail(check_id, thumbnail_path)
+                    logger.info(f"Generated thumbnail for check {check_id}: {thumbnail_path}")
+            except Exception as thumb_error:
+                logger.warning(f"Failed to generate thumbnail for check {check_id}: {thumb_error}")
+            
+            # Note: We keep uploaded files for later access via /api/file/{check_id}
 
     except asyncio.CancelledError:
         logger.info(f"Check cancelled: {session_id}")
         await db.update_check_status(check_id, 'cancelled')
-        await manager.send_message(session_id, "cancelled", {"message": "Check cancelled"})
+        await manager.send_message(session_id, "cancelled", {"message": "Check cancelled", "check_id": check_id})
     except Exception as e:
         logger.error(f"Error in run_check: {e}", exc_info=True)
         await db.update_check_status(check_id, 'error')
-        await manager.broadcast_error(
-            session_id,
-            f"Check failed: {str(e)}",
-            type(e).__name__
-        )
+        await manager.send_message(session_id, "error", {
+            "message": f"Check failed: {str(e)}",
+            "details": type(e).__name__,
+            "check_id": check_id
+        })
     finally:
         active_checks.pop(session_id, None)
 
@@ -455,6 +473,13 @@ async def get_thumbnail(check_id: int):
             else:
                 # PDF file no longer exists, use placeholder
                 thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+        elif source_type == 'file':
+            # For non-PDF file uploads, generate thumbnail with file content
+            logger.info(f"Generating text content thumbnail for uploaded file check {check_id}")
+            if os.path.exists(paper_source):
+                thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
+            else:
+                thumbnail_path = await get_text_thumbnail_async(check_id, "Uploaded file")
         elif source_type == 'text':
             # Generate thumbnail with actual text content for pasted text
             logger.info(f"Generating text content thumbnail for check {check_id}")
@@ -524,6 +549,53 @@ async def get_pasted_text(check_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting pasted text: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/file/{check_id}")
+async def get_uploaded_file(check_id: int):
+    """
+    Get the uploaded file content for a check.
+    
+    Returns the file for viewing/download.
+    """
+    try:
+        check = await db.get_check_by_id(check_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        
+        source_type = check.get('source_type', '')
+        paper_source = check.get('paper_source', '')
+        paper_title = check.get('paper_title', 'uploaded_file')
+        
+        if source_type != 'file':
+            raise HTTPException(status_code=400, detail="This check is not from an uploaded file")
+        
+        if os.path.exists(paper_source):
+            # Determine media type based on file extension
+            media_type = "application/octet-stream"
+            if paper_source.lower().endswith('.pdf'):
+                media_type = "application/pdf"
+            elif paper_source.lower().endswith('.txt'):
+                media_type = "text/plain; charset=utf-8"
+            elif paper_source.lower().endswith('.bib'):
+                media_type = "text/plain; charset=utf-8"
+            elif paper_source.lower().endswith('.tex'):
+                media_type = "text/plain; charset=utf-8"
+            
+            return FileResponse(
+                paper_source,
+                media_type=media_type,
+                filename=paper_title,
+                headers={"Cache-Control": "public, max-age=3600"}
+            )
+        else:
+            raise HTTPException(status_code=404, detail="File no longer exists")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting uploaded file: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

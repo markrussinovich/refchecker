@@ -265,7 +265,7 @@ class Database:
 
     async def update_check_results(self,
                                     check_id: int,
-                                    paper_title: str,
+                                    paper_title: Optional[str],
                                     total_refs: int,
                                     errors_count: int,
                                     warnings_count: int,
@@ -277,30 +277,54 @@ class Database:
                                     results: List[Dict[str, Any]],
                                     status: str = 'completed',
                                     extraction_method: Optional[str] = None) -> bool:
-        """Update a check with its results"""
+        """Update a check with its results. If paper_title is None, don't update it."""
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE check_history
-                SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
-                    suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
-                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
-                    extraction_method = ?
-                WHERE id = ?
-            """, (
-                paper_title,
-                total_refs,
-                errors_count,
-                warnings_count,
-                suggestions_count,
-                unverified_count,
-                refs_with_errors,
-                refs_with_warnings_only,
-                refs_verified,
-                json.dumps(results),
-                status,
-                extraction_method,
-                check_id
-            ))
+            if paper_title is not None:
+                await db.execute("""
+                    UPDATE check_history
+                    SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
+                        suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
+                        refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
+                        extraction_method = ?
+                    WHERE id = ?
+                """, (
+                    paper_title,
+                    total_refs,
+                    errors_count,
+                    warnings_count,
+                    suggestions_count,
+                    unverified_count,
+                    refs_with_errors,
+                    refs_with_warnings_only,
+                    refs_verified,
+                    json.dumps(results),
+                    status,
+                    extraction_method,
+                    check_id
+                ))
+            else:
+                # Don't update paper_title if None
+                await db.execute("""
+                    UPDATE check_history
+                    SET total_refs = ?, errors_count = ?, warnings_count = ?,
+                        suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
+                        refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
+                        extraction_method = ?
+                    WHERE id = ?
+                """, (
+                    total_refs,
+                    errors_count,
+                    warnings_count,
+                    suggestions_count,
+                    unverified_count,
+                    refs_with_errors,
+                    refs_with_warnings_only,
+                    refs_verified,
+                    json.dumps(results),
+                    status,
+                    extraction_method,
+                    check_id
+                ))
             await db.commit()
             return True
 

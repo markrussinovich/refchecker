@@ -385,27 +385,43 @@ class ProgressRefChecker:
                 })
 
                 # Handle uploaded file - run PDF processing in thread
+                # Note: paper_title is already set to the original filename in main.py
+                # so we don't update it here
                 if paper_source.lower().endswith('.pdf'):
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
-                    paper_title = Path(paper_source).stem
-                    await update_title_if_needed(paper_title)
                 elif paper_source.lower().endswith(('.tex', '.txt')):
                     def read_file():
                         with open(paper_source, 'r', encoding='utf-8') as f:
                             return f.read()
                     paper_text = await asyncio.to_thread(read_file)
-                    paper_title = Path(paper_source).stem
-                    await update_title_if_needed(paper_title)
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
             elif source_type == "text":
                 await self.emit_progress("extracting", {
                     "message": "Preparing pasted text..."
                 })
-                paper_text = paper_source
+                # paper_source is now a file path - read the actual text content
+                if os.path.exists(paper_source):
+                    def read_text_file():
+                        with open(paper_source, 'r', encoding='utf-8') as f:
+                            return f.read()
+                    paper_text = await asyncio.to_thread(read_text_file)
+                else:
+                    # Fallback: paper_source is the actual text (legacy behavior)
+                    paper_text = paper_source
                 paper_title = "Pasted Text"
                 extraction_method = 'text'
+                
+                # Check if the pasted text is LaTeX thebibliography format (.bbl)
+                if '\\begin{thebibliography}' in paper_text and '\\bibitem' in paper_text:
+                    logger.info("Detected LaTeX thebibliography format in pasted text")
+                    # Use the BibTeX extraction method instead
+                    refs_result = await self._extract_references_from_bibtex(paper_text)
+                    if refs_result and refs_result[0]:
+                        arxiv_source_references = refs_result[0]
+                        extraction_method = 'bbl'  # Mark as bbl extraction
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from pasted .bbl content")
                 # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")

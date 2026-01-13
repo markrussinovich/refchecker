@@ -89,6 +89,12 @@ export default function InputSection() {
       const displaySource = inputMode === 'url' 
         ? inputValue.trim() 
         : (inputMode === 'file' ? fileUpload.file?.name : 'Pasted text')
+      
+      // Map inputMode to sourceType
+      const sourceType = inputMode === 'url' ? 'url' : (inputMode === 'file' ? 'file' : 'text')
+      
+      // For file uploads, the filename becomes the paper title
+      const displayTitle = inputMode === 'file' ? fileUpload.file?.name : null
 
       // Start the check
       logger.info('API', 'Sending POST /api/check')
@@ -97,16 +103,17 @@ export default function InputSection() {
       
       logger.info('API', 'Check started successfully', { session_id, check_id, message })
 
-      // Initialize check state with the check_id and source
-      startCheck(session_id, check_id, displaySource)
+      // Initialize check state with the check_id, source, sourceType, and title
+      startCheck(session_id, check_id, displaySource, sourceType, displayTitle)
 
       // IMPORTANT: Add to history IMMEDIATELY so WebSocket updates have a target
       // This prevents race conditions where messages arrive before fetchHistory completes
       const { addToHistory } = useHistoryStore.getState()
       addToHistory({
         id: check_id,
-        paper_title: displaySource,
+        paper_title: displayTitle || displaySource,
         paper_source: displaySource,
+        source_type: sourceType,
         custom_label: null,
         timestamp: new Date().toISOString(),
         total_refs: 0,
@@ -199,6 +206,18 @@ export default function InputSection() {
                 ? '#ffffff' 
                 : 'var(--color-text-secondary)',
               cursor: isChecking ? 'not-allowed' : 'pointer',
+            }}
+            onMouseEnter={(e) => {
+              if (!isChecking && inputMode !== mode.id) {
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
+                e.currentTarget.style.color = 'var(--color-text-primary)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (inputMode !== mode.id) {
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+                e.currentTarget.style.color = 'var(--color-text-secondary)'
+              }
             }}
           >
             {mode.label}

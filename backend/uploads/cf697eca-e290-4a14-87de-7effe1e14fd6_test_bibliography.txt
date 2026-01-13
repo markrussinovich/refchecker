@@ -1,0 +1,18 @@
+\begin{thebibliography}{3}
+
+\bibitem{ref1}
+John Smith and Jane Doe.
+\newblock A Test Paper Title.
+\newblock In \emph{Proceedings of Test Conference}, pages 1--10, 2024.
+
+\bibitem{ref2}
+Alice Johnson.
+\newblock Another Research Paper.
+\newblock \emph{Journal of Testing}, 10(2):100--120, 2023.
+
+\bibitem{ref3}
+Bob Williams and Carol Brown.
+\newblock Third Sample Reference.
+\newblock arXiv preprint arXiv:2401.12345, 2024.
+
+\end{thebibliography}

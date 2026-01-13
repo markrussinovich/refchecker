@@ -14,6 +14,7 @@ export const useCheckStore = create((set, get) => ({
   activeSessions: [], // List of all active session IDs (for WebSocket connections)
   paperTitle: null,
   paperSource: null, // URL or filename being checked
+  sourceType: null, // 'url', 'file', or 'text'
   statusMessage: '',
   progress: 0,
   references: [],
@@ -36,8 +37,8 @@ export const useCheckStore = create((set, get) => ({
   statusFilter: [], // empty = show all, or array of ['verified', 'error', 'warning', 'unverified']
 
   // Actions
-  startCheck: (sessionId, checkId = null, paperSource = null) => {
-    logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}`)
+  startCheck: (sessionId, checkId = null, paperSource = null, sourceType = null, paperTitle = null) => {
+    logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}, sourceType ${sourceType}, paperTitle ${paperTitle}`)
     // Record session→check mapping before overwriting state
     const prevMap = get().sessionToCheckMap
     const newMap = checkId ? { ...prevMap, [sessionId]: checkId } : prevMap
@@ -51,8 +52,9 @@ export const useCheckStore = create((set, get) => ({
       currentCheckId: checkId,
       sessionToCheckMap: newMap,
       activeSessions,
-      paperTitle: null,
+      paperTitle: paperTitle,
       paperSource,
+      sourceType,
       statusMessage: 'Starting check...',
       progress: 0,
       references: [],
@@ -266,10 +268,18 @@ export const useCheckStore = create((set, get) => ({
 
   setError: (error) => {
     logger.error('CheckStore', 'Check error', error)
+    // Clean up error message - remove URLs and simplify
+    let cleanError = error
+    if (typeof error === 'string') {
+      // Remove URLs from error message
+      cleanError = error.replace(/\s*\(https?:\/\/[^\s)]+\)/g, '')
+      // Remove "Check failed: " prefix if it's already included
+      cleanError = cleanError.replace(/^Check failed:\s*/i, '')
+    }
     set({
       status: 'error',
-      statusMessage: `Error: ${error}`,
-      error,
+      statusMessage: `Error: ${cleanError}`,
+      error: cleanError,
     })
   },
 
@@ -401,6 +411,18 @@ export const useCheckStore = create((set, get) => ({
             extraction_method: data.extraction_method,
           })
           break
+        case 'error':
+          logger.error('CheckStore', `Check ${checkIdForMessage} failed (concurrent session ${messageSessionId?.slice(0,8)})`, data)
+          historyStore.updateHistoryProgress(checkIdForMessage, {
+            status: 'error',
+          })
+          break
+        case 'cancelled':
+          logger.info('CheckStore', `Check ${checkIdForMessage} cancelled (concurrent session ${messageSessionId?.slice(0,8)})`)
+          historyStore.updateHistoryProgress(checkIdForMessage, {
+            status: 'cancelled',
+          })
+          break
         default:
           // Other message types for concurrent sessions - ignore
           break
@@ -425,9 +447,14 @@ export const useCheckStore = create((set, get) => ({
         
       case 'extracting':
         store.setStatusMessage(data.message || 'Extracting references...')
-        if (data.paper_title) {
-          store.setPaperTitle(data.paper_title)
-          useHistoryStore.getState().updateHistoryItemTitle(store.currentCheckId, data.paper_title)
+        // Only update paper_title from backend if it's a meaningful title
+        // Never overwrite with "Unknown Paper" - this preserves the original filename for file uploads
+        if (data.paper_title && data.paper_title !== 'Unknown Paper') {
+          // Also check if current title is not already set to avoid overwriting good titles
+          if (!store.paperTitle || store.paperTitle === 'Unknown Paper') {
+            store.setPaperTitle(data.paper_title)
+            useHistoryStore.getState().updateHistoryItemTitle(store.currentCheckId, data.paper_title)
+          }
         }
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, { status: 'in_progress' })
         break
@@ -520,8 +547,17 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'error':
-        logger.error('CheckStore', 'Server error', data)
+        logger.error('CheckStore', 'Server error', { data, checkIdForMessage, currentCheckId: store.currentCheckId, sessionId: store.sessionId, messageSessionId })
         store.setError(data.message || data.details || 'Unknown error')
+        // Update history to show error status
+        if (checkIdForMessage) {
+          logger.info('CheckStore', `Updating history item ${checkIdForMessage} to error status`)
+          useHistoryStore.getState().updateHistoryProgress(checkIdForMessage, {
+            status: 'error',
+          })
+        } else {
+          logger.warn('CheckStore', 'No checkIdForMessage available to update history')
+        }
         break
         
       default:

@@ -5,6 +5,7 @@
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f7f7f8;
   --color-bg-tertiary: #ececf1;
+  --color-bg-hover: #e0e0e5;
   --color-text-primary: #0d0d0d;
   --color-text-secondary: #676767;
   --color-text-muted: #8e8ea0;
@@ -32,6 +33,7 @@
   --color-bg-primary: #212121;
   --color-bg-secondary: #2f2f2f;
   --color-bg-tertiary: #424242;
+  --color-bg-hover: #525252;
   --color-text-primary: #ececec;
   --color-text-secondary: #b4b4b4;
   --color-text-muted: #8e8e8e;
