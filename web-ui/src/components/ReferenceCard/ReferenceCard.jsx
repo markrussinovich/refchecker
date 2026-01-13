@@ -332,7 +332,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
               className="font-bold flex-1"
               style={{ color: 'var(--color-text-primary)' }}
             >
-              {reference.title || 'Unknown Title'}
+              {reference.title || reference.cited_url || 'Unknown Title'}
             </div>
             
             {/* Export button */}

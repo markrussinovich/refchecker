@@ -292,7 +292,7 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
         unverified: '❓',
       }[status] || '❓'
       
-      lines.push(`### ${index + 1}. ${ref.title || 'Unknown Title'} ${statusEmoji}`)
+      lines.push(`### ${index + 1}. ${ref.title || ref.cited_url || 'Unknown Title'} ${statusEmoji}`)
       lines.push('')
       
       // Authors
@@ -477,7 +477,7 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
     references.forEach((ref, index) => {
       const status = (ref.status || 'unknown').toUpperCase()
       lines.push('')
-      lines.push(`[${index + 1}] ${ref.title || 'Unknown Title'} [${status}]`)
+      lines.push(`[${index + 1}] ${ref.title || ref.cited_url || 'Unknown Title'} [${status}]`)
       if (ref.authors?.length > 0) {
         lines.push(`    Authors: ${formatAuthors(ref.authors)}`)
       }

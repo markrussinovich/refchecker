@@ -259,11 +259,11 @@ class ProgressRefChecker:
 
         result = {
             "index": index,
-            "title": reference.get('title', 'Unknown Title'),
+            "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
             "authors": reference.get('authors', []),
             "year": reference.get('year'),
             "venue": reference.get('venue'),
-            "cited_url": reference.get('url'),
+            "cited_url": reference.get('cited_url') or reference.get('url'),
             "status": status,
             "errors": formatted_errors,
             "warnings": formatted_warnings,
@@ -283,11 +283,11 @@ class ProgressRefChecker:
         """Format an error result when verification fails."""
         return {
             "index": index,
-            "title": reference.get('title', 'Unknown'),
+            "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown',
             "authors": reference.get('authors', []),
             "year": reference.get('year'),
             "venue": reference.get('venue'),
-            "cited_url": reference.get('url'),
+            "cited_url": reference.get('cited_url') or reference.get('url'),
             "status": "error",
             "errors": [{
                 "error_type": "check_failed",
@@ -487,10 +487,11 @@ class ProgressRefChecker:
                 "references": [
                     {
                         "index": idx,
-                        "title": ref.get("title", "Unknown Title"),
+                        "title": ref.get("title") or ref.get("cited_url") or ref.get("url") or "Unknown Title",
                         "authors": ref.get("authors", []),
                         "year": ref.get("year"),
-                        "venue": ref.get("venue")
+                        "venue": ref.get("venue"),
+                        "cited_url": ref.get("cited_url") or ref.get("url")
                     }
                     for idx, ref in enumerate(references, 1)
                 ]
@@ -861,7 +862,7 @@ class ProgressRefChecker:
             # Emit that this reference is now being checked
             await self.emit_progress("checking_reference", {
                 "index": idx + 1,
-                "title": reference.get("title", "Unknown Title"),
+                "title": reference.get("title") or reference.get("cited_url") or reference.get("url") or "Unknown Title",
                 "total": total_refs
             })
             
@@ -879,11 +880,11 @@ class ProgressRefChecker:
             except asyncio.TimeoutError:
                 result = {
                     "index": idx + 1,
-                    "title": reference.get('title', 'Unknown'),
+                    "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown',
                     "authors": reference.get('authors', []),
                     "year": reference.get('year'),
                     "venue": reference.get('venue'),
-                    "cited_url": reference.get('url'),
+                    "cited_url": reference.get('cited_url') or reference.get('url'),
                     "status": "error",
                     "errors": [{
                         "error_type": "timeout",

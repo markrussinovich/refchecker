@@ -256,12 +256,28 @@ class EnhancedHybridReferenceChecker:
         Returns:
             Tuple of (verified_data, errors, url)
         """
+        # Check if this is a URL-only reference (should skip verification)
+        authors = reference.get('authors', [])
+        if authors and "URL Reference" in authors:
+            # Skip verification for URL references - they're just links, not papers
+            logger.debug("Enhanced Hybrid: Skipping verification for URL reference")
+            return None, [], reference.get('cited_url') or reference.get('url')
+        
+        # Also check if it looks like a URL-only reference (no title, just URL)
+        title = reference.get('title', '').strip()
+        cited_url = reference.get('cited_url') or reference.get('url')
+        if not title and cited_url:
+            # This is a URL-only reference without a title
+            logger.debug(f"Enhanced Hybrid: Skipping verification for URL-only reference: {cited_url}")
+            return None, [], cited_url
+        
         # Track all APIs that failed and could be retried
         failed_apis = []
         
         # PHASE 1: Try all APIs once in priority order
         
         # Strategy 1: Always try local database first (fastest)
+        if self.local_db:
         if self.local_db:
             verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
             if success:
