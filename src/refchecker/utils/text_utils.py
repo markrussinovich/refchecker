@@ -676,22 +676,6 @@ def clean_title(title):
     return title
 
 
-def extract_arxiv_id_from_url(url):
-    """
-    Extract ArXiv ID from URL or text containing ArXiv reference.
-    
-    This function is deprecated. Use utils.url_utils.extract_arxiv_id_from_url instead.
-    Kept for backwards compatibility.
-    
-    Args:
-        url: URL string or text containing arXiv reference
-        
-    Returns:
-        ArXiv ID or None if not found
-    """
-    from refchecker.utils.url_utils import extract_arxiv_id_from_url as common_extract
-    return common_extract(url)
-
 def extract_year_from_text(text):
     """
     Extract a 4-digit year from text
@@ -2343,6 +2327,17 @@ def detect_latex_bibliography_format(text):
             'details': details
         }
     
+    # Check for standalone \bibitem entries (common in .bbl files without full environment wrapper)
+    # This handles cases where the \begin{thebibliography} wrapper is missing
+    bibitem_matches = re.findall(r'\\bibitem(?:\[[^\]]*\])?\{[^}]+\}', text)
+    if bibitem_matches:
+        details['bibitem_count'] = len(bibitem_matches)
+        return {
+            'is_latex': True,
+            'format_type': 'thebibliography',
+            'details': details
+        }
+    
     # Check for \bibliography{} command
     bibcommand_pattern = r'\\bibliography\{([^}]+)\}'
     bibcommand_match = re.search(bibcommand_pattern, text, re.IGNORECASE)
@@ -3125,7 +3120,8 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
         # Parse \bibitem entries (improved for .bbl files with ACM-Reference-Format)
         # Handle both simple \bibitem{key} and complex \bibitem[label]{key} formats
         # Also handle line continuation with % and various spacing patterns
-        bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\s*%?\s*\n?\s*\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\})'
+        # Updated to also match end-of-string ($) for standalone bibitem entries
+        bibitem_pattern = r'\\bibitem(?:\[([^\]]*)\])?\s*%?\s*\n?\s*\{([^}]+)\}\s*(.*?)(?=\\bibitem|\\end\{thebibliography\}|$)'
         
         matches = re.finditer(bibitem_pattern, text, re.DOTALL | re.IGNORECASE)
         
@@ -3311,7 +3307,80 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     # Second part is usually title  
                     if len(parts) >= 2:
                         title_part = parts[1].strip()
-                        title_clean = strip_latex_commands(title_part).strip()
+                        
+                        # Handle \href{URL}{text} or \href {URL} {text} format
+                        # Extract URL before stripping LaTeX commands
+                        # We need to use balanced brace matching because titles can contain
+                        # nested braces like {LLM} for capitalization protection
+                        href_url = None
+                        title_text = None
+                        
+                        href_start = title_part.find('\\href')
+                        if href_start != -1:
+                            # Find first opening brace (URL)
+                            pos = href_start + 5  # Skip \href
+                            while pos < len(title_part) and title_part[pos] in ' \t\n':
+                                pos += 1
+                            
+                            if pos < len(title_part) and title_part[pos] == '{':
+                                # Extract URL using balanced braces
+                                brace_count = 0
+                                url_start = pos + 1
+                                url_end = pos
+                                for i in range(pos, len(title_part)):
+                                    if title_part[i] == '{':
+                                        brace_count += 1
+                                    elif title_part[i] == '}':
+                                        brace_count -= 1
+                                        if brace_count == 0:
+                                            url_end = i
+                                            break
+                                
+                                if url_end > url_start:
+                                    href_url = title_part[url_start:url_end].strip()
+                                    
+                                    # Now find the second brace group (title text)
+                                    pos = url_end + 1
+                                    while pos < len(title_part) and title_part[pos] in ' \t\n':
+                                        pos += 1
+                                    
+                                    if pos < len(title_part) and title_part[pos] == '{':
+                                        # Extract title text using balanced braces
+                                        brace_count = 0
+                                        text_start = pos + 1
+                                        text_end = pos
+                                        for i in range(pos, len(title_part)):
+                                            if title_part[i] == '{':
+                                                brace_count += 1
+                                            elif title_part[i] == '}':
+                                                brace_count -= 1
+                                                if brace_count == 0:
+                                                    text_end = i
+                                                    break
+                                        
+                                        if text_end > text_start:
+                                            title_text = title_part[text_start:text_end].strip()
+                        
+                        if href_url and title_text:
+                            
+                            # Extract DOI if it's a doi.org URL
+                            if 'doi.org/' in href_url and not ref.get('doi'):
+                                doi_match = re.search(r'doi\.org/(.+)$', href_url)
+                                if doi_match:
+                                    ref['doi'] = doi_match.group(1)
+                                    ref['url'] = href_url
+                            # Extract arXiv ID if it's an arxiv URL  
+                            elif 'arxiv.org/' in href_url.lower() and not ref.get('url'):
+                                ref['url'] = href_url
+                            # Generic URL
+                            elif not ref.get('url'):
+                                ref['url'] = href_url
+                            
+                            # Use the title text (second part of href), not the URL
+                            title_clean = strip_latex_commands(title_text).strip()
+                        else:
+                            title_clean = strip_latex_commands(title_part).strip()
+                        
                         # Remove trailing dots and clean up
                         title_clean = title_clean.rstrip('.')
                         if title_clean and len(title_clean) > 5:  # Reasonable title length
@@ -3402,11 +3471,24 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     from refchecker.utils.url_utils import clean_url_punctuation
                     ref['url'] = clean_url_punctuation(url_match.group(1))
             
-            # Extract DOI from \href{https://doi.org/...}
+            # Extract DOI from \href{https://doi.org/...} or \href {URL} {text} with spaces
             if not ref.get('doi'):
-                doi_match = re.search(r'\\href\{https?://doi\.org/([^}]+)\}', content)
+                # Handle both \href{URL}{text} and \href {URL} {text} formats
+                doi_match = re.search(r'\\href\s*\{(https?://doi\.org/[^}]+)\}', content)
                 if doi_match:
-                    ref['doi'] = doi_match.group(1)
+                    doi_url = doi_match.group(1)
+                    # Extract DOI from the URL
+                    doi_id_match = re.search(r'doi\.org/(.+)$', doi_url)
+                    if doi_id_match:
+                        ref['doi'] = doi_id_match.group(1)
+                        if not ref.get('url'):
+                            ref['url'] = doi_url
+            
+            # Extract URL from \href{URL}{text} if not already set (for non-DOI URLs like arXiv)
+            if not ref.get('url'):
+                href_url_match = re.search(r'\\href\s*\{([^}]+)\}\s*\{[^}]*\}', content)
+                if href_url_match:
+                    ref['url'] = href_url_match.group(1).strip()
             
             # Extract arXiv ID from \showeprint[arxiv]{...} (ACM format) or from content (natbib format)
             arxiv_match = re.search(r'\\showeprint\[arxiv\]\{([^}]+)\}', content)
@@ -4035,6 +4117,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     Returns:
         True if venues are substantially different, False if they match/overlap
     """
+    # Import here to avoid circular dependency
+    from refchecker.utils.url_utils import extract_arxiv_id_from_url
+    
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
     
