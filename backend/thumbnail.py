@@ -19,7 +19,7 @@ THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / "refchecker_thumbnails"
 
 # Thumbnail settings
 THUMBNAIL_WIDTH = 200  # Target width in pixels
-THUMBNAIL_DPI = 72  # DPI for rendering
+THUMBNAIL_DPI = 150  # Higher DPI for sharper text rendering
 
 
 def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
@@ -93,11 +93,31 @@ def generate_pdf_thumbnail(pdf_path: str, output_path: Optional[str] = None) -> 
         # Create transformation matrix
         mat = fitz.Matrix(zoom, zoom)
         
-        # Render page to pixmap
+        # Render page to pixmap with higher quality
         pix = page.get_pixmap(matrix=mat, alpha=False)
         
-        # Save as PNG
-        pix.save(output_path)
+        # Enhance contrast to make text darker/more readable
+        try:
+            from PIL import Image, ImageEnhance
+            import io
+            
+            # Convert pixmap to PIL Image
+            img_data = pix.tobytes("png")
+            img = Image.open(io.BytesIO(img_data))
+            
+            # Increase contrast (1.3 = 30% more contrast)
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.3)
+            
+            # Slightly increase sharpness
+            enhancer = ImageEnhance.Sharpness(img)
+            img = enhancer.enhance(1.2)
+            
+            # Save enhanced image
+            img.save(output_path, "PNG")
+        except ImportError:
+            # Fallback: save without enhancement if PIL not available
+            pix.save(output_path)
         
         doc.close()
         

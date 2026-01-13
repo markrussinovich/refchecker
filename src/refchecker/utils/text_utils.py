@@ -3321,9 +3321,13 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     if len(parts) >= 3:
                         venue_part = parts[2].strip()
                         venue_clean = strip_latex_commands(venue_part).strip()
-                        # Remove year and clean up
+                        # Remove "In " prefix if present (common in bbl format)
+                        venue_clean = re.sub(r'^In\s+', '', venue_clean)
+                        # Remove trailing year only (at end of string), not year in the middle of venue name
+                        # e.g., "2020 Conference on..." should keep the conference name
                         if ref['year']:
-                            venue_clean = re.sub(rf'\b{ref["year"]}\b.*', '', venue_clean)
+                            # Only remove year if it appears at the very end (possibly with punctuation)
+                            venue_clean = re.sub(rf',?\s*{ref["year"]}\s*\.?\s*$', '', venue_clean)
                         venue_clean = venue_clean.rstrip(',. ')
                         # Filter out common non-venue patterns that shouldn't be treated as venues
                         non_venue_patterns = ['URL', 'url', 'http:', 'https:', 'DOI', 'doi:', 'ArXiv', 'arxiv:']
@@ -4098,6 +4102,19 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             return text
         
         venue_lower = expand_abbreviations(venue_lower)
+        
+        # Strip page numbers (e.g., "pages 38--55", "pp. 123-456", "page 42")
+        venue_lower = re.sub(r',?\s*pages?\s*\d+\s*[-–—]+\s*\d+', '', venue_lower)
+        venue_lower = re.sub(r',?\s*pp\.?\s*\d+\s*[-–—]+\s*\d+', '', venue_lower)
+        venue_lower = re.sub(r',?\s*pages?\s*\d+', '', venue_lower)
+        venue_lower = re.sub(r',?\s*pp\.?\s*\d+', '', venue_lower)
+        
+        # Strip publisher names that are commonly appended
+        publishers = ['springer', 'elsevier', 'wiley', 'acm', 'ieee', 'mit press', 
+                      'cambridge university press', 'oxford university press', 
+                      'morgan kaufmann', 'addison-wesley', 'prentice hall']
+        for publisher in publishers:
+            venue_lower = re.sub(rf',?\s*{re.escape(publisher)}\s*$', '', venue_lower, flags=re.IGNORECASE)
         
         # Remove punctuation and normalize spacing for comparison
         venue_lower = re.sub(r'[.,;:]', '', venue_lower)  # Remove punctuation

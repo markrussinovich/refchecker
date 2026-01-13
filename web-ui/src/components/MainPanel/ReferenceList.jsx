@@ -159,7 +159,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
 
   return (
     <div 
-      className="rounded-lg border overflow-hidden"
+      className="rounded-lg border overflow-hidden relative"
       style={{
         backgroundColor: 'var(--color-bg-secondary)',
         borderColor: 'var(--color-border)',
@@ -188,7 +188,10 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
         )}
       </div>
 
-      <div className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+      <div 
+        className="divide-y"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         {filteredReferences.map((ref, displayIndex) => (
             <ReferenceCard 
               key={`ref-${ref.index ?? displayIndex}-${displayIndex}`} 

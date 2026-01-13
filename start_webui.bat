@@ -17,7 +17,7 @@ if "%ANTHROPIC_API_KEY%"=="" (
 
 echo Starting Backend Server...
 echo.
-start "RefChecker Backend" cmd /k "cd backend && ..\.venv\Scripts\python.exe main.py"
+start "RefChecker Backend" cmd /k ".venv\Scripts\python.exe -m uvicorn backend.main:app --host 0.0.0.0 --port 8000"
 
 echo Waiting for backend to start...
 timeout /t 5 /nobreak > nul

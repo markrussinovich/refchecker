@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import InputSection from './InputSection'
 import StatusSection from './StatusSection'
 import StatsSection from './StatsSection'
@@ -161,7 +161,7 @@ export default function MainPanel() {
 
   return (
     <main 
-      className="flex-1"
+      className="flex-1 relative"
       style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
       <div className="max-w-4xl mx-auto p-6 space-y-6">

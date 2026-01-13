@@ -51,6 +51,19 @@ def _make_cli_checker(llm_provider):
     cli_checker.fatal_error = False
     return cli_checker
 
+
+def _normalize_reference_fields(ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize reference field names for consistency.
+    
+    The parser uses 'journal' but the rest of the pipeline expects 'venue'.
+    This function normalizes field names for consistent handling.
+    """
+    # Map 'journal' to 'venue' if venue is not set
+    if ref.get('journal') and not ref.get('venue'):
+        ref['venue'] = ref['journal']
+    return ref
+
+
 # Default max concurrent reference checks (similar to CLI default)
 # This value is now managed by the global concurrency limiter
 DEFAULT_MAX_CONCURRENT_CHECKS = 6
@@ -69,7 +82,8 @@ class ProgressRefChecker:
                  progress_callback: Optional[Callable] = None,
                  cancel_event: Optional[asyncio.Event] = None,
                  check_id: Optional[int] = None,
-                 title_update_callback: Optional[Callable] = None):
+                 title_update_callback: Optional[Callable] = None,
+                 bibliography_source_callback: Optional[Callable] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -81,6 +95,7 @@ class ProgressRefChecker:
             progress_callback: Async callback for progress updates
             check_id: Database ID for this check (for updating title)
             title_update_callback: Async callback to update title in DB
+            bibliography_source_callback: Async callback to save bibliography source content
         """
         self.llm_provider = llm_provider
         self.llm_model = llm_model
@@ -90,6 +105,7 @@ class ProgressRefChecker:
         self.cancel_event = cancel_event
         self.check_id = check_id
         self.title_update_callback = title_update_callback
+        self.bibliography_source_callback = bibliography_source_callback
 
         # Initialize LLM if requested
         self.llm = None
@@ -357,6 +373,9 @@ class ProgressRefChecker:
                 
                 if bibtex_content:
                     logger.info(f"Found BibTeX/BBL content from ArXiv source for {arxiv_id}")
+                    # Save the bibliography content for later viewing
+                    if self.bibliography_source_callback and self.check_id:
+                        await self.bibliography_source_callback(self.check_id, bibtex_content, arxiv_id)
                     # Extract references from the BibTeX content (returns tuple)
                     result = await self._extract_references_from_bibtex(bibtex_content)
                     arxiv_source_references, extraction_method = result
@@ -694,6 +713,8 @@ class ProgressRefChecker:
                 return []
             if refs:
                 logger.info(f"Extracted {len(refs)} references via CLI parser")
+                # Normalize field names (journal -> venue)
+                refs = [_normalize_reference_fields(ref) for ref in refs]
                 return refs
 
             logger.warning("No references could be extracted")
@@ -741,11 +762,15 @@ class ProgressRefChecker:
                                 llm_validation = await asyncio.to_thread(validate_parsed_references, processed_refs)
                                 if llm_validation['quality_score'] > validation['quality_score']:
                                     logger.info(f"LLM extraction improved quality ({llm_validation['quality_score']:.2f})")
+                                    # Normalize field names (journal -> venue)
+                                    processed_refs = [_normalize_reference_fields(ref) for ref in processed_refs]
                                     return (processed_refs, 'llm')
                         except Exception as e:
                             logger.warning(f"LLM fallback failed: {e}")
                     
                     logger.info(f"Extracted {len(refs)} references from .bbl content")
+                    # Normalize field names (journal -> venue)
+                    refs = [_normalize_reference_fields(ref) for ref in refs]
                     return (refs, 'bbl')
             else:
                 # Parse as BibTeX format
@@ -756,6 +781,8 @@ class ProgressRefChecker:
                     return ([], None)
                 if refs:
                     logger.info(f"Extracted {len(refs)} references from .bib content")
+                    # Normalize field names (journal -> venue)
+                    refs = [_normalize_reference_fields(ref) for ref in refs]
                     return (refs, 'bib')
             
             return ([], None)

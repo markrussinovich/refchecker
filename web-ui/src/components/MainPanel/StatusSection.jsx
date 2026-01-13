@@ -681,19 +681,19 @@ export default function StatusSection() {
               style={{ color: 'var(--color-text-muted)' }}
             >
               Source:{' '}
-              {displaySourceType === 'text' && selectedCheckId ? (
+              {selectedCheckId ? (
                 <a 
-                  href={`${API_BASE}/api/text/${selectedCheckId}`}
+                  href={`${API_BASE}/api/bibliography/${selectedCheckId}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:underline"
                   style={{ color: 'var(--color-link)' }}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  Pasted .{displayExtractionMethod} file
+                  {displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`}
                 </a>
               ) : (
-                `ArXiv .${displayExtractionMethod} file`
+                displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`
               )}
             </p>
           ) : displayExtractionMethod === 'pdf' ? (

@@ -317,6 +317,21 @@ async def run_check(
             await db.update_check_title(check_id, paper_title)
             logger.info(f"Updated paper title for check {check_id}: {paper_title}")
 
+        # Create bibliography source callback to save bbl/bib content
+        async def bibliography_source_callback(check_id: int, content: str, arxiv_id: str):
+            try:
+                # Save the bibliography content to a file
+                bib_dir = Path(__file__).parent / "uploads" / "bibliography"
+                bib_dir.mkdir(parents=True, exist_ok=True)
+                bib_path = bib_dir / f"{check_id}_{arxiv_id}_bibliography.txt"
+                with open(bib_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                # Update the database with the path
+                await db.update_check_bibliography_source(check_id, str(bib_path))
+                logger.info(f"Saved bibliography source for check {check_id}: {bib_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save bibliography source: {e}")
+
         # Create checker with progress callback
         checker = ProgressRefChecker(
             llm_provider=llm_provider,
@@ -326,7 +341,8 @@ async def run_check(
             progress_callback=progress_callback,
             cancel_event=cancel_event,
             check_id=check_id,
-            title_update_callback=title_update_callback
+            title_update_callback=title_update_callback,
+            bibliography_source_callback=bibliography_source_callback
         )
 
         # Run the check
@@ -596,6 +612,57 @@ async def get_uploaded_file(check_id: int):
         raise
     except Exception as e:
         logger.error(f"Error getting uploaded file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/bibliography/{check_id}")
+async def get_bibliography_source(check_id: int):
+    """
+    Get the bibliography source content (bbl/bib file) for a check.
+    
+    Returns the bibliography file content as plain text for viewing.
+    This is the actual source file used to extract references (from ArXiv source or pasted text).
+    """
+    try:
+        check = await db.get_check_by_id(check_id)
+        if not check:
+            raise HTTPException(status_code=404, detail="Check not found")
+        
+        bibliography_source_path = check.get('bibliography_source_path', '')
+        extraction_method = check.get('extraction_method', '')
+        source_type = check.get('source_type', '')
+        paper_source = check.get('paper_source', '')
+        
+        # First check if we have a saved bibliography source file
+        if bibliography_source_path and os.path.exists(bibliography_source_path):
+            return FileResponse(
+                bibliography_source_path,
+                media_type="text/plain; charset=utf-8",
+                filename=f"bibliography_{check_id}.{extraction_method or 'txt'}",
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        
+        # Fall back to pasted text source if source_type is 'text' and it's bbl/bib
+        if source_type == 'text' and extraction_method in ['bbl', 'bib'] and os.path.exists(paper_source):
+            return FileResponse(
+                paper_source,
+                media_type="text/plain; charset=utf-8",
+                filename=f"bibliography_{check_id}.{extraction_method}",
+                headers={
+                    "Content-Type": "text/plain; charset=utf-8",
+                    "Cache-Control": "public, max-age=3600"
+                }
+            )
+        
+        raise HTTPException(status_code=404, detail="Bibliography source not available for this check")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting bibliography source: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
