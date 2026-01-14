@@ -10,8 +10,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
 
-# Add src to path to import refchecker
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+# Add src to path to import refchecker when running from source
+# This is only needed when not installed as a package
+_src_path = str(Path(__file__).parent.parent / "src")
+if _src_path not in sys.path and os.path.exists(_src_path):
+    sys.path.insert(0, _src_path)
 
 from backend.concurrency import get_limiter
 

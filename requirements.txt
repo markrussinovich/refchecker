@@ -18,10 +18,12 @@ pymupdf>=1.23.0  # For PDF thumbnail generation
 
 # Web UI backend dependencies
 fastapi>=0.100.0
-uvicorn>=0.22.0
+uvicorn[standard]>=0.22.0  # Includes websockets and other production dependencies
 pydantic>=2.0.0
 aiosqlite>=0.19.0
 httpx>=0.24.0
+Pillow>=9.0.0  # For thumbnail image enhancement
+python-multipart>=0.0.6  # For FastAPI form data handling
 
 # Optional dependencies for LLM providers
 openai>=1.0.0

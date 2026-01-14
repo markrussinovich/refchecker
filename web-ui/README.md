@@ -19,7 +19,10 @@ A modern, real-time web interface for validating academic paper references.
 
 ### Prerequisites
 
-- **Python 3.8+** with virtual environment set up in project root
+- **Python 3.8+** with RefChecker installed:
+  ```bash
+  pip install academic-refchecker[llm,webui]
+  ```
 - **Node.js 18+** and npm
 - **LLM API Key** (Anthropic or OpenAI recommended)
 
@@ -210,7 +213,7 @@ Message types:
 
 ### Backend won't start
 - Check Python virtual environment is activated
-- Verify dependencies: `pip install fastapi uvicorn[standard] websockets aiosqlite`
+- Install dependencies: `pip install academic-refchecker[webui]` or `pip install -r requirements.txt`
 - Check API key is set in environment
 
 ### Frontend won't start

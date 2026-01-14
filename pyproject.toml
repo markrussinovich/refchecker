@@ -72,12 +72,14 @@ vllm = [
 ]
 webui = [
     "fastapi>=0.100.0",
-    "uvicorn>=0.22.0",
+    "uvicorn[standard]>=0.22.0",  # Includes websockets for WebSocket support
     "pydantic>=2.0.0",
     "aiosqlite>=0.19.0",
     "httpx>=0.24.0",
     "cryptography>=42.0.0",
     "pymupdf>=1.23.0",
+    "Pillow>=9.0.0",  # For thumbnail image enhancement
+    "python-multipart>=0.0.6",  # For FastAPI form data handling
 ]
 
 [project.urls]
@@ -87,10 +89,11 @@ Repository = "https://github.com/markrussinovich/refchecker"
 
 [project.scripts]
 academic-refchecker = "refchecker.core.refchecker:main"
+refchecker-webui = "backend.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["refchecker*"]
+where = ["src", "."]
+include = ["refchecker*", "backend*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "refchecker.__version__.__version__"}

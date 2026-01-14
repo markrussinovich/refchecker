@@ -10,6 +10,9 @@ recursive-include config *.conf *.py
 # Include source code
 recursive-include src *.py
 
+# Include backend code
+recursive-include backend *.py
+
 # Include scripts
 recursive-include scripts *.py
 
@@ -36,3 +39,9 @@ prune .claude
 exclude .gitignore
 exclude Makefile
 exclude reference_errors.txt
+
+# Exclude backend runtime files (databases, logs, uploads)
+prune backend/uploads
+exclude backend/*.db
+exclude backend/*.log
+exclude backend/.encryption_key

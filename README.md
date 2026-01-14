@@ -115,15 +115,38 @@ Learn about RefChecker's design philosophy and development process in this detai
 
 RefChecker also includes a modern web interface with real-time progress updates, check history, and export options.
 
+### Prerequisites
+
+- **Python 3.8+** with RefChecker installed (`pip install academic-refchecker[webui]`)
+- **Node.js 18+** and npm
+
 ### Quick Start (Web UI)
 
 ```bash
+# Install Python dependencies (if not already done)
+pip install academic-refchecker[llm,webui]
+
+# Install Node.js dependencies
 cd web-ui
 npm install    # First time only
 npm start      # Starts both backend and frontend
 ```
 
 Then open **http://localhost:5173** in your browser.
+
+### Alternative: Start Servers Separately
+
+**Terminal 1 - Backend:**
+```bash
+refchecker-webui --port 8000
+# Or: python -m uvicorn backend.main:app --port 8000
+```
+
+**Terminal 2 - Frontend:**
+```bash
+cd web-ui
+npm run dev
+```
 
 ### Features
 
@@ -223,23 +246,32 @@ You can debug vllm server issues by running refchecker with the `--debug` flag.
 
 ## 📦 Installation
 
+### Prerequisites
+
+- **Python 3.8+** (3.10+ recommended)
+- **Node.js 18+** and npm (only required for Web UI)
+
 ### Option 1: Install from PyPI (Recommended)
 
 For the latest stable release with all features:
 
 ```bash
-pip install academic-refchecker[llm,dev,optional]
+pip install academic-refchecker[llm,webui]
 ```
 
 This installs RefChecker with:
 - **llm**: Support for OpenAI, Anthropic, Google, Azure, and vLLM providers
-- **dev**: Development tools (pytest, black, flake8, mypy)
-- **optional**: Enhanced features (lxml, selenium, pikepdf, nltk, scikit-learn)
+- **webui**: Web interface dependencies (FastAPI, uvicorn, etc.)
 
-For a minimal installation:
+For a minimal installation (CLI only, no LLM or Web UI):
 ```bash
 pip install academic-refchecker
 ```
+
+Other optional extras:
+- **dev**: Development tools (pytest, black, flake8, mypy)
+- **optional**: Enhanced features (lxml, selenium, pikepdf, nltk, scikit-learn)
+- **vllm**: Local model inference with vLLM
 
 ### Option 2: Install from Source
 
@@ -250,13 +282,27 @@ git clone https://github.com/markrussinovich/refchecker.git
 cd refchecker
 ```
 
-#### 2. Install Dependencies
+#### 2. Create and Activate Virtual Environment (Recommended)
 
 ```bash
+python -m venv .venv
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate
+```
+
+#### 3. Install Dependencies
+
+```bash
+# Install all dependencies including LLM and Web UI support
+pip install -e ".[llm,webui]"
+
+# Or install from requirements.txt
 pip install -r requirements.txt
 ```
 
-#### 3. (Optional) Install Additional Dependencies
+#### 4. (Optional) Install Additional Dependencies
 
 For enhanced performance and LLM support, you can install optional dependencies:
 
@@ -274,6 +320,15 @@ pip install selenium
 
 # For better PDF processing
 pip install pikepdf
+```
+
+### Web UI Installation
+
+The Web UI requires Node.js 18+ in addition to the Python dependencies:
+
+```bash
+cd web-ui
+npm install
 ```
 
 ## 📖 Usage
