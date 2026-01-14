@@ -124,6 +124,67 @@ def create_year_warning(cited_year: int, correct_year: int) -> Dict[str, Any]:
     }
 
 
+def create_year_missing_warning(correct_year: int) -> Dict[str, Any]:
+    """
+    Create a standardized warning for missing year in reference.
+    
+    Args:
+        correct_year: Correct year from database
+        
+    Returns:
+        Standardized warning dictionary
+    """
+    return {
+        'warning_type': 'year',
+        'warning_details': f"Year missing: should include '{correct_year}'",
+        'ref_year_correct': correct_year
+    }
+
+
+def validate_year(cited_year: Optional[int], paper_year: Optional[int], 
+                  year_tolerance: int = 1, use_flexible_validation: bool = False,
+                  context: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """
+    Validate year field and return appropriate warning if needed.
+    
+    This function handles:
+    - Year mismatch (with configurable tolerance)
+    - Missing year in reference
+    
+    Args:
+        cited_year: Year as cited in the reference (may be None)
+        paper_year: Correct year from database/API (may be None)
+        year_tolerance: Maximum allowed difference between years (default 1)
+        use_flexible_validation: If True, use is_year_substantially_different for more context-aware checking
+        context: Optional context dict for flexible validation (e.g., {'arxiv_match': True})
+        
+    Returns:
+        Warning dictionary if year issue found, None otherwise
+    """
+    if not paper_year:
+        # Can't validate without a known correct year
+        return None
+    
+    if cited_year and paper_year:
+        if use_flexible_validation:
+            # Use the more sophisticated validation from text_utils
+            from refchecker.utils.text_utils import is_year_substantially_different
+            is_different, warning_message = is_year_substantially_different(
+                cited_year, paper_year, context or {}
+            )
+            if is_different and warning_message:
+                return create_year_warning(cited_year, paper_year)
+        else:
+            # Simple tolerance-based validation
+            if abs(cited_year - paper_year) > year_tolerance:
+                return create_year_warning(cited_year, paper_year)
+    elif not cited_year and paper_year:
+        # Reference is missing a year but paper has one
+        return create_year_missing_warning(paper_year)
+    
+    return None
+
+
 def create_doi_error(cited_doi: str, correct_doi: str) -> Optional[Dict[str, str]]:
     """
     Create a standardized DOI error or warning dictionary.

@@ -36,7 +36,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from refchecker.utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
-from refchecker.utils.error_utils import create_author_error, create_year_warning, create_doi_error
+from refchecker.utils.error_utils import create_author_error, create_doi_error
 from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
@@ -432,28 +432,24 @@ class LocalNonArxivReferenceChecker:
         
         # Verify year (with tolerance)
         paper_year = paper_data.get('year')
-        if year and paper_year:
-            # Get year tolerance from config (default to 1 if not available)
-            year_tolerance = 1  # Default tolerance
-            try:
-                from config.settings import get_config
-                config = get_config()
-                year_tolerance = config.get('text_processing', {}).get('year_tolerance', 1)
-            except (ImportError, Exception):
-                pass  # Use default if config not available
-            
-            # Only flag as mismatch if the difference is greater than tolerance
-            if abs(year - paper_year) > year_tolerance:
-                logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
-                errors.append(create_year_warning(year, paper_year))
-        elif not year and paper_year:
-            # Reference has no year but paper has one - warn about missing year
-            logger.debug(f"Local DB: Year missing - should be: {paper_year}")
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': f"Year missing: should include '{paper_year}'",
-                'ref_year_correct': paper_year
-            })
+        # Get year tolerance from config (default to 1 if not available)
+        year_tolerance = 1  # Default tolerance
+        try:
+            from config.settings import get_config
+            config = get_config()
+            year_tolerance = config.get('text_processing', {}).get('year_tolerance', 1)
+        except (ImportError, Exception):
+            pass  # Use default if config not available
+        
+        from refchecker.utils.error_utils import validate_year
+        year_warning = validate_year(
+            cited_year=year,
+            paper_year=paper_year,
+            year_tolerance=year_tolerance
+        )
+        if year_warning:
+            logger.debug(f"Local DB: Year issue - {year_warning.get('warning_details', '')}")
+            errors.append(year_warning)
         
         # Verify DOI
         paper_doi = None

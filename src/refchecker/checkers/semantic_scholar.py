@@ -511,36 +511,25 @@ class NonArxivReferenceChecker:
         
         # Verify year using flexible validation
         paper_year = paper_data.get('year')
-        if year and paper_year:
-            # Check if we have an exact ArXiv ID match for additional context
-            arxiv_id_match = False
-            if url and 'arxiv.org/abs/' in url:
-                arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
-                if arxiv_match:
-                    cited_arxiv_id = arxiv_match.group(1)
-                    external_ids = paper_data.get('externalIds', {})
-                    found_arxiv_id = external_ids.get('ArXiv')
-                    arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
-            
-            # Use flexible year validation
-            from refchecker.utils.text_utils import is_year_substantially_different
-            context = {'arxiv_match': arxiv_id_match}
-            is_different, warning_message = is_year_substantially_different(year, paper_year, context)
-            
-            if is_different and warning_message:
-                from refchecker.utils.error_utils import format_year_mismatch
-                errors.append({
-                    'warning_type': 'year',
-                    'warning_details': format_year_mismatch(year, paper_year),
-                    'ref_year_correct': paper_year
-                })
-        elif not year and paper_year:
-            # Reference has no year but paper has one - warn about missing year
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': f"Year missing: should include '{paper_year}'",
-                'ref_year_correct': paper_year
-            })
+        # Check if we have an exact ArXiv ID match for additional context
+        arxiv_id_match = False
+        if url and 'arxiv.org/abs/' in url:
+            arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
+            if arxiv_match:
+                cited_arxiv_id = arxiv_match.group(1)
+                external_ids = paper_data.get('externalIds', {})
+                found_arxiv_id = external_ids.get('ArXiv')
+                arxiv_id_match = (cited_arxiv_id == found_arxiv_id)
+        
+        from refchecker.utils.error_utils import validate_year
+        year_warning = validate_year(
+            cited_year=year,
+            paper_year=paper_year,
+            use_flexible_validation=True,
+            context={'arxiv_match': arxiv_id_match}
+        )
+        if year_warning:
+            errors.append(year_warning)
         
         # Verify venue
         cited_venue = reference.get('journal', '') or reference.get('venue', '')
