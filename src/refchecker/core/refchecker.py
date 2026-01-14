@@ -1947,6 +1947,14 @@ class ArxivReferenceChecker:
                     'warning_details': format_year_mismatch(year, paper_year),
                     'ref_year_correct': paper_year
                 })
+        elif not year and paper_year:
+            # Reference has no year but paper has one - warn about missing year
+            logger.debug(f"DB Verification: Year missing - should be: {paper_year}")
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year missing: should include '{paper_year}'",
+                'ref_year_correct': paper_year
+            })
         
         # Verify DOI
         if doi and external_ids.get('DOI'):

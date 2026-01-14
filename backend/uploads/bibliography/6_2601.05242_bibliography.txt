@@ -1,0 +1,230 @@
+\begin{thebibliography}{10}
+
+\bibitem{liu2025laser}
+Wei Liu, Ruochen Zhou, Yiyun Deng, Yuzhen Huang, Junteng Liu, Yuntian Deng, Yizhe Zhang, and Junxian He.
+\newblock Learn to reason efficiently with adaptive length-based reward shaping.
+\newblock {\em arXiv preprint arXiv:2505.15612}, 2025.
+
+\bibitem{team2025kimi}
+Kimi Team, Angang Du, Bofei Gao, Bowei Xing, Changjiu Jiang, Cheng Chen, Cheng Li, Chenjun Xiao, Chenzhuang Du, Chonghua Liao, et~al.
+\newblock Kimi k1. 5: Scaling reinforcement learning with llms.
+\newblock {\em arXiv preprint arXiv:2501.12599}, 2025.
+
+\bibitem{aggarwal2025l1}
+Pranjal Aggarwal and Sean Welleck.
+\newblock L1: Controlling how long a reasoning model thinks with reinforcement learning.
+\newblock {\em arXiv preprint arXiv:2503.04697}, 2025.
+
+\bibitem{mu2024rule}
+Tong Mu, Alec Helyar, Johannes Heidecke, Joshua Achiam, Andrea Vallone, Ian Kivlichan, Molly Lin, Alex Beutel, John Schulman, and Lilian Weng.
+\newblock Rule based rewards for language model safety.
+\newblock {\em Advances in Neural Information Processing Systems}, 37:108877--108901, 2024.
+
+\bibitem{chen2025grpocareconsistencyawarereinforcementlearning}
+Yi~Chen, Yuying Ge, Rui Wang, Yixiao Ge, Junhao Cheng, Ying Shan, and Xihui Liu.
+\newblock Grpo-care: Consistency-aware reinforcement learning for multimodal reasoning, 2025.
+
+\bibitem{liu2025deepseek}
+Aixin Liu, Aoxue Mei, Bangcai Lin, Bing Xue, Bingxuan Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, et~al.
+\newblock Deepseek-v3. 2: Pushing the frontier of open large language models.
+\newblock {\em arXiv preprint arXiv:2512.02556}, 2025.
+
+\bibitem{zhang2025genderalign}
+Tao Zhang, Ziqian Zeng, YuxiangXiao YuxiangXiao, Huiping Zhuang, Cen Chen, James~R Foulds, and Shimei Pan.
+\newblock Genderalign: An alignment dataset for mitigating gender bias in large language models.
+\newblock In {\em Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)}, pages 11293--11311, 2025.
+
+\bibitem{guo2025deepseek}
+Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, Qihao Zhu, Shirong Ma, Peiyi Wang, Xiao Bi, et~al.
+\newblock Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning.
+\newblock {\em arXiv preprint arXiv:2501.12948}, 2025.
+
+\bibitem{yu2025dapo}
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu~Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, et~al.
+\newblock Dapo: An open-source llm reinforcement learning system at scale.
+\newblock {\em arXiv preprint arXiv:2503.14476}, 2025.
+
+\bibitem{hu2025reinforce++}
+Jian Hu, Jason~Klein Liu, Haotian Xu, and Wei Shen.
+\newblock Reinforce++: An efficient rlhf algorithm with robustness to both prompt and reward models.
+\newblock {\em arXiv preprint arXiv:2501.03262}, 2025.
+
+\bibitem{schulman2017proximal}
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
+\newblock Proximal policy optimization algorithms.
+\newblock {\em arXiv preprint arXiv:1707.06347}, 2017.
+
+\bibitem{qian2025toolrl}
+Cheng Qian, Emre~Can Acikgoz, Qi~He, Hongru Wang, Xiusi Chen, Dilek Hakkani-T{\"u}r, Gokhan Tur, and Heng Ji.
+\newblock Toolrl: Reward is all tool learning needs.
+\newblock {\em arXiv preprint arXiv:2504.13958}, 2025.
+
+\bibitem{liu2025understanding}
+Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee~Sun Lee, and Min Lin.
+\newblock Understanding r1-zero-like training: A critical perspective.
+\newblock {\em arXiv preprint arXiv:2503.20783}, 2025.
+
+\bibitem{liu2025dler}
+Shih-Yang Liu, Xin Dong, Ximing Lu, Shizhe Diao, Mingjie Liu, Min-Hung Chen, Hongxu Yin, Yu-Chiang~Frank Wang, Kwang-Ting Cheng, Yejin Choi, et~al.
+\newblock Dler: Doing length penalty right-incentivizing more intelligence per token via reinforcement learning.
+\newblock {\em arXiv preprint arXiv:2510.15110}, 2025.
+
+\bibitem{liu2024toolace}
+Weiwen Liu, Xu~Huang, Xingshan Zeng, Xinlong Hao, Shuai Yu, Dexun Li, Shuai Wang, Weinan Gan, Zhengying Liu, Yuanqing Yu, et~al.
+\newblock Toolace: Winning the points of llm function calling.
+\newblock {\em arXiv preprint arXiv:2409.00920}, 2024.
+
+\bibitem{lin2024hammer}
+Qiqiang Lin, Muning Wen, Qiuying Peng, Guanyu Nie, Junwei Liao, Jun Wang, Xiaoyun Mo, Jiamu Zhou, Cheng Cheng, Yin Zhao, et~al.
+\newblock Hammer: Robust function-calling for on-device language models via function masking.
+\newblock {\em arXiv preprint arXiv:2410.04587}, 2024.
+
+\bibitem{zhang2025xlam}
+Jianguo Zhang, Tian Lan, Ming Zhu, Zuxin Liu, Thai~Quoc Hoang, Shirley Kokane, Weiran Yao, Juntao Tan, Akshara Prabhakar, Haolin Chen, et~al.
+\newblock xlam: A family of large action models to empower ai agent systems.
+\newblock In {\em Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers)}, pages 11583--11597, 2025.
+
+\bibitem{qwen2025qwen25technicalreport}
+Qwen, :, An~Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo~Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le~Yu, Mei Li, Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men, Runji Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yu~Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu.
+\newblock Qwen2.5 technical report, 2025.
+
+\bibitem{sheng2024verl}
+Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru~Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu.
+\newblock Hybridflow: A flexible and efficient rlhf framework.
+\newblock {\em arXiv preprint arXiv: 2409.19256}, 2024.
+
+\bibitem{patilberkeley}
+Shishir~G Patil, Huanzhi Mao, Fanjia Yan, Charlie Cheng-Jie Ji, Vishnu Suresh, Ion Stoica, and Joseph~E Gonzalez.
+\newblock The berkeley function calling leaderboard (bfcl): From tool use to agentic evaluation of large language models.
+\newblock In {\em Forty-second International Conference on Machine Learning}.
+
+\bibitem{yang2025qwen3}
+An~Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo~Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et~al.
+\newblock Qwen3 technical report.
+\newblock {\em arXiv preprint arXiv:2505.09388}, 2025.
+
+\bibitem{deepscaler2025}
+Michael Luo, Sijun Tan, Justin Wong, Xiaoxiang Shi, William Tang, Manan Roongta, Colin Cai, Jeffrey Luo, Tianjun Zhang, Erran Li, Raluca~Ada Popa, and Ion Stoica.
+\newblock Deepscaler: Surpassing o1-preview with a 1.5b model by scaling rl.
+\newblock \url{https://pretty-radio-b75.notion.site/DeepScaleR-Surpassing-O1-Preview-with-a-1-5B-Model-by-Scaling-RL-19681902c1468005bed8ca303013a4e2}, 2025.
+\newblock Notion Blog.
+
+\bibitem{aime24}
+MAA.
+\newblock American invitational mathematics examination - aime.
+\newblock {\em In American Invitational Mathematics Examination - AIME 2024}, 2024.
+
+\bibitem{amc}
+MAA.
+\newblock American invitational mathematics examination - amc.
+\newblock {\em In American Invitational Mathematics Examination - AMC}, 2024.
+
+\bibitem{hendrycks2021math500}
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt.
+\newblock Measuring mathematical problem solving with the math dataset.
+\newblock {\em arXiv preprint arXiv:2103.03874}, 2021.
+
+\bibitem{lewkowycz2022minerva}
+Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et~al.
+\newblock Solving quantitative reasoning problems with language models.
+\newblock {\em Advances in neural information processing systems}, 35:3843--3857, 2022.
+
+\bibitem{he2024olympiadbench}
+Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen~Leng Thai, Junhao Shen, Jinyi Hu, Xu~Han, Yujie Huang, Yuxiang Zhang, et~al.
+\newblock Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems.
+\newblock {\em arXiv preprint arXiv:2402.14008}, 2024.
+
+\bibitem{cui2025process}
+Ganqu Cui, Lifan Yuan, Zefan Wang, Hanbin Wang, Yuchen Zhang, Jiacheng Chen, Wendi Li, Bingxiang He, Yuchen Fan, Tianyu Yu, et~al.
+\newblock Process reinforcement through implicit rewards.
+\newblock {\em arXiv preprint arXiv:2502.01456}, 2025.
+
+\bibitem{hendrycks2021measuring}
+Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir Puranik, Horace He, Dawn Song, et~al.
+\newblock Measuring coding challenge competence with apps.
+\newblock {\em arXiv preprint arXiv:2105.09938}, 2021.
+
+\bibitem{li2022competition}
+Yujia Li, David Choi, Junyoung Chung, Nate Kushman, Julian Schrittwieser, R{\'e}mi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal~Lago, et~al.
+\newblock Competition-level code generation with alphacode.
+\newblock {\em Science}, 378(6624):1092--1097, 2022.
+
+\bibitem{li2023taco}
+Rongao Li, Jie Fu, Bo-Wen Zhang, Tao Huang, Zhihong Sun, Chen Lyu, Guang Liu, Zhi Jin, and Ge~Li.
+\newblock Taco: Topics in algorithmic code generation dataset.
+\newblock {\em arXiv preprint arXiv:2312.14852}, 2023.
+
+\bibitem{Shao2024DeepSeekMathPT}
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Jun-Mei Song, Mingchuan Zhang, Y.~K. Li, Yu~Wu, and Daya Guo.
+\newblock Deepseekmath: Pushing the limits of mathematical reasoning in open language models.
+\newblock {\em ArXiv}, abs/2402.03300, 2024.
+
+\bibitem{Zheng2025GroupSP}
+Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An~Yang, Jingren Zhou, and Junyang Lin.
+\newblock Group sequence policy optimization.
+\newblock {\em ArXiv}, abs/2507.18071, 2025.
+
+\bibitem{Yu2025DAPOAO}
+Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu~Yue, Tiantian Fan, Gaohong Liu, Lingjun Liu, Xin Liu, Haibin Lin, Zhiqi Lin, Bole Ma, Guangming Sheng, Yuxuan Tong, Chi Zhang, Mofan Zhang, Wang Zhang, Hang Zhu, Jinhua Zhu, Jiaze Chen, Jiangjie Chen, Chengyi Wang, Honglin Yu, Weinan Dai, Yuxuan Song, Xiang Wei, Haodong Zhou, Jingjing Liu, Wei Ma, Ya-Qin Zhang, Lin Yan, Mu~Qiao, Yong-Xu Wu, and Mingxuan Wang.
+\newblock Dapo: An open-source llm reinforcement learning system at scale.
+\newblock {\em ArXiv}, abs/2503.14476, 2025.
+
+\bibitem{Shrivastava2025SampleMT}
+Vaishnavi Shrivastava, Ahmed Awadallah, Vidhisha Balachandran, Shivam Garg, Harkirat~Singh Behl, and Dimitris Papailiopoulos.
+\newblock Sample more to think less: Group filtered policy optimization for concise reasoning.
+\newblock {\em ArXiv}, abs/2508.09726, 2025.
+
+\bibitem{Liu2025DLERDL}
+Shih-Yang Liu, Xin Dong, Ximing Lu, Shizhe Diao, Mingjie Liu, Min-Hung Chen, Hongxu Yin, Yu-Chiang~Frank Wang, Kwang-Ting Cheng, Yejin Choi, Jan Kautz, and Pavlo Molchanov.
+\newblock Dler: Doing length penalty right - incentivizing more intelligence per token via reinforcement learning.
+\newblock {\em ArXiv}, abs/2510.15110, 2025.
+
+\bibitem{Dai2023SafeRS}
+Josef Dai, Xuehai Pan, Ruiyang Sun, Jiaming Ji, Xinbo Xu, Mickel Liu, Yizhou Wang, and Yaodong Yang.
+\newblock Safe rlhf: Safe reinforcement learning from human feedback.
+\newblock {\em ArXiv}, abs/2310.12773, 2023.
+
+\bibitem{Jang2023PersonalizedSP}
+Joel Jang, Seungone Kim, Bill~Yuchen Lin, Yizhong Wang, Jack Hessel, Luke~S. Zettlemoyer, Hannaneh Hajishirzi, Yejin Choi, and Prithviraj Ammanabrolu.
+\newblock Personalized soups: Personalized large language model alignment via post-hoc parameter merging.
+\newblock {\em ArXiv}, abs/2310.11564, 2023.
+
+\bibitem{Lai2024ALaRMAL}
+Yuhang Lai, Siyuan Wang, Shujun Liu, Xuanjing Huang, and Zhongyu Wei.
+\newblock Alarm: Align language models via hierarchical rewards modeling.
+\newblock In {\em Annual Meeting of the Association for Computational Linguistics}, 2024.
+
+\bibitem{DeepSeekAI2025DeepSeekV32PT}
+DeepSeek-AI, Aixin Liu, Aoxue Mei, Bangcai Lin, Bing Xue, Bing-Li Wang, Bingzheng Xu, Bochao Wu, Bowei Zhang, Chaofan Lin, Chen Dong, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chenhao Xu, Chong Ruan, Damai Dai, Daya Guo, Dejian Yang, Deli Chen, Erhang Li, Fangqi Zhou, Fangyun Lin, Fucong Dai, Guangbo Hao, Guanting Chen, Guowei Li, H.~Zhang, Hanwei Xu, Hao Li, Haofen Liang, Haoran Wei, Haowei Zhang, Hao sheng Luo, Haozhe Ji, Honghui Ding, Hongxuan Tang, Huanqi Cao, Huazuo Gao, Huixian Qu, Hui Zeng, Jialiang Huang, Jiashi Li, Jiaxin Xu, Jiewen Hu, JingChang Chen, Jingting Xiang, Jingyang Yuan, Jing Cheng, Jinhua Zhu, Jun Ran, Junguang Jiang, Junjie Qiu, Junlong Li, Jun-Mei Song, Kai Dong, Kaige Gao, Kang Guan, Kexin Huang, Kexing Zhou, Kezhao Huang, Kuai Yu, Lean Wang, Lecong Zhang, Lei Wang, Liang Zhao, Liangsheng Yin, Lihua Guo, Ling-Li Luo, Linwang Ma, Litong Wang, Liyue Zhang, M.~S. Di, M.~Y. Xu, Mingchuan Zhang, Minghua Zhang, Min Tang, Mingxu Zhou, P.~Huang, Peixin Cong, Peiyi Wang, Qiancheng Wang, Qihao
+  Zhu, Qingyang Li, Qinyu Chen, Qiushi Du, Ruiling Xu, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, Runqiu Yin, Runxin Xu, Ruomeng Shen, Ruoyu Zhang, S.~H. Liu, Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shaofei Cai, Shaoyuan Chen, Shengding Hu, Shengyu Liu, Shiqiang Hu, Shirong Ma, Shiyu Wang, Shuiping Yu, Shunfeng Zhou, Shuting Pan, Songyang Zhou, Tao Ni, Tao Yun, Tian Pei, Tian Ye, Tianyuan Yue, Wangding Zeng, Wen Liu, Wenfeng Liang, Wenjie Pang, Wenjing Luo, Wenjun Gao, Wentao Zhang, Xi~Gao, Xiangwen Wang, Xiaoling Bi, Xiaodong Liu, Xiaohan Wang, Xiaokang Chen, Xiaokang Zhang, Xiaotao Nie, Xin Cheng, Xin Liu, Xin Xie, Xingchao Liu, Xingkai Yu, Xingyou Li, Xinyu Yang, Xinyuan Li, Xu~Chen, Xuecheng Su, Xuehai Pan, Xuheng Lin, Xuwei Fu, Y.~Q. Wang, Yang Zhang, Yanhong Xu, Yanru Ma, Yao Li, Yao Zhao, Yaofeng Sun, Yaohui Wang, Yi~Qian, Yingpu Yu, Yichao Zhang, Yifan Ding, Yifan Shi, Yi~Xiong, Ying He, Ying Zhou, Yinmin Zhong, Yishi Piao, Yisong Wang, Yixiao Chen, Yixuan Tan, Yixuan Wei, Yiyang Ma, Yiyuan
+  Liu, Yonglun Yang, Yongqiang Guo, Yongtong Wu, Yu~Wu, Yuan Cheng, Yuan Ou, Yuanfan Xu, Yuduan Wang, Yue Gong, Yuhan Wu, Yuheng Zou, Yukun Li, Yunfan Xiong, Yu-Wei Luo, Yu~mei You, Yuxuan Liu, Yuyang Zhou, Z.~F. Wu, Z.~Z. Ren, Zehua Zhao, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean Xu, Zhenda Xie, Zhen guo Zhang, Zhewen Hao, Zhibin Gou, Zhicheng Ma, Zhigang Yan, Zhihong Shao, Zhixian Huang, Zhiyu Wu, Zhuoshu Li, Zhuping Zhang, Zian Xu, Zihao Wang, Zihui Gu, Zijia Zhu, Zi-Rui Li, Zipeng Zhang, Ziwei Xie, Ziyi Gao, Zizheng Pan, Zongqing Yao, Bei Feng, Hui Li, J.~L. Cai, Jiaqi Ni, Lei Xu, Meng Li, Ning Tian, R.~J. Chen, Ruiqi Jin, S.~S. Li, Shuang Zhou, Tianyu Sun, X.~Q. Li, Xiangyu Jin, Xiaojin Shen, Xiaosha Chen, Xinnan Song, Xinyi Zhou, Y.~X. Zhu, Yanping Huang, Yao Li, Yi~Zheng, Yuchen Zhu, Yunxiang Ma, Zhen Huang, Zhipeng Xu, Zhongyu Zhang, Dong-Li Ji, Jian Liang, Jianzhong Guo, Jin Chen, Leyi Xia, Miaojun Wang, Mingming Li, Peng Zhang, Ruyi Chen, Shangmian Sun, Shao-Kang Wu, Shengfeng Ye, T.Wang, W.~L. Xiao,
+  Wei An, Xianzu Wang, Xiaowen Sun, Xiaoxiang Wang, Ying Tang, Yukun Zha, Ze-Na Zhang, Zhenghua Ju, Zhen Zhang, and Zihua Qu.
+\newblock Deepseek-v3.2: Pushing the frontier of open large language models.
+\newblock 2025.
+
+\bibitem{Luo2025O1PrunerLF}
+Haotian Luo, Li~Shen, Haiying He, Yibo Wang, Shiwei Liu, Wei Li, Naiqiang Tan, Xiaochun Cao, and Dacheng Tao.
+\newblock O1-pruner: Length-harmonizing fine-tuning for o1-like reasoning pruning.
+\newblock {\em ArXiv}, abs/2501.12570, 2025.
+
+\bibitem{Arora2025TrainingLM}
+Daman Arora and Andrea Zanette.
+\newblock Training language models to reason efficiently.
+\newblock {\em ArXiv}, abs/2502.04463, 2025.
+
+\bibitem{Yi2025ShorterBetterGR}
+Jingyang Yi and Jiazheng Wang.
+\newblock Shorterbetter: Guiding reasoning models to find optimal inference length for efficient reasoning.
+\newblock {\em ArXiv}, abs/2504.21370, 2025.
+
+\bibitem{Aggarwal2025L1CH}
+Pranjal Aggarwal and Sean Welleck.
+\newblock L1: Controlling how long a reasoning model thinks with reinforcement learning.
+\newblock {\em ArXiv}, abs/2503.04697, 2025.
+
+\bibitem{Su2025ThinkingFA}
+Jinyan Su and Claire Cardie.
+\newblock Thinking fast and right: Balancing accuracy and reasoning length with adaptive rewards.
+\newblock {\em ArXiv}, abs/2505.18298, 2025.
+
+\end{thebibliography}

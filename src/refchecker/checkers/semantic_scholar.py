@@ -534,6 +534,13 @@ class NonArxivReferenceChecker:
                     'warning_details': format_year_mismatch(year, paper_year),
                     'ref_year_correct': paper_year
                 })
+        elif not year and paper_year:
+            # Reference has no year but paper has one - warn about missing year
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year missing: should include '{paper_year}'",
+                'ref_year_correct': paper_year
+            })
         
         # Verify venue
         cited_venue = reference.get('journal', '') or reference.get('venue', '')

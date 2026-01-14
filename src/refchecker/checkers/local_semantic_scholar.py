@@ -446,6 +446,14 @@ class LocalNonArxivReferenceChecker:
             if abs(year - paper_year) > year_tolerance:
                 logger.debug(f"Local DB: Year mismatch - cited: {year}, actual: {paper_year}")
                 errors.append(create_year_warning(year, paper_year))
+        elif not year and paper_year:
+            # Reference has no year but paper has one - warn about missing year
+            logger.debug(f"Local DB: Year missing - should be: {paper_year}")
+            errors.append({
+                'warning_type': 'year',
+                'warning_details': f"Year missing: should include '{paper_year}'",
+                'ref_year_correct': paper_year
+            })
         
         # Verify DOI
         paper_doi = None
