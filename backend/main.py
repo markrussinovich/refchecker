@@ -479,7 +479,37 @@ async def get_thumbnail(check_id: int):
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
         arxiv_match = re.search(arxiv_id_pattern, paper_source)
         
-        if arxiv_match:
+        # Check if this is a direct PDF URL (not ArXiv)
+        is_direct_pdf_url = (
+            source_type == 'url' and
+            paper_source.lower().endswith('.pdf') and 
+            'arxiv.org' not in paper_source.lower()
+        )
+        
+        if is_direct_pdf_url:
+            # Generate thumbnail from direct PDF URL
+            logger.info(f"Generating thumbnail from PDF URL: {paper_source}")
+            import hashlib
+            import tempfile
+            import urllib.request
+            
+            pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
+            pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+            
+            # Download PDF if not already cached
+            if not os.path.exists(pdf_path):
+                try:
+                    await asyncio.to_thread(lambda: urllib.request.urlretrieve(paper_source, pdf_path))
+                except Exception as e:
+                    logger.error(f"Failed to download PDF for thumbnail: {e}")
+                    thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+                    pdf_path = None
+            
+            if pdf_path and os.path.exists(pdf_path):
+                thumbnail_path = await generate_pdf_thumbnail_async(pdf_path)
+            else:
+                thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+        elif arxiv_match:
             # Generate thumbnail from ArXiv paper
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
@@ -550,9 +580,36 @@ async def get_preview(check_id: int):
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
         arxiv_match = re.search(arxiv_id_pattern, paper_source)
         
+        # Check if this is a direct PDF URL (not ArXiv)
+        is_direct_pdf_url = (
+            source_type == 'url' and
+            paper_source.lower().endswith('.pdf') and 
+            'arxiv.org' not in paper_source.lower()
+        )
+        
         preview_path = None
         
-        if arxiv_match:
+        if is_direct_pdf_url:
+            # Generate preview from direct PDF URL
+            logger.info(f"Generating preview from PDF URL: {paper_source}")
+            import hashlib
+            import tempfile
+            import urllib.request
+            
+            pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
+            pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+            
+            # Download PDF if not already cached
+            if not os.path.exists(pdf_path):
+                try:
+                    await asyncio.to_thread(lambda: urllib.request.urlretrieve(paper_source, pdf_path))
+                except Exception as e:
+                    logger.error(f"Failed to download PDF for preview: {e}")
+                    pdf_path = None
+            
+            if pdf_path and os.path.exists(pdf_path):
+                preview_path = await generate_pdf_preview_async(pdf_path)
+        elif arxiv_match:
             # Generate preview from ArXiv paper
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating preview for ArXiv paper: {arxiv_id}")

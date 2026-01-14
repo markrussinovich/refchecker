@@ -346,60 +346,99 @@ class ProgressRefChecker:
             extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', or None
             
             if source_type == "url":
-                # Handle ArXiv URLs/IDs
-                arxiv_id = extract_arxiv_id_from_url(paper_source)
-                if not arxiv_id:
-                    arxiv_id = paper_source  # Assume it's already an ID
-
-                await self.emit_progress("extracting", {
-                    "message": f"Fetching ArXiv paper {arxiv_id}..."
-                })
-
-                # Download from ArXiv - run in thread to avoid blocking event loop
-                def fetch_arxiv():
-                    search = arxiv.Search(id_list=[arxiv_id])
-                    return next(search.results())
+                # Check if this is a direct PDF URL (not arXiv)
+                is_direct_pdf_url = (
+                    paper_source.lower().endswith('.pdf') and 
+                    'arxiv.org' not in paper_source.lower()
+                )
                 
-                paper = await asyncio.to_thread(fetch_arxiv)
-                paper_title = paper.title
-                await update_title_if_needed(paper_title)
-
-                # Try to get BibTeX content from ArXiv source files first
-                # This uses the .bbl file preference logic for papers with large .bib files
-                await self.emit_progress("extracting", {
-                    "message": f"Checking ArXiv source for bibliography files..."
-                })
-                
-                bibtex_content = await asyncio.to_thread(get_bibtex_content, paper)
-                
-                if bibtex_content:
-                    logger.info(f"Found BibTeX/BBL content from ArXiv source for {arxiv_id}")
-                    # Save the bibliography content for later viewing
-                    if self.bibliography_source_callback and self.check_id:
-                        await self.bibliography_source_callback(self.check_id, bibtex_content, arxiv_id)
-                    # Extract references from the BibTeX content (returns tuple)
-                    result = await self._extract_references_from_bibtex(bibtex_content)
-                    arxiv_source_references, extraction_method = result
-                    if arxiv_source_references:
-                        logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files (method: {extraction_method})")
-                    else:
-                        logger.warning("Could not extract references from ArXiv source, falling back to PDF")
-                
-                # Fall back to PDF extraction if no references from source files
-                if not arxiv_source_references:
+                if is_direct_pdf_url:
+                    # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
                     # PDF extraction requires LLM for reliable reference extraction
                     if not self.llm:
-                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings or provide a paper with BibTeX/LaTeX source files.")
+                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
+                    
+                    await self.emit_progress("extracting", {
+                        "message": "Downloading PDF from URL..."
+                    })
+                    
+                    # Download PDF from URL
+                    import urllib.request
+                    import hashlib
+                    pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
+                    pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+                    
+                    def download_pdf_url():
+                        urllib.request.urlretrieve(paper_source, pdf_path)
+                        return pdf_path
+                    
+                    await asyncio.to_thread(download_pdf_url)
+                    
+                    # Extract title from PDF filename or URL
+                    from urllib.parse import urlparse, unquote
+                    url_path = urlparse(paper_source).path
+                    pdf_filename = unquote(url_path.split('/')[-1])
+                    paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                    await update_title_if_needed(paper_title)
+                    
                     extraction_method = 'pdf'
-                    # Download PDF - run in thread (use cross-platform temp directory)
-                    pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
-                    await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
-
-                    # Extract text from PDF - run in thread
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
                 else:
-                    paper_text = ""  # Not needed since we have references
+                    # Handle ArXiv URLs/IDs
+                    arxiv_id = extract_arxiv_id_from_url(paper_source)
+                    if not arxiv_id:
+                        arxiv_id = paper_source  # Assume it's already an ID
+
+                    await self.emit_progress("extracting", {
+                        "message": f"Fetching ArXiv paper {arxiv_id}..."
+                    })
+
+                    # Download from ArXiv - run in thread to avoid blocking event loop
+                    def fetch_arxiv():
+                        search = arxiv.Search(id_list=[arxiv_id])
+                        return next(search.results())
+                    
+                    paper = await asyncio.to_thread(fetch_arxiv)
+                    paper_title = paper.title
+                    await update_title_if_needed(paper_title)
+
+                    # Try to get BibTeX content from ArXiv source files first
+                    # This uses the .bbl file preference logic for papers with large .bib files
+                    await self.emit_progress("extracting", {
+                        "message": f"Checking ArXiv source for bibliography files..."
+                    })
+                    
+                    bibtex_content = await asyncio.to_thread(get_bibtex_content, paper)
+                    
+                    if bibtex_content:
+                        logger.info(f"Found BibTeX/BBL content from ArXiv source for {arxiv_id}")
+                        # Save the bibliography content for later viewing
+                        if self.bibliography_source_callback and self.check_id:
+                            await self.bibliography_source_callback(self.check_id, bibtex_content, arxiv_id)
+                        # Extract references from the BibTeX content (returns tuple)
+                        result = await self._extract_references_from_bibtex(bibtex_content)
+                        arxiv_source_references, extraction_method = result
+                        if arxiv_source_references:
+                            logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files (method: {extraction_method})")
+                        else:
+                            logger.warning("Could not extract references from ArXiv source, falling back to PDF")
+                    
+                    # Fall back to PDF extraction if no references from source files
+                    if not arxiv_source_references:
+                        # PDF extraction requires LLM for reliable reference extraction
+                        if not self.llm:
+                            raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings or provide a paper with BibTeX/LaTeX source files.")
+                        extraction_method = 'pdf'
+                        # Download PDF - run in thread (use cross-platform temp directory)
+                        pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
+                        await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
+
+                        # Extract text from PDF - run in thread
+                        pdf_processor = PDFProcessor()
+                        paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
+                    else:
+                        paper_text = ""  # Not needed since we have references
 
             elif source_type == "file":
                 extraction_method = 'file'
