@@ -108,9 +108,10 @@ function formatSource(source, title, sourceType, checkId) {
   if (source.startsWith('http://') || source.startsWith('https://')) {
     return { type: 'url', value: source, display: source }
   }
-  // ArXiv IDs - show full URL
-  if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(source)) {
-    const fullUrl = `https://arxiv.org/abs/${source}`
+  // ArXiv IDs - show full URL (handles both "2310.02238" and "arXiv:2310.02238" formats)
+  const arxivMatch = source.match(/^(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)$/i)
+  if (arxivMatch) {
+    const fullUrl = `https://arxiv.org/abs/${arxivMatch[1]}`
     return { type: 'url', value: fullUrl, display: fullUrl }
   }
   // Filename or other

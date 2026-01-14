@@ -14,9 +14,10 @@ function expandArxivId(source) {
   if (source.startsWith('http://') || source.startsWith('https://')) {
     return source
   }
-  // If it's an arXiv ID, convert to full URL
-  if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(source)) {
-    return `https://arxiv.org/abs/${source}`
+  // If it's an arXiv ID (handles both "2310.02238" and "arXiv:2310.02238" formats)
+  const arxivMatch = source.match(/^(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)$/i)
+  if (arxivMatch) {
+    return `https://arxiv.org/abs/${arxivMatch[1]}`
   }
   // Otherwise return as-is
   return source
