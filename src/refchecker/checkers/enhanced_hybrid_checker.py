@@ -278,7 +278,6 @@ class EnhancedHybridReferenceChecker:
         
         # Strategy 1: Always try local database first (fastest)
         if self.local_db:
-        if self.local_db:
             verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
             if success:
                 return verified_data, errors, url
