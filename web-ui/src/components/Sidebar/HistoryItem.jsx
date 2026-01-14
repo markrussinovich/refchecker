@@ -6,6 +6,23 @@ import { logger } from '../../utils/logger'
 import * as api from '../../utils/api'
 
 /**
+ * Convert arXiv ID to full URL if needed
+ */
+function expandArxivId(source) {
+  if (!source) return source
+  // If it's already a URL, return as-is
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    return source
+  }
+  // If it's an arXiv ID, convert to full URL
+  if (/^\d{4}\.\d{4,5}(v\d+)?$/.test(source)) {
+    return `https://arxiv.org/abs/${source}`
+  }
+  // Otherwise return as-is
+  return source
+}
+
+/**
  * Individual history item in the sidebar
  */
 export default function HistoryItem({ item, isSelected }) {
@@ -198,9 +215,9 @@ export default function HistoryItem({ item, isSelected }) {
           <div 
             className="text-xs mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
             style={{ color: 'var(--color-text-muted)' }}
-            title={item.paper_source}
+            title={expandArxivId(item.paper_source)}
           >
-            {item.paper_source}
+            {expandArxivId(item.paper_source)}
           </div>
         )}
         
