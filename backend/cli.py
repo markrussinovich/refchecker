@@ -7,12 +7,13 @@ This module provides the console script entry point for the refchecker-webui com
 
 import sys
 import argparse
+from pathlib import Path
 
 
 def main():
     """Main entry point for the refchecker-webui command."""
     parser = argparse.ArgumentParser(
-        description="Start the RefChecker Web UI backend server"
+        description="Start the RefChecker Web UI server"
     )
     parser.add_argument(
         "--host", 
@@ -40,8 +41,15 @@ def main():
         print("Install it with: pip install 'academic-refchecker[webui]'")
         sys.exit(1)
     
-    print(f"Starting RefChecker Web UI backend on http://{args.host}:{args.port}")
-    print("Make sure to start the frontend separately (cd web-ui && npm run dev)")
+    # Check if static frontend is bundled
+    static_dir = Path(__file__).parent / "static"
+    has_frontend = static_dir.exists() and (static_dir / "index.html").exists()
+    
+    print(f"Starting RefChecker Web UI on http://{args.host}:{args.port}")
+    if has_frontend:
+        print(f"Open http://localhost:{args.port} in your browser")
+    else:
+        print("Note: Frontend not bundled. Start it separately: cd web-ui && npm run dev")
     print()
     
     uvicorn.run(

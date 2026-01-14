@@ -28,6 +28,8 @@ class PackageBuilder:
         self.dist_dir = self.project_root / "dist"
         self.build_dir = self.project_root / "build"
         self.egg_info_dirs = list(self.project_root.rglob("*.egg-info"))
+        self.webui_dir = self.project_root / "web-ui"
+        self.static_dir = self.project_root / "backend" / "static"
         
     def print_status(self, message: str, status: str = "INFO"):
         """Print colored status messages"""
@@ -88,6 +90,11 @@ class PackageBuilder:
             if pycache.is_dir():
                 shutil.rmtree(pycache)
         
+        # Remove bundled static frontend (will be rebuilt)
+        if self.static_dir.exists():
+            shutil.rmtree(self.static_dir)
+            self.print_status(f"Removed {self.static_dir}")
+        
         self.print_status("Build artifacts cleaned", "SUCCESS")
     
     def check_prerequisites(self) -> bool:
@@ -137,9 +144,74 @@ class PackageBuilder:
         self.print_status("Package configuration valid", "SUCCESS")
         return True
     
+    def build_frontend(self) -> bool:
+        """Build the web UI frontend and copy to backend/static"""
+        self.print_status("Building web UI frontend...")
+        
+        # Check if web-ui directory exists
+        if not self.webui_dir.exists():
+            self.print_status("web-ui directory not found, skipping frontend build", "WARNING")
+            return True
+        
+        # Check for package.json
+        package_json = self.webui_dir / "package.json"
+        if not package_json.exists():
+            self.print_status("web-ui/package.json not found, skipping frontend build", "WARNING")
+            return True
+        
+        # Check if npm is available
+        try:
+            subprocess.run(["npm", "--version"], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            self.print_status("npm not found, skipping frontend build", "WARNING")
+            self.print_status("Install Node.js to include the web UI in the package", "INFO")
+            return True
+        
+        # Install dependencies if node_modules doesn't exist
+        node_modules = self.webui_dir / "node_modules"
+        if not node_modules.exists():
+            if not self.run_command(
+                ["npm", "install"],
+                "Installing frontend dependencies"
+            ):
+                return False
+        
+        # Build the frontend
+        result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=self.webui_dir,
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            self.print_status(f"Frontend build failed: {result.stderr}", "ERROR")
+            return False
+        
+        self.print_status("Frontend built successfully", "SUCCESS")
+        
+        # Copy dist to backend/static
+        webui_dist = self.webui_dir / "dist"
+        if not webui_dist.exists():
+            self.print_status("web-ui/dist not found after build", "ERROR")
+            return False
+        
+        # Remove existing static dir and copy new one
+        if self.static_dir.exists():
+            shutil.rmtree(self.static_dir)
+        
+        shutil.copytree(webui_dist, self.static_dir)
+        self.print_status(f"Copied frontend to {self.static_dir}", "SUCCESS")
+        
+        return True
+    
     def build_package(self) -> bool:
         """Build the package using python -m build"""
         self.print_status("Building package...")
+        
+        # Build frontend first
+        if not self.build_frontend():
+            self.print_status("Frontend build failed, continuing without bundled UI", "WARNING")
         
         # Create dist directory
         self.dist_dir.mkdir(exist_ok=True)

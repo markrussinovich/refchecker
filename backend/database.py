@@ -4,15 +4,38 @@ Database module for storing check history and LLM configurations
 import aiosqlite
 import json
 import os
+import sys
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from cryptography.fernet import Fernet
 
 
+def get_data_dir() -> Path:
+    """Get platform-appropriate user data directory for refchecker.
+    
+    Windows: %LOCALAPPDATA%\refchecker
+    macOS: ~/Library/Application Support/refchecker
+    Linux: ~/.local/share/refchecker
+    """
+    if sys.platform == "win32":
+        # Windows: use LOCALAPPDATA
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        # macOS: use Application Support
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        # Linux/Unix: use XDG_DATA_HOME or ~/.local/share
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    
+    data_dir = base / "refchecker"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
 def get_encryption_key() -> bytes:
     """Get or create encryption key for API keys"""
-    key_file = Path(__file__).parent / ".encryption_key"
+    key_file = get_data_dir() / ".encryption_key"
     if key_file.exists():
         return key_file.read_bytes()
     else:
@@ -24,7 +47,9 @@ def get_encryption_key() -> bytes:
 class Database:
     """Handles SQLite database operations for check history and LLM configs"""
 
-    def __init__(self, db_path: str = "refchecker_history.db"):
+    def __init__(self, db_path: Optional[str] = None):
+        if db_path is None:
+            db_path = str(get_data_dir() / "refchecker_history.db")
         self.db_path = db_path
         self._fernet = Fernet(get_encryption_key())
 

@@ -13,6 +13,9 @@ recursive-include src *.py
 # Include backend code
 recursive-include backend *.py
 
+# Include web UI frontend (built assets)
+recursive-include backend/static *
+
 # Include scripts
 recursive-include scripts *.py
 

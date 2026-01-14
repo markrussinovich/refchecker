@@ -7,9 +7,10 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 
@@ -69,10 +70,13 @@ class CheckLabelUpdate(BaseModel):
 # Create FastAPI app
 app = FastAPI(title="RefChecker Web UI API", version="1.0.0")
 
+# Static files directory for bundled frontend
+STATIC_DIR = Path(__file__).parent / "static"
+
 # Configure CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://localhost:5175", "http://127.0.0.1:5174", "http://127.0.0.1:5175"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://localhost:5175", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://localhost:8000", "http://127.0.0.1:8000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -117,7 +121,12 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
+    """Serve frontend if available, otherwise return API health check"""
+    # If static frontend is bundled, serve it
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(str(index_path), media_type="text/html")
+    # Otherwise return API health check
     return {"status": "ok", "message": "RefChecker Web UI API"}
 
 
@@ -985,6 +994,27 @@ async def validate_llm_config(config: LLMConfigValidate):
     Validate an LLM configuration by making a test API call.
     Returns success or error message.
     """
+    # Map providers to their required packages
+    PROVIDER_PACKAGES = {
+        "anthropic": ("anthropic", "pip install anthropic"),
+        "openai": ("openai", "pip install openai"),
+        "google": ("google.generativeai", "pip install google-generativeai"),
+        "gemini": ("google.generativeai", "pip install google-generativeai"),
+    }
+    
+    # Check if required package is installed for this provider
+    provider_lower = config.provider.lower()
+    if provider_lower in PROVIDER_PACKAGES:
+        module_name, install_cmd = PROVIDER_PACKAGES[provider_lower]
+        try:
+            __import__(module_name.split('.')[0])
+        except ImportError:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"The '{config.provider}' provider requires the '{module_name.split('.')[0]}' package. "
+                       f"Please install it with: {install_cmd}"
+            )
+    
     try:
         import sys
         from pathlib import Path
@@ -1004,6 +1034,18 @@ async def validate_llm_config(config: LLMConfigValidate):
         provider = create_llm_provider(config.provider, llm_config)
         if not provider:
             raise HTTPException(status_code=400, detail=f"Failed to create {config.provider} provider")
+        
+        # Check if provider is available (has required client initialized)
+        if hasattr(provider, 'is_available') and not provider.is_available():
+            # Provider was created but client failed to initialize
+            if provider_lower in PROVIDER_PACKAGES:
+                _, install_cmd = PROVIDER_PACKAGES[provider_lower]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Provider '{config.provider}' is not available. "
+                           f"Make sure the required package is installed: {install_cmd}"
+                )
+            raise HTTPException(status_code=400, detail=f"Provider '{config.provider}' is not available")
         
         # Make a simple test call using _call_llm
         test_response = provider._call_llm("Say 'ok' if you can hear me.")
@@ -1025,6 +1067,16 @@ async def validate_llm_config(config: LLMConfigValidate):
             raise HTTPException(status_code=400, detail="Invalid API key")
         elif "rate" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Rate limited - but API key is valid")
+        elif "'NoneType'" in error_msg:
+            # This usually means the provider library isn't installed
+            if provider_lower in PROVIDER_PACKAGES:
+                _, install_cmd = PROVIDER_PACKAGES[provider_lower]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The '{config.provider}' provider requires additional packages. "
+                           f"Please install with: {install_cmd}"
+                )
+            raise HTTPException(status_code=400, detail=f"Provider initialization failed. Check that required packages are installed.")
         else:
             raise HTTPException(status_code=400, detail=f"Validation failed: {error_msg}")
 
@@ -1259,6 +1311,55 @@ async def clear_database():
     except Exception as e:
         logger.error(f"Error clearing database: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Mount static files for bundled frontend (if available)
+# This must be after all API routes to avoid conflicts
+if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
+    # Mount assets directory for JS/CSS files
+    if (STATIC_DIR / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
+    
+    @app.get("/favicon.svg")
+    async def favicon():
+        """Serve favicon"""
+        favicon_path = STATIC_DIR / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(str(favicon_path), media_type="image/svg+xml")
+        raise HTTPException(status_code=404)
+    
+    @app.get("/{full_path:path}")
+    async def serve_spa(request: Request, full_path: str):
+        """
+        Serve the SPA frontend for all non-API routes.
+        This enables client-side routing.
+        """
+        # Don't serve SPA for API routes (they're handled above)
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        
+        # Try to serve the exact file if it exists
+        file_path = STATIC_DIR / full_path
+        if file_path.exists() and file_path.is_file():
+            # Determine content type
+            suffix = file_path.suffix.lower()
+            media_types = {
+                ".html": "text/html",
+                ".css": "text/css",
+                ".js": "application/javascript",
+                ".json": "application/json",
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".svg": "image/svg+xml",
+                ".ico": "image/x-icon",
+            }
+            media_type = media_types.get(suffix, "application/octet-stream")
+            return FileResponse(str(file_path), media_type=media_type)
+        
+        # For all other paths, serve index.html (SPA routing)
+        index_path = STATIC_DIR / "index.html"
+        return FileResponse(str(index_path), media_type="text/html")
 
 
 if __name__ == "__main__":
