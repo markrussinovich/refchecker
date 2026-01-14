@@ -1,0 +1,183 @@
+%%% -*-BibTeX-*-
+%%% Do NOT edit. File created by BibTeX with style
+%%% ACM-Reference-Format-Journals [18-Jan-2012].
+
+\begin{thebibliography}{18}
+
+%%% ====================================================================
+%%% NOTE TO THE USER: you can override these defaults by providing
+%%% customized versions of any of these macros before the \bibliography
+%%% command.  Each of them MUST provide its own final punctuation,
+%%% except for \shownote{} and \showURL{}.  The latter two
+%%% do not use final punctuation, in order to avoid confusing it with
+%%% the Web address.
+%%%
+%%% To suppress output of a particular field, define its macro to expand
+%%% to an empty string, or better, \unskip, like this:
+%%%
+%%% \newcommand{\showURL}[1]{\unskip}   % LaTeX syntax
+%%%
+%%% \def \showURL #1{\unskip}           % plain TeX syntax
+%%%
+%%% ====================================================================
+
+\ifx \showCODEN    \undefined \def \showCODEN     #1{\unskip}     \fi
+\ifx \showISBNx    \undefined \def \showISBNx     #1{\unskip}     \fi
+\ifx \showISBNxiii \undefined \def \showISBNxiii  #1{\unskip}     \fi
+\ifx \showISSN     \undefined \def \showISSN      #1{\unskip}     \fi
+\ifx \showLCCN     \undefined \def \showLCCN      #1{\unskip}     \fi
+\ifx \shownote     \undefined \def \shownote      #1{#1}          \fi
+\ifx \showarticletitle \undefined \def \showarticletitle #1{#1}   \fi
+\ifx \showURL      \undefined \def \showURL       {\relax}        \fi
+% The following commands are used for tagged output and should be
+% invisible to TeX
+\providecommand\bibfield[2]{#2}
+\providecommand\bibinfo[2]{#2}
+\providecommand\natexlab[1]{#1}
+\providecommand\showeprint[2][]{arXiv:#2}
+
+\bibitem[Chen et~al\mbox{.}(2022)]%
+        {CMSGZLF22}
+\bibfield{author}{\bibinfo{person}{Kangjie Chen}, \bibinfo{person}{Yuxian Meng}, \bibinfo{person}{Xiaofei Sun}, \bibinfo{person}{Shangwei Guo}, \bibinfo{person}{Tianwei Zhang}, \bibinfo{person}{Jiwei Li}, {and} \bibinfo{person}{Chun Fan}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{{BadPre: Task-agnostic Backdoor Attacks to Pre-trained {NLP} Foundation Models}}. In \bibinfo{booktitle}{\emph{{International Conference on Learning Representations (ICLR)}}}.
+\newblock
+
+
+\bibitem[Chen et~al\mbox{.}(2021)]%
+        {CSBMSWZ21}
+\bibfield{author}{\bibinfo{person}{Xiaoyi Chen}, \bibinfo{person}{Ahmed Salem}, \bibinfo{person}{Michael Backes}, \bibinfo{person}{Shiqing Ma}, \bibinfo{person}{Qingni Shen}, \bibinfo{person}{Zhonghai Wu}, {and} \bibinfo{person}{Yang Zhang}.} \bibinfo{year}{2021}\natexlab{}.
+\newblock \showarticletitle{{BadNL: Backdoor Attacks Against NLP Models with Semantic-preserving Improvements}}. In \bibinfo{booktitle}{\emph{{Annual Computer Security Applications Conference (ACSAC)}}}. \bibinfo{publisher}{ACSAC}, \bibinfo{pages}{554--569}.
+\newblock
+
+
+\bibitem[Fernandez et~al\mbox{.}(2024)]%
+        {FCFD24}
+\bibfield{author}{\bibinfo{person}{Pierre Fernandez}, \bibinfo{person}{Guillaume Couairon}, \bibinfo{person}{Teddy Furon}, {and} \bibinfo{person}{Matthijs Douze}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Functional Invariants to Watermark Large Transformers}.
+\newblock
+\showeprint[arxiv]{2310.11446}~[cs.CR]
+
+
+\bibitem[Gu et~al\mbox{.}(2023)]%
+        {GHZ23}
+\bibfield{author}{\bibinfo{person}{Chenxi Gu}, \bibinfo{person}{Chengsong Huang}, \bibinfo{person}{Xiaoqing Zheng}, \bibinfo{person}{Kai-Wei Chang}, {and} \bibinfo{person}{Cho-Jui Hsieh}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Watermarking Pre-trained Language Models with Backdooring}.
+\newblock
+\showeprint[arxiv]{2210.07543}~[cs.CL]
+
+
+\bibitem[Hendrycks et~al\mbox{.}(2021a)]%
+        {HBBCLSS21}
+\bibfield{author}{\bibinfo{person}{Dan Hendrycks}, \bibinfo{person}{Collin Burns}, \bibinfo{person}{Steven Basart}, \bibinfo{person}{Andrew Critch}, \bibinfo{person}{Jerry Li}, \bibinfo{person}{Dawn Song}, {and} \bibinfo{person}{Jacob Steinhardt}.} \bibinfo{year}{2021}\natexlab{a}.
+\newblock \showarticletitle{Aligning AI With Shared Human Values}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the International Conference on Learning Representations (ICLR)}} (\bibinfo{year}{2021}).
+\newblock
+
+
+\bibitem[Hendrycks et~al\mbox{.}(2021b)]%
+        {HBBZMSS21}
+\bibfield{author}{\bibinfo{person}{Dan Hendrycks}, \bibinfo{person}{Collin Burns}, \bibinfo{person}{Steven Basart}, \bibinfo{person}{Andy Zou}, \bibinfo{person}{Mantas Mazeika}, \bibinfo{person}{Dawn Song}, {and} \bibinfo{person}{Jacob Steinhardt}.} \bibinfo{year}{2021}\natexlab{b}.
+\newblock \showarticletitle{Measuring Massive Multitask Language Understanding}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the International Conference on Learning Representations (ICLR)}} (\bibinfo{year}{2021}).
+\newblock
+
+
+\bibitem[Hubinger et~al\mbox{.}(2024)]%
+        {SleeperAgents2024}
+\bibfield{author}{\bibinfo{person}{Evan Hubinger}, \bibinfo{person}{Carson Denison}, \bibinfo{person}{Jesse Mu}, \bibinfo{person}{Mike Lambert}, \bibinfo{person}{Meg Tong}, \bibinfo{person}{Monte MacDiarmid}, \bibinfo{person}{Tamera Lanham}, \bibinfo{person}{Daniel~M. Ziegler}, \bibinfo{person}{Tim Maxwell}, \bibinfo{person}{Newton Cheng}, \bibinfo{person}{Adam Jermyn}, \bibinfo{person}{Amanda Askell}, \bibinfo{person}{Ansh Radhakrishnan}, \bibinfo{person}{Cem Anil}, \bibinfo{person}{David Duvenaud}, \bibinfo{person}{Deep Ganguli}, \bibinfo{person}{Fazl Barez}, \bibinfo{person}{Jack Clark}, \bibinfo{person}{Kamal Ndousse}, \bibinfo{person}{Kshitij Sachan}, \bibinfo{person}{Michael Sellitto}, \bibinfo{person}{Mrinank Sharma}, \bibinfo{person}{Nova DasSarma}, \bibinfo{person}{Roger Grosse}, \bibinfo{person}{Shauna Kravec}, \bibinfo{person}{Yuntao Bai}, \bibinfo{person}{Zachary Witten}, \bibinfo{person}{Marina Favaro}, \bibinfo{person}{Jan Brauner}, \bibinfo{person}{Holden Karnofsky}, \bibinfo{person}{Paul
+  Christiano}, \bibinfo{person}{Samuel~R. Bowman}, \bibinfo{person}{Logan Graham}, \bibinfo{person}{Jared Kaplan}, \bibinfo{person}{Sören Mindermann}, \bibinfo{person}{Ryan Greenblatt}, \bibinfo{person}{Buck Shlegeris}, \bibinfo{person}{Nicholas Schiefer}, {and} \bibinfo{person}{Ethan Perez}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Sleeper Agents: Training Deceptive LLMs that Persist Through Safety Training}.
+\newblock
+\showeprint[arxiv]{2401.05566}~[cs.CR]
+
+
+\bibitem[Kandpal et~al\mbox{.}(2023)]%
+        {KJTC23}
+\bibfield{author}{\bibinfo{person}{Nikhil Kandpal}, \bibinfo{person}{Matthew Jagielski}, \bibinfo{person}{Florian Tramèr}, {and} \bibinfo{person}{Nicholas Carlini}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Backdoor Attacks for In-Context Learning with Language Models}.
+\newblock  (\bibinfo{year}{2023}).
+\newblock
+\showeprint[arxiv]{2307.14692}~[cs.CR]
+
+
+\bibitem[Li et~al\mbox{.}(2023a)]%
+        {LCLDZL23}
+\bibfield{author}{\bibinfo{person}{Peixuan Li}, \bibinfo{person}{Pengzhou Cheng}, \bibinfo{person}{Fangqi Li}, \bibinfo{person}{Wei Du}, \bibinfo{person}{Haodong Zhao}, {and} \bibinfo{person}{Gongshen Liu}.} \bibinfo{year}{2023}\natexlab{a}.
+\newblock \showarticletitle{PLMmark: A Secure and Robust Black-Box Watermarking Framework for Pre-trained Language Models}.
+\newblock \bibinfo{journal}{\emph{Proceedings of the AAAI Conference on Artificial Intelligence}} \bibinfo{volume}{37}, \bibinfo{number}{12} (\bibinfo{date}{Jun.} \bibinfo{year}{2023}), \bibinfo{pages}{14991--14999}.
+\newblock
+\href{https://doi.org/10.1609/aaai.v37i12.26750}{doi:\nolinkurl{10.1609/aaai.v37i12.26750}}
+
+
+\bibitem[Li et~al\mbox{.}(2023b)]%
+        {LLZDJZ23}
+\bibfield{author}{\bibinfo{person}{Yunxiang Li}, \bibinfo{person}{Zihan Li}, \bibinfo{person}{Kai Zhang}, \bibinfo{person}{Ruilong Dan}, \bibinfo{person}{Steve Jiang}, {and} \bibinfo{person}{You Zhang}.} \bibinfo{year}{2023}\natexlab{b}.
+\newblock \bibinfo{title}{ChatDoctor: A Medical Chat Model Fine-Tuned on a Large Language Model Meta-AI (LLaMA) Using Medical Domain Knowledge}.
+\newblock
+\showeprint[arxiv]{2303.14070}~[cs.CL]
+
+
+\bibitem[Lin et~al\mbox{.}(2022)]%
+        {LHE22}
+\bibfield{author}{\bibinfo{person}{Stephanie Lin}, \bibinfo{person}{Jacob Hilton}, {and} \bibinfo{person}{Owain Evans}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \bibinfo{title}{TruthfulQA: Measuring How Models Mimic Human Falsehoods}.
+\newblock
+\showeprint[arxiv]{2109.07958}~[cs.CL]
+
+
+\bibitem[Pan et~al\mbox{.}(2022)]%
+        {PZSZY22}
+\bibfield{author}{\bibinfo{person}{Xudong Pan}, \bibinfo{person}{Mi Zhang}, \bibinfo{person}{Beina Sheng}, \bibinfo{person}{Jiaming Zhu}, {and} \bibinfo{person}{Min Yang}.} \bibinfo{year}{2022}\natexlab{}.
+\newblock \showarticletitle{{Hidden Trigger Backdoor Attack on {NLP} Models via Linguistic Style Manipulation}}. In \bibinfo{booktitle}{\emph{{USENIX Security Symposium (USENIX Security)}}}. \bibinfo{publisher}{USENIX}, \bibinfo{pages}{3611--3628}.
+\newblock
+
+
+\bibitem[Sakaguchi et~al\mbox{.}(2019)]%
+        {SLBC19}
+\bibfield{author}{\bibinfo{person}{Keisuke Sakaguchi}, \bibinfo{person}{Ronan~Le Bras}, \bibinfo{person}{Chandra Bhagavatula}, {and} \bibinfo{person}{Yejin Choi}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \bibinfo{title}{WinoGrande: An Adversarial Winograd Schema Challenge at Scale}.
+\newblock
+\showeprint[arxiv]{1907.10641}~[cs.CL]
+
+
+\bibitem[Taori et~al\mbox{.}(2023)]%
+        {TGZDLGLB23}
+\bibfield{author}{\bibinfo{person}{Rohan Taori}, \bibinfo{person}{Ishaan Gulrajani}, \bibinfo{person}{Tianyi Zhang}, \bibinfo{person}{Yann Dubois}, \bibinfo{person}{Xuechen Li}, \bibinfo{person}{Carlos Guestrin}, \bibinfo{person}{Percy Liang}, {and} \bibinfo{person}{Tatsunori~B. Hashimoto}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \bibinfo{title}{Stanford Alpaca: An Instruction-following LLaMA model}.
+\newblock \bibinfo{howpublished}{\url{https://github.com/tatsu-lab/stanford_alpaca}}.
+\newblock
+
+
+\bibitem[Wen et~al\mbox{.}(2023)]%
+        {WWBZS23}
+\bibfield{author}{\bibinfo{person}{Rui Wen}, \bibinfo{person}{Tianhao Wang}, \bibinfo{person}{Michael Backes}, \bibinfo{person}{Yang Zhang}, {and} \bibinfo{person}{Ahmed Salem}.} \bibinfo{year}{2023}\natexlab{}.
+\newblock \showarticletitle{Last One Standing: A Comparative Analysis of Security and Privacy of Soft Prompt Tuning, LoRA, and In-Context Learning}.
+\newblock  (\bibinfo{year}{2023}).
+\newblock
+\showeprint[arxiv]{2310.11397}~[cs.CR]
+
+
+\bibitem[Xu et~al\mbox{.}(2024)]%
+        {XWMKXC24}
+\bibfield{author}{\bibinfo{person}{Jiashu Xu}, \bibinfo{person}{Fei Wang}, \bibinfo{person}{Mingyu~Derek Ma}, \bibinfo{person}{Pang~Wei Koh}, \bibinfo{person}{Chaowei Xiao}, {and} \bibinfo{person}{Muhao Chen}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Instructional Fingerprinting of Large Language Models}.
+\newblock
+\showeprint[arxiv]{2401.12255}~[cs.CR]
+
+
+\bibitem[Zellers et~al\mbox{.}(2019)]%
+        {ZHBFC19}
+\bibfield{author}{\bibinfo{person}{Rowan Zellers}, \bibinfo{person}{Ari Holtzman}, \bibinfo{person}{Yonatan Bisk}, \bibinfo{person}{Ali Farhadi}, {and} \bibinfo{person}{Yejin Choi}.} \bibinfo{year}{2019}\natexlab{}.
+\newblock \showarticletitle{HellaSwag: Can a Machine Really Finish Your Sentence?}. In \bibinfo{booktitle}{\emph{Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics}}.
+\newblock
+
+
+\bibitem[Zeng et~al\mbox{.}(2024)]%
+        {ZZWL24}
+\bibfield{author}{\bibinfo{person}{Boyi Zeng}, \bibinfo{person}{Chenghu Zhou}, \bibinfo{person}{Xinbing Wang}, {and} \bibinfo{person}{Zhouhan Lin}.} \bibinfo{year}{2024}\natexlab{}.
+\newblock \bibinfo{title}{Human-Readable Fingerprint for Large Language Models}.
+\newblock
+\showeprint[arxiv]{2312.04828}~[cs.CL]
+
+
+\end{thebibliography}

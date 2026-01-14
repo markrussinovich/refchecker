@@ -554,11 +554,43 @@ export const useHistoryStore = create((set, get) => ({
       logger.info('HistoryStore', `Deleting check ${id}`)
       await api.deleteCheck(id)
       
-      set(state => ({
-        history: state.history.filter(h => h.id !== id),
-        selectedCheckId: state.selectedCheckId === id ? null : state.selectedCheckId,
-        selectedCheck: state.selectedCheck?.id === id ? null : state.selectedCheck
-      }))
+      set(state => {
+        const newHistory = state.history.filter(h => h.id !== id)
+        const wasSelected = state.selectedCheckId === id
+        
+        // If the deleted item was selected, try to select the next most recent item
+        // but only if there's no "New refcheck" placeholder (id=-1) in the list
+        let newSelectedCheckId = wasSelected ? null : state.selectedCheckId
+        let newSelectedCheck = wasSelected ? null : state.selectedCheck
+        
+        if (wasSelected && newHistory.length > 0) {
+          const hasPlaceholder = newHistory.some(h => h.id === -1)
+          if (!hasPlaceholder) {
+            // Select the first (most recent) item
+            const nextItem = newHistory[0]
+            newSelectedCheckId = nextItem.id
+            newSelectedCheck = nextItem
+          }
+        }
+        
+        return {
+          history: newHistory,
+          selectedCheckId: newSelectedCheckId,
+          selectedCheck: newSelectedCheck
+        }
+      })
+      
+      // If a new check was auto-selected, fetch its full details
+      const state = get()
+      if (state.selectedCheckId && state.selectedCheckId !== id) {
+        // Fetch full details for the auto-selected check
+        try {
+          const response = await api.getCheck(state.selectedCheckId)
+          set({ selectedCheck: response.data })
+        } catch (error) {
+          logger.error('HistoryStore', 'Failed to fetch auto-selected check details', error)
+        }
+      }
       
       logger.info('HistoryStore', 'Check deleted')
     } catch (error) {
