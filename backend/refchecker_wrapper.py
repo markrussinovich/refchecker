@@ -387,6 +387,9 @@ class ProgressRefChecker:
                 
                 # Fall back to PDF extraction if no references from source files
                 if not arxiv_source_references:
+                    # PDF extraction requires LLM for reliable reference extraction
+                    if not self.llm:
+                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings or provide a paper with BibTeX/LaTeX source files.")
                     extraction_method = 'pdf'
                     # Download PDF - run in thread (use cross-platform temp directory)
                     pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
@@ -408,6 +411,9 @@ class ProgressRefChecker:
                 # Note: paper_title is already set to the original filename in main.py
                 # so we don't update it here
                 if paper_source.lower().endswith('.pdf'):
+                    # PDF extraction requires LLM for reliable reference extraction
+                    if not self.llm:
+                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                 elif paper_source.lower().endswith(('.tex', '.txt')):
