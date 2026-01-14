@@ -792,6 +792,9 @@ def normalize_paper_title(title: str) -> str:
     # Strip LaTeX commands first to handle math formatting consistently
     normalized = strip_latex_commands(title)
     
+    # Normalize diacritics (ü -> u, é -> e, etc.) for consistent comparison
+    normalized = normalize_diacritics(normalized)
+    
     # Convert to lowercase
     normalized = normalized.lower()
     

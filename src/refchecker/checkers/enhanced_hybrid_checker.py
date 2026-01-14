@@ -548,10 +548,9 @@ class EnhancedHybridReferenceChecker:
         if self.semantic_scholar:
             return self.semantic_scholar.normalize_paper_title(title)
         else:
-            # Basic normalization if Semantic Scholar is not available
-            import re
-            title = re.sub(r'\s+', ' ', title.strip().lower())
-            return re.sub(r'[^\w\s]', '', title)
+            # Use the centralized normalization function from text_utils
+            from refchecker.utils.text_utils import normalize_paper_title as normalize_title
+            return normalize_title(title)
     
     def compare_authors(self, cited_authors: List[str], correct_authors: List[Any]) -> Tuple[bool, str]:
         """
