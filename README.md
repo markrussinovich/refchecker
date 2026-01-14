@@ -115,6 +115,8 @@ Learn about RefChecker's design philosophy and development process in this detai
 
 RefChecker also includes a modern web interface with real-time progress updates, check history, and export options.
 
+![RefChecker Web UI](assets/webui.png)
+
 ### Prerequisites
 
 - **Python 3.8+** with RefChecker installed (`pip install academic-refchecker[webui]`)
