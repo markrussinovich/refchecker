@@ -117,18 +117,45 @@ RefChecker also includes a modern web interface with real-time progress updates,
 
 ![RefChecker Web UI](assets/webui.png)
 
-### Prerequisites
+### Option 1: Install from PyPI (Recommended)
 
-- **Python 3.8+** with RefChecker installed (`pip install academic-refchecker[webui]`)
-- **Node.js 18+** and npm
-
-### Quick Start (Web UI)
+The simplest way to run the Web UI is using the pip-installed package:
 
 ```bash
-# Install Python dependencies (if not already done)
+# Install RefChecker with Web UI support
 pip install academic-refchecker[llm,webui]
 
-# Install Node.js dependencies
+# Start the web server
+refchecker-webui
+```
+
+Then open **http://localhost:8000** in your browser.
+
+The `refchecker-webui` command starts a complete web server with both the API backend and the pre-built frontend.
+
+**Options:**
+```bash
+refchecker-webui --port 8080      # Use a different port
+refchecker-webui --host 0.0.0.0   # Allow external connections
+```
+
+### Option 2: Run from Cloned Repository (Development)
+
+If you're developing or modifying the Web UI:
+
+**Prerequisites:**
+- **Python 3.8+** with dependencies installed
+- **Node.js 18+** and npm
+
+```bash
+# Clone the repository
+git clone https://github.com/markrussinovich/refchecker.git
+cd refchecker
+
+# Install Python dependencies
+pip install -e ".[llm,webui]"
+
+# Install and run the frontend development server
 cd web-ui
 npm install    # First time only
 npm start      # Starts both backend and frontend
@@ -136,15 +163,14 @@ npm start      # Starts both backend and frontend
 
 Then open **http://localhost:5173** in your browser.
 
-### Alternative: Start Servers Separately
+**Alternative: Start Servers Separately**
 
-**Terminal 1 - Backend:**
+*Terminal 1 - Backend:*
 ```bash
-refchecker-webui --port 8000
-# Or: python -m uvicorn backend.main:app --port 8000
+python -m uvicorn backend.main:app --reload --port 8000
 ```
 
-**Terminal 2 - Frontend:**
+*Terminal 2 - Frontend:*
 ```bash
 cd web-ui
 npm run dev

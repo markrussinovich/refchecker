@@ -17,43 +17,66 @@ A modern, real-time web interface for validating academic paper references.
 
 ## Quick Start
 
-### Prerequisites
+### Option 1: Pip Install (Recommended)
 
-- **Python 3.8+** with RefChecker installed:
-  ```bash
-  pip install academic-refchecker[llm,webui]
-  ```
-- **Node.js 18+** and npm
-- **LLM API Key** (Anthropic or OpenAI recommended)
-
-### One-Command Launch
+The simplest way to run the Web UI:
 
 ```bash
+# Install RefChecker with Web UI support
+pip install academic-refchecker[llm,webui]
+
+# Start the web server
+refchecker-webui
+```
+
+Then open **http://localhost:8000** in your browser.
+
+The `refchecker-webui` command runs both the backend API and serves the pre-built frontend.
+
+**Command-line options:**
+```bash
+refchecker-webui --port 8080      # Use a different port
+refchecker-webui --host 0.0.0.0   # Allow external connections
+```
+
+### Option 2: Development Mode (Cloned Repository)
+
+For development or modifying the Web UI:
+
+**Prerequisites:**
+- Python 3.8+ with dependencies installed
+- Node.js 18+ and npm
+- LLM API Key (Anthropic or OpenAI recommended)
+
+```bash
+# From the repository root, install Python dependencies
+pip install -e ".[llm,webui]"
+
+# Install Node.js dependencies and start both servers
 cd web-ui
 npm install    # First time only
 npm start      # Starts both backend and frontend
 ```
-
-Options:
-- `npm start` - Start servers (skips if already running)
-- `npm run restart` - Kill existing servers and restart fresh
 
 This will:
 1. Start the FastAPI backend on **http://localhost:8000**
 2. Start the Vite frontend on **http://localhost:5173**
 3. Open your browser to the web interface
 
-### Manual Launch
+**Options:**
+- `npm start` - Start servers (skips if already running)
+- `npm run restart` - Kill existing servers and restart fresh
+
+### Manual Server Launch (Development)
 
 If you prefer to run servers separately:
 
-**Terminal 1 - Backend:**
+*Terminal 1 - Backend:*
 ```bash
-cd backend
-python main.py
+python -m uvicorn backend.main:app --reload --port 8000
 ```
 
-**Terminal 2 - Frontend:**
+*Terminal 2 - Frontend:*
 ```bash
 cd web-ui
 npm run dev

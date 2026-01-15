@@ -145,25 +145,26 @@ refchecker/
 
 ## 🚀 How to Run
 
-### Terminal 1: Backend
+### Option 1: Pip Install (Recommended)
+
 ```bash
-cd refchecker
-.venv\Scripts\activate
-cd backend
-python main.py
+pip install academic-refchecker[llm,webui]
+refchecker-webui
 ```
 Running at: http://localhost:8000
 
-### Terminal 2: Frontend
+### Option 2: Development Mode (Cloned Repository)
+
 ```bash
-cd refchecker/web-ui
-npm run dev
+cd web-ui
+npm install    # First time only
+npm start      # Starts both backend and frontend
 ```
 Running at: http://localhost:5173
 
-### Testing (Optional)
+### Testing (Development Only)
 ```bash
-cd refchecker/web-ui
+cd web-ui
 npx playwright test
 ```
 

@@ -1,87 +1,101 @@
 # RefChecker Web UI - Quick Start
 
-## ⚡ Fast Start (Windows)
+## ⚡ Option 1: Pip Install (Recommended)
 
-### Option 1: One-Click Startup
-```cmd
-start_webui.bat
+The simplest way to run RefChecker Web UI:
+
+```bash
+# Install RefChecker with all features
+pip install academic-refchecker[llm,webui]
+
+# Start the web server
+refchecker-webui
 ```
 
-### Option 2: Manual Startup
+Then open **http://localhost:8000** in your browser.
 
-**Terminal 1 - Backend:**
-```cmd
-cd backend
-..\.venv\Scripts\python.exe main.py
+**Optional environment variables:**
+```bash
+# Set API keys for LLM and faster verification
+export ANTHROPIC_API_KEY=your_key_here          # or OPENAI_API_KEY
+export SEMANTIC_SCHOLAR_API_KEY=your_key_here   # Optional, 5x faster
 ```
 
-**Terminal 2 - Frontend:**
+---
+
+## 🛠️ Option 2: Run from Cloned Repository (Development)
+
+For development or if you've cloned the repository:
+
+### Windows
 ```cmd
+cd web-ui
+npm install
+npm start
+```
+
+### macOS/Linux
+```bash
+cd web-ui
+npm install
+npm start
+```
+
+Then open **http://localhost:5173** in your browser.
+
+### Alternative: Start Servers Separately
+
+*Terminal 1 - Backend:*
+```bash
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+*Terminal 2 - Frontend:*
+```bash
 cd web-ui
 npm run dev
 ```
 
-Then open: **http://localhost:5173**
-
 ---
 
-## 🧪 Testing
+## 🧪 Testing (Development Only)
 
-```cmd
+```bash
 cd web-ui
 npx playwright test
 ```
 
 ---
 
-## 📝 Environment Setup
+## ✅ Verify Server is Running
 
-Make sure `ANTHROPIC_API_KEY` is set:
-
-```cmd
-set ANTHROPIC_API_KEY=your_api_key_here
+```bash
+curl http://localhost:8000/
 ```
 
----
-
-## ✅ Verify Backend is Running
-
-```cmd
-curl http://localhost:8000/api/health
-```
-
-Should return: `{"status":"healthy"}`
+Should return the web interface or API info.
 
 ---
 
 ## 📚 Try It Out
 
-1. Open **http://localhost:5173**
+1. Open the web UI in your browser
 2. Enter ArXiv ID: **1706.03762**
 3. Click "Check References"
 4. Watch real-time validation!
 
 ---
 
-## 📖 Full Documentation
-
-- **README_WEBUI.md** - Complete user guide
-- **WEBUI_IMPLEMENTATION.md** - Technical details
-- **WEBUI_COMPLETE.md** - Project summary
-
----
-
 ## 🐛 Troubleshooting
 
 **Backend won't start?**
-- Check ANTHROPIC_API_KEY is set
-- Make sure .venv is activated
-- Verify Python 3.7+ is installed
+- Check that you have an LLM API key set (ANTHROPIC_API_KEY or OPENAI_API_KEY)
+- Verify Python 3.8+ is installed
 
-**Frontend won't start?**
+**Frontend won't start? (development mode)**
 - Run `npm install` in web-ui directory
 - Check Node.js version: `node --version` (need 18+)
 
 **Can't connect?**
-- Ensure backend shows: "Uvicorn running on http://0.0.0.0:8000"
-- Check firewall isn't blocking ports 5173 or 8000
+- Check firewall isn't blocking port 8000 (or 5173 for development mode)
+- Verify the server is running

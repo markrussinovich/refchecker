@@ -83,21 +83,35 @@ refchecker/
 
 ## Running the Application
 
-### Backend
+### Option 1: Pip Install (Recommended)
 ```bash
-cd refchecker
-.venv\Scripts\activate
-cd backend
-uvicorn main:app --reload --port 8000
+pip install academic-refchecker[llm,webui]
+refchecker-webui
+```
+Access at: http://localhost:8000
+
+### Option 2: Development Mode (Cloned Repository)
+
+**One-Command Launch:**
+```bash
+cd web-ui
+npm install    # First time only
+npm start      # Starts both backend and frontend
+```
+Access at: http://localhost:5173
+
+**Manual Launch (Development):**
+
+*Terminal 1 - Backend:*
+```bash
+python -m uvicorn backend.main:app --reload --port 8000
 ```
 
-### Frontend
+*Terminal 2 - Frontend:*
 ```bash
-cd refchecker/web-ui
+cd web-ui
 npm run dev
 ```
-
-Access at: http://localhost:5173
 
 ## Key Features
 
