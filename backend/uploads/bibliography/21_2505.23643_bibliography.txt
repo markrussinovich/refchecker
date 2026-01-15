@@ -1,0 +1,265 @@
+\begin{thebibliography}{10}
+
+\bibitem{TaskTracker}
+Sahar Abdelnabi, Aideen Fay, Giovanni Cherubin, Ahmed Salem, and Mario Fritz.
+\newblock Get my drift? catching llm task drift with activation deltas.
+\newblock In {\em {IEEE} Conference on Secure and Trustworthy Machine Learning,
+  SaTML 2025}. IEEE, 2025.
+
+\bibitem{guidance2025}
+Guidance AI.
+\newblock Guidance: A guidance language for controlling large language models.
+\newblock \url{https://github.com/guidance-ai/guidance}, 2025.
+\newblock Accessed: 2025-04-12.
+
+\bibitem{computer_use}
+Anthropic.
+\newblock {C}omputer {U}se (beta).
+\newblock
+  \url{https://docs.anthropic.com/en/docs/agents-and-tools/computer-use}, 2024.
+
+\bibitem{ayub2024embedding}
+Md.~Ahsan Ayub and Subhabrata Majumdar.
+\newblock Embedding-based classifiers can detect prompt injection attacks.
+\newblock In {\em Conference on Applied Machine Learning in Information
+  Security {(CAMLIS} 2024)}, volume 3920 of {\em {CEUR} Workshop Proceedings},
+  pages 257--268. CEUR-WS.org, 2024.
+
+\bibitem{balunovic2024ai}
+Mislav Balunovic, Luca Beurer-Kellner, Marc Fischer, and Martin Vechev.
+\newblock {AI} agents with formal security guarantees.
+\newblock In {\em ICML 2024 Next Generation of AI Safety Workshop}, 2024.
+
+\bibitem{beurerkellner2024guidingllmsrightway}
+Luca Beurer-Kellner, Marc Fischer, and Martin Vechev.
+\newblock Guiding llms the right way: Fast, non-invasive constrained
+  generation, 2024.
+
+\bibitem{langchain}
+Harrison Chase.
+\newblock {L}ang{C}hain, 2022.
+
+\bibitem{chen2025struq}
+Sizhe Chen, Julien Piet, Chawin Sitawarin, and David Wagner.
+\newblock {S}tru{Q}: Defending against prompt injection with structured
+  queries.
+\newblock In {\em 34th USENIX Security Symposium (USENIX Security '25)}, 2025.
+\newblock To appear.
+
+\bibitem{chen2025secalign}
+Sizhe Chen, Arman Zharmagambetov, Saeed Mahloujifar, Kamalika Chaudhuri, David
+  Wagner, and Chuan Guo.
+\newblock Secalign: Defending against prompt injection with preference
+  optimization, 2025.
+
+\bibitem{debenedetti2025caml}
+Edoardo Debenedetti, Ilia Shumailov, Tianqi Fan, Jamie Hayes, Nicholas Carlini,
+  Daniel Fabian, Christoph Kern, Chongyang Shi, Andreas Terzis, and Florian
+  Tramèr.
+\newblock Defeating prompt injections by design, 2025.
+
+\bibitem{agentdojo24}
+Edoardo Debenedetti, Jie Zhang, Mislav Balunović, Luca Beurer-Kellner, Marc
+  Fischer, and Florian Tramèr.
+\newblock Agentdojo: A dynamic environment to evaluate prompt injection attacks
+  and defenses for llm agents, 2024.
+
+\bibitem{denning1976lattice}
+Dorothy~E Denning.
+\newblock A lattice model of secure information flow.
+\newblock {\em Communications of the ACM}, 19(5):236--243, 1976.
+
+\bibitem{magenticone}
+Adam Fourney, Gagan Bansal, Hussein Mozannar, Cheng Tan, Eduardo Salinas,
+  Erkang, Zhu, Friederike Niedtner, Grace Proebsting, Griffin Bassman, Jack
+  Gerrits, Jacob Alber, Peter Chang, Ricky Loynd, Robert West, Victor Dibia,
+  Ahmed Awadallah, Ece Kamar, Rafah Hosn, and Saleema Amershi.
+\newblock {M}agentic-{O}ne: A generalist multi-agent system for solving complex
+  tasks, 2024.
+
+\bibitem{geng2023grammar}
+Saibo Geng, Martin Josifoski, Maxime Peyrard, and Robert West.
+\newblock Grammar-constrained decoding for structured nlp tasks without
+  finetuning.
+\newblock In {\em 2023 Conference on Empirical Methods in Natural Language
+  Processing, EMNLP 2023}, pages 10932--10952, 2023.
+
+\bibitem{goguen1982security}
+Joseph~A Goguen and Jos{\'e} Meseguer.
+\newblock Security policies and security models.
+\newblock In {\em 1982 IEEE Symposium on Security and Privacy}, pages 11--11.
+  IEEE, 1982.
+
+\bibitem{greshake2023youve}
+Kai Greshake, Sahar Abdelnabi, Shailesh Mishra, Christoph Endres, Thorsten
+  Holz, and Mario Fritz.
+\newblock Not what you've signed up for: Compromising real-world
+  {LLM}-integrated applications with indirect prompt injection, 2023.
+
+\bibitem{spotlighting}
+Keegan Hines, Gary Lopez, Matthew Hall, Federico Zarfati, Yonatan Zunger, and
+  Emre Kiciman.
+\newblock Defending against indirect prompt injection attacks with
+  spotlighting.
+\newblock In {\em Conference on Applied Machine Learning in Information
+  Security {(CAMLIS} 2024)}, volume 3920 of {\em {CEUR} Workshop Proceedings},
+  pages 48--62. CEUR-WS.org, 2024.
+
+\bibitem{jia2024taskshield}
+Feiran Jia, Tong Wu, Xin Qin, and Anna Squicciarini.
+\newblock The task shield: Enforcing task alignment to defend against indirect
+  prompt injection in llm agents, 2024.
+
+\bibitem{devin2024}
+Cognition Labs.
+\newblock {D}evin: The first {AI} software engineer.
+\newblock \url{https://www.cognition-labs.com/}, 2024.
+
+\bibitem{liu2023prompt}
+Yi~Liu, Gelei Deng, Yuekang Li, Kailong Wang, Zihao Wang, Xiaofeng Wang,
+  Tianwei Zhang, Yepang Liu, Haoyu Wang, Yan Zheng, and Yang Liu.
+\newblock Prompt injection attack against {LLM}-integrated applications, 2023.
+
+\bibitem{liu2024formalizing}
+Yupei Liu, Yuqi Jia, Runpeng Geng, Jinyuan Jia, and Neil~Zhenqiang Gong.
+\newblock Formalizing and benchmarking prompt injection attacks and defenses.
+\newblock In {\em 33rd USENIX Security Symposium (USENIX Security 24)}, pages
+  1831--1847. USENIX Association, 2024.
+
+\bibitem{myers97dlm}
+Andrew~C. Myers and Barbara Liskov.
+\newblock A decentralized model for information flow control.
+\newblock In {\em 16th ACM Symposium on Operating Systems Principles, SOSP
+  '97}, page 129–142. ACM, 1997.
+
+\bibitem{myers2004enforcing}
+Andrew~C Myers, Andrei Sabelfeld, and Steve Zdancewic.
+\newblock Enforcing robust declassification.
+\newblock In {\em 17th IEEE Computer Security Foundations Workshop, CSF'2004},
+  pages 172--186. IEEE, 2004.
+
+\bibitem{openai_agents_sdk}
+OpenAI.
+\newblock Openai agents sdk.
+\newblock \url{https://openai.github.io/openai-agents-python/}, 2024.
+
+\bibitem{rlhf}
+Long Ouyang, Jeff Wu, Xu~Jiang, Diogo Almeida, Carroll~L. Wainwright, Pamela
+  Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John
+  Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda
+  Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe.
+\newblock Training language models to follow instructions with human feedback.
+\newblock In {\em Advances in Neural Information Processing Systems},
+  volume~35, pages 27730--27744. Curran Associates, Inc., 2022.
+
+\bibitem{sabelfeld2003language}
+Andrei Sabelfeld and Andrew~C Myers.
+\newblock Language-based information-flow security.
+\newblock {\em IEEE J. on Selected Areas in Communications}, 21(1):5--19, 2003.
+
+\bibitem{schick2023toolformer}
+Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, Maria Lomeli,
+  Eric Hambro, Luke Zettlemoyer, Nicola Cancedda, and Thomas Scialom.
+\newblock Toolformer: Language models can teach themselves to use tools.
+\newblock In {\em Advances in Neural Information Processing Systems},
+  volume~36, pages 68539--68551. Curran Associates, Inc., 2023.
+
+\bibitem{explicitsecrecy}
+Daniel Schoepe, Musard Balliu, Benjamin~C. Pierce, and Andrei Sabelfeld.
+\newblock Explicit secrecy: A policy for taint tracking.
+\newblock In {\em 2016 IEEE European Symposium on Security and Privacy}, pages
+  15--30. IEEE, 2016.
+
+\bibitem{siddiqui2024labelprop}
+Shoaib~Ahmed Siddiqui, Radhika Gaonkar, Boris Köpf, David Krueger, Andrew
+  Paverd, Ahmed Salem, Shruti Tople, Lukas Wutschitz, Menglin Xia, and Santiago
+  Zanella-Béguelin.
+\newblock Permissive information-flow analysis for large language models, 2024.
+
+\bibitem{Volpano1999}
+Dennis Volpano.
+\newblock Safety versus secrecy.
+\newblock In {\em Static Analysis (SAS 1999)}, volume 1694 of {\em Lecture
+  Notes in Computer Science}, pages 303--311. Springer, 1999.
+
+\bibitem{wallace2024hierarchy}
+Eric Wallace, Kai Xiao, Reimar Leike, Lilian Weng, Johannes Heidecke, and Alex
+  Beutel.
+\newblock The instruction hierarchy: Training {LLM}s to prioritize privileged
+  instructions, 2024.
+
+\bibitem{dualLLM2023}
+Simon Willison.
+\newblock The dual {LLM} pattern for building ai assistants that can resist
+  prompt injection.
+\newblock Online: \url{https://simonwillison.net/2023/Apr/25/dual-llm-pattern},
+  April 2023.
+
+\bibitem{wu2024systemleveldefenseindirectprompt}
+Fangzhou Wu, Ethan Cecchetti, and Chaowei Xiao.
+\newblock System-level defense against indirect prompt injection attacks: An
+  information flow control perspective, 2024.
+
+\bibitem{autogen}
+Qingyun Wu, Gagan Bansal, Jieyu Zhang, Yiran Wu, Beibin Li, Erkang Zhu,
+  Li~Jiang, Xiaoyun Zhang, Shaokun Zhang, Jiale Liu, Ahmed~Hassan Awadallah,
+  Ryen~W White, Doug Burger, and Chi Wang.
+\newblock {A}uto{G}en: Enabling next-gen {LLM} applications via multi-agent
+  conversations.
+\newblock In {\em First Conference on Language Modeling, COLM 2024}, 2024.
+
+\bibitem{wu2025instructional}
+Tong Wu, Shujian Zhang, Kaiqiang Song, Silei Xu, Sanqiang Zhao, Ravi Agrawal,
+  Sathish~Reddy Indurthi, Chong Xiang, Prateek Mittal, and Wenxuan Zhou.
+\newblock Instructional segment embedding: Improving {LLM} safety with
+  instruction hierarchy.
+\newblock In {\em 13th International Conference on Learning Representations},
+  2025.
+
+\bibitem{gradsafe}
+Yueqi Xie, Minghong Fang, Renjie Pi, and Neil Gong.
+\newblock {G}rad{S}afe: Detecting jailbreak prompts for {LLM}s via
+  safety-critical gradient analysis.
+\newblock In {\em 62nd Annual Meeting of the Association for Computational
+  Linguistics (Volume 1: Long Papers)}, pages 507--518. ACL, 2024.
+
+\bibitem{yao2023react}
+Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik~R Narasimhan,
+  and Yuan Cao.
+\newblock React: Synergizing reasoning and acting in language models.
+\newblock In {\em 11th International Conference on Learning Representations},
+  2023.
+
+\bibitem{yi2023benchmarking}
+Jingwei Yi, Yueqi Xie, Bin Zhu, Emre Kiciman, Guangzhong Sun, Xing Xie, and
+  Fangzhao Wu.
+\newblock Benchmarking and defending against indirect prompt injection attacks
+  on large language models, 2023.
+
+\bibitem{zhan2024injecagent}
+Qiusi Zhan, Zhixiang Liang, Zifan Ying, and Daniel Kang.
+\newblock Injecagent: Benchmarking indirect prompt injections in
+  tool-integrated large language model agents.
+\newblock {\em ACL}, 2024.
+
+\bibitem{zhang2025agent}
+Hanrong Zhang, Jingyuan Huang, Kai Mei, Yifei Yao, Zhenting Wang, Chenlu Zhan,
+  Hongwei Wang, and Yongfeng Zhang.
+\newblock Agent security bench (asb): Formalizing and benchmarking attacks and
+  defenses in llm-based agents.
+\newblock {\em ICLR}, 2025.
+
+\bibitem{zhong2025rtbas}
+Peter~Yong Zhong, Siyuan Chen, Ruiqi Wang, McKenna McCall, Ben~L. Titzer,
+  Heather Miller, and Phillip~B. Gibbons.
+\newblock Rtbas: Defending llm agents against prompt injection and privacy
+  leakage, 2025.
+
+\bibitem{circuitbreaking}
+Andy Zou, Long Phan, Justin Wang, Derek Duenas, Maxwell Lin, Maksym
+  Andriushchenko, Rowan Wang, Zico Kolter, Matt Fredrikson, and Dan Hendrycks.
+\newblock Improving alignment and robustness with circuit breakers.
+\newblock In {\em Advances in Neural Information Processing Systems},
+  volume~37, pages 83345--83373. Curran Associates, Inc., 2024.
+
+\end{thebibliography}
