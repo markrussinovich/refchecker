@@ -48,7 +48,7 @@ export default function HistoryItem({ item, isSelected }) {
   const progressPercent = totalRefs > 0 ? Math.min((processedRefs / totalRefs) * 100, 100) : 0
 
   const handleClick = () => {
-    if (!isEditing) {
+    if (!isEditing && !isSelected) {
       logger.info('HistoryItem', `Selecting check ${item.id}`)
       selectCheck(item.id)
     }
