@@ -34,6 +34,11 @@ jobs:
       run: |
         pytest tests/ -v --cov=src --cov-report=term-missing
     
+    - name: Configure git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+    
     - name: Sync version with git tags
       run: |
         # Get the latest git tag
@@ -59,11 +64,6 @@ jobs:
         else
           echo "Version already in sync: $current_version"
         fi
-    
-    - name: Configure git
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
     
     - name: Increment version
       id: increment_version
