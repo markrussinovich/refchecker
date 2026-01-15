@@ -43,8 +43,18 @@ export default function MainPanel() {
     const updateButtonPosition = () => {
       if (contentRef.current) {
         const rect = contentRef.current.getBoundingClientRect()
-        // Position button 12px to the right of the content column
-        setButtonLeft(rect.right + 12)
+        const margin = 12
+        const buttonWidth = 44
+        const viewportWidth = window.innerWidth
+        // Preferred spot: just to the right of the content column
+        let proposedLeft = rect.right + margin
+        // Keep the button visible on narrow viewports by clamping within the viewport
+        const maxLeft = viewportWidth - buttonWidth - margin
+        if (proposedLeft > maxLeft) {
+          // If there's no room outside, overlay inside the content's right edge
+          proposedLeft = Math.max(rect.right - buttonWidth - margin, margin)
+        }
+        setButtonLeft(proposedLeft)
       }
     }
 
