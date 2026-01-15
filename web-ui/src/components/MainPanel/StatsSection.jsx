@@ -227,7 +227,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
             ringColor: 'var(--color-success)',
           }}
-          title="Filter by verified"
+          title={`${refsVerified} reference${refsVerified === 1 ? '' : 's'} fully verified`}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" fill="var(--color-success)" />
@@ -247,7 +247,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
             ringColor: 'var(--color-error)',
           }}
-          title={refsWithErrors > 0 ? 'Filter by errors' : 'No errors'}
+          title={refsWithErrors > 0 ? `${refsWithErrors} reference${refsWithErrors === 1 ? '' : 's'} with errors` : 'No references with errors'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
@@ -268,7 +268,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
             ringColor: 'var(--color-warning)',
           }}
-          title={refsWithWarningsOnly > 0 ? 'Filter by warnings' : 'No warnings'}
+          title={refsWithWarningsOnly > 0 ? `${refsWithWarningsOnly} reference${refsWithWarningsOnly === 1 ? '' : 's'} with warnings only` : 'No references with warnings only'}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
             <path d="M12 2L2 20h20L12 2z" fill="var(--color-warning)" />
@@ -289,7 +289,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               backgroundColor: isUnverifiedSelected ? 'var(--color-bg-tertiary)' : 'transparent',
               ringColor: 'var(--color-text-muted)',
             }}
-            title="Filter by unverified"
+            title={`${refsUnverified} reference${refsUnverified === 1 ? '' : 's'} could not be verified`}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
@@ -318,7 +318,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                 borderColor: isSelected ? filter.color : 'var(--color-border)',
                 color: filter.color,
               }}
-              title={`Filter by ${filter.label.toLowerCase()}`}
+              title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
             >
               <span className="font-bold">{filter.value}</span>
               <span>{filter.label}</span>
