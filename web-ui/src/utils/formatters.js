@@ -409,7 +409,8 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
     })
   }
   
-  return lines.join('\n')
+  // Use Markdown line breaks (two trailing spaces) to keep fields on separate, tight lines
+  return lines.join('  \n')
 }
 
 /**

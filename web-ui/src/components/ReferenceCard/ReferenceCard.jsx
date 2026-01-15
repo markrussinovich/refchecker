@@ -385,7 +385,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             <div 
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              <span className="font-bold">Authors:</span> {formatAuthors(reference.authors)}
+              {formatAuthors(reference.authors)}
             </div>
           )}
           
@@ -394,7 +394,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             <div 
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              <span className="font-bold">Venue:</span> {reference.venue}
+              {reference.venue}
             </div>
           )}
           
@@ -403,7 +403,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             <div 
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              <span className="font-bold">Year:</span> {reference.year}
+              {reference.year}
             </div>
           )}
           
