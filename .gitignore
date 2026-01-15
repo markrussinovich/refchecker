@@ -114,6 +114,8 @@ semantic_scholar_db/
 *.log
 *.csv
 *.json
+!web-ui/package.json
+!web-ui/package-lock.json
 refchecker_history.db
 refchecker_history.db-wal
 refchecker_history.db-shm
