@@ -1,0 +1,154 @@
+\begin{thebibliography}{10}
+
+\bibitem{chatGPTMolotov}
+\url{https://chat.openai.com/share/31708d66-c735-46e4-94fd-41f436d4d3e9}.
+
+\bibitem{GeminiUltraMolotov}
+\url{https://gemini.google.com/share/35f0817c3a03}.
+
+\bibitem{first_jailbreak_prompts}
+\url{https://www.lesswrong.com/posts/RYcoJdvmoBbi5Nax7/jailbreaking-chatgpt-on-release-day}.
+
+\bibitem{JailbreakChat}
+\url{https://www.jailbreakchat.com/}.
+
+\bibitem{ACF}
+\url{https://learn.microsoft.com/en-us/python/api/overview/azure/ai-contentsafety-readme?view=azure-python}.
+
+\bibitem{PresAPI}
+\url{https://perspectiveapi.com/}.
+
+\bibitem{ManyShot}
+Cem Anil, Esin Durmus, Mrinank Sharma, Joe Benton, Sandipan Kundu, Joshua Batson, Nina Rimsky, Meg Tong, Jesse Mu, Daniel Ford, et~al.
+\newblock Many-shot jailbreaking.
+
+\bibitem{BKKAK22}
+Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, Carol Chen, Catherine Olsson, Christopher Olah, Danny Hernandez, Dawn Drain, Deep Ganguli, Dustin Li, Eli Tran-Johnson, Ethan Perez, Jamie Kerr, Jared Mueller, Jeffrey Ladish, Joshua Landau, Kamal Ndousse, Kamile Lukosuite, Liane Lovitt, Michael Sellitto, Nelson Elhage, Nicholas Schiefer, Noemi Mercado, Nova DasSarma, Robert Lasenby, Robin Larson, Sam Ringer, Scott Johnston, Shauna Kravec, Sheer~El Showk, Stanislav Fort, Tamera Lanham, Timothy Telleen-Lawton, Tom Conerly, Tom Henighan, Tristan Hume, Samuel~R. Bowman, Zac Hatfield-Dodds, Ben Mann, Dario Amodei, Nicholas Joseph, Sam McCandlish, Tom Brown, and Jared Kaplan.
+\newblock Constitutional ai: Harmlessness from ai feedback, 2022.
+
+\bibitem{CTWJHLRBSEOR21}
+Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-Voss, Katherine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, Alina Oprea, and Colin Raffel.
+\newblock Extracting training data from large language models, 2021.
+
+\bibitem{CRDHPW23}
+Patrick Chao, Alexander Robey, Edgar Dobriban, Hamed Hassani, George~J. Pappas, and Eric Wong.
+\newblock {Jailbreaking Black Box Large Language Models in Twenty Queries}.
+\newblock {\em {CoRR abs/2310.08419}}, 2023.
+
+\bibitem{CIA}
+Yixin Cheng, Markos Georgopoulos, Volkan Cevher, and Grigorios~G. Chrysos.
+\newblock Leveraging the context through multi-round interactions for jailbreaking attacks.
+\newblock 2024.
+
+\bibitem{DLLWZLWZL23}
+Gelei Deng, Yi~Liu, Yuekang Li, Kailong Wang, Ying Zhang, Zefeng Li, Haoyu Wang, Tianwei Zhang, and Yang Liu.
+\newblock {Jailbreaker: Automated Jailbreak Across Multiple Large Language Model Chatbots}.
+\newblock {\em {CoRR abs/2307.08715}}, 2023.
+
+\bibitem{DZPB23}
+Yue Deng, Wenxuan Zhang, Sinno~Jialin Pan, and Lidong Bing.
+\newblock {Multilingual Jailbreak Challenges in Large Language Models}.
+\newblock {\em {CoRR abs/2310.06474}}, 2023.
+
+\bibitem{GZHKWWHM23}
+Suyu Ge, Chunting Zhou, Rui Hou, Madian Khabsa, Yi-Chia Wang, Qifan Wang, Jiawei Han, and Yuning Mao.
+\newblock Mart: Improving llm safety with multi-round automatic red-teaming, 2023.
+
+\bibitem{GMTA22}
+Amelia Glaese, Nat McAleese, Maja Trebacz, John Aslanides, Vlad Firoiu, Timo Ewalds, Maribeth Rauh, Laura Weidinger, Martin Chadwick, Phoebe Thacker, Lucy Campbell-Gillingham, Jonathan Uesato, Po-Sen Huang, Ramona Comanescu, Fan Yang, Abigail See, Sumanth Dathathri, Rory Greig, Charlie Chen, Doug Fritz, Jaume~Sanchez Elias, Richard Green, Soňa Mokrá, Nicholas Fernando, Boxi Wu, Rachel Foley, Susannah Young, Iason Gabriel, William Isaac, John Mellor, Demis Hassabis, Koray Kavukcuoglu, Lisa~Anne Hendricks, and Geoffrey Irving.
+\newblock Improving alignment of dialogue agents via targeted human judgements, 2022.
+
+\bibitem{HGXLC23}
+Yangsibo Huang, Samyak Gupta, Mengzhou Xia, Kai Li, and Danqi Chen.
+\newblock {Catastrophic Jailbreak of Open-source LLMs via Exploiting Generation}.
+\newblock {\em {CoRR abs/2310.06987}}, 2023.
+
+\bibitem{KPOKCX23}
+Nikhil Kandpal, Krishna Pillutla, Alina Oprea, Peter Kairouz, Christopher~A. Choquette-Choo, and Zheng Xu.
+\newblock User inference attacks on large language models, 2023.
+
+\bibitem{KAL23}
+Tadayoshi Kohno, Yasemin Acar, and Wulf Loh.
+\newblock Ethical frameworks and computer security trolley problems: Foundations for conversations.
+\newblock In {\em 32nd USENIX Security Symposium (USENIX Security 23)}, pages 5145--5162, Anaheim, CA, August 2023. USENIX Association.
+
+\bibitem{KSCBBPBP23}
+Tomasz Korbak, Kejian Shi, Angelica Chen, Rasika Bhalerao, Christopher~L. Buckley, Jason Phang, Samuel~R. Bowman, and Ethan Perez.
+\newblock Pretraining language models with human preferences, 2023.
+
+\bibitem{LGFXHMS23}
+Haoran Li, Dadi Guo, Wei Fan, Mingshi Xu, Jie Huang, Fanpu Meng, and Yangqiu Song.
+\newblock Multi-step jailbreaking privacy attacks on chatgpt, 2023.
+
+\bibitem{LXCX23}
+Xiaogeng Liu, Nan Xu, Muhao Chen, and Chaowei Xiao.
+\newblock {AutoDAN: Generating Stealthy Jailbreak Prompts on Aligned Large Language Models}.
+\newblock {\em {CoRR abs/2310.04451}}, 2023.
+
+\bibitem{LDXLZZZZL23}
+Yi~Liu, Gelei Deng, Zhengzi Xu, Yuekang Li, Yaowen Zheng, Ying Zhang, Lida Zhao, Tianwei Zhang, and Yang Liu.
+\newblock {Jailbreaking ChatGPT via Prompt Engineering: An Empirical Study}.
+\newblock {\em {CoRR abs/2305.13860}}, 2023.
+
+\bibitem{LSSTWZ23}
+Nils Lukas, Ahmed Salem, Robert Sim, Shruti Tople, Lukas Wutschitz, and Santiago Zanella-Béguelin.
+\newblock Analyzing leakage of personally identifiable information in language models, 2023.
+
+\bibitem{MPYZWMSLBLFH24}
+Mantas Mazeika, Long Phan, Xuwang Yin, Andy Zou, Zifan Wang, Norman Mu, Elham Sakhaee, Nathaniel Li, Steven Basart, Bo~Li, David Forsyth, and Dan Hendrycks.
+\newblock Harmbench: A standardized evaluation framework for automated red teaming and robust refusal, 2024.
+
+\bibitem{OWJ22}
+Long Ouyang, Jeff Wu, Xu~Jiang, Diogo Almeida, Carroll~L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe.
+\newblock Training language models to follow instructions with human feedback, 2022.
+
+\bibitem{SPK23}
+Ahmed Salem, Andrew Paverd, and Boris Köpf.
+\newblock Maatphor: Automated variant analysis for prompt injection attacks, 2023.
+
+\bibitem{SCBSZ23}
+Xinyue Shen, Zeyuan Chen, Michael Backes, Yun Shen, and Yang Zhang.
+\newblock {Do Anything Now: Characterizing and Evaluating In-The-Wild Jailbreak Prompts on Large Language Models}.
+\newblock {\em {CoRR abs/2308.03825}}, 2023.
+
+\bibitem{WHS23}
+Alexander Wei, Nika Haghtalab, and Jacob Steinhardt.
+\newblock {Jailbroken: How Does {LLM} Safety Training Fail?}
+\newblock {\em {CoRR abs/2307.02483}}, 2023.
+
+\bibitem{WWBZS23}
+Rui Wen, Tianhao Wang, Michael Backes, Yang Zhang, and Ahmed Salem.
+\newblock Last one standing: A comparative analysis of security and privacy of soft prompt tuning, lora, and in-context learning, 2023.
+
+\bibitem{XYSCLCXW23}
+Yueqi Xie, Jingwei Yi, Jiawei Shao, Justin Curl, Lingjuan Lyu, Qifeng Chen, Xing Xie, and Fangzhao Wu.
+\newblock Defending chatgpt against jailbreak attack via self-reminders.
+\newblock {\em Nature Machine Intelligence}, 5:1486--1496, 2023.
+
+\bibitem{XZZX23}
+Liang Xu, Kangkang Zhao, Lei Zhu, and Hang Xue.
+\newblock Sc-safety: A multi-round open-ended question adversarial safety benchmark for large language models in chinese, 2023.
+
+\bibitem{YTHH24}
+Xikang Yang, Xuehai Tang, Songlin Hu, and Jizhong Han.
+\newblock Chain of attack: a semantic-driven contextual multi-turn attacker for llm, 2024.
+
+\bibitem{YLYX23}
+Jiahao Yu, Xingwei Lin, Zheng Yu, and Xinyu Xing.
+\newblock {{GPTFUZZER:} Red Teaming Large Language Models with Auto-Generated Jailbreak Prompts}.
+\newblock {\em {CoRR abs/2309.10253}}, 2023.
+
+\bibitem{ZYKMWH24}
+Zhexin Zhang, Junxiao Yang, Pei Ke, Fei Mi, Hongning Wang, and Minlie Huang.
+\newblock Defending large language models against jailbreaking attacks through goal prioritization, 2024.
+
+\bibitem{ZSTCZ23}
+Zhuo Zhang, Guangyu Shen, Guanhong Tao, Siyuan Cheng, and Xiangyu Zhang.
+\newblock Make them spill the beans! coercive knowledge extraction from (production) llms, 2023.
+
+\bibitem{ZWKF23}
+Andy Zou, Zifan Wang, J.~Zico Kolter, and Matt Fredrikson.
+\newblock {Universal and Transferable Adversarial Attacks on Aligned Language Models}.
+\newblock {\em {CoRR abs/2307.15043}}, 2023.
+
+\end{thebibliography}

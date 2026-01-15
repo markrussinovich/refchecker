@@ -231,6 +231,12 @@ export default function InputSection() {
             type="text"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && inputValue.trim() && !isChecking && !isSubmitting) {
+                e.preventDefault()
+                handleSubmit()
+              }
+            }}
             placeholder="Enter ArXiv ID (e.g., 2401.12345) or URL"
             disabled={isChecking}
             className="w-full px-4 py-3 rounded-lg border focus:outline-none focus:ring-2"

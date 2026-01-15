@@ -124,19 +124,19 @@ def create_year_warning(cited_year: int, correct_year: int) -> Dict[str, Any]:
     }
 
 
-def create_year_missing_warning(correct_year: int) -> Dict[str, Any]:
+def create_year_missing_error(correct_year: int) -> Dict[str, Any]:
     """
-    Create a standardized warning for missing year in reference.
+    Create a standardized error for missing year in reference.
     
     Args:
         correct_year: Correct year from database
         
     Returns:
-        Standardized warning dictionary
+        Standardized error dictionary
     """
     return {
-        'warning_type': 'year',
-        'warning_details': f"Year missing: should include '{correct_year}'",
+        'error_type': 'year',
+        'error_details': f"Year missing: should include '{correct_year}'",
         'ref_year_correct': correct_year
     }
 
@@ -180,7 +180,7 @@ def validate_year(cited_year: Optional[int], paper_year: Optional[int],
                 return create_year_warning(cited_year, paper_year)
     elif not cited_year and paper_year:
         # Reference is missing a year but paper has one
-        return create_year_missing_warning(paper_year)
+        return create_year_missing_error(paper_year)
     
     return None
 
@@ -281,8 +281,8 @@ def create_venue_warning(cited_venue: str, correct_venue: str) -> Dict[str, str]
     # If cited venue cleans to empty, treat as missing venue instead of mismatch
     if not clean_cited and clean_correct:
         return {
-            'warning_type': 'venue',
-            'warning_details': format_missing_venue(clean_correct),
+            'error_type': 'venue',
+            'error_details': format_missing_venue(clean_correct),
             'ref_venue_correct': correct_venue
         }
 

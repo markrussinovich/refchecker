@@ -569,10 +569,10 @@ class NonArxivReferenceChecker:
                 from refchecker.utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
-            # Reference has no venue but paper has one - always warn about missing venue
+            # Reference has no venue but paper has one - error for missing venue
             errors.append({
-                'warning_type': 'venue',
-                'warning_details': f"Venue missing: should include '{paper_venue}'",
+                'error_type': 'venue',
+                'error_details': f"Venue missing: should include '{paper_venue}'",
                 'ref_venue_correct': paper_venue
             })
 

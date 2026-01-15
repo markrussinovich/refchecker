@@ -1,0 +1,97 @@
+\newcommand{\etalchar}[1]{$^{#1}$}
+\begin{thebibliography}{ZFBH{\etalchar{+}}23}
+
+\bibitem[BHT{\etalchar{+}}19]{bisk2019piqa}
+Yonatan Bisk, Ari Holtzman, Jesse Thomason, Jacob Andreas, Yoshua Bengio,
+  Joyce~Y Chai, Mirella Lapata, Angeliki Lazaridou, Ryan~J Maynez, Piyush
+  Narang, et~al.
+\newblock Piqa: Reasoning about physical commonsense in natural language.
+\newblock {\em arXiv preprint arXiv:1911.11641}, 2019.
+
+\bibitem[CLC{\etalchar{+}}19]{clark2019boolq}
+Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael
+  Collins, and Kristina Toutanova.
+\newblock Boolq: Exploring the surprising difficulty of natural yes/no
+  questions.
+\newblock In {\em Proceedings of the 2019 Conference of the North American
+  Chapter of the Association for Computational Linguistics: Human Language
+  Technologies, Volume 1 (Long and Short Papers)}, pages 2924--2936, 2019.
+
+\bibitem[GTB{\etalchar{+}}21]{eval-harness}
+Leo Gao, Jonathan Tow, Stella Biderman, Sid Black, Anthony DiPofi, Charles
+  Foster, Laurence Golding, Jeffrey Hsu, Kyle McDonell, Niklas Muennighoff,
+  Jason Phang, Laria Reynolds, Eric Tang, Anish Thite, Ben Wang, Kevin Wang,
+  and Andy Zou.
+\newblock A framework for few-shot language model evaluation, September 2021.
+
+\bibitem[JLZ{\etalchar{+}}22]{jiang2022machine}
+Yiwen Jiang, Shenglong Liu, Tao Zhao, Wei Li, and Xianzhou Gao.
+\newblock Machine unlearning survey.
+\newblock In {\em Fifth International Conference on Mechatronics and Computer
+  Technology Engineering (MCTE 2022)}, volume 12500, pages 1596--1603. SPIE,
+  2022.
+
+\bibitem[JYY{\etalchar{+}}22]{jang2022knowledge}
+Joel Jang, Dongkeun Yoon, Sohee Yang, Sungmin Cha, Moontae Lee, Lajanugen
+  Logeswaran, and Minjoon Seo.
+\newblock Knowledge unlearning for mitigating privacy risks in language models.
+\newblock {\em arXiv preprint arXiv:2210.01504}, 2022.
+
+\bibitem[MCKS18]{mihaylov2018can}
+Todor Mihaylov, Peter Clark, Tushar Khot, and Ashish Sabharwal.
+\newblock Can a suit of armor conduct electricity? a new dataset for open book
+  question answering.
+\newblock {\em arXiv preprint arXiv:1809.02789}, 2018.
+
+\bibitem[NHN{\etalchar{+}}22]{nguyen2022survey}
+Thanh~Tam Nguyen, Thanh~Trung Huynh, Phi~Le Nguyen, Alan Wee-Chung Liew,
+  Hongzhi Yin, and Quoc Viet~Hung Nguyen.
+\newblock A survey of machine unlearning.
+\newblock {\em arXiv preprint arXiv:2209.02299}, 2022.
+
+\bibitem[Row07]{rowling2007harry}
+J.K. Rowling.
+\newblock {\em The Harry Potter Series}.
+\newblock Bloomsbury, 1997-2007.
+\newblock Comprising: Harry Potter and the Philosopher's Stone; Harry Potter
+  and the Chamber of Secrets; Harry Potter and the Prisoner of Azkaban; Harry
+  Potter and the Goblet of Fire; Harry Potter and the Order of the Phoenix;
+  Harry Potter and the Half-Blood Prince; Harry Potter and the Deathly Hallows.
+
+\bibitem[SLBBC19]{sakaguchi2019winogrande}
+Keisuke Sakaguchi, Ronan Le~Bras, Chandra Bhagavatula, and Yejin Choi.
+\newblock Winogrande: An adversarial winograd schema challenge at scale.
+\newblock {\em arXiv preprint arXiv:1907.10641}, 2019.
+
+\bibitem[WCY{\etalchar{+}}23]{wang2023kga}
+Lingzhi Wang, Tong Chen, Wei Yuan, Xingshan Zeng, Kam-Fai Wong, and Hongzhi
+  Yin.
+\newblock Kga: A general machine unlearning framework based on knowledge gap
+  alignment.
+\newblock {\em arXiv preprint arXiv:2305.06535}, 2023.
+
+\bibitem[YBS19]{yadav2019quick}
+Vikas Yadav, Steven Bethard, and Mihai Surdeanu.
+\newblock Quick and (not so) dirty: Unsupervised selection of justification
+  sentences for multi-hop question answering.
+\newblock {\em arXiv preprint arXiv:1911.07176}, 2019.
+
+\bibitem[ZFBH{\etalchar{+}}23]{zhang2023right}
+Dawen Zhang, Pamela Finckenberg-Broman, Thong Hoang, Shidong Pan, Zhenchang
+  Xing, Mark Staples, and Xiwei Xu.
+\newblock Right to be forgotten in the era of large language models:
+  Implications, challenges, and solutions.
+\newblock {\em arXiv preprint arXiv:2307.03941}, 2023.
+
+\bibitem[ZHB{\etalchar{+}}19]{zellers2019hellaswag}
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi.
+\newblock Hellaswag: Can a machine really finish your sentence?
+\newblock In {\em Proceedings of the 57th Annual Meeting of the Association for
+  Computational Linguistics}, pages 4791--4800, 2019.
+
+\bibitem[ZNIS23]{zhang2023review}
+Haibo Zhang, Toru Nakamura, Takamasa Isohara, and Kouichi Sakurai.
+\newblock A review on machine unlearning.
+\newblock {\em SN Computer Science}, 4(4):337, 2023.
+
+\end{thebibliography}

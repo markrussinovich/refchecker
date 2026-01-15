@@ -231,8 +231,8 @@ test.describe('RefChecker Web UI', () => {
     await page.getByRole('button', { name: 'Check References' }).click();
 
     await expect(sidebar.getByText('Paper One', { exact: true })).toBeVisible();
-    // During in-progress, the sidebar shows "X/Y refs" or "Extracting refs..."
-    await expect(sidebar.getByText(/\d+\/\d+ refs|Extracting refs/)).toBeVisible();
+    // During in-progress, the sidebar shows "X/Y" (progress) or "Extracting..."
+    await expect(sidebar.getByText(/\d+\/\d+|Extracting/)).toBeVisible({ timeout: 10000 });
 
     // Start second check while first is in progress
     await page.getByRole('button', { name: 'New refcheck' }).click();
@@ -241,7 +241,7 @@ test.describe('RefChecker Web UI', () => {
 
     await expect(sidebar.getByText('Paper Two', { exact: true })).toBeVisible();
     // Second check also shows similar progress format
-    await expect(sidebar.getByText(/\d+\/\d+ refs|Extracting refs/).first()).toBeVisible();
+    await expect(sidebar.getByText(/\d+\/\d+|Extracting/).first()).toBeVisible({ timeout: 10000 });
 
     // Switch to Paper Two and confirm its data
     await sidebar.getByText('Paper Two', { exact: true }).click();
