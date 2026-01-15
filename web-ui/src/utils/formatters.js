@@ -300,12 +300,14 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
         lines.push(`**Authors:** ${formatAuthors(ref.authors)}`)
       }
       
-      // Year and venue
-      if (ref.year) {
-        lines.push(`**Year:** ${ref.year}`)
-      }
+      // Venue
       if (ref.venue) {
         lines.push(`**Venue:** ${ref.venue}`)
+      }
+      
+      // Year
+      if (ref.year) {
+        lines.push(`**Year:** ${ref.year}`)
       }
       
       // Cited URL
@@ -712,14 +714,14 @@ export function exportReferenceAsMarkdown(ref) {
     lines.push(`**Authors:** ${formatAuthors(corrected.authors)}`)
   }
   
-  // Year
-  if (corrected.year) {
-    lines.push(`**Year:** ${corrected.year}`)
-  }
-  
   // Venue (italic)
   if (corrected.venue) {
     lines.push(`**Venue:** *${corrected.venue}*`)
+  }
+  
+  // Year
+  if (corrected.year) {
+    lines.push(`**Year:** ${corrected.year}`)
   }
   
   // Add arXiv URL if suggested, otherwise use authoritative URL

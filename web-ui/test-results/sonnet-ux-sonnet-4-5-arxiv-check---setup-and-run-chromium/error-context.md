@@ -1,0 +1,1596 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - button "New Refcheck" [ref=e6] [cursor=pointer]:
+      - img [ref=e8]
+      - generic [ref=e10]: New Refcheck
+    - generic [ref=e11]:
+      - heading "History" [level=2] [ref=e13]
+      - generic [ref=e14]:
+        - generic [ref=e16] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e17]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e18]
+          - generic [ref=e19]: Today at 01:48 PM
+          - generic [ref=e20]:
+            - generic [ref=e21]: 40 refs
+            - generic "4 refs with errors" [ref=e22]:
+              - img [ref=e23]
+              - generic [ref=e25]: "4"
+            - generic "23 refs with warnings" [ref=e26]:
+              - img [ref=e27]
+              - generic [ref=e29]: "23"
+            - generic "15 suggestions" [ref=e30]:
+              - img [ref=e31]
+              - generic [ref=e33]: "15"
+        - generic [ref=e35] [cursor=pointer]:
+          - generic "Securing AI Agents with Information-Flow Control" [ref=e36]
+          - generic "https://arxiv.org/abs/2505.23643" [ref=e37]
+          - generic [ref=e38]: Thursday 05:08 PM
+          - generic [ref=e39]:
+            - generic [ref=e40]: 42 refs
+            - generic "17 refs with errors" [ref=e41]:
+              - img [ref=e42]
+              - generic [ref=e44]: "17"
+            - generic "7 refs with warnings" [ref=e45]:
+              - img [ref=e46]
+              - generic [ref=e48]: "7"
+            - generic "27 suggestions" [ref=e49]:
+              - img [ref=e50]
+              - generic [ref=e52]: "27"
+            - generic "7 unverified refs" [ref=e53]:
+              - img [ref=e54]
+              - generic [ref=e56]: "7"
+        - generic [ref=e58] [cursor=pointer]:
+          - generic "Navigating the Ethical and Societal Impacts of Generative AI in Higher Computing Education" [ref=e59]
+          - generic "https://arxiv.org/pdf/2511.15768" [ref=e60]
+          - generic [ref=e61]: Today at 03:18 AM
+          - generic [ref=e62]:
+            - generic [ref=e63]: 368 refs
+            - generic "30 refs with errors" [ref=e64]:
+              - img [ref=e65]
+              - generic [ref=e67]: "30"
+            - generic "104 refs with warnings" [ref=e68]:
+              - img [ref=e69]
+              - generic [ref=e71]: "104"
+            - generic "92 suggestions" [ref=e72]:
+              - img [ref=e73]
+              - generic [ref=e75]: "92"
+            - generic "5 unverified refs" [ref=e76]:
+              - img [ref=e77]
+              - generic [ref=e79]: "5"
+        - generic [ref=e81] [cursor=pointer]:
+          - generic "Uncovering Political Bias in Large Language Models using Parliamentary Voting Records" [ref=e82]
+          - generic "https://arxiv.org/abs/2601.08785" [ref=e83]
+          - generic [ref=e84]: Today at 01:41 AM
+          - generic [ref=e85]:
+            - generic [ref=e86]: 36 refs
+            - generic "5 refs with errors" [ref=e87]:
+              - img [ref=e88]
+              - generic [ref=e90]: "5"
+            - generic "14 refs with warnings" [ref=e91]:
+              - img [ref=e92]
+              - generic [ref=e94]: "14"
+            - generic "16 suggestions" [ref=e95]:
+              - img [ref=e96]
+              - generic [ref=e98]: "16"
+            - generic "1 unverified ref" [ref=e99]:
+              - img [ref=e100]
+              - generic [ref=e102]: "1"
+        - generic [ref=e104] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e105]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e106]
+          - generic [ref=e107]: Today at 12:56 AM
+          - generic [ref=e108]:
+            - generic [ref=e109]: 40 refs
+            - generic "4 refs with errors" [ref=e110]:
+              - img [ref=e111]
+              - generic [ref=e113]: "4"
+            - generic "23 refs with warnings" [ref=e114]:
+              - img [ref=e115]
+              - generic [ref=e117]: "23"
+            - generic "15 suggestions" [ref=e118]:
+              - img [ref=e119]
+              - generic [ref=e121]: "15"
+        - generic [ref=e123] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e124]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e125]
+          - generic [ref=e126]: Today at 12:39 AM
+          - generic [ref=e127]:
+            - generic [ref=e128]: 40 refs
+            - generic "4 refs with errors" [ref=e129]:
+              - img [ref=e130]
+              - generic [ref=e132]: "4"
+            - generic "23 refs with warnings" [ref=e133]:
+              - img [ref=e134]
+              - generic [ref=e136]: "23"
+            - generic "15 suggestions" [ref=e137]:
+              - img [ref=e138]
+              - generic [ref=e140]: "15"
+        - generic [ref=e142] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e143]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e144]
+          - generic [ref=e145]: Today at 12:00 AM
+          - generic [ref=e146]:
+            - generic [ref=e147]: 14 refs
+            - generic "8 refs with warnings" [ref=e148]:
+              - img [ref=e149]
+              - generic [ref=e151]: "8"
+            - generic "3 suggestions" [ref=e152]:
+              - img [ref=e153]
+              - generic [ref=e155]: "3"
+            - generic "2 unverified refs" [ref=e156]:
+              - img [ref=e157]
+              - generic [ref=e159]: "2"
+        - generic [ref=e161] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e162]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e163]
+          - generic [ref=e164]: Today at 12:00 AM
+          - generic [ref=e165]:
+            - generic [ref=e166]: 40 refs
+            - generic "4 refs with errors" [ref=e167]:
+              - img [ref=e168]
+              - generic [ref=e170]: "4"
+            - generic "23 refs with warnings" [ref=e171]:
+              - img [ref=e172]
+              - generic [ref=e174]: "23"
+            - generic "15 suggestions" [ref=e175]:
+              - img [ref=e176]
+              - generic [ref=e178]: "15"
+        - generic [ref=e180] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e181]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e182]
+          - generic [ref=e183]: Today at 12:00 AM
+          - generic [ref=e184]:
+            - generic [ref=e185]: 14 refs
+            - generic "8 refs with warnings" [ref=e186]:
+              - img [ref=e187]
+              - generic [ref=e189]: "8"
+            - generic "3 suggestions" [ref=e190]:
+              - img [ref=e191]
+              - generic [ref=e193]: "3"
+            - generic "2 unverified refs" [ref=e194]:
+              - img [ref=e195]
+              - generic [ref=e197]: "2"
+        - generic [ref=e199] [cursor=pointer]:
+          - 'generic "GDPO: Group reward-Decoupled Normalization Policy Optimization for Multi-reward RL Optimization" [ref=e200]'
+          - generic "https://arxiv.org/abs/2601.05242?utm_source=substack&utm_medium=email" [ref=e201]
+          - generic [ref=e202]: Today at 06:54 PM
+          - generic [ref=e203]:
+            - generic [ref=e204]: 45 refs
+            - generic "24 refs with warnings" [ref=e205]:
+              - img [ref=e206]
+              - generic [ref=e208]: "24"
+            - generic "21 suggestions" [ref=e209]:
+              - img [ref=e210]
+              - generic [ref=e212]: "21"
+            - generic "4 unverified refs" [ref=e213]:
+              - img [ref=e214]
+              - generic [ref=e216]: "4"
+        - generic [ref=e218] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e219]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e220]
+          - generic [ref=e221]: Today at 06:52 PM
+          - generic [ref=e222]:
+            - generic [ref=e223]: 14 refs
+            - generic "8 refs with warnings" [ref=e224]:
+              - img [ref=e225]
+              - generic [ref=e227]: "8"
+            - generic "3 suggestions" [ref=e228]:
+              - img [ref=e229]
+              - generic [ref=e231]: "3"
+            - generic "2 unverified refs" [ref=e232]:
+              - img [ref=e233]
+              - generic [ref=e235]: "2"
+        - generic [ref=e237] [cursor=pointer]:
+          - generic "Learning Latent Action World Models In The Wild" [ref=e238]
+          - generic "https://arxiv.org/pdf/2601.05230" [ref=e239]
+          - generic [ref=e240]: Today at 06:51 PM
+          - generic [ref=e241]:
+            - generic [ref=e242]: 75 refs
+            - generic "38 refs with warnings" [ref=e243]:
+              - img [ref=e244]
+              - generic [ref=e246]: "38"
+            - generic "30 suggestions" [ref=e247]:
+              - img [ref=e248]
+              - generic [ref=e250]: "30"
+            - generic "2 unverified refs" [ref=e251]:
+              - img [ref=e252]
+              - generic [ref=e254]: "2"
+        - generic [ref=e256] [cursor=pointer]:
+          - generic "Hey, That's My Model! Introducing Chain & Hash, An LLM Fingerprinting Technique" [ref=e257]
+          - generic "https://arxiv.org/abs/2407.10887" [ref=e258]
+          - generic [ref=e259]: Today at 06:51 PM
+          - generic [ref=e260]:
+            - generic [ref=e261]: 18 refs
+            - generic "13 refs with warnings" [ref=e262]:
+              - img [ref=e263]
+              - generic [ref=e265]: "13"
+            - generic "5 suggestions" [ref=e266]:
+              - img [ref=e267]
+              - generic [ref=e269]: "5"
+            - generic "1 unverified ref" [ref=e270]:
+              - img [ref=e271]
+              - generic [ref=e273]: "1"
+        - generic [ref=e275] [cursor=pointer]:
+          - 'generic "Great, Now Write an Article About That: The Crescendo Multi-Turn LLM Jailbreak Attack" [ref=e276]'
+          - generic "https://arxiv.org/abs/2404.01833" [ref=e277]
+          - generic [ref=e278]: Today at 06:50 PM
+          - generic [ref=e279]:
+            - generic [ref=e280]: 36 refs
+            - generic "27 refs with warnings" [ref=e281]:
+              - img [ref=e282]
+              - generic [ref=e284]: "27"
+            - generic "26 suggestions" [ref=e285]:
+              - img [ref=e286]
+              - generic [ref=e288]: "26"
+        - generic [ref=e290] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e291]'
+          - generic "https://arxiv.org/abs/2311.12022" [ref=e292]
+          - generic [ref=e293]: Today at 06:30 PM
+          - generic [ref=e294]:
+            - generic [ref=e295]: 39 refs
+            - generic "25 refs with warnings" [ref=e296]:
+              - img [ref=e297]
+              - generic [ref=e299]: "25"
+            - generic "20 suggestions" [ref=e300]:
+              - img [ref=e301]
+              - generic [ref=e303]: "20"
+            - generic "3 unverified refs" [ref=e304]:
+              - img [ref=e305]
+              - generic [ref=e307]: "3"
+    - button "Settings" [ref=e309] [cursor=pointer]:
+      - img [ref=e310]
+      - generic [ref=e313]: Settings
+  - generic [ref=e315]:
+    - banner [ref=e316]:
+      - generic [ref=e317]:
+        - img [ref=e318]
+        - heading "RefChecker" [level=1] [ref=e323]
+      - generic [ref=e324]:
+        - button "anthropic-claude-sonnet-4-20250514" [ref=e327]:
+          - generic [ref=e328]: anthropic-claude-sonnet-4-20250514
+          - img [ref=e329]
+        - link "View on GitHub" [ref=e331] [cursor=pointer]:
+          - /url: https://github.com/markrussinovich/refchecker
+          - img [ref=e332]
+    - main [ref=e334]:
+      - generic [ref=e335]:
+        - generic [ref=e337]:
+          - img [ref=e339]
+          - button "Paper thumbnail" [ref=e341] [cursor=pointer]:
+            - img "Paper thumbnail" [ref=e342]
+          - generic [ref=e343]:
+            - heading "Attention Is All You Need" [level=3] [ref=e344]
+            - paragraph [ref=e345]:
+              - link "https://arxiv.org/abs/1706.03762" [ref=e346] [cursor=pointer]:
+                - /url: https://arxiv.org/abs/1706.03762
+            - paragraph [ref=e347]: "Model: anthropic / claude-sonnet-4-20250514"
+            - paragraph [ref=e348]: Check completed
+        - generic [ref=e349]:
+          - generic [ref=e350]:
+            - heading "Summary" [level=3] [ref=e352]
+            - button "Export" [ref=e355] [cursor=pointer]:
+              - img [ref=e356]
+              - generic [ref=e359]: Export
+              - img [ref=e360]
+          - generic [ref=e362]:
+            - button "13" [ref=e363] [cursor=pointer]:
+              - img [ref=e364]
+              - generic [ref=e367]: "13"
+            - button "4" [ref=e368] [cursor=pointer]:
+              - img [ref=e369]
+              - generic [ref=e372]: "4"
+            - button "23" [ref=e373] [cursor=pointer]:
+              - img [ref=e374]
+              - generic [ref=e377]: "23"
+            - generic [ref=e378]: of 40
+            - button "4 Errors" [ref=e380] [cursor=pointer]:
+              - generic [ref=e381]: "4"
+              - generic [ref=e382]: Errors
+            - button "26 Warnings" [ref=e383] [cursor=pointer]:
+              - generic [ref=e384]: "26"
+              - generic [ref=e385]: Warnings
+            - button "15 Suggestions" [ref=e386] [cursor=pointer]:
+              - generic [ref=e387]: "15"
+              - generic [ref=e388]: Suggestions
+        - generic [ref=e389]:
+          - heading "References (40)" [level=3] [ref=e391]
+          - generic [ref=e392]:
+            - generic [ref=e394]:
+              - generic "Verified" [ref=e396]:
+                - img [ref=e397]
+              - generic [ref=e400]: "1."
+              - generic [ref=e401]:
+                - generic [ref=e402]:
+                  - generic [ref=e403]: Layer normalization
+                  - button "Copy corrected reference" [ref=e405] [cursor=pointer]:
+                    - img [ref=e406]
+                - generic [ref=e408]: "Authors: Jimmy Lei Ba, Jamie Ryan Kiros, Geoffrey E Hinton"
+                - generic [ref=e409]: "Venue: arXiv preprint arXiv:1607.06450"
+                - generic [ref=e410]: "Year: 2016"
+                - link "https://arxiv.org/abs/1607.06450" [ref=e412] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1607.06450
+                - generic [ref=e414]: Verification
+                - generic [ref=e416]:
+                  - generic [ref=e417]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/97fb4e3d45bb098e27e0071448b6152217bd35a5" [ref=e418] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/97fb4e3d45bb098e27e0071448b6152217bd35a5
+                - generic [ref=e419]:
+                  - generic [ref=e420]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1607.06450" [ref=e421] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1607.06450
+            - generic [ref=e423]:
+              - generic "Warning" [ref=e425]:
+                - img [ref=e426]
+              - generic [ref=e429]: "2."
+              - generic [ref=e430]:
+                - generic [ref=e431]:
+                  - generic [ref=e432]: Neural machine translation by jointly learning to align and translate
+                  - button "Copy corrected reference" [ref=e434] [cursor=pointer]:
+                    - img [ref=e435]
+                - generic [ref=e437]: "Authors: Dzmitry Bahdanau, Kyunghyun Cho, Yoshua Bengio"
+                - generic [ref=e438]: "Venue: CoRR, abs/1409.0473"
+                - generic [ref=e439]: "Year: 2014"
+                - generic [ref=e441]: Verification
+                - generic [ref=e443]:
+                  - generic [ref=e444]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/fa72afa9b2cbc8f0d7b05d52548906610ffbb9c5" [ref=e445] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/fa72afa9b2cbc8f0d7b05d52548906610ffbb9c5
+                - generic [ref=e446]:
+                  - generic [ref=e447]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1409.0473" [ref=e448] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1409.0473
+                - generic [ref=e449]:
+                  - generic [ref=e450]:
+                    - generic [ref=e451]: ⚠️
+                    - generic [ref=e452]: "Warning: Venue mismatch"
+                  - generic [ref=e453]:
+                    - generic [ref=e454]: "cited:"
+                    - generic [ref=e455]: CoRR, abs/1409.
+                  - generic [ref=e456]:
+                    - generic [ref=e457]: "actual:"
+                    - generic [ref=e458]: International Conference on Learning Representations
+                - generic [ref=e460]:
+                  - img [ref=e462]
+                  - generic [ref=e466]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1409.0473" [ref=e467] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1409.0473
+            - generic [ref=e469]:
+              - generic "Warning" [ref=e471]:
+                - img [ref=e472]
+              - generic [ref=e475]: "3."
+              - generic [ref=e476]:
+                - generic [ref=e477]:
+                  - generic [ref=e478]: Massive exploration of neural machine translation architectures
+                  - button "Copy corrected reference" [ref=e480] [cursor=pointer]:
+                    - img [ref=e481]
+                - generic [ref=e483]: "Authors: Denny Britz, Anna Goldie, Minh-Thang Luong, Quoc V. Le"
+                - generic [ref=e484]: "Venue: CoRR, abs/1703.03906"
+                - generic [ref=e485]: "Year: 2017"
+                - generic [ref=e487]: Verification
+                - generic [ref=e489]:
+                  - generic [ref=e490]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/4550a4c714920ef57d19878e31c9ebae37b049b2" [ref=e491] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/4550a4c714920ef57d19878e31c9ebae37b049b2
+                - generic [ref=e492]:
+                  - generic [ref=e493]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1703.03906" [ref=e494] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1703.03906
+                - generic [ref=e495]:
+                  - generic [ref=e496]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/D17-1151" [ref=e497] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/D17-1151
+                - generic [ref=e498]:
+                  - generic [ref=e499]:
+                    - generic [ref=e500]: ⚠️
+                    - generic [ref=e501]: "Warning: Venue mismatch"
+                  - generic [ref=e502]:
+                    - generic [ref=e503]: "cited:"
+                    - generic [ref=e504]: CoRR, abs/1703.0
+                  - generic [ref=e505]:
+                    - generic [ref=e506]: "actual:"
+                    - generic [ref=e507]: Conference on Empirical Methods in Natural Language Processing
+                - generic [ref=e509]:
+                  - img [ref=e511]
+                  - generic [ref=e515]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1703.03906" [ref=e516] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1703.03906
+            - generic [ref=e518]:
+              - generic "Warning" [ref=e520]:
+                - img [ref=e521]
+              - generic [ref=e524]: "4."
+              - generic [ref=e525]:
+                - generic [ref=e526]:
+                  - generic [ref=e527]: Long short-term memory-networks for machine reading
+                  - button "Copy corrected reference" [ref=e529] [cursor=pointer]:
+                    - img [ref=e530]
+                - generic [ref=e532]: "Authors: Jianpeng Cheng, Li Dong, Mirella Lapata"
+                - generic [ref=e533]: "Venue: arXiv preprint arXiv:1601.06733"
+                - generic [ref=e534]: "Year: 2016"
+                - link "https://arxiv.org/abs/1601.06733" [ref=e536] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1601.06733
+                - generic [ref=e538]: Verification
+                - generic [ref=e540]:
+                  - generic [ref=e541]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/13fe71da009484f240c46f14d9330e932f8de210" [ref=e542] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/13fe71da009484f240c46f14d9330e932f8de210
+                - generic [ref=e543]:
+                  - generic [ref=e544]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1601.06733" [ref=e545] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1601.06733
+                - generic [ref=e546]:
+                  - generic [ref=e547]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/D16-1053" [ref=e548] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/D16-1053
+                - generic [ref=e549]:
+                  - generic [ref=e550]:
+                    - generic [ref=e551]: ⚠️
+                    - generic [ref=e552]: "Warning: Venue mismatch"
+                  - generic [ref=e553]:
+                    - generic [ref=e554]: "cited:"
+                    - generic [ref=e555]: arXiv preprint arXiv:1601.0
+                  - generic [ref=e556]:
+                    - generic [ref=e557]: "actual:"
+                    - generic [ref=e558]: Conference on Empirical Methods in Natural Language Processing
+            - generic [ref=e560]:
+              - generic "Error" [ref=e562]:
+                - img [ref=e563]
+              - generic [ref=e566]: "5."
+              - generic [ref=e567]:
+                - generic [ref=e568]:
+                  - generic [ref=e569]: Learning phrase representations using rnn encoder-decoder for statistical machine translation
+                  - button "Copy corrected reference" [ref=e571] [cursor=pointer]:
+                    - img [ref=e572]
+                - generic [ref=e574]: "Authors: Kyunghyun Cho, Bart van Merrienboer, Caglar Gulcehre, Fethi Bougares, Holger Schwenk, Yoshua Bengio"
+                - generic [ref=e575]: "Venue: CoRR, abs/1406.1078"
+                - generic [ref=e576]: "Year: 2014"
+                - generic [ref=e578]: Verification
+                - generic [ref=e580]:
+                  - generic [ref=e581]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/0b544dfe355a5070b60986319a3f51fb45d1348e" [ref=e582] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/0b544dfe355a5070b60986319a3f51fb45d1348e
+                - generic [ref=e583]:
+                  - generic [ref=e584]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1406.1078" [ref=e585] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1406.1078
+                - generic [ref=e586]:
+                  - generic [ref=e587]: "DOI URL:"
+                  - link "https://doi.org/10.3115/v1/D14-1179" [ref=e588] [cursor=pointer]:
+                    - /url: https://doi.org/10.3115/v1/D14-1179
+                - generic [ref=e589]:
+                  - generic [ref=e590]:
+                    - generic [ref=e591]: ⚠️
+                    - generic [ref=e592]: "Warning: Venue mismatch"
+                  - generic [ref=e593]:
+                    - generic [ref=e594]: "cited:"
+                    - generic [ref=e595]: CoRR, abs/1406.
+                  - generic [ref=e596]:
+                    - generic [ref=e597]: "actual:"
+                    - generic [ref=e598]: Conference on Empirical Methods in Natural Language Processing
+                - generic [ref=e599]:
+                  - generic [ref=e600]:
+                    - img [ref=e602]
+                    - generic [ref=e605]: "Error: Author count mismatch: 6 cited vs 7 correct"
+                  - generic [ref=e606]:
+                    - generic [ref=e607]: "cited:"
+                    - generic [ref=e608]: Kyunghyun Cho, Bart van Merrienboer, Caglar Gulcehre, Fethi Bougares, Holger Schwenk, Yoshua Bengio
+                  - generic [ref=e609]:
+                    - generic [ref=e610]: "actual:"
+                    - generic [ref=e611]: Kyunghyun Cho, B. V. Merrienboer, Çaglar Gülçehre, Dzmitry Bahdanau, Fethi Bougares, Holger Schwenk, Yoshua Bengio
+                - generic [ref=e613]:
+                  - img [ref=e615]
+                  - generic [ref=e619]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1406.1078" [ref=e620] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1406.1078
+            - generic [ref=e622]:
+              - generic "Warning" [ref=e624]:
+                - img [ref=e625]
+              - generic [ref=e628]: "6."
+              - generic [ref=e629]:
+                - generic [ref=e630]:
+                  - generic [ref=e631]: "Xception: Deep learning with depthwise separable convolutions"
+                  - button "Copy corrected reference" [ref=e633] [cursor=pointer]:
+                    - img [ref=e634]
+                - generic [ref=e636]: "Authors: Francois Chollet"
+                - generic [ref=e637]: "Venue: arXiv preprint arXiv:1610.02357"
+                - generic [ref=e638]: "Year: 2016"
+                - link "https://arxiv.org/abs/1610.02357" [ref=e640] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1610.02357
+                - generic [ref=e642]: Verification
+                - generic [ref=e644]:
+                  - generic [ref=e645]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/5b6ec746d309b165f9f9def873a2375b6fb40f3d" [ref=e646] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/5b6ec746d309b165f9f9def873a2375b6fb40f3d
+                - generic [ref=e647]:
+                  - generic [ref=e648]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1610.02357" [ref=e649] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1610.02357
+                - generic [ref=e650]:
+                  - generic [ref=e651]: "DOI URL:"
+                  - link "https://doi.org/10.1109/CVPR.2017.195" [ref=e652] [cursor=pointer]:
+                    - /url: https://doi.org/10.1109/CVPR.2017.195
+                - generic [ref=e653]:
+                  - generic [ref=e654]:
+                    - generic [ref=e655]: ⚠️
+                    - generic [ref=e656]: "Warning: Venue mismatch"
+                  - generic [ref=e657]:
+                    - generic [ref=e658]: "cited:"
+                    - generic [ref=e659]: arXiv preprint arXiv:1610.0
+                  - generic [ref=e660]:
+                    - generic [ref=e661]: "actual:"
+                    - generic [ref=e662]: Computer Vision and Pattern Recognition
+            - generic [ref=e664]:
+              - generic "Warning" [ref=e666]:
+                - img [ref=e667]
+              - generic [ref=e670]: "7."
+              - generic [ref=e671]:
+                - generic [ref=e672]:
+                  - generic [ref=e673]: Empirical evaluation of gated recurrent neural networks on sequence modeling
+                  - button "Copy corrected reference" [ref=e675] [cursor=pointer]:
+                    - img [ref=e676]
+                - generic [ref=e678]: "Authors: Junyoung Chung, Çaglar Gülçehre, Kyunghyun Cho, Yoshua Bengio"
+                - generic [ref=e679]: "Venue: CoRR, abs/1412.3555"
+                - generic [ref=e680]: "Year: 2014"
+                - generic [ref=e682]: Verification
+                - generic [ref=e684]:
+                  - generic [ref=e685]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/ac3ee98020251797c2b401e1389461df88e52e62" [ref=e686] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/ac3ee98020251797c2b401e1389461df88e52e62
+                - generic [ref=e687]:
+                  - generic [ref=e688]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1412.3555" [ref=e689] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1412.3555
+                - generic [ref=e690]:
+                  - generic [ref=e691]:
+                    - generic [ref=e692]: ⚠️
+                    - generic [ref=e693]: "Warning: Venue mismatch"
+                  - generic [ref=e694]:
+                    - generic [ref=e695]: "cited:"
+                    - generic [ref=e696]: CoRR, abs/1412.
+                  - generic [ref=e697]:
+                    - generic [ref=e698]: "actual:"
+                    - generic [ref=e699]: arXiv.org
+                - generic [ref=e701]:
+                  - img [ref=e703]
+                  - generic [ref=e707]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1412.3555" [ref=e708] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1412.3555
+            - generic [ref=e710]:
+              - generic "Warning" [ref=e712]:
+                - img [ref=e713]
+              - generic [ref=e716]: "8."
+              - generic [ref=e717]:
+                - generic [ref=e718]:
+                  - generic [ref=e719]: Recurrent neural network grammars
+                  - button "Copy corrected reference" [ref=e721] [cursor=pointer]:
+                    - img [ref=e722]
+                - generic [ref=e724]: "Authors: Chris Dyer, Adhiguna Kuncoro, Miguel Ballesteros, Noah A. Smith"
+                - generic [ref=e725]: "Venue: Proc. of NAACL"
+                - generic [ref=e726]: "Year: 2016"
+                - generic [ref=e728]: Verification
+                - generic [ref=e730]:
+                  - generic [ref=e731]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/7345843e87c81e24e42264859b214d26042f8d51" [ref=e732] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/7345843e87c81e24e42264859b214d26042f8d51
+                - generic [ref=e733]:
+                  - generic [ref=e734]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1602.07776" [ref=e735] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1602.07776
+                - generic [ref=e736]:
+                  - generic [ref=e737]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/N16-1024" [ref=e738] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/N16-1024
+                - generic [ref=e739]:
+                  - generic [ref=e740]:
+                    - generic [ref=e741]: ⚠️
+                    - generic [ref=e742]: "Warning: Venue mismatch"
+                  - generic [ref=e743]:
+                    - generic [ref=e744]: "cited:"
+                    - generic [ref=e745]: NAACL
+                  - generic [ref=e746]:
+                    - generic [ref=e747]: "actual:"
+                    - generic [ref=e748]: North American Chapter of the Association for Computational Linguistics
+                - generic [ref=e750]:
+                  - img [ref=e752]
+                  - generic [ref=e756]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1602.07776" [ref=e757] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1602.07776
+            - generic [ref=e759]:
+              - generic "Warning" [ref=e761]:
+                - img [ref=e762]
+              - generic [ref=e765]: "9."
+              - generic [ref=e766]:
+                - generic [ref=e767]:
+                  - generic [ref=e768]: Convolutional sequence to sequence learning
+                  - button "Copy corrected reference" [ref=e770] [cursor=pointer]:
+                    - img [ref=e771]
+                - generic [ref=e773]: "Authors: Jonas Gehring, Michael Auli, David Grangier, Denis Yarats, Yann N. Dauphin"
+                - generic [ref=e774]: "Venue: arXiv preprint arXiv:1705.03122v2"
+                - generic [ref=e775]: "Year: 2017"
+                - link "https://arxiv.org/abs/1705.03122v2" [ref=e777] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1705.03122v2
+                - generic [ref=e779]: Verification
+                - generic [ref=e781]:
+                  - generic [ref=e782]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/43428880d75b3a14257c3ee9bda054e61eb869c0" [ref=e783] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/43428880d75b3a14257c3ee9bda054e61eb869c0
+                - generic [ref=e784]:
+                  - generic [ref=e785]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1705.03122" [ref=e786] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1705.03122
+                - generic [ref=e787]:
+                  - generic [ref=e788]:
+                    - generic [ref=e789]: ⚠️
+                    - generic [ref=e790]: "Warning: Venue mismatch"
+                  - generic [ref=e791]:
+                    - generic [ref=e792]: "cited:"
+                    - generic [ref=e793]: arXiv preprint arXiv:1705.03122v2
+                  - generic [ref=e794]:
+                    - generic [ref=e795]: "actual:"
+                    - generic [ref=e796]: International Conference on Machine Learning
+            - generic [ref=e798]:
+              - generic "Verified" [ref=e800]:
+                - img [ref=e801]
+              - generic [ref=e804]: "10."
+              - generic [ref=e805]:
+                - generic [ref=e806]:
+                  - generic [ref=e807]: Generating sequences with recurrent neural networks
+                  - button "Copy corrected reference" [ref=e809] [cursor=pointer]:
+                    - img [ref=e810]
+                - generic [ref=e812]: "Authors: Alex Graves"
+                - generic [ref=e813]: "Venue: arXiv preprint arXiv:1308.0850"
+                - generic [ref=e814]: "Year: 2013"
+                - link "https://arxiv.org/abs/1308.0850" [ref=e816] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1308.0850
+                - generic [ref=e818]: Verification
+                - generic [ref=e820]:
+                  - generic [ref=e821]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/6471fd1cbc081fb3b7b5b14d6ab9eaaba02b5c17" [ref=e822] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/6471fd1cbc081fb3b7b5b14d6ab9eaaba02b5c17
+                - generic [ref=e823]:
+                  - generic [ref=e824]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1308.0850" [ref=e825] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1308.0850
+            - generic [ref=e827]:
+              - generic "Warning" [ref=e829]:
+                - img [ref=e830]
+              - generic [ref=e833]: "11."
+              - generic [ref=e834]:
+                - generic [ref=e835]:
+                  - generic [ref=e836]: Deep residual learning for image recognition
+                  - button "Copy corrected reference" [ref=e838] [cursor=pointer]:
+                    - img [ref=e839]
+                - generic [ref=e841]: "Authors: Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun"
+                - generic [ref=e842]: "Venue: Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition"
+                - generic [ref=e843]: "Year: 2016"
+                - generic [ref=e845]: Verification
+                - generic [ref=e847]:
+                  - generic [ref=e848]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/2c03df8b48bf3fa39054345bafabfeff15bfd11d" [ref=e849] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/2c03df8b48bf3fa39054345bafabfeff15bfd11d
+                - generic [ref=e850]:
+                  - generic [ref=e851]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1512.03385" [ref=e852] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1512.03385
+                - generic [ref=e853]:
+                  - generic [ref=e854]: "DOI URL:"
+                  - link "https://doi.org/10.1109/cvpr.2016.90" [ref=e855] [cursor=pointer]:
+                    - /url: https://doi.org/10.1109/cvpr.2016.90
+                - generic [ref=e856]:
+                  - generic [ref=e857]:
+                    - generic [ref=e858]: ⚠️
+                    - generic [ref=e859]: "Warning: Year mismatch"
+                  - generic [ref=e860]:
+                    - generic [ref=e861]: "cited:"
+                    - generic [ref=e862]: "2016"
+                  - generic [ref=e863]:
+                    - generic [ref=e864]: "actual:"
+                    - generic [ref=e865]: "2015"
+                - generic [ref=e867]:
+                  - img [ref=e869]
+                  - generic [ref=e873]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1512.03385" [ref=e874] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1512.03385
+            - generic [ref=e876]:
+              - generic "Error" [ref=e878]:
+                - img [ref=e879]
+              - generic [ref=e882]: "12."
+              - generic [ref=e883]:
+                - generic [ref=e884]:
+                  - generic [ref=e885]: "Gradient flow in recurrent nets: the difficulty of learning long-term dependencies"
+                  - button "Copy corrected reference" [ref=e887] [cursor=pointer]:
+                    - img [ref=e888]
+                - generic [ref=e890]: "Authors: Sepp Hochreiter, Yoshua Bengio, Paolo Frasconi, Jürgen Schmidhuber"
+                - generic [ref=e891]: "Year: 2001"
+                - generic [ref=e893]: Verification
+                - generic [ref=e895]:
+                  - generic [ref=e896]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/2e5f2b57f4c476dd69dc22ccdf547e48f40a994c" [ref=e897] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/2e5f2b57f4c476dd69dc22ccdf547e48f40a994c
+                - generic [ref=e898]:
+                  - generic [ref=e899]:
+                    - img [ref=e901]
+                    - generic [ref=e904]: "Error: Author count mismatch: 4 cited vs 2 correct"
+                  - generic [ref=e905]:
+                    - generic [ref=e906]: "cited:"
+                    - generic [ref=e907]: Sepp Hochreiter, Yoshua Bengio, Paolo Frasconi, Jürgen Schmidhuber
+                  - generic [ref=e908]:
+                    - generic [ref=e909]: "actual:"
+                    - generic [ref=e910]: Sepp Hochreiter, Yoshua Bengio
+            - generic [ref=e912]:
+              - generic "Verified" [ref=e914]:
+                - img [ref=e915]
+              - generic [ref=e918]: "13."
+              - generic [ref=e919]:
+                - generic [ref=e920]:
+                  - generic [ref=e921]: Long short-term memory
+                  - button "Copy corrected reference" [ref=e923] [cursor=pointer]:
+                    - img [ref=e924]
+                - generic [ref=e926]: "Authors: Sepp Hochreiter and Jürgen Schmidhuber"
+                - generic [ref=e927]: "Venue: Neural computation"
+                - generic [ref=e928]: "Year: 1997"
+                - generic [ref=e930]: Verification
+                - generic [ref=e932]:
+                  - generic [ref=e933]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/2e9d221c206e9503ceb452302d68d10e293f2a10" [ref=e934] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/2e9d221c206e9503ceb452302d68d10e293f2a10
+                - generic [ref=e935]:
+                  - generic [ref=e936]: "DOI URL:"
+                  - link "https://doi.org/10.1162/neco.1997.9.8.1735" [ref=e937] [cursor=pointer]:
+                    - /url: https://doi.org/10.1162/neco.1997.9.8.1735
+            - generic [ref=e939]:
+              - generic "Verified" [ref=e941]:
+                - img [ref=e942]
+              - generic [ref=e945]: "14."
+              - generic [ref=e946]:
+                - generic [ref=e947]:
+                  - generic [ref=e948]: Self-training PCFG grammars with latent annotations across languages
+                  - button "Copy corrected reference" [ref=e950] [cursor=pointer]:
+                    - img [ref=e951]
+                - generic [ref=e953]: "Authors: Zhongqiang Huang and Mary Harper"
+                - generic [ref=e954]: "Venue: Proceedings of the 2009 Conference on Empirical Methods in Natural Language Processing"
+                - generic [ref=e955]: "Year: 2009"
+                - generic [ref=e957]: Verification
+                - generic [ref=e959]:
+                  - generic [ref=e960]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/5bfd8d40bc071fffaf93685a46974b122ee4239d" [ref=e961] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/5bfd8d40bc071fffaf93685a46974b122ee4239d
+                - generic [ref=e962]:
+                  - generic [ref=e963]: "DOI URL:"
+                  - link "https://doi.org/10.3115/1699571.1699621" [ref=e964] [cursor=pointer]:
+                    - /url: https://doi.org/10.3115/1699571.1699621
+            - generic [ref=e966]:
+              - generic "Verified" [ref=e968]:
+                - img [ref=e969]
+              - generic [ref=e972]: "15."
+              - generic [ref=e973]:
+                - generic [ref=e974]:
+                  - generic [ref=e975]: Exploring the limits of language modeling
+                  - button "Copy corrected reference" [ref=e977] [cursor=pointer]:
+                    - img [ref=e978]
+                - generic [ref=e980]: "Authors: Rafal Jozefowicz, Oriol Vinyals, Mike Schuster, Noam Shazeer, Yonghui Wu"
+                - generic [ref=e981]: "Venue: arXiv preprint arXiv:1602.02410"
+                - generic [ref=e982]: "Year: 2016"
+                - link "https://arxiv.org/abs/1602.02410" [ref=e984] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1602.02410
+                - generic [ref=e986]: Verification
+                - generic [ref=e988]:
+                  - generic [ref=e989]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/2f2d8f8072e5cc9b296fad551f65f183bdbff7aa" [ref=e990] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/2f2d8f8072e5cc9b296fad551f65f183bdbff7aa
+                - generic [ref=e991]:
+                  - generic [ref=e992]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1602.02410" [ref=e993] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1602.02410
+            - generic [ref=e995]:
+              - generic "Suggestion" [ref=e997]:
+                - img [ref=e998]
+              - generic [ref=e1002]: "16."
+              - generic [ref=e1003]:
+                - generic [ref=e1004]:
+                  - generic [ref=e1005]: Can active memory replace attention?
+                  - button "Copy corrected reference" [ref=e1007] [cursor=pointer]:
+                    - img [ref=e1008]
+                - generic [ref=e1010]: "Authors: Łukasz Kaiser and Samy Bengio"
+                - generic [ref=e1011]: "Venue: Advances in Neural Information Processing Systems, (NIPS)"
+                - generic [ref=e1012]: "Year: 2016"
+                - generic [ref=e1014]: Verification
+                - generic [ref=e1016]:
+                  - generic [ref=e1017]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/735d547fc75e0772d2a78c46a1cc5fad7da1474c" [ref=e1018] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/735d547fc75e0772d2a78c46a1cc5fad7da1474c
+                - generic [ref=e1019]:
+                  - generic [ref=e1020]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1610.08613" [ref=e1021] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1610.08613
+                - generic [ref=e1023]:
+                  - img [ref=e1025]
+                  - generic [ref=e1029]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1610.08613" [ref=e1030] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1610.08613
+            - generic [ref=e1032]:
+              - generic "Warning" [ref=e1034]:
+                - img [ref=e1035]
+              - generic [ref=e1038]: "17."
+              - generic [ref=e1039]:
+                - generic [ref=e1040]:
+                  - generic [ref=e1041]: Neural GPUs learn algorithms
+                  - button "Copy corrected reference" [ref=e1043] [cursor=pointer]:
+                    - img [ref=e1044]
+                - generic [ref=e1046]: "Authors: Łukasz Kaiser and Ilya Sutskever"
+                - generic [ref=e1047]: "Venue: International Conference on Learning Representations (ICLR)"
+                - generic [ref=e1048]: "Year: 2016"
+                - generic [ref=e1050]: Verification
+                - generic [ref=e1052]:
+                  - generic [ref=e1053]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/5e4eb58d5b47ac1c73f4cf189497170e75ae6237" [ref=e1054] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/5e4eb58d5b47ac1c73f4cf189497170e75ae6237
+                - generic [ref=e1055]:
+                  - generic [ref=e1056]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1511.08228" [ref=e1057] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1511.08228
+                - generic [ref=e1058]:
+                  - generic [ref=e1059]:
+                    - generic [ref=e1060]: ⚠️
+                    - generic [ref=e1061]: "Warning: Year mismatch"
+                  - generic [ref=e1062]:
+                    - generic [ref=e1063]: "cited:"
+                    - generic [ref=e1064]: "2016"
+                  - generic [ref=e1065]:
+                    - generic [ref=e1066]: "actual:"
+                    - generic [ref=e1067]: "2015"
+                - generic [ref=e1069]:
+                  - img [ref=e1071]
+                  - generic [ref=e1075]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1511.08228" [ref=e1076] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1511.08228
+            - generic [ref=e1078]:
+              - generic "Warning" [ref=e1080]:
+                - img [ref=e1081]
+              - generic [ref=e1084]: "18."
+              - generic [ref=e1085]:
+                - generic [ref=e1086]:
+                  - generic [ref=e1087]: Neural machine translation in linear time
+                  - button "Copy corrected reference" [ref=e1089] [cursor=pointer]:
+                    - img [ref=e1090]
+                - generic [ref=e1092]: "Authors: Nal Kalchbrenner, Lasse Espeholt, Karen Simonyan, Aaron van den Oord, Alex Graves, Koray Kavukcuoglu"
+                - generic [ref=e1093]: "Venue: arXiv preprint arXiv:1610.10099v2"
+                - generic [ref=e1094]: "Year: 2017"
+                - link "https://arxiv.org/abs/1610.10099v2" [ref=e1096] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1610.10099v2
+                - generic [ref=e1098]: Verification
+                - generic [ref=e1100]:
+                  - generic [ref=e1101]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/98445f4172659ec5e891e031d8202c102135c644" [ref=e1102] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/98445f4172659ec5e891e031d8202c102135c644
+                - generic [ref=e1103]:
+                  - generic [ref=e1104]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1610.10099" [ref=e1105] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1610.10099
+                - generic [ref=e1106]:
+                  - generic [ref=e1107]:
+                    - generic [ref=e1108]: ⚠️
+                    - generic [ref=e1109]: "Warning: Year mismatch"
+                  - generic [ref=e1110]:
+                    - generic [ref=e1111]: "cited:"
+                    - generic [ref=e1112]: "2017"
+                  - generic [ref=e1113]:
+                    - generic [ref=e1114]: "actual:"
+                    - generic [ref=e1115]: "2016"
+            - generic [ref=e1117]:
+              - generic "Suggestion" [ref=e1119]:
+                - img [ref=e1120]
+              - generic [ref=e1124]: "19."
+              - generic [ref=e1125]:
+                - generic [ref=e1126]:
+                  - generic [ref=e1127]: Structured attention networks
+                  - button "Copy corrected reference" [ref=e1129] [cursor=pointer]:
+                    - img [ref=e1130]
+                - generic [ref=e1132]: "Authors: Yoon Kim, Carl Denton, Luong Hoang, Alexander M. Rush"
+                - generic [ref=e1133]: "Venue: International Conference on Learning Representations"
+                - generic [ref=e1134]: "Year: 2017"
+                - generic [ref=e1136]: Verification
+                - generic [ref=e1138]:
+                  - generic [ref=e1139]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/13d9323a8716131911bfda048a40e2cde1a76a46" [ref=e1140] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/13d9323a8716131911bfda048a40e2cde1a76a46
+                - generic [ref=e1141]:
+                  - generic [ref=e1142]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1702.00887" [ref=e1143] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1702.00887
+                - generic [ref=e1145]:
+                  - img [ref=e1147]
+                  - generic [ref=e1151]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1702.00887" [ref=e1152] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1702.00887
+            - generic [ref=e1154]:
+              - generic "Warning" [ref=e1156]:
+                - img [ref=e1157]
+              - generic [ref=e1160]: "20."
+              - generic [ref=e1161]:
+                - generic [ref=e1162]:
+                  - generic [ref=e1163]: "Adam: A method for stochastic optimization"
+                  - button "Copy corrected reference" [ref=e1165] [cursor=pointer]:
+                    - img [ref=e1166]
+                - generic [ref=e1168]: "Authors: Diederik Kingma and Jimmy Ba"
+                - generic [ref=e1169]: "Venue: ICLR"
+                - generic [ref=e1170]: "Year: 2015"
+                - generic [ref=e1172]: Verification
+                - generic [ref=e1174]:
+                  - generic [ref=e1175]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/a6cb366736791bcccc5c8639de5a8f9636bf87e8" [ref=e1176] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/a6cb366736791bcccc5c8639de5a8f9636bf87e8
+                - generic [ref=e1177]:
+                  - generic [ref=e1178]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1412.6980" [ref=e1179] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1412.6980
+                - generic [ref=e1180]:
+                  - generic [ref=e1181]:
+                    - generic [ref=e1182]: ⚠️
+                    - generic [ref=e1183]: "Warning: Year mismatch"
+                  - generic [ref=e1184]:
+                    - generic [ref=e1185]: "cited:"
+                    - generic [ref=e1186]: "2015"
+                  - generic [ref=e1187]:
+                    - generic [ref=e1188]: "actual:"
+                    - generic [ref=e1189]: "2014"
+                - generic [ref=e1191]:
+                  - img [ref=e1193]
+                  - generic [ref=e1197]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1412.6980" [ref=e1198] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1412.6980
+            - generic [ref=e1200]:
+              - generic "Warning" [ref=e1202]:
+                - img [ref=e1203]
+              - generic [ref=e1206]: "21."
+              - generic [ref=e1207]:
+                - generic [ref=e1208]:
+                  - generic [ref=e1209]: Factorization tricks for LSTM networks
+                  - button "Copy corrected reference" [ref=e1211] [cursor=pointer]:
+                    - img [ref=e1212]
+                - generic [ref=e1214]: "Authors: Oleksii Kuchaiev and Boris Ginsburg"
+                - generic [ref=e1215]: "Venue: arXiv preprint arXiv:1703.10722"
+                - generic [ref=e1216]: "Year: 2017"
+                - link "https://arxiv.org/abs/1703.10722" [ref=e1218] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1703.10722
+                - generic [ref=e1220]: Verification
+                - generic [ref=e1222]:
+                  - generic [ref=e1223]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/79baf48bd560060549998d7b61751286de062e2a" [ref=e1224] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/79baf48bd560060549998d7b61751286de062e2a
+                - generic [ref=e1225]:
+                  - generic [ref=e1226]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1703.10722" [ref=e1227] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1703.10722
+                - generic [ref=e1228]:
+                  - generic [ref=e1229]:
+                    - generic [ref=e1230]: ⚠️
+                    - generic [ref=e1231]: "Warning: Venue mismatch"
+                  - generic [ref=e1232]:
+                    - generic [ref=e1233]: "cited:"
+                    - generic [ref=e1234]: arXiv preprint arXiv:1703.1
+                  - generic [ref=e1235]:
+                    - generic [ref=e1236]: "actual:"
+                    - generic [ref=e1237]: International Conference on Learning Representations
+            - generic [ref=e1239]:
+              - generic "Warning" [ref=e1241]:
+                - img [ref=e1242]
+              - generic [ref=e1245]: "22."
+              - generic [ref=e1246]:
+                - generic [ref=e1247]:
+                  - generic [ref=e1248]: A structured self-attentive sentence embedding
+                  - button "Copy corrected reference" [ref=e1250] [cursor=pointer]:
+                    - img [ref=e1251]
+                - generic [ref=e1253]: "Authors: Zhouhan Lin, Minwei Feng, Cicero Nogueira dos Santos, Mo Yu, Bing Xiang, Bowen Zhou, Yoshua Bengio"
+                - generic [ref=e1254]: "Venue: arXiv preprint arXiv:1703.03130"
+                - generic [ref=e1255]: "Year: 2017"
+                - link "https://arxiv.org/abs/1703.03130" [ref=e1257] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1703.03130
+                - generic [ref=e1259]: Verification
+                - generic [ref=e1261]:
+                  - generic [ref=e1262]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/204a4a70428f3938d2c538a4d74c7ae0416306d8" [ref=e1263] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/204a4a70428f3938d2c538a4d74c7ae0416306d8
+                - generic [ref=e1264]:
+                  - generic [ref=e1265]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1703.03130" [ref=e1266] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1703.03130
+                - generic [ref=e1267]:
+                  - generic [ref=e1268]:
+                    - generic [ref=e1269]: ⚠️
+                    - generic [ref=e1270]: "Warning: Venue mismatch"
+                  - generic [ref=e1271]:
+                    - generic [ref=e1272]: "cited:"
+                    - generic [ref=e1273]: arXiv preprint arXiv:1703.0
+                  - generic [ref=e1274]:
+                    - generic [ref=e1275]: "actual:"
+                    - generic [ref=e1276]: International Conference on Learning Representations
+            - generic [ref=e1278]:
+              - generic "Warning" [ref=e1280]:
+                - img [ref=e1281]
+              - generic [ref=e1284]: "23."
+              - generic [ref=e1285]:
+                - generic [ref=e1286]:
+                  - generic [ref=e1287]: Multi-task sequence to sequence learning
+                  - button "Copy corrected reference" [ref=e1289] [cursor=pointer]:
+                    - img [ref=e1290]
+                - generic [ref=e1292]: "Authors: Minh-Thang Luong, Quoc V. Le, Ilya Sutskever, Oriol Vinyals, Lukasz Kaiser"
+                - generic [ref=e1293]: "Venue: arXiv preprint arXiv:1511.06114"
+                - generic [ref=e1294]: "Year: 2015"
+                - link "https://arxiv.org/abs/1511.06114" [ref=e1296] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1511.06114
+                - generic [ref=e1298]: Verification
+                - generic [ref=e1300]:
+                  - generic [ref=e1301]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/d76c07211479e233f7c6a6f32d5346c983c5598f" [ref=e1302] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/d76c07211479e233f7c6a6f32d5346c983c5598f
+                - generic [ref=e1303]:
+                  - generic [ref=e1304]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1511.06114" [ref=e1305] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1511.06114
+                - generic [ref=e1306]:
+                  - generic [ref=e1307]:
+                    - generic [ref=e1308]: ⚠️
+                    - generic [ref=e1309]: "Warning: Venue mismatch"
+                  - generic [ref=e1310]:
+                    - generic [ref=e1311]: "cited:"
+                    - generic [ref=e1312]: arXiv preprint arXiv:1511.0
+                  - generic [ref=e1313]:
+                    - generic [ref=e1314]: "actual:"
+                    - generic [ref=e1315]: International Conference on Learning Representations
+            - generic [ref=e1317]:
+              - generic "Warning" [ref=e1319]:
+                - img [ref=e1320]
+              - generic [ref=e1323]: "24."
+              - generic [ref=e1324]:
+                - generic [ref=e1325]:
+                  - generic [ref=e1326]: Effective approaches to attention-based neural machine translation
+                  - button "Copy corrected reference" [ref=e1328] [cursor=pointer]:
+                    - img [ref=e1329]
+                - generic [ref=e1331]: "Authors: Minh-Thang Luong, Hieu Pham, Christopher D Manning"
+                - generic [ref=e1332]: "Venue: arXiv preprint arXiv:1508.04025"
+                - generic [ref=e1333]: "Year: 2015"
+                - link "https://arxiv.org/abs/1508.04025" [ref=e1335] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1508.04025
+                - generic [ref=e1337]: Verification
+                - generic [ref=e1339]:
+                  - generic [ref=e1340]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/93499a7c7f699b6630a86fad964536f9423bb6d0" [ref=e1341] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/93499a7c7f699b6630a86fad964536f9423bb6d0
+                - generic [ref=e1342]:
+                  - generic [ref=e1343]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1508.04025" [ref=e1344] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1508.04025
+                - generic [ref=e1345]:
+                  - generic [ref=e1346]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/D15-1166" [ref=e1347] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/D15-1166
+                - generic [ref=e1348]:
+                  - generic [ref=e1349]:
+                    - generic [ref=e1350]: ⚠️
+                    - generic [ref=e1351]: "Warning: First author mismatch"
+                  - generic [ref=e1352]:
+                    - generic [ref=e1353]: "cited:"
+                    - generic [ref=e1354]: Minh-Thang Luong
+                  - generic [ref=e1355]:
+                    - generic [ref=e1356]: "actual:"
+                    - generic [ref=e1357]: Thang Luong
+                - generic [ref=e1358]:
+                  - generic [ref=e1359]:
+                    - generic [ref=e1360]: ⚠️
+                    - generic [ref=e1361]: "Warning: Venue mismatch"
+                  - generic [ref=e1362]:
+                    - generic [ref=e1363]: "cited:"
+                    - generic [ref=e1364]: arXiv preprint arXiv:1508.0
+                  - generic [ref=e1365]:
+                    - generic [ref=e1366]: "actual:"
+                    - generic [ref=e1367]: Conference on Empirical Methods in Natural Language Processing
+            - generic [ref=e1369]:
+              - generic "Error" [ref=e1371]:
+                - img [ref=e1372]
+              - generic [ref=e1375]: "25."
+              - generic [ref=e1376]:
+                - generic [ref=e1377]:
+                  - generic [ref=e1378]: "Building a large annotated corpus of english: The penn treebank"
+                  - button "Copy corrected reference" [ref=e1380] [cursor=pointer]:
+                    - img [ref=e1381]
+                - generic [ref=e1383]: "Authors: Mitchell P Marcus, Mary Ann Marcinkiewicz, Beatrice Santorini"
+                - generic [ref=e1384]: "Venue: Computational linguistics"
+                - generic [ref=e1385]: "Year: 1993"
+                - generic [ref=e1387]: Verification
+                - generic [ref=e1389]:
+                  - generic [ref=e1390]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/0b44fcbeea9415d400c5f5789d6b892b6f98daff" [ref=e1391] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/0b44fcbeea9415d400c5f5789d6b892b6f98daff
+                - generic [ref=e1392]:
+                  - generic [ref=e1393]:
+                    - generic [ref=e1394]: ⚠️
+                    - generic [ref=e1395]: "Warning: Venue mismatch"
+                  - generic [ref=e1396]:
+                    - generic [ref=e1397]: "cited:"
+                    - generic [ref=e1398]: Computational linguistics
+                  - generic [ref=e1399]:
+                    - generic [ref=e1400]: "actual:"
+                    - generic [ref=e1401]: International Conference on Computational Logic
+                - generic [ref=e1402]:
+                  - generic [ref=e1403]:
+                    - img [ref=e1405]
+                    - generic [ref=e1408]: "Error: Author 2 mismatch"
+                  - generic [ref=e1409]:
+                    - generic [ref=e1410]: "cited:"
+                    - generic [ref=e1411]: Mary Ann Marcinkiewicz
+                  - generic [ref=e1412]:
+                    - generic [ref=e1413]: "actual:"
+                    - generic [ref=e1414]: Beatrice Santorini
+            - generic [ref=e1416]:
+              - generic "Warning" [ref=e1418]:
+                - img [ref=e1419]
+              - generic [ref=e1422]: "26."
+              - generic [ref=e1423]:
+                - generic [ref=e1424]:
+                  - generic [ref=e1425]: Effective self-training for parsing
+                  - button "Copy corrected reference" [ref=e1427] [cursor=pointer]:
+                    - img [ref=e1428]
+                - generic [ref=e1430]: "Authors: David McClosky, Eugene Charniak, Mark Johnson"
+                - generic [ref=e1431]: "Venue: Proceedings of the Human Language Technology Conference of the NAACL, Main Conference"
+                - generic [ref=e1432]: "Year: 2006"
+                - generic [ref=e1434]: Verification
+                - generic [ref=e1436]:
+                  - generic [ref=e1437]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/78a9513e70f596077179101f6cb6eadc51602039" [ref=e1438] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/78a9513e70f596077179101f6cb6eadc51602039
+                - generic [ref=e1439]:
+                  - generic [ref=e1440]: "DOI URL:"
+                  - link "https://doi.org/10.3115/1220835.1220855" [ref=e1441] [cursor=pointer]:
+                    - /url: https://doi.org/10.3115/1220835.1220855
+                - generic [ref=e1442]:
+                  - generic [ref=e1443]:
+                    - generic [ref=e1444]: ⚠️
+                    - generic [ref=e1445]: "Warning: Venue mismatch"
+                  - generic [ref=e1446]:
+                    - generic [ref=e1447]: "cited:"
+                    - generic [ref=e1448]: Human Language Technology Conference of the NAACL, Main Conference
+                  - generic [ref=e1449]:
+                    - generic [ref=e1450]: "actual:"
+                    - generic [ref=e1451]: North American Chapter of the Association for Computational Linguistics
+            - generic [ref=e1453]:
+              - generic "Error" [ref=e1455]:
+                - img [ref=e1456]
+              - generic [ref=e1459]: "27."
+              - generic [ref=e1460]:
+                - generic [ref=e1461]:
+                  - generic [ref=e1462]: A decomposable attention model
+                  - button "Copy corrected reference" [ref=e1464] [cursor=pointer]:
+                    - img [ref=e1465]
+                - generic [ref=e1467]: "Authors: Ankur Parikh, Oscar Täckström, Dipanjan Das, Jakob Uszkoreit"
+                - generic [ref=e1468]: "Venue: Empirical Methods in Natural Language Processing"
+                - generic [ref=e1469]: "Year: 2016"
+                - generic [ref=e1471]: Verification
+                - generic [ref=e1473]:
+                  - generic [ref=e1474]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/2cd8e8f510c89c7c18268e8ad51c061e459ad321" [ref=e1475] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/2cd8e8f510c89c7c18268e8ad51c061e459ad321
+                - generic [ref=e1476]:
+                  - generic [ref=e1477]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1606.01933" [ref=e1478] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1606.01933
+                - generic [ref=e1479]:
+                  - generic [ref=e1480]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/D16-1244" [ref=e1481] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/D16-1244
+                - generic [ref=e1482]:
+                  - generic [ref=e1483]:
+                    - img [ref=e1485]
+                    - generic [ref=e1488]: "Error: Title mismatch"
+                  - generic [ref=e1489]:
+                    - generic [ref=e1490]: "cited:"
+                    - generic [ref=e1491]: A decomposable attention model
+                  - generic [ref=e1492]:
+                    - generic [ref=e1493]: "actual:"
+                    - generic [ref=e1494]: A Decomposable Attention Model for Natural Language Inference
+                - generic [ref=e1496]:
+                  - img [ref=e1498]
+                  - generic [ref=e1502]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1606.01933" [ref=e1503] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1606.01933
+            - generic [ref=e1505]:
+              - generic "Warning" [ref=e1507]:
+                - img [ref=e1508]
+              - generic [ref=e1511]: "28."
+              - generic [ref=e1512]:
+                - generic [ref=e1513]:
+                  - generic [ref=e1514]: A deep reinforced model for abstractive summarization
+                  - button "Copy corrected reference" [ref=e1516] [cursor=pointer]:
+                    - img [ref=e1517]
+                - generic [ref=e1519]: "Authors: Romain Paulus, Caiming Xiong, Richard Socher"
+                - generic [ref=e1520]: "Venue: arXiv preprint arXiv:1705.04304"
+                - generic [ref=e1521]: "Year: 2017"
+                - link "https://arxiv.org/abs/1705.04304" [ref=e1523] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1705.04304
+                - generic [ref=e1525]: Verification
+                - generic [ref=e1527]:
+                  - generic [ref=e1528]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/032274e57f7d8b456bd255fe76b909b2c1d7458e" [ref=e1529] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/032274e57f7d8b456bd255fe76b909b2c1d7458e
+                - generic [ref=e1530]:
+                  - generic [ref=e1531]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1705.04304" [ref=e1532] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1705.04304
+                - generic [ref=e1533]:
+                  - generic [ref=e1534]:
+                    - generic [ref=e1535]: ⚠️
+                    - generic [ref=e1536]: "Warning: Venue mismatch"
+                  - generic [ref=e1537]:
+                    - generic [ref=e1538]: "cited:"
+                    - generic [ref=e1539]: arXiv preprint arXiv:1705.0
+                  - generic [ref=e1540]:
+                    - generic [ref=e1541]: "actual:"
+                    - generic [ref=e1542]: International Conference on Learning Representations
+            - generic [ref=e1544]:
+              - generic "Verified" [ref=e1546]:
+                - img [ref=e1547]
+              - generic [ref=e1550]: "29."
+              - generic [ref=e1551]:
+                - generic [ref=e1552]:
+                  - generic [ref=e1553]: Learning accurate, compact, and interpretable tree annotation
+                  - button "Copy corrected reference" [ref=e1555] [cursor=pointer]:
+                    - img [ref=e1556]
+                - generic [ref=e1558]: "Authors: Slav Petrov, Leon Barrett, Romain Thibaux, Dan Klein"
+                - generic [ref=e1559]: "Venue: Proceedings of the 21st International Conference on Computational Linguistics and 44th Annual Meeting of the ACL"
+                - generic [ref=e1560]: "Year: 2006"
+                - generic [ref=e1562]: Verification
+                - generic [ref=e1564]:
+                  - generic [ref=e1565]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/f52de7242e574b70410ca6fb70b79c811919fc00" [ref=e1566] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/f52de7242e574b70410ca6fb70b79c811919fc00
+                - generic [ref=e1567]:
+                  - generic [ref=e1568]: "DOI URL:"
+                  - link "https://doi.org/10.3115/1220175.1220230" [ref=e1569] [cursor=pointer]:
+                    - /url: https://doi.org/10.3115/1220175.1220230
+            - generic [ref=e1571]:
+              - generic "Warning" [ref=e1573]:
+                - img [ref=e1574]
+              - generic [ref=e1577]: "30."
+              - generic [ref=e1578]:
+                - generic [ref=e1579]:
+                  - generic [ref=e1580]: Using the output embedding to improve language models
+                  - button "Copy corrected reference" [ref=e1582] [cursor=pointer]:
+                    - img [ref=e1583]
+                - generic [ref=e1585]: "Authors: Ofir Press and Lior Wolf"
+                - generic [ref=e1586]: "Venue: arXiv preprint arXiv:1608.05859"
+                - generic [ref=e1587]: "Year: 2016"
+                - link "https://arxiv.org/abs/1608.05859" [ref=e1589] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1608.05859
+                - generic [ref=e1591]: Verification
+                - generic [ref=e1593]:
+                  - generic [ref=e1594]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/63e39cdf1ad884da6bc69096bb3413b5b1100559" [ref=e1595] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/63e39cdf1ad884da6bc69096bb3413b5b1100559
+                - generic [ref=e1596]:
+                  - generic [ref=e1597]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1608.05859" [ref=e1598] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1608.05859
+                - generic [ref=e1599]:
+                  - generic [ref=e1600]: "DOI URL:"
+                  - link "https://doi.org/10.18653/V1/E17-2025" [ref=e1601] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/V1/E17-2025
+                - generic [ref=e1602]:
+                  - generic [ref=e1603]:
+                    - generic [ref=e1604]: ⚠️
+                    - generic [ref=e1605]: "Warning: Venue mismatch"
+                  - generic [ref=e1606]:
+                    - generic [ref=e1607]: "cited:"
+                    - generic [ref=e1608]: arXiv preprint arXiv:1608.0
+                  - generic [ref=e1609]:
+                    - generic [ref=e1610]: "actual:"
+                    - generic [ref=e1611]: Conference of the European Chapter of the Association for Computational Linguistics
+            - generic [ref=e1613]:
+              - generic "Warning" [ref=e1615]:
+                - img [ref=e1616]
+              - generic [ref=e1619]: "31."
+              - generic [ref=e1620]:
+                - generic [ref=e1621]:
+                  - generic [ref=e1622]: Neural machine translation of rare words with subword units
+                  - button "Copy corrected reference" [ref=e1624] [cursor=pointer]:
+                    - img [ref=e1625]
+                - generic [ref=e1627]: "Authors: Rico Sennrich, Barry Haddow, Alexandra Birch"
+                - generic [ref=e1628]: "Venue: arXiv preprint arXiv:1508.07909"
+                - generic [ref=e1629]: "Year: 2015"
+                - link "https://arxiv.org/abs/1508.07909" [ref=e1631] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1508.07909
+                - generic [ref=e1633]: Verification
+                - generic [ref=e1635]:
+                  - generic [ref=e1636]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/1518039b5001f1836565215eb047526b3ac7f462" [ref=e1637] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/1518039b5001f1836565215eb047526b3ac7f462
+                - generic [ref=e1638]:
+                  - generic [ref=e1639]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1508.07909" [ref=e1640] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1508.07909
+                - generic [ref=e1641]:
+                  - generic [ref=e1642]: "DOI URL:"
+                  - link "https://doi.org/10.18653/v1/P16-1162" [ref=e1643] [cursor=pointer]:
+                    - /url: https://doi.org/10.18653/v1/P16-1162
+                - generic [ref=e1644]:
+                  - generic [ref=e1645]:
+                    - generic [ref=e1646]: ⚠️
+                    - generic [ref=e1647]: "Warning: Venue mismatch"
+                  - generic [ref=e1648]:
+                    - generic [ref=e1649]: "cited:"
+                    - generic [ref=e1650]: arXiv preprint arXiv:1508.0
+                  - generic [ref=e1651]:
+                    - generic [ref=e1652]: "actual:"
+                    - generic [ref=e1653]: Annual Meeting of the Association for Computational Linguistics
+            - generic [ref=e1655]:
+              - generic "Warning" [ref=e1657]:
+                - img [ref=e1658]
+              - generic [ref=e1661]: "32."
+              - generic [ref=e1662]:
+                - generic [ref=e1663]:
+                  - generic [ref=e1664]: "Outrageously large neural networks: The sparsely-gated mixture-of-experts layer"
+                  - button "Copy corrected reference" [ref=e1666] [cursor=pointer]:
+                    - img [ref=e1667]
+                - generic [ref=e1669]: "Authors: Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, Jeff Dean"
+                - generic [ref=e1670]: "Venue: arXiv preprint arXiv:1701.06538"
+                - generic [ref=e1671]: "Year: 2017"
+                - link "https://arxiv.org/abs/1701.06538" [ref=e1673] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1701.06538
+                - generic [ref=e1675]: Verification
+                - generic [ref=e1677]:
+                  - generic [ref=e1678]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/510e26733aaff585d65701b9f1be7ca9d5afc586" [ref=e1679] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/510e26733aaff585d65701b9f1be7ca9d5afc586
+                - generic [ref=e1680]:
+                  - generic [ref=e1681]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1701.06538" [ref=e1682] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1701.06538
+                - generic [ref=e1683]:
+                  - generic [ref=e1684]:
+                    - generic [ref=e1685]: ⚠️
+                    - generic [ref=e1686]: "Warning: Venue mismatch"
+                  - generic [ref=e1687]:
+                    - generic [ref=e1688]: "cited:"
+                    - generic [ref=e1689]: arXiv preprint arXiv:1701.0
+                  - generic [ref=e1690]:
+                    - generic [ref=e1691]: "actual:"
+                    - generic [ref=e1692]: International Conference on Learning Representations
+            - generic [ref=e1694]:
+              - generic "Verified" [ref=e1696]:
+                - img [ref=e1697]
+              - generic [ref=e1700]: "33."
+              - generic [ref=e1701]:
+                - generic [ref=e1702]:
+                  - generic [ref=e1703]: "Dropout: a simple way to prevent neural networks from overfitting"
+                  - button "Copy corrected reference" [ref=e1705] [cursor=pointer]:
+                    - img [ref=e1706]
+                - generic [ref=e1708]: "Authors: Nitish Srivastava, Geoffrey E Hinton, Alex Krizhevsky, Ilya Sutskever, Ruslan Salakhutdinov"
+                - generic [ref=e1709]: "Venue: Journal of Machine Learning Research"
+                - generic [ref=e1710]: "Year: 2014"
+                - generic [ref=e1712]: Verification
+                - generic [ref=e1714]:
+                  - generic [ref=e1715]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/34f25a8704614163c4095b3ee2fc969b60de4698" [ref=e1716] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/34f25a8704614163c4095b3ee2fc969b60de4698
+                - generic [ref=e1717]:
+                  - generic [ref=e1718]: "DOI URL:"
+                  - link "https://doi.org/10.5555/2627435.2670313" [ref=e1719] [cursor=pointer]:
+                    - /url: https://doi.org/10.5555/2627435.2670313
+            - generic [ref=e1721]:
+              - generic "Verified" [ref=e1723]:
+                - img [ref=e1724]
+              - generic [ref=e1727]: "34."
+              - generic [ref=e1728]:
+                - generic [ref=e1729]:
+                  - generic [ref=e1730]: End-to-end memory networks
+                  - button "Copy corrected reference" [ref=e1732] [cursor=pointer]:
+                    - img [ref=e1733]
+                - generic [ref=e1735]: "Authors: Sainbayar Sukhbaatar, Arthur Szlam, Jason Weston, Rob Fergus"
+                - generic [ref=e1736]: "Venue: Advances in Neural Information Processing Systems 28"
+                - generic [ref=e1737]: "Year: 2015"
+                - generic [ref=e1739]: Verification
+                - generic [ref=e1741]:
+                  - generic [ref=e1742]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/4f10b9f47c5bb6b54dd4f5ca8d9fa2c0bbd7ec5e" [ref=e1743] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/4f10b9f47c5bb6b54dd4f5ca8d9fa2c0bbd7ec5e
+            - generic [ref=e1745]:
+              - generic "Suggestion" [ref=e1747]:
+                - img [ref=e1748]
+              - generic [ref=e1752]: "35."
+              - generic [ref=e1753]:
+                - generic [ref=e1754]:
+                  - generic [ref=e1755]: Sequence to sequence learning with neural networks
+                  - button "Copy corrected reference" [ref=e1757] [cursor=pointer]:
+                    - img [ref=e1758]
+                - generic [ref=e1760]: "Authors: Ilya Sutskever, Oriol Vinyals, Quoc VV Le"
+                - generic [ref=e1761]: "Venue: Advances in Neural Information Processing Systems"
+                - generic [ref=e1762]: "Year: 2014"
+                - generic [ref=e1764]: Verification
+                - generic [ref=e1766]:
+                  - generic [ref=e1767]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/cea967b59209c6be22829699f05b8b1ac4dc092d" [ref=e1768] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/cea967b59209c6be22829699f05b8b1ac4dc092d
+                - generic [ref=e1769]:
+                  - generic [ref=e1770]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1409.3215" [ref=e1771] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1409.3215
+                - generic [ref=e1773]:
+                  - img [ref=e1775]
+                  - generic [ref=e1779]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1409.3215" [ref=e1780] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1409.3215
+            - generic [ref=e1782]:
+              - generic "Warning" [ref=e1784]:
+                - img [ref=e1785]
+              - generic [ref=e1788]: "36."
+              - generic [ref=e1789]:
+                - generic [ref=e1790]:
+                  - generic [ref=e1791]: Rethinking the inception architecture for computer vision
+                  - button "Copy corrected reference" [ref=e1793] [cursor=pointer]:
+                    - img [ref=e1794]
+                - generic [ref=e1796]: "Authors: Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, Zbigniew Wojna"
+                - generic [ref=e1797]: "Venue: CoRR"
+                - generic [ref=e1798]: "Year: 2015"
+                - generic [ref=e1800]: Verification
+                - generic [ref=e1802]:
+                  - generic [ref=e1803]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/23ffaa0fe06eae05817f527a47ac3291077f9e58" [ref=e1804] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/23ffaa0fe06eae05817f527a47ac3291077f9e58
+                - generic [ref=e1805]:
+                  - generic [ref=e1806]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1512.00567" [ref=e1807] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1512.00567
+                - generic [ref=e1808]:
+                  - generic [ref=e1809]: "DOI URL:"
+                  - link "https://doi.org/10.1109/CVPR.2016.308" [ref=e1810] [cursor=pointer]:
+                    - /url: https://doi.org/10.1109/CVPR.2016.308
+                - generic [ref=e1811]:
+                  - generic [ref=e1812]:
+                    - generic [ref=e1813]: ⚠️
+                    - generic [ref=e1814]: "Warning: Venue mismatch"
+                  - generic [ref=e1815]:
+                    - generic [ref=e1816]: "cited:"
+                    - generic [ref=e1817]: CoRR
+                  - generic [ref=e1818]:
+                    - generic [ref=e1819]: "actual:"
+                    - generic [ref=e1820]: Computer Vision and Pattern Recognition
+                - generic [ref=e1822]:
+                  - img [ref=e1824]
+                  - generic [ref=e1828]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1512.00567" [ref=e1829] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1512.00567
+            - generic [ref=e1831]:
+              - generic "Warning" [ref=e1833]:
+                - img [ref=e1834]
+              - generic [ref=e1837]: "37."
+              - generic [ref=e1838]:
+                - generic [ref=e1839]:
+                  - generic [ref=e1840]: Grammar as a foreign language
+                  - button "Copy corrected reference" [ref=e1842] [cursor=pointer]:
+                    - img [ref=e1843]
+                - generic [ref=e1845]: "Authors: Vinyals, Kaiser, Koo, Petrov, Sutskever, Hinton"
+                - generic [ref=e1846]: "Venue: Advances in Neural Information Processing Systems"
+                - generic [ref=e1847]: "Year: 2015"
+                - generic [ref=e1849]: Verification
+                - generic [ref=e1851]:
+                  - generic [ref=e1852]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/47570e7f63e296f224a0e7f9a0d08b0de3cbaf40" [ref=e1853] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/47570e7f63e296f224a0e7f9a0d08b0de3cbaf40
+                - generic [ref=e1854]:
+                  - generic [ref=e1855]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1412.7449" [ref=e1856] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1412.7449
+                - generic [ref=e1857]:
+                  - generic [ref=e1858]:
+                    - generic [ref=e1859]: ⚠️
+                    - generic [ref=e1860]: "Warning: Year mismatch"
+                  - generic [ref=e1861]:
+                    - generic [ref=e1862]: "cited:"
+                    - generic [ref=e1863]: "2015"
+                  - generic [ref=e1864]:
+                    - generic [ref=e1865]: "actual:"
+                    - generic [ref=e1866]: "2014"
+                - generic [ref=e1868]:
+                  - img [ref=e1870]
+                  - generic [ref=e1874]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1412.7449" [ref=e1875] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1412.7449
+            - generic [ref=e1877]:
+              - generic "Verified" [ref=e1879]:
+                - img [ref=e1880]
+              - generic [ref=e1883]: "38."
+              - generic [ref=e1884]:
+                - generic [ref=e1885]:
+                  - generic [ref=e1886]: "Google's neural machine translation system: Bridging the gap between human and machine translation"
+                  - button "Copy corrected reference" [ref=e1888] [cursor=pointer]:
+                    - img [ref=e1889]
+                - generic [ref=e1891]: "Authors: Yonghui Wu, Mike Schuster, Zhifeng Chen, Quoc V Le, Mohammad Norouzi, Wolfgang Macherey, Maxim Krikun, Yuan Cao, Qin Gao, Klaus Macherey, et al."
+                - generic [ref=e1892]: "Venue: arXiv preprint arXiv:1609.08144"
+                - generic [ref=e1893]: "Year: 2016"
+                - link "https://arxiv.org/abs/1609.08144" [ref=e1895] [cursor=pointer]:
+                  - /url: https://arxiv.org/abs/1609.08144
+                - generic [ref=e1897]: Verification
+                - generic [ref=e1899]:
+                  - generic [ref=e1900]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/c6850869aa5e78a107c378d2e8bfa39633158c0c" [ref=e1901] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/c6850869aa5e78a107c378d2e8bfa39633158c0c
+                - generic [ref=e1902]:
+                  - generic [ref=e1903]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1609.08144" [ref=e1904] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1609.08144
+            - generic [ref=e1906]:
+              - generic "Warning" [ref=e1908]:
+                - img [ref=e1909]
+              - generic [ref=e1912]: "39."
+              - generic [ref=e1913]:
+                - generic [ref=e1914]:
+                  - generic [ref=e1915]: Deep recurrent models with fast-forward connections for neural machine translation
+                  - button "Copy corrected reference" [ref=e1917] [cursor=pointer]:
+                    - img [ref=e1918]
+                - generic [ref=e1920]: "Authors: Jie Zhou, Ying Cao, Xuguang Wang, Peng Li, Wei Xu"
+                - generic [ref=e1921]: "Venue: CoRR"
+                - generic [ref=e1922]: "Year: 2016"
+                - generic [ref=e1924]: Verification
+                - generic [ref=e1926]:
+                  - generic [ref=e1927]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/b60abe57bc195616063be10638c6437358c81d1e" [ref=e1928] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/b60abe57bc195616063be10638c6437358c81d1e
+                - generic [ref=e1929]:
+                  - generic [ref=e1930]: "ArXiv URL:"
+                  - link "https://arxiv.org/abs/1606.04199" [ref=e1931] [cursor=pointer]:
+                    - /url: https://arxiv.org/abs/1606.04199
+                - generic [ref=e1932]:
+                  - generic [ref=e1933]: "DOI URL:"
+                  - link "https://doi.org/10.1162/tacl_a_00105" [ref=e1934] [cursor=pointer]:
+                    - /url: https://doi.org/10.1162/tacl_a_00105
+                - generic [ref=e1935]:
+                  - generic [ref=e1936]:
+                    - generic [ref=e1937]: ⚠️
+                    - generic [ref=e1938]: "Warning: Venue mismatch"
+                  - generic [ref=e1939]:
+                    - generic [ref=e1940]: "cited:"
+                    - generic [ref=e1941]: CoRR
+                  - generic [ref=e1942]:
+                    - generic [ref=e1943]: "actual:"
+                    - generic [ref=e1944]: Transactions of the Association for Computational Linguistics
+                - generic [ref=e1946]:
+                  - img [ref=e1948]
+                  - generic [ref=e1952]:
+                    - text: "Suggestion: Reference could include arXiv URL:"
+                    - link "https://arxiv.org/abs/1606.04199" [ref=e1953] [cursor=pointer]:
+                      - /url: https://arxiv.org/abs/1606.04199
+            - generic [ref=e1955]:
+              - generic "Verified" [ref=e1957]:
+                - img [ref=e1958]
+              - generic [ref=e1961]: "40."
+              - generic [ref=e1962]:
+                - generic [ref=e1963]:
+                  - generic [ref=e1964]: Fast and accurate shift-reduce constituent parsing
+                  - button "Copy corrected reference" [ref=e1966] [cursor=pointer]:
+                    - img [ref=e1967]
+                - generic [ref=e1969]: "Authors: Muhua Zhu, Yue Zhang, Wenliang Chen, Min Zhang, Jingbo Zhu"
+                - generic [ref=e1970]: "Venue: Proceedings of the 51st Annual Meeting of the ACL (Volume 1: Long Papers)"
+                - generic [ref=e1971]: "Year: 2013"
+                - generic [ref=e1973]: Verification
+                - generic [ref=e1975]:
+                  - generic [ref=e1976]: "Verified URL:"
+                  - link "https://www.semanticscholar.org/paper/174bbdb96252454cbb40a9c4e53335996235a008" [ref=e1977] [cursor=pointer]:
+                    - /url: https://www.semanticscholar.org/paper/174bbdb96252454cbb40a9c4e53335996235a008
+  - button "Show Debug Panel" [ref=e1978]:
+    - img [ref=e1979]
+```

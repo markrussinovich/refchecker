@@ -1,0 +1,259 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - button "New Refcheck" [active] [ref=e6] [cursor=pointer]:
+      - img [ref=e8]
+      - generic [ref=e10]: New Refcheck
+    - generic [ref=e11]:
+      - heading "History" [level=2] [ref=e13]
+      - generic [ref=e14]:
+        - generic [ref=e16] [cursor=pointer]:
+          - generic "New refcheck" [ref=e17]
+          - generic [ref=e19]: Start a new check
+        - generic [ref=e21] [cursor=pointer]:
+          - generic "Securing AI Agents with Information-Flow Control" [ref=e22]
+          - generic "https://arxiv.org/abs/2505.23643" [ref=e23]
+          - generic [ref=e24]: Thursday 05:08 PM
+          - generic [ref=e25]:
+            - generic [ref=e26]: 42 refs
+            - generic "17 refs with errors" [ref=e27]:
+              - img [ref=e28]
+              - generic [ref=e30]: "17"
+            - generic "7 refs with warnings" [ref=e31]:
+              - img [ref=e32]
+              - generic [ref=e34]: "7"
+            - generic "27 suggestions" [ref=e35]:
+              - img [ref=e36]
+              - generic [ref=e38]: "27"
+            - generic "7 unverified refs" [ref=e39]:
+              - img [ref=e40]
+              - generic [ref=e42]: "7"
+        - generic [ref=e44] [cursor=pointer]:
+          - generic "Navigating the Ethical and Societal Impacts of Generative AI in Higher Computing Education" [ref=e45]
+          - generic "https://arxiv.org/pdf/2511.15768" [ref=e46]
+          - generic [ref=e47]: Today at 03:18 AM
+          - generic [ref=e48]:
+            - generic [ref=e49]: 368 refs
+            - generic "30 refs with errors" [ref=e50]:
+              - img [ref=e51]
+              - generic [ref=e53]: "30"
+            - generic "104 refs with warnings" [ref=e54]:
+              - img [ref=e55]
+              - generic [ref=e57]: "104"
+            - generic "92 suggestions" [ref=e58]:
+              - img [ref=e59]
+              - generic [ref=e61]: "92"
+            - generic "5 unverified refs" [ref=e62]:
+              - img [ref=e63]
+              - generic [ref=e65]: "5"
+        - generic [ref=e67] [cursor=pointer]:
+          - generic "Uncovering Political Bias in Large Language Models using Parliamentary Voting Records" [ref=e68]
+          - generic "https://arxiv.org/abs/2601.08785" [ref=e69]
+          - generic [ref=e70]: Today at 01:41 AM
+          - generic [ref=e71]:
+            - generic [ref=e72]: 36 refs
+            - generic "5 refs with errors" [ref=e73]:
+              - img [ref=e74]
+              - generic [ref=e76]: "5"
+            - generic "14 refs with warnings" [ref=e77]:
+              - img [ref=e78]
+              - generic [ref=e80]: "14"
+            - generic "16 suggestions" [ref=e81]:
+              - img [ref=e82]
+              - generic [ref=e84]: "16"
+            - generic "1 unverified ref" [ref=e85]:
+              - img [ref=e86]
+              - generic [ref=e88]: "1"
+        - generic [ref=e90] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e91]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e92]
+          - generic [ref=e93]: Today at 12:56 AM
+          - generic [ref=e94]:
+            - generic [ref=e95]: 40 refs
+            - generic "4 refs with errors" [ref=e96]:
+              - img [ref=e97]
+              - generic [ref=e99]: "4"
+            - generic "23 refs with warnings" [ref=e100]:
+              - img [ref=e101]
+              - generic [ref=e103]: "23"
+            - generic "15 suggestions" [ref=e104]:
+              - img [ref=e105]
+              - generic [ref=e107]: "15"
+        - generic [ref=e109] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e110]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e111]
+          - generic [ref=e112]: Today at 12:39 AM
+          - generic [ref=e113]:
+            - generic [ref=e114]: 40 refs
+            - generic "4 refs with errors" [ref=e115]:
+              - img [ref=e116]
+              - generic [ref=e118]: "4"
+            - generic "23 refs with warnings" [ref=e119]:
+              - img [ref=e120]
+              - generic [ref=e122]: "23"
+            - generic "15 suggestions" [ref=e123]:
+              - img [ref=e124]
+              - generic [ref=e126]: "15"
+        - generic [ref=e128] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e129]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e130]
+          - generic [ref=e131]: Today at 12:00 AM
+          - generic [ref=e132]:
+            - generic [ref=e133]: 14 refs
+            - generic "8 refs with warnings" [ref=e134]:
+              - img [ref=e135]
+              - generic [ref=e137]: "8"
+            - generic "3 suggestions" [ref=e138]:
+              - img [ref=e139]
+              - generic [ref=e141]: "3"
+            - generic "2 unverified refs" [ref=e142]:
+              - img [ref=e143]
+              - generic [ref=e145]: "2"
+        - generic [ref=e147] [cursor=pointer]:
+          - generic "Attention Is All You Need" [ref=e148]
+          - generic "https://arxiv.org/abs/1706.03762" [ref=e149]
+          - generic [ref=e150]: Today at 12:00 AM
+          - generic [ref=e151]:
+            - generic [ref=e152]: 40 refs
+            - generic "4 refs with errors" [ref=e153]:
+              - img [ref=e154]
+              - generic [ref=e156]: "4"
+            - generic "23 refs with warnings" [ref=e157]:
+              - img [ref=e158]
+              - generic [ref=e160]: "23"
+            - generic "15 suggestions" [ref=e161]:
+              - img [ref=e162]
+              - generic [ref=e164]: "15"
+        - generic [ref=e166] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e167]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e168]
+          - generic [ref=e169]: Today at 12:00 AM
+          - generic [ref=e170]:
+            - generic [ref=e171]: 14 refs
+            - generic "8 refs with warnings" [ref=e172]:
+              - img [ref=e173]
+              - generic [ref=e175]: "8"
+            - generic "3 suggestions" [ref=e176]:
+              - img [ref=e177]
+              - generic [ref=e179]: "3"
+            - generic "2 unverified refs" [ref=e180]:
+              - img [ref=e181]
+              - generic [ref=e183]: "2"
+        - generic [ref=e185] [cursor=pointer]:
+          - 'generic "GDPO: Group reward-Decoupled Normalization Policy Optimization for Multi-reward RL Optimization" [ref=e186]'
+          - generic "https://arxiv.org/abs/2601.05242?utm_source=substack&utm_medium=email" [ref=e187]
+          - generic [ref=e188]: Today at 06:54 PM
+          - generic [ref=e189]:
+            - generic [ref=e190]: 45 refs
+            - generic "24 refs with warnings" [ref=e191]:
+              - img [ref=e192]
+              - generic [ref=e194]: "24"
+            - generic "21 suggestions" [ref=e195]:
+              - img [ref=e196]
+              - generic [ref=e198]: "21"
+            - generic "4 unverified refs" [ref=e199]:
+              - img [ref=e200]
+              - generic [ref=e202]: "4"
+        - generic [ref=e204] [cursor=pointer]:
+          - generic "Who's Harry Potter? Approximate Unlearning in LLMs" [ref=e205]
+          - generic "https://arxiv.org/abs/2310.02238" [ref=e206]
+          - generic [ref=e207]: Today at 06:52 PM
+          - generic [ref=e208]:
+            - generic [ref=e209]: 14 refs
+            - generic "8 refs with warnings" [ref=e210]:
+              - img [ref=e211]
+              - generic [ref=e213]: "8"
+            - generic "3 suggestions" [ref=e214]:
+              - img [ref=e215]
+              - generic [ref=e217]: "3"
+            - generic "2 unverified refs" [ref=e218]:
+              - img [ref=e219]
+              - generic [ref=e221]: "2"
+        - generic [ref=e223] [cursor=pointer]:
+          - generic "Learning Latent Action World Models In The Wild" [ref=e224]
+          - generic "https://arxiv.org/pdf/2601.05230" [ref=e225]
+          - generic [ref=e226]: Today at 06:51 PM
+          - generic [ref=e227]:
+            - generic [ref=e228]: 75 refs
+            - generic "38 refs with warnings" [ref=e229]:
+              - img [ref=e230]
+              - generic [ref=e232]: "38"
+            - generic "30 suggestions" [ref=e233]:
+              - img [ref=e234]
+              - generic [ref=e236]: "30"
+            - generic "2 unverified refs" [ref=e237]:
+              - img [ref=e238]
+              - generic [ref=e240]: "2"
+        - generic [ref=e242] [cursor=pointer]:
+          - generic "Hey, That's My Model! Introducing Chain & Hash, An LLM Fingerprinting Technique" [ref=e243]
+          - generic "https://arxiv.org/abs/2407.10887" [ref=e244]
+          - generic [ref=e245]: Today at 06:51 PM
+          - generic [ref=e246]:
+            - generic [ref=e247]: 18 refs
+            - generic "13 refs with warnings" [ref=e248]:
+              - img [ref=e249]
+              - generic [ref=e251]: "13"
+            - generic "5 suggestions" [ref=e252]:
+              - img [ref=e253]
+              - generic [ref=e255]: "5"
+            - generic "1 unverified ref" [ref=e256]:
+              - img [ref=e257]
+              - generic [ref=e259]: "1"
+        - generic [ref=e261] [cursor=pointer]:
+          - 'generic "Great, Now Write an Article About That: The Crescendo Multi-Turn LLM Jailbreak Attack" [ref=e262]'
+          - generic "https://arxiv.org/abs/2404.01833" [ref=e263]
+          - generic [ref=e264]: Today at 06:50 PM
+          - generic [ref=e265]:
+            - generic [ref=e266]: 36 refs
+            - generic "27 refs with warnings" [ref=e267]:
+              - img [ref=e268]
+              - generic [ref=e270]: "27"
+            - generic "26 suggestions" [ref=e271]:
+              - img [ref=e272]
+              - generic [ref=e274]: "26"
+        - generic [ref=e276] [cursor=pointer]:
+          - 'generic "GPQA: A Graduate-Level Google-Proof Q&A Benchmark" [ref=e277]'
+          - generic "https://arxiv.org/abs/2311.12022" [ref=e278]
+          - generic [ref=e279]: Today at 06:30 PM
+          - generic [ref=e280]:
+            - generic [ref=e281]: 39 refs
+            - generic "25 refs with warnings" [ref=e282]:
+              - img [ref=e283]
+              - generic [ref=e285]: "25"
+            - generic "20 suggestions" [ref=e286]:
+              - img [ref=e287]
+              - generic [ref=e289]: "20"
+            - generic "3 unverified refs" [ref=e290]:
+              - img [ref=e291]
+              - generic [ref=e293]: "3"
+    - button "Settings" [ref=e295] [cursor=pointer]:
+      - img [ref=e296]
+      - generic [ref=e299]: Settings
+  - generic [ref=e301]:
+    - banner [ref=e302]:
+      - generic [ref=e303]:
+        - img [ref=e304]
+        - heading "RefChecker" [level=1] [ref=e309]
+      - generic [ref=e310]:
+        - button "anthropic-claude-sonnet-4-20250514" [ref=e313]:
+          - generic [ref=e314]: anthropic-claude-sonnet-4-20250514
+          - img [ref=e315]
+        - link "View on GitHub" [ref=e317] [cursor=pointer]:
+          - /url: https://github.com/markrussinovich/refchecker
+          - img [ref=e318]
+    - main [ref=e320]:
+      - generic [ref=e322]:
+        - heading "Check Paper References" [level=2] [ref=e323]
+        - generic [ref=e324]:
+          - button "URL / ArXiv ID" [ref=e325] [cursor=pointer]
+          - button "Upload File" [ref=e326] [cursor=pointer]
+          - button "Paste Text" [ref=e327] [cursor=pointer]
+        - textbox "Enter ArXiv ID (e.g., 2401.12345) or URL" [ref=e329]: https://arxiv.org/abs/2311.12022
+        - generic [ref=e330]:
+          - button "Check References" [ref=e331] [cursor=pointer]
+          - generic [ref=e332]: Using Sonnet 4.5 Test (anthropic)
+  - button "Show Debug Panel" [ref=e333]:
+    - img [ref=e334]
+```
