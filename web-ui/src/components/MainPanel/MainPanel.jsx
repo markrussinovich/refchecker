@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import InputSection from './InputSection'
 import StatusSection from './StatusSection'
 import StatsSection from './StatsSection'
@@ -11,6 +11,11 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
  * All checks are treated as peers - no special handling for "current" vs "history"
  */
 export default function MainPanel() {
+  const mainRef = useRef(null)
+  const contentRef = useRef(null)
+  const [showScrollTop, setShowScrollTop] = useState(false)
+  const [buttonLeft, setButtonLeft] = useState(null)
+  
   const { 
     status: checkStoreStatus, 
     references: checkStoreRefs, 
@@ -19,6 +24,39 @@ export default function MainPanel() {
     clearStatusFilter 
   } = useCheckStore()
   const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
+
+  // Track scroll position to show/hide scroll-to-top button
+  useEffect(() => {
+    const mainElement = mainRef.current
+    if (!mainElement) return
+
+    const handleScroll = () => {
+      setShowScrollTop(mainElement.scrollTop > 300)
+    }
+
+    mainElement.addEventListener('scroll', handleScroll, { passive: true })
+    return () => mainElement.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Calculate button position based on content container
+  useEffect(() => {
+    const updateButtonPosition = () => {
+      if (contentRef.current) {
+        const rect = contentRef.current.getBoundingClientRect()
+        // Position button 12px to the right of the content column
+        setButtonLeft(rect.right + 12)
+      }
+    }
+
+    updateButtonPosition()
+    window.addEventListener('resize', updateButtonPosition)
+    return () => window.removeEventListener('resize', updateButtonPosition)
+  }, [])
+
+  // Scroll to top handler
+  const scrollToTop = useCallback(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
 
   // Determine what to display:
   // - selectedCheckId === -1: "New refcheck" placeholder -> show input form
@@ -161,10 +199,11 @@ export default function MainPanel() {
 
   return (
     <main 
+      ref={mainRef}
       className="flex-1 relative"
       style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
-      <div className="max-w-4xl mx-auto p-6 space-y-6">
+      <div ref={contentRef} className="max-w-4xl mx-auto p-6 space-y-6">
         {/* Input Section */}
         {showInput && <InputSection />}
 
@@ -193,6 +232,27 @@ export default function MainPanel() {
           />
         )}
       </div>
+
+      {/* Scroll to top button - fixed position to the right of content column */}
+      {showScrollTop && buttonLeft && (
+        <button
+          onClick={scrollToTop}
+          className="fixed z-40 p-2 rounded-full shadow-lg transition-all duration-200 hover:scale-110 opacity-50 hover:opacity-100"
+          style={{
+            backgroundColor: 'var(--color-bg-tertiary)',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+            left: `${buttonLeft}px`,
+            bottom: '2rem',
+          }}
+          title="Scroll to top"
+          aria-label="Scroll to top"
+        >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
+          </svg>
+        </button>
+      )}
     </main>
   )
 }
