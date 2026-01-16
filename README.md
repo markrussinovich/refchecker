@@ -244,6 +244,8 @@ python run_refchecker.py --paper https://arxiv.org/abs/1706.03762 \
 
 #### Google Gemini
 
+With `GOOGLE_API_KEY` environment variable:  
+
 ```bash
 python run_refchecker.py --paper paper.tex \
   --llm-provider google \
@@ -251,6 +253,8 @@ python run_refchecker.py --paper paper.tex \
 ```
 
 #### Azure OpenAI
+
+With `AZURE_OPENAI_API_KEY` environment variable:
 
 ```bash
 python run_refchecker.py --paper paper.txt \
