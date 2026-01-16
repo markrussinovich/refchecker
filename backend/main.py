@@ -183,10 +183,12 @@ async def start_check(
         
         # Retrieve API key from config if config_id provided
         api_key = None
+        endpoint = None
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id)
             if config:
                 api_key = config.get('api_key')
+                endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
                 logger.info(f"Using LLM config {llm_config_id}: {llm_provider}/{llm_model}")
@@ -238,7 +240,7 @@ async def start_check(
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, api_key, use_llm, cancel_event)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, api_key, endpoint, use_llm, cancel_event)
         )
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id}
 
@@ -262,6 +264,7 @@ async def run_check(
     llm_provider: str,
     llm_model: Optional[str],
     api_key: Optional[str],
+    endpoint: Optional[str],
     use_llm: bool,
     cancel_event: asyncio.Event
 ):
@@ -349,6 +352,7 @@ async def run_check(
             llm_provider=llm_provider,
             llm_model=llm_model,
             api_key=api_key,
+            endpoint=endpoint,
             use_llm=use_llm,
             progress_callback=progress_callback,
             cancel_event=cancel_event,
@@ -829,6 +833,7 @@ async def recheck(check_id: int):
                 llm_provider,
                 llm_model,
                 None,  # API key will need to be retrieved separately
+                None,  # Endpoint will need to be retrieved separately
                 True,
                 cancel_event
             )

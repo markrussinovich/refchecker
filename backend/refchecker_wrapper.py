@@ -82,6 +82,7 @@ class ProgressRefChecker:
                  llm_provider: Optional[str] = None,
                  llm_model: Optional[str] = None,
                  api_key: Optional[str] = None,
+                 endpoint: Optional[str] = None,
                  use_llm: bool = True,
                  progress_callback: Optional[Callable] = None,
                  cancel_event: Optional[asyncio.Event] = None,
@@ -104,6 +105,7 @@ class ProgressRefChecker:
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.api_key = api_key
+        self.endpoint = endpoint
         self.use_llm = use_llm
         self.progress_callback = progress_callback
         self.cancel_event = cancel_event
@@ -121,6 +123,8 @@ class ProgressRefChecker:
                     llm_config['model'] = llm_model
                 if api_key:
                     llm_config['api_key'] = api_key
+                if endpoint:
+                    llm_config['endpoint'] = endpoint
                 self.llm = create_llm_provider(
                     provider_name=llm_provider,
                     config=llm_config
