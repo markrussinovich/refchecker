@@ -10,6 +10,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const { 
     settings, 
     isLoading, 
+    version,
     isSettingsOpen, 
     closeSettings, 
     updateSetting 
@@ -386,6 +387,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               </button>
             ))}
           </nav>
+
+          <div className="px-4 mt-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            Version {version || '—'}
+          </div>
         </div>
 
         {/* Right Content */}

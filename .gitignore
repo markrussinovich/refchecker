@@ -119,6 +119,7 @@ semantic_scholar_db/
 refchecker_history.db
 refchecker_history.db-wal
 refchecker_history.db-shm
+backend/uploads/
 
 # Temporary files
 temp/

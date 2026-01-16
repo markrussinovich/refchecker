@@ -215,6 +215,9 @@ export default function StatusSection() {
 
   // Determine the source type - prefer selectedCheck, fall back to checkStore for current session
   const displaySourceType = selectedCheck?.source_type || (isCurrentSessionCheck ? checkStoreSourceType : null)
+  const displayLlmLabel = displayLlmModel 
+    ? `${displayLlmProvider ? `${displayLlmProvider} / ` : ''}${displayLlmModel}`
+    : null
   
   const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId)
   const thumbnailInfo = getThumbnailInfo(displaySource, displaySourceType)
@@ -675,74 +678,95 @@ export default function StatusSection() {
             </p>
           )}
           {/* Show extraction source - clickable for text sources */}
-          {displayExtractionMethod && ['bbl', 'bib'].includes(displayExtractionMethod) ? (
-            <p 
-              className="text-sm"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              Source:{' '}
-              {selectedCheckId ? (
-                <a 
-                  href={`${API_BASE}/api/bibliography/${selectedCheckId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:underline"
-                  style={{ color: 'var(--color-link)' }}
-                  onClick={(e) => e.stopPropagation()}
+          {(() => {
+            if (displayExtractionMethod && ['bbl', 'bib'].includes(displayExtractionMethod)) {
+              const label = displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
                 >
-                  {displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`}
-                </a>
-              ) : (
-                displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`
-              )}
-            </p>
-          ) : displayExtractionMethod === 'pdf' ? (
+                  Source:{' '}
+                  {selectedCheckId ? (
+                    <a 
+                      href={`${API_BASE}/api/bibliography/${selectedCheckId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="hover:underline"
+                      style={{ color: 'var(--color-link)' }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    label
+                  )}
+                </p>
+              )
+            }
+
+            if (displayExtractionMethod === 'pdf') {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source: PDF extraction
+                </p>
+              )
+            }
+
+            if (displaySourceType === 'text' && selectedCheckId) {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source:{' '}
+                  <a 
+                    href={`${API_BASE}/api/text/${selectedCheckId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                    style={{ color: 'var(--color-link)' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Pasted text
+                  </a>
+                </p>
+              )
+            }
+
+            if (displaySourceType === 'file' && selectedCheckId) {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source:{' '}
+                  <a 
+                    href={`${API_BASE}/api/file/${selectedCheckId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline"
+                    style={{ color: 'var(--color-link)' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Uploaded file
+                  </a>
+                </p>
+              )
+            }
+
+            return null
+          })()}
+
+          {displayLlmLabel && (
             <p 
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Source: PDF extraction
-            </p>
-          ) : displaySourceType === 'text' && selectedCheckId ? (
-            <p 
-              className="text-sm"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              Source:{' '}
-              <a 
-                href={`${API_BASE}/api/text/${selectedCheckId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
-                style={{ color: 'var(--color-link)' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                Pasted text
-              </a>
-            </p>
-          ) : displaySourceType === 'file' && selectedCheckId ? (
-            <p 
-              className="text-sm"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              Source:{' '}
-              <a 
-                href={`${API_BASE}/api/file/${selectedCheckId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
-                style={{ color: 'var(--color-link)' }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                Uploaded file
-              </a>
-            </p>
-          ) : displayLlmModel && (
-            <p 
-              className="text-sm"
-              style={{ color: 'var(--color-text-muted)' }}
-            >
-              Model: {displayLlmProvider ? `${displayLlmProvider} / ` : ''}{displayLlmModel}
+              Model: {displayLlmLabel}
             </p>
           )}
           <p 

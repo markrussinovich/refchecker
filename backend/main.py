@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
+from refchecker.__version__ import __version__
 
 import aiosqlite
 from .database import db
@@ -134,6 +135,12 @@ async def root():
 async def health():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.get("/api/version")
+async def version():
+    """Return server/CLI version from refchecker package."""
+    return {"version": __version__}
 
 
 @app.websocket("/api/ws/{session_id}")

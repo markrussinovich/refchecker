@@ -10,6 +10,7 @@ const API_BASE = ''
 export const useSettingsStore = create((set, get) => ({
   // State
   settings: {},
+  version: null,
   isLoading: false,
   error: null,
   isSettingsOpen: false,
@@ -21,6 +22,7 @@ export const useSettingsStore = create((set, get) => ({
     set({ isSettingsOpen: true })
     // Fetch latest settings when opening
     get().fetchSettings()
+    get().fetchVersion()
   },
 
   /**
@@ -58,6 +60,28 @@ export const useSettingsStore = create((set, get) => ({
     } catch (error) {
       logger.error('SettingsStore', 'Error fetching settings', error)
       set({ error: error.message, isLoading: false })
+    }
+  },
+
+  /**
+   * Fetch application version from backend (same source as CLI)
+   */
+  fetchVersion: async (attempt = 1) => {
+    const maxAttempts = 3
+    const backoffMs = 800
+    try {
+      const response = await fetch(`${API_BASE}/api/version`)
+      if (!response.ok) {
+        throw new Error(`Failed to fetch version: ${response.status}`)
+      }
+      const data = await response.json()
+      set({ version: data.version })
+      logger.info('SettingsStore', `Fetched version ${data.version}`)
+    } catch (error) {
+      logger.error('SettingsStore', `Error fetching version (attempt ${attempt})`, error)
+      if (attempt < maxAttempts) {
+        setTimeout(() => get().fetchVersion(attempt + 1), backoffMs)
+      }
     }
   },
 
