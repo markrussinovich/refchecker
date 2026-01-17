@@ -3095,6 +3095,35 @@ def validate_parsed_references(references):
     }
 
 
+def is_access_note(text):
+    """
+    Check if text is an access note like '[Online; accessed DD-MM-YYYY]' or '[Accessed: YYYY-MM-DD]'
+    These should not be treated as titles or venues.
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if text appears to be an access/retrieval note
+    """
+    if not text:
+        return False
+    text_clean = text.strip().rstrip('.')
+    # Common patterns for access notes
+    access_patterns = [
+        r'^\[Online;?\s*accessed\s+[\d\-/]+\]$',  # [Online; accessed 07-12-2024]
+        r'^\[Accessed:?\s+[\d\-/]+\]$',            # [Accessed: 2024-07-12]
+        r'^\[Online\]$',                           # [Online]
+        r'^\[accessed\s+[\d\-/]+\]$',              # [accessed 07-12-2024]
+        r'^\[Online,?\s+accessed\s+[\d\-/]+\]$',   # [Online, accessed 07-12-2024]
+        r'^Online;\s*accessed\s+[\d\-/]+$',        # Online; accessed 07-12-2024 (without brackets)
+    ]
+    for pattern in access_patterns:
+        if re.match(pattern, text_clean, re.IGNORECASE):
+            return True
+    return False
+
+
 def extract_latex_references(text, file_path=None):  # pylint: disable=unused-argument
     """
     Extract references from LaTeX content programmatically
@@ -3220,191 +3249,244 @@ def extract_latex_references(text, file_path=None):  # pylint: disable=unused-ar
                     # Clean and extract authors
                     author_part_clean = strip_latex_commands(author_part).strip()
                     
-                    # Simple fix: just improve the organization detection without complex parsing
-                    # Remove year pattern first - handle both parenthetical and standalone years
-                    author_text_clean = re.sub(r'\s*\(\d{4}\)\.?$', '', author_part_clean).strip()
-                    author_text_clean = re.sub(r'\s+\d{4}\.?$', '', author_text_clean).strip()
+                    # Special case: Check if second part is just an access note like [Online; accessed ...]
+                    # This indicates the reference has no authors, and the first part is actually the title
+                    # e.g., "The caida anonymized internet traces.\n\newblock [Online; accessed 07-12-2024]."
+                    first_part_is_title = False
+                    if len(parts) >= 2:
+                        second_part_clean = strip_latex_commands(parts[1]).strip()
+                        if is_access_note(second_part_clean):
+                            first_part_is_title = True
+                            # Use first part as title, not authors
+                            title_text_from_first = author_part_clean.rstrip('.')
+                            if title_text_from_first and len(title_text_from_first) > 5:
+                                ref['title'] = title_text_from_first
+                            # Don't set authors - this reference has none (or just a dataset name)
                     
-                    # Better organization detection - check if it looks like multiple authors
-                    is_multi_author = (
-                        ', and ' in author_text_clean or  # "A, B, and C" format
-                        ' and ' in author_text_clean or    # "A and B" format
-                        re.search(r'\w+,\s+[A-Z]\.', author_text_clean) or  # "Last, F." patterns
-                        (author_text_clean.count(',') >= 2 and len(author_text_clean) > 30)  # Multiple commas in longer text
-                    )
+                    if first_part_is_title:
+                        # Skip normal author/title parsing - already handled above
+                        pass
+                    else:
+                        # Normal case: first part contains authors
+                        # Simple fix: just improve the organization detection without complex parsing
+                        # Remove year pattern first - handle both parenthetical and standalone years
+                        author_text_clean = re.sub(r'\s*\(\d{4}\)\.?$', '', author_part_clean).strip()
+                        author_text_clean = re.sub(r'\s+\d{4}\.?$', '', author_text_clean).strip()
                     
-                    if is_multi_author:
-                        # Parse multiple authors - use existing logic from parse_authors_with_initials
-                        try:
-                            parsed_authors = parse_authors_with_initials(author_text_clean)
-                            if parsed_authors and len(parsed_authors) > 1:
-                                # Clean up "and" prefixes, periods, and preserve "et al"
-                                cleaned_authors = []
-                                for author in parsed_authors:
-                                    # Remove leading "and" 
-                                    author = re.sub(r'^and\s+', '', author.strip())
-                                    # Remove trailing periods that shouldn't be there
-                                    author = clean_author_name(author)
-                                    # Preserve "et al" variants to enable proper author count handling
-                                    if author.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
-                                        cleaned_authors.append('et al')  # Normalize to standard form
-                                    else:
-                                        cleaned_authors.append(author)
-                                if cleaned_authors:
-                                    ref['authors'] = cleaned_authors
-                            else:
-                                # Fallback: try once more with semicolon handling, then simple comma split
+                        # Better organization detection - check if it looks like multiple authors
+                        is_multi_author = (
+                            ', and ' in author_text_clean or  # "A, B, and C" format
+                            ' and ' in author_text_clean or    # "A and B" format
+                            re.search(r'\w+,\s+[A-Z]\.', author_text_clean) or  # "Last, F." patterns
+                            (author_text_clean.count(',') >= 2 and len(author_text_clean) > 30)  # Multiple commas in longer text
+                        )
+                    
+                        if is_multi_author:
+                            # Parse multiple authors - use existing logic from parse_authors_with_initials
+                            try:
+                                parsed_authors = parse_authors_with_initials(author_text_clean)
+                                if parsed_authors and len(parsed_authors) > 1:
+                                    # Clean up "and" prefixes, periods, and preserve "et al"
+                                    cleaned_authors = []
+                                    for author in parsed_authors:
+                                        # Remove leading "and" 
+                                        author = re.sub(r'^and\s+', '', author.strip())
+                                        # Remove trailing periods that shouldn't be there
+                                        author = clean_author_name(author)
+                                        # Preserve "et al" variants to enable proper author count handling
+                                        if author.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'al., et', 'others', 'and others']:
+                                            cleaned_authors.append('et al')  # Normalize to standard form
+                                        else:
+                                            cleaned_authors.append(author)
+                                    if cleaned_authors:
+                                        ref['authors'] = cleaned_authors
+                                else:
+                                    # Fallback: try once more with semicolon handling, then simple comma split
+                                    simple_authors = []
+                                    try:
+                                        # Try parsing again with normalized separators
+                                        normalized_text = re.sub(r';\s*and\s+', ', ', author_text_clean)
+                                        fallback_authors = parse_authors_with_initials(normalized_text)
+                                        if fallback_authors and len(fallback_authors) >= 2:
+                                            simple_authors = fallback_authors
+                                        else:
+                                            raise ValueError("Fallback parsing failed")
+                                    except:
+                                        # Last resort: naive comma split
+                                        for a in author_text_clean.split(','):
+                                            a = a.strip()
+                                            # Remove "and" prefix and skip short/empty entries
+                                            a = re.sub(r'^and\s+', '', a)
+                                            # Clean author name (remove unnecessary periods)
+                                            a = clean_author_name(a)
+                                            if a and len(a) > 2:
+                                                # Preserve "et al" variants to enable proper author count handling
+                                                if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                                    simple_authors.append('et al')  # Normalize to standard form
+                                                else:
+                                                    simple_authors.append(a)
+                                            elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                                simple_authors.append('et al')  # Handle short "et al" variants
+                                    
+                                    if simple_authors:
+                                        ref['authors'] = simple_authors
+                            except Exception:
+                                # Fallback: simple comma split with cleanup
                                 simple_authors = []
-                                try:
-                                    # Try parsing again with normalized separators
-                                    normalized_text = re.sub(r';\s*and\s+', ', ', author_text_clean)
-                                    fallback_authors = parse_authors_with_initials(normalized_text)
-                                    if fallback_authors and len(fallback_authors) >= 2:
-                                        simple_authors = fallback_authors
-                                    else:
-                                        raise ValueError("Fallback parsing failed")
-                                except:
-                                    # Last resort: naive comma split
-                                    for a in author_text_clean.split(','):
-                                        a = a.strip()
-                                        # Remove "and" prefix and skip short/empty entries
-                                        a = re.sub(r'^and\s+', '', a)
-                                        # Clean author name (remove unnecessary periods)
-                                        a = clean_author_name(a)
-                                        if a and len(a) > 2:
-                                            # Preserve "et al" variants to enable proper author count handling
-                                            if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
-                                                simple_authors.append('et al')  # Normalize to standard form
-                                            else:
-                                                simple_authors.append(a)
-                                        elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
-                                            simple_authors.append('et al')  # Handle short "et al" variants
-                                
+                                for a in author_text_clean.split(','):
+                                    a = a.strip()
+                                    # Remove "and" prefix and skip short/empty entries
+                                    a = re.sub(r'^and\s+', '', a)
+                                    # Clean author name (remove unnecessary periods)
+                                    a = clean_author_name(a)
+                                    if a and len(a) > 2:
+                                        # Preserve "et al" variants to enable proper author count handling
+                                        if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                            simple_authors.append('et al')  # Normalize to standard form
+                                        else:
+                                            simple_authors.append(a)
+                                    elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
+                                        simple_authors.append('et al')  # Handle short "et al" variants
                                 if simple_authors:
                                     ref['authors'] = simple_authors
-                        except Exception:
-                            # Fallback: simple comma split with cleanup
-                            simple_authors = []
-                            for a in author_text_clean.split(','):
-                                a = a.strip()
-                                # Remove "and" prefix and skip short/empty entries
-                                a = re.sub(r'^and\s+', '', a)
-                                # Clean author name (remove unnecessary periods)
-                                a = clean_author_name(a)
-                                if a and len(a) > 2:
-                                    # Preserve "et al" variants to enable proper author count handling
-                                    if a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
-                                        simple_authors.append('et al')  # Normalize to standard form
-                                    else:
-                                        simple_authors.append(a)
-                                elif a and a.lower() in ['et al', 'et al.', 'et~al', 'et~al.', 'others', 'and others']:
-                                    simple_authors.append('et al')  # Handle short "et al" variants
-                            if simple_authors:
-                                ref['authors'] = simple_authors
-                    else:
-                        # Single organization author
-                        author_name = clean_author_name(author_text_clean)
-                        if author_name and len(author_name) > 2:
-                            ref['authors'] = [author_name]
+                        else:
+                            # Single organization author
+                            author_name = clean_author_name(author_text_clean)
+                            if author_name and len(author_name) > 2:
+                                ref['authors'] = [author_name]
                     
                     # Second part is usually title  
-                    if len(parts) >= 2:
+                    if len(parts) >= 2 and not first_part_is_title:
                         title_part = parts[1].strip()
                         
-                        # Handle \href{URL}{text} or \href {URL} {text} format
-                        # Extract URL before stripping LaTeX commands
-                        # We need to use balanced brace matching because titles can contain
-                        # nested braces like {LLM} for capitalization protection
-                        href_url = None
-                        title_text = None
-                        
-                        href_start = title_part.find('\\href')
-                        if href_start != -1:
-                            # Find first opening brace (URL)
-                            pos = href_start + 5  # Skip \href
-                            while pos < len(title_part) and title_part[pos] in ' \t\n':
-                                pos += 1
-                            
-                            if pos < len(title_part) and title_part[pos] == '{':
-                                # Extract URL using balanced braces
-                                brace_count = 0
-                                url_start = pos + 1
-                                url_end = pos
-                                for i in range(pos, len(title_part)):
-                                    if title_part[i] == '{':
-                                        brace_count += 1
-                                    elif title_part[i] == '}':
-                                        brace_count -= 1
-                                        if brace_count == 0:
-                                            url_end = i
-                                            break
-                                
-                                if url_end > url_start:
-                                    href_url = title_part[url_start:url_end].strip()
-                                    
-                                    # Now find the second brace group (title text)
-                                    pos = url_end + 1
-                                    while pos < len(title_part) and title_part[pos] in ' \t\n':
-                                        pos += 1
-                                    
-                                    if pos < len(title_part) and title_part[pos] == '{':
-                                        # Extract title text using balanced braces
-                                        brace_count = 0
-                                        text_start = pos + 1
-                                        text_end = pos
-                                        for i in range(pos, len(title_part)):
-                                            if title_part[i] == '{':
-                                                brace_count += 1
-                                            elif title_part[i] == '}':
-                                                brace_count -= 1
-                                                if brace_count == 0:
-                                                    text_end = i
-                                                    break
-                                        
-                                        if text_end > text_start:
-                                            title_text = title_part[text_start:text_end].strip()
-                        
-                        if href_url and title_text:
-                            
-                            # Extract DOI if it's a doi.org URL
-                            if 'doi.org/' in href_url and not ref.get('doi'):
-                                doi_match = re.search(r'doi\.org/(.+)$', href_url)
-                                if doi_match:
-                                    ref['doi'] = doi_match.group(1)
-                                    ref['url'] = href_url
-                            # Extract arXiv ID if it's an arxiv URL  
-                            elif 'arxiv.org/' in href_url.lower() and not ref.get('url'):
-                                ref['url'] = href_url
-                            # Generic URL
-                            elif not ref.get('url'):
-                                ref['url'] = href_url
-                            
-                            # Use the title text (second part of href), not the URL
-                            title_clean = strip_latex_commands(title_text).strip()
+                        # Check if this is an access note - skip if so
+                        title_part_clean = strip_latex_commands(title_part).strip()
+                        if is_access_note(title_part_clean):
+                            # This is just an access note, not a title
+                            pass
                         else:
-                            title_clean = strip_latex_commands(title_part).strip()
+                            # Check if this is a URL-only part (common for @misc website references)
+                            # Pattern: \url{...}, YEAR or just \url{...}
+                            # In this case, use the author/organization name as the title instead
+                            url_only_match = re.match(r'^\\url\{[^}]+\}(?:\s*,\s*\d{4})?\.?\s*$', title_part)
+                            if url_only_match:
+                                # This is a URL-only block, not a title
+                                # For website/misc references, the org name IS the title
+                                # Use the author_part_clean as title if it looks like an org name
+                                if author_part_clean and not ref.get('title'):
+                                    # Organization names are often in braces, clean them up
+                                    org_title = author_part_clean.strip('{}.')
+                                    if org_title and len(org_title) > 2:
+                                        ref['title'] = org_title
+                                # Continue to extract URL below
                         
-                        # Remove trailing dots and clean up
-                        title_clean = title_clean.rstrip('.')
-                        if title_clean and len(title_clean) > 5:  # Reasonable title length
-                            ref['title'] = title_clean
+                            # Handle \href{URL}{text} or \href {URL} {text} format
+                            # Extract URL before stripping LaTeX commands
+                            # We need to use balanced brace matching because titles can contain
+                            # nested braces like {LLM} for capitalization protection
+                            href_url = None
+                            title_text = None
+                            
+                            href_start = title_part.find('\\href')
+                            if href_start != -1:
+                                # Find first opening brace (URL)
+                                pos = href_start + 5  # Skip \href
+                                while pos < len(title_part) and title_part[pos] in ' \t\n':
+                                    pos += 1
+                                
+                                if pos < len(title_part) and title_part[pos] == '{':
+                                    # Extract URL using balanced braces
+                                    brace_count = 0
+                                    url_start = pos + 1
+                                    url_end = pos
+                                    for i in range(pos, len(title_part)):
+                                        if title_part[i] == '{':
+                                            brace_count += 1
+                                        elif title_part[i] == '}':
+                                            brace_count -= 1
+                                            if brace_count == 0:
+                                                url_end = i
+                                                break
+                                    
+                                    if url_end > url_start:
+                                        href_url = title_part[url_start:url_end].strip()
+                                        
+                                        # Now find the second brace group (title text)
+                                        pos = url_end + 1
+                                        while pos < len(title_part) and title_part[pos] in ' \t\n':
+                                            pos += 1
+                                        
+                                        if pos < len(title_part) and title_part[pos] == '{':
+                                            # Extract title text using balanced braces
+                                            brace_count = 0
+                                            text_start = pos + 1
+                                            text_end = pos
+                                            for i in range(pos, len(title_part)):
+                                                if title_part[i] == '{':
+                                                    brace_count += 1
+                                                elif title_part[i] == '}':
+                                                    brace_count -= 1
+                                                    if brace_count == 0:
+                                                        text_end = i
+                                                        break
+                                            
+                                            if text_end > text_start:
+                                                title_text = title_part[text_start:text_end].strip()
+                            
+                            if href_url and title_text:
+                                
+                                # Extract DOI if it's a doi.org URL
+                                if 'doi.org/' in href_url and not ref.get('doi'):
+                                    doi_match = re.search(r'doi\.org/(.+)$', href_url)
+                                    if doi_match:
+                                        ref['doi'] = doi_match.group(1)
+                                        ref['url'] = href_url
+                                # Extract arXiv ID if it's an arxiv URL  
+                                elif 'arxiv.org/' in href_url.lower() and not ref.get('url'):
+                                    ref['url'] = href_url
+                                # Generic URL
+                                elif not ref.get('url'):
+                                    ref['url'] = href_url
+                                
+                                # Use the title text (second part of href), not the URL
+                                title_clean = strip_latex_commands(title_text).strip()
+                            elif not url_only_match:
+                                # Only extract title from this part if it's not a URL-only block
+                                title_clean = strip_latex_commands(title_part).strip()
+                            else:
+                                # URL-only block - title already set from org name above
+                                title_clean = None
+                            
+                            # Remove trailing dots and clean up
+                            if title_clean:
+                                title_clean = title_clean.rstrip('.')
+                                # Also remove leading comma and year pattern that may remain from URL stripping
+                                title_clean = re.sub(r'^,\s*\d{4}\s*$', '', title_clean).strip()
+                                title_clean = re.sub(r'^,\s*', '', title_clean).strip()
+                            if title_clean and len(title_clean) > 5:  # Reasonable title length
+                                ref['title'] = title_clean
                     
                     # Third part is usually venue/journal
                     if len(parts) >= 3:
                         venue_part = parts[2].strip()
                         venue_clean = strip_latex_commands(venue_part).strip()
-                        # Remove "In " prefix if present (common in bbl format)
-                        venue_clean = re.sub(r'^In\s+', '', venue_clean)
-                        # Remove trailing year only (at end of string), not year in the middle of venue name
-                        # e.g., "2020 Conference on..." should keep the conference name
-                        if ref['year']:
-                            # Only remove year if it appears at the very end (possibly with punctuation)
-                            venue_clean = re.sub(rf',?\s*{ref["year"]}\s*\.?\s*$', '', venue_clean)
-                        venue_clean = venue_clean.rstrip(',. ')
-                        # Filter out common non-venue patterns that shouldn't be treated as venues
-                        non_venue_patterns = ['URL', 'url', 'http:', 'https:', 'DOI', 'doi:', 'ArXiv', 'arxiv:']
-                        if venue_clean and not any(pattern in venue_clean for pattern in non_venue_patterns):
-                            ref['journal'] = venue_clean
+                        
+                        # Check if this is an access note - skip if so
+                        if is_access_note(venue_clean):
+                            pass  # Don't treat access notes as venues
+                        else:
+                            # Remove "In " prefix if present (common in bbl format)
+                            venue_clean = re.sub(r'^In\s+', '', venue_clean)
+                            # Remove trailing year only (at end of string), not year in the middle of venue name
+                            # e.g., "2020 Conference on..." should keep the conference name
+                            if ref['year']:
+                                # Only remove year if it appears at the very end (possibly with punctuation)
+                                venue_clean = re.sub(rf',?\s*{ref["year"]}\s*\.?\s*$', '', venue_clean)
+                            venue_clean = venue_clean.rstrip(',. ')
+                            # Filter out common non-venue patterns that shouldn't be treated as venues
+                            non_venue_patterns = ['URL', 'url', 'http:', 'https:', 'DOI', 'doi:', 'ArXiv', 'arxiv:']
+                            if venue_clean and not any(pattern in venue_clean for pattern in non_venue_patterns):
+                                ref['journal'] = venue_clean
                 
                 # Extract URL if present
                 url_match = re.search(r'\\url\{([^}]+)\}', content)

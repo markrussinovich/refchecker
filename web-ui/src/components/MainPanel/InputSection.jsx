@@ -9,6 +9,26 @@ import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 /**
+ * Sanitize URL input - detect and fix duplicated URLs
+ * E.g., "https://arxiv.org/abs/123https://arxiv.org/abs/123" -> "https://arxiv.org/abs/123"
+ */
+function sanitizeUrlInput(input) {
+  if (!input) return input
+  const trimmed = input.trim()
+  
+  // Check if the string contains a duplicated URL (URL appears twice consecutively)
+  // Pattern: URL immediately followed by the same URL (or similar URL with http/https variation)
+  const urlPattern = /^(https?:\/\/[^\s]+?)(https?:\/\/)/i
+  const match = trimmed.match(urlPattern)
+  if (match) {
+    // Return just the first URL (before the second http/https)
+    return match[1]
+  }
+  
+  return trimmed
+}
+
+/**
  * Input section for paper URL, ArXiv ID, or file upload
  */
 export default function InputSection() {
@@ -54,12 +74,15 @@ export default function InputSection() {
       // Get selected LLM config
       const config = getSelectedConfig()
       
+      // Sanitize URL input to handle duplicated URLs (e.g., from double paste)
+      const sanitizedUrl = inputMode === 'url' ? sanitizeUrlInput(inputValue) : null
+      
       // Build form data
       const formData = new FormData()
       formData.append('source_type', inputMode === 'url' ? 'url' : inputMode === 'file' ? 'file' : 'text')
       
       if (inputMode === 'url') {
-        formData.append('source_value', inputValue.trim())
+        formData.append('source_value', sanitizedUrl)
       } else if (inputMode === 'file') {
         formData.append('file', fileUpload.file)
       } else {
@@ -82,12 +105,12 @@ export default function InputSection() {
         mode: inputMode, 
         llm: config?.provider,
         model: config?.model,
-        source: inputMode === 'url' ? inputValue.trim() : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
+        source: inputMode === 'url' ? sanitizedUrl : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
       })
 
-      // Determine the source for display
+      // Determine the source for display (use sanitized URL)
       const displaySource = inputMode === 'url' 
-        ? inputValue.trim() 
+        ? sanitizedUrl 
         : (inputMode === 'file' ? fileUpload.file?.name : 'Pasted text')
       
       // Map inputMode to sourceType

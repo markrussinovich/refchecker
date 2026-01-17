@@ -9,7 +9,41 @@ import os
 # Add src to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from refchecker.utils.text_utils import extract_latex_references
+from refchecker.utils.text_utils import extract_latex_references, is_access_note
+
+
+class TestAccessNoteDetection(unittest.TestCase):
+    """Test is_access_note helper function"""
+    
+    def test_access_note_patterns(self):
+        """Test that various access note patterns are detected"""
+        # Should return True for access notes
+        access_notes = [
+            '[Online; accessed 07-12-2024]',
+            '[Online; accessed 01-01-2023].',
+            '[Online; accessed 2024-07-12]',
+            '[Accessed: 2024-01-15]',
+            '[accessed 07/12/2024]',
+            '[Online]',
+            '[Online, accessed 07-11-2024]',
+        ]
+        for note in access_notes:
+            self.assertTrue(is_access_note(note), f"Should detect '{note}' as access note")
+    
+    def test_non_access_note_patterns(self):
+        """Test that titles and venues are not detected as access notes"""
+        # Should return False for regular text
+        non_notes = [
+            'The caida anonymized internet traces',
+            'P4-based in-network telemetry',
+            'IEEE INFOCOM 2024',
+            'ACM SIGCOMM Computer Communication Review',
+            'Pages 1--8',
+            'https://github.com/Xilinx/open-nic',
+        ]
+        for text in non_notes:
+            self.assertFalse(is_access_note(text), f"Should not detect '{text}' as access note")
+
 
 class TestLatexAuthorExtraction(unittest.TestCase):
     """Test LaTeX author extraction functionality"""
@@ -348,6 +382,163 @@ Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi.
         self.assertEqual(len(references), 1)
         ref = references[0]
         self.assertEqual(ref['year'], 2019)
+    
+    def test_organization_website_reference(self):
+        """Test parsing of @misc website references with organization as title"""
+        # This is the format from compiled .bbl files for @misc entries
+        # The organization name in braces should be used as the title,
+        # not the ", 2022" that remains after stripping the URL
+        bbl_content = r"""
+\begin{thebibliography}{10}
+
+\bibitem{opennic}
+{AMD OpenNIC Project}.
+\newblock \url{https://github.com/Xilinx/open-nic}, 2022.
+\newblock [Online; accessed 01-01-2023].
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 1)
+        ref = references[0]
+        
+        # Title should be the organization name, NOT ", 2022"
+        self.assertEqual(ref['title'], 'AMD OpenNIC Project',
+                         f"Expected 'AMD OpenNIC Project' as title, got '{ref['title']}'")
+        
+        # Year should be extracted correctly
+        self.assertEqual(ref['year'], 2022)
+        
+        # URL should be extracted
+        self.assertIn('github.com/Xilinx/open-nic', ref.get('url', ''))
+        
+        # Authors should include the organization
+        self.assertEqual(ref['authors'], ['AMD OpenNIC Project'])
+    
+    def test_multiple_organization_website_references(self):
+        """Test parsing multiple @misc website references"""
+        bbl_content = r"""
+\begin{thebibliography}{10}
+
+\bibitem{opennic}
+{AMD OpenNIC Project}.
+\newblock \url{https://github.com/Xilinx/open-nic}, 2022.
+\newblock [Online; accessed 01-01-2023].
+
+\bibitem{vitisnet}
+{Vitis Networking P4}.
+\newblock \url{https://www.xilinx.com/products/intellectual-property/ef-di-vitisnetp4.html}, 2022.
+\newblock [Online; accessed 01-01-2023].
+
+\bibitem{graphChallenge}
+{MIT Graph Challenge}.
+\newblock \url{https://graphchallenge.mit.edu/}, 2024.
+\newblock [Online; accessed 07-11-2024].
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 3)
+        
+        # Check each reference
+        expected = [
+            {'title': 'AMD OpenNIC Project', 'year': 2022},
+            {'title': 'Vitis Networking P4', 'year': 2022},
+            {'title': 'MIT Graph Challenge', 'year': 2024},
+        ]
+        
+        for i, ref in enumerate(references):
+            self.assertEqual(ref['title'], expected[i]['title'],
+                             f"Reference {i+1}: Expected title '{expected[i]['title']}', got '{ref['title']}'")
+            self.assertEqual(ref['year'], expected[i]['year'])
+    
+    def test_access_note_not_treated_as_title(self):
+        """Test that [Online; accessed DD-MM-YYYY] is not treated as title"""
+        # CAIDA-style entry: title on first line, access note on second
+        bbl_content = r"""
+\begin{thebibliography}{10}
+
+\bibitem{CAIDA}
+The caida anonymized internet traces.
+\newblock [Online; accessed 07-12-2024].
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 1)
+        ref = references[0]
+        
+        # Title should be the actual title, NOT the access note
+        self.assertEqual(ref['title'], 'The caida anonymized internet traces',
+                         f"Expected 'The caida anonymized internet traces' as title, got '{ref.get('title')}'")
+        
+        # Year should be extracted from the access note date
+        self.assertEqual(ref['year'], 2024)
+        
+        # Authors should be empty for this type of entry
+        self.assertEqual(ref.get('authors', []), [])
+        
+        # Journal should NOT be the access note
+        self.assertIsNone(ref.get('journal') or None)
+    
+    def test_access_note_not_treated_as_venue(self):
+        """Test that [Online; accessed...] notes in third position are not treated as venues"""
+        bbl_content = r"""
+\begin{thebibliography}{10}
+
+\bibitem{opennic}
+{AMD OpenNIC Project}.
+\newblock \url{https://github.com/Xilinx/open-nic}, 2022.
+\newblock [Online; accessed 01-01-2023].
+
+\bibitem{esnet}
+{ESNet SmartNIC}.
+\newblock \url{https://github.com/esnet/esnet-smartnic-hw}, 2022.
+\newblock [Online; accessed 01-01-2023].
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 2)
+        
+        for ref in references:
+            # Journal should be empty, not the access note
+            journal = ref.get('journal') or ''
+            self.assertNotIn('Online', journal,
+                             f"Access note incorrectly treated as venue: '{journal}'")
+            self.assertNotIn('accessed', journal,
+                             f"Access note incorrectly treated as venue: '{journal}'")
+    
+    def test_et_al_author_parsing(self):
+        """Test parsing of 'et al.' style author entries"""
+        bbl_content = r"""
+\begin{thebibliography}{10}
+
+\bibitem{Jeremy2024Hpec}
+Jananthan et~al.
+\newblock Anonymized network sensing graph challenge.
+\newblock In {\em 2024 IEEE High Performance Extreme Computing Conference (HPEC) Submitted}, pages 1--8, 2024.
+
+\end{thebibliography}
+"""
+        references = extract_latex_references(bbl_content)
+        
+        self.assertEqual(len(references), 1)
+        ref = references[0]
+        
+        # Should have author with et al
+        self.assertIn('Jananthan', ' '.join(ref.get('authors', [])))
+        self.assertIn('et al', ' '.join(ref.get('authors', [])))
+        
+        # Title should be extracted correctly
+        self.assertEqual(ref['title'], 'Anonymized network sensing graph challenge')
+        
+        # Year should be 2024
+        self.assertEqual(ref['year'], 2024)
 
 
 if __name__ == '__main__':
