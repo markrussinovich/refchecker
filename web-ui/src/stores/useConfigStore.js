@@ -15,24 +15,51 @@ export const useConfigStore = create((set, get) => ({
   // Actions
   fetchConfigs: async () => {
     set({ isLoading: true, error: null })
-    try {
-      logger.info('ConfigStore', 'Fetching LLM configs')
-      const response = await api.getLLMConfigs()
-      const configs = response.data
-      
-      // Find the default config
-      const defaultConfig = configs.find(c => c.is_default)
-      
-      set({ 
-        configs, 
-        selectedConfigId: defaultConfig?.id || configs[0]?.id || null,
-        isLoading: false 
-      })
-      logger.info('ConfigStore', `Loaded ${configs.length} configs`)
-    } catch (error) {
-      logger.error('ConfigStore', 'Failed to fetch configs', error)
-      set({ error: error.message, isLoading: false })
+    
+    // Retry logic with exponential backoff for server startup race condition
+    const maxRetries = 5
+    const baseDelay = 1000 // 1 second
+    let lastError = null
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.info('ConfigStore', `Fetching LLM configs (attempt ${attempt}/${maxRetries})`)
+        const response = await api.getLLMConfigs()
+        const configs = response.data
+        
+        // Find the default config
+        const defaultConfig = configs.find(c => c.is_default)
+        
+        set({ 
+          configs, 
+          selectedConfigId: defaultConfig?.id || configs[0]?.id || null,
+          isLoading: false,
+          error: null
+        })
+        logger.info('ConfigStore', `Loaded ${configs.length} configs`)
+        return // Success - exit the function
+      } catch (error) {
+        lastError = error
+        logger.warn('ConfigStore', `Attempt ${attempt}/${maxRetries} failed: ${error.message}`)
+        
+        if (attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+          const delay = baseDelay * Math.pow(2, attempt - 1)
+          logger.info('ConfigStore', `Retrying in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
+        }
+      }
     }
+    
+    // All retries exhausted
+    logger.error('ConfigStore', `Failed to fetch configs after ${maxRetries} attempts`, lastError)
+    set({ error: lastError?.message || 'Failed to connect to server', isLoading: false })
+    
+    // Schedule a background retry
+    setTimeout(() => {
+      logger.info('ConfigStore', 'Background retry: attempting to fetch configs')
+      get().fetchConfigs()
+    }, 5000)
   },
 
   addConfig: async (config) => {

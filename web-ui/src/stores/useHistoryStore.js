@@ -233,126 +233,154 @@ export const useHistoryStore = create((set, get) => ({
     
     logger.info('HistoryStore', 'Starting initializeWithPlaceholder API call')
     
-    // Create a timeout promise to prevent indefinite waiting
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Connection timeout - backend may not be running')), 10000)
-    )
+    // Retry logic with exponential backoff for server startup race condition
+    const maxRetries = 5
+    const baseDelay = 1000 // 1 second
+    let lastError = null
     
-    try {
-      // Race between the API call and the timeout
-      const response = await Promise.race([
-        api.getHistory(limit),
-        timeoutPromise
-      ])
-      const fetched = response.data
-      let historyWorking = Array.isArray(fetched) ? [...fetched] : []
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        logger.info('HistoryStore', `Attempting to fetch history (attempt ${attempt}/${maxRetries})`)
+        
+        // Create a timeout promise for this attempt
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Connection timeout')), 10000)
+        )
+        
+        const response = await Promise.race([
+          api.getHistory(limit),
+          timeoutPromise
+        ])
+        
+        // Success! Process the response
+        const fetched = response.data
+        let historyWorking = Array.isArray(fetched) ? [...fetched] : []
 
-      // For in_progress items, fetch detail to get current progress and results
-      const inProgressItems = historyWorking
-        .filter(item => item.status === 'in_progress')
-        .slice(0, 5)
+        // For in_progress items, fetch detail to get current progress and results
+        const inProgressItems = historyWorking
+          .filter(item => item.status === 'in_progress')
+          .slice(0, 5)
 
-      for (const item of inProgressItems) {
-        try {
-          const detail = (await api.getCheckDetail(item.id)).data
-          
-          // Calculate processed_refs from results array
-          const results = Array.isArray(detail.results) ? detail.results : []
-          const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
-          
-          // Update the item with full progress info
-          historyWorking = historyWorking.map(h => h.id === item.id
-            ? {
-                ...h,
-                status: detail.status || 'in_progress',
-                total_refs: detail.total_refs || 0,
-                processed_refs: processedRefs,
-                errors_count: detail.errors_count || 0,
-                warnings_count: detail.warnings_count || 0,
-                suggestions_count: detail.suggestions_count || 0,
-                unverified_count: detail.unverified_count || 0,
-                refs_with_errors: detail.refs_with_errors || 0,
-                refs_with_warnings_only: detail.refs_with_warnings_only || 0,
-                results: results,
-                session_id: item.session_id,
-              }
-            : h)
-          
-          // Register this session for WebSocket reconnection
-          if (item.session_id && detail.status === 'in_progress') {
-            useCheckStore.getState().registerSession(item.session_id, item.id)
+        for (const item of inProgressItems) {
+          try {
+            const detail = (await api.getCheckDetail(item.id)).data
+            
+            // Calculate processed_refs from results array
+            const results = Array.isArray(detail.results) ? detail.results : []
+            const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+            
+            // Update the item with full progress info
+            historyWorking = historyWorking.map(h => h.id === item.id
+              ? {
+                  ...h,
+                  status: detail.status || 'in_progress',
+                  total_refs: detail.total_refs || 0,
+                  processed_refs: processedRefs,
+                  errors_count: detail.errors_count || 0,
+                  warnings_count: detail.warnings_count || 0,
+                  suggestions_count: detail.suggestions_count || 0,
+                  unverified_count: detail.unverified_count || 0,
+                  refs_with_errors: detail.refs_with_errors || 0,
+                  refs_with_warnings_only: detail.refs_with_warnings_only || 0,
+                  results: results,
+                  session_id: item.session_id,
+                }
+              : h)
+            
+            // Register this session for WebSocket reconnection
+            if (item.session_id && detail.status === 'in_progress') {
+              useCheckStore.getState().registerSession(item.session_id, item.id)
+            }
+            
+            logger.info('HistoryStore', 'Startup: loaded progress for in_progress item', { 
+              id: item.id, 
+              status: detail.status, 
+              total_refs: detail.total_refs,
+              processed_refs: processedRefs,
+              session_id: item.session_id
+            })
+          } catch (err) {
+            logger.warn('HistoryStore', 'Startup: failed to load in_progress item detail', { id: item.id, error: err?.message })
           }
-          
-          logger.info('HistoryStore', 'Startup: loaded progress for in_progress item', { 
-            id: item.id, 
-            status: detail.status, 
-            total_refs: detail.total_refs,
-            processed_refs: processedRefs,
-            session_id: item.session_id
-          })
-        } catch (err) {
-          logger.warn('HistoryStore', 'Startup: failed to load in_progress item detail', { id: item.id, error: err?.message })
+        }
+
+        logger.info('HistoryStore', `Fetched ${historyWorking.length} items, adding placeholder`)
+        
+        const placeholder = {
+          id: -1,
+          paper_title: 'New refcheck',
+          paper_source: '',
+          custom_label: null,
+          timestamp: null,
+          total_refs: 0,
+          errors_count: 0,
+          warnings_count: 0,
+          suggestions_count: 0,
+          unverified_count: 0,
+          llm_provider: null,
+          llm_model: null,
+          status: 'idle',
+          source_type: 'url',
+          placeholder: true,
+        }
+        
+        set({
+          history: [placeholder, ...historyWorking],
+          isLoading: false,
+          error: null,
+          selectedCheckId: -1,
+          selectedCheck: null,
+        })
+        logger.info('HistoryStore', `Initialized with placeholder and ${historyWorking.length} history items`)
+        return // Success - exit the function
+        
+      } catch (error) {
+        lastError = error
+        logger.warn('HistoryStore', `Attempt ${attempt}/${maxRetries} failed: ${error.message}`)
+        
+        if (attempt < maxRetries) {
+          // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+          const delay = baseDelay * Math.pow(2, attempt - 1)
+          logger.info('HistoryStore', `Retrying in ${delay}ms...`)
+          await new Promise(resolve => setTimeout(resolve, delay))
         }
       }
-
-      logger.info('HistoryStore', `Fetched ${historyWorking.length} items, adding placeholder`)
-      
-      const placeholder = {
-        id: -1,
-        paper_title: 'New refcheck',
-        paper_source: '',
-        custom_label: null,
-        timestamp: null,
-        total_refs: 0,
-        errors_count: 0,
-        warnings_count: 0,
-        suggestions_count: 0,
-        unverified_count: 0,
-        llm_provider: null,
-        llm_model: null,
-        status: 'idle',
-        source_type: 'url',
-        placeholder: true,
-      }
-      
-      set({
-        history: [placeholder, ...historyWorking],
-        isLoading: false,
-        selectedCheckId: -1,
-        selectedCheck: null,
-      })
-      logger.info('HistoryStore', `Initialized with placeholder and ${historyWorking.length} history items`)
-    } catch (error) {
-      logger.error('HistoryStore', 'Failed to initialize history', error)
-      
-      // Even on error, initialize with placeholder so user can still use the app
-      const placeholder = {
-        id: -1,
-        paper_title: 'New refcheck',
-        paper_source: '',
-        custom_label: null,
-        timestamp: null,
-        total_refs: 0,
-        errors_count: 0,
-        warnings_count: 0,
-        suggestions_count: 0,
-        unverified_count: 0,
-        llm_provider: null,
-        llm_model: null,
-        status: 'idle',
-        source_type: 'url',
-        placeholder: true,
-      }
-      
-      set({ 
-        history: [placeholder],
-        error: error.message, 
-        isLoading: false,
-        selectedCheckId: -1,
-        selectedCheck: null,
-      })
-      logger.info('HistoryStore', 'Initialized with placeholder only (API error)')
     }
+    
+    // All retries exhausted - initialize with placeholder only
+    logger.error('HistoryStore', `Failed to fetch history after ${maxRetries} attempts`, lastError)
+    
+    const placeholder = {
+      id: -1,
+      paper_title: 'New refcheck',
+      paper_source: '',
+      custom_label: null,
+      timestamp: null,
+      total_refs: 0,
+      errors_count: 0,
+      warnings_count: 0,
+      suggestions_count: 0,
+      unverified_count: 0,
+      llm_provider: null,
+      llm_model: null,
+      status: 'idle',
+      source_type: 'url',
+      placeholder: true,
+    }
+    
+    set({ 
+      history: [placeholder],
+      error: `Failed to connect to server after ${maxRetries} attempts. History will load when server is available.`, 
+      isLoading: false,
+      selectedCheckId: -1,
+      selectedCheck: null,
+    })
+    
+    // Schedule a background retry to fetch history once server is up
+    setTimeout(() => {
+      logger.info('HistoryStore', 'Background retry: attempting to fetch history')
+      get().fetchHistory()
+    }, 5000)
   },
 
   selectCheck: async (id) => {
