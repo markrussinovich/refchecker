@@ -106,7 +106,8 @@ Instructions:
     - When extracting URLs, preserve the complete URL including protocol
     - For BibTeX howpublished fields, extract the full URL from the field value
 12. When parsing multi-line references, combine all authors from all lines before the title
-13. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), simply return nothing - do NOT explain why you cannot extract references
+13. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), return ONLY an empty response with no text at all - do NOT explain why, do NOT describe what you see, do NOT say "I return nothing" or similar phrases
+14. OUTPUT FORMAT: Your response must contain ONLY extracted references in the format specified above (Author1*Author2#Title#Venue#Year#URL), one per line. No introductory text, no explanations, no commentary, no "Looking at this text..." statements. If there are no references to extract, output absolutely nothing.
 
 Bibliography text:
 {cleaned_bibliography}
@@ -159,6 +160,24 @@ Bibliography text:
             if 'only figures' in ref.lower() and 'learning curves' in ref.lower():
                 continue
             if ref.lower().startswith('i cannot'):
+                continue
+            # Skip "Looking at this text..." explanatory responses
+            if ref.lower().startswith('looking at'):
+                continue
+            # Skip responses that say "I return nothing" or similar
+            if 'i return nothing' in ref.lower() or 'return nothing' in ref.lower():
+                continue
+            # Skip responses that mention "no valid bibliographic references"
+            if 'no valid bibliographic' in ref.lower():
+                continue
+            # Skip responses that say "Since there are no"
+            if ref.lower().startswith('since there are no'):
+                continue
+            # Skip responses that mention "numbered format specified"
+            if 'numbered format specified' in ref.lower():
+                continue
+            # Skip responses that describe what the text contains instead of extracting
+            if ('it contains' in ref.lower() or 'it does not contain' in ref.lower()) and 'bibliography' in ref.lower():
                 continue
             
             # Remove common prefixes (bullets, numbers, etc.)
