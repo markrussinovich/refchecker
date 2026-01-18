@@ -1319,6 +1319,38 @@ def is_name_match(name1: str, name2: str) -> bool:
     # This handles both surname particle normalization effects and standard 3-part names
     def match_initials_with_names(init_parts, name_parts):
         """Helper function to match initials against full names"""
+        # Handle 4-part initials vs 2-part compound surname
+        # e.g., ['M.', 'V.', 'D.', 'Briel'] vs ['Menkes', 'van den Briel']
+        # where "van den" particles are treated as initials "V. D."
+        if len(init_parts) == 4 and len(name_parts) == 2:
+            # Check if first 3 parts are initials and last is surname
+            if (len(init_parts[0].rstrip('.')) == 1 and 
+                len(init_parts[1].rstrip('.')) == 1 and 
+                len(init_parts[2].rstrip('.')) == 1 and 
+                len(init_parts[3]) > 1 and
+                len(name_parts[0]) > 1 and len(name_parts[1]) > 1):
+                
+                first_initial = init_parts[0].rstrip('.')
+                second_initial = init_parts[1].rstrip('.')
+                third_initial = init_parts[2].rstrip('.')
+                last_name = init_parts[3]
+                first_name = name_parts[0]
+                compound_last = name_parts[1]
+                
+                # Extract parts from compound lastname (e.g., "van den Briel" -> ["van", "den", "Briel"])
+                compound_parts = compound_last.split()
+                if len(compound_parts) >= 3:
+                    # compound_parts = ["van", "den", "Briel"]
+                    particle1 = compound_parts[0]
+                    particle2 = compound_parts[1]
+                    actual_last = compound_parts[-1]
+                    
+                    if (last_name == actual_last and 
+                        first_initial == first_name[0] and
+                        second_initial == particle1[0] and
+                        third_initial == particle2[0]):
+                        return True
+        
         if len(init_parts) == 3 and len(name_parts) == 2:
             # After surname particle normalization: ['g.', 'v.', 'horn'] vs ['grant', 'van horn']
             if (len(init_parts[0].rstrip('.')) == 1 and len(init_parts[1].rstrip('.')) == 1 and len(init_parts[2]) > 1 and

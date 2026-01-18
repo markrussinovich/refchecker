@@ -6,16 +6,16 @@ import HistoryItem from './HistoryItem'
  * Scrollable list of historical checks
  */
 export default function HistoryList() {
-  const { history, selectedCheckId, isLoading, error } = useHistoryStore()
+  const { history, selectedCheckId, isLoading, error, scrollTrigger } = useHistoryStore()
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false)
   const scrollContainerRef = useRef(null)
   
-  // Scroll to top when "New Refcheck" is selected (id === -1)
+  // Scroll to top when scrollTrigger changes (New Refcheck button clicked)
   useEffect(() => {
-    if (selectedCheckId === -1 && scrollContainerRef.current) {
+    if (scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = 0
     }
-  }, [selectedCheckId])
+  }, [scrollTrigger])
   
   // Show a timeout message if loading takes too long
   useEffect(() => {

@@ -15,6 +15,7 @@ export const useHistoryStore = create((set, get) => ({
   isLoadingDetail: false,
   error: null,
   placeholderAdded: false, // tracks whether we've already injected the placeholder automatically
+  scrollTrigger: 0, // incremented to trigger scroll-to-top in HistoryList
 
   // Actions
   fetchHistory: async (limit = 50) => {
@@ -639,7 +640,7 @@ export const useHistoryStore = create((set, get) => ({
   ensureNewRefcheckItem: () => {
     set(state => {
       const exists = state.history.some(h => h.id === -1)
-      if (exists) return { ...state, placeholderAdded: true }
+      if (exists) return { ...state, placeholderAdded: true, scrollTrigger: state.scrollTrigger + 1 }
       const placeholder = {
         id: -1,
         paper_title: 'New refcheck',
@@ -657,7 +658,7 @@ export const useHistoryStore = create((set, get) => ({
         source_type: 'url',
         placeholder: true,
       }
-      return { history: [placeholder, ...state.history], placeholderAdded: true }
+      return { history: [placeholder, ...state.history], placeholderAdded: true, scrollTrigger: state.scrollTrigger + 1 }
     })
   },
 
