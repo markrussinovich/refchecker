@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import HistoryItem from './HistoryItem'
 
@@ -8,6 +8,14 @@ import HistoryItem from './HistoryItem'
 export default function HistoryList() {
   const { history, selectedCheckId, isLoading, error } = useHistoryStore()
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false)
+  const scrollContainerRef = useRef(null)
+  
+  // Scroll to top when "New Refcheck" is selected (id === -1)
+  useEffect(() => {
+    if (selectedCheckId === -1 && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0
+    }
+  }, [selectedCheckId])
   
   // Show a timeout message if loading takes too long
   useEffect(() => {
@@ -76,7 +84,7 @@ export default function HistoryList() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
       {history.map(item => (
         <HistoryItem
           key={item.id}

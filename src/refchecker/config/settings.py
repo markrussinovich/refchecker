@@ -22,6 +22,14 @@ DEFAULT_CONFIG = {
         "timeout": 30,
     },
     
+    "arxiv_citation": {
+        "base_url": "https://arxiv.org/bibtex",
+        "rate_limit_delay": 3.0,  # Share rate limiting with other ArXiv endpoints
+        "timeout": 30,
+        "use_as_authoritative": True,  # Use ArXiv BibTeX as authoritative source
+        "enabled": True,  # Enable ArXiv citation checker in hybrid checker
+    },
+    
     # Processing Settings
     "processing": {
         "max_papers": 50,

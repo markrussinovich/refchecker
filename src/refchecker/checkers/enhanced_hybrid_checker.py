@@ -43,6 +43,7 @@ class EnhancedHybridReferenceChecker:
                  contact_email: Optional[str] = None,
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
+                 enable_arxiv_citation: bool = True,
                  debug_mode: bool = False):
         """
         Initialize the enhanced hybrid reference checker
@@ -53,10 +54,21 @@ class EnhancedHybridReferenceChecker:
             contact_email: Email for polite pool access to APIs
             enable_openalex: Whether to use OpenAlex API
             enable_crossref: Whether to use CrossRef API
+            enable_arxiv_citation: Whether to use ArXiv Citation checker as authoritative source
             debug_mode: Whether to enable debug logging
         """
         self.contact_email = contact_email
         self.debug_mode = debug_mode
+        
+        # Initialize ArXiv Citation checker (authoritative source for ArXiv papers)
+        self.arxiv_citation = None
+        if enable_arxiv_citation:
+            try:
+                from .arxiv_citation import ArXivCitationChecker
+                self.arxiv_citation = ArXivCitationChecker()
+                logger.debug("Enhanced Hybrid: ArXiv Citation checker initialized")
+            except Exception as e:
+                logger.warning(f"Enhanced Hybrid: Failed to initialize ArXiv Citation checker: {e}")
         
         # Initialize local database checker if available
         self.local_db = None
@@ -112,6 +124,7 @@ class EnhancedHybridReferenceChecker:
         
         # Track API performance for adaptive selection
         self.api_stats = {
+            'arxiv_citation': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'local_db': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openalex': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
@@ -275,6 +288,17 @@ class EnhancedHybridReferenceChecker:
         failed_apis = []
         
         # PHASE 1: Try all APIs once in priority order
+        
+        # Strategy 0: For ArXiv papers, try ArXiv Citation checker first (authoritative source)
+        # This fetches the official BibTeX from ArXiv which is the author-submitted metadata
+        if self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference):
+            logger.debug("Enhanced Hybrid: Reference appears to be ArXiv paper, trying ArXiv Citation checker first")
+            verified_data, errors, url, success, failure_type = self._try_api('arxiv_citation', self.arxiv_citation, reference)
+            if success:
+                logger.debug("Enhanced Hybrid: ArXiv Citation checker succeeded as authoritative source")
+                return verified_data, errors, url
+            if failure_type in ['throttled', 'timeout', 'server_error']:
+                failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
         
         # Strategy 1: Always try local database first (fastest)
         if self.local_db:

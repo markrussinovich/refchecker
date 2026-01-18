@@ -57,7 +57,8 @@ async function isServerRunning(port, path = '/') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
     
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+    // Try localhost first (Vite binds to localhost by default)
+    const response = await fetch(`http://localhost:${port}${path}`, {
       signal: controller.signal
     });
     
@@ -168,12 +169,20 @@ function startBackend() {
   log(`Starting backend with: ${python}`, colors.blue);
   
   // Run backend as module from project root to handle relative imports
+  // Use detached: true on Windows to prevent the child process from being killed when parent terminal changes
   const backend = spawn(python, ['-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000'], {
     cwd: rootDir,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env },
-    shell: isWindows
+    shell: false,  // Don't use shell - it causes issues on Windows
+    detached: !isWindows,  // Use process groups on Unix for cleanup
+    windowsHide: true  // Hide console window on Windows
   });
+  
+  // Prevent Node from waiting for this process if it's detached
+  if (!isWindows) {
+    backend.unref();
+  }
   
   backend.stdout.on('data', (data) => {
     if (!debugMode) return;
@@ -208,14 +217,23 @@ function startBackend() {
 
 // Start frontend server
 function startFrontend() {
-  const npm = isWindows ? 'npm.cmd' : 'npm';
+  let frontend;
   
-  const frontend = spawn(npm, ['run', 'dev'], {
-    cwd: __dirname,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
-    shell: isWindows
-  });
+  if (isWindows) {
+    // On Windows, use cmd.exe explicitly to avoid PowerShell execution policy issues
+    frontend = spawn('cmd.exe', ['/c', 'npm', 'run', 'dev'], {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+      windowsHide: true
+    });
+  } else {
+    frontend = spawn('npm', ['run', 'dev'], {
+      cwd: __dirname,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env }
+    });
+  }
   
   frontend.stdout.on('data', (data) => {
     if (!debugMode) return;
@@ -242,6 +260,31 @@ function startFrontend() {
   });
   
   return frontend;
+}
+
+// Wait for backend to be ready with retries
+async function waitForBackend(maxRetries = 15, delayMs = 1000) {
+  for (let i = 0; i < maxRetries; i++) {
+    if (await isBackendRunning()) {
+      return true;
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return false;
+}
+
+// Wait for frontend to be ready with retries
+async function waitForFrontend(maxRetries = 30, delayMs = 500) {
+  const frontendPort = 5173;
+  // Give frontend a moment to start binding to port
+  await new Promise(r => setTimeout(r, 1000));
+  for (let i = 0; i < maxRetries; i++) {
+    if (await isServerRunning(frontendPort)) {
+      return true;
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return false;
 }
 
 // Main
@@ -301,7 +344,13 @@ async function main() {
   // Start backend if not running
   if (!backendRunning) {
     backend = startBackend();
-    await new Promise(r => setTimeout(r, 3000));
+    log('Starting backend server...', colors.yellow);
+    const backendReady = await waitForBackend(20, 500);
+    if (backendReady) {
+      log(`✓ Backend started on port ${backendPort}`, colors.green);
+    } else {
+      log('Warning: Backend may not have started correctly', colors.red);
+    }
   } else {
     log(`✓ Backend already running on port ${backendPort}`, colors.green);
   }
@@ -309,7 +358,13 @@ async function main() {
   // Start frontend if not running
   if (!frontendRunning) {
     frontend = startFrontend();
-    await new Promise(r => setTimeout(r, 3000));
+    log('Starting frontend server...', colors.yellow);
+    const frontendReady = await waitForFrontend(20, 500);
+    if (frontendReady) {
+      log(`✓ Frontend started on port ${frontendPort}`, colors.green);
+    } else {
+      log('Warning: Frontend may not have started correctly', colors.red);
+    }
   } else {
     log(`✓ Frontend already running on port ${frontendPort}`, colors.green);
   }
