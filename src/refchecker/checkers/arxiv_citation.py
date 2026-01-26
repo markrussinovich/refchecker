@@ -368,13 +368,29 @@ class ArXivCitationChecker:
                 # ArXiv date format usually YYYY/MM/DD
                 ym = re.search(r'^(\d{4})', date_match.group(1))
                 if ym: year = int(ym.group(1))
+            
+            # Extract version dateline information
+            # Look for <div class="dateline">...</div>
+            dateline_match = re.search(r'<div class="dateline">(.*?)</div>', html_content, re.DOTALL)
+            dateline_text = ""
+            if dateline_match:
+                # Extract text content, removing HTML tags
+                dateline_html = dateline_match.group(1)
+                # Remove HTML tags but preserve text content
+                dateline_text = re.sub(r'<[^>]+>', '', dateline_html).strip()
+                # Decode HTML entities
+                dateline_text = html.unescape(dateline_text)
+                logger.debug(f"Found dateline for {version_str}: {dateline_text}")
+            else:
+                logger.debug(f"No dateline found for {version_str} (likely latest version)")
 
             return {
                 'version': version_str,
                 'title': title,
                 'authors': [{'name': a} for a in authors],
                 'year': year,
-                'url': url
+                'url': url,
+                'dateline': dateline_text  # Version submission/revision info
             }
         except Exception as e:
             logger.warning(f"Failed to fetch history {version_str}: {e}")
@@ -499,9 +515,16 @@ class ArXivCitationChecker:
                     del error['error_type']
                     del error['error_details']
                 
+                # Build version warning with dateline information if available
+                dateline = version_data.get('dateline', '').strip()
+                if dateline:
+                    version_warning_details = dateline
+                else:
+                    version_warning_details = f"Reference cites ArXiv version {version_data['version']}, verified against latest version"
+                
                 errors.insert(0, {
                     'warning_type': 'version',
-                    'warning_details': f"Reference cites ArXiv version {version_data['version']}, verified against latest version"
+                    'warning_details': version_warning_details
                 })
 
                 return version_data, errors, paper_url
