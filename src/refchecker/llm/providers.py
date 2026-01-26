@@ -62,52 +62,25 @@ class LLMProviderMixin:
         """Create prompt for reference extraction"""
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
-        
-        return f"""
-Please extract individual references from the following bibliography text. Each reference should be a complete bibliographic entry.
 
-Instructions:
-1. Split the bibliography into individual references based on numbered markers like [1], [2], etc.
-2. IMPORTANT: References may span multiple lines. A single reference includes everything from one number marker (e.g., [37]) until the next number marker (e.g., [38])
-3. For each reference, extract: authors, title, publication venue, year, and any URLs/DOIs
-   - For BibTeX entries, extract fields correctly:
-     * title = the actual paper title from "title" field
-     * venue = from "journal", "booktitle", "conference" fields  
-     * Do NOT confuse journal names like "arXiv preprint arXiv:1234.5678" with paper titles
-4. Include references that are incomplete, like only author names and titles, but ignore ones that are just a URL without other details
-5. Place a hashmark (#) rather than period between fields of a reference, but asterisks (*) between individual authors
-   e.g. Author1*Author2*Author3#Title#Venue#Year#URL
-6. CRITICAL: When extracting authors, understand BibTeX author field format correctly
-   - In BibTeX, the "author" field contains author names separated by " and " (not commas)
-   - Individual author names may be in "Last, First" format (e.g., "Smith, John")
-   - Multiple authors are separated by " and " (e.g., "Smith, John and Doe, Jane")
-   - SPECIAL CASE for collaborations: Handle "Last, First and others" pattern correctly
-     * author = {"Khachatryan, Vardan and others"} → ONE explicit author plus et al: "Vardan Khachatryan*et al"
-     * author = {"Smith, John and others"} → ONE explicit author plus et al: "John Smith*et al"
-     * The "Last, First and others" pattern indicates a collaboration paper where only the first author is listed explicitly
-   - EXAMPLES:
-     * author = {"Dolan, Brian P."} → ONE author: "Dolan, Brian P."
-     * author = {"Smith, John and Doe, Jane"} → TWO authors: "Smith, John*Doe, Jane"
-     * author = {"Arnab, Anurag and Dehghani, Mostafa and Heigold, Georg"} → THREE authors: "Arnab, Anurag*Dehghani, Mostafa*Heigold, Georg"
-     * author = {"Khachatryan, Vardan and others"} → ONE explicit author plus et al: "Vardan Khachatryan*et al"
-   - Use asterisks (*) to separate individual authors in your output
-   - For "Last, First" format, convert to "First Last" for readability (e.g., "Smith, John" → "John Smith")
-   - If a BibTeX entry has NO author field, output an empty author field (nothing before the first #)
-   - Do NOT infer or guess authors based on title or context - only use what is explicitly stated
-7. CRITICAL: When extracting authors, preserve "et al" and similar indicators exactly as they appear
-   - If the original says "John Smith, Jane Doe, et al" then output "John Smith, Jane Doe, et al"
-   - If the original says "John Smith et al." then output "John Smith et al."
-   - Also preserve variations like "and others", "etc.", "..." when used to indicate additional authors
-   - Do NOT expand "et al" into individual author names, even if you know them
-8. Return ONLY the references, one per line
-9. Do not include reference numbers like [1], [2], etc. in your output
-10. Do not add any additional text or explanations
-11. Ensure that URLs and DOIs are from the specific reference only
-    - When extracting URLs, preserve the complete URL including protocol
-    - For BibTeX howpublished fields, extract the full URL from the field value
-12. When parsing multi-line references, combine all authors from all lines before the title
-13. CRITICAL: If the text contains no valid bibliographic references (e.g., only figures, appendix material, or explanatory text), return ONLY an empty response with no text at all - do NOT explain why, do NOT describe what you see, do NOT say "I return nothing" or similar phrases
-14. OUTPUT FORMAT: Your response must contain ONLY extracted references in the format specified above (Author1*Author2#Title#Venue#Year#URL), one per line. No introductory text, no explanations, no commentary, no "Looking at this text..." statements. If there are no references to extract, output absolutely nothing.
+        return f"""OUTPUT FORMAT (MANDATORY):
+- Each line must be: Author1*Author2#Title#Venue#Year#URL
+- Use # between fields, * between authors
+- One reference per line
+- NO other text allowed - no explanations, descriptions, or commentary
+- If no valid references exist, return NOTHING (completely empty response)
+
+EXTRACTION RULES:
+1. Split by numbered markers [1], [2], etc. - references may span multiple lines
+2. Extract: authors, title, venue (journal/booktitle), year, URLs/DOIs
+3. For BibTeX: "title" field = paper title, "journal"/"booktitle" = venue
+4. Handle author formats:
+   - "Last, First and others" → "First Last*et al"
+   - "Last, First" → "First Last"
+   - Separate multiple authors with *
+   - Preserve "et al" exactly as written
+5. Skip entries that are only URLs without bibliographic data
+6. If no author field exists, start with # (empty author)
 
 Bibliography text:
 {cleaned_bibliography}
@@ -117,85 +90,120 @@ Bibliography text:
         """Parse LLM response into list of references"""
         if not content:
             return []
-        
+
         # Ensure content is a string
         if not isinstance(content, str):
             content = str(content)
-        
+
         # Clean the content - remove leading/trailing whitespace
         content = content.strip()
-        
+
+        # Early check: if no # delimiters at all, likely all prose/explanatory text
+        if '#' not in content:
+            logger.warning("LLM response contains no structured references (no # delimiters found)")
+            return []
+
         # Split by double newlines first to handle paragraph-style formatting
         # then fall back to single newlines
         references = []
-        
+
         # Try double newline splitting first (paragraph style)
         if '\n\n' in content:
             potential_refs = content.split('\n\n')
         else:
             # Fall back to single newline splitting
             potential_refs = content.split('\n')
-        
+
+        import re
+
+        # Common prose patterns that indicate explanatory text
+        prose_starters = (
+            'this ', 'the ', 'i ', 'looking ', 'based on', 'it ',
+            'there ', 'these ', 'here ', 'note', 'please ', 'however',
+            'unfortunately', 'appears to', 'contains', 'following',
+            'above', 'below', 'after', 'before', 'when ', 'if ',
+            'as ', 'for ', 'from ', 'with ', 'without ', 'although'
+        )
+
         for ref in potential_refs:
             ref = ref.strip()
-            
-            # Skip empty lines, headers, and explanatory text
+
+            # Skip empty lines
             if not ref:
                 continue
-            if ref.lower().startswith(('reference', 'here are', 'below are', 'extracted', 'bibliography')):
+
+            # Skip lines starting with # (markdown headers or empty author field without title)
+            if ref.startswith('#') and not re.match(r'^#[^#]', ref):
                 continue
-            if ref.startswith('#'):
+
+            # Check for prose/explanatory text patterns
+            ref_lower = ref.lower()
+
+            # Skip common explanatory headers
+            if ref_lower.startswith(('reference', 'here are', 'below are', 'extracted', 'bibliography')):
                 continue
-            if 'extracted from the bibliography' in ref.lower():
-                continue
-            if 'formatted as a complete' in ref.lower():
-                continue
+
             # Skip verbose LLM explanatory responses
-            if 'cannot extract' in ref.lower() and ('references' in ref.lower() or 'bibliographic' in ref.lower()):
+            skip_patterns = [
+                'extracted from the bibliography',
+                'formatted as a complete',
+                'cannot extract',
+                'appears to be from',
+                'no numbered reference markers',
+                'only figures',
+                'i cannot',
+                'i return nothing',
+                'return nothing',
+                'no valid bibliographic',
+                'numbered format specified',
+                'it contains',
+                'it does not contain',
+                'text appears to be',
+                'does not appear to contain',
+                'no references found',
+                'empty response',
+                'no bibliography',
+                'no actual bibliographic',
+                'no academic references',
+                'contains only numerical',
+                'data tables',
+                'evaluation rubric',
+                'publication metadata',
+                'citable sources',
+                'reference list',
+            ]
+            if any(pattern in ref_lower for pattern in skip_patterns):
                 continue
-            if 'appears to be from' in ref.lower() and 'appendix' in ref.lower():
+
+            # Skip lines starting with common prose patterns
+            if ref_lower.startswith(prose_starters):
                 continue
-            if 'no numbered reference markers' in ref.lower():
+            if ref_lower.startswith('looking at'):
                 continue
-            if 'only figures' in ref.lower() and 'learning curves' in ref.lower():
+            if ref_lower.startswith('since there are'):
                 continue
-            if ref.lower().startswith('i cannot'):
+
+            # Key structural check: valid references MUST have # delimiters
+            if '#' not in ref:
+                # No delimiter = not a valid reference, skip it
+                logger.debug(f"Skipping line without # delimiter: {ref[:80]}...")
                 continue
-            # Skip "Looking at this text..." explanatory responses
-            if ref.lower().startswith('looking at'):
-                continue
-            # Skip responses that say "I return nothing" or similar
-            if 'i return nothing' in ref.lower() or 'return nothing' in ref.lower():
-                continue
-            # Skip responses that mention "no valid bibliographic references"
-            if 'no valid bibliographic' in ref.lower():
-                continue
-            # Skip responses that say "Since there are no"
-            if ref.lower().startswith('since there are no'):
-                continue
-            # Skip responses that mention "numbered format specified"
-            if 'numbered format specified' in ref.lower():
-                continue
-            # Skip responses that describe what the text contains instead of extracting
-            if ('it contains' in ref.lower() or 'it does not contain' in ref.lower()) and 'bibliography' in ref.lower():
-                continue
-            
+
             # Remove common prefixes (bullets, numbers, etc.)
             ref = ref.lstrip('- *•')
             ref = ref.strip()
-            
+
             # Remove reference numbers like "1.", "[1]", "(1)" from the beginning
-            import re
             ref = re.sub(r'^(\d+\.|\[\d+\]|\(\d+\))\s*', '', ref)
-            
+
             # Filter out very short lines (likely not complete references)
-            if len(ref) > 30:  # Increased minimum length for academic references
+            if len(ref) > 30:  # Minimum length for academic references
                 references.append(ref)
-        
+
         return references
 
 
-class OpenAIProvider(LLMProvider, LLMProviderMixin):
+class OpenAIProvider(LLMProviderMixin, LLMProvider):
     """OpenAI GPT provider for reference extraction"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -216,10 +224,6 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
     def extract_references(self, bibliography_text: str) -> List[str]:
         return self.extract_references_with_chunking(bibliography_text)
     
-    def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
-        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
-    
     def _call_llm(self, prompt: str) -> str:
         """Make the actual OpenAI API call and return the response text"""
         try:
@@ -239,7 +243,7 @@ class OpenAIProvider(LLMProvider, LLMProviderMixin):
             raise
 
 
-class AnthropicProvider(LLMProvider, LLMProviderMixin):
+class AnthropicProvider(LLMProviderMixin, LLMProvider):
     """Anthropic Claude provider for reference extraction"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -260,10 +264,6 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
     def extract_references(self, bibliography_text: str) -> List[str]:
         return self.extract_references_with_chunking(bibliography_text)
     
-    def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
-        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
-    
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Anthropic API call and return the response text"""
         try:
@@ -271,6 +271,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
                 model=self.model or "claude-sonnet-4-20250514",
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
+                system="You are a bibliographic reference extractor. You output ONLY structured reference data in the exact format specified. Never explain, describe, or comment on the input. Never output prose or sentences. If input contains no extractable references, return a completely empty response with no text.",
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -300,7 +301,7 @@ class AnthropicProvider(LLMProvider, LLMProviderMixin):
             raise
 
 
-class GoogleProvider(LLMProvider, LLMProviderMixin):
+class GoogleProvider(LLMProviderMixin, LLMProvider):
     """Google Gemini provider for reference extraction"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -321,10 +322,6 @@ class GoogleProvider(LLMProvider, LLMProviderMixin):
     
     def extract_references(self, bibliography_text: str) -> List[str]:
         return self.extract_references_with_chunking(bibliography_text)
-    
-    def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
-        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
     
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
@@ -360,7 +357,7 @@ class GoogleProvider(LLMProvider, LLMProviderMixin):
             raise
 
 
-class AzureProvider(LLMProvider, LLMProviderMixin):
+class AzureProvider(LLMProviderMixin, LLMProvider):
     """Azure OpenAI provider for reference extraction"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -394,10 +391,6 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
     def extract_references(self, bibliography_text: str) -> List[str]:
         return self.extract_references_with_chunking(bibliography_text)
     
-    def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
-        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
-    
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Azure OpenAI API call and return the response text"""
         try:
@@ -416,7 +409,7 @@ class AzureProvider(LLMProvider, LLMProviderMixin):
             logger.error(f"Azure API call failed: {e}")
             raise
 
-class vLLMProvider(LLMProvider, LLMProviderMixin):
+class vLLMProvider(LLMProviderMixin, LLMProvider):
     """vLLM provider using OpenAI-compatible server mode for local Hugging Face models"""
     
     def __init__(self, config: Dict[str, Any]):
@@ -856,10 +849,6 @@ class vLLMProvider(LLMProvider, LLMProviderMixin):
 
     def extract_references(self, bibliography_text: str) -> List[str]:
         return self.extract_references_with_chunking(bibliography_text)
-    
-    def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
-        return LLMProviderMixin._create_extraction_prompt(self, bibliography_text)
     
     def _call_llm(self, prompt: str) -> str:
         """Make the actual vLLM API call and return the response text"""

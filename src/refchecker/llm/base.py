@@ -110,21 +110,7 @@ class LLMProvider(ABC):
         
         logger.debug(f"Created {len(chunks)} balanced overlapping chunks for parallel processing")
         return chunks
-    
-    def _parse_llm_response(self, response_text: str) -> List[str]:
-        """Parse LLM response and extract individual references"""
-        if not response_text:
-            return []
-        
-        # Split by newlines and filter out empty lines
-        references = []
-        for line in response_text.strip().split('\n'):
-            line = line.strip()
-            if line and not line.startswith('#') and len(line) > 10:  # Basic filtering
-                references.append(line)
-        
-        return references
-    
+
     def extract_references_with_chunking(self, bibliography_text: str) -> List[str]:
         """
         Template method that handles chunking for all providers.
