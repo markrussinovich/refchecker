@@ -165,23 +165,14 @@ export default function HistoryItem({ item, isSelected }) {
 
   return (
     <div
+      data-history-item
       onClick={handleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className="px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative"
+      className={`px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''}`}
       style={{
-        backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : 'transparent',
+        backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : undefined,
         minHeight: '72px',
-      }}
-      onMouseOver={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-        }
-      }}
-      onMouseOut={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'transparent'
-        }
       }}
     >
       {/* Label / Title - full width, controls overlay on top */}
