@@ -85,6 +85,8 @@ class ArXivCitationChecker:
             # export.arxiv.org URLs
             r'export\.arxiv\.org/abs/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
             r'export\.arxiv\.org/pdf/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
+            # doi
+            r"(?:arxiv[:./])(\d{4}\.\d{4,5})(v\d+)?"
         ]
     
     def extract_arxiv_id(self, reference: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -105,6 +107,7 @@ class ArXivCitationChecker:
             reference.get('raw_text', ''),
             reference.get('eprint', ''),  # BibTeX field
             reference.get('journal', ''),
+            reference.get('doi', ''),  # DOI field (may contain arXiv ID)
         ]
         
         for source in sources:
