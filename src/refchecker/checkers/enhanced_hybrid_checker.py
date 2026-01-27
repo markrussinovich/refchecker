@@ -300,7 +300,11 @@ class EnhancedHybridReferenceChecker:
                 # Try to find published version from Semantic Scholar
                 if self.semantic_scholar:
                     verified_data_published, errors_published, url_published, success_published, failure_type_published = self._try_api('semantic_scholar', self.semantic_scholar, reference)
-                    if success_published:
+                    
+                    # If Semantic Scholar only found the ArXiv version, skip the published version
+                    paper_venue_published = self.semantic_scholar.get_venue_from_paper_data(verified_data_published)
+                    if 'arxiv' not in paper_venue_published.lower() and success_published:
+                        logger.debug("Enhanced Hybrid: Semantic Scholar found published version, converting errors to warnings")
                         # Convert errors to warnings since ArXiv citation is the authoritative source
                         for error in errors_published:
                             if 'error_type' in error:
