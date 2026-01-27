@@ -389,7 +389,8 @@ class EnhancedHybridReferenceChecker:
                 failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
         
         # Strategy 1: Always try local database first (fastest)
-        if self.local_db:
+        # Skip if we already have ArXiv result - we'll go straight to Semantic Scholar for venue info
+        if self.local_db and not arxiv_result:
             verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
             if success:
                 return verified_data, errors, url
@@ -397,8 +398,9 @@ class EnhancedHybridReferenceChecker:
                 failed_apis.append(('local_db', self.local_db, failure_type))
         
         # Strategy 2: If reference has DOI, prioritize CrossRef
+        # Skip if we already have ArXiv result - we'll go straight to Semantic Scholar for venue info
         crossref_result = None
-        if self._should_try_doi_apis_first(reference) and self.crossref:
+        if self._should_try_doi_apis_first(reference) and self.crossref and not arxiv_result:
             verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
             if success:
                 # Check if the data is complete enough to use
