@@ -3,6 +3,7 @@ Wrapper around refchecker library with progress callbacks for real-time updates
 """
 import sys
 import os
+import re
 import asyncio
 import logging
 import tempfile
@@ -494,6 +495,25 @@ class ProgressRefChecker:
                         arxiv_source_references = refs_result[0]
                         extraction_method = 'bbl'  # Mark as bbl extraction
                         logger.info(f"Extracted {len(arxiv_source_references)} references from pasted .bbl content")
+                # Check if the pasted text is BibTeX format (@article, @misc, @inproceedings, etc.)
+                elif re.search(r'@\s*(article|book|inproceedings|incollection|misc|techreport|phdthesis|mastersthesis|conference|inbook|proceedings)\s*\{', paper_text, re.IGNORECASE):
+                    logger.info("Detected BibTeX format in pasted text")
+                    refs_result = await self._extract_references_from_bibtex(paper_text)
+                    if refs_result and refs_result[0]:
+                        arxiv_source_references = refs_result[0]
+                        extraction_method = 'bib'  # Mark as bib extraction
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from pasted BibTeX content")
+                # Fallback: Try BibTeX parsing anyway for partial/malformed content
+                # This handles cases like incomplete paste, or BibTeX-like content without standard entry types
+                elif any(marker in paper_text for marker in ['title={', 'author={', 'year={', 'eprint={', '@']):
+                    logger.info("Detected possible BibTeX-like content, attempting parse")
+                    refs_result = await self._extract_references_from_bibtex(paper_text)
+                    if refs_result and refs_result[0]:
+                        arxiv_source_references = refs_result[0]
+                        extraction_method = 'bib'
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from partial BibTeX content")
+                    else:
+                        logger.warning("BibTeX-like content detected but parsing failed, will try LLM extraction")
                 # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
