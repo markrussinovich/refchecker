@@ -296,6 +296,25 @@ class EnhancedHybridReferenceChecker:
             verified_data, errors, url, success, failure_type = self._try_api('arxiv_citation', self.arxiv_citation, reference)
             if success:
                 logger.debug("Enhanced Hybrid: ArXiv Citation checker succeeded as authoritative source")
+
+                # Try to find published version from Semantic Scholar
+                if self.semantic_scholar:
+                    verified_data_published, errors_published, url_published, success_published, failure_type_published = self._try_api('semantic_scholar', self.semantic_scholar, reference)
+                    if success_published:
+                        # Convert errors to warnings since ArXiv citation is the authoritative source
+                        for error in errors_published:
+                            if 'error_type' in error:
+                                error['warning_type'] = error['error_type']
+                                error['warning_details'] = error['error_details']
+                                del error['error_type']
+                                del error['error_details']
+                        errors_published.insert(0, {
+                            'warning_type': 'version',
+                            'warning_details': 'Consider citing the published version instead of the ArXiv version'
+                        })
+                        
+                        return verified_data_published, errors_published, url_published
+                
                 return verified_data, errors, url
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
