@@ -27,6 +27,7 @@ from .thumbnail import (
     generate_pdf_thumbnail_async,
     generate_pdf_preview_async,
     get_text_thumbnail_async,
+    get_text_preview_async,
     get_thumbnail_cache_path,
     get_preview_cache_path
 )
@@ -646,9 +647,33 @@ async def get_preview(check_id: int):
                 media_type="image/png",
                 headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
             )
-        else:
-            # Fall back to thumbnail if preview can't be generated
-            raise HTTPException(status_code=404, detail="Could not generate preview")
+        
+        # For text sources, generate a high-resolution text preview for overlay display
+        if source_type == 'text':
+            logger.info(f"Generating text preview for check {check_id}")
+            preview_path = await get_text_preview_async(check_id, "", paper_source)
+            if preview_path and os.path.exists(preview_path):
+                return FileResponse(
+                    preview_path,
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+        
+        # For non-PDF file uploads, also generate a text preview
+        if source_type == 'file' and not paper_source.lower().endswith('.pdf'):
+            logger.info(f"Generating text preview for uploaded file check {check_id}")
+            if os.path.exists(paper_source):
+                preview_path = await get_text_preview_async(check_id, "", paper_source)
+            else:
+                preview_path = await get_text_preview_async(check_id, "Uploaded file")
+            if preview_path and os.path.exists(preview_path):
+                return FileResponse(
+                    preview_path,
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+        
+        raise HTTPException(status_code=404, detail="Could not generate preview")
             
     except HTTPException:
         raise
