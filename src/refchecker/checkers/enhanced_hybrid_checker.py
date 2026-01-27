@@ -302,22 +302,24 @@ class EnhancedHybridReferenceChecker:
                     verified_data_published, errors_published, url_published, success_published, failure_type_published = self._try_api('semantic_scholar', self.semantic_scholar, reference)
                     
                     # If Semantic Scholar only found the ArXiv version, skip the published version
-                    paper_venue_published = self.semantic_scholar.get_venue_from_paper_data(verified_data_published)
-                    if 'arxiv' not in paper_venue_published.lower() and success_published:
-                        logger.debug("Enhanced Hybrid: Semantic Scholar found published version, converting errors to warnings")
-                        # Convert errors to warnings since ArXiv citation is the authoritative source
-                        for error in errors_published:
-                            if 'error_type' in error:
-                                error['warning_type'] = error['error_type']
-                                error['warning_details'] = error['error_details']
-                                del error['error_type']
-                                del error['error_details']
-                        errors_published.insert(0, {
-                            'warning_type': 'version',
-                            'warning_details': 'Consider citing the published version instead of the ArXiv version'
-                        })
-                        
-                        return verified_data_published, errors_published, url_published
+                    # Check if we have valid data before calling get_venue_from_paper_data
+                    if verified_data_published and success_published:
+                        paper_venue_published = self.semantic_scholar.get_venue_from_paper_data(verified_data_published)
+                        if paper_venue_published and 'arxiv' not in paper_venue_published.lower():
+                            logger.debug("Enhanced Hybrid: Semantic Scholar found published version, converting errors to warnings")
+                            # Convert errors to warnings since ArXiv citation is the authoritative source
+                            for error in errors_published:
+                                if 'error_type' in error:
+                                    error['warning_type'] = error['error_type']
+                                    error['warning_details'] = error['error_details']
+                                    del error['error_type']
+                                    del error['error_details']
+                            errors_published.insert(0, {
+                                'warning_type': 'version',
+                                'warning_details': 'Consider citing the published version instead of the ArXiv version'
+                            })
+                            
+                            return verified_data_published, errors_published, url_published
                 
                 return verified_data, errors, url
             if failure_type in ['throttled', 'timeout', 'server_error']:
