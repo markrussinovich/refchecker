@@ -221,12 +221,15 @@ async def start_check(
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")
+            # Normalize line endings - remove all \r to prevent double carriage returns
+            # Browser may send \r\n, and Windows file writing can add extra \r
+            normalized_text = source_text.replace('\r\n', '\n').replace('\r', '\n')
             # Save pasted text to a file for later retrieval and thumbnail generation
             text_dir = Path(tempfile.gettempdir()) / "refchecker_texts"
             text_dir.mkdir(parents=True, exist_ok=True)
             text_file_path = text_dir / f"pasted_{session_id}.txt"
-            with open(text_file_path, "w", encoding="utf-8") as f:
-                f.write(source_text)
+            with open(text_file_path, "w", encoding="utf-8", newline='\n') as f:
+                f.write(normalized_text)
             paper_source = str(text_file_path)
             paper_title = "Pasted Text"
         elif source_type == "url":

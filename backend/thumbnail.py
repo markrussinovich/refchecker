@@ -416,6 +416,13 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
             except Exception as e:
                 logger.warning(f"Could not read text file: {e}")
         
+        # Clean up text content - remove excessive blank lines that cause rendering issues
+        if text_content:
+            # Normalize line endings and remove consecutive blank lines
+            lines = text_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+            # Keep only non-empty lines
+            text_content = '\n'.join(line for line in lines if line.strip())
+        
         # Create a document-like image with actual text content
         doc = fitz.open()
         page = doc.new_page(width=THUMBNAIL_WIDTH, height=int(THUMBNAIL_WIDTH * 1.4))
@@ -513,6 +520,13 @@ def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str 
                     text_content = f.read()
             except Exception as e:
                 logger.warning(f"Could not read text file: {e}")
+        
+        # Clean up text content - remove excessive blank lines that cause rendering issues
+        if text_content:
+            # Normalize line endings and remove consecutive blank lines
+            lines = text_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+            # Keep only non-empty lines
+            text_content = '\n'.join(line for line in lines if line.strip())
         
         # Create a document-like image with actual text content at high resolution
         doc = fitz.open()
