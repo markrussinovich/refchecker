@@ -8,8 +8,8 @@ for papers found on ArXiv, as it reflects the author-submitted metadata.
 
 Key features:
 - Fetches official BibTeX from https://arxiv.org/bibtex/{arxiv_id}
-- Always uses the latest version metadata (strips version suffixes)
-- Logs warnings when cited version differs from latest version
+- Checks reference against all historical versions when latest doesn't match
+- Annotates errors with version info when reference matches an older version
 - Parses BibTeX to extract normalized metadata matching refchecker schema
 
 Usage:
@@ -30,6 +30,7 @@ Usage:
 import re
 import logging
 import requests
+import html
 from typing import Dict, List, Tuple, Optional, Any
 
 import bibtexparser
@@ -88,6 +89,8 @@ class ArXivCitationChecker:
             # export.arxiv.org URLs
             r'export\.arxiv\.org/abs/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
             r'export\.arxiv\.org/pdf/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
+            # DOI format
+            r"(?:arxiv[:./])(\d{4}\.\d{4,5})(v\d+)?"
         ]
     
     def extract_arxiv_id(self, reference: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
@@ -107,6 +110,8 @@ class ArXivCitationChecker:
             reference.get('cited_url', ''),
             reference.get('raw_text', ''),
             reference.get('eprint', ''),  # BibTeX field
+            reference.get('journal', ''),
+            reference.get('doi', ''),  # DOI field (may contain arXiv ID)
         ]
         
         for source in sources:
@@ -324,23 +329,6 @@ class ArXivCitationChecker:
         
         return None
     
-    def get_latest_version_info(self, arxiv_id: str) -> Optional[str]:
-        """
-        Get the latest version number for an ArXiv paper.
-        
-        Note: This requires fetching the abstract page, so it's optional.
-        For now, we rely on the BibTeX always returning latest version metadata.
-        
-        Args:
-            arxiv_id: ArXiv ID without version
-            
-        Returns:
-            Latest version string (e.g., "v3") or None if couldn't determine
-        """
-        # The BibTeX endpoint always returns the latest version's metadata,
-        # so we don't need to explicitly fetch version info
-        return None
-    
     def is_arxiv_reference(self, reference: Dict[str, Any]) -> bool:
         """
         Check if a reference is an ArXiv paper.
@@ -353,6 +341,121 @@ class ArXivCitationChecker:
         """
         arxiv_id, _ = self.extract_arxiv_id(reference)
         return arxiv_id is not None
+
+    def _fetch_version_metadata_from_html(self, arxiv_id: str, version_num: int) -> Optional[Dict[str, Any]]:
+        """
+        Fetch and parse metadata for a specific version using HTML scraping.
+        
+        Args:
+            arxiv_id: ArXiv ID without version
+            version_num: Version number to fetch (1, 2, 3, etc.)
+            
+        Returns:
+            Dictionary with version metadata or None if version doesn't exist
+        """
+        version_str = f"v{version_num}"
+        url = f"{self.abs_url}/{arxiv_id}{version_str}"
+
+        self.rate_limiter.wait()
+        try:
+            logger.debug(f"Checking historical version: {url}")
+            response = requests.get(url, timeout=self.timeout)
+            if response.status_code == 404:
+                return None  # Version does not exist
+            response.raise_for_status()
+            html_content = response.text
+
+            # Parse meta tags for metadata
+            # Title
+            title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
+            title = html.unescape(title_match.group(1)).strip() if title_match else ""
+
+            # Authors
+            authors = []
+            for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
+                authors.append(html.unescape(auth).strip())
+
+            # Date/Year
+            date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
+            year = None
+            if date_match:
+                ym = re.search(r'^(\d{4})', date_match.group(1))
+                if ym:
+                    year = int(ym.group(1))
+
+            return {
+                'version': version_str,
+                'version_num': version_num,
+                'title': title,
+                'authors': [{'name': a} for a in authors],
+                'year': year,
+                'url': url,
+            }
+        except Exception as e:
+            logger.warning(f"Failed to fetch history {version_str}: {e}")
+            return None
+
+    def _get_latest_version_number(self, arxiv_id: str) -> Optional[int]:
+        """
+        Get the latest version number by fetching the abstract page.
+        
+        Args:
+            arxiv_id: ArXiv ID without version
+            
+        Returns:
+            Latest version number as integer, or None if couldn't determine
+        """
+        url = f"{self.abs_url}/{arxiv_id}"
+        
+        self.rate_limiter.wait()
+        try:
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+            
+            # Look for version links like "[v1]", "[v2]", etc.
+            versions = re.findall(r'\[v(\d+)\]', response.text)
+            if versions:
+                return max(int(v) for v in versions)
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to get latest version for {arxiv_id}: {e}")
+            return None
+
+    def _compare_info_match(
+            self, cited_title: str, cited_authors: List[str], cited_year: Optional[int],
+            authoritative_title: str, authoritative_authors: List[str], authoritative_year: Optional[int]) -> bool:
+        """
+        Compare the information of a cited paper with the authoritative information.
+        
+        Args:
+            cited_title: Title from the reference
+            cited_authors: Authors from the reference
+            cited_year: Year from the reference
+            authoritative_title: Title from ArXiv version
+            authoritative_authors: Authors from ArXiv version
+            authoritative_year: Year from ArXiv version
+            
+        Returns:
+            True if the information matches, False otherwise.
+        """
+        # Compare title
+        if cited_title and authoritative_title:
+            title_similarity = compare_titles_with_latex_cleaning(cited_title, authoritative_title)
+            if title_similarity < SIMILARITY_THRESHOLD:
+                return False
+        
+        # Compare authors
+        if cited_authors and authoritative_authors:
+            authors_match, _ = compare_authors(cited_authors, authoritative_authors)
+            if not authors_match:
+                return False
+        
+        # Compare year
+        if cited_year and authoritative_year:
+            if cited_year != authoritative_year:
+                return False
+        
+        return True
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -360,10 +463,10 @@ class ArXivCitationChecker:
         
         This method:
         1. Extracts the ArXiv ID from the reference
-        2. Fetches the official BibTeX from ArXiv (always latest version)
-        3. Parses the BibTeX to get authoritative metadata
-        4. Compares cited metadata against authoritative source
-        5. Logs warnings for version mismatches
+        2. Fetches the official BibTeX from ArXiv (latest version)
+        3. Compares cited metadata against latest version
+        4. If errors found, checks historical versions to find a match
+        5. Annotates errors with version info if reference matches an older version
         
         Args:
             reference: Reference dictionary with title, authors, year, url, etc.
@@ -385,34 +488,26 @@ class ArXivCitationChecker:
         
         logger.debug(f"ArXivCitationChecker: Verifying ArXiv paper {arxiv_id}")
         
-        # Fetch authoritative BibTeX
+        # Extract information from reference for comparison
+        cited_title = reference.get('title', '').strip()
+        cited_authors = reference.get('authors', [])
+        cited_year = reference.get('year')
+
+        # Fetch authoritative BibTeX (latest version)
         bibtex_content = self.fetch_bibtex(arxiv_id)
         
         if not bibtex_content:
             logger.debug(f"ArXivCitationChecker: Could not fetch BibTeX for {arxiv_id}")
             return None, [{"error_type": "api_failure", "error_details": f"Could not fetch ArXiv BibTeX for {arxiv_id}"}], None
         
-        # Parse BibTeX
-        verified_data = self.parse_bibtex(bibtex_content)
+        latest_data = self.parse_bibtex(bibtex_content)
         
-        if not verified_data:
+        if not latest_data:
             logger.debug(f"ArXivCitationChecker: Could not parse BibTeX for {arxiv_id}")
             return None, [], None
-        
-        # Log version mismatch warning if cited version differs from latest
-        if cited_version:
-            # ArXiv BibTeX always returns latest version metadata
-            # We don't know the actual latest version number without additional API call,
-            # but we can warn that a specific version was cited
-            errors.append({
-                'warning_type': 'version',
-                'warning_details': f"Reference cites ArXiv version {cited_version}, verified against latest version metadata",
-            })
-            logger.debug(f"ArXivCitationChecker: Cited version {cited_version} for {arxiv_id}")
-        
-        # Compare title
-        cited_title = reference.get('title', '').strip()
-        authoritative_title = verified_data.get('title', '').strip()
+
+        # Compare against latest version
+        authoritative_title = latest_data.get('title', '').strip()
         
         if cited_title and authoritative_title:
             title_similarity = compare_titles_with_latex_cleaning(cited_title, authoritative_title)
@@ -426,9 +521,8 @@ class ArXivCitationChecker:
                 })
         
         # Compare authors
-        cited_authors = reference.get('authors', [])
         if cited_authors:
-            authoritative_authors = verified_data.get('authors', [])
+            authoritative_authors = latest_data.get('authors', [])
             authors_match, author_error = compare_authors(cited_authors, authoritative_authors)
             
             if not authors_match:
@@ -440,9 +534,7 @@ class ArXivCitationChecker:
                 })
         
         # Compare year
-        cited_year = reference.get('year')
-        authoritative_year = verified_data.get('year')
-        
+        authoritative_year = latest_data.get('year')
         year_warning = validate_year(
             cited_year=cited_year,
             paper_year=authoritative_year,
@@ -451,10 +543,41 @@ class ArXivCitationChecker:
         )
         if year_warning:
             errors.append(year_warning)
-        
-        # Build URL
+
         paper_url = f"https://arxiv.org/abs/{arxiv_id}"
         
-        logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with {len(errors)} errors/warnings")
+        # If no errors against latest version, we're done
+        if len(errors) == 0:
+            logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with no errors")
+            return latest_data, errors, paper_url
         
-        return verified_data, errors, paper_url
+        # Check if reference matches a historical version
+        # Get latest version number first
+        latest_version_num = self._get_latest_version_number(arxiv_id)
+        
+        if latest_version_num and latest_version_num > 1:
+            # Check historical versions (1 to latest-1)
+            for version_num in range(1, latest_version_num):
+                version_data = self._fetch_version_metadata_from_html(arxiv_id, version_num)
+                if not version_data:
+                    continue
+
+                # Check if reference matches this historical version
+                if self._compare_info_match(
+                        cited_title, cited_authors, cited_year,
+                        version_data['title'], version_data['authors'], version_data['year']):
+                    
+                    logger.debug(f"ArXivCitationChecker: Reference matches historical version v{version_num}")
+                    
+                    # Annotate errors with version update info
+                    version_suffix = f" (v{latest_version_num} vs v{version_num} update)"
+                    for error in errors:
+                        if 'error_type' in error:
+                            error['error_type'] = error['error_type'] + version_suffix
+                    
+                    # Return with annotated errors - URL points to the matched version
+                    matched_url = f"https://arxiv.org/abs/{arxiv_id}v{version_num}"
+                    return latest_data, errors, matched_url
+        
+        logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with {len(errors)} errors/warnings")
+        return latest_data, errors, paper_url
