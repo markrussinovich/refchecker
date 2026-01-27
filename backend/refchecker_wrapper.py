@@ -463,11 +463,20 @@ class ProgressRefChecker:
                         raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
-                elif paper_source.lower().endswith(('.tex', '.txt')):
+                elif paper_source.lower().endswith(('.tex', '.txt', '.bib')):
                     def read_file():
                         with open(paper_source, 'r', encoding='utf-8') as f:
                             return f.read()
                     paper_text = await asyncio.to_thread(read_file)
+                    
+                    # For .bib files, extract references directly using BibTeX parser
+                    if paper_source.lower().endswith('.bib'):
+                        logger.info("Processing uploaded .bib file as BibTeX")
+                        refs_result = await self._extract_references_from_bibtex(paper_text)
+                        if refs_result and refs_result[0]:
+                            arxiv_source_references = refs_result[0]
+                            extraction_method = 'bib'
+                            logger.info(f"Extracted {len(arxiv_source_references)} references from .bib file")
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
             elif source_type == "text":

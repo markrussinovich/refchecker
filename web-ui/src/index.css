@@ -124,3 +124,16 @@ body {
 .history-item-hoverable:hover {
   background-color: var(--color-bg-tertiary);
 }
+
+/* Hide action buttons by default, show on hover */
+.history-item-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.history-item-hoverable:hover .history-item-actions,
+[data-history-item]:hover .history-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
