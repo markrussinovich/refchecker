@@ -569,15 +569,24 @@ class ArXivCitationChecker:
                     
                     logger.debug(f"ArXivCitationChecker: Reference matches historical version v{version_num}")
                     
-                    # Annotate errors with version update info
+                    # Convert errors to warnings with version update info
+                    # Version update issues are informational, not errors - the citation was correct for its time
                     version_suffix = f" (v{latest_version_num} vs v{version_num} update)"
+                    warnings = []
                     for error in errors:
-                        if 'error_type' in error:
-                            error['error_type'] = error['error_type'] + version_suffix
+                        warning = {
+                            'warning_type': error.get('error_type', 'unknown') + version_suffix,
+                            'warning_details': error.get('error_details', ''),
+                        }
+                        # Preserve correction hints
+                        for key in ['ref_title_correct', 'ref_authors_correct', 'ref_year_correct']:
+                            if key in error:
+                                warning[key] = error[key]
+                        warnings.append(warning)
                     
-                    # Return with annotated errors - URL points to the matched version
+                    # Return with warnings instead of errors - URL points to the matched version
                     matched_url = f"https://arxiv.org/abs/{arxiv_id}v{version_num}"
-                    return latest_data, errors, matched_url
+                    return latest_data, warnings, matched_url
         
         logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with {len(errors)} errors/warnings")
         return latest_data, errors, paper_url
