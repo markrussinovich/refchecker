@@ -517,13 +517,13 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             const versionAnnotation = extractVersionAnnotation(warning.error_type)
             
             // Use prefix from error_details and append version annotation if present
-            const baseText = (hasParsedCitedActual && parsedDetails?.prefix) 
-              ? parsedDetails.prefix?.replace(/:$/, '')
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
+              ? parsedDetails.prefix.replace(/:$/, '')
               : (warning.error_details || `${formatWarningType(warning.error_type)} mismatch`)
             
-            const warningText = versionAnnotation && !baseText.includes(versionAnnotation)
+            const warningText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
               ? `${baseText} ${versionAnnotation}`
-              : baseText
+              : (baseText || '')
             
             return (
               <div 
@@ -566,14 +566,13 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             const versionAnnotation = extractVersionAnnotation(error.error_type)
             
             // Use prefix from error_details and append version annotation if present
-            const baseText = (hasParsedCitedActual && parsedDetails?.prefix) 
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
               ? parsedDetails.prefix
               : (error.error_details || error.error_type)
-            
-            const errorText = versionAnnotation && !baseText.includes(versionAnnotation)
+
+            const errorText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
               ? `${baseText} ${versionAnnotation}`
-              : baseText
-            
+              : (baseText || '')
             return (
               <div 
                 key={`error-${i}`}

@@ -614,7 +614,7 @@ export const useHistoryStore = create((set, get) => ({
       if (state.selectedCheckId && state.selectedCheckId !== id) {
         // Fetch full details for the auto-selected check
         try {
-          const response = await api.getCheck(state.selectedCheckId)
+          const response = await api.getCheckDetail(state.selectedCheckId)
           set({ selectedCheck: response.data })
         } catch (error) {
           logger.error('HistoryStore', 'Failed to fetch auto-selected check details', error)
