@@ -257,6 +257,90 @@ class EnhancedHybridReferenceChecker:
         
         return True
     
+    def _merge_arxiv_with_semantic_scholar(
+        self,
+        arxiv_data: Dict[str, Any],
+        arxiv_errors: List[Dict[str, Any]],
+        arxiv_url: str,
+        ss_data: Dict[str, Any],
+        ss_errors: List[Dict[str, Any]],
+        ss_url: str,
+        reference: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Merge ArXiv verification results with Semantic Scholar data.
+        
+        ArXiv is authoritative for title/author/year, but Semantic Scholar
+        provides venue information and additional URLs (DOI, S2 page).
+        
+        Args:
+            arxiv_data: Verified data from ArXiv
+            arxiv_errors: Errors/warnings from ArXiv verification
+            arxiv_url: ArXiv URL
+            ss_data: Data from Semantic Scholar
+            ss_errors: Errors from Semantic Scholar (used for venue checking)
+            ss_url: Semantic Scholar URL
+            reference: Original reference
+            
+        Returns:
+            Tuple of (merged_data, merged_errors)
+        """
+        merged_data = dict(arxiv_data) if arxiv_data else {}
+        merged_errors = list(arxiv_errors) if arxiv_errors else []
+        
+        if not ss_data:
+            return merged_data, merged_errors
+        
+        # Add Semantic Scholar URL to external IDs
+        if 'externalIds' not in merged_data:
+            merged_data['externalIds'] = {}
+        
+        ss_external_ids = ss_data.get('externalIds', {})
+        
+        # Add S2 paper ID
+        if ss_data.get('paperId'):
+            merged_data['externalIds']['S2PaperId'] = ss_data['paperId']
+        
+        # Add DOI if available from Semantic Scholar
+        if ss_external_ids.get('DOI') and not merged_data['externalIds'].get('DOI'):
+            merged_data['externalIds']['DOI'] = ss_external_ids['DOI']
+        
+        # Store Semantic Scholar URL
+        merged_data['_semantic_scholar_url'] = ss_url
+        
+        # Check for venue mismatch - if paper was published at a venue but citation only says arXiv
+        ss_venue = ss_data.get('venue', '')
+        cited_venue = reference.get('venue', reference.get('journal', '')).strip().lower()
+        
+        # Normalize ArXiv venue names
+        is_cited_as_arxiv = (
+            not cited_venue or 
+            cited_venue in ['arxiv', 'arxiv preprint', 'arxiv.org', 'preprint']
+        )
+        
+        # Check if Semantic Scholar shows a real publication venue
+        if ss_venue and is_cited_as_arxiv:
+            # Ignore generic/empty venues
+            ss_venue_lower = ss_venue.lower().strip()
+            is_real_venue = (
+                ss_venue_lower and 
+                ss_venue_lower not in ['arxiv', 'arxiv.org', 'preprint', ''] and
+                not ss_venue_lower.startswith('arxiv')
+            )
+            
+            if is_real_venue:
+                # This paper was published at a venue but is only cited as arXiv
+                logger.debug(f"Enhanced Hybrid: Paper published at '{ss_venue}' but cited as arXiv")
+                merged_errors.append({
+                    'warning_type': 'venue',
+                    'warning_details': f"Paper was published at venue but cited as arXiv preprint:\n       cited:  arXiv\n       actual: {ss_venue}",
+                    'ref_venue_correct': ss_venue
+                })
+                # Also add the venue to merged data
+                merged_data['venue'] = ss_venue
+        
+        return merged_data, merged_errors
+
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
         Verify a non-arXiv reference using multiple APIs in priority order
@@ -287,6 +371,9 @@ class EnhancedHybridReferenceChecker:
         # Track all APIs that failed and could be retried
         failed_apis = []
         
+        # Store ArXiv result for potential merging with Semantic Scholar
+        arxiv_result = None
+        
         # PHASE 1: Try all APIs once in priority order
         
         # Strategy 0: For ArXiv papers, try ArXiv Citation checker first (authoritative source)
@@ -295,8 +382,9 @@ class EnhancedHybridReferenceChecker:
             logger.debug("Enhanced Hybrid: Reference appears to be ArXiv paper, trying ArXiv Citation checker first")
             verified_data, errors, url, success, failure_type = self._try_api('arxiv_citation', self.arxiv_citation, reference)
             if success:
-                logger.debug("Enhanced Hybrid: ArXiv Citation checker succeeded as authoritative source")
-                return verified_data, errors, url
+                logger.debug("Enhanced Hybrid: ArXiv Citation checker succeeded, also querying Semantic Scholar for venue/URLs")
+                arxiv_result = (verified_data, errors, url)
+                # Continue to Semantic Scholar to get venue and additional URLs
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
         
@@ -327,10 +415,24 @@ class EnhancedHybridReferenceChecker:
         if self.semantic_scholar:
             verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
+                # If we have ArXiv result, merge Semantic Scholar venue/URLs into it
+                if arxiv_result:
+                    arxiv_data, arxiv_errors, arxiv_url = arxiv_result
+                    merged_data, merged_errors = self._merge_arxiv_with_semantic_scholar(
+                        arxiv_data, arxiv_errors, arxiv_url,
+                        verified_data, errors, url,
+                        reference
+                    )
+                    return merged_data, merged_errors, arxiv_url
                 return verified_data, errors, url
             # For Semantic Scholar, only retry retryable failures (not 'not_found')
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
+        
+        # If ArXiv succeeded but Semantic Scholar failed, return ArXiv result
+        if arxiv_result:
+            logger.debug("Enhanced Hybrid: Returning ArXiv result (Semantic Scholar unavailable)")
+            return arxiv_result
         
         # Strategy 4: Try OpenAlex API (excellent reliability, replaces Google Scholar)
         openalex_result = None

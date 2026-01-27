@@ -239,6 +239,18 @@ class ProgressRefChecker:
                 if not any(u.get('url') == doi_url for u in authoritative_urls):
                     authoritative_urls.append({"type": "doi", "url": doi_url})
 
+            # Add Semantic Scholar URL if available
+            s2_paper_id = external_ids.get('S2PaperId')
+            if s2_paper_id:
+                s2_url = f"https://www.semanticscholar.org/paper/{s2_paper_id}"
+                if not any(u.get('url') == s2_url for u in authoritative_urls):
+                    authoritative_urls.append({"type": "semantic_scholar", "url": s2_url})
+            
+            # Also check for inline S2 URL (from merged data)
+            s2_inline_url = verified_data.get('_semantic_scholar_url')
+            if s2_inline_url and not any(u.get('url') == s2_inline_url for u in authoritative_urls):
+                authoritative_urls.append({"type": "semantic_scholar", "url": s2_inline_url})
+
         # Format errors, warnings, and suggestions
         formatted_errors = []
         formatted_warnings = []
