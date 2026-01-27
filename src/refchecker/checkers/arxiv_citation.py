@@ -571,7 +571,7 @@ class ArXivCitationChecker:
                     
                     # Convert errors to warnings with version update info
                     # Version update issues are informational, not errors - the citation was correct for its time
-                    version_suffix = f" (v{latest_version_num} vs v{version_num} update)"
+                    version_suffix = f" (v{version_num} vs v{latest_version_num} update)"
                     warnings = []
                     for error in errors:
                         warning = {
