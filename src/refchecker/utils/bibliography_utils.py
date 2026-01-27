@@ -164,8 +164,8 @@ def _parse_bibtex_references(bibliography_text):
     Returns:
         List of reference dictionaries
     """
-    from refchecker.utils.bibtex_parser import parse_bibtex_entries
-    return parse_bibtex_entries(bibliography_text)
+    from refchecker.utils.bibtex_parser import parse_bibtex_references
+    return parse_bibtex_references(bibliography_text)
 
 
 def _parse_biblatex_references(bibliography_text):
