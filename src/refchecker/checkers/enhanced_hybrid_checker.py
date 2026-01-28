@@ -419,6 +419,15 @@ class EnhancedHybridReferenceChecker:
             if success:
                 # If we have ArXiv result, merge Semantic Scholar venue/URLs into it
                 if arxiv_result:
+                    # Check if SS data is valid and venue is not just arxiv
+                    # (skip merge if SS only found the arxiv version, no published venue)
+                    if verified_data:
+                        ss_venue = self.semantic_scholar.get_venue_from_paper_data(verified_data)
+                        if ss_venue and 'arxiv' in ss_venue.lower():
+                            # SS only found arxiv venue, skip merge and return arxiv result
+                            logger.debug("Enhanced Hybrid: Semantic Scholar only found ArXiv venue, skipping merge")
+                            return arxiv_result
+                    
                     arxiv_data, arxiv_errors, arxiv_url = arxiv_result
                     merged_data, merged_errors = self._merge_arxiv_with_semantic_scholar(
                         arxiv_data, arxiv_errors, arxiv_url,

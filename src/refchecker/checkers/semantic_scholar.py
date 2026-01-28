@@ -223,7 +223,49 @@ class NonArxivReferenceChecker:
         """
         return compare_authors(cited_authors, correct_authors)
     
-    
+    def get_venue_from_paper_data(self, paper_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract venue from paper data dictionary.
+        
+        Checks multiple fields since Semantic Scholar returns venue info 
+        in different fields depending on publication type.
+        
+        Args:
+            paper_data: Paper data dictionary from Semantic Scholar
+            
+        Returns:
+            Venue string or None if not found
+        """
+        if not paper_data:
+            return None
+            
+        paper_venue = None
+        
+        # First try the simple 'venue' field (string)
+        if paper_data.get('venue'):
+            paper_venue = paper_data.get('venue')
+        
+        # If no venue, try publicationVenue object
+        if not paper_venue and paper_data.get('publicationVenue'):
+            pub_venue = paper_data.get('publicationVenue')
+            if isinstance(pub_venue, dict):
+                paper_venue = pub_venue.get('name', '')
+            elif isinstance(pub_venue, str):
+                paper_venue = pub_venue
+        
+        # If still no venue, try journal object
+        if not paper_venue and paper_data.get('journal'):
+            journal = paper_data.get('journal')
+            if isinstance(journal, dict):
+                paper_venue = journal.get('name', '')
+            elif isinstance(journal, str):
+                paper_venue = journal
+        
+        # Ensure paper_venue is a string
+        if paper_venue and not isinstance(paper_venue, str):
+            paper_venue = str(paper_venue)
+        
+        return paper_venue if paper_venue else None
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
