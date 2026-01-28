@@ -3,6 +3,7 @@ Wrapper around refchecker library with progress callbacks for real-time updates
 """
 import sys
 import os
+import re
 import asyncio
 import logging
 import tempfile
@@ -238,6 +239,18 @@ class ProgressRefChecker:
                 if not any(u.get('url') == doi_url for u in authoritative_urls):
                     authoritative_urls.append({"type": "doi", "url": doi_url})
 
+            # Add Semantic Scholar URL if available
+            s2_paper_id = external_ids.get('S2PaperId')
+            if s2_paper_id:
+                s2_url = f"https://www.semanticscholar.org/paper/{s2_paper_id}"
+                if not any(u.get('url') == s2_url for u in authoritative_urls):
+                    authoritative_urls.append({"type": "semantic_scholar", "url": s2_url})
+            
+            # Also check for inline S2 URL (from merged data)
+            s2_inline_url = verified_data.get('_semantic_scholar_url')
+            if s2_inline_url and not any(u.get('url') == s2_inline_url for u in authoritative_urls):
+                authoritative_urls.append({"type": "semantic_scholar", "url": s2_inline_url})
+
         # Format errors, warnings, and suggestions
         formatted_errors = []
         formatted_warnings = []
@@ -462,11 +475,20 @@ class ProgressRefChecker:
                         raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
-                elif paper_source.lower().endswith(('.tex', '.txt')):
+                elif paper_source.lower().endswith(('.tex', '.txt', '.bib')):
                     def read_file():
                         with open(paper_source, 'r', encoding='utf-8') as f:
                             return f.read()
                     paper_text = await asyncio.to_thread(read_file)
+                    
+                    # For .bib files, extract references directly using BibTeX parser
+                    if paper_source.lower().endswith('.bib'):
+                        logger.info("Processing uploaded .bib file as BibTeX")
+                        refs_result = await self._extract_references_from_bibtex(paper_text)
+                        if refs_result and refs_result[0]:
+                            arxiv_source_references = refs_result[0]
+                            extraction_method = 'bib'
+                            logger.info(f"Extracted {len(arxiv_source_references)} references from .bib file")
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
             elif source_type == "text":
@@ -494,6 +516,25 @@ class ProgressRefChecker:
                         arxiv_source_references = refs_result[0]
                         extraction_method = 'bbl'  # Mark as bbl extraction
                         logger.info(f"Extracted {len(arxiv_source_references)} references from pasted .bbl content")
+                # Check if the pasted text is BibTeX format (@article, @misc, @inproceedings, etc.)
+                elif re.search(r'@\s*(article|book|inproceedings|incollection|misc|techreport|phdthesis|mastersthesis|conference|inbook|proceedings)\s*\{', paper_text, re.IGNORECASE):
+                    logger.info("Detected BibTeX format in pasted text")
+                    refs_result = await self._extract_references_from_bibtex(paper_text)
+                    if refs_result and refs_result[0]:
+                        arxiv_source_references = refs_result[0]
+                        extraction_method = 'bib'  # Mark as bib extraction
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from pasted BibTeX content")
+                # Fallback: Try BibTeX parsing anyway for partial/malformed content
+                # This handles cases like incomplete paste, or BibTeX-like content without standard entry types
+                elif any(marker in paper_text for marker in ['title={', 'author={', 'year={', 'eprint={', '@']):
+                    logger.info("Detected possible BibTeX-like content, attempting parse")
+                    refs_result = await self._extract_references_from_bibtex(paper_text)
+                    if refs_result and refs_result[0]:
+                        arxiv_source_references = refs_result[0]
+                        extraction_method = 'bib'
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from partial BibTeX content")
+                    else:
+                        logger.warning("BibTeX-like content detected but parsing failed, will try LLM extraction")
                 # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")

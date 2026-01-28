@@ -42,13 +42,26 @@ def compare_authors(cited_authors, correct_authors, threshold=0.8):
     Compare two author lists and return similarity metrics
     
     Args:
-        cited_authors: List of authors as cited
-        correct_authors: List of correct authors
+        cited_authors: List of authors as cited (can be strings or dicts with 'name' key)
+        correct_authors: List of correct authors (can be strings or dicts with 'name' key)
         threshold: Similarity threshold (0-1)
         
     Returns:
         Dictionary with comparison results
     """
+    # Normalize author lists to strings (handle dict format from APIs)
+    def normalize_author_list(authors):
+        result = []
+        for a in authors:
+            if isinstance(a, dict):
+                result.append(a.get('name', str(a)))
+            else:
+                result.append(str(a))
+        return result
+    
+    cited_authors = normalize_author_list(cited_authors) if cited_authors else []
+    correct_authors = normalize_author_list(correct_authors) if correct_authors else []
+    
     if not cited_authors or not correct_authors:
         return {
             'match': False,

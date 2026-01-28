@@ -341,7 +341,7 @@ class TestVerifyReference:
     
     @patch.object(ArXivCitationChecker, 'fetch_bibtex')
     def test_verify_reference_version_warning(self, mock_fetch, checker):
-        """Test that version mismatch generates warning."""
+        """Test that citing specific version with correct metadata produces no warnings."""
         mock_fetch.return_value = """@misc{test2023,
       title={Test Paper}, 
       author={John Doe},
@@ -357,10 +357,11 @@ class TestVerifyReference:
         
         verified_data, errors, url = checker.verify_reference(reference)
         
+        # When reference matches latest version correctly, no warnings are generated
+        # (version update annotations only appear when errors are found against latest
+        # but the reference matches a historical version)
         assert verified_data is not None
-        version_warnings = [e for e in errors if e.get('warning_type') == 'version']
-        assert len(version_warnings) == 1
-        assert 'v2' in version_warnings[0]['warning_details']
+        assert len(errors) == 0
     
     def test_verify_reference_no_arxiv_id(self, checker):
         """Test verification with no ArXiv ID returns empty."""

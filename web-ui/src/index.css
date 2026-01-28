@@ -115,3 +115,25 @@ body {
 .progress-bar {
   background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-info) 100%);
 }
+
+/* History item hover - uses CSS :hover for proper behavior when items shift under cursor */
+.history-item-hoverable {
+  background-color: transparent;
+}
+
+.history-item-hoverable:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Hide action buttons by default, show on hover */
+.history-item-actions {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.history-item-hoverable:hover .history-item-actions,
+[data-history-item]:hover .history-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}

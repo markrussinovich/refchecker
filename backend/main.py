@@ -27,6 +27,7 @@ from .thumbnail import (
     generate_pdf_thumbnail_async,
     generate_pdf_preview_async,
     get_text_thumbnail_async,
+    get_text_preview_async,
     get_thumbnail_cache_path,
     get_preview_cache_path
 )
@@ -220,12 +221,15 @@ async def start_check(
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")
+            # Normalize line endings - remove all \r to prevent double carriage returns
+            # Browser may send \r\n, and Windows file writing can add extra \r
+            normalized_text = source_text.replace('\r\n', '\n').replace('\r', '\n')
             # Save pasted text to a file for later retrieval and thumbnail generation
             text_dir = Path(tempfile.gettempdir()) / "refchecker_texts"
             text_dir.mkdir(parents=True, exist_ok=True)
             text_file_path = text_dir / f"pasted_{session_id}.txt"
-            with open(text_file_path, "w", encoding="utf-8") as f:
-                f.write(source_text)
+            with open(text_file_path, "w", encoding="utf-8", newline='\n') as f:
+                f.write(normalized_text)
             paper_source = str(text_file_path)
             paper_title = "Pasted Text"
         elif source_type == "url":
@@ -646,9 +650,33 @@ async def get_preview(check_id: int):
                 media_type="image/png",
                 headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
             )
-        else:
-            # Fall back to thumbnail if preview can't be generated
-            raise HTTPException(status_code=404, detail="Could not generate preview")
+        
+        # For text sources, generate a high-resolution text preview for overlay display
+        if source_type == 'text':
+            logger.info(f"Generating text preview for check {check_id}")
+            preview_path = await get_text_preview_async(check_id, "", paper_source)
+            if preview_path and os.path.exists(preview_path):
+                return FileResponse(
+                    preview_path,
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+        
+        # For non-PDF file uploads, also generate a text preview
+        if source_type == 'file' and not paper_source.lower().endswith('.pdf'):
+            logger.info(f"Generating text preview for uploaded file check {check_id}")
+            if os.path.exists(paper_source):
+                preview_path = await get_text_preview_async(check_id, "", paper_source)
+            else:
+                preview_path = await get_text_preview_async(check_id, "Uploaded file")
+            if preview_path and os.path.exists(preview_path):
+                return FileResponse(
+                    preview_path,
+                    media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=86400"}
+                )
+        
+        raise HTTPException(status_code=404, detail="Could not generate preview")
             
     except HTTPException:
         raise

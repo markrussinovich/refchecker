@@ -33,7 +33,6 @@ export default function HistoryItem({ item, isSelected }) {
   const storeCancelCheck = useCheckStore(state => state.cancelCheck)
   const [isEditing, setIsEditing] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const [isHovered, setIsHovered] = useState(false)
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
 
@@ -165,23 +164,12 @@ export default function HistoryItem({ item, isSelected }) {
 
   return (
     <div
+      data-history-item
       onClick={handleClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className="px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative"
+      className={`px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''}`}
       style={{
-        backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : 'transparent',
+        backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : undefined,
         minHeight: '72px',
-      }}
-      onMouseOver={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-        }
-      }}
-      onMouseOut={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.backgroundColor = 'transparent'
-        }
       }}
     >
       {/* Label / Title - full width, controls overlay on top */}
@@ -402,20 +390,20 @@ export default function HistoryItem({ item, isSelected }) {
             </svg>
           </button>
         </div>
-      ) : isHovered && !isEditing && !isPlaceholder && (
+      ) : !isEditing && !isPlaceholder && (
         <div 
-          className="absolute top-2 right-2 flex items-center"
+          className="history-item-actions absolute top-2 right-2 flex items-center"
         >
-          {/* Gradient fade */}
+          {/* Gradient fade - always use tertiary since actions only visible on hover */}
           <div 
             className="w-8 h-6"
             style={{ 
-              background: `linear-gradient(to right, transparent, ${isSelected ? 'var(--color-bg-tertiary)' : 'var(--color-bg-primary)'})`
+              background: 'linear-gradient(to right, transparent, var(--color-bg-tertiary))'
             }}
           />
           <div 
             className="flex items-center gap-1 pl-1 pr-1 h-6"
-            style={{ backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : 'var(--color-bg-primary)' }}
+            style={{ backgroundColor: 'var(--color-bg-tertiary)' }}
           >
             <button
               onClick={handleEditStart}

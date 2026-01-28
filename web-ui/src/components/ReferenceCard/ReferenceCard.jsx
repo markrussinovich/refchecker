@@ -507,10 +507,23 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             const parsedDetails = parseErrorDetails(warning.error_details)
             const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
             
-            // Use the specific prefix from error_details if available, otherwise fall back to generic type
-            const warningText = (hasParsedCitedActual && parsedDetails?.prefix) 
-              ? parsedDetails.prefix.replace(/:$/, '') // Remove trailing colon if present
+            // Extract version annotation from error_type if present
+            const extractVersionAnnotation = (type) => {
+              if (!type) return null
+              const match = type.match(/\(v\d+\s+vs\s+v\d+\s+update\)/i)
+              return match ? match[0] : null
+            }
+            
+            const versionAnnotation = extractVersionAnnotation(warning.error_type)
+            
+            // Use prefix from error_details and append version annotation if present
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
+              ? parsedDetails.prefix.replace(/:$/, '')
               : (warning.error_details || `${formatWarningType(warning.error_type)} mismatch`)
+            
+            const warningText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
+              ? `${baseText} ${versionAnnotation}`
+              : (baseText || '')
             
             return (
               <div 
@@ -543,11 +556,23 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
             const parsedDetails = parseErrorDetails(error.error_details)
             const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
             
-            // Use the specific prefix from error_details if available, otherwise fall back to raw details
-            const errorText = (hasParsedCitedActual && parsedDetails?.prefix) 
+            // Extract version annotation from error_type if present (e.g., "title (v3 vs v1 update)" -> "(v3 vs v1 update)")
+            const extractVersionAnnotation = (type) => {
+              if (!type) return null
+              const match = type.match(/\(v\d+\s+vs\s+v\d+\s+update\)/i)
+              return match ? match[0] : null
+            }
+            
+            const versionAnnotation = extractVersionAnnotation(error.error_type)
+            
+            // Use prefix from error_details and append version annotation if present
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
               ? parsedDetails.prefix
               : (error.error_details || error.error_type)
-            
+
+            const errorText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
+              ? `${baseText} ${versionAnnotation}`
+              : (baseText || '')
             return (
               <div 
                 key={`error-${i}`}

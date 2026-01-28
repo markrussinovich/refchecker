@@ -416,6 +416,13 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
             except Exception as e:
                 logger.warning(f"Could not read text file: {e}")
         
+        # Clean up text content - remove excessive blank lines that cause rendering issues
+        if text_content:
+            # Normalize line endings and remove consecutive blank lines
+            lines = text_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+            # Keep only non-empty lines
+            text_content = '\n'.join(line for line in lines if line.strip())
+        
         # Create a document-like image with actual text content
         doc = fitz.open()
         page = doc.new_page(width=THUMBNAIL_WIDTH, height=int(THUMBNAIL_WIDTH * 1.4))
@@ -481,6 +488,116 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
     except Exception as e:
         logger.error(f"Error generating text thumbnail: {e}")
         return None
+
+
+def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+    """
+    Generate a high-resolution preview for pasted text showing actual content.
+    
+    Creates a larger image (similar to PDF previews) with the text content.
+    
+    Args:
+        check_id: Check ID for naming
+        text_preview: Optional first few lines of text to display
+        text_file_path: Optional path to the text file to read content from
+        
+    Returns:
+        Path to the generated preview, or None if generation failed
+    """
+    try:
+        import fitz
+        
+        output_path = get_preview_cache_path(f"text_{check_id}", check_id)
+        
+        if output_path.exists():
+            return str(output_path)
+        
+        # Try to read text content from file
+        text_content = text_preview
+        if text_file_path and os.path.exists(text_file_path):
+            try:
+                with open(text_file_path, 'r', encoding='utf-8') as f:
+                    text_content = f.read()
+            except Exception as e:
+                logger.warning(f"Could not read text file: {e}")
+        
+        # Clean up text content - remove excessive blank lines that cause rendering issues
+        if text_content:
+            # Normalize line endings and remove consecutive blank lines
+            lines = text_content.replace('\r\n', '\n').replace('\r', '\n').split('\n')
+            # Keep only non-empty lines
+            text_content = '\n'.join(line for line in lines if line.strip())
+        
+        # Create a document-like image with actual text content at high resolution
+        doc = fitz.open()
+        page = doc.new_page(width=PREVIEW_WIDTH, height=int(PREVIEW_WIDTH * 1.4))
+        
+        # Fill with white/off-white background
+        page.draw_rect(page.rect, color=(0.9, 0.9, 0.9), fill=(0.98, 0.98, 0.98))
+        
+        # Draw border
+        page.draw_rect(page.rect, color=(0.7, 0.7, 0.7), width=2)
+        
+        # Draw actual text content if available
+        margin = 40
+        if text_content:
+            # Create a text box for the content
+            text_rect = fitz.Rect(margin, margin, PREVIEW_WIDTH - margin, int(PREVIEW_WIDTH * 1.4) - margin)
+            
+            # Truncate to first ~4000 chars for preview
+            display_text = text_content[:4000]
+            if len(text_content) > 4000:
+                display_text += "\n\n..."
+            
+            # Insert text with readable font size
+            page.insert_textbox(
+                text_rect,
+                display_text,
+                fontsize=14,
+                color=(0.15, 0.15, 0.15),
+                fontname="helv"
+            )
+        else:
+            # Fallback: Draw placeholder
+            header_rect = fitz.Rect(margin, margin, PREVIEW_WIDTH - margin, margin + 60)
+            page.insert_textbox(header_rect, "Pasted Text", fontsize=36, color=(0.3, 0.3, 0.5))
+            
+            # Draw placeholder lines
+            line_height = 24
+            y = margin + 100
+            
+            for i in range(20):
+                line_width = PREVIEW_WIDTH - 2 * margin
+                if i % 3 == 2:
+                    line_width = line_width * 0.7
+                
+                page.draw_line(
+                    fitz.Point(margin, y),
+                    fitz.Point(margin + line_width, y),
+                    color=(0.7, 0.7, 0.7),
+                    width=3
+                )
+                y += line_height
+        
+        # Render to pixmap and save
+        pix = page.get_pixmap(alpha=False)
+        pix.save(str(output_path))
+        doc.close()
+        
+        logger.info(f"Generated text preview: {output_path}")
+        return str(output_path)
+        
+    except ImportError:
+        logger.error("PyMuPDF (fitz) is not installed")
+        return None
+    except Exception as e:
+        logger.error(f"Error generating text preview: {e}")
+        return None
+
+
+async def get_text_preview_async(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+    """Async wrapper for text preview generation."""
+    return await asyncio.to_thread(get_text_preview, check_id, text_preview, text_file_path)
 
 
 async def get_text_thumbnail_async(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
