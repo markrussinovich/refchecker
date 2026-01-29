@@ -27,9 +27,11 @@ import requests
 import time
 import logging
 import re
+import html
 from typing import Dict, List, Tuple, Optional, Any, Union
 from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from refchecker.utils.error_utils import format_title_mismatch
+from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter
 from refchecker.config.settings import get_config
 
 # Set up logging
@@ -67,6 +69,11 @@ class NonArxivReferenceChecker:
         # Track API failures for Enhanced Hybrid Checker
         self._api_failed = False
         self._failure_reason = None
+        
+        # ArXiv rate limiter for version checks
+        self.arxiv_rate_limiter = ArXivRateLimiter.get_instance()
+        self.arxiv_abs_url = "https://arxiv.org/abs"
+        self.arxiv_timeout = 30
     
     def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
@@ -266,6 +273,258 @@ class NonArxivReferenceChecker:
             paper_venue = str(paper_venue)
         
         return paper_venue if paper_venue else None
+    
+    def _extract_arxiv_id_and_version(self, reference: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Extract ArXiv ID and version from a reference.
+        
+        Args:
+            reference: Reference dictionary containing url, raw_text, etc.
+            
+        Returns:
+            Tuple of (arxiv_id_without_version, version_string_or_None)
+            For example: ("2301.12345", "v2") or ("2301.12345", None)
+        """
+        # Patterns to extract arXiv IDs with versions
+        arxiv_id_patterns = [
+            r'arxiv\.org/abs/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
+            r'arxiv\.org/pdf/([0-9]{4}\.[0-9]{4,5})(v\d+)?',
+            r'arxiv\.org/abs/([a-z-]+/[0-9]{7})(v\d+)?',
+            r'arxiv\.org/pdf/([a-z-]+/[0-9]{7})(v\d+)?',
+            r'arXiv:([0-9]{4}\.[0-9]{4,5})(v\d+)?',
+            r'arXiv:([a-z-]+/[0-9]{7})(v\d+)?',
+        ]
+        
+        sources = [
+            reference.get('url', ''),
+            reference.get('cited_url', ''),
+            reference.get('raw_text', ''),
+        ]
+        
+        for source in sources:
+            if not source:
+                continue
+            
+            for pattern in arxiv_id_patterns:
+                match = re.search(pattern, source, re.IGNORECASE)
+                if match:
+                    arxiv_id = match.group(1)
+                    version = match.group(2) if len(match.groups()) > 1 else None
+                    return arxiv_id, version
+        
+        return None, None
+    
+    def _get_latest_arxiv_version_number(self, arxiv_id: str) -> Optional[int]:
+        """
+        Get the latest version number for an ArXiv paper.
+        
+        Args:
+            arxiv_id: ArXiv ID without version
+            
+        Returns:
+            Latest version number as integer, or None if couldn't determine
+        """
+        url = f"{self.arxiv_abs_url}/{arxiv_id}"
+        
+        self.arxiv_rate_limiter.wait()
+        try:
+            response = requests.get(url, timeout=self.arxiv_timeout)
+            response.raise_for_status()
+            
+            # Look for version links like "[v1]", "[v2]", etc.
+            versions = re.findall(r'\[v(\d+)\]', response.text)
+            if versions:
+                return max(int(v) for v in versions)
+            return None
+        except Exception as e:
+            logger.debug(f"Failed to get latest version for {arxiv_id}: {e}")
+            return None
+    
+    def _fetch_arxiv_version_metadata(self, arxiv_id: str, version_num: int) -> Optional[Dict[str, Any]]:
+        """
+        Fetch metadata for a specific ArXiv version using HTML scraping.
+        
+        Args:
+            arxiv_id: ArXiv ID without version
+            version_num: Version number to fetch (1, 2, 3, etc.)
+            
+        Returns:
+            Dictionary with version metadata or None if version doesn't exist
+        """
+        version_str = f"v{version_num}"
+        url = f"{self.arxiv_abs_url}/{arxiv_id}{version_str}"
+
+        self.arxiv_rate_limiter.wait()
+        try:
+            logger.debug(f"Checking ArXiv version: {url}")
+            response = requests.get(url, timeout=self.arxiv_timeout)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            html_content = response.text
+
+            # Parse meta tags for metadata
+            title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
+            title = html.unescape(title_match.group(1)).strip() if title_match else ""
+
+            authors = []
+            for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
+                authors.append({'name': html.unescape(auth).strip()})
+
+            date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
+            year = None
+            if date_match:
+                ym = re.search(r'^(\d{4})', date_match.group(1))
+                if ym:
+                    year = int(ym.group(1))
+
+            return {
+                'version': version_str,
+                'version_num': version_num,
+                'title': title,
+                'authors': authors,
+                'year': year,
+                'url': url,
+            }
+        except Exception as e:
+            logger.debug(f"Failed to fetch ArXiv version {version_str}: {e}")
+            return None
+    
+    def _check_arxiv_version_update(self, reference: Dict[str, Any], paper_data: Dict[str, Any], arxiv_id: str, errors: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[int]]:
+        """
+        Check if a reference is citing an older version of an ArXiv paper that has been updated.
+        If the reference matches a historical version, converts errors to warnings with version annotation.
+        
+        Args:
+            reference: The original reference dictionary
+            paper_data: The verified paper data from Semantic Scholar (latest version)
+            arxiv_id: The ArXiv ID from the paper
+            errors: The current list of errors found against the latest version
+            
+        Returns:
+            Tuple of (modified_errors_or_warnings, matched_version_num)
+            - If reference matches a historical version: returns (warnings_with_version_suffix, matched_version)
+            - Otherwise: returns (original_errors, None)
+        """
+        # Extract cited version from reference
+        _, cited_version = self._extract_arxiv_id_and_version(reference)
+        
+        # Get the latest version number
+        latest_version_num = self._get_latest_arxiv_version_number(arxiv_id)
+        
+        if not latest_version_num or latest_version_num <= 1:
+            # Only one version exists or couldn't determine
+            return errors, None
+        
+        # Check if reference explicitly cites a specific older version
+        cited_version_num = None
+        if cited_version:
+            match = re.match(r'v(\d+)', cited_version)
+            if match:
+                cited_version_num = int(match.group(1))
+        
+        # If a specific older version is cited in the URL, convert errors to warnings
+        if cited_version_num and cited_version_num < latest_version_num:
+            version_suffix = f" (v{cited_version_num} vs v{latest_version_num} update)"
+            warnings = self._convert_errors_to_version_warnings(errors, version_suffix)
+            return warnings, cited_version_num
+        
+        # If no explicit version or no errors to check, return original
+        if not errors:
+            return errors, None
+        
+        # Check if reference metadata matches a historical version
+        cited_title = reference.get('title', '').strip()
+        
+        if not cited_title:
+            return errors, None
+        
+        from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+        
+        # Find the BEST matching version by comparing against all versions
+        # (not just checking if latest exceeds threshold)
+        best_match_version = None
+        best_match_score = 0.0
+        
+        # Check latest version first
+        latest_version_data = self._fetch_arxiv_version_metadata(arxiv_id, latest_version_num)
+        if latest_version_data:
+            latest_title = latest_version_data.get('title', '').strip()
+            if latest_title:
+                latest_score = compare_titles_with_latex_cleaning(cited_title, latest_title)
+                if latest_score >= SIMILARITY_THRESHOLD:
+                    best_match_version = latest_version_num
+                    best_match_score = latest_score
+        
+        # Check historical versions to find if any is a BETTER match
+        for version_num in range(1, latest_version_num):
+            version_data = self._fetch_arxiv_version_metadata(arxiv_id, version_num)
+            if not version_data:
+                continue
+            
+            version_title = version_data.get('title', '').strip()
+            if not version_title:
+                continue
+            
+            version_score = compare_titles_with_latex_cleaning(cited_title, version_title)
+            
+            # If this version is a better match than current best
+            if version_score > best_match_score and version_score >= SIMILARITY_THRESHOLD:
+                best_match_version = version_num
+                best_match_score = version_score
+        
+        # If best match is a historical version (not latest), convert errors to warnings
+        if best_match_version is not None and best_match_version < latest_version_num:
+            logger.debug(f"Reference best matches ArXiv v{best_match_version} (score: {best_match_score:.3f}, latest is v{latest_version_num})")
+            version_suffix = f" (v{best_match_version} vs v{latest_version_num} update)"
+            warnings = self._convert_errors_to_version_warnings(errors, version_suffix)
+            return warnings, best_match_version
+        
+        return errors, None
+    
+    def _convert_errors_to_version_warnings(self, errors: List[Dict[str, Any]], version_suffix: str) -> List[Dict[str, Any]]:
+        """
+        Convert error dictionaries to warning dictionaries with version suffix.
+        
+        Args:
+            errors: List of error dictionaries
+            version_suffix: Version suffix to append (e.g., " (v1 vs v3 update)")
+            
+        Returns:
+            List of warning dictionaries with version annotation
+        """
+        warnings = []
+        for error in errors:
+            error_type = error.get('error_type', '')
+            
+            # Skip info_type entries (suggestions) - keep them as-is
+            if 'info_type' in error:
+                warnings.append(error)
+                continue
+            
+            # Skip entries that are already warnings
+            if 'warning_type' in error:
+                # Just append the version suffix
+                warning = error.copy()
+                warning['warning_type'] = error['warning_type'] + version_suffix
+                warnings.append(warning)
+                continue
+            
+            # Convert error to warning with version suffix
+            warning = {
+                'warning_type': error_type + version_suffix,
+                'warning_details': error.get('error_details', ''),
+            }
+            
+            # Preserve correction hints
+            for key in ['ref_title_correct', 'ref_authors_correct', 'ref_year_correct', 
+                       'ref_venue_correct', 'ref_doi_correct', 'ref_url_correct']:
+                if key in error:
+                    warning[key] = error[key]
+            
+            warnings.append(warning)
+        
+        return warnings
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -642,6 +901,10 @@ class NonArxivReferenceChecker:
                     'info_details': f"Reference could include arXiv URL: {arxiv_url}",
                     'ref_url_correct': arxiv_url
                 })
+            
+            # Check for ArXiv version updates - if reference matches an older version,
+            # convert errors to warnings with version annotation (like ArXiv citation checker)
+            errors, matched_version = self._check_arxiv_version_update(reference, paper_data, arxiv_id, errors)
 
         # Verify DOI
         paper_doi = None

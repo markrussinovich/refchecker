@@ -31,6 +31,7 @@ import re
 import logging
 import requests
 import html
+import time
 from typing import Dict, List, Tuple, Optional, Any
 
 import bibtexparser
@@ -356,7 +357,13 @@ class ArXivCitationChecker:
         version_str = f"v{version_num}"
         url = f"{self.abs_url}/{arxiv_id}{version_str}"
 
+        # Use shorter delay for version metadata (HTML parsing is lightweight)
+        # Save original delay, use 1 second, then restore
+        original_delay = self.rate_limiter.delay
+        self.rate_limiter.delay = 1.0  # Faster rate for version checking
         self.rate_limiter.wait()
+        self.rate_limiter.delay = original_delay  # Restore original delay
+        
         try:
             logger.debug(f"Checking historical version: {url}")
             response = requests.get(url, timeout=self.timeout)
@@ -421,16 +428,59 @@ class ArXivCitationChecker:
             logger.warning(f"Failed to get latest version for {arxiv_id}: {e}")
             return None
 
-    def _compare_info_match(
-            self, cited_title: str, cited_authors: List[str], cited_year: Optional[int],
-            authoritative_title: str, authoritative_authors: List[str], authoritative_year: Optional[int]) -> bool:
+    def _calculate_match_score(
+            self, cited_title: str, cited_authors: List[str],
+            authoritative_title: str, authoritative_authors: List[Dict]) -> float:
         """
-        Compare the information of a cited paper with the authoritative information.
+        Calculate a numeric match score between cited reference and authoritative data.
+        
+        Used to find the BEST matching historical version, not just the first one that
+        passes a threshold.
         
         Args:
             cited_title: Title from the reference
             cited_authors: Authors from the reference
-            cited_year: Year from the reference
+            authoritative_title: Title from ArXiv version
+            authoritative_authors: Authors from ArXiv version
+            
+        Returns:
+            A score between 0.0 and 1.0 where higher is better.
+        """
+        if not cited_title or not authoritative_title:
+            return 0.0
+        
+        # Primary: Title similarity (weighted at 80%)
+        title_similarity = compare_titles_with_latex_cleaning(cited_title, authoritative_title)
+        
+        # Secondary: Author count match (weighted at 20%)
+        author_score = 0.0
+        if cited_authors and authoritative_authors:
+            cited_count = len(cited_authors)
+            auth_count = len(authoritative_authors)
+            if cited_count == auth_count:
+                author_score = 1.0
+            elif abs(cited_count - auth_count) == 1:
+                author_score = 0.7
+            elif abs(cited_count - auth_count) == 2:
+                author_score = 0.4
+            else:
+                author_score = 0.1
+        
+        # Weighted combination
+        return 0.8 * title_similarity + 0.2 * author_score
+    
+    def _compare_info_match(
+            self, cited_title: str, cited_authors: List[str], cited_year: Optional[int],
+            authoritative_title: str, authoritative_authors: List[Dict], authoritative_year: Optional[int]) -> bool:
+        """
+        Compare the information of a cited paper with the authoritative information.
+        
+        Uses title as the primary matching criterion. Authors are used as a secondary
+        check, but year is not required to match (year often has discrepancies).
+        
+        Args:
+            cited_title: Title from the reference
+            cited_authors: Authors from the reference
             authoritative_title: Title from ArXiv version
             authoritative_authors: Authors from ArXiv version
             authoritative_year: Year from ArXiv version
@@ -438,22 +488,31 @@ class ArXivCitationChecker:
         Returns:
             True if the information matches, False otherwise.
         """
-        # Compare title
+        # Primary criterion: Title MUST match
         if cited_title and authoritative_title:
             title_similarity = compare_titles_with_latex_cleaning(cited_title, authoritative_title)
             if title_similarity < SIMILARITY_THRESHOLD:
                 return False
+        else:
+            # If no title to compare, can't determine match
+            return False
         
-        # Compare authors
+        # Secondary criterion: If authors are provided, they should reasonably match
+        # (be lenient - allow partial matches since author lists can vary)
         if cited_authors and authoritative_authors:
             authors_match, _ = compare_authors(cited_authors, authoritative_authors)
-            if not authors_match:
+            # If authors don't match at all, this might not be the right version
+            # But be lenient - just having similar author count is a good sign
+            cited_count = len(cited_authors)
+            auth_count = len(authoritative_authors)
+            # Allow if authors match OR if author counts are within 1 of each other
+            if not authors_match and abs(cited_count - auth_count) > 1:
                 return False
         
-        # Compare year
-        if cited_year and authoritative_year:
-            if cited_year != authoritative_year:
-                return False
+        # Year is NOT used as a matching criterion because:
+        # 1. ArXiv shows submission date, citations often use publication year
+        # 2. People often cite with incorrect years
+        # 3. The same ArXiv version can be cited with different years
         
         return True
     
@@ -556,37 +615,68 @@ class ArXivCitationChecker:
         latest_version_num = self._get_latest_version_number(arxiv_id)
         
         if latest_version_num and latest_version_num > 1:
+            # Find the BEST matching version, not just the first one
+            best_match_version = None
+            best_match_score = 0.0
+            best_match_data = None
+            
+            # Add timeout for version checking (30 seconds max)
+            # This prevents blocking when rate-limited with many concurrent ArXiv requests
+            version_check_start = time.time()
+            VERSION_CHECK_TIMEOUT = 30.0
+            
             # Check historical versions (1 to latest-1)
-            for version_num in range(1, latest_version_num):
+            # Start from newest historical version (more likely to match recent citations)
+            for version_num in range(latest_version_num - 1, 0, -1):
+                # Check if we've exceeded the version checking timeout
+                if time.time() - version_check_start > VERSION_CHECK_TIMEOUT:
+                    logger.debug(f"ArXivCitationChecker: Version checking timed out after {VERSION_CHECK_TIMEOUT}s")
+                    break
+                    
                 version_data = self._fetch_version_metadata_from_html(arxiv_id, version_num)
                 if not version_data:
                     continue
 
-                # Check if reference matches this historical version
-                if self._compare_info_match(
-                        cited_title, cited_authors, cited_year,
-                        version_data['title'], version_data['authors'], version_data['year']):
-                    
-                    logger.debug(f"ArXivCitationChecker: Reference matches historical version v{version_num}")
-                    
-                    # Convert errors to warnings with version update info
-                    # Version update issues are informational, not errors - the citation was correct for its time
-                    version_suffix = f" (v{version_num} vs v{latest_version_num} update)"
-                    warnings = []
-                    for error in errors:
-                        warning = {
-                            'warning_type': error.get('error_type', 'unknown') + version_suffix,
-                            'warning_details': error.get('error_details', ''),
-                        }
-                        # Preserve correction hints
-                        for key in ['ref_title_correct', 'ref_authors_correct', 'ref_year_correct']:
-                            if key in error:
-                                warning[key] = error[key]
-                        warnings.append(warning)
-                    
-                    # Return with warnings instead of errors - URL points to the matched version
-                    matched_url = f"https://arxiv.org/abs/{arxiv_id}v{version_num}"
-                    return latest_data, warnings, matched_url
+                # Calculate match score for this version
+                match_score = self._calculate_match_score(
+                    cited_title, cited_authors,
+                    version_data['title'], version_data['authors'])
+                
+                if match_score > best_match_score:
+                    best_match_score = match_score
+                    best_match_version = version_num
+                    best_match_data = version_data
+                
+                # Early termination: if we found an excellent match (>= 0.98), stop searching
+                # This saves HTTP requests when we've found a near-perfect version match
+                if best_match_score >= 0.98:
+                    logger.debug(f"ArXivCitationChecker: Found excellent version match v{best_match_version} (score: {best_match_score:.3f}), stopping search")
+                    break
+            
+            # If we found a matching version (above threshold), convert errors to warnings
+            if best_match_version and best_match_score >= SIMILARITY_THRESHOLD:
+                logger.debug(f"ArXivCitationChecker: Reference best matches historical version v{best_match_version} (score: {best_match_score:.3f})")
+                
+                # Convert errors to warnings with version update info
+                # Version update issues are informational, not errors - the citation was correct for its time
+                version_suffix = f" (v{best_match_version} vs v{latest_version_num} update)"
+                warnings = []
+                for error in errors:
+                    # Get the error/warning type - handle both error_type and warning_type
+                    err_type = error.get('error_type') or error.get('warning_type', 'unknown')
+                    warning = {
+                        'warning_type': err_type + version_suffix,
+                        'warning_details': error.get('error_details') or error.get('warning_details', ''),
+                    }
+                    # Preserve correction hints
+                    for key in ['ref_title_correct', 'ref_authors_correct', 'ref_year_correct']:
+                        if key in error:
+                            warning[key] = error[key]
+                    warnings.append(warning)
+                
+                # Return with warnings instead of errors - URL points to the matched version
+                matched_url = f"https://arxiv.org/abs/{arxiv_id}v{best_match_version}"
+                return latest_data, warnings, matched_url
         
         logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with {len(errors)} errors/warnings")
         return latest_data, errors, paper_url
