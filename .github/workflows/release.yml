@@ -188,24 +188,3 @@ jobs:
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
-    
-    - name: Extract metadata for GPU image
-      id: meta-gpu
-      uses: docker/metadata-action@v5
-      with:
-        images: ghcr.io/${{ github.repository }}
-        tags: |
-          type=raw,value=gpu
-          type=raw,value=${{ needs.test-and-release.outputs.version }}-gpu
-    
-    - name: Build and push GPU image (amd64 only)
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile.gpu
-        platforms: linux/amd64
-        push: true
-        tags: ${{ steps.meta-gpu.outputs.tags }}
-        labels: ${{ steps.meta-gpu.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max

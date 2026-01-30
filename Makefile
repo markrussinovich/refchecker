@@ -1,5 +1,5 @@
 .PHONY: help install install-dev test clean lint format type-check run docs \
-        docker-build docker-build-gpu docker-run docker-run-gpu docker-test docker-push
+	docker-build docker-run docker-test docker-push
 
 # Default target
 help:
@@ -19,9 +19,7 @@ help:
 	@echo ""
 	@echo "Docker targets:"
 	@echo "  docker-build     Build Docker image"
-	@echo "  docker-build-gpu Build Docker image with GPU support"
 	@echo "  docker-run       Run Docker container"
-	@echo "  docker-run-gpu   Run Docker container with GPU"
 	@echo "  docker-test      Build and test Docker image"
 	@echo "  docker-push      Push images to GitHub Container Registry"
 
@@ -87,10 +85,6 @@ VERSION = $(shell python -c "import sys; sys.path.insert(0, 'src'); from refchec
 docker-build:
 	docker build -t $(DOCKER_IMAGE):latest -t $(DOCKER_IMAGE):$(VERSION) .
 
-# Build GPU-enabled Docker image
-docker-build-gpu:
-	docker build -f Dockerfile.gpu -t $(DOCKER_IMAGE):gpu -t $(DOCKER_IMAGE):$(VERSION)-gpu .
-
 # Run Docker container
 docker-run:
 	docker run -it --rm \
@@ -98,16 +92,6 @@ docker-run:
 		-v refchecker-data:/app/data \
 		--env-file .env \
 		$(DOCKER_IMAGE):latest
-
-# Run GPU-enabled Docker container
-docker-run-gpu:
-	docker run -it --rm \
-		--gpus all \
-		-p 8000:8000 \
-		-v refchecker-data:/app/data \
-		-v refchecker-models:/app/models \
-		--env-file .env \
-		$(DOCKER_IMAGE):gpu
 
 # Build and test Docker image (for CI)
 docker-test:
@@ -123,8 +107,3 @@ docker-test:
 docker-push:
 	docker push $(DOCKER_IMAGE):latest
 	docker push $(DOCKER_IMAGE):$(VERSION)
-
-# Push GPU image
-docker-push-gpu:
-	docker push $(DOCKER_IMAGE):gpu
-	docker push $(DOCKER_IMAGE):$(VERSION)-gpu

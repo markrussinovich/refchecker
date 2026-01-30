@@ -38,6 +38,6 @@ google-generativeai>=0.3.0
 lxml>=4.6.0
 
 # Note: Heavy dependencies excluded for smaller image:
-# - torch, vllm (local model inference - use Dockerfile.gpu)
+# - torch, vllm (local model inference - use pip/source install instead)
 # - selenium (browser automation)
 # - scikit-learn, nltk, joblib (ML features)
