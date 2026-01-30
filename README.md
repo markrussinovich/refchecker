@@ -13,7 +13,6 @@ Validate reference accuracy in academic papers. Useful for authors checking bibl
 - [Run](#run)
 - [Output](#output)
 - [Configure](#configure)
-- [Docker](#docker)
 - [Local Database](#local-database)
 - [Testing](#testing)
 - [License](#license)
@@ -142,6 +141,69 @@ curl http://localhost:8000/
 
 Web UI documentation: see [web-ui/README.md](web-ui/README.md).
 
+### Docker
+
+Pre-built multi-architecture images are published to GitHub Container Registry on every release.
+
+#### Quick Start
+
+```bash
+docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
+```
+
+Open **http://localhost:8000** in your browser.
+
+#### With LLM API Key
+
+Pass your API key for LLM-powered reference extraction (recommended):
+
+```bash
+# Anthropic Claude (recommended)
+docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+
+# OpenAI
+docker run -p 8000:8000 -e OPENAI_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+
+# Google Gemini
+docker run -p 8000:8000 -e GOOGLE_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+```
+
+#### Persistent Data
+
+Mount a volume to persist check history and settings between restarts:
+
+```bash
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=your_key \
+  -v refchecker-data:/app/data \
+  ghcr.io/markrussinovich/refchecker:latest
+```
+
+#### Docker Compose
+
+For easier configuration with an `.env` file:
+
+```bash
+git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
+cp .env.example .env  # Add your API keys
+docker compose up -d
+```
+
+Common commands:
+
+```bash
+docker compose logs -f    # View logs
+docker compose down       # Stop
+docker compose pull       # Update to latest
+```
+
+#### Available Tags
+
+| Tag | Description | Arch | Size |
+|-----|-------------|------|------|
+| `latest` | Latest stable release | amd64, arm64 | ~800MB |
+| `X.Y.Z` | Specific version (e.g., `2.0.18`) | amd64, arm64 | ~800MB |
+
 ### CLI
 
 ```bash
@@ -241,69 +303,6 @@ export ANTHROPIC_API_KEY=your_key           # Also: OPENAI_API_KEY, GOOGLE_API_K
 # Performance
 export SEMANTIC_SCHOLAR_API_KEY=your_key    # Higher rate limits / faster verification
 ```
-
-## Docker
-
-Pre-built multi-architecture images are published to GitHub Container Registry on every release.
-
-### Quick Start
-
-```bash
-docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
-```
-
-Open **http://localhost:8000** in your browser.
-
-### With LLM API Key
-
-Pass your API key for LLM-powered reference extraction (recommended):
-
-```bash
-# Anthropic Claude (recommended)
-docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-
-# OpenAI
-docker run -p 8000:8000 -e OPENAI_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-
-# Google Gemini
-docker run -p 8000:8000 -e GOOGLE_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-```
-
-### Persistent Data
-
-Mount a volume to persist check history and settings between restarts:
-
-```bash
-docker run -p 8000:8000 \
-  -e ANTHROPIC_API_KEY=your_key \
-  -v refchecker-data:/app/data \
-  ghcr.io/markrussinovich/refchecker:latest
-```
-
-### Docker Compose
-
-For easier configuration with an `.env` file:
-
-```bash
-git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
-cp .env.example .env  # Add your API keys
-docker compose up -d
-```
-
-Common commands:
-
-```bash
-docker compose logs -f    # View logs
-docker compose down       # Stop
-docker compose pull       # Update to latest
-```
-
-### Available Tags
-
-| Tag | Description | Arch | Size |
-|-----|-------------|------|------|
-| `latest` | Latest stable release | amd64, arm64 | ~800MB |
-| `X.Y.Z` | Specific version (e.g., `2.0.18`) | amd64, arm64 | ~800MB |
 
 ## Local Database
 
