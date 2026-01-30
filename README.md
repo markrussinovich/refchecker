@@ -68,8 +68,8 @@ Learn about RefChecker's design philosophy and development process in this detai
 - [📊 Sample Output](#-sample-output)
 - [🎯 Features](#-features)
 - [🚀 Quick Start](#-quick-start)
+- [🐳 Docker (Recommended)](#-docker-recommended)
 - [🌐 Web UI](#-web-ui)
-- [🐳 Docker](#-docker)
 - [🤖 LLM-Enhanced Reference Extraction](#-llm-enhanced-reference-extraction)
 - [📦 Installation](#-installation)
 - [📖 Usage](#-usage)
@@ -93,7 +93,15 @@ Learn about RefChecker's design philosophy and development process in this detai
 
 ## 🚀 Quick Start
 
-### Check Your First Paper
+### Easiest: Use Docker
+
+```bash
+docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+```
+
+Open **http://localhost:8000** in your browser. See [Docker](#-docker-recommended) for more options.
+
+### Command Line (requires Python installation)
 
 1. **Check a famous paper:**
    ```bash
@@ -112,15 +120,139 @@ Learn about RefChecker's design philosophy and development process in this detai
 
 > **⚡ Performance Tip**: Reference verification takes 5-10 seconds per reference without a Semantic Scholar API key due to rate limiting. With an API key, verification speeds up to 1-2 seconds per reference. Set `SEMANTIC_SCHOLAR_API_KEY` environment variable or use `--semantic-scholar-api-key` for faster processing.
 
+## 🐳 Docker (Recommended)
+
+The easiest way to run RefChecker is with Docker. Pre-built images are automatically published to GitHub Container Registry on every release.
+
+### Quick Start
+
+```bash
+# Pull and run the latest image (works on Intel/AMD and Apple Silicon)
+docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
+```
+
+Open **http://localhost:8000** in your browser.
+
+### With LLM API Keys
+
+To use LLM-powered reference extraction (recommended for best accuracy), pass your API key:
+
+```bash
+# Using Anthropic Claude (recommended)
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker:latest
+
+# Using OpenAI
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker:latest
+
+# Using Google Gemini
+docker run -p 8000:8000 \
+  -e GOOGLE_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker:latest
+```
+
+### Persistent Data
+
+To persist check history and settings between container restarts:
+
+```bash
+docker run -p 8000:8000 \
+  -v refchecker-data:/app/data \
+  -e ANTHROPIC_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker:latest
+```
+
+### Using Docker Compose
+
+For easier configuration, clone the repo and use the included `docker-compose.yml`:
+
+```bash
+git clone https://github.com/markrussinovich/refchecker.git
+cd refchecker
+
+# Copy the example environment file and add your API keys
+cp .env.example .env
+# Edit .env with your API keys
+
+# Start RefChecker
+docker compose up
+
+# Or run in background
+docker compose up -d
+```
+
+### GPU Support for Local Models
+
+For running local LLMs with vLLM (no API keys needed), use the GPU-enabled image:
+
+```bash
+# Pull the GPU image (amd64/NVIDIA only)
+docker pull ghcr.io/markrussinovich/refchecker:gpu
+
+# Run with GPU access
+docker run --gpus all -p 8000:8000 \
+  -v refchecker-data:/app/data \
+  -v refchecker-models:/app/models \
+  ghcr.io/markrussinovich/refchecker:gpu
+```
+
+Or with Docker Compose:
+
+```bash
+# Start with GPU profile
+docker compose --profile gpu up
+```
+
+### Available Image Tags
+
+| Tag | Description | Architectures | Size |
+|-----|-------------|---------------|------|
+| `latest` | Latest stable release with cloud LLM support | amd64, arm64 | ~800MB |
+| `X.Y.Z` | Specific version (e.g., `1.2.50`) | amd64, arm64 | ~800MB |
+| `gpu` | GPU-enabled with vLLM/PyTorch for local models | amd64 only | ~12GB |
+| `X.Y.Z-gpu` | Specific GPU version | amd64 only | ~12GB |
+
+> **Note**: The `gpu` images are amd64 only because CUDA is not available on ARM. For Apple Silicon Macs, use the standard `latest` tag with cloud LLM APIs.
+
+### Building Locally
+
+```bash
+# Build standard image
+make docker-build
+
+# Build GPU image  
+make docker-build-gpu
+
+# Run locally
+make docker-run
+
+# Test the build
+make docker-test
+```
+
 ## 🌐 Web UI
 
-RefChecker also includes a modern web interface with real-time progress updates, check history, and export options.
+RefChecker includes a modern web interface with real-time progress updates, check history, and export options.
 
 ![RefChecker Web UI](assets/webui.png)
 
-### Option 1: Install from PyPI (Recommended)
+### Features
 
-The simplest way to run the Web UI is using the pip-installed package:
+- ✨ Real-time validation with live progress updates
+- 📄 Support for ArXiv URLs and file uploads (PDF, LaTeX, text)
+- 📊 Live statistics with filtering by status
+- 📋 Export references as Markdown, plain text, or BibTeX (with corrected values)
+- 📚 Persistent check history
+- 🌓 Automatic dark/light mode
+
+### Option 1: Docker (See Above)
+
+The Docker image includes the complete Web UI - just run the container and open http://localhost:8000.
+
+### Option 2: Install from PyPI
 
 ```bash
 # Install RefChecker with Web UI support
@@ -132,15 +264,13 @@ refchecker-webui
 
 Then open **http://localhost:8000** in your browser.
 
-The `refchecker-webui` command starts a complete web server with both the API backend and the pre-built frontend.
-
 **Options:**
 ```bash
 refchecker-webui --port 8080      # Use a different port
 refchecker-webui --host 0.0.0.0   # Allow external connections
 ```
 
-### Option 2: Run from Cloned Repository (Development)
+### Option 3: Run from Cloned Repository (Development)
 
 If you're developing or modifying the Web UI:
 
@@ -177,124 +307,7 @@ cd web-ui
 npm run dev
 ```
 
-### Features
-
-- ✨ Real-time validation with live progress updates
-- 📄 Support for ArXiv URLs and file uploads (PDF, LaTeX, text)
-- 📊 Live statistics with filtering by status
-- 📋 Export references as Markdown, plain text, or BibTeX (with corrected values)
-- 📚 Persistent check history
-- 🌓 Automatic dark/light mode
-
 For complete Web UI documentation, see **[web-ui/README.md](web-ui/README.md)**.
-
-## 🐳 Docker
-
-RefChecker is available as a Docker image for easy deployment without installing Python dependencies.
-
-### Quick Start
-
-```bash
-# Pull and run the latest image
-docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker
-```
-
-Open **http://localhost:8000** in your browser.
-
-### Configuration with API Keys
-
-To use LLM-powered reference extraction, pass your API keys as environment variables:
-
-```bash
-# Using Anthropic Claude
-docker run -p 8000:8000 \
-  -e ANTHROPIC_API_KEY=your_key_here \
-  ghcr.io/markrussinovich/refchecker
-
-# Using OpenAI
-docker run -p 8000:8000 \
-  -e OPENAI_API_KEY=your_key_here \
-  ghcr.io/markrussinovich/refchecker
-
-# Using Google Gemini
-docker run -p 8000:8000 \
-  -e GOOGLE_API_KEY=your_key_here \
-  ghcr.io/markrussinovich/refchecker
-```
-
-### Persistent Data
-
-To persist check history and settings between container restarts:
-
-```bash
-docker run -p 8000:8000 \
-  -v refchecker-data:/app/data \
-  -e ANTHROPIC_API_KEY=your_key_here \
-  ghcr.io/markrussinovich/refchecker
-```
-
-### Using Docker Compose
-
-For easier configuration, use the included `docker-compose.yml`:
-
-```bash
-# Copy the example environment file and add your API keys
-cp .env.example .env
-# Edit .env with your API keys
-
-# Start RefChecker
-docker compose up
-
-# Or run in background
-docker compose up -d
-```
-
-### GPU Support for Local Models
-
-For running local LLMs with vLLM, use the GPU-enabled image:
-
-```bash
-# Pull the GPU image
-docker pull ghcr.io/markrussinovich/refchecker:gpu
-
-# Run with GPU access
-docker run --gpus all -p 8000:8000 \
-  -v refchecker-data:/app/data \
-  -v refchecker-models:/app/models \
-  ghcr.io/markrussinovich/refchecker:gpu
-```
-
-Or with Docker Compose:
-
-```bash
-# Start with GPU profile
-docker compose --profile gpu up
-```
-
-### Available Tags
-
-| Tag | Description | Architectures |
-|-----|-------------|---------------|
-| `latest` | Latest stable release | amd64, arm64 |
-| `X.Y.Z` | Specific version | amd64, arm64 |
-| `gpu` | GPU-enabled with vLLM | amd64 |
-| `X.Y.Z-gpu` | Specific GPU version | amd64 |
-
-### Building Locally
-
-```bash
-# Build standard image
-make docker-build
-
-# Build GPU image
-make docker-build-gpu
-
-# Run locally
-make docker-run
-
-# Test the build
-make docker-test
-```
 
 ## 🤖 LLM-Enhanced Reference Extraction
 
@@ -387,12 +400,20 @@ You can debug vllm server issues by running refchecker with the `--debug` flag.
 
 ## 📦 Installation
 
-### Prerequisites
+### Option 1: Docker (Recommended)
 
+No installation required - just run the Docker image:
+
+```bash
+docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
+```
+
+See [Docker](#-docker-recommended) section for full details on configuration, persistent data, and GPU support.
+
+### Option 2: Install from PyPI
+
+**Prerequisites:**
 - **Python 3.8+** (3.10+ recommended)
-- **Node.js 18+** and npm (only required for Web UI)
-
-### Option 1: Install from PyPI (Recommended)
 
 For the latest stable release with all features:
 
@@ -414,7 +435,11 @@ Other optional extras:
 - **optional**: Enhanced features (lxml, selenium, pikepdf, nltk, scikit-learn)
 - **vllm**: Local model inference with vLLM
 
-### Option 2: Install from Source
+### Option 3: Install from Source
+
+**Prerequisites:**
+- **Python 3.8+** (3.10+ recommended)
+- **Node.js 18+** and npm (only required for Web UI development)
 
 #### 1. Clone the Repository
 
