@@ -1,0 +1,93 @@
+# RefChecker Docker Compose Configuration
+#
+# Usage:
+#   docker compose up              # Start RefChecker
+#   docker compose up -d           # Start in background
+#   docker compose down            # Stop RefChecker
+#   docker compose logs -f         # View logs
+#
+# For GPU support, use the gpu profile:
+#   docker compose --profile gpu up
+
+services:
+  refchecker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/markrussinovich/refchecker:latest
+    container_name: refchecker
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent data storage (database, uploads, thumbnails)
+      - refchecker-data:/app/data
+      # Optional: mount uploads directory for file persistence
+      - ./uploads:/app/backend/uploads
+    environment:
+      # LLM API Keys (set in .env file or environment)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # Semantic Scholar API Key (optional, for higher rate limits)
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
+      # Data directory (inside container)
+      - REFCHECKER_DATA_DIR=/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # GPU-enabled variant for local model inference
+  refchecker-gpu:
+    build:
+      context: .
+      dockerfile: Dockerfile.gpu
+    image: ghcr.io/markrussinovich/refchecker:gpu
+    container_name: refchecker-gpu
+    profiles:
+      - gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent data storage
+      - refchecker-data:/app/data
+      # Model cache for HuggingFace models
+      - refchecker-models:/app/models
+      # Optional: mount uploads directory
+      - ./uploads:/app/backend/uploads
+    environment:
+      # LLM API Keys (set in .env file or environment)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      # HuggingFace token for gated models
+      - HF_TOKEN=${HF_TOKEN:-}
+      # Semantic Scholar API Key
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
+      # Data directory
+      - REFCHECKER_DATA_DIR=/app/data
+      # CUDA settings
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  refchecker-data:
+    name: refchecker-data
+  refchecker-models:
+    name: refchecker-models

@@ -1,0 +1,98 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Node.js (except web-ui source)
+web-ui/node_modules/
+web-ui/dist/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Test artifacts
+tests/
+test_*.py
+conftest.py
+pytest.ini
+
+# Documentation
+docs/
+*.md
+!README.md
+paper/
+
+# Development files
+Makefile
+scripts/
+UNKNOWN.egg-info/
+
+# Logs and debug
+logs/
+*.log
+debug/
+output/
+validation_output/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Database files (we want fresh data in container)
+*.db
+*.db-wal
+*.db-shm
+
+# Uploads directory (persistent via volume)
+backend/uploads/
+
+# Cache directories
+.cache/
+*.cache
+
+# Build artifacts
+*.whl
+*.tar.gz

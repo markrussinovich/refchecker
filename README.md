@@ -69,6 +69,7 @@ Learn about RefChecker's design philosophy and development process in this detai
 - [🎯 Features](#-features)
 - [🚀 Quick Start](#-quick-start)
 - [🌐 Web UI](#-web-ui)
+- [🐳 Docker](#-docker)
 - [🤖 LLM-Enhanced Reference Extraction](#-llm-enhanced-reference-extraction)
 - [📦 Installation](#-installation)
 - [📖 Usage](#-usage)
@@ -186,6 +187,114 @@ npm run dev
 - 🌓 Automatic dark/light mode
 
 For complete Web UI documentation, see **[web-ui/README.md](web-ui/README.md)**.
+
+## 🐳 Docker
+
+RefChecker is available as a Docker image for easy deployment without installing Python dependencies.
+
+### Quick Start
+
+```bash
+# Pull and run the latest image
+docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker
+```
+
+Open **http://localhost:8000** in your browser.
+
+### Configuration with API Keys
+
+To use LLM-powered reference extraction, pass your API keys as environment variables:
+
+```bash
+# Using Anthropic Claude
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker
+
+# Using OpenAI
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker
+
+# Using Google Gemini
+docker run -p 8000:8000 \
+  -e GOOGLE_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker
+```
+
+### Persistent Data
+
+To persist check history and settings between container restarts:
+
+```bash
+docker run -p 8000:8000 \
+  -v refchecker-data:/app/data \
+  -e ANTHROPIC_API_KEY=your_key_here \
+  ghcr.io/markrussinovich/refchecker
+```
+
+### Using Docker Compose
+
+For easier configuration, use the included `docker-compose.yml`:
+
+```bash
+# Copy the example environment file and add your API keys
+cp .env.example .env
+# Edit .env with your API keys
+
+# Start RefChecker
+docker compose up
+
+# Or run in background
+docker compose up -d
+```
+
+### GPU Support for Local Models
+
+For running local LLMs with vLLM, use the GPU-enabled image:
+
+```bash
+# Pull the GPU image
+docker pull ghcr.io/markrussinovich/refchecker:gpu
+
+# Run with GPU access
+docker run --gpus all -p 8000:8000 \
+  -v refchecker-data:/app/data \
+  -v refchecker-models:/app/models \
+  ghcr.io/markrussinovich/refchecker:gpu
+```
+
+Or with Docker Compose:
+
+```bash
+# Start with GPU profile
+docker compose --profile gpu up
+```
+
+### Available Tags
+
+| Tag | Description | Architectures |
+|-----|-------------|---------------|
+| `latest` | Latest stable release | amd64, arm64 |
+| `X.Y.Z` | Specific version | amd64, arm64 |
+| `gpu` | GPU-enabled with vLLM | amd64 |
+| `X.Y.Z-gpu` | Specific GPU version | amd64 |
+
+### Building Locally
+
+```bash
+# Build standard image
+make docker-build
+
+# Build GPU image
+make docker-build-gpu
+
+# Run locally
+make docker-run
+
+# Test the build
+make docker-test
+```
 
 ## 🤖 LLM-Enhanced Reference Extraction
 

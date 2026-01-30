@@ -14,10 +14,20 @@ from cryptography.fernet import Fernet
 def get_data_dir() -> Path:
     """Get platform-appropriate user data directory for refchecker.
     
+    If REFCHECKER_DATA_DIR environment variable is set, use that path.
+    Otherwise, use platform-specific defaults:
+    
     Windows: %LOCALAPPDATA%\refchecker
     macOS: ~/Library/Application Support/refchecker
     Linux: ~/.local/share/refchecker
     """
+    # Check for environment variable override (useful for Docker)
+    env_data_dir = os.environ.get("REFCHECKER_DATA_DIR")
+    if env_data_dir:
+        data_dir = Path(env_data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        return data_dir
+    
     if sys.platform == "win32":
         # Windows: use LOCALAPPDATA
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
