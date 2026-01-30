@@ -24,7 +24,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Runtime image with CUDA
 # =============================================================================
-FROM nvidia/cuda:12.1-runtime-ubuntu22.04 AS runtime
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS runtime
 
 LABEL org.opencontainers.image.title="RefChecker GPU"
 LABEL org.opencontainers.image.description="Academic paper reference validation tool with GPU support for local LLM inference"
@@ -76,7 +76,7 @@ RUN pip install --no-cache-dir --upgrade pip wheel setuptools
 # Install PyTorch with CUDA support first (large download, cached early)
 RUN pip install --no-cache-dir \
     torch>=2.0.0 \
-    --index-url https://download.pytorch.org/whl/cu121
+    --index-url https://download.pytorch.org/whl/cu124
 
 # Install vLLM and HuggingFace dependencies
 RUN pip install --no-cache-dir \
