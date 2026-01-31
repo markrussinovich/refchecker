@@ -1,14 +1,50 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import HistoryItem from './HistoryItem'
+import BatchGroup from './BatchGroup'
 
 /**
- * Scrollable list of historical checks
+ * Scrollable list of historical checks, with batch grouping
  */
 export default function HistoryList() {
   const { history, selectedCheckId, isLoading, error, scrollTrigger } = useHistoryStore()
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false)
+  const [collapsedBatches, setCollapsedBatches] = useState({})
   const scrollContainerRef = useRef(null)
+  
+  // Group history items by batch_id
+  const groupedHistory = useMemo(() => {
+    const groups = []
+    const batchMap = new Map()
+    
+    for (const item of history) {
+      if (item.batch_id) {
+        if (!batchMap.has(item.batch_id)) {
+          const batchGroup = {
+            type: 'batch',
+            batch_id: item.batch_id,
+            batch_label: item.batch_label,
+            items: [],
+            timestamp: item.timestamp,
+          }
+          batchMap.set(item.batch_id, batchGroup)
+          groups.push(batchGroup)
+        }
+        batchMap.get(item.batch_id).items.push(item)
+      } else {
+        groups.push({ type: 'single', item })
+      }
+    }
+    
+    return groups
+  }, [history])
+  
+  const toggleBatchCollapse = (batchId) => {
+    setCollapsedBatches(prev => ({
+      ...prev,
+      [batchId]: !prev[batchId],
+    }))
+  }
   
   // Scroll to top when scrollTrigger changes (New Refcheck button clicked)
   useEffect(() => {
@@ -85,13 +121,28 @@ export default function HistoryList() {
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-      {history.map(item => (
-        <HistoryItem
-          key={item.id}
-          item={item}
-          isSelected={item.id === selectedCheckId}
-        />
-      ))}
+      {groupedHistory.map((group, index) => {
+        if (group.type === 'batch') {
+          return (
+            <BatchGroup
+              key={group.batch_id}
+              batchId={group.batch_id}
+              batchLabel={group.batch_label}
+              items={group.items}
+              isCollapsed={collapsedBatches[group.batch_id] ?? false}
+              onToggle={() => toggleBatchCollapse(group.batch_id)}
+              selectedCheckId={selectedCheckId}
+            />
+          )
+        }
+        return (
+          <HistoryItem
+            key={group.item.id}
+            item={group.item}
+            isSelected={group.item.id === selectedCheckId}
+          />
+        )
+      })}
     </div>
   )
 }

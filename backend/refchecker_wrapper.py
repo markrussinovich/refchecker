@@ -291,7 +291,7 @@ class ProgressRefChecker:
             "authoritative_urls": authoritative_urls,
             "corrected_reference": None
         }
-        logger.debug(f"_format_verification_result output: status={status}, errors={len(formatted_errors)}, warnings={len(formatted_warnings)}, suggestions={len(formatted_suggestions)}")
+        logger.info(f"_format_verification_result output: suggestions={formatted_suggestions}, status={status}")
         return result
 
     def _format_error_result(
@@ -961,7 +961,6 @@ class ProgressRefChecker:
             
             try:
                 # Run the sync check in a thread
-                # Use 240 second timeout to allow for ArXiv rate limiting with version checking
                 result = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,  # Use default executor
@@ -969,7 +968,7 @@ class ProgressRefChecker:
                         reference,
                         idx + 1
                     ),
-                    timeout=240.0  # 4 minute timeout per reference (allows for rate-limited version checking)
+                    timeout=120.0  # 2 minute timeout per reference
                 )
             except asyncio.TimeoutError:
                 result = {
@@ -982,7 +981,7 @@ class ProgressRefChecker:
                     "status": "error",
                     "errors": [{
                         "error_type": "timeout",
-                        "error_details": "Verification timed out after 240 seconds"
+                        "error_details": "Verification timed out after 120 seconds"
                     }],
                     "warnings": [],
                     "authoritative_urls": [],

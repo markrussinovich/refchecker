@@ -144,6 +144,12 @@ class Database:
             """)
 
             await self._ensure_columns(db)
+            
+            # Create index for batch queries
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_batch_id 
+                ON check_history(batch_id)
+            """)
             await db.commit()
 
     async def _ensure_columns(self, db: aiosqlite.Connection):
@@ -168,6 +174,10 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN thumbnail_path TEXT")
         if "bibliography_source_path" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN bibliography_source_path TEXT")
+        if "batch_id" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN batch_id TEXT")
+        if "batch_label" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN batch_label TEXT")
 
     async def save_check(self,
                          paper_title: str,
@@ -222,7 +232,7 @@ class Database:
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
-                       llm_provider, llm_model, status, source_type
+                       llm_provider, llm_model, status, source_type, batch_id, batch_label
                 FROM check_history
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -282,20 +292,25 @@ class Database:
                                     paper_source: str,
                                     source_type: str,
                                     llm_provider: Optional[str] = None,
-                                    llm_model: Optional[str] = None) -> int:
+                                    llm_model: Optional[str] = None,
+                                    batch_id: Optional[str] = None,
+                                    batch_label: Optional[str] = None) -> int:
         """Create a pending check entry before verification starts"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
-                 suggestions_count, unverified_count, results_json, llm_provider, llm_model, status)
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress')
+                 suggestions_count, unverified_count, results_json, llm_provider, llm_model, status,
+                 batch_id, batch_label)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?)
             """, (
                 paper_title,
                 paper_source,
                 source_type,
                 llm_provider,
-                llm_model
+                llm_model,
+                batch_id,
+                batch_label
             ))
             await db.commit()
             return cursor.lastrowid
@@ -715,6 +730,88 @@ class Database:
             cursor = await db.execute("DELETE FROM verification_cache")
             await db.commit()
             return cursor.rowcount
+
+    # Batch operations
+
+    async def get_batch_checks(self, batch_id: str) -> List[Dict[str, Any]]:
+        """Get all checks belonging to a batch"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT id, paper_title, paper_source, custom_label, timestamp,
+                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       refs_with_errors, refs_with_warnings_only, refs_verified,
+                       llm_provider, llm_model, status, source_type, batch_id, batch_label
+                FROM check_history
+                WHERE batch_id = ?
+                ORDER BY timestamp ASC
+            """, (batch_id,)) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def get_batch_summary(self, batch_id: str) -> Optional[Dict[str, Any]]:
+        """Get aggregated summary for a batch"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            db.row_factory = aiosqlite.Row
+            async with db.execute("""
+                SELECT 
+                    batch_id,
+                    batch_label,
+                    COUNT(*) as total_papers,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_papers,
+                    SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress_papers,
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_papers,
+                    SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_papers,
+                    SUM(total_refs) as total_refs,
+                    SUM(errors_count) as total_errors,
+                    SUM(warnings_count) as total_warnings,
+                    SUM(suggestions_count) as total_suggestions,
+                    SUM(unverified_count) as total_unverified,
+                    MIN(timestamp) as started_at
+                FROM check_history
+                WHERE batch_id = ?
+                GROUP BY batch_id
+            """, (batch_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return dict(row)
+                return None
+
+    async def cancel_batch(self, batch_id: str) -> int:
+        """Cancel all in-progress checks in a batch. Returns count of cancelled checks."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute("""
+                UPDATE check_history 
+                SET status = 'cancelled' 
+                WHERE batch_id = ? AND status = 'in_progress'
+            """, (batch_id,))
+            await db.commit()
+            return cursor.rowcount
+
+    async def delete_batch(self, batch_id: str) -> int:
+        """Delete all checks in a batch. Returns count of deleted checks."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute(
+                "DELETE FROM check_history WHERE batch_id = ?",
+                (batch_id,)
+            )
+            await db.commit()
+            return cursor.rowcount
+
+    async def update_batch_label(self, batch_id: str, label: str) -> bool:
+        """Update the label for all checks in a batch"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute(
+                "UPDATE check_history SET batch_label = ? WHERE batch_id = ?",
+                (label, batch_id)
+            )
+            await db.commit()
+            return True
 
 
 # Global database instance

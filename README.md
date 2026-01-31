@@ -259,17 +259,17 @@ LLM-powered extraction improves accuracy with complex bibliographies. Claude Son
 | Provider | Env Variable | Example Model |
 |----------|--------------|---------------|
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
-| Google | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
-| Azure | `AZURE_OPENAI_API_KEY` | `gpt-4` |
-| vLLM | (local) | `meta-llama/Llama-3.1-8B-Instruct` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.2-mini` |
+| Google | `GOOGLE_API_KEY` | `gemini-3` |
+| Azure | `AZURE_OPENAI_API_KEY` | `gpt-4o` |
+| vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
 
 ```bash
 export ANTHROPIC_API_KEY=your_key
 academic-refchecker --paper 1706.03762 --llm-provider anthropic
 
-academic-refchecker --paper paper.pdf --llm-provider openai --llm-model gpt-4o
-academic-refchecker --paper paper.pdf --llm-provider vllm --llm-model meta-llama/Llama-3.1-8B-Instruct
+academic-refchecker --paper paper.pdf --llm-provider openai --llm-model gpt-5.2-mini
+academic-refchecker --paper paper.pdf --llm-provider vllm --llm-model meta-llama/Llama-3.3-70B-Instruct
 ```
 
 #### Local models (vLLM)
@@ -278,7 +278,7 @@ There is no separate “GPU Docker image”. For local inference, install the vL
 
 ```bash
 pip install "academic-refchecker[vllm]"
-python scripts/start_vllm_server.py --model meta-llama/Llama-3.1-8B-Instruct --port 8001
+python scripts/start_vllm_server.py --model meta-llama/Llama-3.3-70B-Instruct --port 8001
 academic-refchecker --paper paper.pdf --llm-provider vllm --llm-endpoint http://localhost:8001/v1
 ```
 

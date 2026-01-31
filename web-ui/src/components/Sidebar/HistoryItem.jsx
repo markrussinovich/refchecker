@@ -25,8 +25,12 @@ function expandArxivId(source) {
 
 /**
  * Individual history item in the sidebar
+ * @param {Object} props
+ * @param {Object} props.item - The history item data
+ * @param {boolean} props.isSelected - Whether this item is currently selected
+ * @param {boolean} [props.compact=false] - Whether to show in compact mode (for batch groups)
  */
-export default function HistoryItem({ item, isSelected }) {
+export default function HistoryItem({ item, isSelected, compact = false }) {
   const { selectCheck, updateLabel, deleteCheck, updateHistoryProgress } = useHistoryStore()
   // Only subscribe to the specific values we need to minimize re-renders
   const currentSessionId = useCheckStore(state => state.sessionId)
@@ -166,10 +170,10 @@ export default function HistoryItem({ item, isSelected }) {
     <div
       data-history-item
       onClick={handleClick}
-      className={`px-3 py-2 mx-2 my-0.5 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''}`}
+      className={`px-3 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''} ${compact ? 'py-1.5 mx-0' : 'py-2 mx-2 my-0.5'}`}
       style={{
         backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : undefined,
-        minHeight: '72px',
+        minHeight: compact ? '48px' : '72px',
       }}
     >
       {/* Label / Title - full width, controls overlay on top */}
@@ -201,7 +205,7 @@ export default function HistoryItem({ item, isSelected }) {
         )}
         
         {/* Paper source URL (show if available, but not for pasted text or file uploads which use temp paths) */}
-        {!isPlaceholder && item.paper_source && item.source_type !== 'text' && item.source_type !== 'file' && (
+        {!compact && !isPlaceholder && item.paper_source && item.source_type !== 'text' && item.source_type !== 'file' && (
           <div 
             className="text-xs mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap"
             style={{ color: 'var(--color-text-muted)' }}
@@ -211,8 +215,8 @@ export default function HistoryItem({ item, isSelected }) {
           </div>
         )}
         
-        {/* Date (hide for placeholder or missing timestamp) */}
-        {item.timestamp && !isPlaceholder && (
+        {/* Date (hide for placeholder or missing timestamp, or in compact mode) */}
+        {!compact && item.timestamp && !isPlaceholder && (
           <div 
             className="text-xs mt-1"
             style={{ color: 'var(--color-text-muted)' }}

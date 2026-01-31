@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Button from '../common/Button'
 import FileDropZone from './FileDropZone'
+import BulkInputZone from './BulkInputZone'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -32,9 +33,12 @@ function sanitizeUrlInput(input) {
  * Input section for paper URL, ArXiv ID, or file upload
  */
 export default function InputSection() {
-  const [inputMode, setInputMode] = useState('url') // url, file, text
+  const [inputMode, setInputMode] = useState('url') // url, file, text, bulk
   const [inputValue, setInputValue] = useState('')
   const [textValue, setTextValue] = useState('')
+  const [bulkUrls, setBulkUrls] = useState('')
+  const [bulkFiles, setBulkFiles] = useState([])
+  const [bulkMode, setBulkMode] = useState('urls') // urls or files
   const [isSubmitting, setIsSubmitting] = useState(false)
   
   const { 
@@ -160,6 +164,101 @@ export default function InputSection() {
     }
   }
 
+  const handleBulkSubmit = async () => {
+    clearSelection()
+    
+    // Validate input
+    if (bulkMode === 'urls') {
+      const urls = bulkUrls.split('\n').map(u => u.trim()).filter(Boolean)
+      if (urls.length === 0) {
+        logger.warn('InputSection', 'No URLs provided for bulk check')
+        return
+      }
+    } else if (bulkMode === 'files' && bulkFiles.length === 0) {
+      logger.warn('InputSection', 'No files selected for bulk check')
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      const config = getSelectedConfig()
+      const { addToHistory } = useHistoryStore.getState()
+      
+      let response
+      
+      if (bulkMode === 'urls') {
+        const urls = bulkUrls.split('\n').map(u => u.trim()).filter(Boolean)
+        
+        response = await api.startBatchCheck({
+          urls,
+          batch_label: `Batch of ${urls.length} papers`,
+          llm_config_id: config?.id,
+          llm_provider: config?.provider || 'anthropic',
+          llm_model: config?.model,
+          use_llm: !!config,
+        })
+      } else {
+        // File batch
+        const formData = new FormData()
+        bulkFiles.forEach(file => formData.append('files', file))
+        formData.append('batch_label', `Batch of ${bulkFiles.length} files`)
+        if (config) {
+          formData.append('llm_config_id', config.id.toString())
+          formData.append('llm_provider', config.provider)
+          if (config.model) formData.append('llm_model', config.model)
+          formData.append('use_llm', 'true')
+        } else {
+          formData.append('use_llm', 'false')
+        }
+        
+        response = await api.startBatchFileCheck(formData)
+      }
+
+      const { batch_id, batch_label, checks } = response.data
+      
+      logger.info('Batch', `Started batch ${batch_id} with ${checks.length} papers`)
+
+      // Add all checks to history immediately
+      for (const check of checks) {
+        addToHistory({
+          id: check.check_id,
+          paper_title: check.source,
+          paper_source: check.source,
+          source_type: bulkMode === 'urls' ? 'url' : 'file',
+          custom_label: null,
+          timestamp: new Date().toISOString(),
+          total_refs: 0,
+          errors_count: 0,
+          warnings_count: 0,
+          unverified_count: 0,
+          llm_provider: config?.provider || null,
+          llm_model: config?.model || null,
+          status: 'in_progress',
+          session_id: check.session_id,
+          batch_id: batch_id,
+          batch_label: batch_label,
+        })
+      }
+
+      // Select the first check
+      if (checks.length > 0) {
+        selectCheck(checks[0].check_id)
+        startCheck(checks[0].session_id, checks[0].check_id, checks[0].source, bulkMode === 'urls' ? 'url' : 'file', null)
+      }
+
+      // Clear bulk inputs
+      setBulkUrls('')
+      setBulkFiles([])
+
+    } catch (error) {
+      logger.error('InputSection', 'Failed to start bulk check', error)
+      setError(error.response?.data?.detail || error.message || 'Failed to start bulk check')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const handleCancel = async () => {
     const { sessionId } = useCheckStore.getState()
     if (!sessionId) return
@@ -214,6 +313,7 @@ export default function InputSection() {
           { id: 'url', label: 'URL / ArXiv ID' },
           { id: 'file', label: 'Upload File' },
           { id: 'text', label: 'Paste Text' },
+          { id: 'bulk', label: 'Bulk' },
         ].map(mode => (
           <button
             key={mode.id}
@@ -301,11 +401,23 @@ export default function InputSection() {
             }}
           />
         )}
+
+        {inputMode === 'bulk' && (
+          <BulkInputZone
+            bulkMode={bulkMode}
+            setBulkMode={setBulkMode}
+            bulkUrls={bulkUrls}
+            setBulkUrls={setBulkUrls}
+            bulkFiles={bulkFiles}
+            setBulkFiles={setBulkFiles}
+            disabled={isChecking}
+          />
+        )}
       </div>
 
       {/* Action buttons */}
       <div className="flex items-center gap-3">
-        {!isChecking && !isComplete && (
+        {!isChecking && !isComplete && inputMode !== 'bulk' && (
           <Button 
             onClick={handleSubmit}
             loading={isSubmitting}
@@ -316,6 +428,22 @@ export default function InputSection() {
             }
           >
             Check References
+          </Button>
+        )}
+
+        {!isChecking && !isComplete && inputMode === 'bulk' && (
+          <Button 
+            onClick={handleBulkSubmit}
+            loading={isSubmitting}
+            disabled={
+              (bulkMode === 'urls' && !bulkUrls.trim()) ||
+              (bulkMode === 'files' && bulkFiles.length === 0)
+            }
+          >
+            {bulkMode === 'urls' 
+              ? `Check ${bulkUrls.split('\n').filter(u => u.trim()).length || 0} Papers`
+              : `Check ${bulkFiles.length} Files`
+            }
           </Button>
         )}
 

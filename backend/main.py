@@ -69,6 +69,20 @@ class CheckLabelUpdate(BaseModel):
     custom_label: str
 
 
+class BatchLabelUpdate(BaseModel):
+    batch_label: str
+
+
+class BatchUrlsRequest(BaseModel):
+    """Request model for batch URL submission"""
+    urls: list[str]
+    batch_label: Optional[str] = None
+    llm_config_id: Optional[int] = None
+    llm_provider: str = "anthropic"
+    llm_model: Optional[str] = None
+    use_llm: bool = True
+
+
 # Create FastAPI app
 app = FastAPI(title="RefChecker Web UI API", version="1.0.0")
 
@@ -898,6 +912,418 @@ async def cancel_check(session_id: str):
     active["cancel_event"].set()
     active["task"].cancel()
     return {"message": "Cancellation requested"}
+
+
+# ============ Batch Operations ============
+
+@app.post("/api/check/batch")
+async def start_batch_check(request: BatchUrlsRequest):
+    """
+    Start a batch of reference checks from a list of URLs/ArXiv IDs.
+    
+    Returns batch_id and list of individual check sessions.
+    """
+    try:
+        if not request.urls or len(request.urls) == 0:
+            raise HTTPException(status_code=400, detail="No URLs provided")
+        
+        # Limit batch size to prevent abuse
+        MAX_BATCH_SIZE = 50
+        if len(request.urls) > MAX_BATCH_SIZE:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Batch size exceeds maximum of {MAX_BATCH_SIZE} papers"
+            )
+        
+        # Generate unique batch ID
+        batch_id = str(uuid.uuid4())
+        batch_label = request.batch_label or f"Batch of {len(request.urls)} papers"
+        
+        # Get API key from config if provided
+        api_key = None
+        endpoint = None
+        llm_provider = request.llm_provider
+        llm_model = request.llm_model
+        
+        if request.llm_config_id and request.use_llm:
+            config = await db.get_llm_config_by_id(request.llm_config_id)
+            if config:
+                api_key = config.get('api_key')
+                endpoint = config.get('endpoint')
+                llm_provider = config.get('provider', llm_provider)
+                llm_model = config.get('model') or llm_model
+        
+        checks = []
+        
+        for url in request.urls:
+            url = url.strip()
+            if not url:
+                continue
+            
+            session_id = str(uuid.uuid4())
+            
+            # Create pending check entry with batch info
+            check_id = await db.create_pending_check(
+                paper_title=url,  # Will be updated during processing
+                paper_source=url,
+                source_type='url',
+                llm_provider=llm_provider if request.use_llm else None,
+                llm_model=llm_model if request.use_llm else None,
+                batch_id=batch_id,
+                batch_label=batch_label
+            )
+            
+            # Start check in background
+            cancel_event = asyncio.Event()
+            task = asyncio.create_task(
+                run_check(
+                    session_id, check_id, url, 'url',
+                    llm_provider, llm_model, api_key, endpoint,
+                    request.use_llm, cancel_event
+                )
+            )
+            active_checks[session_id] = {
+                "task": task, 
+                "cancel_event": cancel_event, 
+                "check_id": check_id,
+                "batch_id": batch_id
+            }
+            
+            checks.append({
+                "session_id": session_id,
+                "check_id": check_id,
+                "source": url
+            })
+        
+        logger.info(f"Started batch {batch_id} with {len(checks)} papers")
+        
+        return {
+            "batch_id": batch_id,
+            "batch_label": batch_label,
+            "total_papers": len(checks),
+            "checks": checks
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting batch check: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/check/batch/files")
+async def start_batch_check_files(
+    files: list[UploadFile] = File(...),
+    batch_label: Optional[str] = Form(None),
+    llm_config_id: Optional[int] = Form(None),
+    llm_provider: str = Form("anthropic"),
+    llm_model: Optional[str] = Form(None),
+    use_llm: bool = Form(True)
+):
+    """
+    Start a batch of reference checks from uploaded files.
+    
+    Accepts multiple files or a single ZIP file containing documents.
+    """
+    try:
+        if not files or len(files) == 0:
+            raise HTTPException(status_code=400, detail="No files provided")
+        
+        MAX_BATCH_SIZE = 50
+        
+        # Generate unique batch ID
+        batch_id = str(uuid.uuid4())
+        uploads_dir = Path(__file__).parent / "uploads"
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get API key from config if provided
+        api_key = None
+        endpoint = None
+        
+        if llm_config_id and use_llm:
+            config = await db.get_llm_config_by_id(llm_config_id)
+            if config:
+                api_key = config.get('api_key')
+                endpoint = config.get('endpoint')
+                llm_provider = config.get('provider', llm_provider)
+                llm_model = config.get('model') or llm_model
+        
+        files_to_process = []
+        
+        # Check if single ZIP file
+        if len(files) == 1 and files[0].filename.lower().endswith('.zip'):
+            import zipfile
+            import io
+            
+            zip_content = await files[0].read()
+            with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zf:
+                for name in zf.namelist():
+                    # Skip directories and hidden files
+                    if name.endswith('/') or name.startswith('__') or '/.' in name:
+                        continue
+                    
+                    # Only process supported file types
+                    lower_name = name.lower()
+                    if not any(lower_name.endswith(ext) for ext in ['.pdf', '.txt', '.tex', '.bib', '.bbl']):
+                        continue
+                    
+                    if len(files_to_process) >= MAX_BATCH_SIZE:
+                        break
+                    
+                    # Extract file
+                    content = zf.read(name)
+                    filename = os.path.basename(name)
+                    file_path = uploads_dir / f"{batch_id}_{filename}"
+                    with open(file_path, 'wb') as f:
+                        f.write(content)
+                    
+                    files_to_process.append({
+                        'path': str(file_path),
+                        'filename': filename
+                    })
+        else:
+            # Process individual files
+            for file in files[:MAX_BATCH_SIZE]:
+                safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+                file_path = uploads_dir / f"{batch_id}_{safe_filename}"
+                content = await file.read()
+                with open(file_path, "wb") as f:
+                    f.write(content)
+                
+                files_to_process.append({
+                    'path': str(file_path),
+                    'filename': file.filename
+                })
+        
+        if not files_to_process:
+            raise HTTPException(status_code=400, detail="No valid files found")
+        
+        label = batch_label or f"Batch of {len(files_to_process)} files"
+        
+        checks = []
+        for file_info in files_to_process:
+            session_id = str(uuid.uuid4())
+            
+            check_id = await db.create_pending_check(
+                paper_title=file_info['filename'],
+                paper_source=file_info['path'],
+                source_type='file',
+                llm_provider=llm_provider if use_llm else None,
+                llm_model=llm_model if use_llm else None,
+                batch_id=batch_id,
+                batch_label=label
+            )
+            
+            cancel_event = asyncio.Event()
+            task = asyncio.create_task(
+                run_check(
+                    session_id, check_id, file_info['path'], 'file',
+                    llm_provider, llm_model, api_key, endpoint,
+                    use_llm, cancel_event
+                )
+            )
+            active_checks[session_id] = {
+                "task": task,
+                "cancel_event": cancel_event,
+                "check_id": check_id,
+                "batch_id": batch_id
+            }
+            
+            checks.append({
+                "session_id": session_id,
+                "check_id": check_id,
+                "source": file_info['filename']
+            })
+        
+        logger.info(f"Started file batch {batch_id} with {len(checks)} files")
+        
+        return {
+            "batch_id": batch_id,
+            "batch_label": label,
+            "total_papers": len(checks),
+            "checks": checks
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting batch file check: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/batch/{batch_id}")
+async def get_batch(batch_id: str):
+    """Get batch summary and all checks in the batch"""
+    try:
+        summary = await db.get_batch_summary(batch_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        
+        checks = await db.get_batch_checks(batch_id)
+        
+        # Add session_id for in-progress checks
+        for check in checks:
+            if check.get("status") == "in_progress":
+                session_id = _session_id_for_check(check["id"])
+                if session_id:
+                    check["session_id"] = session_id
+        
+        return {
+            **summary,
+            "checks": checks
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting batch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cancel/batch/{batch_id}")
+async def cancel_batch(batch_id: str):
+    """Cancel all active checks in a batch"""
+    try:
+        # Cancel active tasks
+        cancelled_sessions = 0
+        for session_id, meta in list(active_checks.items()):
+            if meta.get("batch_id") == batch_id:
+                meta["cancel_event"].set()
+                meta["task"].cancel()
+                cancelled_sessions += 1
+        
+        # Update database status for any remaining in-progress
+        db_cancelled = await db.cancel_batch(batch_id)
+        
+        logger.info(f"Cancelled batch {batch_id}: {cancelled_sessions} active, {db_cancelled} in DB")
+        
+        return {
+            "message": "Batch cancellation requested",
+            "batch_id": batch_id,
+            "cancelled_active": cancelled_sessions,
+            "cancelled_pending": db_cancelled
+        }
+    except Exception as e:
+        logger.error(f"Error cancelling batch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/batch/{batch_id}")
+async def delete_batch(batch_id: str):
+    """Delete all checks in a batch"""
+    try:
+        # First cancel any active checks
+        for session_id, meta in list(active_checks.items()):
+            if meta.get("batch_id") == batch_id:
+                meta["cancel_event"].set()
+                meta["task"].cancel()
+                active_checks.pop(session_id, None)
+        
+        # Delete from database
+        deleted_count = await db.delete_batch(batch_id)
+        
+        if deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        
+        logger.info(f"Deleted batch {batch_id}: {deleted_count} checks")
+        
+        return {
+            "message": "Batch deleted successfully",
+            "batch_id": batch_id,
+            "deleted_count": deleted_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting batch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/batch/{batch_id}")
+async def update_batch_label(batch_id: str, update: BatchLabelUpdate):
+    """Update the label for a batch"""
+    try:
+        success = await db.update_batch_label(batch_id, update.batch_label)
+        if success:
+            return {"message": "Batch label updated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Batch not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating batch label: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/recheck/batch/{batch_id}")
+async def recheck_batch(batch_id: str):
+    """Re-run all checks in a batch"""
+    try:
+        # Get original batch checks
+        original_checks = await db.get_batch_checks(batch_id)
+        if not original_checks:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        
+        # Create new batch
+        new_batch_id = str(uuid.uuid4())
+        original_label = original_checks[0].get("batch_label", "Re-checked batch")
+        new_label = f"Re-check: {original_label}"
+        
+        checks = []
+        for original in original_checks:
+            session_id = str(uuid.uuid4())
+            source = original["paper_source"]
+            source_type = original.get("source_type", "url")
+            llm_provider = original.get("llm_provider", "anthropic")
+            llm_model = original.get("llm_model")
+            
+            check_id = await db.create_pending_check(
+                paper_title=original.get("paper_title", "Re-checking..."),
+                paper_source=source,
+                source_type=source_type,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                batch_id=new_batch_id,
+                batch_label=new_label
+            )
+            
+            cancel_event = asyncio.Event()
+            task = asyncio.create_task(
+                run_check(
+                    session_id, check_id, source, source_type,
+                    llm_provider, llm_model, None, None, True, cancel_event
+                )
+            )
+            active_checks[session_id] = {
+                "task": task,
+                "cancel_event": cancel_event,
+                "check_id": check_id,
+                "batch_id": new_batch_id
+            }
+            
+            checks.append({
+                "session_id": session_id,
+                "check_id": check_id,
+                "original_id": original["id"],
+                "source": source
+            })
+        
+        logger.info(f"Re-started batch {batch_id} as {new_batch_id} with {len(checks)} papers")
+        
+        return {
+            "batch_id": new_batch_id,
+            "batch_label": new_label,
+            "original_batch_id": batch_id,
+            "total_papers": len(checks),
+            "checks": checks
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error rechecking batch: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ End Batch Operations ============
 
 
 @app.delete("/api/history/{check_id}")
