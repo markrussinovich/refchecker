@@ -75,6 +75,18 @@ export default function BulkInputZone({
               ? '1px solid var(--color-accent)' 
               : '1px solid transparent',
           }}
+          onMouseEnter={(e) => {
+            if (!disabled && bulkMode !== 'urls') {
+              e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
+              e.currentTarget.style.color = 'var(--color-text-primary)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (bulkMode !== 'urls') {
+              e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text-secondary)'
+            }
+          }}
         >
           List of URLs
         </button>
@@ -92,6 +104,18 @@ export default function BulkInputZone({
             border: bulkMode === 'files' 
               ? '1px solid var(--color-accent)' 
               : '1px solid transparent',
+          }}
+          onMouseEnter={(e) => {
+            if (!disabled && bulkMode !== 'files') {
+              e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
+              e.currentTarget.style.color = 'var(--color-text-primary)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (bulkMode !== 'files') {
+              e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+              e.currentTarget.style.color = 'var(--color-text-secondary)'
+            }
           }}
         >
           Multiple Files / ZIP

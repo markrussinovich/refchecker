@@ -219,6 +219,12 @@ export default function InputSection() {
       
       logger.info('Batch', `Started batch ${batch_id} with ${checks.length} papers`)
 
+      // Register all sessions for WebSocket connections
+      const { registerSession } = useCheckStore.getState()
+      for (const check of checks) {
+        registerSession(check.session_id, check.check_id)
+      }
+
       // Add all checks to history immediately
       for (const check of checks) {
         addToHistory({
@@ -241,7 +247,7 @@ export default function InputSection() {
         })
       }
 
-      // Select the first check
+      // Select the first check and set it as the active check display
       if (checks.length > 0) {
         selectCheck(checks[0].check_id)
         startCheck(checks[0].session_id, checks[0].check_id, checks[0].source, bulkMode === 'urls' ? 'url' : 'file', null)

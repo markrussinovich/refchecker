@@ -233,6 +233,17 @@ export default function StatusSection() {
   const [showThumbnailOverlay, setShowThumbnailOverlay] = useState(false)
   const [previewUrl, setPreviewUrl] = useState(null)
   
+  // Close thumbnail overlay on Escape key
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showThumbnailOverlay) {
+        setShowThumbnailOverlay(false)
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [showThumbnailOverlay])
+
   // Fetch thumbnail when check ID changes
   useEffect(() => {
     if (!selectedCheckId || selectedCheckId === -1) {

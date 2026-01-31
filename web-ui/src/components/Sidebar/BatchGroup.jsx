@@ -17,7 +17,36 @@ export default function BatchGroup({
 }) {
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
+  const [isEditingLabel, setIsEditingLabel] = useState(false)
+  const [editValue, setEditValue] = useState('')
   const { fetchHistory } = useHistoryStore()
+
+  const handleEditStart = (e) => {
+    e.stopPropagation()
+    setEditValue(batchLabel || `Batch of ${items.length} papers`)
+    setIsEditingLabel(true)
+  }
+
+  const handleEditSave = async () => {
+    if (editValue.trim() && editValue.trim() !== batchLabel) {
+      try {
+        await api.updateBatchLabel(batchId, editValue.trim())
+        await fetchHistory()
+        logger.info('BatchGroup', `Label updated for batch ${batchId}`)
+      } catch (error) {
+        logger.error('BatchGroup', 'Failed to update label', error)
+      }
+    }
+    setIsEditingLabel(false)
+  }
+
+  const handleEditKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleEditSave()
+    } else if (e.key === 'Escape') {
+      setIsEditingLabel(false)
+    }
+  }
 
   // Calculate batch stats
   const stats = useMemo(() => {
@@ -101,12 +130,32 @@ export default function BatchGroup({
 
         {/* Batch info */}
         <div className="flex-1 min-w-0">
-          <div 
-            className="text-sm font-medium truncate"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            {batchLabel || `Batch of ${stats.total} papers`}
-          </div>
+          {isEditingLabel ? (
+            <input
+              type="text"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={handleEditSave}
+              onKeyDown={handleEditKeyDown}
+              onClick={(e) => e.stopPropagation()}
+              autoFocus
+              className="w-full px-2 py-0.5 text-sm rounded border focus:outline-none focus:ring-1"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-accent)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+          ) : (
+            <div 
+              className="text-sm font-medium truncate"
+              style={{ color: 'var(--color-text-primary)' }}
+              onDoubleClick={handleEditStart}
+              title="Double-click to edit"
+            >
+              {batchLabel || `Batch of ${stats.total} papers`}
+            </div>
+          )}
           <div 
             className="text-xs flex items-center gap-2"
             style={{ color: 'var(--color-text-muted)' }}
@@ -139,6 +188,18 @@ export default function BatchGroup({
             </button>
           )}
           
+          {/* Edit button */}
+          {!isEditingLabel && (
+            <button
+              onClick={handleEditStart}
+              className="text-xs px-1.5 py-0.5 rounded opacity-50 hover:opacity-100 transition-opacity"
+              style={{ color: 'var(--color-text-secondary)' }}
+              title="Edit batch label"
+            >
+              ✏️
+            </button>
+          )}
+
           {/* Delete confirmation or button */}
           {isConfirmingDelete ? (
             <div className="flex items-center gap-1">
