@@ -6,6 +6,7 @@ Text processing utilities for ArXiv Reference Checker
 import re
 import logging
 import unicodedata
+import html
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -5088,7 +5089,8 @@ def normalize_venue_for_display(venue: str) -> str:
         
         return text_lower
     
-    venue_text = venue.strip()
+    # Decode any HTML entities (e.g., "&amp;" -> "&") before further cleaning
+    venue_text = html.unescape(venue).strip()
     
     # Strip leading editor name lists like "..., editors, Venue ..." or "..., eds., Venue ..."
     # This prevents author/editor lists from being treated as venue

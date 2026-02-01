@@ -16,12 +16,15 @@ from pydantic import BaseModel
 import logging
 from refchecker.__version__ import __version__
 
-# Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles)
-if sys.platform == 'win32':
-    # Set UTF-8 mode for stdout/stderr to handle special characters
+# Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles).
+# Skip this when running under pytest so we don't replace pytest's capture streams, which can
+# lead to closed-file errors during teardown.
+if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, "buffer"):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import aiosqlite
 from .database import db

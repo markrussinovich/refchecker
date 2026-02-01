@@ -52,6 +52,7 @@ academic-refchecker --paper /path/to/paper.pdf
 - **Comprehensive checks**: Titles, authors, years, venues, DOIs, ArXiv IDs
 - **Smart matching**: Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
 - **Detailed reports**: Errors, warnings, corrected references
+- **Bulk web checks**: Upload multiple files or a ZIP in the Web UI to validate many papers at once
 
 ## Sample Output
 
@@ -111,6 +112,8 @@ The Web UI shows live progress, history, and export (including corrected values)
 ```bash
 refchecker-webui --port 8000
 ```
+
+*Tip: You can bulk-check multiple papers by selecting several files or a single ZIP; the Web UI will group them into a batch in the history sidebar.*
 
 #### Development (frontend)
 

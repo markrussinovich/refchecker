@@ -454,7 +454,20 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
               return true
             })
             
-            return filteredUrls.map((urlObj, i) => (
+            // Sort so verified URLs show first, then arXiv, then others in original order
+            const priorityOrder = ['semantic_scholar', 'arxiv']
+            const sortedUrls = filteredUrls
+              .map((urlObj, originalIndex) => ({ urlObj, originalIndex }))
+              .sort((a, b) => {
+                const pa = priorityOrder.indexOf(a.urlObj.type)
+                const pb = priorityOrder.indexOf(b.urlObj.type)
+                const aRank = pa === -1 ? priorityOrder.length : pa
+                const bRank = pb === -1 ? priorityOrder.length : pb
+                return aRank === bRank ? a.originalIndex - b.originalIndex : aRank - bRank
+              })
+              .map(item => item.urlObj)
+
+            return sortedUrls.map((urlObj, i) => (
               <div key={i} className="flex">
                 <span 
                   className="flex-shrink-0"

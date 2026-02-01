@@ -790,7 +790,11 @@ export default function StatusSection() {
           <p 
             className="text-sm"
             style={{ 
-              color: isError ? 'var(--color-error)' : 'var(--color-text-muted)',
+              color: isError
+                ? 'var(--color-error)'
+                : isCancelled
+                  ? 'var(--color-warning)'
+                  : 'var(--color-text-muted)',
               wordBreak: 'break-word',
               overflowWrap: 'anywhere',
             }}

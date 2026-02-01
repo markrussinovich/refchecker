@@ -9,6 +9,7 @@ A modern, real-time web interface for validating academic paper references.
 - 📊 **Live Statistics** - Real-time summary panel with progress bar and error counts
 - 🔗 **Authoritative Links** - Clickable hyperlinks to Semantic Scholar, ArXiv, and DOI
 - 📚 **Check History** - Persistent storage of all checks with ability to view and re-run
+- 🗂️ **Bulk Checking** - Upload multiple files or a ZIP to validate many papers at once
 - ⚡ **Fast & Responsive** - Modern React UI with TailwindCSS
 - 🤖 **LLM-Powered** - Uses AI for accurate reference extraction
 - 📋 **Export Options** - Copy references as Markdown, plain text, or BibTeX
@@ -96,6 +97,13 @@ npm run dev
 2. Supported formats: PDF, LaTeX (.tex), text (.txt)
 3. Click "Check References"
 4. View results as they stream in
+
+### Bulk Checking Multiple Papers
+
+1. Select multiple files in the upload picker or drag a folder selection from your OS (up to 50 files), or provide a single ZIP containing `.pdf`, `.tex`, `.txt`, `.bib`, or `.bbl` files.
+2. Optionally add a batch label; otherwise RefChecker names it for you (e.g., "Batch of 12 files").
+3. Start the check; each file becomes its own entry under one batch group in the history sidebar so you can expand/collapse or re-run individual results.
+4. Progress and exports work the same as single-file runs; history persists across sessions.
 
 ### Understanding Results
 
