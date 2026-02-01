@@ -220,6 +220,7 @@ async def start_check(
         # Handle file upload or pasted text
         paper_source = source_value
         paper_title = "Processing..."  # Placeholder title until we parse the paper
+        original_filename = None  # Only set for file uploads
         if source_type == "file" and file:
             # Save uploaded file to permanent uploads directory
             uploads_dir = Path(__file__).parent / "uploads"
@@ -232,6 +233,7 @@ async def start_check(
                 f.write(content)
             paper_source = str(file_path)
             paper_title = file.filename
+            original_filename = file.filename  # Store original filename
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")
@@ -258,7 +260,8 @@ async def start_check(
             paper_source=paper_source,
             source_type=source_type,
             llm_provider=llm_provider if use_llm else None,
-            llm_model=llm_model if use_llm else None
+            llm_model=llm_model if use_llm else None,
+            original_filename=original_filename
         )
         logger.info(f"Created pending check with ID {check_id}")
 
@@ -868,7 +871,8 @@ async def recheck(check_id: int):
             paper_source=source,
             source_type=source_type,
             llm_provider=llm_provider,
-            llm_model=llm_model
+            llm_model=llm_model,
+            original_filename=original.get("original_filename")
         )
 
         # Start check in background
@@ -1111,7 +1115,8 @@ async def start_batch_check_files(
                 llm_provider=llm_provider if use_llm else None,
                 llm_model=llm_model if use_llm else None,
                 batch_id=batch_id,
-                batch_label=label
+                batch_label=label,
+                original_filename=file_info['filename']
             )
             
             cancel_event = asyncio.Event()
@@ -1283,7 +1288,8 @@ async def recheck_batch(batch_id: str):
                 llm_provider=llm_provider,
                 llm_model=llm_model,
                 batch_id=new_batch_id,
-                batch_label=new_label
+                batch_label=new_label,
+                original_filename=original.get("original_filename")
             )
             
             cancel_event = asyncio.Event()

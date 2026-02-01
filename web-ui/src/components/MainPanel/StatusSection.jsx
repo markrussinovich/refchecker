@@ -77,7 +77,7 @@ function getThumbnailInfo(source, sourceType) {
 /**
  * Format a source for display - extract just the URL if title+URL are combined
  */
-function formatSource(source, title, sourceType, checkId) {
+function formatSource(source, title, sourceType, checkId, originalFilename) {
   if (!source) return null
   
   // For pasted text, don't show the temp file path - we'll show extraction method as source instead
@@ -85,13 +85,17 @@ function formatSource(source, title, sourceType, checkId) {
     return null
   }
   
-  // For file uploads, show the original filename (stored in title) instead of temp path
-  if (sourceType === 'file' && title && checkId) {
-    return { 
-      type: 'file', 
-      value: `/api/file/${checkId}`, 
-      display: title,
-      checkId: checkId
+  // For file uploads, show the original filename
+  if (sourceType === 'file' && checkId) {
+    // Use original_filename if available, otherwise try to extract from title
+    const displayName = originalFilename || title
+    if (displayName) {
+      return { 
+        type: 'file', 
+        value: `${API_BASE}/api/file/${checkId}`, 
+        display: displayName,
+        checkId: checkId
+      }
     }
   }
   
@@ -165,6 +169,7 @@ export default function StatusSection() {
   let displayLlmProvider = null
   let displayLlmModel = null
   let displayExtractionMethod = null
+  let displayOriginalFilename = null
   
   if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
     // Current session: use live WebSocket data from checkStore
@@ -183,6 +188,7 @@ export default function StatusSection() {
     displayLlmProvider = selectedCheck?.llm_provider
     displayLlmModel = selectedCheck?.llm_model
     displayExtractionMethod = selectedCheck?.extraction_method || checkStoreStats?.extraction_method
+    displayOriginalFilename = historyItem?.original_filename || selectedCheck?.original_filename
   } else if (isViewingCheck && selectedCheck) {
     // Other checks: use selectedCheck data from history
     displayStatus = selectedCheck.status || 'idle'
@@ -194,6 +200,7 @@ export default function StatusSection() {
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
     displayExtractionMethod = selectedCheck.extraction_method
+    displayOriginalFilename = selectedCheck.original_filename
     
     // Build status message based on state
     if (displayStatus === 'in_progress') {
@@ -219,7 +226,7 @@ export default function StatusSection() {
     ? `${displayLlmProvider ? `${displayLlmProvider} / ` : ''}${displayLlmModel}`
     : null
   
-  const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId)
+  const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId, displayOriginalFilename)
   const thumbnailInfo = getThumbnailInfo(displaySource, displaySourceType)
   const isInProgress = displayStatus === 'in_progress' || displayStatus === 'checking'
   const isCompleted = displayStatus === 'completed'

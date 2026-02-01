@@ -178,6 +178,8 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN batch_id TEXT")
         if "batch_label" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN batch_label TEXT")
+        if "original_filename" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN original_filename TEXT")
 
     async def save_check(self,
                          paper_title: str,
@@ -232,7 +234,8 @@ class Database:
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
-                       llm_provider, llm_model, status, source_type, batch_id, batch_label
+                       llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                       original_filename
                 FROM check_history
                 ORDER BY timestamp DESC
                 LIMIT ?
@@ -294,15 +297,16 @@ class Database:
                                     llm_provider: Optional[str] = None,
                                     llm_model: Optional[str] = None,
                                     batch_id: Optional[str] = None,
-                                    batch_label: Optional[str] = None) -> int:
+                                    batch_label: Optional[str] = None,
+                                    original_filename: Optional[str] = None) -> int:
         """Create a pending check entry before verification starts"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, results_json, llm_provider, llm_model, status,
-                 batch_id, batch_label)
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?)
+                 batch_id, batch_label, original_filename)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -310,7 +314,8 @@ class Database:
                 llm_provider,
                 llm_model,
                 batch_id,
-                batch_label
+                batch_label,
+                original_filename
             ))
             await db.commit()
             return cursor.lastrowid
