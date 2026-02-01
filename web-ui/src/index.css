@@ -137,3 +137,16 @@ body {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* Hide cancel button by default, show on hover */
+.history-item-cancel {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.history-item-hoverable:hover .history-item-cancel,
+[data-history-item]:hover .history-item-cancel {
+  opacity: 1;
+  pointer-events: auto;
+}
