@@ -4887,6 +4887,52 @@ class ArxivReferenceChecker:
         title = clean_title(title) if title else ""
         title = title.rstrip(',').strip()
         
+        # FIX: Detect malformed parsing for standards documents
+        # When title is just a year (e.g., "2023") and authors contains what looks like a title
+        # (common for ISO/SAE/PAS standards), swap them
+        if title and re.match(r'^(19|20)\d{2}$', title):
+            # Title is just a year - check if authors contains the actual title
+            if authors and len(authors) > 0:
+                # Join all author parts (sometimes title is split into multiple "authors")
+                combined_authors = ' '.join(authors) if isinstance(authors, list) else str(authors)
+                first_author = authors[0] if isinstance(authors, list) else str(authors)
+                # If first "author" looks like a title (contains certain keywords or is long)
+                standard_keywords = ['iso', 'sae', 'pas ', 'asam', 'arp', 'standard', 'specification', 
+                                     'road vehicles', 'driving automation', 'guidelines', 'taxonomy']
+                if any(kw in combined_authors.lower() for kw in standard_keywords):
+                    logger.debug(f"Fixing malformed standard reference: swapping title '{title}' with author '{combined_authors[:60]}...'")
+                    # Move year to year field, combined authors to actual title
+                    year = int(title)
+                    title = combined_authors
+                    authors = []  # Standards typically don't have authors
+                elif len(first_author) > 40:
+                    # Long first "author" is likely a title
+                    logger.debug(f"Fixing likely malformed reference: swapping title '{title}' with author '{combined_authors[:60]}...'")
+                    year = int(title)
+                    title = combined_authors
+                    authors = []
+        
+        # FIX: Detect when title is a publisher/organization name and authors contains the actual title
+        # Common publishers for standards: SAE International, BSI Standards, ISO, Beuth Verlag, etc.
+        publisher_patterns = ['sae international', 'bsi standards', 'beuth verlag', 'iso/', 'ieee',
+                             'acm', 'springer', 'elsevier', 'wiley', 'oxford university press',
+                             'cambridge university press', 'mit press', 'verlag', 'förderung']
+        title_lower = title.lower() if title else ''
+        if authors and len(authors) > 0:
+            combined_authors = ' '.join(authors) if isinstance(authors, list) else str(authors)
+            # Check if title looks like a short publisher name and authors looks like a real title
+            is_publisher = any(pub in title_lower for pub in publisher_patterns)
+            is_short_title = len(title) < 30
+            authors_look_like_title = any(kw in combined_authors.lower() for kw in 
+                ['iso', 'sae', 'pas ', 'asam', 'arp', 'standard', 'specification', 'road vehicles', 
+                 'driving automation', 'guidelines', 'taxonomy', 'openodd'])
+            
+            if (is_publisher or (is_short_title and authors_look_like_title)) and len(combined_authors) > 20:
+                logger.debug(f"Fixing publisher-as-title: '{title}' -> '{combined_authors[:60]}...'")
+                venue = title  # Publisher becomes venue
+                title = combined_authors
+                authors = []
+        
         # Clean up venue
         # Clean up venue - if venue is just a year, null it
         if venue and venue.isdigit() and len(venue) == 4 and venue.startswith(('19', '20')):

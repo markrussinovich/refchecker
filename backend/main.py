@@ -4,6 +4,7 @@ FastAPI application for RefChecker Web UI
 import asyncio
 import uuid
 import os
+import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 from refchecker.__version__ import __version__
+
+# Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles)
+if sys.platform == 'win32':
+    # Set UTF-8 mode for stdout/stderr to handle special characters
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import aiosqlite
 from .database import db

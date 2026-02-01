@@ -687,16 +687,35 @@ class Database:
         
         Returns the cached result if found, None otherwise.
         """
-        cache_key = self._compute_reference_cache_key(reference)
+        import time
+        import tempfile
+        from pathlib import Path
         
+        debug_file = Path(tempfile.gettempdir()) / "refchecker_debug.log"
+        
+        start = time.time()
+        cache_key = self._compute_reference_cache_key(reference)
+        key_time = time.time() - start
+        
+        connect_start = time.time()
         async with aiosqlite.connect(self.db_path) as db:
+            connect_time = time.time() - connect_start
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
+            
+            query_start = time.time()
             async with db.execute(
                 "SELECT result_json FROM verification_cache WHERE cache_key = ?",
                 (cache_key,)
             ) as cursor:
                 row = await cursor.fetchone()
+                query_time = time.time() - query_start
+                
+                total_time = time.time() - start
+                if total_time > 0.05:
+                    with open(debug_file, "a") as f:
+                        f.write(f"[TIMING] Cache lookup: total={total_time:.3f}s, key={key_time:.3f}s, connect={connect_time:.3f}s, query={query_time:.3f}s\n")
+                
                 if row and row['result_json']:
                     try:
                         return json.loads(row['result_json'])

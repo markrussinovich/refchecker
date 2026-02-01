@@ -7,9 +7,17 @@ import re
 import asyncio
 import logging
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+
+# Debug file logging
+DEBUG_LOG_FILE = Path(tempfile.gettempdir()) / "refchecker_debug.log"
+def debug_log(msg: str):
+    from datetime import datetime
+    with open(DEBUG_LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now().strftime('%H:%M:%S.%f')[:12]} {msg}\n")
 
 # Add src to path to import refchecker when running from source
 # This is only needed when not installed as a package
@@ -832,6 +840,11 @@ class ProgressRefChecker:
                 return []
             if refs:
                 logger.info(f"Extracted {len(refs)} references via CLI parser")
+                # DEBUG: Log problematic references where year looks like title
+                for idx, ref in enumerate(refs):
+                    title = ref.get('title', '')
+                    if title and (title.isdigit() or len(title) < 10):
+                        debug_log(f"PARSE ISSUE ref {idx+1}: title='{title}' authors={ref.get('authors', [])[:2]} year={ref.get('year')}")
                 # Normalize field names (journal -> venue)
                 refs = [_normalize_reference_fields(ref) for ref in refs]
                 return refs
@@ -877,7 +890,16 @@ class ProgressRefChecker:
                         try:
                             llm_refs = await asyncio.to_thread(cli_checker.llm_extractor.extract_references, bibtex_content)
                             if llm_refs:
+                                # DEBUG: Log raw LLM output
+                                debug_log(f"LLM raw output ({len(llm_refs)} refs):")
+                                for i, r in enumerate(llm_refs[:5]):
+                                    debug_log(f"  [{i+1}] {str(r)[:150]}")
                                 processed_refs = await asyncio.to_thread(cli_checker._process_llm_extracted_references, llm_refs)
+                                # DEBUG: Log processed refs with potential issues
+                                for idx, ref in enumerate(processed_refs):
+                                    title = ref.get('title', '')
+                                    if title and (title.isdigit() or len(title) < 10):
+                                        debug_log(f"PARSE ISSUE after LLM ref {idx+1}: title='{title}' authors={ref.get('authors', [])[:2]}")
                                 llm_validation = await asyncio.to_thread(validate_parsed_references, processed_refs)
                                 if llm_validation['quality_score'] > validation['quality_score']:
                                     logger.info(f"LLM extraction improved quality ({llm_validation['quality_score']:.2f})")
@@ -940,7 +962,11 @@ class ProgressRefChecker:
             # Run verification with timeout (handled by caller)
             verified_data, errors, url = self.checker.verify_reference(reference)
             return self._format_verification_result(reference, index, verified_data, errors, url)
-
+        except UnicodeEncodeError as e:
+            # Handle Windows encoding issues with special characters (e.g., Greek letters in titles)
+            logger.warning(f"Unicode encoding error checking reference {index}: {e}")
+            return self._format_error_result(reference, index, 
+                Exception(f"Unicode encoding error - title may contain special characters"))
         except Exception as e:
             logger.error(f"Error checking reference {index}: {e}")
             return self._format_error_result(reference, index, e)
@@ -962,12 +988,21 @@ class ProgressRefChecker:
         from .database import db
         
         # Check cache first
+        cache_start = time.time()
         cached_result = await db.get_cached_verification(reference)
+        cache_time = time.time() - cache_start
+        if cache_time > 0.1:
+            debug_log(f"[TIMING] Cache lookup for ref {idx + 1} took {cache_time:.3f}s")
         if cached_result:
             # Update the index to match current position
             cached_result['index'] = idx + 1
-            logger.info(f"Cache hit for reference {idx + 1}: {reference.get('title', 'Unknown')[:50]}")
+            debug_log(f"Cache hit for reference {idx + 1} in {cache_time:.3f}s")
             return cached_result
+        
+        # Log cache miss with details
+        title = reference.get('title', 'Unknown')[:60]
+        authors = reference.get('authors', [])[:2]
+        debug_log(f"CACHE MISS for ref {idx + 1}: title='{title}' authors={authors}")
         
         limiter = get_limiter()
         
@@ -1068,6 +1103,9 @@ class ProgressRefChecker:
         
         loop = asyncio.get_event_loop()
         
+        start_time = time.time()
+        debug_log(f"[TIMING] Starting parallel check of {total_refs} references")
+        
         # Create tasks for all references - they will be rate-limited by the global semaphore
         tasks = []
         for idx, ref in enumerate(references):
@@ -1077,11 +1115,18 @@ class ProgressRefChecker:
             )
             tasks.append((idx, task))
         
+        task_creation_time = time.time()
+        debug_log(f"[TIMING] Tasks created in {task_creation_time - start_time:.3f}s")
+        
         # Process results as they complete
         pending_tasks = {task for _, task in tasks}
         task_to_idx = {task: idx for idx, task in tasks}
         
+        iteration = 0
         while pending_tasks:
+            iteration += 1
+            iter_start = time.time()
+            
             # Check for cancellation
             try:
                 await self._check_cancelled()
@@ -1091,12 +1136,14 @@ class ProgressRefChecker:
                     task.cancel()
                 raise
             
-            # Wait for some tasks to complete
+            # Wait for some tasks to complete - no timeout needed, just wait for first completed
             done, pending_tasks = await asyncio.wait(
                 pending_tasks,
-                timeout=0.5,
                 return_when=asyncio.FIRST_COMPLETED
             )
+            
+            wait_time = time.time() - iter_start
+            debug_log(f"[TIMING] Iteration {iteration}: wait took {wait_time:.3f}s, {len(done)} done, {len(pending_tasks)} pending")
             
             for task in done:
                 idx = task_to_idx[task]
@@ -1170,6 +1217,7 @@ class ProgressRefChecker:
                     refs_with_warnings_only += 1
                 
                 # Emit result immediately
+                emit_start = time.time()
                 await self.emit_progress("reference_result", result)
                 await self.emit_progress("progress", {
                     "current": processed_count,
@@ -1188,10 +1236,16 @@ class ProgressRefChecker:
                     "refs_verified": refs_verified,
                     "progress_percent": round((processed_count / total_refs) * 100, 1)
                 })
+                emit_time = time.time() - emit_start
+                if emit_time > 0.1:
+                    debug_log(f"[TIMING] Emit for ref {idx + 1} took {emit_time:.3f}s")
                 
                 # Yield to event loop to allow WebSocket messages to flush
                 # This prevents stalls when many cache hits complete rapidly
                 await asyncio.sleep(0)
+        
+        total_time = time.time() - start_time
+        debug_log(f"[TIMING] Total parallel check completed in {total_time:.3f}s for {total_refs} refs")
         
         # Small delay to ensure all WebSocket messages are sent before returning
         # This prevents the 'completed' event from arriving before final progress updates
