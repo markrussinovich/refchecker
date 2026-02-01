@@ -1188,6 +1188,10 @@ class ProgressRefChecker:
                     "refs_verified": refs_verified,
                     "progress_percent": round((processed_count / total_refs) * 100, 1)
                 })
+                
+                # Yield to event loop to allow WebSocket messages to flush
+                # This prevents stalls when many cache hits complete rapidly
+                await asyncio.sleep(0)
         
         # Small delay to ensure all WebSocket messages are sent before returning
         # This prevents the 'completed' event from arriving before final progress updates
