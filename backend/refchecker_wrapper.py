@@ -1189,6 +1189,10 @@ class ProgressRefChecker:
                     "progress_percent": round((processed_count / total_refs) * 100, 1)
                 })
         
+        # Small delay to ensure all WebSocket messages are sent before returning
+        # This prevents the 'completed' event from arriving before final progress updates
+        await asyncio.sleep(0.1)
+        
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
         
