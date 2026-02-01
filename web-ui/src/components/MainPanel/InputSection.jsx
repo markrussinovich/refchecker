@@ -447,8 +447,8 @@ export default function InputSection() {
             }
           >
             {bulkMode === 'urls' 
-              ? `Check ${bulkUrls.split('\n').filter(u => u.trim()).length || 0} Papers`
-              : `Check ${bulkFiles.length} Files`
+              ? `Check ${bulkUrls.split('\n').filter(u => u.trim()).length || 0} ${bulkUrls.split('\n').filter(u => u.trim()).length === 1 ? 'Paper' : 'Papers'}`
+              : `Check ${bulkFiles.length} ${bulkFiles.length === 1 ? 'File' : 'Files'}`
             }
           </Button>
         )}
@@ -461,8 +461,8 @@ export default function InputSection() {
           </Button>
         )}
 
-        {/* LLM indicator */}
-        {!isComplete && (
+        {/* LLM indicator - hide for bulk mode */}
+        {!isComplete && inputMode !== 'bulk' && (
           <span 
             className="text-sm"
             style={{ color: 'var(--color-text-muted)' }}
