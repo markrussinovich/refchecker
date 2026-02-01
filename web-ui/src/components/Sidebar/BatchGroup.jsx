@@ -15,7 +15,6 @@ export default function BatchGroup({
   onToggle,
   selectedCheckId,
 }) {
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isCancelling, setIsCancelling] = useState(false)
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [editValue, setEditValue] = useState('')
@@ -23,7 +22,7 @@ export default function BatchGroup({
 
   const handleEditStart = (e) => {
     e.stopPropagation()
-    setEditValue(batchLabel || `Batch of ${items.length} papers`)
+    setEditValue(batchLabel || `Batch of ${items.length} ${items.length === 1 ? 'paper' : 'papers'}`)
     setIsEditingLabel(true)
   }
 
@@ -88,25 +87,12 @@ export default function BatchGroup({
     }
   }
 
-  const handleDeleteBatch = async (e) => {
-    e.stopPropagation()
-    try {
-      logger.info('BatchGroup', `Deleting batch ${batchId}`)
-      await api.deleteBatch(batchId)
-      await fetchHistory()
-      logger.info('BatchGroup', `Batch ${batchId} deleted`)
-    } catch (error) {
-      logger.error('BatchGroup', 'Failed to delete batch', error)
-    }
-    setIsConfirmingDelete(false)
-  }
-
   return (
     <div>
       {/* Batch header */}
       <button
         onClick={onToggle}
-        className="w-full px-3 py-2 flex items-center gap-2 text-left transition-colors"
+        className="w-full px-3 py-2 text-left transition-colors"
         style={{
           backgroundColor: hasSelectedItem 
             ? 'var(--color-bg-hover)' 
@@ -115,72 +101,115 @@ export default function BatchGroup({
           minHeight: '72px',
         }}
       >
-        {/* Expand/collapse icon */}
-        <svg
-          className="w-4 h-4 transition-transform flex-shrink-0"
-          style={{ 
-            transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
-            color: 'var(--color-text-muted)',
-          }}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-
-        {/* Batch icon */}
-        <span className="text-base">📦</span>
-
-        {/* Batch info */}
-        <div className="flex-1 min-w-0">
-          {isEditingLabel ? (
-            <input
-              type="text"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onBlur={handleEditSave}
-              onKeyDown={handleEditKeyDown}
-              onClick={(e) => e.stopPropagation()}
-              autoFocus
-              className="w-full px-2 py-0.5 text-sm rounded border focus:outline-none focus:ring-1"
-              style={{
-                backgroundColor: 'var(--color-bg-primary)',
-                borderColor: 'var(--color-accent)',
-                color: 'var(--color-text-primary)',
-              }}
-            />
-          ) : (
-            <div 
-              className="text-sm font-medium truncate"
-              style={{ color: 'var(--color-text-primary)' }}
-              onDoubleClick={handleEditStart}
-              title="Double-click to edit"
-            >
-              {batchLabel || `Batch of ${stats.total} papers`}
-            </div>
-          )}
-          <div 
-            className="text-xs flex items-center gap-2"
-            style={{ color: 'var(--color-text-muted)' }}
+        {/* Top row: icon + label + edit/status icons */}
+        <div className="flex items-center gap-2">
+          {/* Expand/collapse icon */}
+          <svg
+            className="w-4 h-4 transition-transform flex-shrink-0"
+            style={{ 
+              transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+              color: 'var(--color-text-muted)',
+            }}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
           >
-            <span>{stats.completed}/{stats.total} done</span>
-            {stats.inProgress > 0 && (
-              <span className="animate-pulse" style={{ color: 'var(--color-accent)' }}>
-                {stats.inProgress} running
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+
+          {/* Batch icon */}
+          <span className="text-base flex-shrink-0">📦</span>
+
+          {/* Batch info */}
+          <div className="flex-1 min-w-0">
+            {isEditingLabel ? (
+              <input
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onBlur={handleEditSave}
+                onKeyDown={handleEditKeyDown}
+                onClick={(e) => e.stopPropagation()}
+                autoFocus
+                className="w-full px-2 py-0.5 text-sm rounded border focus:outline-none focus:ring-1"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-accent)',
+                  color: 'var(--color-text-primary)',
+                }}
+              />
+            ) : (
+              <div 
+                className="text-sm font-medium truncate"
+                style={{ color: 'var(--color-text-primary)' }}
+                title={batchLabel || `Batch of ${stats.total} ${stats.total === 1 ? 'paper' : 'papers'}`}
+              >
+                {batchLabel || `Batch of ${stats.total} ${stats.total === 1 ? 'paper' : 'papers'}`}
+              </div>
+            )}
+          </div>
+
+          {/* Edit button and status icons */}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {!isEditingLabel && (
+              <button
+                onClick={handleEditStart}
+                className="text-xs px-1 py-0.5 rounded opacity-50 hover:opacity-100 transition-opacity"
+                style={{ color: 'var(--color-text-secondary)' }}
+                title="Edit batch label"
+              >
+                ✏️
+              </button>
+            )}
+            
+            {/* Status icons */}
+            {stats.hasErrors && (
+              <span 
+                className="text-xs"
+                style={{ color: 'var(--color-error)' }}
+              >
+                ❌
+              </span>
+            )}
+            {stats.hasWarnings && !stats.hasErrors && (
+              <span 
+                className="text-xs"
+                style={{ color: 'var(--color-warning)' }}
+              >
+                ⚠️
+              </span>
+            )}
+            {stats.isComplete && !stats.hasErrors && !stats.hasWarnings && (
+              <span 
+                className="text-xs"
+                style={{ color: 'var(--color-success)' }}
+              >
+                ✓
               </span>
             )}
           </div>
         </div>
 
-        {/* Status indicator and actions */}
-        <div className="flex items-center gap-1 flex-shrink-0">
+        {/* Bottom row: progress stats + cancel button */}
+        <div className="flex items-center gap-2 mt-1 ml-10">
+          <div 
+            className="text-xs flex-1"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            <span>{stats.completed}/{stats.total} done</span>
+            {stats.inProgress > 0 && (
+              <span className="animate-pulse ml-2" style={{ color: 'var(--color-accent)' }}>
+                {stats.inProgress} running
+              </span>
+            )}
+          </div>
+
           {/* Cancel button for in-progress batches */}
           {stats.inProgress > 0 && (
             <button
               onClick={handleCancelBatch}
               disabled={isCancelling}
-              className="text-xs px-2 py-1 rounded transition-colors"
+              className="text-xs px-2 py-0.5 rounded transition-colors flex-shrink-0"
               style={{
                 backgroundColor: 'var(--color-error-bg)',
                 color: 'var(--color-error)',
@@ -200,86 +229,6 @@ export default function BatchGroup({
             >
               {isCancelling ? '...' : 'Cancel'}
             </button>
-          )}
-          
-          {/* Edit button */}
-          {!isEditingLabel && (
-            <button
-              onClick={handleEditStart}
-              className="text-xs px-1.5 py-0.5 rounded opacity-50 hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-text-secondary)' }}
-              title="Edit batch label"
-            >
-              ✏️
-            </button>
-          )}
-
-          {/* Delete confirmation or button */}
-          {isConfirmingDelete ? (
-            <div className="flex items-center gap-1">
-              <button
-                onClick={handleDeleteBatch}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{
-                  backgroundColor: 'var(--color-error)',
-                  color: 'white',
-                }}
-              >
-                ✓
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(false) }}
-                className="text-xs px-1.5 py-0.5 rounded"
-                style={{
-                  backgroundColor: 'var(--color-bg-tertiary)',
-                  color: 'var(--color-text-muted)',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={(e) => { e.stopPropagation(); setIsConfirmingDelete(true) }}
-              className="text-xs px-1.5 py-0.5 rounded opacity-50 hover:opacity-100 transition-opacity"
-              style={{ color: 'var(--color-error)' }}
-              title="Delete batch"
-            >
-              🗑️
-            </button>
-          )}
-          
-          {/* Status icons */}
-          {stats.errors > 0 && (
-            <span 
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: 'var(--color-error)' }}
-              title={`${stats.errors} failed`}
-            />
-          )}
-          {stats.hasErrors && (
-            <span 
-              className="text-xs"
-              style={{ color: 'var(--color-error)' }}
-            >
-              ❌
-            </span>
-          )}
-          {stats.hasWarnings && !stats.hasErrors && (
-            <span 
-              className="text-xs"
-              style={{ color: 'var(--color-warning)' }}
-            >
-              ⚠️
-            </span>
-          )}
-          {stats.isComplete && !stats.hasErrors && !stats.hasWarnings && (
-            <span 
-              className="text-xs"
-              style={{ color: 'var(--color-success)' }}
-            >
-              ✓
-            </span>
           )}
         </div>
       </button>

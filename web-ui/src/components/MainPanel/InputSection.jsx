@@ -192,7 +192,7 @@ export default function InputSection() {
         
         response = await api.startBatchCheck({
           urls,
-          batch_label: `Batch of ${urls.length} papers`,
+          batch_label: `Batch of ${urls.length} ${urls.length === 1 ? 'paper' : 'papers'}`,
           llm_config_id: config?.id,
           llm_provider: config?.provider || 'anthropic',
           llm_model: config?.model,
@@ -202,7 +202,7 @@ export default function InputSection() {
         // File batch
         const formData = new FormData()
         bulkFiles.forEach(file => formData.append('files', file))
-        formData.append('batch_label', `Batch of ${bulkFiles.length} files`)
+        formData.append('batch_label', `Batch of ${bulkFiles.length} ${bulkFiles.length === 1 ? 'file' : 'files'}`)
         if (config) {
           formData.append('llm_config_id', config.id.toString())
           formData.append('llm_provider', config.provider)
