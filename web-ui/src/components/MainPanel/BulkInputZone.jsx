@@ -218,7 +218,7 @@ export default function BulkInputZone({
                 {bulkFiles.map((file, index) => (
                   <div 
                     key={`${file.name}-${index}`}
-                    className="flex justify-between items-center px-3 py-1.5 text-sm border-b last:border-b-0"
+                    className="group flex justify-between items-center px-3 py-1.5 text-sm border-b last:border-b-0"
                     style={{ borderColor: 'var(--color-border)' }}
                   >
                     <span 
@@ -229,8 +229,16 @@ export default function BulkInputZone({
                     </span>
                     <button
                       onClick={() => removeFile(index)}
-                      className="ml-2 text-xs px-1.5 py-0.5 rounded hover:bg-opacity-80"
+                      className="ml-2 text-xs px-1.5 py-0.5 rounded transition-colors opacity-0 group-hover:opacity-100"
                       style={{ color: 'var(--color-text-muted)' }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
+                        e.currentTarget.style.color = 'var(--color-error)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent'
+                        e.currentTarget.style.color = 'var(--color-text-muted)'
+                      }}
                     >
                       ✕
                     </button>
