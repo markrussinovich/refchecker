@@ -266,3 +266,158 @@ class PDFProcessor:
         """Clear the text extraction cache"""
         self.cache.clear()
         logger.debug("PDF text cache cleared")
+    
+    def extract_title_from_pdf(self, pdf_path: str) -> Optional[str]:
+        """
+        Extract the title from a PDF file.
+        
+        First tries PDF metadata, then falls back to heuristic extraction
+        from the first page text.
+        
+        Args:
+            pdf_path: Path to PDF file
+            
+        Returns:
+            Extracted title or None if not found
+        """
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        
+        try:
+            import pypdf
+            
+            with open(pdf_path, 'rb') as file:
+                pdf_reader = pypdf.PdfReader(file)
+                
+                # Try PDF metadata first
+                metadata = pdf_reader.metadata
+                if metadata:
+                    title = metadata.get('/Title')
+                    if title and isinstance(title, str) and len(title.strip()) > 3:
+                        # Clean up the title
+                        title = title.strip()
+                        # Skip if it looks like a filename
+                        if not title.endswith(('.pdf', '.tex', '.dvi')) and title.lower() != 'untitled':
+                            logger.debug(f"Found title in PDF metadata: {title}")
+                            return title
+                
+                # Fall back to extracting from first page text
+                if len(pdf_reader.pages) > 0:
+                    try:
+                        first_page_text = pdf_reader.pages[0].extract_text()
+                        if first_page_text:
+                            title = self._extract_title_from_text(first_page_text)
+                            if title:
+                                logger.debug(f"Extracted title from first page: {title}")
+                                return title
+                    except Exception as e:
+                        logger.warning(f"Error extracting title from first page: {e}")
+                
+                return None
+                
+        except ImportError:
+            logger.error("pypdf not installed. Install with: pip install pypdf")
+            raise
+        except Exception as e:
+            logger.warning(f"Error extracting title from PDF {pdf_path}: {e}")
+            return None
+    
+    def _extract_title_from_text(self, text: str) -> Optional[str]:
+        """
+        Heuristically extract paper title from text (typically first page).
+        
+        Academic papers typically have the title as one of the first prominent
+        text blocks, often followed by author names.
+        
+        Args:
+            text: Text from first page of PDF
+            
+        Returns:
+            Extracted title or None
+        """
+        if not text:
+            return None
+        
+        import re
+        
+        # Split into lines and clean
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        
+        if not lines:
+            return None
+        
+        # Skip common header elements (conference names, page numbers, etc.)
+        header_patterns = [
+            r'^(proceedings|conference|journal|workshop|symposium)',
+            r'^(vol\.|volume|issue|no\.|number)',
+            r'^\d{1,4}\s*$',  # Page numbers
+            r'^(preprint|arxiv|draft)',
+            r'^(ieee|acm|springer|elsevier)',
+            r'^[a-z]+\s+\d{4}$',  # "January 2024" etc
+        ]
+        
+        # Author indicators that typically follow the title
+        author_indicators = [
+            r'^[A-Z][a-z]+\s+[A-Z][a-z]+(\s*,|\s+and\s+)',  # "John Smith," or "John Smith and"
+            r'^[A-Z]\.\s*[A-Z][a-z]+',  # "J. Smith"
+            r'^[\w\s,]+@[\w\.-]+',  # Email addresses
+            r'^(university|department|institute|school|college)',
+            r'^\d+\s+[A-Z]',  # Addresses like "123 Main St"
+        ]
+        
+        # Find potential title lines
+        title_candidates = []
+        for i, line in enumerate(lines[:15]):  # Only look at first 15 lines
+            # Skip empty or very short lines
+            if len(line) < 10:
+                continue
+            
+            # Skip lines matching header patterns
+            is_header = any(re.search(pat, line, re.IGNORECASE) for pat in header_patterns)
+            if is_header:
+                continue
+            
+            # Check if this looks like the start of author section
+            is_author_section = any(re.search(pat, line, re.IGNORECASE) for pat in author_indicators)
+            if is_author_section:
+                break  # Stop - we've passed the title
+            
+            # Good candidate: reasonable length, not too long
+            if 15 <= len(line) <= 300:
+                title_candidates.append(line)
+                
+                # If next line looks like authors, we found the title
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1]
+                    if any(re.search(pat, next_line, re.IGNORECASE) for pat in author_indicators):
+                        break
+        
+        if not title_candidates:
+            return None
+        
+        # Take the first good candidate, or combine first few if they seem related
+        title = title_candidates[0]
+        
+        # Sometimes titles span multiple lines - check if next line continues
+        if len(title_candidates) > 1:
+            second = title_candidates[1]
+            # If second line is short and starts with lowercase or continues sentence
+            if len(second) < 80 and (second[0].islower() or title.endswith(':')):
+                title = title + ' ' + second
+        
+        # Clean up the title
+        title = re.sub(r'\s+', ' ', title).strip()
+        
+        # Remove common artifacts
+        title = re.sub(r'^\d+\s*', '', title)  # Leading numbers
+        title = re.sub(r'\s*\*+\s*$', '', title)  # Trailing asterisks
+        
+        # Validate: title should have reasonable characteristics
+        if len(title) < 15 or len(title) > 350:
+            return None
+        
+        # Should have some letters (not just numbers/symbols)
+        if not re.search(r'[a-zA-Z]{3,}', title):
+            return None
+        
+        return title

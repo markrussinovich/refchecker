@@ -394,16 +394,32 @@ class ProgressRefChecker:
                     
                     await asyncio.to_thread(download_pdf_url)
                     
-                    # Extract title from PDF filename or URL
-                    from urllib.parse import urlparse, unquote
-                    url_path = urlparse(paper_source).path
-                    pdf_filename = unquote(url_path.split('/')[-1])
-                    paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
-                    await update_title_if_needed(paper_title)
-                    
                     extraction_method = 'pdf'
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
+                    
+                    # Try to extract the paper title from the PDF content
+                    try:
+                        extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, pdf_path)
+                        if extracted_title:
+                            paper_title = extracted_title
+                            await update_title_if_needed(paper_title)
+                            logger.info(f"Extracted title from PDF URL: {paper_title}")
+                        else:
+                            # Fallback to URL filename
+                            from urllib.parse import urlparse, unquote
+                            url_path = urlparse(paper_source).path
+                            pdf_filename = unquote(url_path.split('/')[-1])
+                            paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                            await update_title_if_needed(paper_title)
+                    except Exception as e:
+                        logger.warning(f"Could not extract title from PDF: {e}")
+                        # Fallback to URL filename
+                        from urllib.parse import urlparse, unquote
+                        url_path = urlparse(paper_source).path
+                        pdf_filename = unquote(url_path.split('/')[-1])
+                        paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                        await update_title_if_needed(paper_title)
                 else:
                     # Handle ArXiv URLs/IDs
                     arxiv_id = extract_arxiv_id_from_url(paper_source)
@@ -467,14 +483,22 @@ class ProgressRefChecker:
                 })
 
                 # Handle uploaded file - run PDF processing in thread
-                # Note: paper_title is already set to the original filename in main.py
-                # so we don't update it here
                 if paper_source.lower().endswith('.pdf'):
                     # PDF extraction requires LLM for reliable reference extraction
                     if not self.llm:
                         raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
+                    
+                    # Try to extract the paper title from the PDF
+                    try:
+                        extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, paper_source)
+                        if extracted_title:
+                            paper_title = extracted_title
+                            await update_title_if_needed(paper_title)
+                            logger.info(f"Extracted title from PDF: {paper_title}")
+                    except Exception as e:
+                        logger.warning(f"Could not extract title from PDF: {e}")
                 elif paper_source.lower().endswith(('.tex', '.txt', '.bib')):
                     def read_file():
                         with open(paper_source, 'r', encoding='utf-8') as f:

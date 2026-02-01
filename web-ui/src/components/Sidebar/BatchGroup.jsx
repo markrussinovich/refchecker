@@ -112,6 +112,7 @@ export default function BatchGroup({
             ? 'var(--color-bg-hover)' 
             : 'var(--color-bg-tertiary)',
           borderBottom: '1px solid var(--color-border)',
+          minHeight: '72px',
         }}
       >
         {/* Expand/collapse icon */}
@@ -173,17 +174,27 @@ export default function BatchGroup({
         </div>
 
         {/* Status indicator and actions */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {/* Cancel button for in-progress batches */}
           {stats.inProgress > 0 && (
             <button
               onClick={handleCancelBatch}
               disabled={isCancelling}
-              className="text-xs px-2 py-0.5 rounded transition-colors"
+              className="text-xs px-2 py-1 rounded transition-colors"
               style={{
                 backgroundColor: 'var(--color-error-bg)',
                 color: 'var(--color-error)',
                 opacity: isCancelling ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isCancelling) {
+                  e.currentTarget.style.backgroundColor = 'var(--color-error)'
+                  e.currentTarget.style.color = 'white'
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
+                e.currentTarget.style.color = 'var(--color-error)'
               }}
               title="Cancel all in batch"
             >
