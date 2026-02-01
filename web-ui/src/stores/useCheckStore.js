@@ -340,7 +340,12 @@ export const useCheckStore = create((set, get) => ({
         case 'started':
         case 'extracting':
           historyStore.updateHistoryProgress(checkIdForMessage, { status: 'in_progress' })
-          if (data.paper_title) {
+          if (data.paper_title && data.paper_title !== 'Unknown Paper') {
+            historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
+          }
+          break
+        case 'title_updated':
+          if (data.paper_title && data.paper_title !== 'Unknown Paper') {
             historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
           }
           break

@@ -115,15 +115,18 @@ export default function BatchGroup({
         }}
       >
         {/* Expand/collapse icon */}
-        <span 
-          className="text-xs transition-transform"
+        <svg
+          className="w-4 h-4 transition-transform flex-shrink-0"
           style={{ 
             transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
             color: 'var(--color-text-muted)',
           }}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
         >
-          ▼
-        </span>
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
 
         {/* Batch icon */}
         <span className="text-base">📦</span>
@@ -273,10 +276,10 @@ export default function BatchGroup({
       {/* Collapsed items */}
       {!isCollapsed && (
         <div 
-          className="pl-6"
+          className="pl-3"
           style={{ 
             borderLeft: '2px solid var(--color-accent-muted)',
-            marginLeft: '1rem',
+            marginLeft: '0.75rem',
           }}
         >
           {items.map(item => (

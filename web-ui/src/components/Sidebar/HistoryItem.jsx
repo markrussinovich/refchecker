@@ -170,10 +170,10 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
     <div
       data-history-item
       onClick={handleClick}
-      className={`px-3 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''} ${compact ? 'py-1.5 mx-0' : 'py-2 mx-2 my-0.5'}`}
+      className={`px-3 cursor-pointer transition-colors rounded-md relative ${!isSelected ? 'history-item-hoverable' : ''} ${compact ? 'py-1.5 mx-1' : 'py-2 mx-2 my-0.5'}`}
       style={{
         backgroundColor: isSelected ? 'var(--color-bg-tertiary)' : undefined,
-        minHeight: compact ? '48px' : '72px',
+        minHeight: '72px',
       }}
     >
       {/* Label / Title - full width, controls overlay on top */}
