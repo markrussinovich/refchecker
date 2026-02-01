@@ -97,7 +97,8 @@ class ProgressRefChecker:
                  cancel_event: Optional[asyncio.Event] = None,
                  check_id: Optional[int] = None,
                  title_update_callback: Optional[Callable] = None,
-                 bibliography_source_callback: Optional[Callable] = None):
+                 bibliography_source_callback: Optional[Callable] = None,
+                 semantic_scholar_api_key: Optional[str] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -143,8 +144,12 @@ class ProgressRefChecker:
                 logger.error(f"Failed to initialize LLM: {e}")
 
         # Initialize reference checker
+        # Use provided API key, fall back to environment variable
+        ss_api_key = semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+        if ss_api_key:
+            logger.info("Semantic Scholar API key configured")
         self.checker = EnhancedHybridReferenceChecker(
-            semantic_scholar_api_key=os.getenv('SEMANTIC_SCHOLAR_API_KEY'),
+            semantic_scholar_api_key=ss_api_key,
             debug_mode=False
         )
 

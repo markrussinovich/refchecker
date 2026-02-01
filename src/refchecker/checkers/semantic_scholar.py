@@ -63,8 +63,8 @@ class NonArxivReferenceChecker:
         
         # Rate limiting parameters
         self.request_delay = 1.0  # Initial delay between requests (seconds)
-        self.max_retries = 5  # Sufficient for individual API calls
-        self.backoff_factor = 2  # Exponential backoff factor
+        self.max_retries = 3  # Reduced from 5 to limit timeout accumulation
+        self.backoff_factor = 1.5  # Reduced from 2 for faster retries
         
         # Track API failures for Enhanced Hybrid Checker
         self._api_failed = False

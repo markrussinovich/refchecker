@@ -383,6 +383,9 @@ async def run_check(
             except Exception as e:
                 logger.warning(f"Failed to save bibliography source: {e}")
 
+        # Get Semantic Scholar API key from database settings
+        semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
+        
         # Create checker with progress callback
         checker = ProgressRefChecker(
             llm_provider=llm_provider,
@@ -394,7 +397,8 @@ async def run_check(
             cancel_event=cancel_event,
             check_id=check_id,
             title_update_callback=title_update_callback,
-            bibliography_source_callback=bibliography_source_callback
+            bibliography_source_callback=bibliography_source_callback,
+            semantic_scholar_api_key=semantic_scholar_api_key
         )
 
         # Run the check
