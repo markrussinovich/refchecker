@@ -6,7 +6,6 @@ Text processing utilities for ArXiv Reference Checker
 import re
 import logging
 import unicodedata
-import html
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -1372,6 +1371,15 @@ def is_name_match(name1: str, name2: str) -> bool:
                     if (last_name == actual_last and 
                         first_initial == first_name[0] and
                         middle_initial == middle_name[0]):
+                        return True
+                else:
+                    # Simple last name case: "W. R. Weimer" vs "Westley Weimer"
+                    # The cited name has an extra middle initial that the actual name doesn't have
+                    # Allow match if first initial and last name match (tolerate extra middle initial)
+                    # BUT: Exclude cases where first_name is just concatenated initials (like "gv")
+                    # which should require exact initial matching, not tolerance
+                    is_real_first_name = len(first_name) > 2  # "Westley" yes, "gv" no
+                    if is_real_first_name and last_name == compound_last and first_initial == first_name[0]:
                         return True
         
         elif len(init_parts) == 3 and len(name_parts) == 3:
@@ -4290,6 +4298,7 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 # Handle specific multi-word patterns and well-known acronyms
                 'proc. natl. acad. sci.': 'proceedings of the national academy of sciences',
                 'pnas': 'proceedings of the national academy of sciences',
+                'cacm': 'communications of the acm',
                 # Special cases that don't follow standard acronym patterns
                 'neurips': 'neural information processing systems',  # Special case
                 'nips': 'neural information processing systems',     # old name for neurips
@@ -4426,6 +4435,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
             'nips': 'neural information processing systems',     # old name for neurips
             'nsdi': 'networked systems design and implementation',  # USENIX NSDI
+            'cacm': 'communications of the acm',
+            'communications of the': 'communications of the acm',
         }
         
         # Apply abbreviation expansion - handle multi-word phrases first
@@ -5089,8 +5100,18 @@ def normalize_venue_for_display(venue: str) -> str:
         
         return text_lower
     
-    # Decode any HTML entities (e.g., "&amp;" -> "&") before further cleaning
-    venue_text = html.unescape(venue).strip()
+    venue_text = venue.strip()
+
+    # Fix common truncated venues that lose their organization suffix during PDF extraction
+    truncated_aliases = {
+        "communications of the": "Communications of the ACM",
+    }
+
+    # Allow trailing punctuation/whitespace while matching truncated forms
+    normalized_candidate = re.sub(r"[\s.,;:]+$", "", venue_text, flags=re.IGNORECASE)
+    alias = truncated_aliases.get(normalized_candidate.lower())
+    if alias:
+        return alias
     
     # Strip leading editor name lists like "..., editors, Venue ..." or "..., eds., Venue ..."
     # This prevents author/editor lists from being treated as venue
@@ -5152,7 +5173,8 @@ def normalize_venue_for_display(venue: str) -> str:
     if not re.match(r'ieee\s+transactions', venue_text, re.IGNORECASE):
         venue_text = re.sub(r'^(ieee|acm|aaai|usenix|sigcomm|sigkdd|sigmod|vldb|osdi|sosp|eurosys)\s+', '', venue_text, flags=re.IGNORECASE)  # Remove org prefixes
     venue_text = re.sub(r'^ieee/\w+\s+', '', venue_text, flags=re.IGNORECASE)  # Remove "IEEE/RSJ " etc
-    venue_text = re.sub(r'\s+(ieee|acm|aaai|usenix)\s*$', '', venue_text, flags=re.IGNORECASE)  # Remove org suffixes
+    # Remove org suffixes, but NOT when preceded by "of the" (e.g., "Communications of the ACM", "Journal of the ACM")
+    venue_text = re.sub(r'(?<!of the)\s+(ieee|acm|aaai|usenix)\s*$', '', venue_text, flags=re.IGNORECASE)  # Remove org suffixes
     venue_text = re.sub(r'/\w+\s+', ' ', venue_text)  # Remove "/ACM " style org separators
     
     # IMPORTANT: Don't remove "Conference on" or "International" - they're needed for display

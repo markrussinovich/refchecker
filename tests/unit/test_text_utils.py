@@ -99,6 +99,30 @@ class TestNameMatching:
         assert is_name_match("John Smith", "J. Smith")
         assert is_name_match("D. Yu", "Da Yu")
     
+    def test_middle_initial_tolerance_when_actual_has_no_middle_name(self):
+        """Test matching when cited name has middle initial but actual name doesn't.
+        
+        Regression test for: 'W. R. Weimer' vs 'Westley Weimer'
+        The cited bibliographic entry may include a middle initial that isn't
+        present in the canonical name from Semantic Scholar.
+        """
+        # Main regression case: W. R. Weimer vs Westley Weimer
+        assert is_name_match("W. R. Weimer", "Westley Weimer")
+        assert is_name_match("Westley Weimer", "W. R. Weimer")
+        
+        # Additional test cases
+        assert is_name_match("J. M. Smith", "John Smith")
+        assert is_name_match("John Smith", "J. M. Smith")
+        assert is_name_match("A. B. Johnson", "Alice Johnson")
+        assert is_name_match("Alice Johnson", "A. B. Johnson")
+        
+        # Should still reject non-matching first initials
+        assert not is_name_match("W. R. Weimer", "John Weimer")
+        assert not is_name_match("J. M. Smith", "Alice Smith")
+        
+        # Should still reject non-matching last names
+        assert not is_name_match("W. R. Weimer", "Westley Johnson")
+    
     def test_consecutive_initials_matching(self):
         """Test matching consecutive initials vs spaced initials."""
         # Main regression case from the issue

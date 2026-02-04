@@ -340,12 +340,7 @@ export const useCheckStore = create((set, get) => ({
         case 'started':
         case 'extracting':
           historyStore.updateHistoryProgress(checkIdForMessage, { status: 'in_progress' })
-          if (data.paper_title && data.paper_title !== 'Unknown Paper') {
-            historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
-          }
-          break
-        case 'title_updated':
-          if (data.paper_title && data.paper_title !== 'Unknown Paper') {
+          if (data.paper_title) {
             historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
           }
           break
@@ -530,21 +525,6 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'completed':
-        // Update stats to 100% before completing
-        store.updateStats({
-          ...store.stats,
-          total_refs: data.total_refs,
-          processed_refs: data.total_refs,
-          errors_count: data.errors_count,
-          warnings_count: data.warnings_count,
-          suggestions_count: data.suggestions_count,
-          unverified_count: data.unverified_count,
-          verified_count: data.verified_count,
-          refs_with_errors: data.refs_with_errors,
-          refs_with_warnings_only: data.refs_with_warnings_only,
-          refs_verified: data.refs_verified,
-          progress_percent: 100,
-        })
         store.completeCheck(data.check_id)
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'completed',

@@ -62,18 +62,6 @@ export const deleteCheck = (id) => api.delete(`/history/${id}`)
 export const updateCheckLabel = (id, label) => api.patch(`/history/${id}`, { custom_label: label })
 export const recheck = (id) => api.post(`/recheck/${id}`)
 
-// Batch operations
-export const startBatchCheck = (data) => api.post('/check/batch', data)
-export const startBatchFileCheck = (formData) => api.post('/check/batch/files', formData, {
-  headers: { 'Content-Type': 'multipart/form-data' },
-  timeout: 0,
-})
-export const getBatch = (batchId) => api.get(`/batch/${batchId}`)
-export const cancelBatch = (batchId) => api.post(`/cancel/batch/${batchId}`)
-export const deleteBatch = (batchId) => api.delete(`/batch/${batchId}`)
-export const updateBatchLabel = (batchId, label) => api.patch(`/batch/${batchId}`, { batch_label: label })
-export const recheckBatch = (batchId) => api.post(`/recheck/batch/${batchId}`)
-
 // Admin operations
 export const clearCache = () => api.delete('/admin/cache')
 export const clearDatabase = () => api.delete('/admin/database')
@@ -134,13 +122,6 @@ export default {
   deleteCheck,
   updateCheckLabel,
   recheck,
-  startBatchCheck,
-  startBatchFileCheck,
-  getBatch,
-  cancelBatch,
-  deleteBatch,
-  updateBatchLabel,
-  recheckBatch,
   createWebSocket,
   clearCache,
   clearDatabase,
