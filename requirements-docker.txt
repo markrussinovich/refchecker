@@ -2,7 +2,7 @@
 # This is a subset of requirements.txt optimized for smaller image size
 
 # Core dependencies - required for basic functionality
-numpy<2  # Pin to NumPy 1.x for compatibility with compiled modules
+numpy>=2.0.0  # NumPy 2.x
 requests>=2.25.0
 beautifulsoup4>=4.9.0
 pypdf>=5.0.0

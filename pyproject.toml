@@ -35,7 +35,7 @@ dependencies = [
     "fuzzywuzzy>=0.18.0",
     "python-Levenshtein>=0.12.0",
     "pandas>=1.3.0,<2.4.0",
-    "numpy>=1.22.4,<2.0.0",
+    "numpy>=2.0.0",
     "pdfplumber>=0.6.0",
     "bibtexparser>=1.4.0",
 ]
