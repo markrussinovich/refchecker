@@ -1,0 +1,53 @@
+# Render Blueprint — one-click deploy for RefChecker
+# https://render.com/docs/blueprint-spec
+#
+# Deploy: click "New +" → Blueprint → connect this repo
+# Or use the Deploy to Render button in the README.
+
+services:
+  - type: web
+    name: refchecker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Render sets PORT automatically; the Dockerfile reads it via cli.py
+    envVars:
+      # Persistent data directory (matches the disk mount below)
+      - key: REFCHECKER_DATA_DIR
+        value: /data
+
+      # --- Multi-user auth (required) ---
+      - key: REFCHECKER_MULTIUSER
+        value: "true"
+      - key: JWT_SECRET_KEY
+        generateValue: true          # Render auto-generates a random secret
+      - key: SITE_URL
+        sync: false                  # User must set this to their Render URL
+      - key: HTTPS_ONLY
+        value: "true"
+
+      # --- OAuth providers (configure at least one) ---
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+
+      # --- Optional ---
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: MAX_CHECKS_PER_USER
+        value: "3"
+
+    disk:
+      name: refchecker-data
+      mountPath: /data
+      sizeGB: 1                      # Adjust as needed ($0.25/GB/month on Render)
+
+    healthCheckPath: /api/health

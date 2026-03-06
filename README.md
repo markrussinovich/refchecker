@@ -315,6 +315,20 @@ docker compose pull       # Update to latest
 | `latest` | Latest stable release | amd64, arm64 | ~800MB |
 | `X.Y.Z` | Specific version (e.g., `2.0.18`) | amd64, arm64 | ~800MB |
 
+#### Deploy to Render
+
+RefChecker includes a [`render.yaml`](render.yaml) Blueprint for one-click deployment to [Render](https://render.com):
+
+1. Fork this repo (or connect your own copy).
+2. On Render, click **New +** → **Blueprint** → select the repo.
+3. Render reads `render.yaml` and creates the service with a persistent disk.
+4. Set the required environment variables in the Render dashboard:
+   - `SITE_URL` — your Render app URL (e.g., `https://refchecker-xxxx.onrender.com`)
+   - At least one OAuth provider's `CLIENT_ID` / `CLIENT_SECRET`
+5. Register each provider's callback URL as `https://<your-url>/api/auth/callback/{google,github,microsoft}`.
+
+> **Note:** Render assigns the `PORT` dynamically — the app reads it automatically. The persistent disk at `/data` stores the SQLite database and uploaded files, so data survives redeployments. For other PaaS hosts (Railway, Fly.io), the same Docker image works — just set `PORT`, `REFCHECKER_DATA_DIR`, and the auth env vars.
+
 ### CLI
 
 ```bash

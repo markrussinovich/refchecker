@@ -27,7 +27,7 @@ if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import aiosqlite
-from .database import db
+from .database import db, get_data_dir
 from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
@@ -68,6 +68,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def get_uploads_dir() -> Path:
+    """Return the base uploads directory, inside the persistent data dir."""
+    d = get_data_dir() / "uploads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 # Pydantic models for requests
@@ -390,7 +397,7 @@ async def start_check(
         original_filename = None  # Only set for file uploads
         if source_type == "file" and file:
             # Save uploaded file to user-isolated uploads directory
-            uploads_dir = Path(__file__).parent / "uploads" / str(user_id)
+            uploads_dir = get_uploads_dir() / str(user_id)
             uploads_dir.mkdir(parents=True, exist_ok=True)
             # Use check-specific naming to avoid conflicts
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
@@ -550,7 +557,7 @@ async def run_check(
         async def bibliography_source_callback(check_id: int, content: str, arxiv_id: str):
             try:
                 # Save the bibliography content to a file
-                bib_dir = Path(__file__).parent / "uploads" / "bibliography"
+                bib_dir = get_uploads_dir() / "bibliography"
                 bib_dir.mkdir(parents=True, exist_ok=True)
                 bib_path = bib_dir / f"{check_id}_{arxiv_id}_bibliography.txt"
                 with open(bib_path, "w", encoding="utf-8") as f:
@@ -1262,7 +1269,7 @@ async def start_batch_check_files(
         batch_id = str(uuid.uuid4())
 
         user_id = get_user_id_filter(current_user)
-        uploads_dir = Path(__file__).parent / "uploads" / str(user_id)
+        uploads_dir = get_uploads_dir() / str(user_id)
         uploads_dir.mkdir(parents=True, exist_ok=True)
         
         # api_key from form takes precedence over config stored key

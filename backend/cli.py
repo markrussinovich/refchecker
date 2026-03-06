@@ -6,6 +6,7 @@ This module provides the console script entry point for the refchecker-webui com
 """
 
 import sys
+import os
 import argparse
 from pathlib import Path
 
@@ -30,8 +31,8 @@ def main():
     parser.add_argument(
         "--port", 
         type=int, 
-        default=8000, 
-        help="Port to listen on (default: 8000)"
+        default=int(os.environ.get("PORT", "8000")), 
+        help="Port to listen on (default: PORT env var or 8000)"
     )
     parser.add_argument(
         "--reload",
