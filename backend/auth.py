@@ -442,7 +442,13 @@ def get_user_id_filter(user: UserInfo) -> int:
 # ---------------------------------------------------------------------------
 
 def get_available_providers() -> list[str]:
-    """Return the list of configured OAuth providers."""
+    """Return the list of configured OAuth providers.
+    
+    Only returns providers when multi-user mode is explicitly enabled
+    via REFCHECKER_MULTIUSER=true in the environment (e.g. .env or docker-compose).
+    """
+    if not os.environ.get('REFCHECKER_MULTIUSER', '').lower() in ('1', 'true', 'yes'):
+        return []
     providers = []
     if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
         providers.append("google")

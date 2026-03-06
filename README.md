@@ -150,7 +150,7 @@ Web UI documentation: see [web-ui/README.md](web-ui/README.md).
 
 ### Multi-User Hosted Server (OAuth)
 
-The hosted multi-user mode requires every visitor to sign in via OAuth (Google, GitHub, or Microsoft) before using the app. LLM API keys are entered once by each user in the Settings panel, saved in the **browser's `localStorage`**, and sent in the request body on every check — they are never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required. To enable multi-user mode with OAuth authentication, set the `REFCHECKER_MULTIUSER=true` environment variable. In this mode every visitor must sign in via OAuth (Google, GitHub, or Microsoft) before using the app. LLM API keys are entered once by each user in the Settings panel, saved in the **browser's `localStorage`**, and sent in the request body on every check — they are never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -183,6 +183,9 @@ cp .env.example .env
 Edit `.env` with your values:
 
 ```ini
+# Enable multi-user mode
+REFCHECKER_MULTIUSER=true
+
 # Required
 JWT_SECRET_KEY=<output from step 1>
 SITE_URL=https://<your-domain>
@@ -224,7 +227,7 @@ Without Docker:
 
 ```bash
 pip install "academic-refchecker[llm,webui]"
-JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+REFCHECKER_MULTIUSER=true JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
   refchecker-webui --port 8000
 ```
 
@@ -232,18 +235,21 @@ Or with hot-reload for development:
 
 ```bash
 # Terminal 1 — API
-JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+REFCHECKER_MULTIUSER=true JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
   python -m uvicorn backend.main:app --reload --port 8000
 
 # Terminal 2 — Frontend (http://localhost:5173)
 cd web-ui && npm run dev
 ```
 
+> **Tip:** You can also place these variables in a `.env` file (see `.env.example`). The server loads it automatically on startup.
+
 #### Notes
 
 - **Admin access**: The first user to sign in is automatically granted admin rights. Additional admins can be designated via the `ADMIN_EMAILS` env var (comma-separated list of email addresses).
 - **LLM API keys**: Each user enters their own key in *Settings → API Keys*. Keys are saved in `localStorage` and sent per-request in the request body — never stored on or logged by the server.
 - **Rate limiting**: Each user may run up to `MAX_CHECKS_PER_USER` concurrent checks (default 3). The 4th simultaneous request returns HTTP 429.
+- **Single-user mode**: Without `REFCHECKER_MULTIUSER=true`, the server runs in single-user mode with no login screen — ideal for local use and the CLI.
 - **CLI mode is unaffected**: `academic-refchecker` (CLI) does not require OAuth and continues to work without any auth configuration.
 
 ### Docker

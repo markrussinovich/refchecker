@@ -30,6 +30,7 @@ services:
       # Data directory (inside container)
       - REFCHECKER_DATA_DIR=/app/data
       # Multi-user auth
+      - REFCHECKER_MULTIUSER=${REFCHECKER_MULTIUSER:-false}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
       - SITE_URL=${SITE_URL:-}
       - HTTPS_ONLY=${HTTPS_ONLY:-false}
