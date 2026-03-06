@@ -11,6 +11,10 @@ Validate reference accuracy in academic papers. Useful for authors checking bibl
 - [Sample Output](#sample-output)
 - [Install](#install)
 - [Run](#run)
+  - [Web UI](#web-ui)
+  - [Multi-User Hosted Server (OAuth)](#multi-user-hosted-server-oauth)
+  - [Docker](#docker)
+  - [CLI](#cli)
 - [Output](#output)
 - [Configure](#configure)
 - [Local Database](#local-database)
@@ -143,6 +147,104 @@ curl http://localhost:8000/
 ```
 
 Web UI documentation: see [web-ui/README.md](web-ui/README.md).
+
+### Multi-User Hosted Server (OAuth)
+
+The hosted multi-user mode requires every visitor to sign in via OAuth (Google, GitHub, or Microsoft) before using the app. LLM API keys are entered once by each user in the Settings panel, saved in the **browser's `localStorage`**, and sent in the request body on every check — they are never stored on the server.
+
+#### 1. Generate a JWT Secret Key
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Copy the output — this is your `JWT_SECRET_KEY`.
+
+#### 2. Register an OAuth Application
+
+Configure **at least one** provider:
+
+**Google** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Create credentials → OAuth 2.0 Client ID → Web application*
+- Authorised redirect URI: `https://<your-domain>/api/auth/callback/google`
+
+**GitHub** — [GitHub Settings › Developer settings › OAuth Apps](https://github.com/settings/developers) → *New OAuth App*
+- Authorization callback URL: `https://<your-domain>/api/auth/callback/github`
+
+**Microsoft** — [Azure portal › App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) → *New registration*
+- Redirect URI: `https://<your-domain>/api/auth/callback/microsoft`
+
+#### 3. Configure Environment Variables
+
+```bash
+git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
+cp .env.example .env
+```
+
+Edit `.env` with your values:
+
+```ini
+# Required
+JWT_SECRET_KEY=<output from step 1>
+SITE_URL=https://<your-domain>
+HTTPS_ONLY=true
+
+# At least one OAuth provider (add whichever you registered in step 2)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+
+MS_CLIENT_ID=...
+MS_CLIENT_SECRET=...
+
+# Optional tuning
+ADMIN_EMAILS=your@email.com   # also grants admin to specific emails (first user is auto-admin)
+MAX_CHECKS_PER_USER=3         # max concurrent checks per user (default: 3)
+```
+
+#### 4. Launch with Docker Compose
+
+```bash
+docker compose up -d
+```
+
+The server starts on port **8000**. Place it behind a TLS-terminating reverse proxy (nginx, Caddy, etc.) for HTTPS.
+
+Verify it is running:
+
+```bash
+curl http://localhost:8000/api/auth/providers
+# {"providers":["google","github"]}
+```
+
+#### Local / Development Launch
+
+Without Docker:
+
+```bash
+pip install "academic-refchecker[llm,webui]"
+JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+  refchecker-webui --port 8000
+```
+
+Or with hot-reload for development:
+
+```bash
+# Terminal 1 — API
+JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
+  python -m uvicorn backend.main:app --reload --port 8000
+
+# Terminal 2 — Frontend (http://localhost:5173)
+cd web-ui && npm run dev
+```
+
+#### Notes
+
+- **Admin access**: The first user to sign in is automatically granted admin rights. Additional admins can be designated via the `ADMIN_EMAILS` env var (comma-separated list of email addresses).
+- **LLM API keys**: Each user enters their own key in *Settings → API Keys*. Keys are saved in `localStorage` and sent per-request in the request body — never stored on or logged by the server.
+- **Rate limiting**: Each user may run up to `MAX_CHECKS_PER_USER` concurrent checks (default 3). The 4th simultaneous request returns HTTP 429.
+- **CLI mode is unaffected**: `academic-refchecker` (CLI) does not require OAuth and continues to work without any auth configuration.
 
 ### Docker
 
