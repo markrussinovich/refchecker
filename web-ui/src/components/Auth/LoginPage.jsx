@@ -143,11 +143,21 @@ function SignInButton({ onClick, loading, disabled, label, icon }) {
     <button
       onClick={onClick}
       disabled={disabled}
-      className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-medium text-sm transition-all duration-150 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer hover:brightness-110 hover:scale-[1.02] active:scale-[0.98]"
+      className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg font-medium text-sm transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
       style={{
         backgroundColor: 'var(--color-bg-primary)',
         color: 'var(--color-text-primary)',
         border: '1px solid var(--color-border)',
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
+          e.currentTarget.style.borderColor = 'var(--color-accent)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)'
+        e.currentTarget.style.borderColor = 'var(--color-border)'
       }}
     >
       {loading ? (
