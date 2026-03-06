@@ -207,6 +207,8 @@ function MicrosoftIcon() {
     </svg>
   )
 }
+
+function GitHubIcon() {
   return (
     <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
       <path

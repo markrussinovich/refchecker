@@ -28,21 +28,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [llmKeyEditing, setLlmKeyEditing] = useState({}) // provider -> bool
   const [llmKeySaving, setLlmKeySaving] = useState({})   // provider -> bool
   
-  // Semantic Scholar API key state
-  const [ssHasKey, setSsHasKey] = useState(false)
+  // Semantic Scholar API key state (browser localStorage, not server-side)
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
-  const [ssIsLoading, setSsIsLoading] = useState(true)
+  const [ssIsLoading, setSsIsLoading] = useState(false)
   const [ssIsSaving, setSsIsSaving] = useState(false)
   const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
+  const ssHasKey = hasKey('semantic_scholar')
 
-  // Load Semantic Scholar key status when panel opens
-  useEffect(() => {
-    if (isSettingsOpen && activeSection === 'API Keys') {
-      loadSsKeyStatus()
-    }
-  }, [isSettingsOpen, activeSection])
+  // No server round-trip needed — SS key lives in localStorage
 
   // Close on escape key
   useEffect(() => {
@@ -77,51 +72,32 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     updateSetting(key, value)
   }
 
-  // Semantic Scholar API key handlers
-  const loadSsKeyStatus = async () => {
-    try {
-      setSsIsLoading(true)
-      const response = await api.getSemanticScholarKeyStatus()
-      setSsHasKey(response.data.has_key)
-      logger.info('SettingsPanel', `SS Key status: ${response.data.has_key ? 'configured' : 'not configured'}`)
-    } catch (err) {
-      logger.error('SettingsPanel', 'Failed to load SS key status', err)
-      setSsError('Failed to load status')
-    } finally {
-      setSsIsLoading(false)
-    }
-  }
-
+  // Semantic Scholar API key handlers — localStorage only, never sent to server for storage
   const handleSsSave = async () => {
     if (!ssApiKey.trim()) {
       setSsError('API key cannot be empty')
       return
     }
     try {
-      // First validate the API key
       setSsIsValidating(true)
       setSsError(null)
-      
+
       const validationResponse = await api.validateSemanticScholarKey(ssApiKey.trim())
-      
+
       if (!validationResponse.data.valid) {
         setSsError(validationResponse.data.message || 'Invalid API key')
         setSsIsValidating(false)
         return
       }
-      
-      logger.info('SettingsPanel', 'SS API key validated successfully')
+
+      logger.info('SettingsPanel', 'SS API key validated, saving to localStorage')
       setSsIsValidating(false)
-      
-      // Now save the key
-      setSsIsSaving(true)
-      await api.setSemanticScholarKey(ssApiKey.trim())
-      setSsHasKey(true)
+
+      setKey('semantic_scholar', ssApiKey.trim())
       setSsIsEditing(false)
       setSsApiKey('')
-      logger.info('SettingsPanel', 'SS API key saved')
     } catch (err) {
-      logger.error('SettingsPanel', 'Failed to save SS key', err)
+      logger.error('SettingsPanel', 'Failed to validate SS key', err)
       setSsError(err.response?.data?.detail || 'Failed to validate API key')
     } finally {
       setSsIsValidating(false)
@@ -129,21 +105,12 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
   }
 
-  const handleSsDelete = async () => {
-    try {
-      setSsIsSaving(true)
-      setSsError(null)
-      await api.deleteSemanticScholarKey()
-      setSsHasKey(false)
-      setSsIsEditing(false)
-      setSsApiKey('')
-      logger.info('SettingsPanel', 'SS API key deleted')
-    } catch (err) {
-      logger.error('SettingsPanel', 'Failed to delete SS key', err)
-      setSsError(err.response?.data?.detail || 'Failed to delete API key')
-    } finally {
-      setSsIsSaving(false)
-    }
+  const handleSsDelete = () => {
+    deleteKey('semantic_scholar')
+    setSsIsEditing(false)
+    setSsApiKey('')
+    setSsError(null)
+    logger.info('SettingsPanel', 'SS API key deleted from localStorage')
   }
 
   const handleSsCancel = () => {

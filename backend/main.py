@@ -112,6 +112,7 @@ class BatchUrlsRequest(BaseModel):
     llm_model: Optional[str] = None
     use_llm: bool = True
     api_key: Optional[str] = None
+    semantic_scholar_api_key: Optional[str] = None
 
 
 # Create FastAPI app
@@ -339,6 +340,7 @@ async def start_check(
     llm_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
+    semantic_scholar_api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
 ):
     """
@@ -349,6 +351,7 @@ async def start_check(
         source_value: URL or ArXiv ID (for url type)
         file: Uploaded file (for file type)
         api_key: API key from client (sent per-request, never stored)
+        semantic_scholar_api_key: SS API key from client (sent per-request, never stored)
         llm_config_id: ID of the LLM config to use (for provider/model/endpoint)
         llm_provider: LLM provider to use
         llm_model: Specific model to use
@@ -439,7 +442,7 @@ async def start_check(
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key)
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id}
@@ -474,6 +477,7 @@ async def run_check(
     use_llm: bool,
     cancel_event: asyncio.Event,
     user_id: int = 0,
+    semantic_scholar_api_key: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -487,6 +491,7 @@ async def run_check(
         llm_model: Specific model
         api_key: API key for the LLM provider
         use_llm: Whether to use LLM
+        semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
     try:
         # Wait for WebSocket to connect (give client time to establish connection)
@@ -554,8 +559,9 @@ async def run_check(
             except Exception as e:
                 logger.warning(f"Failed to save bibliography source: {e}")
 
-        # Get Semantic Scholar API key from database settings
-        semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
+        # Use per-request Semantic Scholar key from client; fall back to DB for single-user mode
+        if not semantic_scholar_api_key:
+            semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
         
         # Create checker with progress callback
         checker = ProgressRefChecker(
@@ -1195,7 +1201,8 @@ async def start_batch_check(
                 run_check(
                     session_id, check_id, url, 'url',
                     llm_provider, llm_model, effective_api_key, endpoint,
-                    request.use_llm, cancel_event, user_id
+                    request.use_llm, cancel_event, user_id,
+                    semantic_scholar_api_key=request.semantic_scholar_api_key,
                 )
             )
             active_checks[session_id] = {

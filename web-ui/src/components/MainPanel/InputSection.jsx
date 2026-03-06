@@ -5,6 +5,7 @@ import BulkInputZone from './BulkInputZone'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useKeyStore } from '../../stores/useKeyStore'
 import { useFileUpload } from '../../hooks/useFileUpload'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
@@ -104,6 +105,13 @@ export default function InputSection() {
       } else {
         formData.append('use_llm', 'false')
       }
+
+      // Attach API keys from browser localStorage (never stored server-side)
+      const keyStore = useKeyStore.getState()
+      const llmKey = config ? keyStore.getKey(config.provider) : null
+      if (llmKey) formData.append('api_key', llmKey)
+      const ssKey = keyStore.getKey('semantic_scholar')
+      if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
 
       logger.info('Check', 'Initiating check request', { 
         mode: inputMode, 

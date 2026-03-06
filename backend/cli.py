@@ -11,6 +11,12 @@ from pathlib import Path
 
 
 def main():
+    # Load .env file if present (so OAuth secrets etc. are available)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    except ImportError:
+        pass
     """Main entry point for the refchecker-webui command."""
     parser = argparse.ArgumentParser(
         description="Start the RefChecker Web UI server"
