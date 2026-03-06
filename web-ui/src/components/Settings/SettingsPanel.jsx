@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
+import { useAuthStore } from '../../stores/useAuthStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -17,6 +18,15 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   } = useSettingsStore()
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
+
+  // Auth store for in-memory API key management
+  const { authEnabled, apiKeyProviders, storeApiKey, removeApiKey } = useAuthStore()
+
+  // In-memory LLM API key state (multi-user mode)
+  const LLM_PROVIDERS = ['anthropic', 'openai', 'google', 'gemini']
+  const [llmKeyInputs, setLlmKeyInputs] = useState({})   // provider -> string
+  const [llmKeyEditing, setLlmKeyEditing] = useState({}) // provider -> bool
+  const [llmKeySaving, setLlmKeySaving] = useState({})   // provider -> bool
   
   // Semantic Scholar API key state
   const [ssHasKey, setSsHasKey] = useState(false)
@@ -221,6 +231,131 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAPIKeysSection = () => (
     <div className="space-y-1">
+      {/* In-memory LLM API Keys (only shown when auth is enabled) */}
+      {authEnabled && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
+            LLM API Keys
+          </div>
+          <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+            Keys are stored in server memory only and cleared when the server restarts.
+          </div>
+          <div className="space-y-3">
+            {LLM_PROVIDERS.map((provider) => {
+              const hasKey = apiKeyProviders.includes(provider)
+              const isEditing = !!llmKeyEditing[provider]
+              const isSaving = !!llmKeySaving[provider]
+              const inputValue = llmKeyInputs[provider] || ''
+              return (
+                <div key={provider} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm capitalize font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                        {provider}
+                      </span>
+                      {hasKey ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)' }}>
+                          ✓ Set
+                        </span>
+                      ) : (
+                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Not set</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      {!isEditing && (
+                        <button
+                          onClick={() => setLlmKeyEditing(s => ({ ...s, [provider]: true }))}
+                          className="text-xs px-2 py-1 rounded cursor-pointer"
+                          style={{ color: 'var(--color-accent)' }}
+                        >
+                          {hasKey ? 'Change' : 'Set'}
+                        </button>
+                      )}
+                      {!isEditing && hasKey && (
+                        <button
+                          onClick={async () => {
+                            setLlmKeySaving(s => ({ ...s, [provider]: true }))
+                            try { await removeApiKey(provider) } finally {
+                              setLlmKeySaving(s => ({ ...s, [provider]: false }))
+                            }
+                          }}
+                          className="text-xs px-2 py-1 rounded cursor-pointer"
+                          style={{ color: 'var(--color-error)' }}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {isEditing && (
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={inputValue}
+                        onChange={e => setLlmKeyInputs(s => ({ ...s, [provider]: e.target.value }))}
+                        placeholder={`Enter ${provider} API key…`}
+                        className="flex-1 px-2 py-1.5 text-sm rounded border"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-primary)',
+                        }}
+                        disabled={isSaving}
+                        autoFocus
+                        onKeyDown={async (e) => {
+                          if (e.key === 'Enter' && inputValue.trim()) {
+                            setLlmKeySaving(s => ({ ...s, [provider]: true }))
+                            try {
+                              await storeApiKey(provider, inputValue.trim())
+                              setLlmKeyEditing(s => ({ ...s, [provider]: false }))
+                              setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
+                            } finally {
+                              setLlmKeySaving(s => ({ ...s, [provider]: false }))
+                            }
+                          }
+                          if (e.key === 'Escape') {
+                            setLlmKeyEditing(s => ({ ...s, [provider]: false }))
+                            setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          if (!inputValue.trim()) return
+                          setLlmKeySaving(s => ({ ...s, [provider]: true }))
+                          try {
+                            await storeApiKey(provider, inputValue.trim())
+                            setLlmKeyEditing(s => ({ ...s, [provider]: false }))
+                            setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
+                          } finally {
+                            setLlmKeySaving(s => ({ ...s, [provider]: false }))
+                          }
+                        }}
+                        disabled={isSaving || !inputValue.trim()}
+                        className="px-3 py-1.5 text-xs rounded cursor-pointer"
+                        style={{ backgroundColor: 'var(--color-accent)', color: 'white', opacity: isSaving || !inputValue.trim() ? 0.5 : 1 }}
+                      >
+                        {isSaving ? '…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setLlmKeyEditing(s => ({ ...s, [provider]: false }))
+                          setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
+                        }}
+                        className="px-3 py-1.5 text-xs rounded border cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Semantic Scholar API Key */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex items-center justify-between mb-1">

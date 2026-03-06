@@ -121,6 +121,7 @@ class Database:
                     api_key_encrypted TEXT,
                     endpoint TEXT,
                     is_default BOOLEAN DEFAULT 0,
+                    user_id INTEGER REFERENCES users(id),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -143,12 +144,31 @@ class Database:
                 )
             """)
 
+            # Users table (for multi-user mode)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
+                    email TEXT,
+                    name TEXT,
+                    avatar_url TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(provider, provider_id)
+                )
+            """)
+
             await self._ensure_columns(db)
             
             # Create index for batch queries
             await db.execute("""
                 CREATE INDEX IF NOT EXISTS idx_check_history_batch_id 
                 ON check_history(batch_id)
+            """)
+            # Create index for per-user history queries
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_user_id 
+                ON check_history(user_id)
             """)
             await db.commit()
 
@@ -180,6 +200,14 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN batch_label TEXT")
         if "original_filename" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN original_filename TEXT")
+        if "user_id" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN user_id INTEGER REFERENCES users(id)")
+
+        # Ensure user_id column in llm_configs
+        async with db.execute("PRAGMA table_info(llm_configs)") as cursor:
+            llm_columns = {row[1] async for row in cursor}
+        if "user_id" not in llm_columns:
+            await db.execute("ALTER TABLE llm_configs ADD COLUMN user_id INTEGER REFERENCES users(id)")
 
     async def save_check(self,
                          paper_title: str,
@@ -225,32 +253,52 @@ class Database:
             await db.commit()
             return cursor.lastrowid
 
-    async def get_history(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent check history"""
+    async def get_history(self, limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get recent check history, optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT id, paper_title, paper_source, custom_label, timestamp,
-                       total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
-                       refs_with_errors, refs_with_warnings_only, refs_verified,
-                       llm_provider, llm_model, status, source_type, batch_id, batch_label,
-                       original_filename
-                FROM check_history
-                ORDER BY timestamp DESC
-                LIMIT ?
-            """, (limit,)) as cursor:
+            if user_id is not None:
+                query = """
+                    SELECT id, paper_title, paper_source, custom_label, timestamp,
+                           total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                           refs_with_errors, refs_with_warnings_only, refs_verified,
+                           llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                           original_filename
+                    FROM check_history
+                    WHERE user_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                params = (user_id, limit)
+            else:
+                query = """
+                    SELECT id, paper_title, paper_source, custom_label, timestamp,
+                           total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                           refs_with_errors, refs_with_warnings_only, refs_verified,
+                           llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                           original_filename
+                    FROM check_history
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """
+                params = (limit,)
+            async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def get_check_by_id(self, check_id: int) -> Optional[Dict[str, Any]]:
-        """Get specific check result by ID"""
+    async def get_check_by_id(self, check_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Get specific check result by ID, optionally enforcing user ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM check_history WHERE id = ?
-            """, (check_id,)) as cursor:
+            if user_id is not None:
+                query = "SELECT * FROM check_history WHERE id = ? AND user_id = ?"
+                params = (check_id, user_id)
+            else:
+                query = "SELECT * FROM check_history WHERE id = ?"
+                params = (check_id,)
+            async with db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
@@ -260,11 +308,14 @@ class Database:
                     return result
                 return None
 
-    async def delete_check(self, check_id: int) -> bool:
-        """Delete a check from history"""
+    async def delete_check(self, check_id: int, user_id: Optional[int] = None) -> bool:
+        """Delete a check from history, optionally enforcing user ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
-            await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
+            if user_id is not None:
+                await db.execute("DELETE FROM check_history WHERE id = ? AND user_id = ?", (check_id, user_id))
+            else:
+                await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
             await db.commit()
             return True
 
@@ -298,15 +349,16 @@ class Database:
                                     llm_model: Optional[str] = None,
                                     batch_id: Optional[str] = None,
                                     batch_label: Optional[str] = None,
-                                    original_filename: Optional[str] = None) -> int:
+                                    original_filename: Optional[str] = None,
+                                    user_id: Optional[int] = None) -> int:
         """Create a pending check entry before verification starts"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, results_json, llm_provider, llm_model, status,
-                 batch_id, batch_label, original_filename)
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?)
+                 batch_id, batch_label, original_filename, user_id)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -315,7 +367,8 @@ class Database:
                 llm_model,
                 batch_id,
                 batch_label,
-                original_filename
+                original_filename,
+                user_id
             ))
             await db.commit()
             return cursor.lastrowid
@@ -475,25 +528,40 @@ class Database:
 
     # LLM Configuration methods
 
-    async def get_llm_configs(self) -> List[Dict[str, Any]]:
-        """Get all LLM configurations (API keys redacted)"""
+    async def get_llm_configs(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all LLM configurations (API keys redacted), optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT id, name, provider, model, endpoint, is_default, created_at
-                FROM llm_configs
-                ORDER BY created_at DESC
-            """) as cursor:
+            if user_id is not None:
+                query = """
+                    SELECT id, name, provider, model, endpoint, is_default, created_at
+                    FROM llm_configs
+                    WHERE user_id = ?
+                    ORDER BY created_at DESC
+                """
+                params = (user_id,)
+            else:
+                query = """
+                    SELECT id, name, provider, model, endpoint, is_default, created_at
+                    FROM llm_configs
+                    ORDER BY created_at DESC
+                """
+                params = ()
+            async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def get_llm_config_by_id(self, config_id: int) -> Optional[Dict[str, Any]]:
-        """Get a specific LLM config by ID (includes decrypted API key)"""
+    async def get_llm_config_by_id(self, config_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Get a specific LLM config by ID (includes decrypted API key), optionally checking ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM llm_configs WHERE id = ?
-            """, (config_id,)) as cursor:
+            if user_id is not None:
+                query = "SELECT * FROM llm_configs WHERE id = ? AND user_id = ?"
+                params = (config_id, user_id)
+            else:
+                query = "SELECT * FROM llm_configs WHERE id = ?"
+                params = (config_id,)
+            async with db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
@@ -512,15 +580,16 @@ class Database:
                                  provider: str,
                                  model: Optional[str] = None,
                                  api_key: Optional[str] = None,
-                                 endpoint: Optional[str] = None) -> int:
+                                 endpoint: Optional[str] = None,
+                                 user_id: Optional[int] = None) -> int:
         """Create a new LLM configuration"""
         encrypted_key = self._encrypt(api_key) if api_key else None
 
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO llm_configs (name, provider, model, api_key_encrypted, endpoint)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, provider, model, encrypted_key, endpoint))
+                INSERT INTO llm_configs (name, provider, model, api_key_encrypted, endpoint, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, provider, model, encrypted_key, endpoint, user_id))
             await db.commit()
             return cursor.lastrowid
 
@@ -571,11 +640,14 @@ class Database:
             await db.commit()
             return True
 
-    async def set_default_llm_config(self, config_id: int) -> bool:
-        """Set an LLM config as the default (unsets others)"""
+    async def set_default_llm_config(self, config_id: int, user_id: Optional[int] = None) -> bool:
+        """Set an LLM config as the default (unsets others for the same user)"""
         async with aiosqlite.connect(self.db_path) as db:
-            # Unset all defaults
-            await db.execute("UPDATE llm_configs SET is_default = 0")
+            # Unset all defaults for this user (or globally if no user)
+            if user_id is not None:
+                await db.execute("UPDATE llm_configs SET is_default = 0 WHERE user_id = ?", (user_id,))
+            else:
+                await db.execute("UPDATE llm_configs SET is_default = 0")
             # Set the new default
             await db.execute(
                 "UPDATE llm_configs SET is_default = 1 WHERE id = ?",
@@ -584,13 +656,17 @@ class Database:
             await db.commit()
             return True
 
-    async def get_default_llm_config(self) -> Optional[Dict[str, Any]]:
-        """Get the default LLM configuration (with decrypted API key)"""
+    async def get_default_llm_config(self, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Get the default LLM configuration (with decrypted API key), optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
-                SELECT * FROM llm_configs WHERE is_default = 1
-            """) as cursor:
+            if user_id is not None:
+                query = "SELECT * FROM llm_configs WHERE is_default = 1 AND user_id = ?"
+                params = (user_id,)
+            else:
+                query = "SELECT * FROM llm_configs WHERE is_default = 1"
+                params = ()
+            async with db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
@@ -605,6 +681,54 @@ class Database:
                 return None
 
     # App Settings methods (for Semantic Scholar key, etc.)
+
+    # User management methods
+
+    async def create_or_update_user(self,
+                                     provider: str,
+                                     provider_id: str,
+                                     email: Optional[str] = None,
+                                     name: Optional[str] = None,
+                                     avatar_url: Optional[str] = None) -> int:
+        """Create a new user or update an existing one. Returns the user's internal ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            # Try to find existing user
+            async with db.execute(
+                "SELECT id FROM users WHERE provider = ? AND provider_id = ?",
+                (provider, provider_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+
+            if row:
+                user_id = row[0]
+                # Update user info
+                await db.execute("""
+                    UPDATE users SET email = ?, name = ?, avatar_url = ?
+                    WHERE id = ?
+                """, (email, name, avatar_url, user_id))
+                await db.commit()
+                return user_id
+            else:
+                # Create new user
+                cursor = await db.execute("""
+                    INSERT INTO users (provider, provider_id, email, name, avatar_url)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (provider, provider_id, email, name, avatar_url))
+                await db.commit()
+                return cursor.lastrowid
+
+    async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get a user by their internal ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, provider, provider_id, email, name, avatar_url, created_at FROM users WHERE id = ?",
+                (user_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+
+
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
         """Get an app setting value (optionally decrypted)"""

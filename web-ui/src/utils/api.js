@@ -6,10 +6,24 @@ const api = axios.create({
   timeout: 30000,
 })
 
-// Request interceptor for logging
+// -----------------------------------------------------------------------
+// Auth token management
+// The token is injected into every request via the request interceptor.
+// -----------------------------------------------------------------------
+let _authToken = null
+
+export const setAuthToken = (token) => {
+  _authToken = token
+}
+
+// Request interceptor for logging + auth header injection
 api.interceptors.request.use(
   (config) => {
     logger.debug('API', `${config.method?.toUpperCase()} ${config.url}`, config.data)
+    if (_authToken) {
+      config.headers = config.headers || {}
+      config.headers['Authorization'] = `Bearer ${_authToken}`
+    }
     return config
   },
   (error) => {
@@ -32,6 +46,18 @@ api.interceptors.response.use(
 
 // Health check
 export const health = () => api.get('/health')
+
+// -----------------------------------------------------------------------
+// Auth endpoints
+// -----------------------------------------------------------------------
+export const getAuthProviders = () => api.get('/auth/providers')
+export const getAuthMe = () => api.get('/auth/me')
+export const authLogout = () => api.post('/auth/logout')
+
+// In-memory user API key management (multi-user mode)
+export const getUserApiKeyProviders = () => api.get('/user/api-keys')
+export const setUserApiKey = (provider, apiKey) => api.post('/user/api-keys', { provider, api_key: apiKey })
+export const deleteUserApiKey = (provider) => api.delete(`/user/api-keys/${provider}`)
 
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
@@ -70,7 +96,9 @@ export const clearDatabase = () => api.delete('/admin/database')
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  const wsUrl = `${protocol}//${host}/api/ws/${sessionId}`
+  // Include auth token as query param (WS headers are not easily settable)
+  const tokenParam = _authToken ? `?token=${encodeURIComponent(_authToken)}` : ''
+  const wsUrl = `${protocol}//${host}/api/ws/${sessionId}${tokenParam}`
   
   logger.info('WebSocket', `Connecting to ${wsUrl}`)
   
@@ -106,6 +134,13 @@ export const createWebSocket = (sessionId, handlers) => {
 
 export default {
   health,
+  getAuthProviders,
+  getAuthMe,
+  authLogout,
+  getUserApiKeyProviders,
+  setUserApiKey,
+  deleteUserApiKey,
+  setAuthToken,
   getLLMConfigs,
   createLLMConfig,
   updateLLMConfig,
@@ -126,3 +161,4 @@ export default {
   clearCache,
   clearDatabase,
 }
+

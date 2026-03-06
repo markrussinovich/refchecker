@@ -8,9 +8,9 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
@@ -32,6 +32,26 @@ from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
+from .auth import (
+    AUTH_ENABLED,
+    FRONTEND_REDIRECT_BASE,
+    require_user,
+    get_current_user,
+    get_user_id_filter,
+    get_available_providers,
+    get_google_auth_url,
+    get_github_auth_url,
+    exchange_google_code,
+    exchange_github_code,
+    create_access_token,
+    store_user_api_key,
+    get_user_api_key,
+    delete_user_api_key,
+    has_user_api_key,
+    get_user_api_key_providers,
+    UserInfo,
+    _validate_oauth_state,
+)
 from .thumbnail import (
     generate_arxiv_thumbnail_async,
     generate_arxiv_preview_async,
@@ -92,6 +112,12 @@ class BatchUrlsRequest(BaseModel):
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
     use_llm: bool = True
+
+
+class UserApiKeyRequest(BaseModel):
+    """Request model for storing an in-memory API key"""
+    provider: str
+    api_key: str
 
 
 # Create FastAPI app
@@ -169,6 +195,129 @@ async def version():
     return {"version": __version__}
 
 
+# ---------------------------------------------------------------------------
+# Auth endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/auth/providers")
+async def auth_providers():
+    """Return auth configuration: which OAuth providers are available and whether auth is enabled."""
+    return {
+        "auth_enabled": AUTH_ENABLED,
+        "providers": get_available_providers(),
+    }
+
+
+@app.get("/api/auth/google")
+async def auth_google_start(request: Request):
+    """Initiate the Google OAuth flow."""
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="Auth is disabled")
+    url = get_google_auth_url(request)
+    return RedirectResponse(url=url)
+
+
+@app.get("/api/auth/google/callback")
+async def auth_google_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle Google OAuth callback."""
+    frontend_base = FRONTEND_REDIRECT_BASE or "/"
+    if error or not code or not state:
+        return RedirectResponse(url=f"{frontend_base}?auth_error={error or 'missing_code'}")
+    if not _validate_oauth_state(state, "google"):
+        return RedirectResponse(url=f"{frontend_base}?auth_error=invalid_state")
+    user_data = await exchange_google_code(code, request)
+    if not user_data:
+        return RedirectResponse(url=f"{frontend_base}?auth_error=exchange_failed")
+    user_id = await db.create_or_update_user(**user_data)
+    token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
+    return RedirectResponse(url=f"{frontend_base}?auth_token={token}")
+
+
+@app.get("/api/auth/github")
+async def auth_github_start(request: Request):
+    """Initiate the GitHub OAuth flow."""
+    if not AUTH_ENABLED:
+        raise HTTPException(status_code=400, detail="Auth is disabled")
+    url = get_github_auth_url(request)
+    return RedirectResponse(url=url)
+
+
+@app.get("/api/auth/github/callback")
+async def auth_github_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle GitHub OAuth callback."""
+    frontend_base = FRONTEND_REDIRECT_BASE or "/"
+    if error or not code or not state:
+        return RedirectResponse(url=f"{frontend_base}?auth_error={error or 'missing_code'}")
+    if not _validate_oauth_state(state, "github"):
+        return RedirectResponse(url=f"{frontend_base}?auth_error=invalid_state")
+    user_data = await exchange_github_code(code, request)
+    if not user_data:
+        return RedirectResponse(url=f"{frontend_base}?auth_error=exchange_failed")
+    user_id = await db.create_or_update_user(**user_data)
+    token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
+    return RedirectResponse(url=f"{frontend_base}?auth_token={token}")
+
+
+@app.get("/api/auth/me")
+async def auth_me(current_user: Optional[UserInfo] = Depends(require_user)):
+    """Return the currently authenticated user, or null when auth is disabled."""
+    if current_user is None:
+        # Auth is disabled – return a synthetic anonymous user
+        return {"auth_enabled": False, "user": None}
+    return {
+        "auth_enabled": True,
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "name": current_user.name,
+            "avatar_url": current_user.avatar_url,
+            "provider": current_user.provider,
+        },
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout():
+    """Logout endpoint – client should discard the token."""
+    return {"message": "Logged out"}
+
+
+# ---------------------------------------------------------------------------
+# In-memory API key endpoints (auth-only; keys never stored in DB)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/user/api-keys")
+async def get_user_api_keys(current_user: Optional[UserInfo] = Depends(require_user)):
+    """List the providers for which the current user has an in-memory API key."""
+    if current_user is None:
+        return {"providers": []}
+    return {"providers": get_user_api_key_providers(current_user.id)}
+
+
+@app.post("/api/user/api-keys")
+async def set_user_api_key(
+    data: UserApiKeyRequest,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
+    """Store an API key in server memory for the current user. Key is never persisted."""
+    if current_user is None:
+        raise HTTPException(status_code=400, detail="Auth must be enabled to use in-memory API keys")
+    store_user_api_key(current_user.id, data.provider, data.api_key)
+    return {"message": f"API key stored for provider '{data.provider}'"}
+
+
+@app.delete("/api/user/api-keys/{provider}")
+async def delete_user_api_key_endpoint(
+    provider: str,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
+    """Remove an in-memory API key for the current user."""
+    if current_user is None:
+        raise HTTPException(status_code=400, detail="Auth must be enabled to use in-memory API keys")
+    delete_user_api_key(current_user.id, provider)
+    return {"message": f"API key removed for provider '{provider}'"}
+
+
 @app.websocket("/api/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time updates"""
@@ -193,7 +342,8 @@ async def start_check(
     llm_config_id: Optional[int] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
-    use_llm: bool = Form(True)
+    use_llm: bool = Form(True),
+    current_user: Optional[UserInfo] = Depends(require_user),
 ):
     """
     Start a new reference check
@@ -213,14 +363,20 @@ async def start_check(
     try:
         # Generate session ID
         session_id = str(uuid.uuid4())
-        
+
+        user_id = get_user_id_filter(current_user)
+
         # Retrieve API key from config if config_id provided
         api_key = None
         endpoint = None
         if llm_config_id and use_llm:
-            config = await db.get_llm_config_by_id(llm_config_id)
+            config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if AUTH_ENABLED and current_user is not None:
+                    # In multi-user mode, API keys live in memory only
+                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
+                else:
+                    api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -272,7 +428,8 @@ async def start_check(
             source_type=source_type,
             llm_provider=llm_provider if use_llm else None,
             llm_model=llm_model if use_llm else None,
-            original_filename=original_filename
+            original_filename=original_filename,
+            user_id=user_id,
         )
         logger.info(f"Created pending check with ID {check_id}")
 
@@ -463,10 +620,14 @@ async def run_check(
 
 
 @app.get("/api/history")
-async def get_history(limit: int = 50):
-    """Get check history"""
+async def get_history(
+    limit: int = 50,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
+    """Get check history (filtered by the authenticated user when auth is enabled)"""
     try:
-        history = await db.get_history(limit)
+        user_id = get_user_id_filter(current_user)
+        history = await db.get_history(limit, user_id=user_id)
 
         enriched = []
         for item in history:
@@ -483,10 +644,14 @@ async def get_history(limit: int = 50):
 
 
 @app.get("/api/history/{check_id}")
-async def get_check_detail(check_id: int):
+async def get_check_detail(
+    check_id: int,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
     """Get detailed results for a specific check"""
     try:
-        check = await db.get_check_by_id(check_id)
+        user_id = get_user_id_filter(current_user)
+        check = await db.get_check_by_id(check_id, user_id=user_id)
         if not check:
             raise HTTPException(status_code=404, detail="Check not found")
 
@@ -936,7 +1101,10 @@ async def cancel_check(session_id: str):
 # ============ Batch Operations ============
 
 @app.post("/api/check/batch")
-async def start_batch_check(request: BatchUrlsRequest):
+async def start_batch_check(
+    request: BatchUrlsRequest,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
     """
     Start a batch of reference checks from a list of URLs/ArXiv IDs.
     
@@ -958,6 +1126,8 @@ async def start_batch_check(request: BatchUrlsRequest):
         batch_id = str(uuid.uuid4())
         batch_label = request.batch_label or f"Batch of {len(request.urls)} papers"
         
+        user_id = get_user_id_filter(current_user)
+
         # Get API key from config if provided
         api_key = None
         endpoint = None
@@ -965,9 +1135,12 @@ async def start_batch_check(request: BatchUrlsRequest):
         llm_model = request.llm_model
         
         if request.llm_config_id and request.use_llm:
-            config = await db.get_llm_config_by_id(request.llm_config_id)
+            config = await db.get_llm_config_by_id(request.llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if AUTH_ENABLED and current_user is not None:
+                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
+                else:
+                    api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -989,7 +1162,8 @@ async def start_batch_check(request: BatchUrlsRequest):
                 llm_provider=llm_provider if request.use_llm else None,
                 llm_model=llm_model if request.use_llm else None,
                 batch_id=batch_id,
-                batch_label=batch_label
+                batch_label=batch_label,
+                user_id=user_id,
             )
             
             # Start check in background
@@ -1037,7 +1211,8 @@ async def start_batch_check_files(
     llm_config_id: Optional[int] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
-    use_llm: bool = Form(True)
+    use_llm: bool = Form(True),
+    current_user: Optional[UserInfo] = Depends(require_user),
 ):
     """
     Start a batch of reference checks from uploaded files.
@@ -1058,11 +1233,15 @@ async def start_batch_check_files(
         # Get API key from config if provided
         api_key = None
         endpoint = None
-        
+        user_id = get_user_id_filter(current_user)
+
         if llm_config_id and use_llm:
-            config = await db.get_llm_config_by_id(llm_config_id)
+            config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if AUTH_ENABLED and current_user is not None:
+                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
+                else:
+                    api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -1131,7 +1310,8 @@ async def start_batch_check_files(
                 llm_model=llm_model if use_llm else None,
                 batch_id=batch_id,
                 batch_label=label,
-                original_filename=file_info['filename']
+                original_filename=file_info['filename'],
+                user_id=user_id,
             )
             
             cancel_event = asyncio.Event()
@@ -1348,10 +1528,14 @@ async def recheck_batch(batch_id: str):
 
 
 @app.delete("/api/history/{check_id}")
-async def delete_check(check_id: int):
+async def delete_check(
+    check_id: int,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
     """Delete a check from history"""
     try:
-        success = await db.delete_check(check_id)
+        user_id = get_user_id_filter(current_user)
+        success = await db.delete_check(check_id, user_id=user_id)
         if success:
             return {"message": "Check deleted successfully"}
         else:
@@ -1382,10 +1566,11 @@ async def update_check_label(check_id: int, update: CheckLabelUpdate):
 # LLM Configuration endpoints
 
 @app.get("/api/llm-configs")
-async def get_llm_configs():
+async def get_llm_configs(current_user: Optional[UserInfo] = Depends(require_user)):
     """Get all LLM configurations (API keys are not returned)"""
     try:
-        configs = await db.get_llm_configs()
+        user_id = get_user_id_filter(current_user)
+        configs = await db.get_llm_configs(user_id=user_id)
         return configs
     except Exception as e:
         logger.error(f"Error getting LLM configs: {e}", exc_info=True)
@@ -1393,15 +1578,25 @@ async def get_llm_configs():
 
 
 @app.post("/api/llm-configs")
-async def create_llm_config(config: LLMConfigCreate):
+async def create_llm_config(
+    config: LLMConfigCreate,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
     """Create a new LLM configuration"""
     try:
+        user_id = get_user_id_filter(current_user)
+        # When auth is enabled, do not store the API key in the database
+        api_key_to_store = None if (AUTH_ENABLED and current_user is not None) else config.api_key
+        # If auth is enabled and an API key was provided, store it in memory
+        if AUTH_ENABLED and current_user is not None and config.api_key:
+            store_user_api_key(current_user.id, config.provider, config.api_key)
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
             model=config.model,
-            api_key=config.api_key,
-            endpoint=config.endpoint
+            api_key=api_key_to_store,
+            endpoint=config.endpoint,
+            user_id=user_id,
         )
         # Return the created config (without API key)
         return {
@@ -1460,10 +1655,14 @@ async def delete_llm_config(config_id: int):
 
 
 @app.post("/api/llm-configs/{config_id}/set-default")
-async def set_default_llm_config(config_id: int):
+async def set_default_llm_config(
+    config_id: int,
+    current_user: Optional[UserInfo] = Depends(require_user),
+):
     """Set an LLM configuration as the default"""
     try:
-        success = await db.set_default_llm_config(config_id)
+        user_id = get_user_id_filter(current_user)
+        success = await db.set_default_llm_config(config_id, user_id=user_id)
         if success:
             return {"message": "Default config set successfully"}
         else:
