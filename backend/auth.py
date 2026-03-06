@@ -423,10 +423,13 @@ async def get_current_user(request: Request) -> UserInfo:
 
 
 async def require_user(
-    current_user: UserInfo = Depends(get_current_user),
+    request: Request,
 ) -> UserInfo:
-    """Dependency alias for get_current_user (always requires auth)."""
-    return current_user
+    """Return the authenticated user, or a default local user in single-user mode."""
+    # Single-user mode: no OAuth providers configured → skip auth
+    if not get_available_providers():
+        return UserInfo(id=0, name="Local User", provider="local", is_admin=True)
+    return await get_current_user(request)
 
 
 def get_user_id_filter(user: UserInfo) -> int:

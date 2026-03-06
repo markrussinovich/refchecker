@@ -170,10 +170,22 @@ function startBackend() {
   
   // Run backend as module from project root to handle relative imports
   // Use detached: true on Windows to prevent the child process from being killed when parent terminal changes
+  // Strip multi-user auth env vars so local dev always starts in single-user mode.
+  // To run multi-user locally, use `python -m backend` directly (which loads .env).
+  const backendEnv = { ...process.env };
+  delete backendEnv.JWT_SECRET_KEY;
+  delete backendEnv.GITHUB_CLIENT_ID;
+  delete backendEnv.GITHUB_CLIENT_SECRET;
+  delete backendEnv.GOOGLE_CLIENT_ID;
+  delete backendEnv.GOOGLE_CLIENT_SECRET;
+  delete backendEnv.MS_CLIENT_ID;
+  delete backendEnv.MS_CLIENT_SECRET;
+  backendEnv.REFCHECKER_SKIP_DOTENV = '1';
+
   const backend = spawn(python, ['-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000'], {
     cwd: rootDir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: backendEnv,
     shell: false,  // Don't use shell - it causes issues on Windows
     detached: !isWindows,  // Use process groups on Unix for cleanup
     windowsHide: true  // Hide console window on Windows

@@ -16,13 +16,16 @@ Usage:
     uvicorn backend.main:app --host 0.0.0.0 --port 8000
 """
 
-# Load .env before any other imports so auth/config modules see the values
-try:
-    from pathlib import Path as _Path
-    from dotenv import load_dotenv as _load_dotenv
-    _load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
-except ImportError:
-    pass
+# Load .env before any other imports so auth/config modules see the values.
+# Skip when REFCHECKER_SKIP_DOTENV is set (e.g. npm start launches single-user mode).
+import os as _os
+if not _os.environ.get('REFCHECKER_SKIP_DOTENV'):
+    try:
+        from pathlib import Path as _Path
+        from dotenv import load_dotenv as _load_dotenv
+        _load_dotenv(_Path(__file__).resolve().parent.parent / ".env")
+    except ImportError:
+        pass
 
 from .main import app
 

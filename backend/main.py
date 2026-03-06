@@ -309,14 +309,16 @@ async def auth_logout():
 @app.websocket("/api/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time updates"""
-    token = websocket.cookies.get("rc_auth")
-    if not token:
-        await websocket.close(code=4001, reason="Unauthorized")
-        return
-    token_data = decode_access_token(token)
-    if not token_data:
-        await websocket.close(code=4001, reason="Invalid token")
-        return
+    # In single-user mode (no OAuth providers), skip auth check
+    if get_available_providers():
+        token = websocket.cookies.get("rc_auth")
+        if not token:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+        token_data = decode_access_token(token)
+        if not token_data:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
     await manager.connect(websocket, session_id)
     try:
         # Keep connection alive and handle incoming messages

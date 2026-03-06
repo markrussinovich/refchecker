@@ -54,6 +54,13 @@ export const useAuthStore = create((set, get) => {
         const providers = provResp.data.providers || []
         logger.info('AuthStore', `Providers: ${providers}`)
 
+        // No OAuth providers configured → single-user mode, skip auth
+        if (providers.length === 0) {
+          logger.info('AuthStore', 'No providers configured — single-user mode')
+          set({ providers: [], user: { id: 0, name: 'Local User', provider: 'local' }, isLoading: false })
+          return
+        }
+
         try {
           const meResp = await api.getAuthMe()
           const user = meResp.data.user || null
