@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
-import { useAuthStore } from '../../stores/useAuthStore'
+import { useKeyStore } from '../../stores/useKeyStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -19,10 +19,10 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
 
-  // Auth store for in-memory API key management
-  const { authEnabled, apiKeyProviders, storeApiKey, removeApiKey } = useAuthStore()
+  // Key store for browser-localStorage LLM API key management
+  const { hasKey, setKey, deleteKey } = useKeyStore()
 
-  // In-memory LLM API key state (multi-user mode)
+  // In-memory LLM API key state
   const LLM_PROVIDERS = ['anthropic', 'openai', 'google', 'gemini']
   const [llmKeyInputs, setLlmKeyInputs] = useState({})   // provider -> string
   const [llmKeyEditing, setLlmKeyEditing] = useState({}) // provider -> bool
@@ -231,18 +231,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAPIKeysSection = () => (
     <div className="space-y-1">
-      {/* In-memory LLM API Keys (only shown when auth is enabled) */}
-      {authEnabled && (
-        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+      {/* LLM API Keys (stored in browser localStorage) */}
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
             LLM API Keys
           </div>
           <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-            Keys are stored in server memory only and cleared when the server restarts.
+            Keys are stored in your browser&apos;s local storage only.
           </div>
           <div className="space-y-3">
             {LLM_PROVIDERS.map((provider) => {
-              const hasKey = apiKeyProviders.includes(provider)
+              const hasKeyForProvider = hasKey(provider)
               const isEditing = !!llmKeyEditing[provider]
               const isSaving = !!llmKeySaving[provider]
               const inputValue = llmKeyInputs[provider] || ''
@@ -253,7 +252,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       <span className="text-sm capitalize font-medium" style={{ color: 'var(--color-text-primary)' }}>
                         {provider}
                       </span>
-                      {hasKey ? (
+                      {hasKeyForProvider ? (
                         <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)' }}>
                           ✓ Set
                         </span>
@@ -268,14 +267,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                           className="text-xs px-2 py-1 rounded cursor-pointer"
                           style={{ color: 'var(--color-accent)' }}
                         >
-                          {hasKey ? 'Change' : 'Set'}
+                          {hasKeyForProvider ? 'Change' : 'Set'}
                         </button>
                       )}
-                      {!isEditing && hasKey && (
+                      {!isEditing && hasKeyForProvider && (
                         <button
-                          onClick={async () => {
+                          onClick={() => {
                             setLlmKeySaving(s => ({ ...s, [provider]: true }))
-                            try { await removeApiKey(provider) } finally {
+                            try { deleteKey(provider) } finally {
                               setLlmKeySaving(s => ({ ...s, [provider]: false }))
                             }
                           }}
@@ -302,11 +301,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                         }}
                         disabled={isSaving}
                         autoFocus
-                        onKeyDown={async (e) => {
+                        onKeyDown={(e) => {
                           if (e.key === 'Enter' && inputValue.trim()) {
                             setLlmKeySaving(s => ({ ...s, [provider]: true }))
                             try {
-                              await storeApiKey(provider, inputValue.trim())
+                              setKey(provider, inputValue.trim())
                               setLlmKeyEditing(s => ({ ...s, [provider]: false }))
                               setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
                             } finally {
@@ -320,11 +319,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                         }}
                       />
                       <button
-                        onClick={async () => {
+                        onClick={() => {
                           if (!inputValue.trim()) return
                           setLlmKeySaving(s => ({ ...s, [provider]: true }))
                           try {
-                            await storeApiKey(provider, inputValue.trim())
+                            setKey(provider, inputValue.trim())
                             setLlmKeyEditing(s => ({ ...s, [provider]: false }))
                             setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
                           } finally {
@@ -354,7 +353,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             })}
           </div>
         </div>
-      )}
 
       {/* Semantic Scholar API Key */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>

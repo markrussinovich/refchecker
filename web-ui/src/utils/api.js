@@ -4,26 +4,13 @@ import { logger } from './logger'
 const api = axios.create({
   baseURL: '/api',
   timeout: 30000,
+  withCredentials: true, // send rc_auth cookie on every request
 })
 
-// -----------------------------------------------------------------------
-// Auth token management
-// The token is injected into every request via the request interceptor.
-// -----------------------------------------------------------------------
-let _authToken = null
-
-export const setAuthToken = (token) => {
-  _authToken = token
-}
-
-// Request interceptor for logging + auth header injection
+// Request interceptor for logging
 api.interceptors.request.use(
   (config) => {
     logger.debug('API', `${config.method?.toUpperCase()} ${config.url}`, config.data)
-    if (_authToken) {
-      config.headers = config.headers || {}
-      config.headers['Authorization'] = `Bearer ${_authToken}`
-    }
     return config
   },
   (error) => {
@@ -32,17 +19,23 @@ api.interceptors.request.use(
   }
 )
 
-// Response interceptor for logging
+// Response interceptor: logging + 401 handler
 api.interceptors.response.use(
   (response) => {
     logger.debug('API', `Response ${response.status} from ${response.config.url}`)
     return response
   },
   (error) => {
+    if (error.response?.status === 401) {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    }
     logger.error('API', `Error from ${error.config?.url}`, error.response?.data || error.message)
     return Promise.reject(error)
   }
 )
+
+// No-op kept for backward compat (tests may reference it)
+export const setAuthToken = (_token) => {}
 
 // Health check
 export const health = () => api.get('/health')
@@ -53,11 +46,6 @@ export const health = () => api.get('/health')
 export const getAuthProviders = () => api.get('/auth/providers')
 export const getAuthMe = () => api.get('/auth/me')
 export const authLogout = () => api.post('/auth/logout')
-
-// In-memory user API key management (multi-user mode)
-export const getUserApiKeyProviders = () => api.get('/user/api-keys')
-export const setUserApiKey = (provider, apiKey) => api.post('/user/api-keys', { provider, api_key: apiKey })
-export const deleteUserApiKey = (provider) => api.delete(`/user/api-keys/${provider}`)
 
 // LLM Configurations
 export const getLLMConfigs = () => api.get('/llm-configs')
@@ -92,13 +80,11 @@ export const recheck = (id) => api.post(`/recheck/${id}`)
 export const clearCache = () => api.delete('/admin/cache')
 export const clearDatabase = () => api.delete('/admin/database')
 
-// WebSocket connection factory
+// WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const host = window.location.host
-  // Include auth token as query param (WS headers are not easily settable)
-  const tokenParam = _authToken ? `?token=${encodeURIComponent(_authToken)}` : ''
-  const wsUrl = `${protocol}//${host}/api/ws/${sessionId}${tokenParam}`
+  const wsUrl = `${protocol}//${host}/api/ws/${sessionId}`
   
   logger.info('WebSocket', `Connecting to ${wsUrl}`)
   
@@ -137,9 +123,6 @@ export default {
   getAuthProviders,
   getAuthMe,
   authLogout,
-  getUserApiKeyProviders,
-  setUserApiKey,
-  deleteUserApiKey,
   setAuthToken,
   getLLMConfigs,
   createLLMConfig,

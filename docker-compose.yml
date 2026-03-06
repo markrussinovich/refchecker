@@ -29,6 +29,24 @@ services:
       - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
       # Data directory (inside container)
       - REFCHECKER_DATA_DIR=/app/data
+      # Multi-user auth
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - SITE_URL=${SITE_URL:-}
+      - HTTPS_ONLY=${HTTPS_ONLY:-false}
+      - MAX_CHECKS_PER_USER=${MAX_CHECKS_PER_USER:-3}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
+      # Google OAuth
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI:-}
+      # GitHub OAuth
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI:-}
+      # Microsoft OAuth
+      - MS_CLIENT_ID=${MS_CLIENT_ID:-}
+      - MS_CLIENT_SECRET=${MS_CLIENT_SECRET:-}
+      - MS_REDIRECT_URI=${MS_REDIRECT_URI:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]

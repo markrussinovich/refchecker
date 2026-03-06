@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { useAuthStore } from '../../stores/useAuthStore'
 
 /**
- * Login page shown when AUTH_ENABLED=true and the user is not authenticated.
- * Provides Google and GitHub sign-in buttons.
+ * Login page shown when the user is not authenticated.
+ * Renders sign-in buttons only for providers returned by the server.
  */
 export default function LoginPage() {
-  const { loginWithGoogle, loginWithGithub, error } = useAuthStore()
+  const { providers, loginWithGoogle, loginWithGithub, loginWithMicrosoft, error } = useAuthStore()
   const [isRedirecting, setIsRedirecting] = useState(false)
   const [redirectTarget, setRedirectTarget] = useState(null)
 
@@ -20,6 +20,12 @@ export default function LoginPage() {
     setIsRedirecting(true)
     setRedirectTarget('github')
     loginWithGithub()
+  }
+
+  const handleMicrosoft = () => {
+    setIsRedirecting(true)
+    setRedirectTarget('microsoft')
+    loginWithMicrosoft()
   }
 
   return (
@@ -80,20 +86,41 @@ export default function LoginPage() {
 
         {/* Sign-in buttons */}
         <div className="w-full flex flex-col gap-3">
-          <SignInButton
-            onClick={handleGoogle}
-            loading={isRedirecting && redirectTarget === 'google'}
-            disabled={isRedirecting}
-            label="Continue with Google"
-            icon={<GoogleIcon />}
-          />
-          <SignInButton
-            onClick={handleGithub}
-            loading={isRedirecting && redirectTarget === 'github'}
-            disabled={isRedirecting}
-            label="Continue with GitHub"
-            icon={<GitHubIcon />}
-          />
+          {providers.length === 0 ? (
+            <p className="text-sm text-center" style={{ color: 'var(--color-text-secondary)' }}>
+              No OAuth providers are configured. Contact your administrator.
+            </p>
+          ) : (
+            <>
+              {providers.includes('google') && (
+                <SignInButton
+                  onClick={handleGoogle}
+                  loading={isRedirecting && redirectTarget === 'google'}
+                  disabled={isRedirecting}
+                  label="Continue with Google"
+                  icon={<GoogleIcon />}
+                />
+              )}
+              {providers.includes('github') && (
+                <SignInButton
+                  onClick={handleGithub}
+                  loading={isRedirecting && redirectTarget === 'github'}
+                  disabled={isRedirecting}
+                  label="Continue with GitHub"
+                  icon={<GitHubIcon />}
+                />
+              )}
+              {providers.includes('microsoft') && (
+                <SignInButton
+                  onClick={handleMicrosoft}
+                  loading={isRedirecting && redirectTarget === 'microsoft'}
+                  disabled={isRedirecting}
+                  label="Continue with Microsoft"
+                  icon={<MicrosoftIcon />}
+                />
+              )}
+            </>
+          )}
         </div>
 
         <p
@@ -170,7 +197,16 @@ function GoogleIcon() {
   )
 }
 
-function GitHubIcon() {
+function MicrosoftIcon() {
+  return (
+    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
+      <path d="M11.4 2H2v9.4h9.4V2z" fill="#F25022" />
+      <path d="M22 2h-9.4v9.4H22V2z" fill="#7FBA00" />
+      <path d="M11.4 12.6H2V22h9.4v-9.4z" fill="#00A4EF" />
+      <path d="M22 12.6h-9.4V22H22v-9.4z" fill="#FFB900" />
+    </svg>
+  )
+}
   return (
     <svg className="w-5 h-5 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
       <path

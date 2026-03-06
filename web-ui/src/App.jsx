@@ -17,7 +17,7 @@ function App() {
   })
 
   // Auth state
-  const { authEnabled, user, isLoading: authLoading, init: initAuth } = useAuthStore()
+  const { user, isLoading: authLoading, init: initAuth } = useAuthStore()
 
   // Initialise auth once on mount
   useEffect(() => {
@@ -68,8 +68,8 @@ function App() {
     )
   }
 
-  // When auth is required and no user is logged in, show the login page
-  if (authEnabled && !user) {
+  // When no user is logged in, show the login page
+  if (!user) {
     return <LoginPage />
   }
 

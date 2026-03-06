@@ -703,11 +703,12 @@ class Database:
                         WHERE id = ?
                     """, (email, name, avatar_url, user_id))
                 else:
-                    # Create new user
+                    # Determine is_admin: first-ever user, or email in ADMIN_EMAILS
+                    is_admin = await self._should_be_admin(db, email)
                     cursor = await db.execute("""
                         INSERT INTO users (provider, provider_id, email, name, avatar_url, is_admin)
-                        VALUES (?, ?, ?, ?, ?, 0)
-                    """, (provider, provider_id, email, name, avatar_url))
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (provider, provider_id, email, name, avatar_url, 1 if is_admin else 0))
                     user_id = cursor.lastrowid
 
             # Upsert oauth_accounts record
@@ -718,6 +719,27 @@ class Database:
             """, (user_id, provider, provider_id))
             await db.commit()
             return user_id
+
+    async def _should_be_admin(self, db: aiosqlite.Connection, email: Optional[str]) -> bool:
+        """Return True if the new user should be granted admin rights.
+
+        A user is an admin if:
+        1. They are the very first user in the database, OR
+        2. Their email is listed in the ADMIN_EMAILS env var
+           (comma-separated, case-insensitive).
+        """
+        import os
+        # Check ADMIN_EMAILS
+        admin_emails_env = os.environ.get("ADMIN_EMAILS", "")
+        if email and admin_emails_env:
+            admin_list = [e.strip().lower() for e in admin_emails_env.split(",") if e.strip()]
+            if email.lower() in admin_list:
+                return True
+        # First user heuristic: no existing users yet
+        async with db.execute("SELECT COUNT(*) FROM users") as cursor:
+            row = await cursor.fetchone()
+            user_count = row[0] if row else 0
+        return user_count == 0
 
     async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user by their internal ID."""

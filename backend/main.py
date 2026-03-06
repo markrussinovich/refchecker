@@ -7,7 +7,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -45,6 +45,7 @@ from .auth import (
     exchange_github_code,
     exchange_microsoft_code,
     create_access_token,
+    decode_access_token,
     set_auth_cookie,
     clear_auth_cookie,
     UserInfo,
@@ -110,6 +111,7 @@ class BatchUrlsRequest(BaseModel):
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
     use_llm: bool = True
+    api_key: Optional[str] = None
 
 
 # Create FastAPI app
@@ -118,10 +120,20 @@ app = FastAPI(title="RefChecker Web UI API", version="1.0.0")
 # Static files directory for bundled frontend
 STATIC_DIR = Path(__file__).parent / "static"
 
-# Configure CORS for local development
+# Configure CORS — include SITE_URL origin plus standard dev origins
+_SITE_URL = os.environ.get("SITE_URL", "")
+_cors_origins = [
+    "http://localhost:5173", "http://127.0.0.1:5173",
+    "http://localhost:5174", "http://localhost:5175",
+    "http://127.0.0.1:5174", "http://127.0.0.1:5175",
+    "http://localhost:8000", "http://127.0.0.1:8000",
+]
+if _SITE_URL and _SITE_URL not in _cors_origins:
+    _cors_origins.append(_SITE_URL)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://localhost:5175", "http://127.0.0.1:5174", "http://127.0.0.1:5175", "http://localhost:8000", "http://127.0.0.1:8000"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -129,6 +141,30 @@ app.add_middleware(
 
 # Track active check sessions
 active_checks = {}
+
+# Per-user concurrent check tracking
+_user_active_checks: Dict[int, int] = {}
+_user_active_checks_lock = asyncio.Lock()
+MAX_CHECKS_PER_USER = int(os.environ.get("MAX_CHECKS_PER_USER", "3"))
+
+
+async def _acquire_user_check_slot(user_id: int) -> bool:
+    if user_id == 0:
+        return True  # opt-out sentinel (e.g., unauthenticated recheck)
+    async with _user_active_checks_lock:
+        current = _user_active_checks.get(user_id, 0)
+        if current >= MAX_CHECKS_PER_USER:
+            return False
+        _user_active_checks[user_id] = current + 1
+        return True
+
+
+async def _release_user_check_slot(user_id: int) -> None:
+    if user_id == 0:
+        return  # opt-out sentinel — nothing to release
+    async with _user_active_checks_lock:
+        current = _user_active_checks.get(user_id, 0)
+        _user_active_checks[user_id] = max(0, current - 1)
 
 
 def _session_id_for_check(check_id: int) -> Optional[str]:
@@ -272,6 +308,14 @@ async def auth_logout():
 @app.websocket("/api/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time updates"""
+    token = websocket.cookies.get("rc_auth")
+    if not token:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+    token_data = decode_access_token(token)
+    if not token_data:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
     await manager.connect(websocket, session_id)
     try:
         # Keep connection alive and handle incoming messages
@@ -294,7 +338,8 @@ async def start_check(
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
-    current_user: Optional[UserInfo] = Depends(require_user),
+    api_key: Optional[str] = Form(None),
+    current_user: UserInfo = Depends(require_user),
 ):
     """
     Start a new reference check
@@ -303,7 +348,8 @@ async def start_check(
         source_type: 'url' or 'file'
         source_value: URL or ArXiv ID (for url type)
         file: Uploaded file (for file type)
-        llm_config_id: ID of the LLM config to use (for retrieving API key)
+        api_key: API key from client (sent per-request, never stored)
+        llm_config_id: ID of the LLM config to use (for provider/model/endpoint)
         llm_provider: LLM provider to use
         llm_model: Specific model to use
         use_llm: Whether to use LLM for extraction
@@ -311,19 +357,21 @@ async def start_check(
     Returns:
         Session ID for tracking progress via WebSocket
     """
+    slot_acquired = False
     try:
         # Generate session ID
         session_id = str(uuid.uuid4())
 
         user_id = get_user_id_filter(current_user)
 
-        # Retrieve API key from config if config_id provided
-        api_key = None
+        # api_key from form (client localStorage) takes precedence over config stored key
+        effective_api_key = api_key
         endpoint = None
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if not effective_api_key:
+                    effective_api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -336,8 +384,8 @@ async def start_check(
         paper_title = "Processing..."  # Placeholder title until we parse the paper
         original_filename = None  # Only set for file uploads
         if source_type == "file" and file:
-            # Save uploaded file to permanent uploads directory
-            uploads_dir = Path(__file__).parent / "uploads"
+            # Save uploaded file to user-isolated uploads directory
+            uploads_dir = Path(__file__).parent / "uploads" / str(user_id)
             uploads_dir.mkdir(parents=True, exist_ok=True)
             # Use check-specific naming to avoid conflicts
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
@@ -368,6 +416,14 @@ async def start_check(
         if not paper_source:
             raise HTTPException(status_code=400, detail="No source provided")
 
+        # Rate limiting: enforce per-user concurrent check limit
+        if not await _acquire_user_check_slot(user_id):
+            raise HTTPException(
+                status_code=429,
+                detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
+            )
+        slot_acquired = True
+
         # Create history entry immediately (in_progress status)
         check_id = await db.create_pending_check(
             paper_title=paper_title,
@@ -383,8 +439,9 @@ async def start_check(
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, api_key, endpoint, use_llm, cancel_event)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id)
         )
+        slot_acquired = False  # ownership transferred to run_check's finally block
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id}
 
         return {
@@ -394,7 +451,13 @@ async def start_check(
             "source": paper_source
         }
 
+    except HTTPException:
+        if slot_acquired:
+            await _release_user_check_slot(user_id)
+        raise
     except Exception as e:
+        if slot_acquired:
+            await _release_user_check_slot(user_id)
         logger.error(f"Error starting check: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -409,7 +472,8 @@ async def run_check(
     api_key: Optional[str],
     endpoint: Optional[str],
     use_llm: bool,
-    cancel_event: asyncio.Event
+    cancel_event: asyncio.Event,
+    user_id: int = 0,
 ):
     """
     Run reference check in background and emit progress updates
@@ -564,12 +628,13 @@ async def run_check(
         })
     finally:
         active_checks.pop(session_id, None)
+        await _release_user_check_slot(user_id)
 
 
 @app.get("/api/history")
 async def get_history(
     limit: int = 50,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """Get check history (filtered by the authenticated user when auth is enabled)"""
     try:
@@ -593,7 +658,7 @@ async def get_history(
 @app.get("/api/history/{check_id}")
 async def get_check_detail(
     check_id: int,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """Get detailed results for a specific check"""
     try:
@@ -1012,10 +1077,11 @@ async def recheck(check_id: int):
                 source_type,
                 llm_provider,
                 llm_model,
-                None,  # API key will need to be retrieved separately
-                None,  # Endpoint will need to be retrieved separately
+                None,  # no API key for recheck (not available without re-auth)
+                None,  # no endpoint for recheck
                 True,
-                cancel_event
+                cancel_event,
+                0,  # no per-user rate tracking for recheck
             )
         )
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": new_check_id}
@@ -1050,7 +1116,7 @@ async def cancel_check(session_id: str):
 @app.post("/api/check/batch")
 async def start_batch_check(
     request: BatchUrlsRequest,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """
     Start a batch of reference checks from a list of URLs/ArXiv IDs.
@@ -1075,8 +1141,8 @@ async def start_batch_check(
         
         user_id = get_user_id_filter(current_user)
 
-        # Get API key from config if provided
-        api_key = None
+        # api_key from request body takes precedence over config stored key
+        effective_api_key = request.api_key
         endpoint = None
         llm_provider = request.llm_provider
         llm_model = request.llm_model
@@ -1084,18 +1150,31 @@ async def start_batch_check(
         if request.llm_config_id and request.use_llm:
             config = await db.get_llm_config_by_id(request.llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if not effective_api_key:
+                    effective_api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
-        
+
+        valid_urls = [u.strip() for u in request.urls if u.strip()]
+
+        # Pre-acquire one slot per URL to enforce per-user rate limit atomically
+        slots_needed = len(valid_urls)
+        slots_acquired = 0
+        for _ in range(slots_needed):
+            if not await _acquire_user_check_slot(user_id):
+                # Release slots already acquired
+                for _ in range(slots_acquired):
+                    await _release_user_check_slot(user_id)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
+                )
+            slots_acquired += 1
+
         checks = []
         
-        for url in request.urls:
-            url = url.strip()
-            if not url:
-                continue
-            
+        for url in valid_urls:
             session_id = str(uuid.uuid4())
             
             # Create pending check entry with batch info
@@ -1110,13 +1189,13 @@ async def start_batch_check(
                 user_id=user_id,
             )
             
-            # Start check in background
+            # Start check in background (run_check's finally will release the slot)
             cancel_event = asyncio.Event()
             task = asyncio.create_task(
                 run_check(
                     session_id, check_id, url, 'url',
-                    llm_provider, llm_model, api_key, endpoint,
-                    request.use_llm, cancel_event
+                    llm_provider, llm_model, effective_api_key, endpoint,
+                    request.use_llm, cancel_event, user_id
                 )
             )
             active_checks[session_id] = {
@@ -1156,7 +1235,8 @@ async def start_batch_check_files(
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
-    current_user: Optional[UserInfo] = Depends(require_user),
+    api_key: Optional[str] = Form(None),
+    current_user: UserInfo = Depends(require_user),
 ):
     """
     Start a batch of reference checks from uploaded files.
@@ -1171,18 +1251,20 @@ async def start_batch_check_files(
         
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
-        uploads_dir = Path(__file__).parent / "uploads"
+
+        user_id = get_user_id_filter(current_user)
+        uploads_dir = Path(__file__).parent / "uploads" / str(user_id)
         uploads_dir.mkdir(parents=True, exist_ok=True)
         
-        # Get API key from config if provided
-        api_key = None
+        # api_key from form takes precedence over config stored key
+        effective_api_key = api_key
         endpoint = None
-        user_id = get_user_id_filter(current_user)
 
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                api_key = config.get('api_key')
+                if not effective_api_key:
+                    effective_api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -1238,6 +1320,19 @@ async def start_batch_check_files(
             raise HTTPException(status_code=400, detail="No valid files found")
         
         label = batch_label or f"Batch of {len(files_to_process)} files"
+
+        # Pre-acquire one slot per file to enforce per-user rate limit atomically
+        slots_needed = len(files_to_process)
+        slots_acquired = 0
+        for _ in range(slots_needed):
+            if not await _acquire_user_check_slot(user_id):
+                for _ in range(slots_acquired):
+                    await _release_user_check_slot(user_id)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
+                )
+            slots_acquired += 1
         
         checks = []
         for file_info in files_to_process:
@@ -1259,8 +1354,8 @@ async def start_batch_check_files(
             task = asyncio.create_task(
                 run_check(
                     session_id, check_id, file_info['path'], 'file',
-                    llm_provider, llm_model, api_key, endpoint,
-                    use_llm, cancel_event
+                    llm_provider, llm_model, effective_api_key, endpoint,
+                    use_llm, cancel_event, user_id
                 )
             )
             active_checks[session_id] = {
@@ -1432,7 +1527,7 @@ async def recheck_batch(batch_id: str):
             task = asyncio.create_task(
                 run_check(
                     session_id, check_id, source, source_type,
-                    llm_provider, llm_model, None, None, True, cancel_event
+                    llm_provider, llm_model, None, None, True, cancel_event, 0
                 )
             )
             active_checks[session_id] = {
@@ -1471,7 +1566,7 @@ async def recheck_batch(batch_id: str):
 @app.delete("/api/history/{check_id}")
 async def delete_check(
     check_id: int,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """Delete a check from history"""
     try:
@@ -1507,7 +1602,7 @@ async def update_check_label(check_id: int, update: CheckLabelUpdate):
 # LLM Configuration endpoints
 
 @app.get("/api/llm-configs")
-async def get_llm_configs(current_user: Optional[UserInfo] = Depends(require_user)):
+async def get_llm_configs(current_user: UserInfo = Depends(require_user)):
     """Get all LLM configurations (API keys are not returned)"""
     try:
         user_id = get_user_id_filter(current_user)
@@ -1521,7 +1616,7 @@ async def get_llm_configs(current_user: Optional[UserInfo] = Depends(require_use
 @app.post("/api/llm-configs")
 async def create_llm_config(
     config: LLMConfigCreate,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """Create a new LLM configuration"""
     try:
@@ -1591,7 +1686,7 @@ async def delete_llm_config(config_id: int):
 @app.post("/api/llm-configs/{config_id}/set-default")
 async def set_default_llm_config(
     config_id: int,
-    current_user: Optional[UserInfo] = Depends(require_user),
+    current_user: UserInfo = Depends(require_user),
 ):
     """Set an LLM configuration as the default"""
     try:
@@ -1896,8 +1991,10 @@ async def update_setting(setting_key: str, update: SettingUpdate):
 # Debug/Admin endpoints
 
 @app.delete("/api/admin/cache")
-async def clear_verification_cache():
+async def clear_verification_cache(current_user: UserInfo = Depends(require_user)):
     """Clear the verification cache"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
     try:
         count = await db.clear_verification_cache()
         logger.info(f"Cleared {count} entries from verification cache")
@@ -1908,8 +2005,10 @@ async def clear_verification_cache():
 
 
 @app.delete("/api/admin/database")
-async def clear_database():
+async def clear_database(current_user: UserInfo = Depends(require_user)):
     """Clear all data (cache + history) but keep settings and LLM configs"""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
     try:
         # Clear verification cache
         cache_count = await db.clear_verification_cache()

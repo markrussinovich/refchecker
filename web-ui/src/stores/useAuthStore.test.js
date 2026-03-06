@@ -2,43 +2,28 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
 // Mock window.location for redirect tests
-const mockLocationHref = vi.fn()
 Object.defineProperty(window, 'location', {
-  value: { href: '' },
+  value: { href: '', search: '' },
   writable: true,
 })
-
-// Mock sessionStorage
-const sessionStorageMock = (() => {
-  let store = {}
-  return {
-    getItem: vi.fn((key) => store[key] || null),
-    setItem: vi.fn((key, value) => { store[key] = value }),
-    removeItem: vi.fn((key) => { delete store[key] }),
-    clear: vi.fn(() => { store = {} }),
-  }
-})()
-Object.defineProperty(window, 'sessionStorage', { value: sessionStorageMock })
 
 // Mock history.replaceState
 window.history.replaceState = vi.fn()
 
 // Mock the api module
 vi.mock('../utils/api', () => ({
-  getAuthProviders: vi.fn(() => Promise.resolve({ data: { auth_enabled: false, providers: [] } })),
-  getAuthMe: vi.fn(() => Promise.resolve({ data: { auth_enabled: true, user: { id: 1, email: 'test@example.com', name: 'Test User', avatar_url: null, provider: 'google' } } })),
+  getAuthProviders: vi.fn(() => Promise.resolve({ data: { providers: ['google', 'github'] } })),
+  getAuthMe: vi.fn(() => Promise.resolve({ data: { user: { id: 1, email: 'test@example.com', name: 'Test User', avatar_url: null, provider: 'google' } } })),
   authLogout: vi.fn(() => Promise.resolve({})),
-  getUserApiKeyProviders: vi.fn(() => Promise.resolve({ data: { providers: [] } })),
-  setUserApiKey: vi.fn(() => Promise.resolve({})),
-  deleteUserApiKey: vi.fn(() => Promise.resolve({})),
   setAuthToken: vi.fn(),
 }))
 
 describe('useAuthStore', () => {
   beforeEach(() => {
     vi.resetModules()
-    sessionStorageMock.clear()
     vi.clearAllMocks()
+    window.location.href = ''
+    window.location.search = ''
   })
 
   it('should initialize with isLoading true', async () => {
@@ -47,9 +32,10 @@ describe('useAuthStore', () => {
     expect(result.current.isLoading).toBe(true)
   })
 
-  it('should set authEnabled to false when server says auth is disabled', async () => {
-    const { getAuthProviders } = await import('../utils/api')
-    getAuthProviders.mockResolvedValueOnce({ data: { auth_enabled: false, providers: [] } })
+  it('should populate providers and user when already logged in', async () => {
+    const { getAuthProviders, getAuthMe } = await import('../utils/api')
+    getAuthProviders.mockResolvedValueOnce({ data: { providers: ['google', 'github'] } })
+    getAuthMe.mockResolvedValueOnce({ data: { user: { id: 1, email: 'test@example.com', name: 'Test User' } } })
 
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
@@ -58,59 +44,67 @@ describe('useAuthStore', () => {
       await result.current.init()
     })
 
-    expect(result.current.authEnabled).toBe(false)
-    expect(result.current.isLoading).toBe(false)
-    expect(result.current.user).toBeNull()
-  })
-
-  it('should require login when auth enabled but no token present', async () => {
-    const { getAuthProviders } = await import('../utils/api')
-    getAuthProviders.mockResolvedValueOnce({ data: { auth_enabled: true, providers: ['google', 'github'] } })
-    sessionStorageMock.getItem.mockReturnValue(null)
-
-    const { useAuthStore } = await import('./useAuthStore')
-    const { result } = renderHook(() => useAuthStore())
-
-    await act(async () => {
-      await result.current.init()
-    })
-
-    expect(result.current.authEnabled).toBe(true)
-    expect(result.current.user).toBeNull()
-    expect(result.current.isLoading).toBe(false)
-  })
-
-  it('should authenticate when a valid token is in sessionStorage', async () => {
-    const { getAuthProviders, getAuthMe, setAuthToken } = await import('../utils/api')
-    getAuthProviders.mockResolvedValueOnce({ data: { auth_enabled: true, providers: ['google'] } })
-    sessionStorageMock.getItem.mockReturnValue('fake.jwt.token')
-    getAuthMe.mockResolvedValueOnce({
-      data: {
-        auth_enabled: true,
-        user: { id: 1, email: 'test@example.com', name: 'Test User', avatar_url: null, provider: 'google' },
-      },
-    })
-
-    const { useAuthStore } = await import('./useAuthStore')
-    const { result } = renderHook(() => useAuthStore())
-
-    await act(async () => {
-      await result.current.init()
-    })
-
-    expect(result.current.authEnabled).toBe(true)
+    expect(result.current.providers).toEqual(['google', 'github'])
     expect(result.current.user).not.toBeNull()
     expect(result.current.user.email).toBe('test@example.com')
-    expect(setAuthToken).toHaveBeenCalledWith('fake.jwt.token')
+    expect(result.current.isLoading).toBe(false)
+  })
+
+  it('should set user to null when not logged in (401 from /auth/me)', async () => {
+    const { getAuthProviders, getAuthMe } = await import('../utils/api')
+    getAuthProviders.mockResolvedValueOnce({ data: { providers: ['google', 'github'] } })
+    getAuthMe.mockRejectedValueOnce({ response: { status: 401 } })
+
+    const { useAuthStore } = await import('./useAuthStore')
+    const { result } = renderHook(() => useAuthStore())
+
+    await act(async () => {
+      await result.current.init()
+    })
+
+    expect(result.current.providers).toEqual(['google', 'github'])
+    expect(result.current.user).toBeNull()
+    expect(result.current.isLoading).toBe(false)
+  })
+
+  it('should set empty providers when server returns none', async () => {
+    const { getAuthProviders, getAuthMe } = await import('../utils/api')
+    getAuthProviders.mockResolvedValueOnce({ data: { providers: [] } })
+    getAuthMe.mockRejectedValueOnce({ response: { status: 401 } })
+
+    const { useAuthStore } = await import('./useAuthStore')
+    const { result } = renderHook(() => useAuthStore())
+
+    await act(async () => {
+      await result.current.init()
+    })
+
+    expect(result.current.providers).toEqual([])
+    expect(result.current.user).toBeNull()
+    expect(result.current.isLoading).toBe(false)
+  })
+
+  it('should handle auth_error in URL', async () => {
+    window.location.search = '?auth_error=access_denied'
+
+    const { useAuthStore } = await import('./useAuthStore')
+    const { result } = renderHook(() => useAuthStore())
+
+    await act(async () => {
+      await result.current.init()
+    })
+
+    expect(result.current.error).toContain('access_denied')
+    expect(result.current.isLoading).toBe(false)
+    expect(window.history.replaceState).toHaveBeenCalled()
   })
 
   it('should clear user state on logout', async () => {
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
 
-    // Seed state via the Zustand setState API
     await act(async () => {
-      useAuthStore.setState({ authEnabled: true, user: { id: 1, email: 'x@y.com' }, token: 'tok' })
+      useAuthStore.setState({ user: { id: 1, email: 'x@y.com' } })
     })
 
     await act(async () => {
@@ -118,11 +112,9 @@ describe('useAuthStore', () => {
     })
 
     expect(result.current.user).toBeNull()
-    expect(result.current.token).toBeNull()
-    expect(sessionStorageMock.removeItem).toHaveBeenCalledWith('refchecker_auth_token')
   })
 
-  it('loginWithGoogle should redirect to /api/auth/google', async () => {
+  it('loginWithGoogle should redirect to /api/auth/login/google', async () => {
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
 
@@ -130,10 +122,10 @@ describe('useAuthStore', () => {
       result.current.loginWithGoogle()
     })
 
-    expect(window.location.href).toBe('/api/auth/google')
+    expect(window.location.href).toBe('/api/auth/login/google')
   })
 
-  it('loginWithGithub should redirect to /api/auth/github', async () => {
+  it('loginWithGithub should redirect to /api/auth/login/github', async () => {
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
 
@@ -141,15 +133,32 @@ describe('useAuthStore', () => {
       result.current.loginWithGithub()
     })
 
-    expect(window.location.href).toBe('/api/auth/github')
+    expect(window.location.href).toBe('/api/auth/login/github')
   })
 
-  it('should expose storeApiKey and removeApiKey methods', async () => {
+  it('loginWithMicrosoft should redirect to /api/auth/login/microsoft', async () => {
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
 
-    expect(typeof result.current.storeApiKey).toBe('function')
-    expect(typeof result.current.removeApiKey).toBe('function')
-    expect(typeof result.current.hasApiKey).toBe('function')
+    act(() => {
+      result.current.loginWithMicrosoft()
+    })
+
+    expect(window.location.href).toBe('/api/auth/login/microsoft')
+  })
+
+  it('auth:unauthorized event should clear user', async () => {
+    const { useAuthStore } = await import('./useAuthStore')
+    const { result } = renderHook(() => useAuthStore())
+
+    await act(async () => {
+      useAuthStore.setState({ user: { id: 1, email: 'x@y.com' } })
+    })
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+    })
+
+    expect(result.current.user).toBeNull()
   })
 })
