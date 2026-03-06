@@ -322,10 +322,13 @@ RefChecker includes a [`render.yaml`](render.yaml) Blueprint for one-click deplo
 1. Fork this repo (or connect your own copy).
 2. On Render, click **New +** → **Blueprint** → select the repo.
 3. Render reads `render.yaml` and creates the service with a persistent disk.
-4. Set the required environment variables in the Render dashboard:
-   - `SITE_URL` — your Render app URL (e.g., `https://refchecker-xxxx.onrender.com`)
-   - At least one OAuth provider's `CLIENT_ID` / `CLIENT_SECRET`
-5. Register each provider's callback URL as `https://<your-url>/api/auth/callback/{google,github,microsoft}`.
+4. Set the required environment variables in the Render dashboard (**Environment** tab):
+   - `SITE_URL` — your public URL **including `https://`** (e.g., `https://refchecker-xxxx.onrender.com` or `https://www.refchecker.net`). This must match exactly — OAuth will fail if the scheme is `http://` instead of `https://`.
+   - `HTTPS_ONLY` — set to `true` for production (ensures auth cookies have the `Secure` flag).
+   - `REFCHECKER_DATA_DIR` — set to `/data` (matches the persistent disk mount path).
+   - At least one OAuth provider's `CLIENT_ID` / `CLIENT_SECRET`.
+5. If deploying **without the Blueprint** (manual service), add a persistent disk: **Disks** → **Add Disk** → Name: `refchecker-data`, Mount Path: `/data`, Size: 1 GB.
+6. Register each provider's callback URL as `https://<your-url>/api/auth/callback/{google,github,microsoft}`.
 
 > **Note:** Render assigns the `PORT` dynamically — the app reads it automatically. The persistent disk at `/data` stores the SQLite database and uploaded files, so data survives redeployments. For other PaaS hosts (Railway, Fly.io), the same Docker image works — just set `PORT`, `REFCHECKER_DATA_DIR`, and the auth env vars.
 
