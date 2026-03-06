@@ -33,22 +33,20 @@ from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
 from .auth import (
-    AUTH_ENABLED,
-    FRONTEND_REDIRECT_BASE,
+    SITE_URL,
     require_user,
     get_current_user,
     get_user_id_filter,
     get_available_providers,
     get_google_auth_url,
     get_github_auth_url,
+    get_microsoft_auth_url,
     exchange_google_code,
     exchange_github_code,
+    exchange_microsoft_code,
     create_access_token,
-    store_user_api_key,
-    get_user_api_key,
-    delete_user_api_key,
-    has_user_api_key,
-    get_user_api_key_providers,
+    set_auth_cookie,
+    clear_auth_cookie,
     UserInfo,
     _validate_oauth_state,
 )
@@ -112,12 +110,6 @@ class BatchUrlsRequest(BaseModel):
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
     use_llm: bool = True
-
-
-class UserApiKeyRequest(BaseModel):
-    """Request model for storing an in-memory API key"""
-    provider: str
-    api_key: str
 
 
 # Create FastAPI app
@@ -199,123 +191,82 @@ async def version():
 # Auth endpoints
 # ---------------------------------------------------------------------------
 
+_EXCHANGE_FNS = {
+    "google": (get_google_auth_url, exchange_google_code),
+    "github": (get_github_auth_url, exchange_github_code),
+    "microsoft": (get_microsoft_auth_url, exchange_microsoft_code),
+}
+
+
 @app.get("/api/auth/providers")
 async def auth_providers():
-    """Return auth configuration: which OAuth providers are available and whether auth is enabled."""
-    return {
-        "auth_enabled": AUTH_ENABLED,
-        "providers": get_available_providers(),
-    }
+    """Return which OAuth providers are configured."""
+    return {"providers": get_available_providers()}
 
 
-@app.get("/api/auth/google")
-async def auth_google_start(request: Request):
-    """Initiate the Google OAuth flow."""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=400, detail="Auth is disabled")
-    url = get_google_auth_url(request)
-    return RedirectResponse(url=url)
+@app.get("/api/auth/login/{provider}")
+async def auth_login(provider: str, request: Request):
+    """Redirect to the OAuth authorization URL for the given provider."""
+    entry = _EXCHANGE_FNS.get(provider)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
+    url_fn, _ = entry
+    return RedirectResponse(url=url_fn(request))
 
 
-@app.get("/api/auth/google/callback")
-async def auth_google_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
-    """Handle Google OAuth callback."""
-    frontend_base = FRONTEND_REDIRECT_BASE or "/"
+@app.get("/api/auth/callback/{provider}")
+async def auth_callback(
+    provider: str,
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Handle OAuth callback: exchange code, set cookie, redirect to SITE_URL."""
+    site = SITE_URL or "/"
+    entry = _EXCHANGE_FNS.get(provider)
+    if not entry:
+        return RedirectResponse(url=f"{site}?auth_error=unknown_provider")
+
     if error or not code or not state:
-        return RedirectResponse(url=f"{frontend_base}?auth_error={error or 'missing_code'}")
-    if not _validate_oauth_state(state, "google"):
-        return RedirectResponse(url=f"{frontend_base}?auth_error=invalid_state")
-    user_data = await exchange_google_code(code, request)
+        return RedirectResponse(url=f"{site}?auth_error={error or 'missing_code'}")
+    if not _validate_oauth_state(state, provider):
+        return RedirectResponse(url=f"{site}?auth_error=invalid_state")
+
+    _, exchange_fn = entry
+    user_data = await exchange_fn(code, request)
     if not user_data:
-        return RedirectResponse(url=f"{frontend_base}?auth_error=exchange_failed")
+        return RedirectResponse(url=f"{site}?auth_error=exchange_failed")
+
     user_id = await db.create_or_update_user(**user_data)
     token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
-    return RedirectResponse(url=f"{frontend_base}?auth_token={token}")
-
-
-@app.get("/api/auth/github")
-async def auth_github_start(request: Request):
-    """Initiate the GitHub OAuth flow."""
-    if not AUTH_ENABLED:
-        raise HTTPException(status_code=400, detail="Auth is disabled")
-    url = get_github_auth_url(request)
-    return RedirectResponse(url=url)
-
-
-@app.get("/api/auth/github/callback")
-async def auth_github_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
-    """Handle GitHub OAuth callback."""
-    frontend_base = FRONTEND_REDIRECT_BASE or "/"
-    if error or not code or not state:
-        return RedirectResponse(url=f"{frontend_base}?auth_error={error or 'missing_code'}")
-    if not _validate_oauth_state(state, "github"):
-        return RedirectResponse(url=f"{frontend_base}?auth_error=invalid_state")
-    user_data = await exchange_github_code(code, request)
-    if not user_data:
-        return RedirectResponse(url=f"{frontend_base}?auth_error=exchange_failed")
-    user_id = await db.create_or_update_user(**user_data)
-    token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
-    return RedirectResponse(url=f"{frontend_base}?auth_token={token}")
+    response = RedirectResponse(url=site)
+    set_auth_cookie(response, token)
+    return response
 
 
 @app.get("/api/auth/me")
-async def auth_me(current_user: Optional[UserInfo] = Depends(require_user)):
-    """Return the currently authenticated user, or null when auth is disabled."""
-    if current_user is None:
-        # Auth is disabled – return a synthetic anonymous user
-        return {"auth_enabled": False, "user": None}
+async def auth_me(current_user: UserInfo = Depends(require_user)):
+    """Return the currently authenticated user."""
     return {
-        "auth_enabled": True,
         "user": {
             "id": current_user.id,
             "email": current_user.email,
             "name": current_user.name,
             "avatar_url": current_user.avatar_url,
             "provider": current_user.provider,
-        },
+            "is_admin": current_user.is_admin,
+        }
     }
 
 
 @app.post("/api/auth/logout")
 async def auth_logout():
-    """Logout endpoint – client should discard the token."""
-    return {"message": "Logged out"}
-
-
-# ---------------------------------------------------------------------------
-# In-memory API key endpoints (auth-only; keys never stored in DB)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/user/api-keys")
-async def get_user_api_keys(current_user: Optional[UserInfo] = Depends(require_user)):
-    """List the providers for which the current user has an in-memory API key."""
-    if current_user is None:
-        return {"providers": []}
-    return {"providers": get_user_api_key_providers(current_user.id)}
-
-
-@app.post("/api/user/api-keys")
-async def set_user_api_key(
-    data: UserApiKeyRequest,
-    current_user: Optional[UserInfo] = Depends(require_user),
-):
-    """Store an API key in server memory for the current user. Key is never persisted."""
-    if current_user is None:
-        raise HTTPException(status_code=400, detail="Auth must be enabled to use in-memory API keys")
-    store_user_api_key(current_user.id, data.provider, data.api_key)
-    return {"message": f"API key stored for provider '{data.provider}'"}
-
-
-@app.delete("/api/user/api-keys/{provider}")
-async def delete_user_api_key_endpoint(
-    provider: str,
-    current_user: Optional[UserInfo] = Depends(require_user),
-):
-    """Remove an in-memory API key for the current user."""
-    if current_user is None:
-        raise HTTPException(status_code=400, detail="Auth must be enabled to use in-memory API keys")
-    delete_user_api_key(current_user.id, provider)
-    return {"message": f"API key removed for provider '{provider}'"}
+    """Clear the auth cookie and log out."""
+    from fastapi.responses import JSONResponse
+    response = JSONResponse(content={"ok": True})
+    clear_auth_cookie(response)
+    return response
 
 
 @app.websocket("/api/ws/{session_id}")
@@ -372,11 +323,7 @@ async def start_check(
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                if AUTH_ENABLED and current_user is not None:
-                    # In multi-user mode, API keys live in memory only
-                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
-                else:
-                    api_key = config.get('api_key')
+                api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -1137,10 +1084,7 @@ async def start_batch_check(
         if request.llm_config_id and request.use_llm:
             config = await db.get_llm_config_by_id(request.llm_config_id, user_id=user_id)
             if config:
-                if AUTH_ENABLED and current_user is not None:
-                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
-                else:
-                    api_key = config.get('api_key')
+                api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -1238,10 +1182,7 @@ async def start_batch_check_files(
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
-                if AUTH_ENABLED and current_user is not None:
-                    api_key = get_user_api_key(current_user.id, config.get('provider', llm_provider))
-                else:
-                    api_key = config.get('api_key')
+                api_key = config.get('api_key')
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
@@ -1585,16 +1526,10 @@ async def create_llm_config(
     """Create a new LLM configuration"""
     try:
         user_id = get_user_id_filter(current_user)
-        # When auth is enabled, do not store the API key in the database
-        api_key_to_store = None if (AUTH_ENABLED and current_user is not None) else config.api_key
-        # If auth is enabled and an API key was provided, store it in memory
-        if AUTH_ENABLED and current_user is not None and config.api_key:
-            store_user_api_key(current_user.id, config.provider, config.api_key)
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
             model=config.model,
-            api_key=api_key_to_store,
             endpoint=config.endpoint,
             user_id=user_id,
         )
@@ -1621,7 +1556,6 @@ async def update_llm_config(config_id: int, config: LLMConfigUpdate):
             name=config.name,
             provider=config.provider,
             model=config.model,
-            api_key=config.api_key,
             endpoint=config.endpoint
         )
         if success:

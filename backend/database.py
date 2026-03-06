@@ -8,9 +8,6 @@ import sys
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-from cryptography.fernet import Fernet
-
-
 def get_data_dir() -> Path:
     """Get platform-appropriate user data directory for refchecker.
     
@@ -43,17 +40,6 @@ def get_data_dir() -> Path:
     return data_dir
 
 
-def get_encryption_key() -> bytes:
-    """Get or create encryption key for API keys"""
-    key_file = get_data_dir() / ".encryption_key"
-    if key_file.exists():
-        return key_file.read_bytes()
-    else:
-        key = Fernet.generate_key()
-        key_file.write_bytes(key)
-        return key
-
-
 class Database:
     """Handles SQLite database operations for check history and LLM configs"""
 
@@ -61,15 +47,6 @@ class Database:
         if db_path is None:
             db_path = str(get_data_dir() / "refchecker_history.db")
         self.db_path = db_path
-        self._fernet = Fernet(get_encryption_key())
-
-    def _encrypt(self, value: str) -> str:
-        """Encrypt a string value"""
-        return self._fernet.encrypt(value.encode()).decode()
-
-    def _decrypt(self, value: str) -> str:
-        """Decrypt a string value"""
-        return self._fernet.decrypt(value.encode()).decode()
 
     async def _get_connection(self):
         """Get a database connection with proper settings for concurrent access"""
@@ -111,14 +88,13 @@ class Database:
                 )
             """)
 
-            # LLM configurations table
+            # LLM configurations table (api_key_encrypted omitted for new DBs)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS llm_configs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
                     provider TEXT NOT NULL,
                     model TEXT,
-                    api_key_encrypted TEXT,
                     endpoint TEXT,
                     is_default BOOLEAN DEFAULT 0,
                     user_id INTEGER REFERENCES users(id),
@@ -153,6 +129,19 @@ class Database:
                     email TEXT,
                     name TEXT,
                     avatar_url TEXT,
+                    is_admin BOOLEAN DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(provider, provider_id)
+                )
+            """)
+
+            # OAuth accounts table (links OAuth identities to users)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS oauth_accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL REFERENCES users(id),
+                    provider TEXT NOT NULL,
+                    provider_id TEXT NOT NULL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(provider, provider_id)
                 )
@@ -208,6 +197,12 @@ class Database:
             llm_columns = {row[1] async for row in cursor}
         if "user_id" not in llm_columns:
             await db.execute("ALTER TABLE llm_configs ADD COLUMN user_id INTEGER REFERENCES users(id)")
+
+        # Ensure is_admin column in users
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            user_columns = {row[1] async for row in cursor}
+        if "is_admin" not in user_columns:
+            await db.execute("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
 
     async def save_check(self,
                          paper_title: str,
@@ -552,7 +547,7 @@ class Database:
                 return [dict(row) for row in rows]
 
     async def get_llm_config_by_id(self, config_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Get a specific LLM config by ID (includes decrypted API key), optionally checking ownership."""
+        """Get a specific LLM config by ID, optionally checking ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if user_id is not None:
@@ -565,13 +560,9 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
-                    # Decrypt API key if present
-                    if result.get('api_key_encrypted'):
-                        try:
-                            result['api_key'] = self._decrypt(result['api_key_encrypted'])
-                        except Exception:
-                            result['api_key'] = None
-                    del result['api_key_encrypted']
+                    # Remove legacy encrypted key column if present; api_key is not stored in new DBs
+                    result.pop('api_key_encrypted', None)
+                    result.setdefault('api_key', None)
                     return result
                 return None
 
@@ -579,17 +570,14 @@ class Database:
                                  name: str,
                                  provider: str,
                                  model: Optional[str] = None,
-                                 api_key: Optional[str] = None,
                                  endpoint: Optional[str] = None,
                                  user_id: Optional[int] = None) -> int:
         """Create a new LLM configuration"""
-        encrypted_key = self._encrypt(api_key) if api_key else None
-
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO llm_configs (name, provider, model, api_key_encrypted, endpoint, user_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, provider, model, encrypted_key, endpoint, user_id))
+                INSERT INTO llm_configs (name, provider, model, endpoint, user_id)
+                VALUES (?, ?, ?, ?, ?)
+            """, (name, provider, model, endpoint, user_id))
             await db.commit()
             return cursor.lastrowid
 
@@ -598,7 +586,6 @@ class Database:
                                  name: Optional[str] = None,
                                  provider: Optional[str] = None,
                                  model: Optional[str] = None,
-                                 api_key: Optional[str] = None,
                                  endpoint: Optional[str] = None) -> bool:
         """Update an existing LLM configuration"""
         updates = []
@@ -613,9 +600,6 @@ class Database:
         if model is not None:
             updates.append("model = ?")
             params.append(model)
-        if api_key is not None:
-            updates.append("api_key_encrypted = ?")
-            params.append(self._encrypt(api_key))
         if endpoint is not None:
             updates.append("endpoint = ?")
             params.append(endpoint)
@@ -657,7 +641,7 @@ class Database:
             return True
 
     async def get_default_llm_config(self, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
-        """Get the default LLM configuration (with decrypted API key), optionally filtered by user."""
+        """Get the default LLM configuration, optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if user_id is not None:
@@ -670,13 +654,8 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
-                    if result.get('api_key_encrypted'):
-                        try:
-                            result['api_key'] = self._decrypt(result['api_key_encrypted'])
-                        except Exception:
-                            result['api_key'] = None
-                    if 'api_key_encrypted' in result:
-                        del result['api_key_encrypted']
+                    result.pop('api_key_encrypted', None)
+                    result.setdefault('api_key', None)
                     return result
                 return None
 
@@ -690,48 +669,81 @@ class Database:
                                      email: Optional[str] = None,
                                      name: Optional[str] = None,
                                      avatar_url: Optional[str] = None) -> int:
-        """Create a new user or update an existing one. Returns the user's internal ID."""
+        """Create a new user or update an existing one. Returns the user's internal ID.
+
+        Also upserts the matching row in ``oauth_accounts``.
+        """
         async with aiosqlite.connect(self.db_path) as db:
-            # Try to find existing user
+            # Look up via oauth_accounts first (new schema), then fall back to
+            # the legacy UNIQUE(provider, provider_id) on the users table.
             async with db.execute(
-                "SELECT id FROM users WHERE provider = ? AND provider_id = ?",
+                "SELECT user_id FROM oauth_accounts WHERE provider = ? AND provider_id = ?",
                 (provider, provider_id)
             ) as cursor:
-                row = await cursor.fetchone()
+                oa_row = await cursor.fetchone()
 
-            if row:
-                user_id = row[0]
-                # Update user info
+            if oa_row:
+                user_id = oa_row[0]
                 await db.execute("""
                     UPDATE users SET email = ?, name = ?, avatar_url = ?
                     WHERE id = ?
                 """, (email, name, avatar_url, user_id))
-                await db.commit()
-                return user_id
             else:
-                # Create new user
-                cursor = await db.execute("""
-                    INSERT INTO users (provider, provider_id, email, name, avatar_url)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (provider, provider_id, email, name, avatar_url))
-                await db.commit()
-                return cursor.lastrowid
+                # Try the legacy users unique constraint (existing rows pre-migration)
+                async with db.execute(
+                    "SELECT id FROM users WHERE provider = ? AND provider_id = ?",
+                    (provider, provider_id)
+                ) as cursor:
+                    legacy_row = await cursor.fetchone()
+
+                if legacy_row:
+                    user_id = legacy_row[0]
+                    await db.execute("""
+                        UPDATE users SET email = ?, name = ?, avatar_url = ?
+                        WHERE id = ?
+                    """, (email, name, avatar_url, user_id))
+                else:
+                    # Create new user
+                    cursor = await db.execute("""
+                        INSERT INTO users (provider, provider_id, email, name, avatar_url, is_admin)
+                        VALUES (?, ?, ?, ?, ?, 0)
+                    """, (provider, provider_id, email, name, avatar_url))
+                    user_id = cursor.lastrowid
+
+            # Upsert oauth_accounts record
+            await db.execute("""
+                INSERT INTO oauth_accounts (user_id, provider, provider_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(provider, provider_id) DO UPDATE SET user_id = excluded.user_id
+            """, (user_id, provider, provider_id))
+            await db.commit()
+            return user_id
 
     async def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get a user by their internal ID."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT id, provider, provider_id, email, name, avatar_url, created_at FROM users WHERE id = ?",
+                "SELECT id, provider, provider_id, email, name, avatar_url, is_admin, created_at FROM users WHERE id = ?",
                 (user_id,)
             ) as cursor:
                 row = await cursor.fetchone()
                 return dict(row) if row else None
 
+    async def get_user_by_provider(self, provider: str, provider_id: str) -> Optional[Dict[str, Any]]:
+        """Get a user by OAuth provider and provider-specific ID."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, provider, provider_id, email, name, avatar_url, is_admin, created_at FROM users WHERE provider = ? AND provider_id = ?",
+                (provider, provider_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
 
 
     async def get_setting(self, key: str, decrypt: bool = True) -> Optional[str]:
-        """Get an app setting value (optionally decrypted)"""
+        """Get an app setting value."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
@@ -740,17 +752,11 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 if row and row['value_encrypted']:
-                    if decrypt:
-                        try:
-                            return self._decrypt(row['value_encrypted'])
-                        except Exception:
-                            return None
                     return row['value_encrypted']
                 return None
 
     async def set_setting(self, key: str, value: str) -> bool:
-        """Set an app setting value (encrypted)"""
-        encrypted = self._encrypt(value) if value else None
+        """Set an app setting value."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO app_settings (key, value_encrypted, updated_at)
@@ -758,7 +764,7 @@ class Database:
                 ON CONFLICT(key) DO UPDATE SET
                     value_encrypted = excluded.value_encrypted,
                     updated_at = CURRENT_TIMESTAMP
-            """, (key, encrypted))
+            """, (key, value))
             await db.commit()
             return True
 

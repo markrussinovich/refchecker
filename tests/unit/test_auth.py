@@ -1,7 +1,6 @@
 """
 Unit tests for the authentication module (backend/auth.py).
-These tests verify JWT token handling, OAuth state management,
-and in-memory API key storage.
+These tests verify JWT token handling and OAuth state management.
 """
 import os
 import sys
@@ -10,7 +9,7 @@ import importlib
 import importlib.util
 import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
 # Import auth module directly (bypass backend/__init__.py which pulls in
@@ -86,7 +85,7 @@ class TestJWTTokens:
         assert result is None
 
     def test_decode_expired_token_returns_none(self):
-        import jwt as pyjwt
+        from jose import jwt as jose_jwt
         auth = _import_auth_direct({"JWT_SECRET_KEY": "test-secret-key-abc123"})
         payload = {
             "sub": "1",
@@ -95,16 +94,16 @@ class TestJWTTokens:
             "iat": int(time.time()) - 3600,
             "exp": int(time.time()) - 1,  # expired 1 second ago
         }
-        expired_token = pyjwt.encode(payload, "test-secret-key-abc123", algorithm="HS256")
+        expired_token = jose_jwt.encode(payload, "test-secret-key-abc123", algorithm="HS256")
         result = auth.decode_access_token(expired_token)
         assert result is None
 
     def test_token_uses_correct_expiry(self):
-        import jwt as pyjwt
+        from jose import jwt as jose_jwt
         auth = _import_auth_direct({"JWT_SECRET_KEY": "test-secret-key-abc123", "JWT_EXPIRE_SECONDS": "3600"})
         before = int(time.time())
         token = auth.create_access_token(1, "a@b.com", "A")
-        payload = pyjwt.decode(token, "test-secret-key-abc123", algorithms=["HS256"])
+        payload = jose_jwt.decode(token, "test-secret-key-abc123", algorithms=["HS256"])
         after = int(time.time())
         assert before + 3600 <= payload["exp"] <= after + 3600 + 5
 
@@ -141,49 +140,6 @@ class TestOAuthState:
 
 
 # ---------------------------------------------------------------------------
-# In-memory API key storage tests
-# ---------------------------------------------------------------------------
-
-class TestInMemoryApiKeys:
-    """Tests for in-memory (never persisted) API key storage."""
-
-    def setup_method(self):
-        """Clear in-memory key store before each test."""
-        self.auth = _import_auth_direct()
-        self.auth._user_api_keys.clear()
-
-    def test_store_and_retrieve_api_key(self):
-        self.auth.store_user_api_key(99, "anthropic", "sk-ant-123")
-        key = self.auth.get_user_api_key(99, "anthropic")
-        assert key == "sk-ant-123"
-
-    def test_delete_api_key(self):
-        self.auth.store_user_api_key(99, "openai", "sk-openai-456")
-        self.auth.delete_user_api_key(99, "openai")
-        assert self.auth.get_user_api_key(99, "openai") is None
-
-    def test_has_api_key(self):
-        assert not self.auth.has_user_api_key(99, "google")
-        self.auth.store_user_api_key(99, "google", "key-value")
-        assert self.auth.has_user_api_key(99, "google")
-
-    def test_api_keys_are_isolated_per_user(self):
-        self.auth.store_user_api_key(1, "anthropic", "user1-key")
-        self.auth.store_user_api_key(2, "anthropic", "user2-key")
-        assert self.auth.get_user_api_key(1, "anthropic") == "user1-key"
-        assert self.auth.get_user_api_key(2, "anthropic") == "user2-key"
-
-    def test_get_user_api_key_providers(self):
-        self.auth.store_user_api_key(7, "anthropic", "k1")
-        self.auth.store_user_api_key(7, "openai", "k2")
-        providers = self.auth.get_user_api_key_providers(7)
-        assert set(providers) == {"anthropic", "openai"}
-
-    def test_get_missing_user_returns_none(self):
-        assert self.auth.get_user_api_key(9999, "anthropic") is None
-
-
-# ---------------------------------------------------------------------------
 # Auth config / providers
 # ---------------------------------------------------------------------------
 
@@ -196,6 +152,8 @@ class TestAvailableProviders:
             "GOOGLE_CLIENT_SECRET": "",
             "GITHUB_CLIENT_ID": "",
             "GITHUB_CLIENT_SECRET": "",
+            "MS_CLIENT_ID": "",
+            "MS_CLIENT_SECRET": "",
         })
         assert auth.get_available_providers() == []
 
@@ -205,27 +163,53 @@ class TestAvailableProviders:
             "GOOGLE_CLIENT_SECRET": "google-client-secret",
             "GITHUB_CLIENT_ID": "",
             "GITHUB_CLIENT_SECRET": "",
+            "MS_CLIENT_ID": "",
+            "MS_CLIENT_SECRET": "",
         })
         providers = auth.get_available_providers()
         assert "google" in providers
         assert "github" not in providers
+        assert "microsoft" not in providers
 
-    def test_both_providers_when_configured(self):
+    def test_both_google_and_github_providers_when_configured(self):
         auth = _import_auth_direct({
             "GOOGLE_CLIENT_ID": "gid",
             "GOOGLE_CLIENT_SECRET": "gsec",
             "GITHUB_CLIENT_ID": "ghid",
             "GITHUB_CLIENT_SECRET": "ghsec",
+            "MS_CLIENT_ID": "",
+            "MS_CLIENT_SECRET": "",
         })
         providers = auth.get_available_providers()
         assert "google" in providers
         assert "github" in providers
+        assert "microsoft" not in providers
 
-    def test_auth_disabled_by_default(self):
-        # Remove the variable so it's not set at all
-        auth = _import_auth_direct({"AUTH_ENABLED": ""})
-        assert auth.AUTH_ENABLED is False
+    def test_microsoft_provider_when_configured(self):
+        auth = _import_auth_direct({
+            "GOOGLE_CLIENT_ID": "",
+            "GOOGLE_CLIENT_SECRET": "",
+            "GITHUB_CLIENT_ID": "",
+            "GITHUB_CLIENT_SECRET": "",
+            "MS_CLIENT_ID": "ms-client-id",
+            "MS_CLIENT_SECRET": "ms-client-secret",
+        })
+        providers = auth.get_available_providers()
+        assert "microsoft" in providers
+        assert "google" not in providers
+        assert "github" not in providers
 
-    def test_auth_enabled_via_env_var(self):
-        auth = _import_auth_direct({"AUTH_ENABLED": "true"})
-        assert auth.AUTH_ENABLED is True
+    def test_all_three_providers_when_configured(self):
+        auth = _import_auth_direct({
+            "GOOGLE_CLIENT_ID": "gid",
+            "GOOGLE_CLIENT_SECRET": "gsec",
+            "GITHUB_CLIENT_ID": "ghid",
+            "GITHUB_CLIENT_SECRET": "ghsec",
+            "MS_CLIENT_ID": "msid",
+            "MS_CLIENT_SECRET": "mssec",
+        })
+        providers = auth.get_available_providers()
+        assert "google" in providers
+        assert "github" in providers
+        assert "microsoft" in providers
+

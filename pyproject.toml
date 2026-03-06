@@ -81,7 +81,8 @@ webui = [
     "pymupdf>=1.23.0",
     "Pillow>=9.0.0",  # For thumbnail image enhancement
     "python-multipart>=0.0.6",  # For FastAPI form data handling
-    "PyJWT>=2.6.0",  # For JWT token creation and validation (multi-user auth)
+    "python-jose[cryptography]>=3.3.0",  # For JWT token creation and validation (multi-user auth)
+    "itsdangerous>=2.1.0",  # For signed cookies / CSRF protection
 ]
 
 [project.urls]
