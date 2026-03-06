@@ -25,7 +25,7 @@ _src_path = str(Path(__file__).parent.parent / "src")
 if _src_path not in sys.path and os.path.exists(_src_path):
     sys.path.insert(0, _src_path)
 
-from backend.concurrency import get_limiter
+from backend.concurrency import create_limiter, get_default_max_concurrent
 
 from refchecker.utils.text_utils import extract_latex_references
 from refchecker.utils.url_utils import extract_arxiv_id_from_url
@@ -626,7 +626,7 @@ class ProgressRefChecker:
                     for idx, ref in enumerate(references, 1)
                 ]
             })
-            limiter = get_limiter()
+            limiter = create_limiter()
             await self.emit_progress("progress", {
                 "current": 0,
                 "total": total_refs,
@@ -981,13 +981,14 @@ class ProgressRefChecker:
         reference: Dict[str, Any],
         idx: int,
         total_refs: int,
-        loop: asyncio.AbstractEventLoop
+        loop: asyncio.AbstractEventLoop,
+        limiter=None
     ) -> Dict[str, Any]:
         """
-        Check a single reference with global concurrency limiting.
+        Check a single reference with per-session concurrency limiting.
         
         First checks the verification cache for a previous result.
-        Acquires a slot from the global limiter before starting the check,
+        Acquires a slot from the session limiter before starting the check,
         and releases it when done. Stores result in cache on success.
         """
         from .database import db
@@ -1009,9 +1010,10 @@ class ProgressRefChecker:
         authors = reference.get('authors', [])[:2]
         debug_log(f"CACHE MISS for ref {idx + 1}: title='{title}' authors={authors}")
         
-        limiter = get_limiter()
+        if limiter is None:
+            limiter = create_limiter()
         
-        # Wait for a slot in the global queue
+        # Wait for a slot in the session queue
         async with limiter:
             # Check for cancellation before starting
             await self._check_cancelled()
@@ -1086,10 +1088,10 @@ class ProgressRefChecker:
         total_refs: int
     ) -> tuple:
         """
-        Check references in parallel using global concurrency limiting.
+        Check references in parallel using per-session concurrency limiting.
         
-        All papers share the same global limit, so if you have 3 papers checking
-        and concurrency is 6, each paper gets a share of the 6 slots.
+        Each paper check session gets its own concurrency limiter, so
+        concurrent sessions don't block each other.
         
         Emits progress updates as results come in.
         Only marks references as 'checking' when they actually start.
@@ -1111,11 +1113,12 @@ class ProgressRefChecker:
         start_time = time.time()
         debug_log(f"[TIMING] Starting parallel check of {total_refs} references")
         
-        # Create tasks for all references - they will be rate-limited by the global semaphore
+        # Create tasks for all references - they will be rate-limited by the per-session semaphore
+        session_limiter = create_limiter()
         tasks = []
         for idx, ref in enumerate(references):
             task = asyncio.create_task(
-                self._check_single_reference_with_limit(ref, idx, total_refs, loop),
+                self._check_single_reference_with_limit(ref, idx, total_refs, loop, limiter=session_limiter),
                 name=f"ref-check-{idx}"
             )
             tasks.append((idx, task))

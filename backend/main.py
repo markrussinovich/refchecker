@@ -31,7 +31,7 @@ from .database import db, get_data_dir
 from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
-from .concurrency import init_limiter, get_limiter, DEFAULT_MAX_CONCURRENT
+from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
 from .auth import (
     SITE_URL,
     require_user,
@@ -1981,10 +1981,9 @@ async def update_setting(setting_key: str, update: SettingUpdate):
                 if value > 50:
                     value = 50
                 
-                # Update the global limiter immediately
-                limiter = get_limiter()
-                await limiter.set_max_concurrent(value)
-                logger.info(f"Updated global concurrency limit to {value}")
+                # Update the default limit for new sessions
+                await set_default_max_concurrent(value)
+                logger.info(f"Updated per-session concurrency limit to {value}")
                 
                 # Store the validated value
                 await db.set_setting(setting_key, str(value))
