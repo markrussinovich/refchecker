@@ -27,6 +27,9 @@ def _get_env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+# Multi-user mode (must be explicitly enabled)
+MULTIUSER_MODE: bool = os.environ.get("REFCHECKER_MULTIUSER", "").lower() in ("1", "true", "yes")
+
 # JWT settings
 JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", secrets.token_hex(32))
 JWT_ALGORITHM: str = "HS256"
@@ -447,7 +450,7 @@ def get_available_providers() -> list[str]:
     Only returns providers when multi-user mode is explicitly enabled
     via REFCHECKER_MULTIUSER=true in the environment (e.g. .env or docker-compose).
     """
-    if not os.environ.get('REFCHECKER_MULTIUSER', '').lower() in ('1', 'true', 'yes'):
+    if not MULTIUSER_MODE:
         return []
     providers = []
     if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:

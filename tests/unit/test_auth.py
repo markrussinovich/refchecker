@@ -148,6 +148,7 @@ class TestAvailableProviders:
 
     def test_no_providers_when_unconfigured(self):
         auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
             "GOOGLE_CLIENT_ID": "",
             "GOOGLE_CLIENT_SECRET": "",
             "GITHUB_CLIENT_ID": "",
@@ -157,8 +158,19 @@ class TestAvailableProviders:
         })
         assert auth.get_available_providers() == []
 
+    def test_no_providers_without_multiuser_flag(self):
+        auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "",
+            "GOOGLE_CLIENT_ID": "gid",
+            "GOOGLE_CLIENT_SECRET": "gsec",
+            "GITHUB_CLIENT_ID": "ghid",
+            "GITHUB_CLIENT_SECRET": "ghsec",
+        })
+        assert auth.get_available_providers() == []
+
     def test_google_provider_when_configured(self):
         auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
             "GOOGLE_CLIENT_ID": "google-client-id",
             "GOOGLE_CLIENT_SECRET": "google-client-secret",
             "GITHUB_CLIENT_ID": "",
@@ -173,6 +185,7 @@ class TestAvailableProviders:
 
     def test_both_google_and_github_providers_when_configured(self):
         auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
             "GOOGLE_CLIENT_ID": "gid",
             "GOOGLE_CLIENT_SECRET": "gsec",
             "GITHUB_CLIENT_ID": "ghid",
@@ -187,6 +200,7 @@ class TestAvailableProviders:
 
     def test_microsoft_provider_when_configured(self):
         auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
             "GOOGLE_CLIENT_ID": "",
             "GOOGLE_CLIENT_SECRET": "",
             "GITHUB_CLIENT_ID": "",
@@ -201,6 +215,7 @@ class TestAvailableProviders:
 
     def test_all_three_providers_when_configured(self):
         auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
             "GOOGLE_CLIENT_ID": "gid",
             "GOOGLE_CLIENT_SECRET": "gsec",
             "GITHUB_CLIENT_ID": "ghid",
