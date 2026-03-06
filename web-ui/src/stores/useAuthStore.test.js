@@ -108,9 +108,9 @@ describe('useAuthStore', () => {
     const { useAuthStore } = await import('./useAuthStore')
     const { result } = renderHook(() => useAuthStore())
 
-    // Seed some state
+    // Seed state via the Zustand setState API
     await act(async () => {
-      result.current.authEnabled = true
+      useAuthStore.setState({ authEnabled: true, user: { id: 1, email: 'x@y.com' }, token: 'tok' })
     })
 
     await act(async () => {
