@@ -25,7 +25,7 @@ aiosqlite>=0.19.0
 httpx>=0.24.0
 Pillow>=9.0.0  # For thumbnail image enhancement
 python-multipart>=0.0.6  # For FastAPI form data handling
-PyJWT>=2.6.0  # For JWT token creation and validation (multi-user auth)
+python-jose[cryptography]>=3.3.0  # JWT signing/verification (multi-user auth)
 
 # Optional dependencies for LLM providers
 openai>=1.0.0
