@@ -184,10 +184,21 @@ def _validate_oauth_state(state: str, provider: str) -> bool:
 # OAuth URL builders
 # ---------------------------------------------------------------------------
 
+def _get_base_url(request: Request) -> str:
+    """Return the public base URL, preferring SITE_URL over request.base_url.
+    
+    Behind reverse proxies (Render, etc.) request.base_url resolves to an
+    internal address. SITE_URL provides the correct public origin.
+    """
+    if SITE_URL and SITE_URL != "/":
+        return SITE_URL.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 def get_google_auth_url(request: Request) -> str:
     """Build the Google OAuth authorization URL."""
     state = _generate_oauth_state("google")
-    redirect_uri = GOOGLE_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/google"
+    redirect_uri = GOOGLE_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/google"
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": redirect_uri,
@@ -202,7 +213,7 @@ def get_google_auth_url(request: Request) -> str:
 def get_github_auth_url(request: Request) -> str:
     """Build the GitHub OAuth authorization URL."""
     state = _generate_oauth_state("github")
-    redirect_uri = GITHUB_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/github"
+    redirect_uri = GITHUB_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/github"
     params = {
         "client_id": GITHUB_CLIENT_ID,
         "redirect_uri": redirect_uri,
@@ -215,7 +226,7 @@ def get_github_auth_url(request: Request) -> str:
 def get_microsoft_auth_url(request: Request) -> str:
     """Build the Microsoft OAuth authorization URL."""
     state = _generate_oauth_state("microsoft")
-    redirect_uri = MS_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/microsoft"
+    redirect_uri = MS_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/microsoft"
     params = {
         "client_id": MS_CLIENT_ID,
         "redirect_uri": redirect_uri,
@@ -232,7 +243,7 @@ def get_microsoft_auth_url(request: Request) -> str:
 
 async def exchange_google_code(code: str, request: Request) -> Optional[Dict[str, Any]]:
     """Exchange Google auth code for user info."""
-    redirect_uri = GOOGLE_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/google"
+    redirect_uri = GOOGLE_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/google"
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(GOOGLE_TOKEN_URL, data={
             "code": code,
@@ -268,7 +279,7 @@ async def exchange_google_code(code: str, request: Request) -> Optional[Dict[str
 
 async def exchange_github_code(code: str, request: Request) -> Optional[Dict[str, Any]]:
     """Exchange GitHub auth code for user info."""
-    redirect_uri = GITHUB_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/github"
+    redirect_uri = GITHUB_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/github"
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             GITHUB_TOKEN_URL,
@@ -327,7 +338,7 @@ async def exchange_github_code(code: str, request: Request) -> Optional[Dict[str
 
 async def exchange_microsoft_code(code: str, request: Request) -> Optional[Dict[str, Any]]:
     """Exchange Microsoft auth code for user info."""
-    redirect_uri = MS_REDIRECT_URI or str(request.base_url).rstrip("/") + "/api/auth/callback/microsoft"
+    redirect_uri = MS_REDIRECT_URI or _get_base_url(request) + "/api/auth/callback/microsoft"
     async with httpx.AsyncClient() as client:
         token_resp = await client.post(
             MS_TOKEN_URL,
