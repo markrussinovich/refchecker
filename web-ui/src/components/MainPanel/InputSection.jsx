@@ -312,7 +312,7 @@ export default function InputSection() {
 
   return (
     <div 
-      className="rounded-lg border p-6"
+      className="rounded-lg border p-4 md:p-6"
       style={{
         backgroundColor: 'var(--color-bg-secondary)',
         borderColor: 'var(--color-border)',
@@ -325,8 +325,8 @@ export default function InputSection() {
         Check Paper References
       </h2>
 
-      {/* Input mode tabs */}
-      <div className="flex gap-2 mb-4">
+      {/* Input mode tabs - horizontally scrollable on mobile */}
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
         {[
           { id: 'url', label: 'URL / ArXiv ID' },
           { id: 'file', label: 'Upload File' },
@@ -337,7 +337,7 @@ export default function InputSection() {
             key={mode.id}
             onClick={() => setInputMode(mode.id)}
             disabled={isChecking}
-            className="px-4 py-2 text-sm font-medium rounded-lg transition-colors"
+            className="px-3 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
             style={{
               backgroundColor: inputMode === mode.id 
                 ? 'var(--color-accent)' 

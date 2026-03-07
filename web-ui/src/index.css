@@ -150,3 +150,46 @@ body {
   opacity: 1;
   pointer-events: auto;
 }
+
+/* ── Mobile responsive ── */
+
+/* Sidebar drawer */
+.sidebar-drawer {
+  transition: transform 0.25s ease;
+}
+
+.sidebar-backdrop {
+  transition: opacity 0.25s ease;
+}
+
+/* On touch devices, always show history-item actions (no hover) */
+@media (hover: none) {
+  .history-item-actions,
+  .history-item-cancel {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Mobile layout adjustments */
+@media (max-width: 767px) {
+  /* Hide desktop sidebar */
+  .sidebar-desktop {
+    display: none;
+  }
+
+  /* Header compact */
+  .header-title-text {
+    display: none;
+  }
+
+  .header-github-link {
+    display: none;
+  }
+
+  .header-llm-selector {
+    width: auto;
+    min-width: 0;
+    max-width: 160px;
+  }
+}

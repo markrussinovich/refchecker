@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Sidebar from './components/Sidebar/Sidebar'
 import MainPanel from './components/MainPanel/MainPanel'
 import DebugPanel from './components/DebugPanel'
@@ -9,6 +9,7 @@ import LoginPage from './components/Auth/LoginPage'
 import UserMenu from './components/Auth/UserMenu'
 import { logger } from './utils/logger'
 import { useAuthStore } from './stores/useAuthStore'
+import { useHistoryStore } from './stores/useHistoryStore'
 
 function App() {
   const [theme, setTheme] = useState(() => {
@@ -53,6 +54,16 @@ function App() {
     setTheme(newTheme)
   }
 
+  // Mobile sidebar drawer state
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
+
+  // Auto-close mobile sidebar when a history item is selected
+  const selectedCheckId = useHistoryStore(state => state.selectedCheckId)
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [selectedCheckId])
+
   // Only show auth loading spinner if we already know auth is required
   // (avoids blocking the entire UI while checking providers in single-user mode)
   if (authLoading && authRequired) {
@@ -77,20 +88,31 @@ function App() {
   return (
     <div className="flex h-screen" style={{ backgroundColor: 'var(--color-bg-primary)' }}>
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar mobileOpen={sidebarOpen} onMobileClose={closeSidebar} />
       
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <LiveWebSocketManager />
         {/* Header */}
         <header 
-          className="h-14 flex items-center justify-between px-6 border-b"
+          className="h-14 flex items-center justify-between px-4 md:px-6 border-b"
           style={{ 
             backgroundColor: 'var(--color-bg-secondary)',
             borderColor: 'var(--color-border)'
           }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-3">
+            {/* Hamburger menu - mobile only */}
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 -ml-2 rounded-md transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: 'var(--color-text-primary)' }}
+              aria-label="Open menu"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
             {/* RefChecker Icon */}
             <svg 
               className="w-8 h-8 flex-shrink-0"
@@ -103,21 +125,21 @@ function App() {
               <path d="M70 70l4 4 8-8" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
             </svg>
             <h1 
-              className="text-xl font-semibold"
+              className="text-xl font-semibold header-title-text"
               style={{ color: 'var(--color-text-primary)' }}
             >
               RefChecker
             </h1>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="w-64">
+          <div className="flex items-center gap-2 md:gap-4">
+            <div className="header-llm-selector w-64">
               <LLMSelector compact={true} />
             </div>
             <a
               href="https://github.com/markrussinovich/refchecker"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-gray-400 hover:text-gray-200 transition-colors"
+              className="header-github-link text-gray-400 hover:text-gray-200 transition-colors"
               title="View on GitHub"
             >
               <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">

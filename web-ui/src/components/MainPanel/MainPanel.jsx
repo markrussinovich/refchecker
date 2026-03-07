@@ -213,7 +213,7 @@ export default function MainPanel() {
       className="flex-1 relative"
       style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
-      <div ref={contentRef} className="max-w-4xl mx-auto p-6 space-y-6">
+      <div ref={contentRef} className="max-w-4xl mx-auto p-4 space-y-4 md:p-6 md:space-y-6">
         {/* Input Section */}
         {showInput && <InputSection />}
 
