@@ -30,6 +30,7 @@ export const useAuthStore = create((set, get) => {
     // ------- State -------
     providers: [],    // ['google', 'github', 'microsoft', ...]
     user: null,       // { id, email, name, avatar_url, provider }
+    authRequired: false, // true when OAuth providers are configured
     isLoading: true,  // true while bootstrapping
     error: null,
 
@@ -57,23 +58,23 @@ export const useAuthStore = create((set, get) => {
         // No OAuth providers configured → single-user mode, skip auth
         if (providers.length === 0) {
           logger.info('AuthStore', 'No providers configured — single-user mode')
-          set({ providers: [], user: { id: 0, name: 'Local User', provider: 'local' }, isLoading: false })
+          set({ providers: [], authRequired: false, user: null, isLoading: false })
           return
         }
 
         try {
           const meResp = await api.getAuthMe()
           const user = meResp.data.user || null
-          set({ providers, user, isLoading: false })
+          set({ providers, authRequired: true, user, isLoading: false })
           if (user) logger.info('AuthStore', `Authenticated as ${user.email || user.name}`)
         } catch (_) {
           // 401 means not logged in — that's fine
-          set({ providers, user: null, isLoading: false })
+          set({ providers, authRequired: true, user: null, isLoading: false })
         }
       } catch (err) {
         // If providers endpoint fails (500, network error, etc.) → assume single-user mode
         logger.warn('AuthStore', 'Providers fetch failed — falling back to single-user mode', err)
-        set({ providers: [], user: { id: 0, name: 'Local User', provider: 'local' }, isLoading: false })
+        set({ providers: [], authRequired: false, user: null, isLoading: false })
       }
     },
 

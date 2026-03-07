@@ -8,6 +8,8 @@ test('reconciles in-progress history with completed detail on load', async ({ pa
     const url = new URL(route.request().url())
     const path = url.pathname
 
+    if (path === '/api/auth/providers') return route.fulfill(json(200, { providers: [] }))
+    if (path === '/api/auth/me') return route.fulfill(json(401, { detail: 'Not authenticated' }))
     if (path === '/api/llm-configs') return route.fulfill(json(200, []))
     if (path === '/api/settings/semantic-scholar') return route.fulfill(json(200, { enabled: false }))
     if (path === '/api/health') return route.fulfill(json(200, { status: 'ok' }))

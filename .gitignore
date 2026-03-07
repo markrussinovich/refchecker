@@ -135,6 +135,8 @@ reference_errors.txt
 **/history_output.txt
 test_paper.pdf
 tmp_playwright*
+web-ui/test-results/
+web-ui/playwright-report/
 
 # Sensitive files
 backend/.encryption_key

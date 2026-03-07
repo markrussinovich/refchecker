@@ -379,17 +379,20 @@ async def start_check(
         # api_key from form (client localStorage) takes precedence over config stored key
         effective_api_key = api_key
         endpoint = None
+        logger.info(f"API key from form: {'present' if api_key else 'MISSING'}, use_llm={use_llm}, provider={llm_provider}")
         if llm_config_id and use_llm:
             config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
             if config:
                 if not effective_api_key:
                     effective_api_key = config.get('api_key')
+                    logger.info(f"API key from DB config: {'present' if effective_api_key else 'MISSING'}")
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
                 logger.info(f"Using LLM config {llm_config_id}: {llm_provider}/{llm_model}")
             else:
                 logger.warning(f"LLM config {llm_config_id} not found")
+        logger.info(f"Effective API key resolved: {'present' if effective_api_key else 'MISSING'}, SS key: {'present' if semantic_scholar_api_key else 'MISSING'}")
 
         # Handle file upload or pasted text
         paper_source = source_value

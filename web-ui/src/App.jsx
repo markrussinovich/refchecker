@@ -17,7 +17,7 @@ function App() {
   })
 
   // Auth state
-  const { user, isLoading: authLoading, init: initAuth } = useAuthStore()
+  const { user, authRequired, isLoading: authLoading, init: initAuth } = useAuthStore()
 
   // Initialise auth once on mount
   useEffect(() => {
@@ -53,8 +53,9 @@ function App() {
     setTheme(newTheme)
   }
 
-  // Show a minimal loading screen while auth bootstraps
-  if (authLoading) {
+  // Only show auth loading spinner if we already know auth is required
+  // (avoids blocking the entire UI while checking providers in single-user mode)
+  if (authLoading && authRequired) {
     return (
       <div
         className="flex h-screen items-center justify-center"
@@ -68,8 +69,8 @@ function App() {
     )
   }
 
-  // When no user is logged in, show the login page
-  if (!user) {
+  // When auth is required and no user is logged in, show the login page
+  if (authRequired && !user) {
     return <LoginPage />
   }
 

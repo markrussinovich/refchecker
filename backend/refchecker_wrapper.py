@@ -135,11 +135,19 @@ class ProgressRefChecker:
                     llm_config['api_key'] = api_key
                 if endpoint:
                     llm_config['endpoint'] = endpoint
-                self.llm = create_llm_provider(
+                logger.info(f"Creating LLM provider '{llm_provider}' with api_key={'present' if api_key else 'MISSING'}, model={llm_model}")
+                provider = create_llm_provider(
                     provider_name=llm_provider,
                     config=llm_config
                 )
-                logger.info(f"Initialized LLM provider: {llm_provider}")
+                if provider.is_available():
+                    self.llm = provider
+                    logger.info(f"LLM provider '{llm_provider}' initialized and available")
+                else:
+                    logger.warning(f"LLM provider '{llm_provider}' created but NOT available (no valid API key). "
+                                   f"Checked: config api_key={'present' if api_key else 'MISSING'}, "
+                                   f"env REFCHECKER_ANTHROPIC_API_KEY={'set' if os.getenv('REFCHECKER_ANTHROPIC_API_KEY') else 'unset'}, "
+                                   f"env ANTHROPIC_API_KEY={'set' if os.getenv('ANTHROPIC_API_KEY') else 'unset'}")
             except Exception as e:
                 logger.error(f"Failed to initialize LLM: {e}")
 

@@ -72,7 +72,7 @@ export default function LLMSelector({ compact = false }) {
           setIsOpen(!isOpen)
           setConfirmingDeleteId(null)
         }}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border transition-colors cursor-pointer"
         style={{
           backgroundColor: 'var(--color-bg-primary)',
           borderColor: 'var(--color-border)',

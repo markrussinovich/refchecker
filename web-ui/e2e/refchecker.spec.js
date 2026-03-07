@@ -53,6 +53,8 @@ async function setupApiMock(page, serverState) {
       body: JSON.stringify(body),
     });
 
+    if (path === '/api/auth/providers') return json(200, { providers: [] });
+    if (path === '/api/auth/me') return json(401, { detail: 'Not authenticated' });
     if (path === '/api/llm-configs') return json(200, []);
     if (path === '/api/settings/semantic-scholar') return json(200, { enabled: false });
     if (path === '/api/health') return json(200, { status: 'ok' });

@@ -8,7 +8,13 @@
  * @returns {string} Formatted date string
  */
 export function formatDate(date) {
-  const d = new Date(date)
+  // Backend stores UTC timestamps without a timezone suffix (e.g. "2026-02-01 23:03:05").
+  // Append 'Z' so the browser interprets them as UTC and displays in local time.
+  let input = date
+  if (typeof input === 'string' && !input.endsWith('Z') && !input.includes('+') && !input.includes('T')) {
+    input = input.replace(' ', 'T') + 'Z'
+  }
+  const d = new Date(input)
   const now = new Date()
   const diffMs = now - d
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))

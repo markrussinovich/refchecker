@@ -446,8 +446,10 @@ async def require_user(
     return await get_current_user(request)
 
 
-def get_user_id_filter(user: UserInfo) -> int:
-    """Return the user_id to filter DB queries by."""
+def get_user_id_filter(user: UserInfo) -> Optional[int]:
+    """Return the user_id to filter DB queries by, or None for single-user mode."""
+    if user.id == 0:
+        return None  # Single-user mode: no filtering
     return user.id
 
 

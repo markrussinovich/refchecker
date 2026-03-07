@@ -110,6 +110,9 @@ export default function InputSection() {
       const keyStore = useKeyStore.getState()
       const llmKey = config ? keyStore.getKey(config.provider) : null
       if (llmKey) formData.append('api_key', llmKey)
+      else if (config) {
+        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM extraction will be unavailable unless server has env var fallback.`)
+      }
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
 
@@ -117,6 +120,7 @@ export default function InputSection() {
         mode: inputMode, 
         llm: config?.provider,
         model: config?.model,
+        hasApiKey: !!llmKey,
         source: inputMode === 'url' ? sanitizedUrl : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
       })
 

@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/useAuthStore'
  * Only rendered when auth is enabled.
  */
 export default function UserMenu() {
-  const { user, logout } = useAuthStore()
+  const { user, authRequired, logout } = useAuthStore()
   const [open, setOpen] = useState(false)
   const menuRef = useRef(null)
 
@@ -21,7 +21,7 @@ export default function UserMenu() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  if (!user) return null
+  if (!authRequired || !user) return null
 
   const initials = (user.name || user.email || '?')
     .split(' ')
