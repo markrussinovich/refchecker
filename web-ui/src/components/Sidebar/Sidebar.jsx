@@ -13,7 +13,7 @@ const STORAGE_KEY = 'refchecker-sidebar-width'
 
 /**
  * Sidebar component containing LLM selector and history list.
- * On mobile (<=767px) it renders as a slide-out drawer controlled by
+ * On mobile (<=1023px) it renders as a slide-out drawer controlled by
  * `mobileOpen` / `onMobileClose` props from App.
  */
 export default function Sidebar({ mobileOpen, onMobileClose }) {
@@ -205,7 +205,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
            so we use a data-attr approach instead */
       >
         <style>{`
-          @media (max-width: 767px) {
+          @media (max-width: 1023px) {
             .sidebar-drawer { display: flex !important; }
           }
         `}</style>

@@ -95,17 +95,17 @@ function App() {
         <LiveWebSocketManager />
         {/* Header */}
         <header 
-          className="h-14 flex items-center justify-between px-4 md:px-6 border-b"
+          className="h-14 flex items-center justify-between px-4 lg:px-6 border-b"
           style={{ 
             backgroundColor: 'var(--color-bg-secondary)',
             borderColor: 'var(--color-border)'
           }}
         >
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center gap-2 lg:gap-3">
             {/* Hamburger menu - mobile only */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="md:hidden p-2 -ml-2 rounded-md transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              className="lg:hidden p-2 -ml-2 rounded-md transition-colors hover:bg-[var(--color-bg-tertiary)]"
               style={{ color: 'var(--color-text-primary)' }}
               aria-label="Open menu"
             >
@@ -131,7 +131,7 @@ function App() {
               RefChecker
             </h1>
           </div>
-          <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex items-center gap-2 lg:gap-4">
             <div className="header-llm-selector w-64">
               <LLMSelector compact={true} />
             </div>

@@ -312,7 +312,7 @@ export default function InputSection() {
 
   return (
     <div 
-      className="rounded-lg border p-4 md:p-6"
+      className="rounded-lg border p-4 lg:p-6"
       style={{
         backgroundColor: 'var(--color-bg-secondary)',
         borderColor: 'var(--color-border)',

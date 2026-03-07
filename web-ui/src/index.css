@@ -171,14 +171,15 @@ body {
   }
 }
 
-/* Mobile layout adjustments */
-@media (max-width: 767px) {
-  /* Hide desktop sidebar */
+/* Tablet and below: use drawer instead of desktop sidebar */
+@media (max-width: 1023px) {
   .sidebar-desktop {
     display: none;
   }
+}
 
-  /* Header compact */
+/* Phone: compact header */
+@media (max-width: 639px) {
   .header-title-text {
     display: none;
   }
