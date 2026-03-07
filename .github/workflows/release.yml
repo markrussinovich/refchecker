@@ -105,11 +105,13 @@ jobs:
         echo "new_version=$new_version" >> $GITHUB_OUTPUT
         echo "current_version=$base_version" >> $GITHUB_OUTPUT
     
-    - name: Commit version bump
+    - name: Commit version bump and tag
       run: |
         git add src/refchecker/__version__.py
         git commit -m "Bump version to ${{ steps.increment_version.outputs.new_version }}"
+        git tag "v${{ steps.increment_version.outputs.new_version }}"
         git push
+        git push origin "v${{ steps.increment_version.outputs.new_version }}"
     
     - name: Run build script
       run: |
