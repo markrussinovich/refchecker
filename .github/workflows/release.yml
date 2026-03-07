@@ -4,6 +4,10 @@ on:
   push:
     branches: [ main ]  # Only release from main branch
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   test-and-release:
     runs-on: ubuntu-latest
@@ -42,8 +46,9 @@ jobs:
     
     - name: Sync version with git tags
       run: |
-        # Get the latest git tag
-        latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.2.47")
+        # Get the latest git tag (globally, not just reachable from HEAD)
+        latest_tag=$(git tag --sort=-v:refname | head -1)
+        latest_tag=${latest_tag:-v1.2.47}
         latest_version=${latest_tag#v}
         
         # Read current version from __version__.py
@@ -69,8 +74,9 @@ jobs:
     - name: Increment version
       id: increment_version
       run: |
-        # Get the latest git tag
-        latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.2.47")
+        # Get the latest git tag (globally, not just reachable from HEAD)
+        latest_tag=$(git tag --sort=-v:refname | head -1)
+        latest_tag=${latest_tag:-v1.2.47}
         echo "Latest git tag: $latest_tag"
         
         # Extract version number from tag (remove 'v' prefix if present)
@@ -105,13 +111,11 @@ jobs:
         echo "new_version=$new_version" >> $GITHUB_OUTPUT
         echo "current_version=$base_version" >> $GITHUB_OUTPUT
     
-    - name: Commit version bump and tag
+    - name: Commit version bump
       run: |
         git add src/refchecker/__version__.py
         git commit -m "Bump version to ${{ steps.increment_version.outputs.new_version }}"
-        git tag "v${{ steps.increment_version.outputs.new_version }}"
         git push
-        git push origin "v${{ steps.increment_version.outputs.new_version }}"
     
     - name: Run build script
       run: |
