@@ -184,10 +184,6 @@ body {
 
 /* Phone: compact header */
 @media (max-width: 639px) {
-  .header-title-text {
-    display: none;
-  }
-
   .header-github-link {
     display: none;
   }
