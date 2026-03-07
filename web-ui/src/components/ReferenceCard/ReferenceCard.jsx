@@ -414,7 +414,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 href={reference.cited_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:underline"
+                className="hover:underline mobile-break-url"
                 style={{ color: 'var(--color-link)' }}
               >
                 {reference.cited_url}
@@ -466,7 +466,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                   href={urlObj.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:underline"
+                  className="hover:underline mobile-break-url"
                   style={{ color: 'var(--color-link)' }}
                 >
                   {urlObj.url}

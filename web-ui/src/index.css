@@ -176,6 +176,10 @@ body {
   .sidebar-desktop {
     display: none;
   }
+
+  .mobile-break-url {
+    word-break: break-all;
+  }
 }
 
 /* Phone: compact header */
