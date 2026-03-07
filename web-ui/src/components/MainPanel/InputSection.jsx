@@ -111,7 +111,12 @@ export default function InputSection() {
       const llmKey = config ? keyStore.getKey(config.provider) : null
       if (llmKey) formData.append('api_key', llmKey)
       else if (config) {
-        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM extraction will be unavailable unless server has env var fallback.`)
+        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM features will be unavailable.`)
+        // Warn user but don't block — some papers (BibTeX/BBL) work without LLM
+        const { setError } = useCheckStore.getState()
+        setError(`No API key found for ${config.provider}. Enter your key in Settings → API Keys. (Checks may fail for PDF-only papers.)`)
+        setIsSubmitting(false)
+        return
       }
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)

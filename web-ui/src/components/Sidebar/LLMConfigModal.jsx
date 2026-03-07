@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { useConfigStore } from '../../stores/useConfigStore'
+import { useKeyStore } from '../../stores/useKeyStore'
 import { validateLLMConfig } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -184,6 +185,12 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
       } else {
         await addConfig(configData)
         logger.info('LLMConfigModal', 'Config created')
+      }
+
+      // Save API key to browser localStorage so it's available for check submissions
+      if (formData.api_key.trim()) {
+        useKeyStore.getState().setKey(formData.provider, formData.api_key.trim())
+        logger.info('LLMConfigModal', 'API key saved to local key store', { provider: formData.provider })
       }
 
       onClose()

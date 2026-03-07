@@ -397,7 +397,7 @@ class ProgressRefChecker:
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
                     # PDF extraction requires LLM for reliable reference extraction
                     if not self.llm:
-                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
+                        raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys.")
                     
                     await self.emit_progress("extracting", {
                         "message": "Downloading PDF from URL..."
@@ -485,7 +485,7 @@ class ProgressRefChecker:
                     if not arxiv_source_references:
                         # PDF extraction requires LLM for reliable reference extraction
                         if not self.llm:
-                            raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings or provide a paper with BibTeX/LaTeX source files.")
+                            raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys. (This paper's ArXiv source did not contain parseable bibliography files.)")
                         extraction_method = 'pdf'
                         # Download PDF - run in thread (use cross-platform temp directory)
                         pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
@@ -507,7 +507,7 @@ class ProgressRefChecker:
                 if paper_source.lower().endswith('.pdf'):
                     # PDF extraction requires LLM for reliable reference extraction
                     if not self.llm:
-                        raise ValueError("PDF extraction requires an LLM to be configured. Please configure an LLM provider in settings.")
+                        raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                     
