@@ -12,9 +12,11 @@ const DEFAULT_WIDTH = 280
 const STORAGE_KEY = 'refchecker-sidebar-width'
 
 /**
- * Sidebar component containing LLM selector and history list
+ * Sidebar component containing LLM selector and history list.
+ * On mobile (<=767px) it renders as a slide-out drawer controlled by
+ * `mobileOpen` / `onMobileClose` props from App.
  */
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onMobileClose }) {
   const { fetchConfigs } = useConfigStore()
   const { initializeWithPlaceholder, ensureNewRefcheckItem, selectCheck } = useHistoryStore()
   const { status, reset } = useCheckStore()
@@ -72,23 +74,18 @@ export default function Sidebar() {
     }
   }, [isResizing, resize, stopResizing])
 
-  return (
-    <aside 
-      ref={sidebarRef}
-      className="flex flex-col h-full relative"
-      style={{ 
-        width: `${width}px`,
-        minWidth: `${MIN_WIDTH}px`,
-        maxWidth: `${MAX_WIDTH}px`,
-        backgroundColor: 'var(--color-bg-secondary)',
-      }}
-    >
+  // Close mobile drawer when a history item is selected
+  const handleMobileSelect = useCallback(() => {
+    if (onMobileClose) onMobileClose()
+  }, [onMobileClose])
+
+  const sidebarContent = (
+    <>
       {/* New Refcheck button - fixed at top */}
       <div className="flex-shrink-0 px-3 py-3">
         <button 
           onClick={() => {
             ensureNewRefcheckItem()
-            // Only reset if not currently checking - don't interrupt running checks
             if (status !== 'checking') {
               reset()
             }
@@ -160,15 +157,60 @@ export default function Sidebar() {
           <span>Settings</span>
         </button>
       </div>
+    </>
+  )
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={startResizing}
-        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
-        style={{
-          backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+  return (
+    <>
+      {/* Desktop sidebar */}
+      <aside 
+        ref={sidebarRef}
+        className="sidebar-desktop flex flex-col h-full relative"
+        style={{ 
+          width: `${width}px`,
+          minWidth: `${MIN_WIDTH}px`,
+          maxWidth: `${MAX_WIDTH}px`,
+          backgroundColor: 'var(--color-bg-secondary)',
         }}
-      />
-    </aside>
+      >
+        {sidebarContent}
+
+        {/* Resize handle (desktop only) */}
+        <div
+          onMouseDown={startResizing}
+          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
+          style={{
+            backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+          }}
+        />
+      </aside>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div
+          className="sidebar-backdrop fixed inset-0 z-40 bg-black/40"
+          onClick={onMobileClose}
+          style={{ display: 'block' }}
+        />
+      )}
+      <aside
+        className="sidebar-drawer fixed inset-y-0 left-0 z-50 flex flex-col w-72"
+        style={{
+          backgroundColor: 'var(--color-bg-secondary)',
+          transform: mobileOpen ? 'translateX(0)' : 'translateX(-100%)',
+          display: 'none', // hidden on desktop; overridden below
+        }}
+        /* show only on mobile via inline style toggled by CSS media query trick:
+           we use a className and a @media rule wouldn't override inline display,
+           so we use a data-attr approach instead */
+      >
+        <style>{`
+          @media (max-width: 767px) {
+            .sidebar-drawer { display: flex !important; }
+          }
+        `}</style>
+        {sidebarContent}
+      </aside>
+    </>
   )
 }

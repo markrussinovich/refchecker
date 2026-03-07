@@ -117,8 +117,8 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         borderColor: 'var(--color-border)',
       }}
     >
-      {/* Header row - fixed height with relative positioning for absolute child */}
-      <div className="flex items-center justify-between mb-3 relative" style={{ height: '24px' }}>
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <div className="flex items-center gap-3">
           <h3 
             className="font-semibold text-sm"
@@ -136,7 +136,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           )}
         </div>
         {/* Right side controls */}
-        <div className="absolute right-0 top-0 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           {/* Filter indicator */}
           {isFilterActive && activeFilter && (
             <button
