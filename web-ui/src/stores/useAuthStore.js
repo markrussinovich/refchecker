@@ -71,8 +71,9 @@ export const useAuthStore = create((set, get) => {
           set({ providers, user: null, isLoading: false })
         }
       } catch (err) {
-        logger.error('AuthStore', 'Init failed', err)
-        set({ isLoading: false, error: err.message })
+        // If providers endpoint fails (500, network error, etc.) → assume single-user mode
+        logger.warn('AuthStore', 'Providers fetch failed — falling back to single-user mode', err)
+        set({ providers: [], user: { id: 0, name: 'Local User', provider: 'local' }, isLoading: false })
       }
     },
 
