@@ -56,9 +56,6 @@ export default function InputSection() {
   const fileUpload = useFileUpload()
 
   const handleSubmit = async () => {
-    // Clear any previous history selection
-    clearSelection()
-    
     // Validate input
     if (inputMode === 'url' && !inputValue.trim()) {
       logger.warn('InputSection', 'No URL/ArXiv ID provided')
@@ -111,12 +108,7 @@ export default function InputSection() {
       const llmKey = config ? keyStore.getKey(config.provider) : null
       if (llmKey) formData.append('api_key', llmKey)
       else if (config) {
-        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM features will be unavailable.`)
-        // Warn user but don't block — some papers (BibTeX/BBL) work without LLM
-        const { setError } = useCheckStore.getState()
-        setError(`No API key found for ${config.provider}. Enter your key in Settings → API Keys. (Checks may fail for PDF-only papers.)`)
-        setIsSubmitting(false)
-        return
+        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM features may be unavailable.`)
       }
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
@@ -139,6 +131,9 @@ export default function InputSection() {
       
       // For file uploads, the filename becomes the paper title
       const displayTitle = inputMode === 'file' ? fileUpload.file?.name : null
+
+      // Clear any previous history selection now that validation passed
+      clearSelection()
 
       // Start the check
       logger.info('API', 'Sending POST /api/check')
