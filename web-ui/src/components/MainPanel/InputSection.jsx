@@ -177,8 +177,6 @@ export default function InputSection() {
   }
 
   const handleBulkSubmit = async () => {
-    clearSelection()
-    
     // Validate input
     if (bulkMode === 'urls') {
       const urls = bulkUrls.split('\n').map(u => u.trim()).filter(Boolean)
@@ -191,11 +189,16 @@ export default function InputSection() {
       return
     }
 
+    clearSelection()
+
     setIsSubmitting(true)
 
     try {
       const config = getSelectedConfig()
       const { addToHistory } = useHistoryStore.getState()
+      const keyStore = useKeyStore.getState()
+      const llmKey = config ? keyStore.getKey(config.provider) : null
+      const ssKey = keyStore.getKey('semantic_scholar')
       
       let response
       
@@ -209,6 +212,8 @@ export default function InputSection() {
           llm_provider: config?.provider || 'anthropic',
           llm_model: config?.model,
           use_llm: !!config,
+          api_key: llmKey,
+          semantic_scholar_api_key: ssKey,
         })
       } else {
         // File batch
@@ -223,6 +228,8 @@ export default function InputSection() {
         } else {
           formData.append('use_llm', 'false')
         }
+        if (llmKey) formData.append('api_key', llmKey)
+        if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
         
         response = await api.startBatchFileCheck(formData)
       }

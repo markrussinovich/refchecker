@@ -35,7 +35,7 @@ export default function LoginPage() {
     >
       {/* Card */}
       <div
-        className="w-full max-w-sm rounded-2xl shadow-xl p-8 flex flex-col items-center gap-6"
+        className="w-full max-w-lg rounded-2xl shadow-xl p-8 flex flex-col items-center gap-6"
         style={{
           backgroundColor: 'var(--color-bg-secondary)',
           border: '1px solid var(--color-border)',
@@ -68,6 +68,40 @@ export default function LoginPage() {
           >
             Sign in to check paper references
           </p>
+        </div>
+
+        <div className="w-full space-y-3 text-center">
+          <h2
+            className="text-lg font-semibold"
+            style={{ color: 'var(--color-text-primary)' }}
+          >
+            Verify citations against real sources
+          </h2>
+          <p
+            className="text-sm leading-6"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            RefChecker helps researchers inspect paper references, compare citations with
+            authoritative sources, and spot missing, broken, or potentially hallucinated
+            references before publication or review.
+          </p>
+          <p
+            className="text-sm leading-6"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            It supports URL, arXiv, file, and pasted-text workflows and uses configurable
+            LLM backends to assist with parsing and verification.
+          </p>
+          <a
+            href="https://github.com/markrussinovich/refchecker"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-medium hover:underline"
+            style={{ color: 'var(--color-link)' }}
+          >
+            <GitHubIcon />
+            <span>View the project on GitHub</span>
+          </a>
         </div>
 
         {/* Error banner */}
@@ -128,6 +162,14 @@ export default function LoginPage() {
           style={{ color: 'var(--color-text-tertiary, #9ca3af)' }}
         >
           By signing in you agree to use this service for research purposes.
+        </p>
+
+        <p
+          className="w-full text-xs text-center italic leading-5"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          Note: any LLM keys you enter will be stored in the browser cache and only kept in
+          memory on the server while handling requests; they are not persisted on the server.
         </p>
       </div>
     </div>

@@ -67,13 +67,24 @@ export const startCheck = (formData) => api.post('/check', formData, {
   timeout: 0, // No timeout for file uploads
 })
 
+export const startBatchCheck = (payload) => api.post('/check/batch', payload, {
+  timeout: 0,
+})
+
+export const startBatchFileCheck = (formData) => api.post('/check/batch/files', formData, {
+  headers: { 'Content-Type': 'multipart/form-data' },
+  timeout: 0,
+})
+
 export const cancelCheck = (sessionId) => api.post(`/cancel/${sessionId}`)
+export const cancelBatch = (batchId) => api.post(`/cancel/batch/${batchId}`)
 
 // History operations
 export const getHistory = (limit = 50) => api.get('/history', { params: { limit } })
 export const getCheckDetail = (id) => api.get(`/history/${id}`)
 export const deleteCheck = (id) => api.delete(`/history/${id}`)
 export const updateCheckLabel = (id, label) => api.patch(`/history/${id}`, { custom_label: label })
+export const updateBatchLabel = (batchId, label) => api.patch(`/batch/${batchId}`, { batch_label: label })
 export const recheck = (id) => api.post(`/recheck/${id}`)
 
 // Admin operations
@@ -134,11 +145,15 @@ export default {
   deleteSemanticScholarKey,
   validateSemanticScholarKey,
   startCheck,
+  startBatchCheck,
+  startBatchFileCheck,
   cancelCheck,
+  cancelBatch,
   getHistory,
   getCheckDetail,
   deleteCheck,
   updateCheckLabel,
+  updateBatchLabel,
   recheck,
   createWebSocket,
   clearCache,
