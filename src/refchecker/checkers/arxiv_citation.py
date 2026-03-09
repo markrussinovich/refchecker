@@ -34,9 +34,8 @@ import html
 import time
 from typing import Dict, List, Tuple, Optional, Any
 
-import bibtexparser
-from bibtexparser.bparser import BibTexParser
-from bibtexparser.customization import convert_to_unicode
+from pybtex.database import parse_string
+from pybtex.exceptions import PybtexError
 
 from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter
 from refchecker.utils.text_utils import (
@@ -179,37 +178,33 @@ class ArXivCitationChecker:
             Dictionary with parsed metadata or None if parsing failed
         """
         try:
-            # Configure parser
-            parser = BibTexParser(common_strings=True)
-            parser.customization = convert_to_unicode
-            
-            # Parse BibTeX
-            bib_database = bibtexparser.loads(bibtex_str, parser=parser)
-            
+            bib_database = parse_string(bibtex_str, 'bibtex')
+
             if not bib_database.entries:
                 logger.debug("No entries found in BibTeX")
                 return None
-            
-            entry = bib_database.entries[0]
+
+            entry = next(iter(bib_database.entries.values()))
+            fields = dict(entry.fields)
             
             # Extract and normalize fields
-            title = entry.get('title', '')
+            title = fields.get('title', '')
             # Clean title - remove braces used for capitalization protection
             title = re.sub(r'\{([^}]*)\}', r'\1', title)
             title = title.strip()
             
             # Extract authors
-            authors_str = entry.get('author', '')
-            authors = self._parse_authors(authors_str)
+            authors = [self._format_pybtex_person(person) for person in entry.persons.get('author', [])]
+            authors = [author for author in authors if author]
             
             # Extract year - prefer year from eprint ID (original submission) over BibTeX year (latest revision)
-            arxiv_id = entry.get('eprint', '')
+            arxiv_id = fields.get('eprint', '')
             year = self._extract_year_from_eprint(arxiv_id)
             
             # Fall back to BibTeX year field if eprint year extraction fails
-            if not year and entry.get('year'):
+            if not year and fields.get('year'):
                 try:
-                    year = int(entry['year'])
+                    year = int(fields['year'])
                 except ValueError:
                     pass
             
@@ -228,21 +223,39 @@ class ArXivCitationChecker:
                     'url': f"https://arxiv.org/pdf/{arxiv_id}.pdf" if arxiv_id else None
                 },
                 # Store original bibtex for reference
-                '_bibtex_entry': entry,
+                '_bibtex_entry': fields,
                 '_source': 'ArXiv BibTeX Reference',
                 '_source_url': f"https://arxiv.org/bibtex/{arxiv_id}" if arxiv_id else None,
             }
             
             # Add DOI if present (some ArXiv papers have DOIs)
-            if entry.get('doi'):
-                result['externalIds']['DOI'] = entry['doi']
+            if fields.get('doi'):
+                result['externalIds']['DOI'] = fields['doi']
             
             logger.debug(f"Parsed ArXiv BibTeX: title='{title[:50]}...', authors={len(authors)}, year={year}")
             return result
-            
-        except Exception as e:
+
+        except (PybtexError, Exception) as e:
             logger.warning(f"Failed to parse BibTeX: {e}")
             return None
+
+    def _format_pybtex_person(self, person) -> str:
+        """Convert a pybtex Person into a normalized display name."""
+        name_parts = []
+        for chunk in (
+            person.first_names,
+            person.middle_names,
+            person.prelast_names,
+            person.last_names,
+            person.lineage_names,
+        ):
+            if chunk:
+                name_parts.extend(chunk)
+
+        name = ' '.join(part.strip() for part in name_parts if part and part.strip())
+        name = re.sub(r'\s+', ' ', name)
+        name = re.sub(r'\{([^}]*)\}', r'\1', name)
+        return name.strip()
     
     def _parse_authors(self, authors_str: str) -> List[str]:
         """

@@ -44,6 +44,8 @@ import argparse
 import sys
 import json
 import random
+import csv
+from refchecker.core.hallucination_policy import assess_hallucination_candidate
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        normalize_text as common_normalize_text,
@@ -172,13 +174,68 @@ def setup_logging(debug_mode=False, level=None):
 # Initialize logger (default to INFO for console)
 logger = setup_logging(debug_mode=False)
 
+
+def resolve_input_spec(input_spec):
+    """Resolve a CLI input spec into either a paper id or a local/URL document path."""
+    spec = input_spec.strip()
+    if not spec:
+        raise ValueError("Empty paper specification")
+
+    expanded_spec = os.path.expanduser(spec)
+
+    if spec.startswith('http'):
+        if (spec.lower().endswith('.pdf') or
+            'pdf' in spec.lower() or
+            '/content' in spec or
+            'bitstreams' in spec or
+            spec.endswith('/download')):
+            return None, spec
+
+        paper_id = extract_arxiv_id_from_url(spec)
+        if not paper_id:
+            raise ValueError(f"Could not extract arXiv ID from URL: {spec}")
+        return paper_id, None
+
+    if os.path.exists(expanded_spec):
+        if not (expanded_spec.lower().endswith('.pdf') or
+                expanded_spec.lower().endswith('.tex') or
+                expanded_spec.lower().endswith('.txt') or
+                expanded_spec.lower().endswith('.bib')):
+            raise ValueError(
+                "Unsupported file type. Supported formats: .pdf, .tex, .txt, .bib"
+            )
+        return None, expanded_spec
+
+    return spec, None
+
+
+def load_paper_specs_from_file(list_path):
+    """Load newline-delimited paper specs, ignoring blanks and comments."""
+    specs = []
+    # Accept UTF-8 files written with BOM by Windows editors and PowerShell.
+    with open(list_path, 'r', encoding='utf-8-sig') as f:
+        for line in f:
+            spec = line.strip()
+            if spec and not spec.startswith('#'):
+                specs.append(spec)
+
+    if not specs:
+        raise ValueError(f"No paper specifications found in {list_path}")
+
+    return specs
+
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None, 
-                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4):
+                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4,
+                 scan_mode='standard', report_file=None, report_format='json', only_flagged=False):
         # Initialize the reference checker for non-arXiv references
         self.fatal_error = False            
         self.db_path = db_path
         self.verification_output_file = output_file
+        self.scan_mode = scan_mode
+        self.report_file = report_file
+        self.report_format = report_format
+        self.only_flagged = only_flagged
         
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
@@ -248,7 +305,7 @@ class ArxivReferenceChecker:
                 
         # Initialize LLM-based reference extraction
         try:
-            from config.settings import get_config
+            from refchecker.config.settings import get_config
             self.config = get_config()
         except ImportError:
             self.config = {}
@@ -270,9 +327,244 @@ class ArxivReferenceChecker:
         
         # Initialize consolidated error storage
         self.errors = []
+
+    def _get_source_paper_url(self, source_paper):
+        """Return the most useful source URL for a paper in reports."""
+        if hasattr(source_paper, 'canonical_url') and source_paper.canonical_url:
+            return source_paper.canonical_url
+
+        if hasattr(source_paper, 'file_path') and source_paper.file_path:
+            if getattr(source_paper, 'is_url', False):
+                return source_paper.file_path
+            return f"file://{os.path.abspath(source_paper.file_path)}"
+
+        return f"https://arxiv.org/abs/{source_paper.get_short_id()}"
+
+    def _format_paper_authors(self, paper):
+        """Format paper authors for reports across arXiv and synthetic local/url papers."""
+        authors = getattr(paper, 'authors', []) or []
+        formatted = []
+        for author in authors:
+            if hasattr(author, 'name') and author.name:
+                formatted.append(author.name)
+            else:
+                author_text = str(author).strip()
+                if author_text:
+                    formatted.append(author_text)
+        return ', '.join(formatted) if formatted else 'Unknown'
+
+    def _resolve_url_paper_metadata(self, url):
+        """Resolve extra metadata for supported URL-backed source papers."""
+        metadata = self._extract_openreview_source_metadata(url)
+        if metadata:
+            return metadata
+        return None
+
+    def _extract_openreview_source_metadata(self, url):
+        """Resolve OpenReview paper metadata from a PDF or forum URL when possible."""
+        if 'openreview.net' not in (url or '').lower():
+            return None
+
+        try:
+            from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+
+            checker = OpenReviewReferenceChecker(request_delay=0.0)
+            paper_id = checker.extract_paper_id(url)
+            if not paper_id:
+                return None
+
+            metadata = {
+                'id': paper_id,
+                'source_url': f'https://openreview.net/forum?id={paper_id}',
+            }
+
+            paper_data = checker.get_paper_metadata(paper_id)
+            if not paper_data:
+                return metadata
+
+            metadata.update({
+                'id': paper_data.get('id') or paper_id,
+                'title': paper_data.get('title') or '',
+                'authors': paper_data.get('authors') or [],
+                'year': paper_data.get('year'),
+                'venue': paper_data.get('venue') or '',
+                'source_url': paper_data.get('forum_url') or metadata['source_url'],
+            })
+            return metadata
+        except Exception as e:
+            logger.debug(f"Could not enrich OpenReview source metadata for {url}: {e}")
+            return None
+
+    def _build_current_paper_info(self, paper):
+        """Build single-paper summary metadata for output files."""
+        source_url = self._get_source_paper_url(paper)
+
+        return {
+            'title': getattr(paper, 'title', 'Unknown'),
+            'id': paper.get_short_id(),
+            'url': source_url,
+            'authors': self._format_paper_authors(paper),
+            'year': getattr(getattr(paper, 'published', None), 'year', datetime.datetime.now().year),
+        }
+
+    def _build_structured_report_records(self):
+        """Convert collected error entries into report records."""
+        records = []
+        for error_entry in self.errors:
+            record = dict(error_entry)
+            if self.scan_mode == 'hallucination':
+                record['hallucination_assessment'] = assess_hallucination_candidate(record)
+            records.append(record)
+
+        if self.scan_mode == 'hallucination' and self.only_flagged:
+            records = [
+                record for record in records
+                if record.get('hallucination_assessment', {}).get('candidate')
+            ]
+
+        return records
+
+    def _build_paper_rollups(self, records):
+        """Build per-paper triage summaries from structured records."""
+        rollups = {}
+        level_rank = {'none': 0, 'low': 1, 'medium': 2, 'high': 3}
+
+        for record in records:
+            key = record.get('source_paper_id') or record.get('source_url') or record.get('source_title')
+            if not key:
+                continue
+
+            rollup = rollups.setdefault(key, {
+                'source_paper_id': record.get('source_paper_id', ''),
+                'source_title': record.get('source_title', ''),
+                'source_authors': record.get('source_authors', ''),
+                'source_year': record.get('source_year'),
+                'source_url': record.get('source_url', ''),
+                'total_records': 0,
+                'flagged_records': 0,
+                'max_flag_level': 'none',
+                'error_type_counts': {},
+                'reason_counts': {},
+            })
+
+            rollup['total_records'] += 1
+
+            error_type = record.get('error_type') or 'unknown'
+            rollup['error_type_counts'][error_type] = rollup['error_type_counts'].get(error_type, 0) + 1
+
+            assessment = record.get('hallucination_assessment', {}) or {}
+            if assessment.get('candidate'):
+                rollup['flagged_records'] += 1
+                level = assessment.get('level', 'none')
+                if level_rank.get(level, 0) > level_rank.get(rollup['max_flag_level'], 0):
+                    rollup['max_flag_level'] = level
+                for reason in assessment.get('reasons', []):
+                    rollup['reason_counts'][reason] = rollup['reason_counts'].get(reason, 0) + 1
+
+        result = []
+        for rollup in rollups.values():
+            rollup['has_flagged_records'] = rollup['flagged_records'] > 0
+            rollup['error_type_counts'] = dict(sorted(
+                rollup['error_type_counts'].items(),
+                key=lambda item: (-item[1], item[0]),
+            ))
+            rollup['reason_counts'] = dict(sorted(
+                rollup['reason_counts'].items(),
+                key=lambda item: (-item[1], item[0]),
+            ))
+            result.append(rollup)
+
+        result.sort(
+            key=lambda item: (
+                -item['flagged_records'],
+                -item['total_records'],
+                item['source_title'] or '',
+            )
+        )
+        return result
+
+    def write_structured_report(self):
+        """Write structured output for downstream triage workflows."""
+        if not self.report_file:
+            return
+
+        records = self._build_structured_report_records()
+        paper_rollups = self._build_paper_rollups(records)
+        summary = {
+            'scan_mode': self.scan_mode,
+            'total_papers_processed': self.total_papers_processed,
+            'total_references_processed': self.total_references_processed,
+            'total_errors_found': self.total_errors_found,
+            'total_warnings_found': self.total_warnings_found,
+            'total_info_found': self.total_info_found,
+            'total_unverified_refs': self.total_unverified_refs,
+            'records_written': len(records),
+            'papers_with_records': len(paper_rollups),
+        }
+
+        if self.scan_mode == 'hallucination':
+            flagged_records = [
+                record for record in records
+                if record.get('hallucination_assessment', {}).get('candidate')
+            ]
+            summary['flagged_records'] = len(flagged_records)
+            summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
+
+        try:
+            with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
+                if self.report_format == 'csv':
+                    fieldnames = [
+                        'source_paper_id',
+                        'source_title',
+                        'source_authors',
+                        'source_year',
+                        'source_url',
+                        'ref_paper_id',
+                        'ref_title',
+                        'ref_authors_cited',
+                        'ref_year_cited',
+                        'ref_url_cited',
+                        'error_type',
+                        'error_details',
+                        'ref_verified_url',
+                        'ref_title_correct',
+                        'ref_authors_correct',
+                        'ref_year_correct',
+                        'ref_url_correct',
+                        'ref_venue_correct',
+                        'hallucination_candidate',
+                        'hallucination_level',
+                        'hallucination_score',
+                        'hallucination_reasons',
+                    ]
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                    writer.writeheader()
+                    for record in records:
+                        assessment = record.get('hallucination_assessment', {}) or {}
+                        row = dict(record)
+                        row['hallucination_candidate'] = assessment.get('candidate', False)
+                        row['hallucination_level'] = assessment.get('level', 'none')
+                        row['hallucination_score'] = assessment.get('score', 0)
+                        row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
+                        writer.writerow(row)
+                elif self.report_format == 'jsonl':
+                    for record in records:
+                        f.write(json.dumps(record, ensure_ascii=False) + '\n')
+                else:
+                    payload = {
+                        'generated_at': datetime.datetime.utcnow().isoformat() + 'Z',
+                        'summary': summary,
+                        'papers': paper_rollups,
+                        'records': records,
+                    }
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to write structured report: {e}")
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
+        self.llm_enabled = False
+
         # Check if LLM is explicitly disabled
         if self.llm_config_override and self.llm_config_override.get('disabled'):
             logger.info("LLM-based reference extraction disabled via command line")
@@ -661,13 +953,18 @@ class ArxivReferenceChecker:
         Returns:
             Paper object compatible with ArXiv paper interface
         """
+        url_metadata = self._resolve_url_paper_metadata(file_path) if file_path.startswith('http') else None
+
         class LocalFilePaper:
-            def __init__(self, path, is_url=False):
+            def __init__(self, path, is_url=False, metadata=None):
                 self.file_path = path
                 self.is_url = is_url
                 self.is_latex = path.lower().endswith('.tex')
                 self.is_text_refs = path.lower().endswith('.txt')
                 self.is_bibtex = path.lower().endswith('.bib')
+                self.canonical_url = path if is_url else None
+                self.external_paper_id = None
+                self.venue = ''
                 
                 if is_url:
                     # Extract meaningful title from URL
@@ -703,8 +1000,25 @@ class ArxivReferenceChecker:
                         self.year = datetime.datetime.now().year
                 
                 self.published = PublishedDate()
+
+                if metadata:
+                    if metadata.get('id'):
+                        self.external_paper_id = metadata['id']
+                    if metadata.get('title'):
+                        self.title = metadata['title']
+                    if metadata.get('authors'):
+                        self.authors = metadata['authors']
+                    if metadata.get('year'):
+                        self.published.year = metadata['year']
+                    if metadata.get('venue'):
+                        self.venue = metadata['venue']
+                    if metadata.get('source_url'):
+                        self.canonical_url = metadata['source_url']
                 
             def get_short_id(self):
+                if self.external_paper_id:
+                    return self.external_paper_id
+
                 if self.is_url:
                     url_path = urlparse(self.file_path).path
                     basename = os.path.basename(url_path)
@@ -726,7 +1040,7 @@ class ArxivReferenceChecker:
         
         # Check if it's a URL
         is_url = file_path.startswith('http')
-        return LocalFilePaper(file_path, is_url=is_url)
+        return LocalFilePaper(file_path, is_url=is_url, metadata=url_metadata)
 
     def get_api_performance_summary(self):
         """
@@ -1931,7 +2245,7 @@ class ArxivReferenceChecker:
         # Get year tolerance from config (default to 1 if not available)
         year_tolerance = 1  # Default tolerance
         try:
-            from config.settings import get_config
+            from refchecker.config.settings import get_config
             config = get_config()
             year_tolerance = config.get('text_processing', {}).get('year_tolerance', 1)
         except (ImportError, Exception):
@@ -2720,9 +3034,9 @@ class ArxivReferenceChecker:
                         # Source paper metadata
                         'source_paper_id': source_paper.get_short_id(),
                         'source_title': source_paper.title,
-                        'source_authors': ', '.join([author.name for author in source_paper.authors]),
+                        'source_authors': self._format_paper_authors(source_paper),
                         'source_year': source_paper.published.year,
-                        'source_url': f"https://arxiv.org/abs/{source_paper.get_short_id()}",
+                        'source_url': self._get_source_paper_url(source_paper),
                         
                         # Reference metadata as cited
                         'ref_paper_id': self.extract_arxiv_id_from_url(reference['url']),
@@ -2785,9 +3099,9 @@ class ArxivReferenceChecker:
                 # Source paper metadata
                 'source_paper_id': source_paper.get_short_id(),
                 'source_title': source_paper.title,
-                'source_authors': ', '.join([author.name for author in source_paper.authors]),
+                'source_authors': self._format_paper_authors(source_paper),
                 'source_year': source_paper.published.year,
-                'source_url': f"https://arxiv.org/abs/{source_paper.get_short_id()}",
+                'source_url': self._get_source_paper_url(source_paper),
                 
                 # Reference metadata as cited
                 'ref_paper_id': self.extract_arxiv_id_from_url(reference['url']),
@@ -2873,7 +3187,7 @@ class ArxivReferenceChecker:
                         # Check if this is the first error for this paper
                         if not paper_info_written:
                             f.write(f"\nPAPER: {self.current_paper_info['title']}\n")
-                            f.write(f"ArXiv ID: {self.current_paper_info['id']}\n")
+                            f.write(f"Paper ID: {self.current_paper_info['id']}\n")
                             f.write(f"URL: {self.current_paper_info['url']}\n")
                             f.write(f"Authors: {self.current_paper_info['authors']}\n")
                             f.write(f"Year: {self.current_paper_info['year']}\n")
@@ -2882,7 +3196,7 @@ class ArxivReferenceChecker:
                     else:
                         # Multi-paper mode - write paper info for each error
                         f.write(f"\nPAPER: {error_entry['source_title']}\n")
-                        f.write(f"ArXiv ID: {error_entry['source_paper_id']}\n")
+                        f.write(f"Paper ID: {error_entry['source_paper_id']}\n")
                         f.write(f"URL: {error_entry['source_url']}\n")
                         f.write(f"Authors: {error_entry['source_authors']}\n")
                         f.write(f"Year: {error_entry['source_year']}\n")
@@ -3009,7 +3323,7 @@ class ArxivReferenceChecker:
                 
         return corrected_data
     
-    def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None):
+    def run(self, debug_mode=False, specific_paper_id=None, local_pdf_path=None, input_specs=None):
         """
         Run the reference checking process
         
@@ -3042,61 +3356,51 @@ class ArxivReferenceChecker:
         
         try:
             # Get papers to process
-            if specific_paper_id:
-                # Process a specific paper
-                logger.debug(f"Processing specific paper with ID: {specific_paper_id}")
-                paper = self.get_paper_metadata(specific_paper_id)
-                if not paper:
-                    logger.error(f"Could not find paper with ID: {specific_paper_id}")
-                    return None
-                papers = [paper]
-                # Set single paper mode
-                self.single_paper_mode = True
-                               
-                self.current_paper_info = {
-                    'title': paper.title,
-                    'id': paper.get_short_id(),
-                    'url': f"https://arxiv.org/abs/{paper.get_short_id()}",
-                    'authors': ', '.join([author.name for author in paper.authors]),
-                    'year': paper.published.year
-                }
-                # Reset paper info written flag
-                if hasattr(self, '_paper_info_written'):
-                    delattr(self, '_paper_info_written')
-            elif local_pdf_path:
-                # Process a local PDF or LaTeX file
-                # Determine file type for logging
-                file_ext = os.path.splitext(local_pdf_path)[1].lower()
-                if file_ext == '.pdf':
-                    file_type = "PDF"
-                elif file_ext == '.tex':
-                    file_type = "LaTeX file"
-                elif file_ext == '.bib':
-                    file_type = "BibTeX file"
-                elif file_ext == '.txt':
-                    file_type = "text file"
+            raw_input_specs = input_specs or []
+            if not raw_input_specs:
+                if specific_paper_id:
+                    raw_input_specs = [specific_paper_id]
+                elif local_pdf_path:
+                    raw_input_specs = [local_pdf_path]
+
+            papers = []
+            for input_spec in raw_input_specs:
+                try:
+                    paper_id, resolved_local_path = resolve_input_spec(input_spec)
+                except ValueError as e:
+                    logger.error(str(e))
+                    continue
+
+                if paper_id:
+                    logger.debug(f"Processing specific paper with ID: {paper_id}")
+                    paper = self.get_paper_metadata(paper_id)
+                    if not paper:
+                        logger.error(f"Could not find paper with ID: {paper_id}")
+                        continue
                 else:
-                    file_type = "file"
-                logger.debug(f"Processing {file_type}: {local_pdf_path}")
-                paper = self._create_local_file_paper(local_pdf_path)
-                papers = [paper]
-                # Set single paper mode
-                self.single_paper_mode = True
-                                
-                # Determine appropriate URL for display
-                if local_pdf_path.startswith('http'):
-                    display_url = local_pdf_path  # Use original URL for HTTP(S) links
-                else:
-                    display_url = f"file://{os.path.abspath(local_pdf_path)}"  # Use file:// for local files
-                
-                self.current_paper_info = {
-                    'title': paper.title,
-                    'id': paper.get_short_id(),
-                    'url': display_url,
-                    'authors': ', '.join(paper.authors) if paper.authors else 'Unknown',
-                    'year': paper.published.year
-                }
-                # Reset paper info written flag
+                    file_ext = os.path.splitext(resolved_local_path)[1].lower()
+                    if file_ext == '.pdf':
+                        file_type = "PDF"
+                    elif file_ext == '.tex':
+                        file_type = "LaTeX file"
+                    elif file_ext == '.bib':
+                        file_type = "BibTeX file"
+                    elif file_ext == '.txt':
+                        file_type = "text file"
+                    else:
+                        file_type = "file"
+                    logger.debug(f"Processing {file_type}: {resolved_local_path}")
+                    paper = self._create_local_file_paper(resolved_local_path)
+
+                papers.append(paper)
+
+            if not papers:
+                logger.error("No papers could be prepared for processing")
+                return None
+
+            self.single_paper_mode = len(papers) == 1
+            if self.single_paper_mode:
+                self.current_paper_info = self._build_current_paper_info(papers[0])
                 if hasattr(self, '_paper_info_written'):
                     delattr(self, '_paper_info_written')
             
@@ -3116,8 +3420,8 @@ class ArxivReferenceChecker:
                     # Regular ArXiv paper
                     paper_url = f"https://arxiv.org/abs/{paper_id}"
                 elif hasattr(paper, 'file_path'):
-                    # Local file or URL - use the current_paper_info URL if available
-                    paper_url = self.current_paper_info.get('url', f"file://{os.path.abspath(paper.file_path)}")
+                    # Local file or URL in single- or multi-paper mode.
+                    paper_url = self._get_source_paper_url(paper)
                 else:
                     # Fallback to ArXiv URL
                     paper_url = f"https://arxiv.org/abs/{paper_id}"
@@ -3303,6 +3607,7 @@ class ArxivReferenceChecker:
         
         # Write all accumulated errors to file at the end of the run
         self.write_all_errors_to_file()
+        self.write_structured_report()
         
         # Log performance statistics at the end (debug mode only)
         if self.debug_mode:
@@ -5757,12 +6062,22 @@ def main():
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,
                         help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, local text file containing references, or local BibTeX file")
+    parser.add_argument("--paper-list", type=str,
+                        help="Path to a newline-delimited list of paper specs for bulk CLI scans")
     parser.add_argument("--semantic-scholar-api-key", type=str,
                         help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
                         help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
+    parser.add_argument("--mode", choices=["standard", "hallucination"], default="standard",
+                        help="Run the default verifier or the stricter hallucination triage mode")
+    parser.add_argument("--report-file", type=str,
+                        help="Write structured results to a machine-readable report file")
+    parser.add_argument("--report-format", choices=["json", "jsonl", "csv"], default="json",
+                        help="Structured report format when --report-file is provided")
+    parser.add_argument("--only-flagged", action="store_true",
+                        help="In hallucination mode, only include flagged records in the structured report")
     
     # LLM configuration arguments
     parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
@@ -5784,38 +6099,31 @@ def main():
 
     args = parser.parse_args()
     
+    if args.paper and args.paper_list:
+        print("Error: Use either --paper or --paper-list, not both")
+        return 1
+    if not args.paper and not args.paper_list:
+        print("Error: Please provide --paper or --paper-list")
+        return 1
+
     # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
     paper_id = None
     local_pdf_path = None
+    input_specs = None
+
+    if args.paper_list:
+        try:
+            input_specs = load_paper_specs_from_file(args.paper_list)
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
     
     if args.paper:
-        if args.paper.startswith('http'):
-            # Check if it's a PDF URL first
-            if (args.paper.lower().endswith('.pdf') or 
-                'pdf' in args.paper.lower() or
-                '/content' in args.paper or  # Repository URLs often end with /content
-                'bitstreams' in args.paper or  # DSpace repository URLs
-                args.paper.endswith('/download')):  # Common download endpoint
-                # This is a PDF URL - we'll download it and process as a local PDF
-                local_pdf_path = args.paper  # Store the URL, we'll handle download later
-            else:
-                # Try to extract arXiv ID from URL
-                paper_id = extract_arxiv_id_from_url(args.paper)
-                if not paper_id:
-                    print(f"Error: Could not extract arXiv ID from URL: {args.paper}")
-                    return 1
-        elif os.path.exists(args.paper):
-            # This is a local file - check if it exists first, then determine type
-            local_pdf_path = args.paper
-            if not (args.paper.lower().endswith('.pdf') or 
-                   args.paper.lower().endswith('.tex') or 
-                   args.paper.lower().endswith('.txt') or 
-                   args.paper.lower().endswith('.bib')):
-                print(f"Error: Unsupported file type. Supported formats: .pdf, .tex, .txt, .bib")
-                return 1
-        else:
-            # Assume it's an online paper ID (ArXiv ID, DOI, etc.)
-            paper_id = args.paper
+        try:
+            paper_id, local_pdf_path = resolve_input_spec(args.paper)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
     
     # Process LLM configuration overrides
     llm_config = None
@@ -5854,7 +6162,11 @@ def main():
             llm_config=llm_config,
             debug_mode=args.debug,
             enable_parallel=not args.disable_parallel,
-            max_workers=args.max_workers
+            max_workers=args.max_workers,
+            scan_mode=args.mode,
+            report_file=args.report_file,
+            report_format=args.report_format,
+            only_flagged=args.only_flagged,
         )
         
         if checker.fatal_error:
@@ -5864,7 +6176,8 @@ def main():
         checker.run(
             debug_mode=args.debug,
             specific_paper_id=paper_id,
-            local_pdf_path=local_pdf_path
+            local_pdf_path=local_pdf_path,
+            input_specs=input_specs,
         )
         
         # Check for fatal errors that occurred during runtime

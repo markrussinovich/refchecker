@@ -120,7 +120,7 @@ class LLMProvider(ABC):
             raise Exception(f"{self.__class__.__name__} not available")
         
         # Get model's max_tokens from configuration - try to get provider-specific config
-        from config.settings import get_config
+        from refchecker.config.settings import get_config
         config = get_config()
         
         # Try to get provider-specific max_tokens, fall back to general config
@@ -199,7 +199,7 @@ class LLMProvider(ABC):
             List of all extracted references from all chunks
         """
         # Get configuration for parallel processing
-        from config.settings import get_config
+        from refchecker.config.settings import get_config
         config = get_config()
         
         # Check if parallel processing is enabled

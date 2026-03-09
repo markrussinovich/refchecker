@@ -435,7 +435,7 @@ class LocalNonArxivReferenceChecker:
         # Get year tolerance from config (default to 1 if not available)
         year_tolerance = 1  # Default tolerance
         try:
-            from config.settings import get_config
+            from refchecker.config.settings import get_config
             config = get_config()
             year_tolerance = config.get('text_processing', {}).get('year_tolerance', 1)
         except (ImportError, Exception):
