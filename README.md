@@ -56,6 +56,7 @@ academic-refchecker --paper /path/to/paper.pdf
 - **Comprehensive checks**: Titles, authors, years, venues, DOIs, ArXiv IDs
 - **Smart matching**: Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
 - **Detailed reports**: Errors, warnings, corrected references
+- **Hallucination triage mode**: Bulk-scan papers and surface only high-confidence citation problems
 - **Bulk web checks**: Upload multiple files or a ZIP in the Web UI to validate many papers at once
 
 ## Sample Output
@@ -350,7 +351,12 @@ academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_sch
 
 # Save results
 academic-refchecker --paper 1706.03762 --output-file errors.txt
+
+# Bulk hallucination triage
+academic-refchecker --mode hallucination --paper-list iclr_papers.txt --report-file hallucination_report.json --only-flagged
 ```
+
+`--mode hallucination` is a stricter review pass intended for bulk triage. It keeps the existing verifier, but only elevates strong signals such as unverified rich citations, identifier conflicts, and multiple major metadata mismatches. Use it when you want a shortlist of suspicious references rather than every minor citation issue.
 
 ## Output
 
@@ -364,6 +370,8 @@ RefChecker reports these result types:
 | ❓ **Unverified** | Could not verify against any source | Rare publications, preprints |
 
 Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements.
+
+In hallucination mode, you can also write machine-readable JSON, JSONL, or CSV reports and optionally keep only flagged records.
 
 <details>
 <summary>Detailed examples</summary>
@@ -414,11 +422,24 @@ academic-refchecker --paper paper.pdf --llm-provider vllm --llm-endpoint http://
 
 ```bash
 --paper PAPER              # ArXiv ID, URL, or file path
+--paper-list PATH          # Newline-delimited file of paper specs for bulk scans
+--mode MODE                # standard or hallucination
 --llm-provider PROVIDER    # openai, anthropic, google, azure, vllm
 --llm-model MODEL          # Override default model
 --db-path PATH             # Local database for offline verification
 --output-file [PATH]       # Save results (default: reference_errors.txt)
+--report-file PATH         # Structured report output for bulk triage
+--report-format FORMAT     # json, jsonl, csv
+--only-flagged             # In hallucination mode, suppress non-flagged records in the report
 --debug                    # Verbose output
+```
+
+Example bulk input file:
+
+```text
+https://openreview.net/pdf?id=ZG3RaNIsO8
+https://openreview.net/pdf?id=fB0hRu9GZUS
+paper/local_sample.bib
 ```
 
 ### Environment Variables
