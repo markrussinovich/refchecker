@@ -483,11 +483,8 @@ class ArxivReferenceChecker:
         )
         return result
 
-    def write_structured_report(self):
-        """Write structured output for downstream triage workflows."""
-        if not self.report_file:
-            return
-
+    def _build_structured_report_payload(self):
+        """Build the structured summary, paper rollups, and records payload."""
         records = self._build_structured_report_records()
         paper_rollups = self._build_paper_rollups(records)
         summary = {
@@ -509,6 +506,65 @@ class ArxivReferenceChecker:
             ]
             summary['flagged_records'] = len(flagged_records)
             summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
+
+        return {
+            'summary': summary,
+            'papers': paper_rollups,
+            'records': records,
+        }
+
+    def _build_hallucination_console_lines(self, payload=None, max_papers=5):
+        """Build a compact bulk triage summary for hallucination scans."""
+        if self.scan_mode != 'hallucination':
+            return []
+
+        payload = payload or self._build_structured_report_payload()
+        summary = payload['summary']
+        flagged_papers = [paper for paper in payload['papers'] if paper.get('flagged_records', 0) > 0]
+
+        lines = [
+            "",
+            "HALLUCINATION TRIAGE",
+            "-" * 60,
+            f"Flagged papers: {summary.get('flagged_papers', 0)}",
+            f"Flagged references: {summary.get('flagged_records', 0)}",
+        ]
+
+        if not flagged_papers:
+            lines.append("No high-confidence hallucination candidates found.")
+            return lines
+
+        lines.append("Top flagged papers:")
+        for paper in flagged_papers[:max_papers]:
+            title = paper.get('source_title') or paper.get('source_paper_id') or 'Unknown paper'
+            max_flag_level = (paper.get('max_flag_level') or 'none').upper()
+            reasons = ', '.join(list((paper.get('reason_counts') or {}).keys())[:3])
+            lines.append(
+                f"[{max_flag_level}] {title} ({paper.get('flagged_records', 0)}/{paper.get('total_records', 0)} flagged)"
+            )
+            if reasons:
+                lines.append(f"    Signals: {reasons}")
+
+        remaining = len(flagged_papers) - max_papers
+        if remaining > 0:
+            lines.append(f"... plus {remaining} more flagged paper(s)")
+
+        return lines
+
+    def _print_hallucination_console_summary(self, payload=None):
+        """Print a compact bulk triage summary for hallucination scans."""
+        for line in self._build_hallucination_console_lines(payload=payload):
+            print(line)
+
+    def write_structured_report(self):
+        """Write structured output for downstream triage workflows."""
+        if not self.report_file:
+            return
+
+        payload = self._build_structured_report_payload()
+        records = payload['records']
+        paper_rollups = payload['papers']
+        summary = payload['summary']
 
         try:
             with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
@@ -551,13 +607,13 @@ class ArxivReferenceChecker:
                     for record in records:
                         f.write(json.dumps(record, ensure_ascii=False) + '\n')
                 else:
-                    payload = {
+                    json_payload = {
                         'generated_at': datetime.datetime.utcnow().isoformat() + 'Z',
                         'summary': summary,
                         'papers': paper_rollups,
                         'records': records,
                     }
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
+                    json.dump(json_payload, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Failed to write structured report: {e}")
     
@@ -3585,6 +3641,7 @@ class ArxivReferenceChecker:
                     print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
             else:
                 # Multi-paper mode - show full summary
+                structured_payload = self._build_structured_report_payload() if self.scan_mode == 'hallucination' else None
                 print(f"\n" + "="*60)
                 print(f"📋 FINAL SUMMARY")
                 print(f"="*60)
@@ -3601,6 +3658,9 @@ class ArxivReferenceChecker:
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
+
+                if self.scan_mode == 'hallucination':
+                    self._print_hallucination_console_summary(payload=structured_payload)
                 
                 if self.verification_output_file:
                     print(f"\n💾 Detailed results saved to: {self.verification_output_file}")

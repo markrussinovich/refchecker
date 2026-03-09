@@ -35,13 +35,13 @@ This mode is intended to help reviewers and maintainers find the worst reference
 
 ### Phase 1: CLI foundation
 
-Status: in progress
+Status: complete
 
 - [x] Add `--mode hallucination`.
 - [x] Add `--paper-list` for bulk CLI input.
 - [x] Add report arguments for machine-readable exports.
 - [x] Preserve current single-paper behavior.
-- [ ] Add paper-level triage console summaries for bulk runs.
+- [x] Add paper-level triage console summaries for bulk runs.
 
 Target files:
 
@@ -132,4 +132,6 @@ Each flagged record should include:
 - Implemented: `pybtex` migration to replace deprecated `bibtexparser`
 - Validated: Sonnet-backed 3-paper OpenReview sample with cleaner flagged-paper grouping
 - Validated: focused regression suite after `bibtexparser` uninstall (`47 passed`)
-- Next code slice: add bulk console triage summaries and continue threshold tuning
+- Implemented: bulk hallucination console triage summary for multi-paper CLI runs
+- Validated: bulk CLI smoke run with triage summary output
+- Next code slice: continue threshold tuning and broaden docs
