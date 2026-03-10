@@ -48,6 +48,53 @@ def test_identifier_conflict_is_high_signal():
     assert 'arxiv_id_conflict' in result['reasons']
 
 
+def test_operational_unverified_issue_is_not_candidate():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'GitHub API rate limit exceeded',
+        'ref_title': 'Scaling Laws for Neural Language Models in Realistic Training Regimes',
+        'ref_authors_cited': 'Author One, Author Two',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is False
+    assert result['level'] == 'none'
+    assert result['score'] == 0.0
+    assert 'verification_infrastructure_issue' in result['reasons']
+
+
+def test_url_reference_only_unverified_issue_is_not_candidate():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': "paper not verified but URL references paper",
+        'ref_title': 'A Real Project Page',
+        'ref_authors_cited': 'Author One',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is False
+    assert result['level'] == 'none'
+    assert 'verification_infrastructure_issue' in result['reasons']
+
+
+def test_api_failure_is_not_candidate():
+    entry = {
+        'error_type': 'api_failure',
+        'error_details': 'Semantic Scholar API failed: temporary outage',
+        'ref_title': 'Another Real Paper',
+        'ref_authors_cited': 'Author One, Author Two',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is False
+    assert result['level'] == 'none'
+    assert result['score'] == 0.0
+    assert result['reasons'] == ['verification_infrastructure_issue']
+
+
 def test_paper_rollups_group_flagged_records_by_source_paper():
     checker = object.__new__(ArxivReferenceChecker)
     checker.scan_mode = 'hallucination'

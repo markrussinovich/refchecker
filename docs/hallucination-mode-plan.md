@@ -59,7 +59,7 @@ Status: in progress
   - arXiv/OpenReview identifier mismatch
   - multiple major mismatches together
 - [x] Exclude weak signals such as year-only drift.
-- [ ] Tune thresholds against real-world false positives.
+- [~] Tune thresholds against real-world false positives.
 
 Target files:
 
@@ -134,4 +134,5 @@ Each flagged record should include:
 - Validated: focused regression suite after `bibtexparser` uninstall (`47 passed`)
 - Implemented: bulk hallucination console triage summary for multi-paper CLI runs
 - Validated: bulk CLI smoke run with triage summary output
-- Next code slice: continue threshold tuning and broaden docs
+- Implemented: downgraded operational `unverified` and API-failure cases so rate limits/network issues do not become hallucination candidates
+- Next code slice: keep tuning thresholds against larger real-world samples and broaden docs

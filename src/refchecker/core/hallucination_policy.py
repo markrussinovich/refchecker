@@ -5,10 +5,35 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 
+NON_SUSPICIOUS_UNVERIFIED_MARKERS = (
+	'rate limit',
+	'network error',
+	'api error',
+	'api failed',
+	'http error',
+	'could not fetch',
+	'could not download',
+	'could not extract pdf content',
+	'pdf processing error',
+	'internal processing error',
+	'timeout',
+	'timed out',
+	'repository not found or is private',
+	'no url provided',
+	'paper not verified but url references paper',
+)
+
+
 def _count_cited_authors(cited_authors: str) -> int:
 	if not cited_authors:
 		return 0
 	return len([author for author in cited_authors.split(',') if author.strip()])
+
+
+def _is_non_suspicious_unverified(error_details: str) -> bool:
+	if not error_details:
+		return False
+	return any(marker in error_details for marker in NON_SUSPICIOUS_UNVERIFIED_MARKERS)
 
 
 def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -28,12 +53,23 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 	author_count = _count_cited_authors(cited_authors)
 	has_rich_metadata = bool(title and len(title) >= 20 and author_count >= 1)
 
+	if error_type in {'api_failure', 'processing_failed'}:
+		return {
+			'candidate': False,
+			'level': 'none',
+			'score': 0.0,
+			'reasons': ['verification_infrastructure_issue'],
+		}
+
 	if error_type == 'unverified':
 		reasons.append('unverified')
-		score += 0.45
-		if has_rich_metadata:
-			reasons.append('rich_metadata_not_found')
-			score += 0.2
+		if _is_non_suspicious_unverified(error_details):
+			reasons.append('verification_infrastructure_issue')
+		else:
+			score += 0.45
+			if has_rich_metadata:
+				reasons.append('rich_metadata_not_found')
+				score += 0.2
 
 	if error_type in {'doi', 'arxiv_id', 'arxiv'}:
 		reasons.append(f'{error_type}_conflict')
