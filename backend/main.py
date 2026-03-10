@@ -34,6 +34,7 @@ from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
 from .auth import (
     SITE_URL,
+    MULTIUSER_MODE,
     require_user,
     get_current_user,
     get_user_id_filter,
@@ -245,7 +246,7 @@ _EXCHANGE_FNS = {
 @app.get("/api/auth/providers")
 async def auth_providers():
     """Return which OAuth providers are configured."""
-    return {"providers": get_available_providers()}
+    return {"providers": get_available_providers(), "multiuser": MULTIUSER_MODE}
 
 
 @app.get("/api/auth/login/{provider}")
@@ -1640,21 +1641,24 @@ async def create_llm_config(
     """Create a new LLM configuration"""
     try:
         user_id = get_user_id_filter(current_user)
+        # In single-user mode, store the API key in the database
+        store_key = config.api_key if not MULTIUSER_MODE else None
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
             model=config.model,
             endpoint=config.endpoint,
+            api_key=store_key,
             user_id=user_id,
         )
-        # Return the created config (without API key)
         return {
             "id": config_id,
             "name": config.name,
             "provider": config.provider,
             "model": config.model,
             "endpoint": config.endpoint,
-            "is_default": False
+            "is_default": False,
+            "has_key": bool(store_key),
         }
     except Exception as e:
         logger.error(f"Error creating LLM config: {e}", exc_info=True)
@@ -1665,12 +1669,15 @@ async def create_llm_config(
 async def update_llm_config(config_id: int, config: LLMConfigUpdate):
     """Update an existing LLM configuration"""
     try:
+        # In single-user mode, store the API key in the database
+        store_key = config.api_key if not MULTIUSER_MODE else None
         success = await db.update_llm_config(
             config_id=config_id,
             name=config.name,
             provider=config.provider,
             model=config.model,
-            endpoint=config.endpoint
+            endpoint=config.endpoint,
+            api_key=store_key,
         )
         if success:
             # Get updated config

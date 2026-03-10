@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useConfigStore } from '../../stores/useConfigStore'
+import { useAuthStore } from '../../stores/useAuthStore'
+import { useKeyStore } from '../../stores/useKeyStore'
 import LLMConfigModal from './LLMConfigModal'
 import { logger } from '../../utils/logger'
 
@@ -10,19 +12,37 @@ import { logger } from '../../utils/logger'
  */
 export default function LLMSelector({ compact = false }) {
   const { configs, selectedConfigId, selectConfig, deleteConfig, isLoading } = useConfigStore()
+  const multiuser = useAuthStore(state => state.multiuser)
+  const hasKeyInBrowser = useKeyStore(state => state.hasKey)
+
+  // A config is "valid" (selectable) if it has a key:
+  //   single-user: has_key flag from DB
+  //   multi-user: browser localStorage has a key for that provider
+  const configHasKey = (config) => {
+    if (!config) return false
+    if (multiuser) return hasKeyInBrowser(config.provider)
+    return !!config.has_key
+  }
+  const validConfigs = configs.filter(configHasKey)
   const [isOpen, setIsOpen] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editConfig, setEditConfig] = useState(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null)
   const dropdownRef = useRef(null)
 
-  const selectedConfig = configs.find(c => c.id === selectedConfigId)
+  const selectedConfig = validConfigs.find(c => c.id === selectedConfigId)
 
   // Format display name as provider-model
   const formatConfigName = (config) => {
     if (!config) return 'No LLM configured'
     const model = config.model || 'default'
     return `${config.provider}-${model}`
+  }
+
+  // Find a keyless config for the same provider to use as prefill when creating new configs
+  const findPrefillConfig = () => {
+    const keylessConfigs = configs.filter(c => !configHasKey(c))
+    return keylessConfigs.length > 0 ? keylessConfigs[0] : null
   }
 
   // Close dropdown when clicking outside
@@ -108,9 +128,9 @@ export default function LLMSelector({ compact = false }) {
             borderColor: 'var(--color-border)',
           }}
         >
-          {/* Existing configs */}
+          {/* Existing configs (only those with valid keys) */}
           <div className="max-h-48 overflow-y-auto">
-            {configs.length === 0 ? (
+            {validConfigs.length === 0 ? (
               <div 
                 className="px-3 py-2 text-sm"
                 style={{ color: 'var(--color-text-muted)' }}
@@ -118,7 +138,7 @@ export default function LLMSelector({ compact = false }) {
                 No configurations
               </div>
             ) : (
-              configs.map(config => (
+              validConfigs.map(config => (
                 <div
                   key={config.id}
                   className="flex items-center justify-between px-3 py-2 cursor-pointer transition-colors"
@@ -253,6 +273,7 @@ export default function LLMSelector({ compact = false }) {
             <button
               onClick={() => {
                 setIsOpen(false)
+                setEditConfig(null)
                 setShowModal(true)
               }}
               className="w-full flex items-center px-3 py-2 text-sm transition-colors"
@@ -281,6 +302,7 @@ export default function LLMSelector({ compact = false }) {
           setEditConfig(null)
         }}
         editConfig={editConfig}
+        prefillConfig={!editConfig ? findPrefillConfig() : null}
       />
     </div>
   )

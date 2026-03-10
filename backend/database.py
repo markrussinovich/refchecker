@@ -88,7 +88,7 @@ class Database:
                 )
             """)
 
-            # LLM configurations table (api_key_encrypted omitted for new DBs)
+            # LLM configurations table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS llm_configs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,6 +96,7 @@ class Database:
                     provider TEXT NOT NULL,
                     model TEXT,
                     endpoint TEXT,
+                    api_key_encrypted TEXT,
                     is_default BOOLEAN DEFAULT 0,
                     user_id INTEGER REFERENCES users(id),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -197,6 +198,8 @@ class Database:
             llm_columns = {row[1] async for row in cursor}
         if "user_id" not in llm_columns:
             await db.execute("ALTER TABLE llm_configs ADD COLUMN user_id INTEGER REFERENCES users(id)")
+        if "api_key_encrypted" not in llm_columns:
+            await db.execute("ALTER TABLE llm_configs ADD COLUMN api_key_encrypted TEXT")
 
         # Ensure is_admin column in users
         async with db.execute("PRAGMA table_info(users)") as cursor:
@@ -524,12 +527,13 @@ class Database:
     # LLM Configuration methods
 
     async def get_llm_configs(self, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get all LLM configurations (API keys redacted), optionally filtered by user."""
+        """Get all LLM configurations with has_key flag, optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if user_id is not None:
                 query = """
-                    SELECT id, name, provider, model, endpoint, is_default, created_at
+                    SELECT id, name, provider, model, endpoint, is_default, created_at,
+                           (api_key_encrypted IS NOT NULL AND api_key_encrypted != '') AS has_key
                     FROM llm_configs
                     WHERE user_id = ?
                     ORDER BY created_at DESC
@@ -537,14 +541,15 @@ class Database:
                 params = (user_id,)
             else:
                 query = """
-                    SELECT id, name, provider, model, endpoint, is_default, created_at
+                    SELECT id, name, provider, model, endpoint, is_default, created_at,
+                           (api_key_encrypted IS NOT NULL AND api_key_encrypted != '') AS has_key
                     FROM llm_configs
                     ORDER BY created_at DESC
                 """
                 params = ()
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                return [{**dict(row), 'has_key': bool(row['has_key'])} for row in rows]
 
     async def get_llm_config_by_id(self, config_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get a specific LLM config by ID, optionally checking ownership."""
@@ -560,9 +565,8 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
-                    # Remove legacy encrypted key column if present; api_key is not stored in new DBs
-                    result.pop('api_key_encrypted', None)
-                    result.setdefault('api_key', None)
+                    # Expose stored key as api_key for use during checks
+                    result['api_key'] = result.pop('api_key_encrypted', None)
                     return result
                 return None
 
@@ -571,13 +575,14 @@ class Database:
                                  provider: str,
                                  model: Optional[str] = None,
                                  endpoint: Optional[str] = None,
+                                 api_key: Optional[str] = None,
                                  user_id: Optional[int] = None) -> int:
         """Create a new LLM configuration"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
-                INSERT INTO llm_configs (name, provider, model, endpoint, user_id)
-                VALUES (?, ?, ?, ?, ?)
-            """, (name, provider, model, endpoint, user_id))
+                INSERT INTO llm_configs (name, provider, model, endpoint, api_key_encrypted, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (name, provider, model, endpoint, api_key, user_id))
             await db.commit()
             return cursor.lastrowid
 
@@ -586,7 +591,8 @@ class Database:
                                  name: Optional[str] = None,
                                  provider: Optional[str] = None,
                                  model: Optional[str] = None,
-                                 endpoint: Optional[str] = None) -> bool:
+                                 endpoint: Optional[str] = None,
+                                 api_key: Optional[str] = None) -> bool:
         """Update an existing LLM configuration"""
         updates = []
         params = []
@@ -603,6 +609,9 @@ class Database:
         if endpoint is not None:
             updates.append("endpoint = ?")
             params.append(endpoint)
+        if api_key is not None:
+            updates.append("api_key_encrypted = ?")
+            params.append(api_key)
 
         if not updates:
             return False
@@ -654,8 +663,7 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
-                    result.pop('api_key_encrypted', None)
-                    result.setdefault('api_key', None)
+                    result['api_key'] = result.pop('api_key_encrypted', None)
                     return result
                 return None
 

@@ -103,12 +103,13 @@ export default function InputSection() {
         formData.append('use_llm', 'false')
       }
 
-      // Attach API keys from browser localStorage (never stored server-side)
+      // Attach API keys from browser localStorage; in single-user mode the
+      // backend falls back to the key stored in the DB (config.has_key).
       const keyStore = useKeyStore.getState()
       const llmKey = config ? keyStore.getKey(config.provider) : null
       if (llmKey) formData.append('api_key', llmKey)
-      else if (config) {
-        logger.warn('InputSection', `No API key in browser for provider '${config.provider}'. LLM features may be unavailable.`)
+      else if (config && !config.has_key) {
+        logger.warn('InputSection', `No API key for provider '${config.provider}'. LLM features may be unavailable.`)
       }
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
@@ -117,7 +118,7 @@ export default function InputSection() {
         mode: inputMode, 
         llm: config?.provider,
         model: config?.model,
-        hasApiKey: !!llmKey,
+        hasApiKey: !!(llmKey || config?.has_key),
         source: inputMode === 'url' ? sanitizedUrl : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
       })
 

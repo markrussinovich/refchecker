@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAuthStore } from '../../stores/useAuthStore'
+import { useConfigStore } from '../../stores/useConfigStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -21,6 +23,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   // Key store for browser-localStorage LLM API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
+  const multiuser = useAuthStore(state => state.multiuser)
+  const configs = useConfigStore(state => state.configs)
+
+  // Check if a provider has a key in browser localStorage OR in any DB config
+  const providerHasKey = (provider) => {
+    if (hasKey(provider)) return true
+    return configs.some(c => c.provider === provider && c.has_key)
+  }
 
   // In-memory LLM API key state
   const LLM_PROVIDERS = ['anthropic', 'openai', 'google', 'gemini']
@@ -203,12 +213,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
             LLM API Keys
           </div>
-          <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-            Keys are stored in your browser&apos;s local storage only.
-          </div>
+          {multiuser && (
+            <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
+              Keys are stored in your browser&apos;s local storage only.
+            </div>
+          )}
           <div className="space-y-3">
             {LLM_PROVIDERS.map((provider) => {
-              const hasKeyForProvider = hasKey(provider)
+              const hasKeyForProvider = providerHasKey(provider)
               const isEditing = !!llmKeyEditing[provider]
               const isSaving = !!llmKeySaving[provider]
               const inputValue = llmKeyInputs[provider] || ''
