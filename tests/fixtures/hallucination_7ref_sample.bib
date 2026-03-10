@@ -1,0 +1,81 @@
+% Hallucination detection test fixture.
+%
+% 7 references designed to exercise hallucination triage:
+%   1 accurate        — correct metadata, should verify cleanly
+%   3 minor issues    — real papers with small citation errors
+%   3 hallucinated    — fabricated references from documented LLM patterns
+%
+% The three hallucinated entries are modeled on patterns reported in
+% GPTZero's NeurIPS 2025 hallucination audit and the arXiv study
+% "Hallucinations in Large Language Models" (arXiv:2304.09848).
+
+% ── 1. ACCURATE ──────────────────────────────────────────────────────
+% Real paper, correct metadata.
+
+@inproceedings{vaswani2017attention,
+  title     = {Attention Is All You Need},
+  author    = {Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Lukasz Kaiser and Illia Polosukhin},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2017},
+  url       = {https://arxiv.org/abs/1706.03762}
+}
+
+% ── 2-4. MINOR ISSUES ───────────────────────────────────────────────
+% Real papers with small, realistic citation errors.
+
+% 2. Year off by one: BERT was published on arXiv in 2018, not 2019.
+@article{devlin2019bert_yearoff,
+  title   = {BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding},
+  author  = {Jacob Devlin and Ming-Wei Chang and Kenton Lee and Kristina Toutanova},
+  journal = {arXiv preprint arXiv:1810.04805},
+  year    = {2019},
+  url     = {https://arxiv.org/abs/1810.04805}
+}
+
+% 3. Wrong first author: actual first author is Kaiming He, not Jian He.
+@inproceedings{he2016resnet_wrongauthor,
+  title     = {Deep Residual Learning for Image Recognition},
+  author    = {Jian He and Xiangyu Zhang and Shaoqing Ren and Jian Sun},
+  booktitle = {IEEE Conference on Computer Vision and Pattern Recognition},
+  year      = {2016},
+  url       = {https://arxiv.org/abs/1512.03385}
+}
+
+% 4. Wrong venue: the paper appeared at NeurIPS (then NIPS) 2014, not ICML.
+@inproceedings{goodfellow2014gan_wrongvenue,
+  title     = {Generative Adversarial Nets},
+  author    = {Ian Goodfellow and Jean Pouget-Abadie and Mehdi Mirza and Bing Xu and David Warde-Farley and Sherjil Ozair and Aaron Courville and Yoshua Bengio},
+  booktitle = {Proceedings of the International Conference on Machine Learning},
+  year      = {2014}
+}
+
+% ── 5-7. HALLUCINATED ───────────────────────────────────────────────
+% Completely fabricated references based on documented LLM patterns.
+
+% 5. Fully fabricated: fake authors, title, and venue.
+%    Modeled on the documented hallucination pattern from arXiv:2304.09848.
+@inproceedings{li2019pruning_fake,
+  title     = {Efficient Neural Network Pruning Using Iterative Sparse Retraining},
+  author    = {Shuang Li and Yifan Chen},
+  booktitle = {Proceedings of the 36th International Conference on Machine Learning},
+  year      = {2019},
+  pages     = {354--362}
+}
+
+% 6. Real author, fake paper: Ian Goodfellow is real but never wrote this.
+%    Documented hallucination pattern from GPTZero NeurIPS audit.
+@inproceedings{goodfellow2017rl_fake,
+  title     = {Reinforcement Learning with Adversarial Networks},
+  author    = {Ian Goodfellow and Samy Bengio and Yann LeCun},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2017}
+}
+
+% 7. Blended "Frankenstein" citation: plausible topic, real-sounding venue,
+%    but the paper does not exist. Pattern from NeurIPS 2025 audit.
+@inproceedings{kumar2019sot_fake,
+  title     = {Self-Organizing Transformers for Cross-domain Representation Learning},
+  author    = {Rajesh Kumar and Wei Zhang and Priya Narasimhan},
+  booktitle = {Proceedings of the International Conference on Learning Representations},
+  year      = {2019}
+}
