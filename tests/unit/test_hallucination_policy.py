@@ -1,6 +1,7 @@
 import csv
 
 from refchecker.core.hallucination_policy import assess_hallucination_candidate
+from refchecker.core.report_builder import ReportBuilder
 from refchecker.core.refchecker import ArxivReferenceChecker
 
 
@@ -96,10 +97,8 @@ def test_api_failure_is_not_candidate():
 
 
 def test_paper_rollups_group_flagged_records_by_source_paper():
-    checker = object.__new__(ArxivReferenceChecker)
-    checker.scan_mode = 'hallucination'
-    checker.only_flagged = False
-    checker.errors = [
+    rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
+    errors = [
         {
             'source_paper_id': 'ZG3RaNIsO8',
             'source_title': 'Paper One',
@@ -135,8 +134,8 @@ def test_paper_rollups_group_flagged_records_by_source_paper():
         },
     ]
 
-    records = checker._build_structured_report_records()
-    paper_rollups = checker._build_paper_rollups(records)
+    records = rb.build_structured_report_records(errors)
+    paper_rollups = rb.build_paper_rollups(records)
 
     assert len(paper_rollups) == 2
     assert paper_rollups[0]['source_paper_id'] == 'ZG3RaNIsO8'
@@ -147,18 +146,14 @@ def test_paper_rollups_group_flagged_records_by_source_paper():
 
 
 def test_write_structured_report_csv_flattens_hallucination_assessment(tmp_path):
-    checker = object.__new__(ArxivReferenceChecker)
-    checker.scan_mode = 'hallucination'
-    checker.only_flagged = True
-    checker.report_file = str(tmp_path / 'hallucination_report.csv')
-    checker.report_format = 'csv'
-    checker.total_papers_processed = 1
-    checker.total_references_processed = 4
-    checker.total_errors_found = 1
-    checker.total_warnings_found = 0
-    checker.total_info_found = 0
-    checker.total_unverified_refs = 1
-    checker.errors = [
+    report_file = str(tmp_path / 'hallucination_report.csv')
+    rb = ReportBuilder(
+        scan_mode='hallucination',
+        report_file=report_file,
+        report_format='csv',
+        only_flagged=True,
+    )
+    errors = [
         {
             'source_paper_id': 'ZG3RaNIsO8',
             'source_title': 'Paper One',
@@ -171,10 +166,19 @@ def test_write_structured_report_csv_flattens_hallucination_assessment(tmp_path)
             'error_details': 'Reference could not be verified',
         }
     ]
+    stats = {
+        'total_papers_processed': 1,
+        'total_references_processed': 4,
+        'total_errors_found': 1,
+        'total_warnings_found': 0,
+        'total_info_found': 0,
+        'total_unverified_refs': 1,
+    }
 
-    checker.write_structured_report()
+    payload = rb.build_structured_report_payload(errors, stats)
+    rb.write_structured_report(payload)
 
-    with open(checker.report_file, newline='', encoding='utf-8') as f:
+    with open(report_file, newline='', encoding='utf-8') as f:
         rows = list(csv.DictReader(f))
 
     assert len(rows) == 1
@@ -185,16 +189,8 @@ def test_write_structured_report_csv_flattens_hallucination_assessment(tmp_path)
 
 
 def test_build_hallucination_console_lines_summarizes_flagged_papers():
-    checker = object.__new__(ArxivReferenceChecker)
-    checker.scan_mode = 'hallucination'
-    checker.only_flagged = False
-    checker.total_papers_processed = 3
-    checker.total_references_processed = 7
-    checker.total_errors_found = 2
-    checker.total_warnings_found = 0
-    checker.total_info_found = 0
-    checker.total_unverified_refs = 2
-    checker.errors = [
+    rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
+    errors = [
         {
             'source_paper_id': 'paper-1',
             'source_title': 'Paper One',
@@ -229,8 +225,17 @@ def test_build_hallucination_console_lines_summarizes_flagged_papers():
             'error_details': 'Year mismatch',
         },
     ]
+    stats = {
+        'total_papers_processed': 3,
+        'total_references_processed': 7,
+        'total_errors_found': 2,
+        'total_warnings_found': 0,
+        'total_info_found': 0,
+        'total_unverified_refs': 2,
+    }
 
-    lines = checker._build_hallucination_console_lines()
+    payload = rb.build_structured_report_payload(errors, stats)
+    lines = rb.build_hallucination_console_lines(payload)
     output = '\n'.join(lines)
 
     assert 'HALLUCINATION TRIAGE' in output

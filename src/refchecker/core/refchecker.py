@@ -46,6 +46,7 @@ import json
 import random
 import csv
 from refchecker.core.hallucination_policy import assess_hallucination_candidate
+from refchecker.core.report_builder import ReportBuilder
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
                        normalize_text as common_normalize_text,
@@ -236,6 +237,12 @@ class ArxivReferenceChecker:
         self.report_file = report_file
         self.report_format = report_format
         self.only_flagged = only_flagged
+        self.report_builder = ReportBuilder(
+            scan_mode=scan_mode,
+            report_file=report_file,
+            report_format=report_format,
+            only_flagged=only_flagged,
+        )
         
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
@@ -407,215 +414,45 @@ class ArxivReferenceChecker:
             'year': getattr(getattr(paper, 'published', None), 'year', datetime.datetime.now().year),
         }
 
-    def _build_structured_report_records(self):
-        """Convert collected error entries into report records."""
-        records = []
-        for error_entry in self.errors:
-            record = dict(error_entry)
-            if self.scan_mode == 'hallucination':
-                record['hallucination_assessment'] = assess_hallucination_candidate(record)
-            records.append(record)
-
-        if self.scan_mode == 'hallucination' and self.only_flagged:
-            records = [
-                record for record in records
-                if record.get('hallucination_assessment', {}).get('candidate')
-            ]
-
-        return records
-
-    def _build_paper_rollups(self, records):
-        """Build per-paper triage summaries from structured records."""
-        rollups = {}
-        level_rank = {'none': 0, 'low': 1, 'medium': 2, 'high': 3}
-
-        for record in records:
-            key = record.get('source_paper_id') or record.get('source_url') or record.get('source_title')
-            if not key:
-                continue
-
-            rollup = rollups.setdefault(key, {
-                'source_paper_id': record.get('source_paper_id', ''),
-                'source_title': record.get('source_title', ''),
-                'source_authors': record.get('source_authors', ''),
-                'source_year': record.get('source_year'),
-                'source_url': record.get('source_url', ''),
-                'total_records': 0,
-                'flagged_records': 0,
-                'max_flag_level': 'none',
-                'error_type_counts': {},
-                'reason_counts': {},
-            })
-
-            rollup['total_records'] += 1
-
-            error_type = record.get('error_type') or 'unknown'
-            rollup['error_type_counts'][error_type] = rollup['error_type_counts'].get(error_type, 0) + 1
-
-            assessment = record.get('hallucination_assessment', {}) or {}
-            if assessment.get('candidate'):
-                rollup['flagged_records'] += 1
-                level = assessment.get('level', 'none')
-                if level_rank.get(level, 0) > level_rank.get(rollup['max_flag_level'], 0):
-                    rollup['max_flag_level'] = level
-                for reason in assessment.get('reasons', []):
-                    rollup['reason_counts'][reason] = rollup['reason_counts'].get(reason, 0) + 1
-
-        result = []
-        for rollup in rollups.values():
-            rollup['has_flagged_records'] = rollup['flagged_records'] > 0
-            rollup['error_type_counts'] = dict(sorted(
-                rollup['error_type_counts'].items(),
-                key=lambda item: (-item[1], item[0]),
-            ))
-            rollup['reason_counts'] = dict(sorted(
-                rollup['reason_counts'].items(),
-                key=lambda item: (-item[1], item[0]),
-            ))
-            result.append(rollup)
-
-        result.sort(
-            key=lambda item: (
-                -item['flagged_records'],
-                -item['total_records'],
-                item['source_title'] or '',
-            )
-        )
-        return result
-
-    def _build_structured_report_payload(self):
-        """Build the structured summary, paper rollups, and records payload."""
-        records = self._build_structured_report_records()
-        paper_rollups = self._build_paper_rollups(records)
-        summary = {
-            'scan_mode': self.scan_mode,
+    def _get_report_stats(self):
+        """Collect current run statistics for the report builder."""
+        return {
             'total_papers_processed': self.total_papers_processed,
             'total_references_processed': self.total_references_processed,
             'total_errors_found': self.total_errors_found,
             'total_warnings_found': self.total_warnings_found,
             'total_info_found': self.total_info_found,
             'total_unverified_refs': self.total_unverified_refs,
-            'records_written': len(records),
-            'papers_with_records': len(paper_rollups),
         }
 
-        if self.scan_mode == 'hallucination':
-            flagged_records = [
-                record for record in records
-                if record.get('hallucination_assessment', {}).get('candidate')
-            ]
-            summary['flagged_records'] = len(flagged_records)
-            summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
+    def _build_structured_report_records(self):
+        """Convert collected error entries into report records."""
+        return self.report_builder.build_structured_report_records(self.errors)
 
-        return {
-            'summary': summary,
-            'papers': paper_rollups,
-            'records': records,
-        }
+    def _build_paper_rollups(self, records):
+        """Build per-paper triage summaries from structured records."""
+        return self.report_builder.build_paper_rollups(records)
+
+    def _build_structured_report_payload(self):
+        """Build the structured summary, paper rollups, and records payload."""
+        return self.report_builder.build_structured_report_payload(self.errors, self._get_report_stats())
 
     def _build_hallucination_console_lines(self, payload=None, max_papers=5):
         """Build a compact bulk triage summary for hallucination scans."""
-        if self.scan_mode != 'hallucination':
-            return []
-
         payload = payload or self._build_structured_report_payload()
-        summary = payload['summary']
-        flagged_papers = [paper for paper in payload['papers'] if paper.get('flagged_records', 0) > 0]
-
-        lines = [
-            "",
-            "HALLUCINATION TRIAGE",
-            "-" * 60,
-            f"Flagged papers: {summary.get('flagged_papers', 0)}",
-            f"Flagged references: {summary.get('flagged_records', 0)}",
-        ]
-
-        if not flagged_papers:
-            lines.append("No high-confidence hallucination candidates found.")
-            return lines
-
-        lines.append("Top flagged papers:")
-        for paper in flagged_papers[:max_papers]:
-            title = paper.get('source_title') or paper.get('source_paper_id') or 'Unknown paper'
-            max_flag_level = (paper.get('max_flag_level') or 'none').upper()
-            reasons = ', '.join(list((paper.get('reason_counts') or {}).keys())[:3])
-            lines.append(
-                f"[{max_flag_level}] {title} ({paper.get('flagged_records', 0)}/{paper.get('total_records', 0)} flagged)"
-            )
-            if reasons:
-                lines.append(f"    Signals: {reasons}")
-
-        remaining = len(flagged_papers) - max_papers
-        if remaining > 0:
-            lines.append(f"... plus {remaining} more flagged paper(s)")
-
-        return lines
+        return self.report_builder.build_hallucination_console_lines(payload, max_papers=max_papers)
 
     def _print_hallucination_console_summary(self, payload=None):
         """Print a compact bulk triage summary for hallucination scans."""
-        for line in self._build_hallucination_console_lines(payload=payload):
-            print(line)
+        payload = payload or self._build_structured_report_payload()
+        self.report_builder.print_hallucination_console_summary(payload)
 
-    def write_structured_report(self):
+    def write_structured_report(self, payload=None):
         """Write structured output for downstream triage workflows."""
         if not self.report_file:
             return
-
-        payload = self._build_structured_report_payload()
-        records = payload['records']
-        paper_rollups = payload['papers']
-        summary = payload['summary']
-
-        try:
-            with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
-                if self.report_format == 'csv':
-                    fieldnames = [
-                        'source_paper_id',
-                        'source_title',
-                        'source_authors',
-                        'source_year',
-                        'source_url',
-                        'ref_paper_id',
-                        'ref_title',
-                        'ref_authors_cited',
-                        'ref_year_cited',
-                        'ref_url_cited',
-                        'error_type',
-                        'error_details',
-                        'ref_verified_url',
-                        'ref_title_correct',
-                        'ref_authors_correct',
-                        'ref_year_correct',
-                        'ref_url_correct',
-                        'ref_venue_correct',
-                        'hallucination_candidate',
-                        'hallucination_level',
-                        'hallucination_score',
-                        'hallucination_reasons',
-                    ]
-                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-                    writer.writeheader()
-                    for record in records:
-                        assessment = record.get('hallucination_assessment', {}) or {}
-                        row = dict(record)
-                        row['hallucination_candidate'] = assessment.get('candidate', False)
-                        row['hallucination_level'] = assessment.get('level', 'none')
-                        row['hallucination_score'] = assessment.get('score', 0)
-                        row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
-                        writer.writerow(row)
-                elif self.report_format == 'jsonl':
-                    for record in records:
-                        f.write(json.dumps(record, ensure_ascii=False) + '\n')
-                else:
-                    json_payload = {
-                        'generated_at': datetime.datetime.utcnow().isoformat() + 'Z',
-                        'summary': summary,
-                        'papers': paper_rollups,
-                        'records': records,
-                    }
-                    json.dump(json_payload, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Failed to write structured report: {e}")
+        payload = payload or self._build_structured_report_payload()
+        self.report_builder.write_structured_report(payload)
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
@@ -3615,6 +3452,7 @@ class ArxivReferenceChecker:
                     logger.warning(f"Could not remove output file: {e}")
         
         # Print final summary to console (only if no fatal error occurred)
+        structured_payload = None
         if not debug_mode and not self.fatal_error:
             if self.single_paper_mode:
                 # Single paper mode - show simplified summary
@@ -3641,7 +3479,8 @@ class ArxivReferenceChecker:
                     print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
             else:
                 # Multi-paper mode - show full summary
-                structured_payload = self._build_structured_report_payload() if self.scan_mode == 'hallucination' else None
+                # Build structured payload once and reuse for console + file report
+                structured_payload = self._build_structured_report_payload() if (self.scan_mode == 'hallucination' or self.report_file) else None
                 print(f"\n" + "="*60)
                 print(f"📋 FINAL SUMMARY")
                 print(f"="*60)
@@ -3667,7 +3506,7 @@ class ArxivReferenceChecker:
         
         # Write all accumulated errors to file at the end of the run
         self.write_all_errors_to_file()
-        self.write_structured_report()
+        self.write_structured_report(payload=structured_payload)
         
         # Log performance statistics at the end (debug mode only)
         if self.debug_mode:

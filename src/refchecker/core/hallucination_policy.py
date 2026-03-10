@@ -98,7 +98,11 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 		elif major_signals == 1:
 			score += 0.3
 
-	if error_type in {'year', 'venue', 'url'} and score > 0:
+	# Dampen score when the *primary* error type is a weak signal.
+	# For standalone year/venue/url errors score is already 0, so
+	# this only fires when a weak type appears inside a 'multiple'
+	# block or is combined with other signals in future rules.
+	if error_type in {'year', 'venue', 'url'}:
 		score = max(0.0, score - 0.1)
 
 	score = min(score, 1.0)
