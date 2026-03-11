@@ -102,6 +102,24 @@ def test_multi_source_negative_boosts_score_to_high():
         'error_details': 'Could not verify reference using any available API',
         'ref_title': 'Efficient Neural Network Pruning Using Iterative Sparse Retraining',
         'ref_authors_cited': 'Shuang Li, Yifan Chen',
+        'sources_checked': 4,
+        'sources_negative': 4,
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert result['level'] == 'high'
+    assert result['score'] == 0.85
+    assert 'multi_source_negative_very_high' in result['reasons']
+
+
+def test_three_source_negative_gives_high_boost():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Could not verify reference using any available API',
+        'ref_title': 'Some Fabricated Paper Title That Does Not Exist Anywhere',
+        'ref_authors_cited': 'Author One, Author Two',
         'sources_checked': 3,
         'sources_negative': 3,
     }
@@ -110,7 +128,7 @@ def test_multi_source_negative_boosts_score_to_high():
 
     assert result['candidate'] is True
     assert result['score'] == 0.8
-    assert 'multi_source_negative' in result['reasons']
+    assert 'multi_source_negative_high' in result['reasons']
 
 
 def test_two_source_negative_gives_moderate_boost():
