@@ -146,6 +146,58 @@ def test_no_source_tracking_preserves_existing_behavior():
     assert 'multi_source_negative' not in result['reasons']
 
 
+def test_arxiv_year_conflict_boosts_score():
+    """ArXiv ID 2402.xxxxx implies 2024, but citation claims 2019 — major conflict."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Some Fabricated Paper About Transformers',
+        'ref_authors_cited': 'Author One',
+        'ref_url_cited': 'https://arxiv.org/abs/2402.12345',
+        'ref_year_cited': '2019',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert 'arxiv_year_conflict' in result['reasons']
+    assert result['score'] >= 0.9
+
+
+def test_arxiv_year_off_by_one_is_minor():
+    """Off-by-one year is common (Dec submission → Jan publication)."""
+    entry = {
+        'error_type': 'year',
+        'error_details': 'Year mismatch: cited 2023, actual 2024',
+        'ref_title': 'A Real Paper With Minor Year Error',
+        'ref_authors_cited': 'Author One',
+        'ref_url_cited': 'https://arxiv.org/abs/2312.12345',
+        'ref_year_cited': '2024',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is False
+    assert 'arxiv_year_conflict' not in result['reasons']
+
+
+def test_arxiv_year_consistency_no_arxiv_id():
+    """References without arXiv IDs should not trigger this check."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'A Paper Without ArXiv ID',
+        'ref_authors_cited': 'Author One, Author Two',
+        'ref_url_cited': '',
+        'ref_year_cited': '2019',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert 'arxiv_year_conflict' not in result['reasons']
+    assert 'arxiv_year_minor_conflict' not in result['reasons']
+
+
 def test_paper_rollups_group_flagged_records_by_source_paper():
     rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
     errors = [

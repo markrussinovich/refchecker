@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
 
 
@@ -34,6 +35,24 @@ def _is_non_suspicious_unverified(error_details: str) -> bool:
 	if not error_details:
 		return False
 	return any(marker in error_details for marker in NON_SUSPICIOUS_UNVERIFIED_MARKERS)
+
+
+_ARXIV_ID_PATTERN = re.compile(r'(\d{2})(\d{2})\.\d{4,5}')
+
+
+def _check_arxiv_year_consistency(error_entry: Dict[str, Any]) -> int | None:
+	"""Return the year implied by an arXiv ID, or None if no arXiv ID is present.
+
+	ArXiv IDs since April 2007 follow the format YYMM.NNNNN where YY is the
+	two-digit year and MM is the month. Comparing this to the cited year is a
+	fully deterministic fabrication signal.
+	"""
+	for field in ('ref_url_cited', 'ref_paper_id'):
+		value = error_entry.get(field) or ''
+		m = _ARXIV_ID_PATTERN.search(value)
+		if m:
+			return 2000 + int(m.group(1))
+	return None
 
 
 def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,6 +133,21 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 	# block or is combined with other signals in future rules.
 	if error_type in {'year', 'venue', 'url'}:
 		score = max(0.0, score - 0.1)
+
+	# ArXiv ID year consistency: if the arXiv ID implies a different year
+	# than the one cited, that is a deterministic fabrication signal.
+	arxiv_year = _check_arxiv_year_consistency(error_entry)
+	if arxiv_year is not None:
+		cited_year = error_entry.get('ref_year_cited')
+		if cited_year and str(cited_year).isdigit():
+			year_diff = abs(arxiv_year - int(cited_year))
+			if year_diff >= 2:
+				reasons.append('arxiv_year_conflict')
+				score += 0.3
+			elif year_diff == 1:
+				# Off-by-one is common (Dec submission → Jan publication)
+				reasons.append('arxiv_year_minor_conflict')
+				score += 0.05
 
 	score = min(score, 1.0)
 
