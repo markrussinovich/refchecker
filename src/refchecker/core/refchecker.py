@@ -237,11 +237,27 @@ class ArxivReferenceChecker:
         self.report_file = report_file
         self.report_format = report_format
         self.only_flagged = only_flagged
+
+        # Initialize optional LLM hallucination verifier for scan_mode='hallucination'
+        llm_verifier = None
+        if scan_mode == 'hallucination':
+            try:
+                from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
+                verifier = LLMHallucinationVerifier()
+                if verifier.available:
+                    llm_verifier = verifier
+                    logger.info('LLM hallucination verifier enabled')
+                else:
+                    logger.debug('LLM hallucination verifier not available (no API key)')
+            except Exception as exc:
+                logger.debug(f'LLM hallucination verifier init failed: {exc}')
+
         self.report_builder = ReportBuilder(
             scan_mode=scan_mode,
             report_file=report_file,
             report_format=report_format,
             only_flagged=only_flagged,
+            llm_verifier=llm_verifier,
         )
         
         if db_path:

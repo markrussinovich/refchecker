@@ -26,11 +26,13 @@ class ReportBuilder:
         report_file: Optional[str] = None,
         report_format: str = 'json',
         only_flagged: bool = False,
+        llm_verifier: Optional[Any] = None,
     ):
         self.scan_mode = scan_mode
         self.report_file = report_file
         self.report_format = report_format
         self.only_flagged = only_flagged
+        self.llm_verifier = llm_verifier
 
     # ------------------------------------------------------------------
     # Payload construction
@@ -42,7 +44,15 @@ class ReportBuilder:
         for error_entry in errors:
             record = dict(error_entry)
             if self.scan_mode == 'hallucination':
-                record['hallucination_assessment'] = assess_hallucination_candidate(record)
+                assessment = assess_hallucination_candidate(record)
+
+                # Run LLM verification on flagged candidates (supplementary signal)
+                if assessment['candidate'] and self.llm_verifier and self.llm_verifier.available:
+                    llm_results = self._run_llm_verification(record, assessment)
+                    if llm_results:
+                        record['llm_verification'] = llm_results
+
+                record['hallucination_assessment'] = assessment
             records.append(record)
 
         if self.scan_mode == 'hallucination' and self.only_flagged:
@@ -52,6 +62,40 @@ class ReportBuilder:
             ]
 
         return records
+
+    def _run_llm_verification(
+        self, record: Dict[str, Any], assessment: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Run LLM plausibility and author-consistency checks on a flagged candidate."""
+        results: Dict[str, Any] = {}
+        total_delta = 0.0
+
+        try:
+            plausibility = self.llm_verifier.check_plausibility(record)
+            results['plausibility'] = plausibility
+            total_delta += plausibility.get('score_delta', 0.0)
+        except Exception as exc:
+            logger.warning(f'LLM plausibility check failed: {exc}')
+
+        try:
+            author_check = self.llm_verifier.check_author_consistency(record)
+            results['author_consistency'] = author_check
+            total_delta += author_check.get('score_delta', 0.0)
+        except Exception as exc:
+            logger.warning(f'LLM author consistency check failed: {exc}')
+
+        # Apply LLM score adjustments to the assessment
+        if total_delta > 0:
+            new_score = min(assessment['score'] + total_delta, 1.0)
+            assessment['score'] = round(new_score, 2)
+            assessment['reasons'].append('llm_verification_suspicious')
+            # Recalculate level
+            if new_score >= 0.85:
+                assessment['level'] = 'high'
+            elif new_score >= 0.6:
+                assessment['level'] = 'medium'
+
+        return results if results else None
 
     def build_paper_rollups(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Build per-paper triage summaries from structured records."""
