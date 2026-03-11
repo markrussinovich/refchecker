@@ -9,16 +9,14 @@ fabricated.
 The checker is provider-agnostic: concrete ``WebSearchProvider`` subclasses
 handle the API calls while ``WebSearchChecker`` owns the scoring logic.
 
-Supported providers
--------------------
-* **Brave Search**  – https://brave.com/search/api/  (free tier ≈ 1,000 queries/month)
-* **Serper**        – https://serper.dev/             (free tier: 2,500 queries/month)
+Supported providers (reuse the same API keys used for reference extraction)
+---------------------------------------------------------------------------
+* **OpenAI**  – Responses API with ``web_search_preview`` tool
+               (uses OPENAI_API_KEY, ~$0.01 per search)
+* **Gemini**  – Google Search grounding via ``google-generativeai``
+               (uses GOOGLE_API_KEY)
 
-Set the corresponding environment variable to enable a provider:
-    BRAVE_SEARCH_API_KEY   or   SERPER_API_KEY
-
-If multiple keys are present the first available provider is used
-(Brave preferred by default — override with ``preferred_provider``).
+The first available provider is used automatically (OpenAI preferred).
 """
 
 from __future__ import annotations
@@ -29,8 +27,6 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
-
-import requests
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +77,7 @@ class WebSearchProvider(abc.ABC):
     """Abstract interface for a web search backend.
 
     Subclasses must implement ``search`` which returns a list of
-    ``SearchResult`` dicts, each with at least a ``link`` key.
+    result dicts, each with at least a ``link`` key.
     """
 
     name: str = 'base'
@@ -102,101 +98,129 @@ class WebSearchProvider(abc.ABC):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Brave Search provider
+# OpenAI Responses API provider (web_search_preview tool)
 # ══════════════════════════════════════════════════════════════════════
 
-class BraveSearchProvider(WebSearchProvider):
-    """Brave Search API provider.
+class OpenAISearchProvider(WebSearchProvider):
+    """OpenAI web search via the Responses API.
 
-    Docs : https://api.search.brave.com/app/documentation/web-search
-    Free : ~1,000 queries/month ($5 credit)
-    Key  : BRAVE_SEARCH_API_KEY or REFCHECKER_BRAVE_SEARCH_API_KEY
+    Reuses the same key as reference extraction (OPENAI_API_KEY).
+    Cost: ~$0.01 per search call + token costs.
     """
 
-    name = 'brave'
-    SEARCH_URL = 'https://api.search.brave.com/res/v1/web/search'
-    REQUEST_TIMEOUT = 10
+    name = 'openai'
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None):
         self.api_key = (
             api_key
-            or os.getenv('BRAVE_SEARCH_API_KEY')
-            or os.getenv('REFCHECKER_BRAVE_SEARCH_API_KEY')
+            or os.getenv('OPENAI_API_KEY')
+            or os.getenv('REFCHECKER_OPENAI_API_KEY')
         )
+        self.endpoint = endpoint or os.getenv('OPENAI_CHAT_ENDPOINT')
+        self._client = None
+
+        if self.api_key:
+            try:
+                import openai
+                kwargs: Dict[str, Any] = {'api_key': self.api_key}
+                if self.endpoint:
+                    base = self.endpoint
+                    for suffix in ('/chat/completions', '/completions'):
+                        if base.endswith(suffix):
+                            base = base[: -len(suffix)]
+                    kwargs['base_url'] = base
+                self._client = openai.OpenAI(**kwargs)
+            except ImportError:
+                logger.debug('openai package not installed')
 
     @property
     def available(self) -> bool:
-        return bool(self.api_key)
+        return self._client is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
-        resp = requests.get(
-            self.SEARCH_URL,
-            params={'q': query, 'count': num_results},
-            headers={
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip',
-                'X-Subscription-Token': self.api_key,
-            },
-            timeout=self.REQUEST_TIMEOUT,
+        response = self._client.responses.create(
+            model='gpt-4o-mini',
+            tools=[{'type': 'web_search_preview'}],
+            input=query,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        results = []
-        for item in (data.get('web', {}).get('results', [])):
-            results.append({
-                'link': item.get('url', ''),
-                'title': item.get('title', ''),
-                'snippet': item.get('description', ''),
-            })
+
+        results: List[Dict[str, str]] = []
+        seen_urls: set = set()
+        for item in response.output:
+            content = getattr(item, 'content', None)
+            if not content:
+                continue
+            for block in content:
+                for ann in getattr(block, 'annotations', []):
+                    url = getattr(ann, 'url', '') or ''
+                    title = getattr(ann, 'title', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        results.append({
+                            'link': url,
+                            'title': title,
+                            'snippet': '',
+                        })
         return results
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Serper (Google) provider
+# Google Gemini provider (Google Search grounding)
 # ══════════════════════════════════════════════════════════════════════
 
-class SerperSearchProvider(WebSearchProvider):
-    """Serper Google Search API provider.
+class GeminiSearchProvider(WebSearchProvider):
+    """Google Gemini with Google Search grounding.
 
-    Docs : https://serper.dev/
-    Free : 2,500 queries/month
-    Key  : SERPER_API_KEY or REFCHECKER_SERPER_API_KEY
+    Reuses the same key as reference extraction (GOOGLE_API_KEY).
     """
 
-    name = 'serper'
-    SEARCH_URL = 'https://google.serper.dev/search'
-    REQUEST_TIMEOUT = 10
+    name = 'gemini'
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = (
             api_key
-            or os.getenv('SERPER_API_KEY')
-            or os.getenv('REFCHECKER_SERPER_API_KEY')
+            or os.getenv('GOOGLE_API_KEY')
+            or os.getenv('REFCHECKER_GOOGLE_API_KEY')
         )
+        self._model = None
+
+        if self.api_key:
+            try:
+                import google.generativeai as genai
+                genai.configure(api_key=self.api_key)
+                self._model = genai.GenerativeModel('gemini-2.0-flash')
+            except ImportError:
+                logger.debug('google-generativeai package not installed')
 
     @property
     def available(self) -> bool:
-        return bool(self.api_key)
+        return self._model is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
-        resp = requests.post(
-            self.SEARCH_URL,
-            json={'q': query, 'num': num_results},
-            headers={
-                'X-API-KEY': self.api_key,
-                'Content-Type': 'application/json',
-            },
-            timeout=self.REQUEST_TIMEOUT,
+        import google.generativeai as genai
+
+        response = self._model.generate_content(
+            query,
+            tools='google_search_retrieval',
+            generation_config={'temperature': 0.0},
         )
-        resp.raise_for_status()
-        data = resp.json()
-        results = []
-        for item in data.get('organic', []):
-            results.append({
-                'link': item.get('link', ''),
-                'title': item.get('title', ''),
-                'snippet': item.get('snippet', ''),
-            })
+
+        results: List[Dict[str, str]] = []
+        seen_urls: set = set()
+
+        # Extract grounding source URLs from metadata
+        candidate = response.candidates[0] if response.candidates else None
+        metadata = getattr(candidate, 'grounding_metadata', None)
+        chunks = getattr(metadata, 'grounding_chunks', None) or []
+        for chunk in chunks:
+            web = getattr(chunk, 'web', None)
+            if web:
+                url = getattr(web, 'uri', '') or ''
+                title = getattr(web, 'title', '') or ''
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    results.append({'link': url, 'title': title, 'snippet': ''})
+
         return results
 
 
@@ -205,7 +229,7 @@ class SerperSearchProvider(WebSearchProvider):
 # ══════════════════════════════════════════════════════════════════════
 
 # Default preference order when auto-selecting a provider.
-_PROVIDER_CLASSES: List[type] = [BraveSearchProvider, SerperSearchProvider]
+_PROVIDER_CLASSES: List[type] = [OpenAISearchProvider, GeminiSearchProvider]
 
 
 class WebSearchChecker:
@@ -234,10 +258,10 @@ class WebSearchChecker:
         if not title:
             return _result(False, 0.0, [], '', self._provider_name)
 
-        query = f'"{title}"'
+        query = f'Find the academic paper: "{title}"'
         first_author = _extract_first_author(authors)
         if first_author:
-            query += f' {first_author}'
+            query += f' by {first_author}'
 
         try:
             organic = self.provider.search(query)
@@ -269,7 +293,7 @@ def create_web_search_checker(preferred_provider: Optional[str] = None) -> WebSe
     Parameters
     ----------
     preferred_provider : str, optional
-        Force a specific provider (``'brave'`` or ``'serper'``).
+        Force a specific provider (``'openai'`` or ``'gemini'``).
         If *None*, tries providers in default preference order.
     """
     if preferred_provider:
@@ -278,7 +302,7 @@ def create_web_search_checker(preferred_provider: Optional[str] = None) -> WebSe
                 provider = cls()
                 if provider.available:
                     return WebSearchChecker(provider)
-                logger.debug(f'{cls.name} provider requested but no API key found')
+                logger.debug(f'{cls.name} provider requested but not available')
                 return WebSearchChecker(None)
 
     for cls in _PROVIDER_CLASSES:

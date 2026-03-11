@@ -14,8 +14,8 @@ from refchecker.checkers.web_search import (
     DELTA_MODERATE_HIT,
     DELTA_NO_RESULTS,
     DELTA_STRONG_HIT,
-    BraveSearchProvider,
-    SerperSearchProvider,
+    GeminiSearchProvider,
+    OpenAISearchProvider,
     WebSearchChecker,
     WebSearchProvider,
     create_web_search_checker,
@@ -79,32 +79,26 @@ class TestHelpers:
 
 class TestProviderInterface:
 
-    def test_brave_is_subclass(self):
-        assert issubclass(BraveSearchProvider, WebSearchProvider)
+    def test_openai_is_subclass(self):
+        assert issubclass(OpenAISearchProvider, WebSearchProvider)
 
-    def test_serper_is_subclass(self):
-        assert issubclass(SerperSearchProvider, WebSearchProvider)
+    def test_gemini_is_subclass(self):
+        assert issubclass(GeminiSearchProvider, WebSearchProvider)
 
-    def test_brave_provider_name(self):
-        assert BraveSearchProvider.name == 'brave'
+    def test_openai_provider_name(self):
+        assert OpenAISearchProvider.name == 'openai'
 
-    def test_serper_provider_name(self):
-        assert SerperSearchProvider.name == 'serper'
+    def test_gemini_provider_name(self):
+        assert GeminiSearchProvider.name == 'gemini'
 
-    def test_brave_available_with_key(self):
-        p = BraveSearchProvider(api_key='test')
+    def test_openai_available_with_key(self, _clean_env):
+        """OpenAI provider should be available when a key is set and openai is installed."""
+        os.environ['OPENAI_API_KEY'] = 'test-key'
+        p = OpenAISearchProvider()
         assert p.available
 
-    def test_serper_available_with_key(self):
-        p = SerperSearchProvider(api_key='test')
-        assert p.available
-
-    def test_brave_not_available_without_key(self, _clean_env):
-        p = BraveSearchProvider()
-        assert not p.available
-
-    def test_serper_not_available_without_key(self, _clean_env):
-        p = SerperSearchProvider()
+    def test_gemini_not_available_without_key(self, _clean_env):
+        p = GeminiSearchProvider()
         assert not p.available
 
 
@@ -212,36 +206,32 @@ class TestWebSearchCheckerLogic:
 
 class TestFactory:
 
-    def test_factory_returns_brave_when_key_set(self, _clean_env):
-        os.environ['BRAVE_SEARCH_API_KEY'] = 'test-brave-key'
+    def test_factory_returns_openai_when_key_set(self, _clean_env):
+        os.environ['OPENAI_API_KEY'] = 'test-openai-key'
         checker = create_web_search_checker()
         assert checker.available
-        assert checker._provider_name == 'brave'
+        assert checker._provider_name == 'openai'
 
-    def test_factory_returns_serper_when_key_set(self, _clean_env):
-        os.environ['SERPER_API_KEY'] = 'test-serper-key'
+    def test_factory_prefers_openai_over_gemini(self, _clean_env):
+        os.environ['OPENAI_API_KEY'] = 'openai-key'
+        os.environ['GOOGLE_API_KEY'] = 'google-key'
         checker = create_web_search_checker()
-        assert checker.available
-        assert checker._provider_name == 'serper'
+        assert checker._provider_name == 'openai'
 
-    def test_factory_prefers_brave_over_serper(self, _clean_env):
-        os.environ['BRAVE_SEARCH_API_KEY'] = 'brave-key'
-        os.environ['SERPER_API_KEY'] = 'serper-key'
-        checker = create_web_search_checker()
-        assert checker._provider_name == 'brave'
-
-    def test_factory_preferred_provider_override(self, _clean_env):
-        os.environ['BRAVE_SEARCH_API_KEY'] = 'brave-key'
-        os.environ['SERPER_API_KEY'] = 'serper-key'
-        checker = create_web_search_checker(preferred_provider='serper')
-        assert checker._provider_name == 'serper'
+    def test_factory_preferred_provider_override(self, _clean_env, monkeypatch):
+        os.environ['OPENAI_API_KEY'] = 'openai-key'
+        os.environ['GOOGLE_API_KEY'] = 'google-key'
+        # Gemini provider needs google.generativeai — mock to make it available
+        import types
+        fake_genai = types.ModuleType('google.generativeai')
+        fake_genai.configure = lambda **kw: None
+        fake_genai.GenerativeModel = lambda *a, **kw: object()
+        monkeypatch.setitem(sys.modules, 'google.generativeai', fake_genai)
+        checker = create_web_search_checker(preferred_provider='gemini')
+        assert checker._provider_name == 'gemini'
 
     def test_factory_no_keys_returns_unavailable(self, _clean_env):
         checker = create_web_search_checker()
-        assert not checker.available
-
-    def test_factory_requested_provider_missing_key(self, _clean_env):
-        checker = create_web_search_checker(preferred_provider='brave')
         assert not checker.available
 
 
@@ -310,8 +300,10 @@ class TestReportBuilderWebSearch:
 
 @pytest.fixture()
 def _clean_env():
-    """Temporarily remove web-search env vars to isolate tests."""
-    keys = ('SERPER_API_KEY', 'REFCHECKER_SERPER_API_KEY',
+    """Temporarily remove web-search-related env vars to isolate tests."""
+    keys = ('OPENAI_API_KEY', 'REFCHECKER_OPENAI_API_KEY',
+            'GOOGLE_API_KEY', 'REFCHECKER_GOOGLE_API_KEY',
+            'SERPER_API_KEY', 'REFCHECKER_SERPER_API_KEY',
             'BRAVE_SEARCH_API_KEY', 'REFCHECKER_BRAVE_SEARCH_API_KEY')
     saved = {k: os.environ.pop(k) for k in keys if k in os.environ}
     yield
