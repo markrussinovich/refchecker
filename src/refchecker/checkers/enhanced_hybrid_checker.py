@@ -120,6 +120,16 @@ class EnhancedHybridReferenceChecker:
             logger.warning(f"Enhanced Hybrid: Failed to initialize OpenReview: {e}")
             self.openreview = None
         
+        # Initialize DBLP checker (curated CS bibliography, strong for conferences)
+        self.dblp = None
+        try:
+            from .dblp import DBLPReferenceChecker
+            self.dblp = DBLPReferenceChecker(email=contact_email)
+            logger.debug("Enhanced Hybrid: DBLP checker initialized")
+        except Exception as e:
+            logger.warning(f"Enhanced Hybrid: Failed to initialize DBLP: {e}")
+            self.dblp = None
+        
         # Google Scholar removed - using more reliable APIs only
         
         # Track API performance for adaptive selection
@@ -129,7 +139,8 @@ class EnhancedHybridReferenceChecker:
             'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openalex': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
-            'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0}
+            'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'dblp': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
         }
         
         # Track failed API calls for retry logic - OPTIMIZED CONFIGURATION
@@ -460,6 +471,17 @@ class EnhancedHybridReferenceChecker:
             if failure_type in ['throttled', 'timeout', 'server_error']:
                 failed_apis.append(('openalex', self.openalex, failure_type))
         
+        # Strategy 4b: Try DBLP (curated CS bibliography, strong for conferences)
+        if self.dblp:
+            verified_data, errors, url, success, failure_type = self._try_api('dblp', self.dblp, reference)
+            if success:
+                if self._is_data_complete(verified_data, reference):
+                    return verified_data, errors, url
+                else:
+                    logger.debug("Enhanced Hybrid: DBLP data incomplete, continuing with other APIs")
+            if failure_type in ['throttled', 'timeout', 'server_error']:
+                failed_apis.append(('dblp', self.dblp, failure_type))
+        
         # Strategy 5: Try OpenReview if URL suggests it's an OpenReview paper
         if (self.openreview and 
             hasattr(self.openreview, 'is_openreview_reference') and 
@@ -563,7 +585,7 @@ class EnhancedHybridReferenceChecker:
         
         # If all APIs failed, return unverified with source tracking metadata
         failed_count = len(failed_apis)
-        total_attempted = (1 if self.local_db else 0) + (1 if self.semantic_scholar else 0) + (1 if self.openalex else 0) + (1 if self.crossref else 0)
+        total_attempted = (1 if self.local_db else 0) + (1 if self.semantic_scholar else 0) + (1 if self.openalex else 0) + (1 if self.crossref else 0) + (1 if self.dblp else 0)
         
         if failed_count > 0:
             logger.debug(f"Enhanced Hybrid: All {total_attempted} APIs failed to verify reference ({failed_count} retried)")
