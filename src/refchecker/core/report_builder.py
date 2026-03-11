@@ -27,12 +27,14 @@ class ReportBuilder:
         report_format: str = 'json',
         only_flagged: bool = False,
         llm_verifier: Optional[Any] = None,
+        web_searcher: Optional[Any] = None,
     ):
         self.scan_mode = scan_mode
         self.report_file = report_file
         self.report_format = report_format
         self.only_flagged = only_flagged
         self.llm_verifier = llm_verifier
+        self.web_searcher = web_searcher
 
     # ------------------------------------------------------------------
     # Payload construction
@@ -45,6 +47,12 @@ class ReportBuilder:
             record = dict(error_entry)
             if self.scan_mode == 'hallucination':
                 assessment = assess_hallucination_candidate(record)
+
+                # Run web search on flagged candidates (can reduce or boost score)
+                if assessment['candidate'] and self.web_searcher and self.web_searcher.available:
+                    web_result = self._run_web_search_verification(record, assessment)
+                    if web_result:
+                        record['web_search_verification'] = web_result
 
                 # Run LLM verification on flagged candidates (supplementary signal)
                 if assessment['candidate'] and self.llm_verifier and self.llm_verifier.available:
@@ -62,6 +70,37 @@ class ReportBuilder:
             ]
 
         return records
+
+    def _run_web_search_verification(
+        self, record: Dict[str, Any], assessment: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Run a Serper web search to see if a flagged reference exists online."""
+        try:
+            result = self.web_searcher.check_reference_exists(record)
+        except Exception as exc:
+            logger.warning(f'Web search verification failed: {exc}')
+            return None
+
+        delta = result.get('score_delta', 0.0)
+        if delta != 0.0:
+            new_score = max(min(assessment['score'] + delta, 1.0), 0.0)
+            assessment['score'] = round(new_score, 2)
+
+            if delta < 0:
+                assessment['reasons'].append('web_search_found')
+            else:
+                assessment['reasons'].append('web_search_not_found')
+
+            # Re-evaluate candidacy and level after score adjustment
+            if new_score < 0.6:
+                assessment['candidate'] = False
+                assessment['level'] = 'low' if new_score >= 0.35 else 'none'
+            elif new_score >= 0.85:
+                assessment['level'] = 'high'
+            else:
+                assessment['level'] = 'medium'
+
+        return result
 
     def _run_llm_verification(
         self, record: Dict[str, Any], assessment: Dict[str, Any]

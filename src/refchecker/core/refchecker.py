@@ -253,12 +253,27 @@ class ArxivReferenceChecker:
             except Exception as exc:
                 logger.debug(f'LLM hallucination verifier init failed: {exc}')
 
+        # Initialize optional Serper web search for scan_mode='hallucination'
+        web_searcher = None
+        if scan_mode == 'hallucination':
+            try:
+                from refchecker.checkers.serper_web_search import SerperWebSearchChecker
+                searcher = SerperWebSearchChecker()
+                if searcher.available:
+                    web_searcher = searcher
+                    logger.info('Serper web search verification enabled')
+                else:
+                    logger.debug('Serper web search not available (no SERPER_API_KEY)')
+            except Exception as exc:
+                logger.debug(f'Serper web search init failed: {exc}')
+
         self.report_builder = ReportBuilder(
             scan_mode=scan_mode,
             report_file=report_file,
             report_format=report_format,
             only_flagged=only_flagged,
             llm_verifier=llm_verifier,
+            web_searcher=web_searcher,
         )
         
         if db_path:
