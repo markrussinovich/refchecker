@@ -240,7 +240,8 @@ class ArxivReferenceChecker:
 
         # Initialize optional LLM hallucination verifier for scan_mode='hallucination'
         llm_verifier = None
-        if scan_mode == 'hallucination':
+        llm_disabled = (llm_config or {}).get('disabled', False)
+        if scan_mode == 'hallucination' and not llm_disabled:
             try:
                 from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
                 verifier = LLMHallucinationVerifier()

@@ -124,7 +124,11 @@ class TestHallucination7RefFixture:
             reader = csv.DictReader(f)
             rows = list(reader)
 
-        assert len(rows) == 3
+        # At least the 3 hallucinated refs must be flagged; transient API
+        # failures can cause additional real papers to appear unverified.
+        assert len(rows) >= 3
+        flagged_titles = {row['ref_title'] for row in rows}
+        assert HALLUCINATED_TITLES.issubset(flagged_titles)
 
         required_columns = {'hallucination_candidate', 'hallucination_level',
                             'hallucination_score', 'hallucination_reasons'}
