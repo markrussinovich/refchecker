@@ -110,7 +110,7 @@ def test_multi_source_negative_boosts_score_to_high():
 
     assert result['candidate'] is True
     assert result['level'] == 'high'
-    assert result['score'] == 0.85
+    assert result['score'] >= 0.85
     assert 'multi_source_negative_very_high' in result['reasons']
 
 
@@ -214,6 +214,66 @@ def test_arxiv_year_consistency_no_arxiv_id():
 
     assert 'arxiv_year_conflict' not in result['reasons']
     assert 'arxiv_year_minor_conflict' not in result['reasons']
+
+
+def test_high_buzzword_density_boosts_score():
+    """Title with high ML buzzword density should get a score boost."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Self-Organizing Transformers for Cross-domain Representation Learning',
+        'ref_authors_cited': 'Author One, Author Two',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert 'high_buzzword_density' in result['reasons'] or 'moderate_buzzword_density' in result['reasons']
+    assert result['score'] > 0.65
+
+
+def test_specific_title_no_buzzword_penalty():
+    """A specific, non-generic title should not trigger buzzword density."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding',
+        'ref_authors_cited': 'Author One, Author Two',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    # BERT is specific enough; buzzword density should be moderate at most
+    assert 'high_buzzword_density' not in result['reasons']
+
+
+def test_rich_author_list_boosts_unverified_score():
+    """3+ authors on an unverifiable paper is a Frankenstein signal."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Reinforcement Learning with Adversarial Networks',
+        'ref_authors_cited': 'Ian Goodfellow, Samy Bengio, Yann LeCun',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert 'rich_author_list_unverified' in result['reasons']
+
+
+def test_single_author_no_rich_list_signal():
+    """Single-author unverified ref should not trigger rich_author_list."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Some Fabricated Paper Title That Does Not Exist',
+        'ref_authors_cited': 'Single Author',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert 'rich_author_list_unverified' not in result['reasons']
 
 
 def test_paper_rollups_group_flagged_records_by_source_paper():

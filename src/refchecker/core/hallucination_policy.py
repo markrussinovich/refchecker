@@ -24,6 +24,19 @@ NON_SUSPICIOUS_UNVERIFIED_MARKERS = (
 	'paper not verified but url references paper',
 )
 
+# Trendy ML/AI buzzwords that appear disproportionately in hallucinated titles.
+# A high density of these with no specific contribution marker is suspicious.
+_BUZZWORDS = frozenset({
+	'efficient', 'scalable', 'robust', 'adaptive', 'self-organizing',
+	'cross-domain', 'multi-modal', 'multimodal', 'iterative', 'unified',
+	'generalized', 'neural', 'deep', 'transformer', 'transformers',
+	'representation', 'reinforcement', 'adversarial', 'contrastive',
+	'federated', 'meta-learning', 'self-supervised', 'semi-supervised',
+	'pre-training', 'pre-trained', 'fine-tuning', 'fine-tuned',
+	'attention', 'graph', 'knowledge', 'distillation', 'pruning',
+	'quantization', 'sparse', 'continual', 'curriculum', 'alignment',
+})
+
 
 def _count_cited_authors(cited_authors: str) -> int:
 	if not cited_authors:
@@ -53,6 +66,26 @@ def _check_arxiv_year_consistency(error_entry: Dict[str, Any]) -> int | None:
 		if m:
 			return 2000 + int(m.group(1))
 	return None
+
+
+def _title_buzzword_density(title: str) -> float:
+	"""Return the fraction of words in `title` that are ML buzzwords.
+
+	Hallucinated titles tend to be generic combinations of trendy terminology
+	(e.g. "Self-Organizing Transformers for Cross-domain Representation Learning").
+	Real titles usually contain specific system names, datasets, or claims.
+	"""
+	words = re.findall(r'[a-z]+(?:-[a-z]+)*', title.lower())
+	if len(words) < 4:
+		return 0.0
+	buzz_count = sum(1 for w in words if w in _BUZZWORDS)
+	return buzz_count / len(words)
+
+
+def _has_many_authors(cited_authors: str) -> bool:
+	"""Return True if the citation lists 3+ authors — a proxy for a plausible
+	fabrication with realistic-looking authorship."""
+	return _count_cited_authors(cited_authors) >= 3
 
 
 def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -94,7 +127,6 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 			# that returned negative, the higher our confidence this is fabricated.
 			# With DBLP we now have up to 4+ sources (SS, OpenAlex, CrossRef, DBLP).
 			sources_negative = error_entry.get('sources_negative', 0)
-			sources_checked = error_entry.get('sources_checked', 0)
 			if sources_negative >= 4:
 				reasons.append('multi_source_negative_very_high')
 				score += 0.20
@@ -104,6 +136,22 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 			elif sources_negative == 2:
 				reasons.append('multi_source_negative')
 				score += 0.05
+
+			# Title fabrication pattern: high buzzword density suggests a
+			# generic "word salad" title typical of LLM hallucinations.
+			if title:
+				buzz = _title_buzzword_density(title)
+				if buzz >= 0.5:
+					reasons.append('high_buzzword_density')
+					score += 0.10
+				elif buzz >= 0.35:
+					reasons.append('moderate_buzzword_density')
+					score += 0.05
+
+			# Rich author list on an unverifiable paper is a Frankenstein
+			# hallucination signal (real-looking authors + fabricated title).
+			if _has_many_authors(cited_authors):
+				reasons.append('rich_author_list_unverified')
 				score += 0.05
 
 	if error_type in {'doi', 'arxiv_id', 'arxiv'}:
