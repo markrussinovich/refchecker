@@ -301,7 +301,7 @@ class TestReportBuilderWebSearch:
 @pytest.fixture()
 def _clean_env():
     """Temporarily remove web-search-related env vars to isolate tests."""
-    keys = ('OPENAI_API_KEY', 'REFCHECKER_OPENAI_API_KEY',
+    keys = ('OPENAI_API_KEY', 'REFCHECKER_OPENAI_API_KEY', 'OPENAI_CHAT_KEY',
             'GOOGLE_API_KEY', 'REFCHECKER_GOOGLE_API_KEY',
             'SERPER_API_KEY', 'REFCHECKER_SERPER_API_KEY',
             'BRAVE_SEARCH_API_KEY', 'REFCHECKER_BRAVE_SEARCH_API_KEY')

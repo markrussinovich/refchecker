@@ -115,6 +115,7 @@ class OpenAISearchProvider(WebSearchProvider):
             api_key
             or os.getenv('OPENAI_API_KEY')
             or os.getenv('REFCHECKER_OPENAI_API_KEY')
+            or os.getenv('OPENAI_CHAT_KEY')
         )
         self.endpoint = endpoint or os.getenv('OPENAI_CHAT_ENDPOINT')
         self._client = None
