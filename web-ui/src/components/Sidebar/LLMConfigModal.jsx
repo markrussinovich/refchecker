@@ -7,7 +7,7 @@ import { validateLLMConfig } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4o', requiresKey: true },
+  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-3-5-sonnet-latest', requiresKey: true },
   { id: 'google', name: 'Google', defaultModel: 'gemini-1.5-flash', requiresKey: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4o', requiresKey: true, requiresEndpoint: true },
@@ -17,7 +17,7 @@ const PROVIDERS = [
 /**
  * Modal for adding/editing LLM configurations
  */
-export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
+export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null }) {
   const { addConfig, updateConfig } = useConfigStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
@@ -34,19 +34,22 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
   // Reset form when modal opens/closes or editConfig changes
   useEffect(() => {
     if (isOpen) {
-      const defaultProvider = editConfig?.provider || 'anthropic'
+      // When creating a new config with a prefillConfig (keyless config for same provider),
+      // use its name/model/provider so the user just needs to add the API key
+      const source = editConfig || prefillConfig
+      const defaultProvider = source?.provider || 'anthropic'
       const providerInfo = PROVIDERS.find(p => p.id === defaultProvider)
       const defaultModel = providerInfo?.defaultModel || ''
       setFormData({
-        name: editConfig?.name || defaultModel,
+        name: source?.name || defaultModel,
         provider: defaultProvider,
-        model: editConfig?.model || '',
+        model: source?.model || '',
         api_key: '',
-        endpoint: editConfig?.endpoint || '',
+        endpoint: source?.endpoint || '',
       })
       setError(null)
     }
-  }, [isOpen, editConfig])
+  }, [isOpen, editConfig, prefillConfig])
 
   const selectedProvider = PROVIDERS.find(p => p.id === formData.provider)
 
@@ -139,6 +142,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
           if (!response.data.valid) {
             throw new Error(response.data.error || 'API validation failed')
           }
+          if (response.data.warning) {
+            logger.warn('LLMConfigModal', 'API validation warning', response.data.warning)
+            setError(`⚠️ ${response.data.warning}`)
+          }
           logger.info('LLMConfigModal', 'API validation successful')
         } catch (validationErr) {
           logger.error('LLMConfigModal', 'API validation failed', validationErr)
@@ -181,7 +188,17 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null }) {
 
       if (editConfig) {
         await updateConfig(editConfig.id, configData)
+        // Re-fetch to get updated has_key flags
+        await useConfigStore.getState().fetchConfigs()
         logger.info('LLMConfigModal', 'Config updated')
+      } else if (prefillConfig) {
+        // Update the existing keyless config instead of creating a duplicate
+        await updateConfig(prefillConfig.id, configData)
+        // Re-fetch configs to get updated has_key flags from backend
+        await useConfigStore.getState().fetchConfigs()
+        // Auto-select the newly keyed config
+        await useConfigStore.getState().selectConfig(prefillConfig.id)
+        logger.info('LLMConfigModal', 'Keyless config updated with key')
       } else {
         await addConfig(configData)
         logger.info('LLMConfigModal', 'Config created')

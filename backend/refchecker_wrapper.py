@@ -602,6 +602,16 @@ class ProgressRefChecker:
                     extraction_method = 'llm'
 
             if not references:
+                await self.emit_progress("completed", {
+                    "total_refs": 0,
+                    "errors_count": 0,
+                    "warnings_count": 0,
+                    "suggestions_count": 0,
+                    "unverified_count": 0,
+                    "verified_count": 0,
+                    "extraction_method": extraction_method,
+                    "message": "No references could be extracted from this paper."
+                })
                 return {
                     "paper_title": paper_title,
                     "paper_source": paper_source,
@@ -839,12 +849,21 @@ class ProgressRefChecker:
             cli_checker = _make_cli_checker(self.llm)
 
             # Step 1: find bibliography section (CLI logic) - run in thread
+            await self.emit_progress("extracting", {
+                "message": "Finding bibliography section..."
+            })
             bib_section = await asyncio.to_thread(cli_checker.find_bibliography_section, paper_text)
             if not bib_section:
                 logger.warning("Could not find bibliography section in paper")
+                await self.emit_progress("extracting", {
+                    "message": "Could not find bibliography section in paper."
+                })
                 return []
 
             logger.info(f"Found bibliography section ({len(bib_section)} chars)")
+            await self.emit_progress("extracting", {
+                "message": "Found bibliography section. Parsing references..."
+            })
 
             # Step 2: parse references (CLI logic, including LLM and post-processing) - run in thread
             refs = await asyncio.to_thread(cli_checker.parse_references, bib_section)
@@ -867,9 +886,17 @@ class ProgressRefChecker:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"Error extracting references: {error_msg}")
+            # Surface quota/rate-limit errors clearly so the user knows why extraction failed
+            error_lower = error_msg.lower()
+            if "429" in error_msg or "quota" in error_lower or "rate" in error_lower or "exceeded" in error_lower:
+                user_msg = "LLM API quota exceeded — your API key is valid but the account has insufficient quota. Check your billing details."
+            elif "401" in error_msg or "unauthorized" in error_lower:
+                user_msg = "LLM API key is invalid or expired. Please update your API key in Settings."
+            else:
+                user_msg = f"Failed to extract references: {error_msg}"
             # Emit error to frontend
             await self.emit_progress("error", {
-                "message": f"Failed to extract references: {error_msg}",
+                "message": user_msg,
                 "details": type(e).__name__
             })
             raise
@@ -920,7 +947,18 @@ class ProgressRefChecker:
                                     processed_refs = [_normalize_reference_fields(ref) for ref in processed_refs]
                                     return (processed_refs, 'llm')
                         except Exception as e:
+                            error_msg = str(e)
+                            error_lower = error_msg.lower()
                             logger.warning(f"LLM fallback failed: {e}")
+                            # Surface quota/auth errors so the user knows
+                            if "429" in error_msg or "quota" in error_lower or "rate" in error_lower or "exceeded" in error_lower:
+                                await self.emit_progress("extracting", {
+                                    "message": "LLM extraction skipped — API quota exceeded. Using standard parser instead."
+                                })
+                            elif "401" in error_msg or "unauthorized" in error_lower:
+                                await self.emit_progress("extracting", {
+                                    "message": "LLM extraction skipped — invalid API key. Using standard parser instead."
+                                })
                     
                     logger.info(f"Extracted {len(refs)} references from .bbl content")
                     # Normalize field names (journal -> venue)

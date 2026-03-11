@@ -31,6 +31,7 @@ export const useAuthStore = create((set, get) => {
     providers: [],    // ['google', 'github', 'microsoft', ...]
     user: null,       // { id, email, name, avatar_url, provider }
     authRequired: false, // true when OAuth providers are configured
+    multiuser: false, // true when server is in multi-user mode
     isLoading: true,  // true while bootstrapping
     error: null,
 
@@ -53,28 +54,29 @@ export const useAuthStore = create((set, get) => {
       try {
         const provResp = await api.getAuthProviders()
         const providers = provResp.data.providers || []
-        logger.info('AuthStore', `Providers: ${providers}`)
+        const multiuser = provResp.data.multiuser || false
+        logger.info('AuthStore', `Providers: ${providers}, multiuser: ${multiuser}`)
 
         // No OAuth providers configured → single-user mode, skip auth
         if (providers.length === 0) {
           logger.info('AuthStore', 'No providers configured — single-user mode')
-          set({ providers: [], authRequired: false, user: null, isLoading: false })
+          set({ providers: [], authRequired: false, multiuser, user: null, isLoading: false })
           return
         }
 
         try {
           const meResp = await api.getAuthMe()
           const user = meResp.data.user || null
-          set({ providers, authRequired: true, user, isLoading: false })
+          set({ providers, authRequired: true, multiuser, user, isLoading: false })
           if (user) logger.info('AuthStore', `Authenticated as ${user.email || user.name}`)
         } catch (_) {
           // 401 means not logged in — that's fine
-          set({ providers, authRequired: true, user: null, isLoading: false })
+          set({ providers, authRequired: true, multiuser, user: null, isLoading: false })
         }
       } catch (err) {
         // If providers endpoint fails (500, network error, etc.) → assume single-user mode
         logger.warn('AuthStore', 'Providers fetch failed — falling back to single-user mode', err)
-        set({ providers: [], authRequired: false, user: null, isLoading: false })
+        set({ providers: [], authRequired: false, multiuser: false, user: null, isLoading: false })
       }
     },
 

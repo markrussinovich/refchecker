@@ -34,6 +34,7 @@ from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
 from .auth import (
     SITE_URL,
+    MULTIUSER_MODE,
     require_user,
     get_current_user,
     get_user_id_filter,
@@ -245,7 +246,7 @@ _EXCHANGE_FNS = {
 @app.get("/api/auth/providers")
 async def auth_providers():
     """Return which OAuth providers are configured."""
-    return {"providers": get_available_providers()}
+    return {"providers": get_available_providers(), "multiuser": MULTIUSER_MODE}
 
 
 @app.get("/api/auth/login/{provider}")
@@ -1640,21 +1641,24 @@ async def create_llm_config(
     """Create a new LLM configuration"""
     try:
         user_id = get_user_id_filter(current_user)
+        # In single-user mode, store the API key in the database
+        store_key = config.api_key if not MULTIUSER_MODE else None
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
             model=config.model,
             endpoint=config.endpoint,
+            api_key=store_key,
             user_id=user_id,
         )
-        # Return the created config (without API key)
         return {
             "id": config_id,
             "name": config.name,
             "provider": config.provider,
             "model": config.model,
             "endpoint": config.endpoint,
-            "is_default": False
+            "is_default": False,
+            "has_key": bool(store_key),
         }
     except Exception as e:
         logger.error(f"Error creating LLM config: {e}", exc_info=True)
@@ -1665,12 +1669,15 @@ async def create_llm_config(
 async def update_llm_config(config_id: int, config: LLMConfigUpdate):
     """Update an existing LLM configuration"""
     try:
+        # In single-user mode, store the API key in the database
+        store_key = config.api_key if not MULTIUSER_MODE else None
         success = await db.update_llm_config(
             config_id=config_id,
             name=config.name,
             provider=config.provider,
             model=config.model,
-            endpoint=config.endpoint
+            endpoint=config.endpoint,
+            api_key=store_key,
         )
         if success:
             # Get updated config
@@ -1793,14 +1800,20 @@ async def validate_llm_config(config: LLMConfigValidate):
         raise
     except Exception as e:
         error_msg = str(e)
+        error_lower = error_msg.lower()
         logger.error(f"LLM validation failed: {error_msg}")
-        # Extract useful error message
-        if "404" in error_msg and "model" in error_msg.lower():
+
+        # 429 / quota / rate-limit errors mean the key IS valid but the
+        # account has a billing or rate issue.  Return success with a warning
+        # so the user can still save the config.
+        if "429" in error_msg or "quota" in error_lower or "exceeded" in error_lower or "rate" in error_lower or "billing" in error_lower:
+            warning = "API key is valid, but the account has a quota or rate-limit issue. Check your plan and billing details."
+            logger.info(f"LLM validation passed with warning: {warning}")
+            return {"valid": True, "message": "Connection validated (with warning)", "warning": warning}
+        elif "404" in error_msg and "model" in error_lower:
             raise HTTPException(status_code=400, detail=f"Invalid model name. The model '{config.model}' was not found.")
-        elif "401" in error_msg or "unauthorized" in error_msg.lower():
+        elif "401" in error_msg or "unauthorized" in error_lower or "invalid" in error_lower and "api" in error_lower and "key" in error_lower:
             raise HTTPException(status_code=400, detail="Invalid API key")
-        elif "rate" in error_msg.lower():
-            raise HTTPException(status_code=400, detail="Rate limited - but API key is valid")
         elif "'NoneType'" in error_msg:
             # This usually means the provider library isn't installed
             if provider_lower in PROVIDER_PACKAGES:
