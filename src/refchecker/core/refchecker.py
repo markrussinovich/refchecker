@@ -3026,6 +3026,12 @@ class ArxivReferenceChecker:
             elif error_type == 'venue':
                 error_entry['ref_venue_correct'] = error.get('ref_venue_correct', '')
             
+            # Propagate verification source tracking for hallucination scoring
+            if 'sources_checked' in error:
+                error_entry['sources_checked'] = error['sources_checked']
+            if 'sources_negative' in error:
+                error_entry['sources_negative'] = error['sources_negative']
+            
             # Add verified URL if available (from verification service)
             if reference_url:
                 error_entry['ref_verified_url'] = reference_url

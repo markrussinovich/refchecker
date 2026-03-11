@@ -71,6 +71,16 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 				reasons.append('rich_metadata_not_found')
 				score += 0.2
 
+			# Multi-source negative consensus: boost confidence when multiple
+			# independent databases all failed to find the reference.
+			sources_negative = error_entry.get('sources_negative', 0)
+			if sources_negative >= 3:
+				reasons.append('multi_source_negative')
+				score += 0.15
+			elif sources_negative == 2:
+				reasons.append('multi_source_negative')
+				score += 0.05
+
 	if error_type in {'doi', 'arxiv_id', 'arxiv'}:
 		reasons.append(f'{error_type}_conflict')
 		score += 0.65

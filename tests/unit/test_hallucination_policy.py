@@ -96,6 +96,56 @@ def test_api_failure_is_not_candidate():
     assert result['reasons'] == ['verification_infrastructure_issue']
 
 
+def test_multi_source_negative_boosts_score_to_high():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Could not verify reference using any available API',
+        'ref_title': 'Efficient Neural Network Pruning Using Iterative Sparse Retraining',
+        'ref_authors_cited': 'Shuang Li, Yifan Chen',
+        'sources_checked': 3,
+        'sources_negative': 3,
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert result['score'] == 0.8
+    assert 'multi_source_negative' in result['reasons']
+
+
+def test_two_source_negative_gives_moderate_boost():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Could not verify reference using any available API',
+        'ref_title': 'Some Fabricated Paper Title That Does Not Exist',
+        'ref_authors_cited': 'Author One, Author Two',
+        'sources_checked': 3,
+        'sources_negative': 2,
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert result['level'] in {'medium', 'high'}
+    assert 'multi_source_negative' in result['reasons']
+
+
+def test_no_source_tracking_preserves_existing_behavior():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Scaling Laws for Neural Language Models in Realistic Training Regimes',
+        'ref_authors_cited': 'Author One, Author Two',
+    }
+
+    result = assess_hallucination_candidate(entry)
+
+    assert result['candidate'] is True
+    assert result['level'] in {'medium', 'high'}
+    assert result['score'] == 0.65
+    assert 'multi_source_negative' not in result['reasons']
+
+
 def test_paper_rollups_group_flagged_records_by_source_paper():
     rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
     errors = [

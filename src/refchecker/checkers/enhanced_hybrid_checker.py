@@ -561,7 +561,7 @@ class EnhancedHybridReferenceChecker:
             logger.debug("Enhanced Hybrid: No complete data found, using incomplete data as fallback")
             return best_incomplete
         
-        # If all APIs failed, return unverified
+        # If all APIs failed, return unverified with source tracking metadata
         failed_count = len(failed_apis)
         total_attempted = (1 if self.local_db else 0) + (1 if self.semantic_scholar else 0) + (1 if self.openalex else 0) + (1 if self.crossref else 0)
         
@@ -569,10 +569,17 @@ class EnhancedHybridReferenceChecker:
             logger.debug(f"Enhanced Hybrid: All {total_attempted} APIs failed to verify reference ({failed_count} retried)")
         else:
             logger.debug("Enhanced Hybrid: All available APIs failed to verify reference")
+        
+        # Track how many independent sources were checked and returned negative
+        # (used by hallucination_policy for multi-source negative consensus)
+        sources_checked = total_attempted
+        sources_negative = total_attempted - failed_count
             
         return None, [{
             'error_type': 'unverified',
-            'error_details': 'Could not verify reference using any available API'
+            'error_details': 'Could not verify reference using any available API',
+            'sources_checked': sources_checked,
+            'sources_negative': sources_negative,
         }], None
     
     def _try_openreview_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
