@@ -7,7 +7,7 @@ import { validateLLMConfig } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
 const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4o', requiresKey: true },
+  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-3-5-sonnet-latest', requiresKey: true },
   { id: 'google', name: 'Google', defaultModel: 'gemini-1.5-flash', requiresKey: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4o', requiresKey: true, requiresEndpoint: true },
@@ -141,6 +141,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
           const response = await validateLLMConfig(validationData)
           if (!response.data.valid) {
             throw new Error(response.data.error || 'API validation failed')
+          }
+          if (response.data.warning) {
+            logger.warn('LLMConfigModal', 'API validation warning', response.data.warning)
+            setError(`⚠️ ${response.data.warning}`)
           }
           logger.info('LLMConfigModal', 'API validation successful')
         } catch (validationErr) {

@@ -1800,14 +1800,20 @@ async def validate_llm_config(config: LLMConfigValidate):
         raise
     except Exception as e:
         error_msg = str(e)
+        error_lower = error_msg.lower()
         logger.error(f"LLM validation failed: {error_msg}")
-        # Extract useful error message
-        if "404" in error_msg and "model" in error_msg.lower():
+
+        # 429 / quota / rate-limit errors mean the key IS valid but the
+        # account has a billing or rate issue.  Return success with a warning
+        # so the user can still save the config.
+        if "429" in error_msg or "quota" in error_lower or "exceeded" in error_lower or "rate" in error_lower or "billing" in error_lower:
+            warning = "API key is valid, but the account has a quota or rate-limit issue. Check your plan and billing details."
+            logger.info(f"LLM validation passed with warning: {warning}")
+            return {"valid": True, "message": "Connection validated (with warning)", "warning": warning}
+        elif "404" in error_msg and "model" in error_lower:
             raise HTTPException(status_code=400, detail=f"Invalid model name. The model '{config.model}' was not found.")
-        elif "401" in error_msg or "unauthorized" in error_msg.lower():
+        elif "401" in error_msg or "unauthorized" in error_lower or "invalid" in error_lower and "api" in error_lower and "key" in error_lower:
             raise HTTPException(status_code=400, detail="Invalid API key")
-        elif "rate" in error_msg.lower():
-            raise HTTPException(status_code=400, detail="Rate limited - but API key is valid")
         elif "'NoneType'" in error_msg:
             # This usually means the provider library isn't installed
             if provider_lower in PROVIDER_PACKAGES:

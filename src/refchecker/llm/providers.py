@@ -209,12 +209,20 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.api_key = config.get("api_key") or os.getenv("REFCHECKER_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self.endpoint = config.get("endpoint")
         self.client = None
         
         if self.api_key:
             try:
                 import openai
-                self.client = openai.OpenAI(api_key=self.api_key)
+                import httpx
+                client_kwargs = {
+                    "api_key": self.api_key,
+                    "timeout": httpx.Timeout(60.0, connect=5.0),
+                }
+                if self.endpoint:
+                    client_kwargs["base_url"] = self.endpoint
+                self.client = openai.OpenAI(**client_kwargs)
             except ImportError:
                 logger.error("OpenAI library not installed. Install with: pip install openai")
     
