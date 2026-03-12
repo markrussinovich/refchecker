@@ -51,11 +51,15 @@ class ReportBuilder:
         for error_entry in errors:
             record = dict(error_entry)
 
-            # Skip hallucination check if reference was verified against a source
-            has_verified_source = bool(record.get('ref_verified_url'))
+            # Skip hallucination check if error_type doesn't include unverified
+            # (the reference was found in a database, just has metadata issues)
+            error_type = (record.get('error_type') or '').lower()
+            is_unverified = (error_type == 'unverified'
+                             or (error_type == 'multiple'
+                                 and 'unverified' in (record.get('error_details') or '').lower()))
 
             if (self.llm_verifier and self.llm_verifier.available
-                    and not has_verified_source
+                    and is_unverified
                     and should_check_hallucination(record)):
                 assessment = assess_hallucination(
                     record,

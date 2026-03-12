@@ -5820,9 +5820,8 @@ class ArxivReferenceChecker:
             # Display all non-unverified errors and warnings
             self._display_non_unverified_errors(errors, debug_mode, print_output)
 
-            # Display inline hallucination assessment for any reference with issues
-            # Skip if reference was verified against a source (has verified_data)
-            self._display_hallucination_assessment(reference, errors, debug_mode, print_output, verified_data=verified_data)
+            # Display inline hallucination assessment (only for unverified refs)
+            self._display_hallucination_assessment(reference, errors, debug_mode, print_output)
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -5993,15 +5992,19 @@ class ArxivReferenceChecker:
 
         In normal mode, only LIKELY verdicts are shown with explanation.
         In debug mode, all verdicts are shown.
-        Skips assessment if the reference was verified against a known source.
+        Skips assessment if the reference was actually verified (no unverified error).
         """
         if not print_output:
             return
         if not self.report_builder.llm_verifier or not self.report_builder.llm_verifier.available:
             return
 
-        # Skip if the reference was successfully verified against a source
-        if verified_data is not None:
+        # Skip if the reference has no unverified error — it was successfully verified
+        has_unverified = any(
+            e.get('error_type') == 'unverified'
+            for e in errors
+        )
+        if not has_unverified:
             return
 
         from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
