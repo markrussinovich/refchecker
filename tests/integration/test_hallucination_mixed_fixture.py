@@ -23,10 +23,8 @@ class TestHallucinationMixedFixture:
 
         checker = ArxivReferenceChecker(
             llm_config={'disabled': True},
-            scan_mode='hallucination',
             report_file=str(report_path),
             report_format='json',
-            only_flagged=True,
         )
 
         checker.run(local_pdf_path=str(fixture_path))
@@ -39,9 +37,12 @@ class TestHallucinationMixedFixture:
         assert summary['total_references_processed'] == 4
         assert summary['flagged_records'] == 1
         assert summary['flagged_papers'] == 1
-        assert len(records) == 1
 
-        record = records[0]
+        # All records are now included; filter to flagged only for assertion
+        flagged = [r for r in records if r.get('hallucination_assessment', {}).get('candidate')]
+        assert len(flagged) == 1
+
+        record = flagged[0]
         assert record['source_title'] == 'Hallucination Mixed Sample'
         assert record['ref_title'] == 'Hallucinated Coconut Reasoning for Quantum Citation Alignment'
         assert record['error_type'] == 'unverified'

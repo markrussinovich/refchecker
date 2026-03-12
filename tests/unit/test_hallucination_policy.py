@@ -277,7 +277,7 @@ def test_single_author_no_rich_list_signal():
 
 
 def test_paper_rollups_group_flagged_records_by_source_paper():
-    rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
+    rb = ReportBuilder()
     errors = [
         {
             'source_paper_id': 'ZG3RaNIsO8',
@@ -328,10 +328,8 @@ def test_paper_rollups_group_flagged_records_by_source_paper():
 def test_write_structured_report_csv_flattens_hallucination_assessment(tmp_path):
     report_file = str(tmp_path / 'hallucination_report.csv')
     rb = ReportBuilder(
-        scan_mode='hallucination',
         report_file=report_file,
         report_format='csv',
-        only_flagged=True,
     )
     errors = [
         {
@@ -369,7 +367,7 @@ def test_write_structured_report_csv_flattens_hallucination_assessment(tmp_path)
 
 
 def test_build_hallucination_console_lines_summarizes_flagged_papers():
-    rb = ReportBuilder(scan_mode='hallucination', only_flagged=False)
+    rb = ReportBuilder()
     errors = [
         {
             'source_paper_id': 'paper-1',
@@ -418,8 +416,7 @@ def test_build_hallucination_console_lines_summarizes_flagged_papers():
     lines = rb.build_hallucination_console_lines(payload)
     output = '\n'.join(lines)
 
-    assert 'HALLUCINATION TRIAGE' in output
-    assert 'Flagged papers: 2' in output
+    assert 'HALLUCINATION CANDIDATES' in output
     assert 'Flagged references: 2' in output
     assert 'Paper One' in output
     assert 'Paper Two' in output

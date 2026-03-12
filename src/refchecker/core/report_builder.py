@@ -1,6 +1,6 @@
 """Structured report building for reference checker results.
 
-Handles text, JSON, JSONL, CSV export and hallucination triage console output.
+Handles text, JSON, JSONL, CSV export and hallucination assessment.
 Extracted from ArxivReferenceChecker to keep report logic isolated.
 """
 
@@ -10,7 +10,6 @@ import csv
 import datetime
 import json
 import logging
-import sys
 from typing import Any, Dict, IO, List, Optional
 
 from refchecker.core.hallucination_policy import assess_hallucination_candidate
@@ -23,17 +22,16 @@ class ReportBuilder:
 
     def __init__(
         self,
-        scan_mode: str = 'standard',
         report_file: Optional[str] = None,
         report_format: str = 'json',
-        only_flagged: bool = False,
         llm_verifier: Optional[Any] = None,
         web_searcher: Optional[Any] = None,
+        # Deprecated parameters kept for backward compatibility
+        scan_mode: str = 'standard',
+        only_flagged: bool = False,
     ):
-        self.scan_mode = scan_mode
         self.report_file = report_file
         self.report_format = report_format
-        self.only_flagged = only_flagged
         self.llm_verifier = llm_verifier
         self.web_searcher = web_searcher
 
@@ -42,33 +40,30 @@ class ReportBuilder:
     # ------------------------------------------------------------------
 
     def build_structured_report_records(self, errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Convert collected error entries into report records."""
+        """Convert collected error entries into report records.
+
+        Hallucination assessment is always performed on entries that could
+        indicate a fabricated reference (e.g. unverified, identifier conflicts).
+        """
         records = []
         for error_entry in errors:
             record = dict(error_entry)
-            if self.scan_mode == 'hallucination':
-                assessment = assess_hallucination_candidate(record)
+            assessment = assess_hallucination_candidate(record)
 
-                # Run web search on flagged candidates (can reduce or boost score)
-                if assessment['candidate'] and self.web_searcher and self.web_searcher.available:
-                    web_result = self._run_web_search_verification(record, assessment)
-                    if web_result:
-                        record['web_search_verification'] = web_result
+            # Run web search on flagged candidates (can reduce or boost score)
+            if assessment['candidate'] and self.web_searcher and self.web_searcher.available:
+                web_result = self._run_web_search_verification(record, assessment)
+                if web_result:
+                    record['web_search_verification'] = web_result
 
-                # Run LLM verification on flagged candidates (supplementary signal)
-                if assessment['candidate'] and self.llm_verifier and self.llm_verifier.available:
-                    llm_results = self._run_llm_verification(record, assessment)
-                    if llm_results:
-                        record['llm_verification'] = llm_results
+            # Run LLM verification on flagged candidates (supplementary signal)
+            if assessment['candidate'] and self.llm_verifier and self.llm_verifier.available:
+                llm_results = self._run_llm_verification(record, assessment)
+                if llm_results:
+                    record['llm_verification'] = llm_results
 
-                record['hallucination_assessment'] = assessment
+            record['hallucination_assessment'] = assessment
             records.append(record)
-
-        if self.scan_mode == 'hallucination' and self.only_flagged:
-            records = [
-                record for record in records
-                if record.get('hallucination_assessment', {}).get('candidate')
-            ]
 
         return records
 
@@ -216,7 +211,6 @@ class ReportBuilder:
         records = self.build_structured_report_records(errors)
         paper_rollups = self.build_paper_rollups(records)
         summary = {
-            'scan_mode': self.scan_mode,
             'total_papers_processed': stats.get('total_papers_processed', 0),
             'total_references_processed': stats.get('total_references_processed', 0),
             'total_errors_found': stats.get('total_errors_found', 0),
@@ -227,13 +221,12 @@ class ReportBuilder:
             'papers_with_records': len(paper_rollups),
         }
 
-        if self.scan_mode == 'hallucination':
-            flagged_records = [
-                record for record in records
-                if record.get('hallucination_assessment', {}).get('candidate')
-            ]
-            summary['flagged_records'] = len(flagged_records)
-            summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
+        flagged_records = [
+            record for record in records
+            if record.get('hallucination_assessment', {}).get('candidate')
+        ]
+        summary['flagged_records'] = len(flagged_records)
+        summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
 
         return {
             'summary': summary,
@@ -246,39 +239,37 @@ class ReportBuilder:
     # ------------------------------------------------------------------
 
     def build_hallucination_console_lines(self, payload: Dict[str, Any], max_papers: int = 5) -> List[str]:
-        """Build a compact bulk triage summary for hallucination scans."""
-        if self.scan_mode != 'hallucination':
+        """Build a compact summary of hallucination candidates for console output."""
+        summary = payload['summary']
+        flagged_count = summary.get('flagged_records', 0)
+
+        if flagged_count == 0:
             return []
 
-        summary = payload['summary']
         flagged_papers = [paper for paper in payload['papers'] if paper.get('flagged_records', 0) > 0]
 
         lines = [
             "",
-            "HALLUCINATION TRIAGE",
+            "HALLUCINATION CANDIDATES",
             "-" * 60,
-            f"Flagged papers: {summary.get('flagged_papers', 0)}",
-            f"Flagged references: {summary.get('flagged_records', 0)}",
+            f"Flagged references: {flagged_count}",
         ]
 
-        if not flagged_papers:
-            lines.append("No high-confidence hallucination candidates found.")
-            return lines
+        if flagged_papers:
+            lines.append("Top flagged papers:")
+            for paper in flagged_papers[:max_papers]:
+                title = paper.get('source_title') or paper.get('source_paper_id') or 'Unknown paper'
+                max_flag_level = (paper.get('max_flag_level') or 'none').upper()
+                reasons = ', '.join(list((paper.get('reason_counts') or {}).keys())[:3])
+                lines.append(
+                    f"[{max_flag_level}] {title} ({paper.get('flagged_records', 0)}/{paper.get('total_records', 0)} flagged)"
+                )
+                if reasons:
+                    lines.append(f"    Signals: {reasons}")
 
-        lines.append("Top flagged papers:")
-        for paper in flagged_papers[:max_papers]:
-            title = paper.get('source_title') or paper.get('source_paper_id') or 'Unknown paper'
-            max_flag_level = (paper.get('max_flag_level') or 'none').upper()
-            reasons = ', '.join(list((paper.get('reason_counts') or {}).keys())[:3])
-            lines.append(
-                f"[{max_flag_level}] {title} ({paper.get('flagged_records', 0)}/{paper.get('total_records', 0)} flagged)"
-            )
-            if reasons:
-                lines.append(f"    Signals: {reasons}")
-
-        remaining = len(flagged_papers) - max_papers
-        if remaining > 0:
-            lines.append(f"... plus {remaining} more flagged paper(s)")
+            remaining = len(flagged_papers) - max_papers
+            if remaining > 0:
+                lines.append(f"... plus {remaining} more flagged paper(s)")
 
         return lines
 
@@ -292,20 +283,11 @@ class ReportBuilder:
     # ------------------------------------------------------------------
 
     def write_structured_report(self, payload: Dict[str, Any]) -> None:
-        """Write structured output to report_file or stdout.
+        """Write structured output to report_file.
 
         When *report_file* is set the report goes to that path.
-        When *report_file* is ``None`` and *scan_mode* is ``hallucination``
-        the text format is written to stdout so the user gets triage output
-        by default (can be redirected with shell ``>``).
         """
-        write_to_stdout = (
-            not self.report_file
-            and self.scan_mode == 'hallucination'
-            and self.report_format == 'text'
-        )
-
-        if not self.report_file and not write_to_stdout:
+        if not self.report_file:
             return
 
         records = payload['records']
@@ -313,11 +295,8 @@ class ReportBuilder:
         summary = payload['summary']
 
         try:
-            if write_to_stdout:
-                self._write_to_handle(sys.stdout, records, paper_rollups, summary)
-            else:
-                with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
-                    self._write_to_handle(f, records, paper_rollups, summary)
+            with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
+                self._write_to_handle(f, records, paper_rollups, summary)
         except Exception as e:
             logger.error(f"Failed to write structured report: {e}")
 
@@ -367,47 +346,60 @@ class ReportBuilder:
             'ref_venue_correct',
         ]
 
-        if self.scan_mode == 'hallucination':
-            fieldnames = base_fieldnames + [
-                'hallucination_candidate',
-                'hallucination_level',
-                'hallucination_score',
-                'hallucination_reasons',
-            ]
-        else:
-            fieldnames = base_fieldnames
+        fieldnames = base_fieldnames + [
+            'hallucination_candidate',
+            'hallucination_level',
+            'hallucination_score',
+            'hallucination_reasons',
+        ]
 
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         for record in records:
             row = dict(record)
-            if self.scan_mode == 'hallucination':
-                assessment = record.get('hallucination_assessment', {}) or {}
-                row['hallucination_candidate'] = assessment.get('candidate', False)
-                row['hallucination_level'] = assessment.get('level', 'none')
-                row['hallucination_score'] = assessment.get('score', 0)
-                row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
+            assessment = record.get('hallucination_assessment', {}) or {}
+            row['hallucination_candidate'] = assessment.get('candidate', False)
+            row['hallucination_level'] = assessment.get('level', 'none')
+            row['hallucination_score'] = assessment.get('score', 0)
+            row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
             writer.writerow(row)
 
     def _write_text(self, f: IO, records: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
-        """Write a human-readable text report for hallucination triage."""
-        f.write('HALLUCINATION TRIAGE REPORT\n')
+        """Write a human-readable text report."""
+        f.write('REFERENCE CHECK REPORT\n')
         f.write('=' * 70 + '\n')
         f.write(f'References processed: {summary.get("total_references_processed", 0)}\n')
-        f.write(f'Flagged candidates:   {summary.get("flagged_records", 0)}\n')
+        flagged = summary.get('flagged_records', 0)
+        errors = summary.get('total_errors_found', 0)
+        warnings = summary.get('total_warnings_found', 0)
+        unverified = summary.get('total_unverified_refs', 0)
+        if errors:
+            f.write(f'Errors:               {errors}\n')
+        if warnings:
+            f.write(f'Warnings:             {warnings}\n')
+        if unverified:
+            f.write(f'Unverified:           {unverified}\n')
+        if flagged:
+            f.write(f'Hallucination flags:  {flagged}\n')
         f.write('=' * 70 + '\n\n')
 
         if not records:
-            f.write('No hallucination candidates found.\n')
+            f.write('No issues found.\n')
             return
 
         for i, record in enumerate(records, 1):
             assessment = record.get('hallucination_assessment', {}) or {}
-            level = (assessment.get('level') or 'none').upper()
-            score = assessment.get('score', 0)
-            reasons = assessment.get('reasons', [])
+            is_candidate = assessment.get('candidate', False)
+            error_type = record.get('error_type', 'unknown')
+            error_details = record.get('error_details', '')
 
-            f.write(f'[{i}] [{level} {score:.2f}] {record.get("ref_title", "?")}\n')
+            # Header line with hallucination flag if applicable
+            if is_candidate:
+                level = (assessment.get('level') or 'none').upper()
+                score = assessment.get('score', 0)
+                f.write(f'[{i}] 🚩 [{level} {score:.2f}] {record.get("ref_title", "?")}\n')
+            else:
+                f.write(f'[{i}] {record.get("ref_title", "?")}\n')
 
             authors = record.get('ref_authors_cited', '')
             year = record.get('ref_year_cited', '')
@@ -416,27 +408,33 @@ class ReportBuilder:
             if year:
                 f.write(f'    Year:    {year}\n')
 
-            f.write(f'    Signals: {", ".join(reasons)}\n')
+            f.write(f'    Type:    {error_type}\n')
+            if error_details:
+                f.write(f'    Details: {error_details}\n')
 
-            web = record.get('web_search_verification', {})
-            if web:
-                verdict = web.get('verdict', '')
-                f.write(f'    Web search: {verdict}')
-                urls = web.get('academic_urls', [])
-                if urls:
-                    f.write(f'  {urls[0]}')
-                f.write('\n')
+            if is_candidate:
+                reasons = assessment.get('reasons', [])
+                f.write(f'    Signals: {", ".join(reasons)}\n')
 
-            llm = record.get('llm_verification', {})
-            if llm:
-                p = llm.get('plausibility', {})
-                ac = llm.get('author_consistency', {})
-                parts = []
-                if p:
-                    parts.append(f'plausibility={p.get("verdict")}')
-                if ac:
-                    parts.append(f'author_consistency={ac.get("verdict")}')
-                if parts:
-                    f.write(f'    LLM:        {", ".join(parts)}\n')
+                web = record.get('web_search_verification', {})
+                if web:
+                    verdict = web.get('verdict', '')
+                    f.write(f'    Web search: {verdict}')
+                    urls = web.get('academic_urls', [])
+                    if urls:
+                        f.write(f'  {urls[0]}')
+                    f.write('\n')
+
+                llm = record.get('llm_verification', {})
+                if llm:
+                    p = llm.get('plausibility', {})
+                    ac = llm.get('author_consistency', {})
+                    parts = []
+                    if p:
+                        parts.append(f'plausibility={p.get("verdict")}')
+                    if ac:
+                        parts.append(f'author_consistency={ac.get("verdict")}')
+                    if parts:
+                        f.write(f'    LLM:        {", ".join(parts)}\n')
 
             f.write('\n')

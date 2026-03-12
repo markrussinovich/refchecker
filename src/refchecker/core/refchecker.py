@@ -220,20 +220,20 @@ def load_paper_specs_from_file(list_path):
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None, 
                  llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4,
-                 scan_mode='standard', report_file=None, report_format='json', only_flagged=False):
+                 report_file=None, report_format='json',
+                 # Deprecated parameters kept for backward compatibility
+                 scan_mode='standard', only_flagged=False):
         # Initialize the reference checker for non-arXiv references
         self.fatal_error = False            
         self.db_path = db_path
         self.verification_output_file = output_file
-        self.scan_mode = scan_mode
         self.report_file = report_file
         self.report_format = report_format
-        self.only_flagged = only_flagged
 
-        # Initialize optional LLM hallucination verifier for scan_mode='hallucination'
+        # Initialize optional LLM hallucination verifier
         llm_verifier = None
         llm_disabled = (llm_config or {}).get('disabled', False)
-        if scan_mode == 'hallucination' and not llm_disabled:
+        if not llm_disabled:
             try:
                 from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
                 verifier = LLMHallucinationVerifier()
@@ -245,25 +245,22 @@ class ArxivReferenceChecker:
             except Exception as exc:
                 logger.debug(f'LLM hallucination verifier init failed: {exc}')
 
-        # Initialize optional web search for scan_mode='hallucination'
+        # Initialize optional web search
         web_searcher = None
-        if scan_mode == 'hallucination':
-            try:
-                from refchecker.checkers.web_search import create_web_search_checker
-                searcher = create_web_search_checker()
-                if searcher.available:
-                    web_searcher = searcher
-                    logger.info(f'Web search verification enabled (provider: {searcher._provider_name})')
-                else:
-                    logger.debug('Web search not available (no BRAVE_SEARCH_API_KEY or SERPER_API_KEY)')
-            except Exception as exc:
-                logger.debug(f'Web search init failed: {exc}')
+        try:
+            from refchecker.checkers.web_search import create_web_search_checker
+            searcher = create_web_search_checker()
+            if searcher.available:
+                web_searcher = searcher
+                logger.info(f'Web search verification enabled (provider: {searcher._provider_name})')
+            else:
+                logger.debug('Web search not available (no API key)')
+        except Exception as exc:
+            logger.debug(f'Web search init failed: {exc}')
 
         self.report_builder = ReportBuilder(
-            scan_mode=scan_mode,
             report_file=report_file,
             report_format=report_format,
-            only_flagged=only_flagged,
             llm_verifier=llm_verifier,
             web_searcher=web_searcher,
         )
@@ -473,7 +470,7 @@ class ArxivReferenceChecker:
 
     def write_structured_report(self, payload=None):
         """Write structured output for downstream triage workflows."""
-        if not self.report_file and self.scan_mode != 'hallucination':
+        if not self.report_file:
             return
         payload = payload or self._build_structured_report_payload()
         self.report_builder.write_structured_report(payload)
@@ -3486,6 +3483,10 @@ class ArxivReferenceChecker:
         if not debug_mode and not self.fatal_error:
             if self.single_paper_mode:
                 # Single paper mode - show simplified summary
+                # Build structured payload to get hallucination counts
+                structured_payload = self._build_structured_report_payload()
+                flagged_count = structured_payload['summary'].get('flagged_records', 0)
+
                 print(f"\n" + "="*60)
                 print(f"📋 SUMMARY")
                 print(f"="*60)
@@ -3498,6 +3499,8 @@ class ArxivReferenceChecker:
                     print(f"ℹ️  Total information: {self.total_info_found}")
                 if self.total_unverified_refs > 0:
                     print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                if flagged_count > 0:
+                    print(f"🚩 Likely hallucinated references: {flagged_count}")
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 
@@ -3510,7 +3513,9 @@ class ArxivReferenceChecker:
             else:
                 # Multi-paper mode - show full summary
                 # Build structured payload once and reuse for console + file report
-                structured_payload = self._build_structured_report_payload() if (self.scan_mode == 'hallucination' or self.report_file) else None
+                structured_payload = self._build_structured_report_payload()
+                flagged_count = structured_payload['summary'].get('flagged_records', 0)
+
                 print(f"\n" + "="*60)
                 print(f"📋 FINAL SUMMARY")
                 print(f"="*60)
@@ -3523,22 +3528,21 @@ class ArxivReferenceChecker:
                 print(f"ℹ️  Papers with information: {self.papers_with_info}")
                 print(f"         Total information: {self.total_info_found}")
                 print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                if flagged_count > 0:
+                    print(f"🚩 Likely hallucinated references: {flagged_count}")
+                    self._print_hallucination_console_summary(payload=structured_payload)
                 
                 # Show warning if unreliable extraction was used and there are many errors
                 if self.used_unreliable_extraction and self.total_errors_found > 5:
                     print(f"\n⚠️  Results might be affected by incorrect reference extraction. Consider using LLM extraction, which is more robust.")
-
-                if self.scan_mode == 'hallucination':
-                    self._print_hallucination_console_summary(payload=structured_payload)
                 
                 if self.verification_output_file:
                     print(f"\n💾 Detailed results saved to: {self.verification_output_file}")
         
         # Write all accumulated errors to file at the end of the run
         self.write_all_errors_to_file()
-        # Build structured payload for hallucination mode (always needed for
-        # text/csv/json output) or when a report file is requested.
-        if structured_payload is None and (self.scan_mode == 'hallucination' or self.report_file):
+        # Write structured report when a report file is requested.
+        if structured_payload is None and self.report_file:
             structured_payload = self._build_structured_report_payload()
         self.write_structured_report(payload=structured_payload)
         
@@ -6003,14 +6007,10 @@ def main():
                         help="Path to local Semantic Scholar database (automatically enables local DB mode)")
     parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
                         help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
-    parser.add_argument("--mode", choices=["standard", "hallucination"], default="standard",
-                        help="Run the default verifier or the stricter hallucination triage mode")
     parser.add_argument("--report-file", type=str,
-                        help="Write structured results to a file instead of stdout")
-    parser.add_argument("--report-format", choices=["text", "json", "jsonl", "csv"], default=None,
-                        help="Report format (default: text for hallucination mode, not used for standard mode)")
-    parser.add_argument("--verbose", action="store_true",
-                        help="In hallucination mode, include all references (not just flagged candidates)")
+                        help="Write structured results to a file (JSON, CSV, or text)")
+    parser.add_argument("--report-format", choices=["text", "json", "jsonl", "csv"], default='json',
+                        help="Report format (default: json)")
     
     # LLM configuration arguments
     parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
@@ -6032,13 +6032,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Hallucination mode defaults: only-flagged=True, report_format=text
-    if args.mode == 'hallucination':
-        only_flagged = not args.verbose
-        report_format = args.report_format or 'text'
-    else:
-        only_flagged = False
-        report_format = args.report_format or 'json'
+    report_format = args.report_format
 
     if args.paper and args.paper_list:
         print("Error: Use either --paper or --paper-list, not both")
@@ -6104,10 +6098,8 @@ def main():
             debug_mode=args.debug,
             enable_parallel=not args.disable_parallel,
             max_workers=args.max_workers,
-            scan_mode=args.mode,
             report_file=args.report_file,
             report_format=report_format,
-            only_flagged=only_flagged,
         )
         
         if checker.fatal_error:

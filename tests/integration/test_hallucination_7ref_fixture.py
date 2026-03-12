@@ -41,10 +41,8 @@ class TestHallucination7RefFixture:
 
         checker = ArxivReferenceChecker(
             llm_config={'disabled': True},
-            scan_mode='hallucination',
             report_file=str(report_path),
             report_format='json',
-            only_flagged=False,
         )
 
         checker.run(local_pdf_path=str(FIXTURE_PATH))
@@ -83,16 +81,14 @@ class TestHallucination7RefFixture:
                 f"Real reference should not be flagged: {record['ref_title']}"
             )
 
-    def test_only_flagged_filters_to_hallucinated(self, temp_dir):
-        """With --only-flagged, report should contain exactly the 3 hallucinated refs."""
-        report_path = temp_dir / 'hallucination_7ref_flagged.json'
+    def test_all_records_include_hallucination_assessment(self, temp_dir):
+        """Every record should include a hallucination_assessment, even non-candidates."""
+        report_path = temp_dir / 'hallucination_7ref_all.json'
 
         checker = ArxivReferenceChecker(
             llm_config={'disabled': True},
-            scan_mode='hallucination',
             report_file=str(report_path),
             report_format='json',
-            only_flagged=True,
         )
 
         checker.run(local_pdf_path=str(FIXTURE_PATH))
@@ -100,22 +96,27 @@ class TestHallucination7RefFixture:
         payload = json.loads(report_path.read_text(encoding='utf-8'))
         records = payload['records']
 
-        assert len(records) == 3
-        record_titles = {r['ref_title'] for r in records}
-        assert record_titles == HALLUCINATED_TITLES
+        # All records should have hallucination_assessment
+        for record in records:
+            assert 'hallucination_assessment' in record, (
+                f"Missing hallucination_assessment for: {record.get('ref_title')}"
+            )
+
+        # The 3 hallucinated refs must be flagged as candidates
+        flagged = [r for r in records if r['hallucination_assessment'].get('candidate')]
+        flagged_titles = {r['ref_title'] for r in flagged}
+        assert HALLUCINATED_TITLES.issubset(flagged_titles)
 
     def test_csv_report_contains_hallucination_columns(self, temp_dir):
-        """CSV report in hallucination mode should include assessment columns."""
+        """CSV report should always include hallucination assessment columns."""
         import csv
 
         report_path = temp_dir / 'hallucination_7ref_report.csv'
 
         checker = ArxivReferenceChecker(
             llm_config={'disabled': True},
-            scan_mode='hallucination',
             report_file=str(report_path),
             report_format='csv',
-            only_flagged=True,
         )
 
         checker.run(local_pdf_path=str(FIXTURE_PATH))
@@ -124,16 +125,15 @@ class TestHallucination7RefFixture:
             reader = csv.DictReader(f)
             rows = list(reader)
 
-        # At least the 3 hallucinated refs must be flagged; transient API
-        # failures can cause additional real papers to appear unverified.
-        assert len(rows) >= 3
-        flagged_titles = {row['ref_title'] for row in rows}
-        assert HALLUCINATED_TITLES.issubset(flagged_titles)
-
         required_columns = {'hallucination_candidate', 'hallucination_level',
                             'hallucination_score', 'hallucination_reasons'}
         assert required_columns.issubset(set(reader.fieldnames))
 
-        for row in rows:
-            assert row['hallucination_candidate'] == 'True'
-            assert row['hallucination_level'] in {'medium', 'high'}
+        # At least the 3 hallucinated refs must be flagged
+        flagged_rows = [row for row in rows if row['hallucination_candidate'] == 'True']
+        flagged_titles = {row['ref_title'] for row in flagged_rows}
+        assert HALLUCINATED_TITLES.issubset(flagged_titles)
+
+        for row in flagged_rows:
+            if row['ref_title'] in HALLUCINATED_TITLES:
+                assert row['hallucination_level'] in {'medium', 'high'}

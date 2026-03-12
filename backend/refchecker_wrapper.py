@@ -33,6 +33,7 @@ from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.refchecker import ArxivReferenceChecker
+from refchecker.core.hallucination_policy import assess_hallucination_candidate
 from refchecker.utils.arxiv_utils import get_bibtex_content
 import arxiv
 
@@ -298,6 +299,27 @@ class ProgressRefChecker:
             else:
                 formatted_errors.append(err_obj)
 
+        # Run hallucination assessment on unverified references
+        hallucination_assessment = None
+        if is_unverified and not has_errors:
+            # Build an error entry in the format expected by the policy module
+            error_entry = {
+                'error_type': 'unverified',
+                'error_details': next(
+                    (e.get('error_details', '') for e in sanitized if e.get('error_type') == 'unverified'),
+                    'Reference could not be verified',
+                ),
+                'ref_title': reference.get('title', ''),
+                'ref_authors_cited': ', '.join(reference.get('authors', [])),
+                'ref_year_cited': reference.get('year'),
+                'ref_venue_cited': reference.get('venue', ''),
+                'sources_checked': sum(1 for e in errors if e.get('error_type') == 'api_failure' or e.get('error_type') == 'unverified'),
+                'sources_negative': sum(1 for e in errors if e.get('error_type') != 'api_failure'),
+            }
+            hallucination_assessment = assess_hallucination_candidate(error_entry)
+            if hallucination_assessment.get('candidate'):
+                status = 'hallucination'
+
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
@@ -310,7 +332,8 @@ class ProgressRefChecker:
             "warnings": formatted_warnings,
             "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
-            "corrected_reference": None
+            "corrected_reference": None,
+            "hallucination_assessment": hallucination_assessment,
         }
         logger.info(f"_format_verification_result output: suggestions={formatted_suggestions}, status={status}")
         return result

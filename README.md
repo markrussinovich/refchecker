@@ -352,11 +352,11 @@ academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_sch
 # Save results
 academic-refchecker --paper 1706.03762 --output-file errors.txt
 
-# Bulk hallucination triage
-academic-refchecker --mode hallucination --paper-list iclr_papers.txt --report-file hallucination_report.json --only-flagged
+# Bulk verification
+academic-refchecker --paper-list iclr_papers.txt --report-file report.json
 ```
 
-`--mode hallucination` is a stricter review pass intended for bulk triage. It keeps the existing verifier, but only elevates strong signals such as unverified rich citations, identifier conflicts, and multiple major metadata mismatches. Use it when you want a shortlist of suspicious references rather than every minor citation issue.
+Hallucination detection runs automatically on every reference. References that can't be verified and show strong fabrication signals (unverified rich citations, identifier conflicts, multiple major metadata mismatches) are flagged with a 🚩 hallucination assessment in the output.
 
 ## Output
 
@@ -368,10 +368,11 @@ RefChecker reports these result types:
 | ⚠️ **Warning** | Minor issues to review | Year differences, venue variations |
 | ℹ️ **Suggestion** | Recommended improvements | Add missing ArXiv/DOI URLs, small metadata fixes |
 | ❓ **Unverified** | Could not verify against any source | Rare publications, preprints |
+| 🚩 **Hallucination** | Likely fabricated reference | Unverifiable with rich metadata, identifier conflicts |
 
-Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements.
+Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements. Hallucination flags include a confidence score and the specific signals detected.
 
-In hallucination mode, you can also write machine-readable JSON, JSONL, or CSV reports and optionally keep only flagged records.
+You can write machine-readable JSON, JSONL, or CSV reports with `--report-file` and `--report-format`.
 
 <details>
 <summary>Detailed examples</summary>
@@ -423,14 +424,12 @@ academic-refchecker --paper paper.pdf --llm-provider vllm --llm-endpoint http://
 ```bash
 --paper PAPER              # ArXiv ID, URL, or file path
 --paper-list PATH          # Newline-delimited file of paper specs for bulk scans
---mode MODE                # standard or hallucination
 --llm-provider PROVIDER    # openai, anthropic, google, azure, vllm
 --llm-model MODEL          # Override default model
 --db-path PATH             # Local database for offline verification
 --output-file [PATH]       # Save results (default: reference_errors.txt)
---report-file PATH         # Structured report output for bulk triage
---report-format FORMAT     # json, jsonl, csv
---only-flagged             # In hallucination mode, suppress non-flagged records in the report
+--report-file PATH         # Structured report output (includes hallucination assessment)
+--report-format FORMAT     # json, jsonl, csv, text
 --debug                    # Verbose output
 ```
 

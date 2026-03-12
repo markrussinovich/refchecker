@@ -230,8 +230,6 @@ class TestReportBuilderWebSearch:
             {'link': 'https://semanticscholar.org/paper/y', 'title': 'Y', 'snippet': ''},
         ])
         builder = ReportBuilder(
-            scan_mode='hallucination',
-            only_flagged=False,
             web_searcher=WebSearchChecker(provider),
         )
 
@@ -255,8 +253,6 @@ class TestReportBuilderWebSearch:
 
         provider = StubProvider(results=[])
         builder = ReportBuilder(
-            scan_mode='hallucination',
-            only_flagged=False,
             web_searcher=WebSearchChecker(provider),
         )
 
