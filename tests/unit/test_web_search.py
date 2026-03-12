@@ -78,7 +78,7 @@ class TestProviderInterface:
     def test_gemini_provider_name(self):
         assert GeminiSearchProvider.name == 'gemini'
 
-    def test_openai_available_with_key(self, _clean_env):
+    def test_openai_available_with_key(self, _clean_env, _mock_openai):
         """OpenAI provider should be available when a key is set and openai is installed."""
         os.environ['OPENAI_API_KEY'] = 'test-key'
         p = OpenAISearchProvider()
@@ -193,27 +193,21 @@ class TestWebSearchCheckerLogic:
 
 class TestFactory:
 
-    def test_factory_returns_openai_when_key_set(self, _clean_env):
+    def test_factory_returns_openai_when_key_set(self, _clean_env, _mock_openai):
         os.environ['OPENAI_API_KEY'] = 'test-openai-key'
         checker = create_web_search_checker()
         assert checker.available
         assert checker._provider_name == 'openai'
 
-    def test_factory_prefers_openai_over_gemini(self, _clean_env):
+    def test_factory_prefers_openai_over_gemini(self, _clean_env, _mock_openai):
         os.environ['OPENAI_API_KEY'] = 'openai-key'
         os.environ['GOOGLE_API_KEY'] = 'google-key'
         checker = create_web_search_checker()
         assert checker._provider_name == 'openai'
 
-    def test_factory_preferred_provider_override(self, _clean_env, monkeypatch):
+    def test_factory_preferred_provider_override(self, _clean_env, _mock_genai):
         os.environ['OPENAI_API_KEY'] = 'openai-key'
         os.environ['GOOGLE_API_KEY'] = 'google-key'
-        # Gemini provider needs google.generativeai — mock to make it available
-        import types
-        fake_genai = types.ModuleType('google.generativeai')
-        fake_genai.configure = lambda **kw: None
-        fake_genai.GenerativeModel = lambda *a, **kw: object()
-        monkeypatch.setitem(sys.modules, 'google.generativeai', fake_genai)
         checker = create_web_search_checker(preferred_provider='gemini')
         assert checker._provider_name == 'gemini'
 
@@ -296,3 +290,27 @@ def _clean_env():
     yield
     for k, v in saved.items():
         os.environ[k] = v
+
+
+@pytest.fixture()
+def _mock_openai(monkeypatch):
+    """Mock openai module so provider tests work without the package installed."""
+    import types
+    fake = types.ModuleType('openai')
+    fake.OpenAI = lambda **kw: object()
+    monkeypatch.setitem(sys.modules, 'openai', fake)
+
+
+@pytest.fixture()
+def _mock_genai(monkeypatch):
+    """Mock google.generativeai so Gemini provider tests work without the package."""
+    import types
+    fake_genai = types.ModuleType('google.generativeai')
+    fake_genai.configure = lambda **kw: None
+    fake_genai.GenerativeModel = lambda *a, **kw: object()
+    # Ensure the parent 'google' namespace package is importable
+    if 'google' not in sys.modules:
+        fake_google = types.ModuleType('google')
+        fake_google.__path__ = []
+        monkeypatch.setitem(sys.modules, 'google', fake_google)
+    monkeypatch.setitem(sys.modules, 'google.generativeai', fake_genai)
