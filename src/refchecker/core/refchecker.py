@@ -5805,6 +5805,9 @@ class ArxivReferenceChecker:
             
             # Display all non-unverified errors and warnings
             self._display_non_unverified_errors(errors, debug_mode, print_output)
+
+            # Display inline hallucination assessment for any reference with issues
+            self._display_hallucination_assessment(reference, errors, debug_mode, print_output)
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -5893,7 +5896,7 @@ class ArxivReferenceChecker:
     
 
     def _display_unverified_error_with_subreason(self, reference, reference_url, errors, debug_mode, print_output):
-        """Display the unverified error message with citation details, subreason, and hallucination assessment"""
+        """Display the unverified error message with citation details and subreason"""
         if not debug_mode and print_output:
             print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
             
@@ -5904,22 +5907,6 @@ class ArxivReferenceChecker:
                 if error_details:
                     subreason = self._categorize_unverified_reason(error_details)
                     print(f"         Subreason: {subreason}")
-
-            # Run inline hallucination assessment
-            error_entry = {
-                'error_type': 'unverified',
-                'error_details': unverified_errors[0].get('error_details', '') if unverified_errors else '',
-                'ref_title': reference.get('title', ''),
-                'ref_authors_cited': ', '.join(reference.get('authors', [])),
-                'ref_year_cited': reference.get('year'),
-                'ref_venue_cited': reference.get('venue', ''),
-            }
-            assessment = assess_hallucination_candidate(error_entry)
-            if assessment.get('candidate'):
-                level = assessment.get('level', 'none').upper()
-                score = assessment.get('score', 0)
-                reasons = ', '.join(assessment.get('reasons', []))
-                print(f"      🚩 Likely hallucinated [{level} {score:.2f}]: {reasons}")
 
     def _categorize_unverified_reason(self, error_details):
         """Categorize the unverified error into checker error or not found"""
@@ -5985,6 +5972,45 @@ class ArxivReferenceChecker:
                         print_labeled_multiline("⚠️  Warning", error_details)
                     else:
                         print_labeled_multiline("ℹ️  Information", error_details)
+
+    def _display_hallucination_assessment(self, reference, errors, debug_mode, print_output):
+        """Display inline hallucination assessment if the reference is a candidate."""
+        if debug_mode or not print_output:
+            return
+
+        # Build a consolidated error entry for the hallucination policy
+        error_types = []
+        error_details_parts = []
+        for e in errors:
+            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
+            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
+            if etype:
+                error_types.append(etype)
+            if edetail:
+                error_details_parts.append(edetail)
+
+        # Determine the consolidated error_type (matches add_error_to_dataset logic)
+        if len(error_types) > 1:
+            consolidated_type = 'multiple'
+        elif error_types:
+            consolidated_type = error_types[0]
+        else:
+            return
+
+        error_entry = {
+            'error_type': consolidated_type,
+            'error_details': '\n'.join(error_details_parts),
+            'ref_title': reference.get('title', ''),
+            'ref_authors_cited': ', '.join(reference.get('authors', [])),
+            'ref_year_cited': reference.get('year'),
+            'ref_venue_cited': reference.get('venue', ''),
+        }
+        assessment = assess_hallucination_candidate(error_entry)
+        if assessment.get('candidate'):
+            level = assessment.get('level', 'none').upper()
+            score = assessment.get('score', 0)
+            reasons = ', '.join(assessment.get('reasons', []))
+            print(f"      🚩 Likely hallucinated [{level} {score:.2f}]: {reasons}")
 
     def _output_reference_errors(self, reference, errors, url):
         """
