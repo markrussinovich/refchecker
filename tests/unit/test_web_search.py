@@ -21,7 +21,6 @@ from refchecker.checkers.web_search import (
     create_web_search_checker,
     is_academic_url,
     _extract_academic_urls_from_results,
-    _extract_first_author,
 )
 
 
@@ -59,18 +58,6 @@ class TestHelpers:
 
     def test_extract_academic_urls_empty(self):
         assert _extract_academic_urls_from_results([]) == []
-
-    def test_extract_first_author_comma_separated(self):
-        assert _extract_first_author('Ian Goodfellow, Yoshua Bengio') == 'Goodfellow'
-
-    def test_extract_first_author_and_separated(self):
-        assert _extract_first_author('Ian Goodfellow and Yoshua Bengio') == 'Goodfellow'
-
-    def test_extract_first_author_single(self):
-        assert _extract_first_author('Yann LeCun') == 'LeCun'
-
-    def test_extract_first_author_empty(self):
-        assert _extract_first_author('') == ''
 
 
 # ------------------------------------------------------------------

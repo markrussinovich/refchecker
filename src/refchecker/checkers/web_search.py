@@ -429,12 +429,3 @@ def is_academic_url(url: str) -> bool:
 def _extract_academic_urls_from_results(results: List[Dict[str, str]]) -> List[str]:
     """Filter search results to those on academic domains."""
     return [r['link'] for r in results if is_academic_url(r.get('link', ''))]
-
-
-def _extract_first_author(authors_str: str) -> str:
-    """Return the last name of the first listed author."""
-    if not authors_str:
-        return ''
-    first = authors_str.split(',')[0].split(' and ')[0].strip()
-    parts = first.split()
-    return parts[-1] if parts else ''
