@@ -3874,11 +3874,14 @@ class ArxivReferenceChecker:
                 self.fatal_error = True
                 return []
         
-        # Fallback to regex-based parsing only if LLM was not specified
-        logger.info("No LLM available, falling back to regex-based parsing")
-        self.used_regex_extraction = True
-        self.used_unreliable_extraction = True  # This is the unreliable fallback parsing
-        return self._parse_references_regex(bibliography_text)
+        # No LLM available and non-standard format — cannot parse reliably
+        logger.error("Cannot parse non-standard bibliography format without an LLM. "
+                     "Use --llm-provider to enable LLM-based extraction.")
+        if not self.debug_mode:
+            print("\n  ❌  Cannot parse this bibliography format without an LLM.")
+            print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
+        self.fatal_error = True
+        return []
     
     def _parse_standard_acm_natbib_references(self, bibliography_text):
         """
@@ -4080,15 +4083,26 @@ class ArxivReferenceChecker:
             biblatex_refs = self._parse_biblatex_references(bibliography_text)
             
             # If biblatex parsing returned empty results (due to quality validation),
-            # we'll continue with the unreliable fallback regex parsing
+            # cannot proceed without LLM
             if not biblatex_refs:
-                logger.debug("Biblatex parser returned no results due to quality validation, falling back to regex parsing")
-                print(f"⚠️  Biblatex parser found no valid references (failed quality validation) - falling back to regex parsing")
+                logger.error("Biblatex parser returned no valid references (failed quality validation). "
+                             "Use --llm-provider to enable LLM-based extraction.")
+                if not self.debug_mode:
+                    print(f"\n  ❌  Biblatex parser found no valid references (failed quality validation).")
+                    print(f"      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
+                self.fatal_error = True
+                return []
             else:
                 return biblatex_refs
         
-        # If we reach here, we're using the unreliable fallback regex parsing
-        self.used_unreliable_extraction = True
+        # No recognized format — cannot parse without LLM
+        logger.error("Cannot parse PDF bibliography without an LLM. "
+                     "Use --llm-provider to enable LLM-based extraction.")
+        if not self.debug_mode:
+            print("\n  ❌  Cannot parse this bibliography format without an LLM.")
+            print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
+        self.fatal_error = True
+        return []
         
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
