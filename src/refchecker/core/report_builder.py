@@ -1,6 +1,6 @@
 """Structured report building for reference checker results.
 
-Handles JSON, JSONL, CSV export and hallucination triage console output.
+Handles text, JSON, JSONL, CSV export and hallucination triage console output.
 Extracted from ArxivReferenceChecker to keep report logic isolated.
 """
 
@@ -10,7 +10,8 @@ import csv
 import datetime
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import sys
+from typing import Any, Dict, IO, List, Optional
 
 from refchecker.core.hallucination_policy import assess_hallucination_candidate
 
@@ -291,8 +292,20 @@ class ReportBuilder:
     # ------------------------------------------------------------------
 
     def write_structured_report(self, payload: Dict[str, Any]) -> None:
-        """Write structured output for downstream triage workflows."""
-        if not self.report_file:
+        """Write structured output to report_file or stdout.
+
+        When *report_file* is set the report goes to that path.
+        When *report_file* is ``None`` and *scan_mode* is ``hallucination``
+        the text format is written to stdout so the user gets triage output
+        by default (can be redirected with shell ``>``).
+        """
+        write_to_stdout = (
+            not self.report_file
+            and self.scan_mode == 'hallucination'
+            and self.report_format == 'text'
+        )
+
+        if not self.report_file and not write_to_stdout:
             return
 
         records = payload['records']
@@ -300,22 +313,36 @@ class ReportBuilder:
         summary = payload['summary']
 
         try:
-            with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
-                if self.report_format == 'csv':
-                    self._write_csv(f, records)
-                elif self.report_format == 'jsonl':
-                    for record in records:
-                        f.write(json.dumps(record, ensure_ascii=False) + '\n')
-                else:
-                    json_payload = {
-                        'generated_at': datetime.datetime.utcnow().isoformat() + 'Z',
-                        'summary': summary,
-                        'papers': paper_rollups,
-                        'records': records,
-                    }
-                    json.dump(json_payload, f, indent=2, ensure_ascii=False)
+            if write_to_stdout:
+                self._write_to_handle(sys.stdout, records, paper_rollups, summary)
+            else:
+                with open(self.report_file, 'w', encoding='utf-8', errors='replace') as f:
+                    self._write_to_handle(f, records, paper_rollups, summary)
         except Exception as e:
             logger.error(f"Failed to write structured report: {e}")
+
+    def _write_to_handle(
+        self, f: IO, records: List[Dict[str, Any]],
+        paper_rollups: List[Dict[str, Any]], summary: Dict[str, Any],
+    ) -> None:
+        """Write the report to an open file handle (file or stdout)."""
+        if self.report_format == 'csv':
+            self._write_csv(f, records)
+        elif self.report_format == 'jsonl':
+            for record in records:
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        elif self.report_format == 'json':
+            json_payload = {
+                'generated_at': datetime.datetime.utcnow().isoformat() + 'Z',
+                'summary': summary,
+                'papers': paper_rollups,
+                'records': records,
+            }
+            json.dump(json_payload, f, indent=2, ensure_ascii=False)
+            f.write('\n')
+        else:
+            # text format (default for hallucination mode)
+            self._write_text(f, records, summary)
 
     def _write_csv(self, f, records: List[Dict[str, Any]]) -> None:
         """Write records as CSV, including hallucination columns only when relevant."""
@@ -361,3 +388,55 @@ class ReportBuilder:
                 row['hallucination_score'] = assessment.get('score', 0)
                 row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
             writer.writerow(row)
+
+    def _write_text(self, f: IO, records: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
+        """Write a human-readable text report for hallucination triage."""
+        f.write('HALLUCINATION TRIAGE REPORT\n')
+        f.write('=' * 70 + '\n')
+        f.write(f'References processed: {summary.get("total_references_processed", 0)}\n')
+        f.write(f'Flagged candidates:   {summary.get("flagged_records", 0)}\n')
+        f.write('=' * 70 + '\n\n')
+
+        if not records:
+            f.write('No hallucination candidates found.\n')
+            return
+
+        for i, record in enumerate(records, 1):
+            assessment = record.get('hallucination_assessment', {}) or {}
+            level = (assessment.get('level') or 'none').upper()
+            score = assessment.get('score', 0)
+            reasons = assessment.get('reasons', [])
+
+            f.write(f'[{i}] [{level} {score:.2f}] {record.get("ref_title", "?")}\n')
+
+            authors = record.get('ref_authors_cited', '')
+            year = record.get('ref_year_cited', '')
+            if authors:
+                f.write(f'    Authors: {authors}\n')
+            if year:
+                f.write(f'    Year:    {year}\n')
+
+            f.write(f'    Signals: {", ".join(reasons)}\n')
+
+            web = record.get('web_search_verification', {})
+            if web:
+                verdict = web.get('verdict', '')
+                f.write(f'    Web search: {verdict}')
+                urls = web.get('academic_urls', [])
+                if urls:
+                    f.write(f'  {urls[0]}')
+                f.write('\n')
+
+            llm = record.get('llm_verification', {})
+            if llm:
+                p = llm.get('plausibility', {})
+                ac = llm.get('author_consistency', {})
+                parts = []
+                if p:
+                    parts.append(f'plausibility={p.get("verdict")}')
+                if ac:
+                    parts.append(f'author_consistency={ac.get("verdict")}')
+                if parts:
+                    f.write(f'    LLM:        {", ".join(parts)}\n')
+
+            f.write('\n')

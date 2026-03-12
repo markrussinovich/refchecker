@@ -3536,6 +3536,10 @@ class ArxivReferenceChecker:
         
         # Write all accumulated errors to file at the end of the run
         self.write_all_errors_to_file()
+        # Build structured payload for hallucination mode (always needed for
+        # text/csv/json output) or when a report file is requested.
+        if structured_payload is None and (self.scan_mode == 'hallucination' or self.report_file):
+            structured_payload = self._build_structured_report_payload()
         self.write_structured_report(payload=structured_payload)
         
         # Log performance statistics at the end (debug mode only)
@@ -6002,11 +6006,11 @@ def main():
     parser.add_argument("--mode", choices=["standard", "hallucination"], default="standard",
                         help="Run the default verifier or the stricter hallucination triage mode")
     parser.add_argument("--report-file", type=str,
-                        help="Write structured results to a machine-readable report file")
-    parser.add_argument("--report-format", choices=["json", "jsonl", "csv"], default="json",
-                        help="Structured report format when --report-file is provided")
-    parser.add_argument("--only-flagged", action="store_true",
-                        help="In hallucination mode, only include flagged records in the structured report")
+                        help="Write structured results to a file instead of stdout")
+    parser.add_argument("--report-format", choices=["text", "json", "jsonl", "csv"], default=None,
+                        help="Report format (default: text for hallucination mode, not used for standard mode)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="In hallucination mode, include all references (not just flagged candidates)")
     
     # LLM configuration arguments
     parser.add_argument("--llm-provider", type=str, choices=["openai", "anthropic", "google", "azure", "vllm"],
@@ -6027,7 +6031,15 @@ def main():
                         help="Maximum number of worker threads for parallel processing (default: 6)")
 
     args = parser.parse_args()
-    
+
+    # Hallucination mode defaults: only-flagged=True, report_format=text
+    if args.mode == 'hallucination':
+        only_flagged = not args.verbose
+        report_format = args.report_format or 'text'
+    else:
+        only_flagged = False
+        report_format = args.report_format or 'json'
+
     if args.paper and args.paper_list:
         print("Error: Use either --paper or --paper-list, not both")
         return 1
@@ -6094,8 +6106,8 @@ def main():
             max_workers=args.max_workers,
             scan_mode=args.mode,
             report_file=args.report_file,
-            report_format=args.report_format,
-            only_flagged=args.only_flagged,
+            report_format=report_format,
+            only_flagged=only_flagged,
         )
         
         if checker.fatal_error:
