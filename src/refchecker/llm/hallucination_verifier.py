@@ -17,6 +17,8 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from refchecker.config.settings import resolve_api_key, resolve_endpoint
+
 logger = logging.getLogger(__name__)
 
 _PLAUSIBILITY_PROMPT = """\
@@ -66,11 +68,9 @@ class LLMHallucinationVerifier:
     ):
         self.api_key = (
             api_key
-            or os.getenv('OPENAI_CHAT_KEY')
-            or os.getenv('OPENAI_API_KEY')
-            or os.getenv('REFCHECKER_OPENAI_API_KEY')
+            or resolve_api_key('openai')
         )
-        self.endpoint = endpoint or os.getenv('OPENAI_CHAT_ENDPOINT')
+        self.endpoint = endpoint or resolve_endpoint('openai')
         self.model = model
         self.client = None
 

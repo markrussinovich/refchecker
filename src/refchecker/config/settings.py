@@ -3,7 +3,50 @@ Configuration settings for RefChecker
 """
 
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+
+# ── API key resolution ────────────────────────────────────────────────
+# Canonical env-var fallback chains.  Every component that needs an API
+# key should call ``resolve_api_key`` instead of duplicating the logic.
+
+_PROVIDER_ENV_VARS: Dict[str, list] = {
+    'openai':    ['OPENAI_API_KEY', 'REFCHECKER_OPENAI_API_KEY', 'OPENAI_CHAT_KEY'],
+    'anthropic': ['ANTHROPIC_API_KEY', 'REFCHECKER_ANTHROPIC_API_KEY'],
+    'google':    ['GOOGLE_API_KEY', 'REFCHECKER_GOOGLE_API_KEY'],
+    'azure':     ['AZURE_OPENAI_API_KEY', 'REFCHECKER_AZURE_API_KEY'],
+}
+
+_ENDPOINT_ENV_VARS: Dict[str, list] = {
+    'openai': ['OPENAI_CHAT_ENDPOINT'],
+    'azure':  ['AZURE_OPENAI_ENDPOINT', 'REFCHECKER_AZURE_ENDPOINT'],
+}
+
+
+def resolve_api_key(provider: str, override: Optional[str] = None) -> Optional[str]:
+    """Return the first available API key for *provider*.
+
+    Checks *override* first, then walks the canonical env-var list.
+    """
+    if override:
+        return override
+    for var in _PROVIDER_ENV_VARS.get(provider, []):
+        val = os.getenv(var)
+        if val:
+            return val
+    return None
+
+
+def resolve_endpoint(provider: str, override: Optional[str] = None) -> Optional[str]:
+    """Return the first available endpoint for *provider*."""
+    if override:
+        return override
+    for var in _ENDPOINT_ENV_VARS.get(provider, []):
+        val = os.getenv(var)
+        if val:
+            return val
+    return None
+
 
 # Default configuration
 DEFAULT_CONFIG = {
@@ -126,21 +169,14 @@ def get_config() -> Dict[str, Any]:
     if os.getenv("REFCHECKER_LLM_FALLBACK_ON_ERROR"):
         config["llm"]["fallback_enabled"] = os.getenv("REFCHECKER_LLM_FALLBACK_ON_ERROR").lower() == "true"
     
-    # Provider-specific API keys - check native variables first, then fallback to refchecker-prefixed
-    if os.getenv("OPENAI_API_KEY") or os.getenv("REFCHECKER_OPENAI_API_KEY"):
-        config["llm"]["openai"]["api_key"] = os.getenv("OPENAI_API_KEY") or os.getenv("REFCHECKER_OPENAI_API_KEY")
-    
-    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("REFCHECKER_ANTHROPIC_API_KEY"):
-        config["llm"]["anthropic"]["api_key"] = os.getenv("ANTHROPIC_API_KEY") or os.getenv("REFCHECKER_ANTHROPIC_API_KEY")
-    
-    if os.getenv("GOOGLE_API_KEY") or os.getenv("REFCHECKER_GOOGLE_API_KEY"):
-        config["llm"]["google"]["api_key"] = os.getenv("GOOGLE_API_KEY") or os.getenv("REFCHECKER_GOOGLE_API_KEY")
-    
-    if os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("REFCHECKER_AZURE_API_KEY"):
-        config["llm"]["azure"]["api_key"] = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("REFCHECKER_AZURE_API_KEY")
-    
-    if os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("REFCHECKER_AZURE_ENDPOINT"):
-        config["llm"]["azure"]["endpoint"] = os.getenv("AZURE_OPENAI_ENDPOINT") or os.getenv("REFCHECKER_AZURE_ENDPOINT")
+    # Provider-specific API keys and endpoints via shared resolver
+    for provider in ('openai', 'anthropic', 'google', 'azure'):
+        key = resolve_api_key(provider)
+        if key:
+            config["llm"][provider]["api_key"] = key
+        endpoint = resolve_endpoint(provider)
+        if endpoint:
+            config["llm"][provider]["endpoint"] = endpoint
     
     # vLLM configuration
     if os.getenv("REFCHECKER_VLLM_SERVER_URL"):

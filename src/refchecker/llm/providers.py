@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .base import LLMProvider
+from refchecker.config.settings import resolve_api_key, resolve_endpoint
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +209,7 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key") or os.getenv("REFCHECKER_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+        self.api_key = config.get("api_key") or resolve_api_key('openai')
         self.endpoint = config.get("endpoint")
         self.client = None
         
@@ -256,7 +257,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key") or os.getenv("REFCHECKER_ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.api_key = config.get("api_key") or resolve_api_key('anthropic')
         self.client = None
         
         if self.api_key:
@@ -314,7 +315,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key") or os.getenv("REFCHECKER_GOOGLE_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        self.api_key = config.get("api_key") or resolve_api_key('google')
         self.client = None
         
         if self.api_key:
@@ -370,8 +371,8 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
     
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-        self.api_key = config.get("api_key") or os.getenv("REFCHECKER_AZURE_API_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
-        self.endpoint = config.get("endpoint") or os.getenv("REFCHECKER_AZURE_ENDPOINT") or os.getenv("AZURE_OPENAI_ENDPOINT")
+        self.api_key = config.get("api_key") or resolve_api_key('azure')
+        self.endpoint = config.get("endpoint") or resolve_endpoint('azure')
         self.client = None
         
         logger.debug(f"Azure provider initialized - API key present: {self.api_key is not None}, Endpoint present: {self.endpoint is not None}")

@@ -28,6 +28,8 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from refchecker.config.settings import resolve_api_key, resolve_endpoint
+
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
@@ -126,13 +128,8 @@ class OpenAISearchProvider(WebSearchProvider):
     )
 
     def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None):
-        self.api_key = (
-            api_key
-            or os.getenv('OPENAI_API_KEY')
-            or os.getenv('REFCHECKER_OPENAI_API_KEY')
-            or os.getenv('OPENAI_CHAT_KEY')
-        )
-        self.endpoint = endpoint or os.getenv('OPENAI_CHAT_ENDPOINT')
+        self.api_key = resolve_api_key('openai', override=api_key)
+        self.endpoint = resolve_endpoint('openai', override=endpoint)
         self._client = None
 
         if self.api_key:
@@ -212,11 +209,7 @@ class GeminiSearchProvider(WebSearchProvider):
     name = 'gemini'
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = (
-            api_key
-            or os.getenv('GOOGLE_API_KEY')
-            or os.getenv('REFCHECKER_GOOGLE_API_KEY')
-        )
+        self.api_key = resolve_api_key('google', override=api_key)
         self._model = None
 
         if self.api_key:

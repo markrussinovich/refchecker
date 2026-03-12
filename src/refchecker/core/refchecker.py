@@ -77,25 +77,17 @@ def get_llm_api_key_interactive(provider: str) -> str:
     Returns:
         API key string or None if not available
     """
-    # Define environment variable names for each provider
-    env_vars = {
-        'openai': ['REFCHECKER_OPENAI_API_KEY', 'OPENAI_API_KEY'],
-        'anthropic': ['REFCHECKER_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'],
-        'google': ['REFCHECKER_GOOGLE_API_KEY', 'GOOGLE_API_KEY'],
-        'azure': ['REFCHECKER_AZURE_API_KEY', 'AZURE_OPENAI_API_KEY'],
-        'vllm': []  # vLLM doesn't need API key
-    }
-    
+    from refchecker.config.settings import resolve_api_key
+
     # vLLM doesn't need an API key
     if provider == 'vllm':
         return None
     
-    # Check environment variables first
-    for env_var in env_vars.get(provider, []):
-        api_key = os.getenv(env_var)
-        if api_key:
-            logging.debug(f"Using {provider} API key from environment variable {env_var}")
-            return api_key
+    # Check environment variables via shared resolver
+    api_key = resolve_api_key(provider)
+    if api_key:
+        logging.debug(f"Using {provider} API key from environment")
+        return api_key
     
     # If not found in environment, prompt interactively
     import getpass
