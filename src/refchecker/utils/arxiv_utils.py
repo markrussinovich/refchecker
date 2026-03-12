@@ -441,7 +441,9 @@ def get_bibtex_content(paper):
         logger.debug(f"Detected ArXiv paper {arxiv_id}, checking for .bbl bibliography")
         tex_content, bib_content, bbl_content = download_arxiv_source(arxiv_id)
         
-        # Only use .bbl files for ArXiv papers (.bib files are unreliable)
+        # Only use .bbl files for ArXiv papers — .bbl is the compiled bibliography
+        # and the only authoritative source of which references a paper actually cites.
+        # .bib files may contain entire shared databases (e.g., full ACL Anthology).
         if bbl_content:
             bbl_entry_count = len(re.findall(r'\\bibitem[\[\{]', bbl_content))
             if bbl_entry_count > 0:
@@ -450,10 +452,9 @@ def get_bibtex_content(paper):
             else:
                 logger.debug(f"Found .bbl file but it appears empty")
         
-        # No .bbl available - return None to trigger PDF fallback
         if bib_content:
             bib_entry_count = len(re.findall(r'@\w+\s*\{', bib_content))
-            logger.debug(f"Skipping .bib file ({bib_entry_count} entries) - unreliable, falling back to PDF extraction")
+            logger.debug(f"Skipping .bib file ({bib_entry_count} entries) — not authoritative, falling back to PDF extraction")
         
         logger.debug(f"No usable .bbl file found for ArXiv paper {arxiv_id}")
     
