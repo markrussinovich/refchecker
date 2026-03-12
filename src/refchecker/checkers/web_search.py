@@ -106,9 +106,24 @@ class OpenAISearchProvider(WebSearchProvider):
 
     Reuses the same key as reference extraction (OPENAI_API_KEY).
     Cost: ~$0.01 per search call + token costs.
+
+    Sends the full reference metadata to the model and asks it to search
+    the web and assess whether the paper exists.
     """
 
     name = 'openai'
+
+    _SYSTEM_PROMPT = (
+        'You are an academic reference verifier. The user will give you the '
+        'title, authors, venue, and year of an academic paper. Use web search '
+        'to determine whether this EXACT paper exists.\n\n'
+        'Respond with EXACTLY one of these verdicts on the first line:\n'
+        '  EXISTS   — you found this specific paper (matching title and at least one author)\n'
+        '  NOT_FOUND — web search returned no credible evidence this paper exists\n'
+        '  UNSURE   — results are ambiguous (similar but not identical papers found)\n\n'
+        'Then on the following lines, briefly explain your reasoning (2-3 sentences max). '
+        'If you found the paper, include the URL(s) where it appears.'
+    )
 
     def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None):
         self.api_key = (
@@ -141,17 +156,24 @@ class OpenAISearchProvider(WebSearchProvider):
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
         response = self._client.responses.create(
             model='gpt-4o-mini',
+            instructions=self._SYSTEM_PROMPT,
             tools=[{'type': 'web_search_preview'}],
             input=query,
         )
 
+        # Extract the verdict text and any cited URLs
+        verdict_text = ''
         results: List[Dict[str, str]] = []
         seen_urls: set = set()
+
         for item in response.output:
             content = getattr(item, 'content', None)
             if not content:
                 continue
             for block in content:
+                text = getattr(block, 'text', '') or ''
+                if text:
+                    verdict_text += text + '\n'
                 for ann in getattr(block, 'annotations', []):
                     url = getattr(ann, 'url', '') or ''
                     title = getattr(ann, 'title', '') or ''
@@ -162,6 +184,18 @@ class OpenAISearchProvider(WebSearchProvider):
                             'title': title,
                             'snippet': '',
                         })
+
+        # Stash verdict text on the results so the checker can use it
+        if results:
+            results[0]['_verdict_text'] = verdict_text.strip()
+        elif verdict_text.strip():
+            results.append({
+                'link': '',
+                'title': '',
+                'snippet': '',
+                '_verdict_text': verdict_text.strip(),
+            })
+
         return results
 
 
@@ -252,36 +286,68 @@ class WebSearchChecker:
             academic_urls – matching academic URLs (up to 5)
             query         – the search query used
             provider      – name of the search provider used
+            verdict       – LLM verdict (EXISTS / NOT_FOUND / UNSURE)
+            explanation   – LLM reasoning text
         """
         title = record.get('ref_title', '')
         authors = record.get('ref_authors_cited', '')
+        year = record.get('ref_year_cited', '')
+        venue = record.get('ref_venue_cited', '') or record.get('source_title', '')
 
         if not title:
             return _result(False, 0.0, [], '', self._provider_name)
 
-        query = f'Find the academic paper: "{title}"'
-        first_author = _extract_first_author(authors)
-        if first_author:
-            query += f' by {first_author}'
+        # Build a rich prompt with the full reference metadata
+        lines = [f'Title: {title}']
+        if authors:
+            lines.append(f'Authors: {authors}')
+        if year:
+            lines.append(f'Year: {year}')
+        if venue:
+            lines.append(f'Venue: {venue}')
+        query = '\n'.join(lines)
 
         try:
-            organic = self.provider.search(query)
+            raw_results = self.provider.search(query)
         except Exception as exc:
             logger.warning(f'{self._provider_name} web search failed: {exc}')
             return _result(False, 0.0, [], query, self._provider_name)
 
-        academic_urls = _extract_academic_urls_from_results(organic)
+        # Extract the LLM verdict from the stashed text
+        verdict_text = ''
+        for r in raw_results:
+            verdict_text = r.pop('_verdict_text', '') or verdict_text
 
-        if len(academic_urls) >= 2:
-            return _result(True, DELTA_STRONG_HIT, academic_urls[:5], query, self._provider_name)
+        verdict = _parse_verdict(verdict_text)
+        academic_urls = _extract_academic_urls_from_results(raw_results)
 
-        if len(academic_urls) == 1:
-            return _result(True, DELTA_MODERATE_HIT, academic_urls, query, self._provider_name)
+        # Score based on the LLM verdict rather than just URL counting
+        if verdict == 'EXISTS' and academic_urls:
+            delta = DELTA_STRONG_HIT if len(academic_urls) >= 2 else DELTA_MODERATE_HIT
+            return _result(True, delta, academic_urls[:5], query, self._provider_name,
+                           verdict=verdict, explanation=verdict_text)
 
-        if not organic:
-            return _result(False, DELTA_NO_RESULTS, [], query, self._provider_name)
+        if verdict == 'EXISTS':
+            # LLM says exists but no academic URLs extracted
+            return _result(True, DELTA_MODERATE_HIT, [], query, self._provider_name,
+                           verdict=verdict, explanation=verdict_text)
 
-        return _result(False, DELTA_INCONCLUSIVE, [], query, self._provider_name)
+        if verdict == 'NOT_FOUND':
+            return _result(False, DELTA_NO_RESULTS, [], query, self._provider_name,
+                           verdict=verdict, explanation=verdict_text)
+
+        # UNSURE or unparseable — fall back to URL-based heuristic
+        if academic_urls:
+            delta = DELTA_STRONG_HIT if len(academic_urls) >= 2 else DELTA_MODERATE_HIT
+            return _result(True, delta, academic_urls[:5], query, self._provider_name,
+                           verdict=verdict, explanation=verdict_text)
+
+        if not raw_results or all(not r.get('link') for r in raw_results):
+            return _result(False, DELTA_NO_RESULTS, [], query, self._provider_name,
+                           verdict=verdict, explanation=verdict_text)
+
+        return _result(False, DELTA_INCONCLUSIVE, [], query, self._provider_name,
+                       verdict=verdict, explanation=verdict_text)
 
     @property
     def _provider_name(self) -> str:
@@ -325,6 +391,8 @@ def _result(
     academic_urls: List[str],
     query: str,
     provider: str = '',
+    verdict: str = '',
+    explanation: str = '',
 ) -> Dict[str, Any]:
     return {
         'found': found,
@@ -332,7 +400,20 @@ def _result(
         'academic_urls': academic_urls,
         'query': query,
         'provider': provider,
+        'verdict': verdict,
+        'explanation': explanation,
     }
+
+
+def _parse_verdict(text: str) -> str:
+    """Extract EXISTS / NOT_FOUND / UNSURE from the first line of LLM output."""
+    if not text:
+        return 'UNSURE'
+    first_line = text.strip().split('\n')[0].upper()
+    for v in ('EXISTS', 'NOT_FOUND', 'UNSURE'):
+        if v in first_line:
+            return v
+    return 'UNSURE'
 
 
 def is_academic_url(url: str) -> bool:
