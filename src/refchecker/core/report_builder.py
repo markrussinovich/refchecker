@@ -74,7 +74,7 @@ class ReportBuilder:
     def _run_web_search_verification(
         self, record: Dict[str, Any], assessment: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Run a Serper web search to see if a flagged reference exists online."""
+        """Run a web search to see if a flagged reference exists online."""
         try:
             result = self.web_searcher.check_reference_exists(record)
         except Exception as exc:
@@ -82,6 +82,12 @@ class ReportBuilder:
             return None
 
         delta = result.get('score_delta', 0.0)
+        verdict = result.get('verdict', '')
+        logger.debug(
+            'Web search: title=%r verdict=%s delta=%.2f urls=%s',
+            record.get('ref_title', '')[:60], verdict, delta, result.get('academic_urls', []),
+        )
+
         if delta != 0.0:
             new_score = max(min(assessment['score'] + delta, 1.0), 0.0)
             assessment['score'] = round(new_score, 2)

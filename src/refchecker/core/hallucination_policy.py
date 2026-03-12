@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 NON_SUSPICIOUS_UNVERIFIED_MARKERS = (
@@ -214,9 +217,14 @@ def assess_hallucination_candidate(error_entry: Dict[str, Any]) -> Dict[str, Any
 	else:
 		level = 'none'
 
-	return {
+	result = {
 		'candidate': score >= 0.6,
 		'level': level,
 		'score': round(score, 2),
 		'reasons': reasons,
 	}
+	logger.debug(
+		'Hallucination policy: title=%r score=%.2f level=%s candidate=%s reasons=%s',
+		title[:60] if title else '', score, level, result['candidate'], reasons,
+	)
+	return result
