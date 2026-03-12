@@ -255,4 +255,7 @@ class LLMHallucinationVerifier:
             verdict = 'UNCERTAIN'
 
         explanation = '\n'.join(lines[1:]).strip()
+        if not explanation:
+            # Use the full first line as explanation if no separate reasoning
+            explanation = lines[0].strip() if lines else ''
         return verdict, explanation
