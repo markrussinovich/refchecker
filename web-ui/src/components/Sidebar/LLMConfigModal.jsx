@@ -8,9 +8,9 @@ import { logger } from '../../utils/logger'
 
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true },
-  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-3-5-sonnet-latest', requiresKey: true },
-  { id: 'google', name: 'Google', defaultModel: 'gemini-1.5-flash', requiresKey: true },
-  { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4o', requiresKey: true, requiresEndpoint: true },
+  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true },
+  { id: 'google', name: 'Google', defaultModel: 'gemini-2.5-flash', requiresKey: true },
+  { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true },
   { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true },
 ]
 

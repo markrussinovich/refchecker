@@ -216,7 +216,7 @@ class GeminiSearchProvider(WebSearchProvider):
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.api_key)
-                self._model = genai.GenerativeModel('gemini-2.0-flash')
+                self._model = genai.GenerativeModel('gemini-2.5-flash')
             except ImportError:
                 logger.debug('google-generativeai package not installed')
 

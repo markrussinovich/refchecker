@@ -116,7 +116,7 @@ DEFAULT_CONFIG = {
             "timeout": 30,
         },
         "anthropic": {
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-6",
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
@@ -128,7 +128,7 @@ DEFAULT_CONFIG = {
             "timeout": 30,
         },
         "azure": {
-            "model": "gpt-4o",
+            "model": "gpt-4.1",
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,

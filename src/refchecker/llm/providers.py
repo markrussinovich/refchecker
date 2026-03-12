@@ -277,7 +277,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
         """Make the actual Anthropic API call and return the response text"""
         try:
             response = self.client.messages.create(
-                model=self.model or "claude-sonnet-4-20250514",
+                model=self.model or "claude-sonnet-4-6",
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 system="You are a bibliographic reference extractor. You output ONLY structured reference data in the exact format specified. Never explain, describe, or comment on the input. Never output prose or sentences. If input contains no extractable references, return a completely empty response with no text.",
@@ -322,7 +322,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel(self.model or "gemini-1.5-flash")
+                self.client = genai.GenerativeModel(self.model or "gemini-2.5-flash")
             except ImportError:
                 logger.error("Google Generative AI library not installed. Install with: pip install google-generativeai")
     
@@ -404,7 +404,7 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
         """Make the actual Azure OpenAI API call and return the response text"""
         try:
             response = self.client.chat.completions.create(
-                model=self.model or "gpt-4o",
+                model=self.model or "gpt-4.1",
                 messages=[
                     {"role": "user", "content": prompt}
                 ],
