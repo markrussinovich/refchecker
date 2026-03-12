@@ -222,53 +222,28 @@ class TestFactory:
 
 class TestReportBuilderWebSearch:
 
-    def test_web_search_can_unflag_candidate(self):
-        from refchecker.core.report_builder import ReportBuilder
-
+    def test_web_search_checker_returns_results(self):
+        """Web search checker returns structured results with academic URLs."""
         provider = StubProvider(results=[
             {'link': 'https://arxiv.org/abs/1234.5678', 'title': 'X', 'snippet': ''},
             {'link': 'https://semanticscholar.org/paper/y', 'title': 'Y', 'snippet': ''},
         ])
-        builder = ReportBuilder(
-            web_searcher=WebSearchChecker(provider),
-        )
-
-        errors = [{
-            'error_type': 'unverified',
-            'error_details': 'Reference could not be verified',
+        checker = WebSearchChecker(provider)
+        result = checker.check_reference_exists({
             'ref_title': 'Real Paper That APIs Missed',
             'ref_authors_cited': 'Alice Smith, Bob Jones',
-            'sources_checked': 2,
-            'sources_negative': 2,
-        }]
+        })
+        assert result['found'] is True
+        assert len(result['academic_urls']) == 2
 
-        records = builder.build_structured_report_records(errors)
-        assert len(records) == 1
-        assessment = records[0]['hallucination_assessment']
-        if 'web_search_found' in assessment.get('reasons', []):
-            assert assessment['score'] < 0.65
-
-    def test_web_search_not_found_boosts_score(self):
-        from refchecker.core.report_builder import ReportBuilder
-
-        provider = StubProvider(results=[])
-        builder = ReportBuilder(
-            web_searcher=WebSearchChecker(provider),
-        )
-
-        errors = [{
-            'error_type': 'unverified',
-            'error_details': 'Reference could not be verified',
+    def test_web_search_no_results(self):
+        """Web search with no results returns found=False."""
+        checker = WebSearchChecker(StubProvider(results=[]))
+        result = checker.check_reference_exists({
             'ref_title': 'Fabricated Paper With Good Metadata',
             'ref_authors_cited': 'Alice Smith, Bob Jones, Carol White',
-            'sources_checked': 4,
-            'sources_negative': 4,
-        }]
-
-        records = builder.build_structured_report_records(errors)
-        assessment = records[0]['hallucination_assessment']
-        assert assessment['candidate'] is True
-        assert 'web_search_not_found' in assessment['reasons']
+        })
+        assert result['found'] is False
 
 
 # ------------------------------------------------------------------

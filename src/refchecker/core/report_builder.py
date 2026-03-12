@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Dict, IO, List, Optional
 
-from refchecker.core.hallucination_policy import assess_hallucination_candidate
+from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
 
 logger = logging.getLogger(__name__)
 
@@ -42,101 +42,25 @@ class ReportBuilder:
     def build_structured_report_records(self, errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert collected error entries into report records.
 
-        Hallucination assessment is always performed on entries that could
-        indicate a fabricated reference (e.g. unverified, identifier conflicts).
+        Hallucination assessment is performed via LLM on entries that pass
+        the pre-filter (unverified, ID conflicts, multiple major mismatches).
+        Requires an LLM to be configured; without one, no assessment is done.
         """
         records = []
         for error_entry in errors:
             record = dict(error_entry)
-            assessment = assess_hallucination_candidate(record)
 
-            # Run web search on flagged candidates (can reduce or boost score)
-            if assessment['candidate'] and self.web_searcher and self.web_searcher.available:
-                web_result = self._run_web_search_verification(record, assessment)
-                if web_result:
-                    record['web_search_verification'] = web_result
+            if self.llm_verifier and self.llm_verifier.available and should_check_hallucination(record):
+                assessment = assess_hallucination(
+                    record,
+                    llm_client=self.llm_verifier,
+                    web_searcher=self.web_searcher,
+                )
+                record['hallucination_assessment'] = assessment
 
-            # Run LLM verification on flagged candidates (supplementary signal)
-            if assessment['candidate'] and self.llm_verifier and self.llm_verifier.available:
-                llm_results = self._run_llm_verification(record, assessment)
-                if llm_results:
-                    record['llm_verification'] = llm_results
-
-            record['hallucination_assessment'] = assessment
             records.append(record)
 
         return records
-
-    def _run_web_search_verification(
-        self, record: Dict[str, Any], assessment: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Run a web search to see if a flagged reference exists online."""
-        try:
-            result = self.web_searcher.check_reference_exists(record)
-        except Exception as exc:
-            logger.warning(f'Web search verification failed: {exc}')
-            return None
-
-        delta = result.get('score_delta', 0.0)
-        verdict = result.get('verdict', '')
-        logger.debug(
-            'Web search: title=%r verdict=%s delta=%.2f urls=%s',
-            record.get('ref_title', '')[:60], verdict, delta, result.get('academic_urls', []),
-        )
-
-        if delta != 0.0:
-            new_score = max(min(assessment['score'] + delta, 1.0), 0.0)
-            assessment['score'] = round(new_score, 2)
-
-            if delta < 0:
-                assessment['reasons'].append('web_search_found')
-            else:
-                assessment['reasons'].append('web_search_not_found')
-
-            # Re-evaluate candidacy and level after score adjustment
-            if new_score < 0.6:
-                assessment['candidate'] = False
-                assessment['level'] = 'low' if new_score >= 0.35 else 'none'
-            elif new_score >= 0.85:
-                assessment['level'] = 'high'
-            else:
-                assessment['level'] = 'medium'
-
-        return result
-
-    def _run_llm_verification(
-        self, record: Dict[str, Any], assessment: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Run LLM plausibility and author-consistency checks on a flagged candidate."""
-        results: Dict[str, Any] = {}
-        total_delta = 0.0
-
-        try:
-            plausibility = self.llm_verifier.check_plausibility(record)
-            results['plausibility'] = plausibility
-            total_delta += plausibility.get('score_delta', 0.0)
-        except Exception as exc:
-            logger.warning(f'LLM plausibility check failed: {exc}')
-
-        try:
-            author_check = self.llm_verifier.check_author_consistency(record)
-            results['author_consistency'] = author_check
-            total_delta += author_check.get('score_delta', 0.0)
-        except Exception as exc:
-            logger.warning(f'LLM author consistency check failed: {exc}')
-
-        # Apply LLM score adjustments to the assessment
-        if total_delta > 0:
-            new_score = min(assessment['score'] + total_delta, 1.0)
-            assessment['score'] = round(new_score, 2)
-            assessment['reasons'].append('llm_verification_suspicious')
-            # Recalculate level
-            if new_score >= 0.85:
-                assessment['level'] = 'high'
-            elif new_score >= 0.6:
-                assessment['level'] = 'medium'
-
-        return results if results else None
 
     def build_paper_rollups(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Build per-paper triage summaries from structured records."""
@@ -167,13 +91,11 @@ class ReportBuilder:
             rollup['error_type_counts'][error_type] = rollup['error_type_counts'].get(error_type, 0) + 1
 
             assessment = record.get('hallucination_assessment', {}) or {}
-            if assessment.get('candidate'):
+            if assessment.get('verdict') == 'LIKELY':
                 rollup['flagged_records'] += 1
-                level = assessment.get('level', 'none')
+                level = 'high'
                 if level_rank.get(level, 0) > level_rank.get(rollup['max_flag_level'], 0):
                     rollup['max_flag_level'] = level
-                for reason in assessment.get('reasons', []):
-                    rollup['reason_counts'][reason] = rollup['reason_counts'].get(reason, 0) + 1
 
         result = []
         for rollup in rollups.values():
@@ -223,7 +145,7 @@ class ReportBuilder:
 
         flagged_records = [
             record for record in records
-            if record.get('hallucination_assessment', {}).get('candidate')
+            if record.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
         ]
         summary['flagged_records'] = len(flagged_records)
         summary['flagged_papers'] = sum(1 for paper in paper_rollups if paper['flagged_records'] > 0)
@@ -347,10 +269,8 @@ class ReportBuilder:
         ]
 
         fieldnames = base_fieldnames + [
-            'hallucination_candidate',
-            'hallucination_level',
-            'hallucination_score',
-            'hallucination_reasons',
+            'hallucination_verdict',
+            'hallucination_explanation',
         ]
 
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
@@ -358,10 +278,8 @@ class ReportBuilder:
         for record in records:
             row = dict(record)
             assessment = record.get('hallucination_assessment', {}) or {}
-            row['hallucination_candidate'] = assessment.get('candidate', False)
-            row['hallucination_level'] = assessment.get('level', 'none')
-            row['hallucination_score'] = assessment.get('score', 0)
-            row['hallucination_reasons'] = ';'.join(assessment.get('reasons', []))
+            row['hallucination_verdict'] = assessment.get('verdict', '')
+            row['hallucination_explanation'] = assessment.get('explanation', '')
             writer.writerow(row)
 
     def _write_text(self, f: IO, records: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
@@ -389,15 +307,12 @@ class ReportBuilder:
 
         for i, record in enumerate(records, 1):
             assessment = record.get('hallucination_assessment', {}) or {}
-            is_candidate = assessment.get('candidate', False)
+            verdict = assessment.get('verdict', '')
             error_type = record.get('error_type', 'unknown')
             error_details = record.get('error_details', '')
 
-            # Header line with hallucination flag if applicable
-            if is_candidate:
-                level = (assessment.get('level') or 'none').upper()
-                score = assessment.get('score', 0)
-                f.write(f'[{i}] 🚩 [{level} {score:.2f}] {record.get("ref_title", "?")}\n')
+            if verdict == 'LIKELY':
+                f.write(f'[{i}] 🚩 LIKELY HALLUCINATED: {record.get("ref_title", "?")}\n')
             else:
                 f.write(f'[{i}] {record.get("ref_title", "?")}\n')
 
@@ -412,29 +327,9 @@ class ReportBuilder:
             if error_details:
                 f.write(f'    Details: {error_details}\n')
 
-            if is_candidate:
-                reasons = assessment.get('reasons', [])
-                f.write(f'    Signals: {", ".join(reasons)}\n')
-
-                web = record.get('web_search_verification', {})
-                if web:
-                    verdict = web.get('verdict', '')
-                    f.write(f'    Web search: {verdict}')
-                    urls = web.get('academic_urls', [])
-                    if urls:
-                        f.write(f'  {urls[0]}')
-                    f.write('\n')
-
-                llm = record.get('llm_verification', {})
-                if llm:
-                    p = llm.get('plausibility', {})
-                    ac = llm.get('author_consistency', {})
-                    parts = []
-                    if p:
-                        parts.append(f'plausibility={p.get("verdict")}')
-                    if ac:
-                        parts.append(f'author_consistency={ac.get("verdict")}')
-                    if parts:
-                        f.write(f'    LLM:        {", ".join(parts)}\n')
+            if verdict == 'LIKELY':
+                explanation = assessment.get('explanation', '')
+                if explanation:
+                    f.write(f'    Reason:  {explanation}\n')
 
             f.write('\n')

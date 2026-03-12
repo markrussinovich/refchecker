@@ -1,14 +1,12 @@
-"""LLM-based hallucination verification for flagged references.
+"""LLM-based hallucination verifier for reference checking.
 
-This module provides two optional LLM checks that run ONLY on references
-already flagged as hallucination candidates by deterministic checks:
+The LLM receives the full reference metadata plus all validation errors
+detected by the checkers, and determines whether the reference is likely
+fabricated (LIKELY), genuine (UNLIKELY), or unclear (UNCERTAIN).
 
-  4A — Plausibility judge: asks the LLM whether the paper exists.
-  4B — Author-work consistency: asks whether the claimed author(s) are
-       known for work matching the paper title/venue.
-
-Both signals are supplementary (+0.05 to +0.10) and never the sole basis
-for flagging.  Requires an OpenAI-compatible API key.
+If web search is available, the LLM first decides whether a search would
+provide a useful additional signal. Minor author-name or year mismatches
+don't warrant a search; unverified references with plausible metadata do.
 """
 
 from __future__ import annotations
@@ -21,55 +19,75 @@ from refchecker.config.settings import resolve_api_key, resolve_endpoint
 
 logger = logging.getLogger(__name__)
 
-_PLAUSIBILITY_PROMPT = """\
-You are a research-integrity assistant. Given the following academic reference,
-determine whether it corresponds to a real, published paper.
 
+_ASSESSMENT_PROMPT = """\
+You are an academic-integrity assistant that determines whether a cited \
+reference is likely **hallucinated** (fabricated by an AI).
+
+## Reference metadata
 Title:   {title}
 Authors: {authors}
 Venue:   {venue}
 Year:    {year}
+URL:     {url}
 
-Reply with EXACTLY one of:
-  REAL    — you are confident this paper exists
-  FAKE    — you are confident this paper does NOT exist
-  UNSURE  — you cannot determine with confidence
+## Validation results from automated checkers
+{validation_summary}
 
-Then on a new line, give a one-sentence justification."""
+## Instructions
+Based on the reference metadata and the validation errors above, determine \
+whether this reference is a hallucinated (fabricated) citation.
 
-_AUTHOR_CONSISTENCY_PROMPT = """\
-You are a research-integrity assistant. Consider the following reference:
+Key signals of hallucination:
+- The reference could not be found in ANY academic database (Semantic Scholar, \
+OpenAlex, CrossRef, DBLP, arXiv)
+- Authors are obviously fake ("John Doe", "Jane Smith") or don't work in the \
+cited field
+- The ArXiv ID or DOI points to a completely different paper
+- The title sounds generic/buzzwordy with no specific contribution
+- Multiple major metadata fields conflict with what databases found
 
+Key signals that it is NOT hallucinated:
+- The paper was found and verified, even with minor metadata errors
+- Year off-by-one, venue abbreviation differences, or author name formatting \
+differences are common in real citations and NOT signs of hallucination
+- Author count mismatches where the names mostly overlap are NOT hallucination
+
+Reply with EXACTLY one of these verdicts on the FIRST line:
+  LIKELY    — this reference is probably fabricated
+  UNLIKELY  — this reference is probably real despite the errors
+  UNCERTAIN — cannot determine with confidence
+
+Then on the following lines, give a concise explanation (2-3 sentences max)."""
+
+_WEB_SEARCH_DECISION_PROMPT = """\
+Given this reference that could not be verified by academic databases:
 Title:   {title}
 Authors: {authors}
-Venue:   {venue}
 Year:    {year}
 
-For each listed author, briefly state whether they are known researchers and
-whether they have published work related to the topic described in the title.
-Then state whether the combination of these authors on this topic is plausible.
+Errors: {errors}
 
-Reply with EXACTLY one of on the first line:
-  PLAUSIBLE   — the author-topic combination is believable
-  IMPLAUSIBLE — one or more authors are unlikely to have written this
-  UNSURE      — insufficient information
-
-Then on new lines, give brief justifications."""
+Would a web search provide useful additional signal to determine if this is \
+a hallucinated reference? Answer YES or NO on the first line.
+Only answer YES for references that are unverified or have major conflicts. \
+Minor author-name or year differences do NOT warrant a search."""
 
 
 class LLMHallucinationVerifier:
-    """Lightweight LLM verifier for hallucination candidates."""
+    """LLM-based hallucination verifier.
+
+    Requires an OpenAI-compatible API key. Uses a single prompt to
+    evaluate the reference + its validation errors.
+    """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
-        model: str = 'gpt-4.1',
+        model: str = 'gpt-4.1-mini',
     ):
-        self.api_key = (
-            api_key
-            or resolve_api_key('openai')
-        )
+        self.api_key = api_key or resolve_api_key('openai')
         self.endpoint = endpoint or resolve_endpoint('openai')
         self.model = model
         self.client = None
@@ -79,7 +97,6 @@ class LLMHallucinationVerifier:
                 import openai
                 kwargs: Dict[str, Any] = {'api_key': self.api_key}
                 if self.endpoint:
-                    # Strip trailing path segments if endpoint includes /chat/completions
                     base = self.endpoint
                     for suffix in ('/chat/completions', '/completions'):
                         if base.endswith(suffix):
@@ -103,92 +120,139 @@ class LLMHallucinationVerifier:
         )
         return (resp.choices[0].message.content or '').strip()
 
-    # ------------------------------------------------------------------
-    # 4A: Plausibility judge
-    # ------------------------------------------------------------------
-    def check_plausibility(self, error_entry: Dict[str, Any]) -> Dict[str, Any]:
-        """Ask the LLM whether a flagged reference is real or fabricated.
+    def assess(
+        self,
+        error_entry: Dict[str, Any],
+        web_searcher: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """Assess whether a reference is likely hallucinated.
 
-        Returns a dict with:
-          verdict: 'REAL' | 'FAKE' | 'UNSURE' | 'ERROR'
-          justification: str
-          score_delta: float (0.0 for REAL/UNSURE, +0.10 for FAKE)
+        Parameters
+        ----------
+        error_entry : dict
+            Consolidated error entry with reference metadata and errors.
+        web_searcher : optional
+            Web search checker; used only if the LLM recommends a search.
+
+        Returns
+        -------
+        dict with verdict, explanation, and optional web_search results.
         """
         if not self.available:
-            return {'verdict': 'ERROR', 'justification': 'LLM not available', 'score_delta': 0.0}
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': 'LLM not available.',
+                'web_search': None,
+            }
 
         title = error_entry.get('ref_title', '')
         authors = error_entry.get('ref_authors_cited', '')
-        venue = error_entry.get('original_reference', {}).get('venue',
-                    error_entry.get('original_reference', {}).get('journal', ''))
+        orig = error_entry.get('original_reference', {})
+        venue = orig.get('venue', orig.get('journal', '')) or ''
         year = error_entry.get('ref_year_cited', '')
+        url = error_entry.get('ref_url_cited', '')
 
-        prompt = _PLAUSIBILITY_PROMPT.format(
-            title=title, authors=authors, venue=venue, year=year,
+        # Build a human-readable summary of validation errors
+        validation_lines = self._build_validation_summary(error_entry)
+
+        prompt = _ASSESSMENT_PROMPT.format(
+            title=title,
+            authors=authors,
+            venue=venue,
+            year=year,
+            url=url or '(none)',
+            validation_summary=validation_lines or 'No specific errors detected.',
         )
 
         try:
             response = self._call(prompt)
-            first_line = response.split('\n')[0].strip().upper()
-
-            if 'FAKE' in first_line:
-                verdict = 'FAKE'
-                score_delta = 0.10
-            elif 'REAL' in first_line:
-                verdict = 'REAL'
-                score_delta = 0.0
-            else:
-                verdict = 'UNSURE'
-                score_delta = 0.0
-
-            justification = '\n'.join(response.split('\n')[1:]).strip()
-            return {'verdict': verdict, 'justification': justification, 'score_delta': score_delta}
-
+            verdict, explanation = self._parse_verdict(response)
         except Exception as exc:
-            logger.warning(f'LLM plausibility check failed: {exc}')
-            return {'verdict': 'ERROR', 'justification': str(exc), 'score_delta': 0.0}
+            logger.warning(f'LLM hallucination assessment failed: {exc}')
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': f'LLM call failed: {exc}',
+                'web_search': None,
+            }
 
-    # ------------------------------------------------------------------
-    # 4B: Author-work consistency
-    # ------------------------------------------------------------------
-    def check_author_consistency(self, error_entry: Dict[str, Any]) -> Dict[str, Any]:
-        """Ask the LLM whether the author-topic combination is plausible.
+        # Optionally run web search for additional signal
+        web_result = None
+        if web_searcher and web_searcher.available and verdict != 'UNLIKELY':
+            if self._should_web_search(error_entry):
+                try:
+                    web_result = web_searcher.check_reference_exists(error_entry)
+                    # Let web search influence the verdict
+                    web_verdict = web_result.get('verdict', '')
+                    if web_verdict == 'EXISTS' and verdict == 'UNCERTAIN':
+                        verdict = 'UNLIKELY'
+                        explanation += ' (Web search found the paper.)'
+                    elif web_verdict == 'NOT_FOUND' and verdict == 'UNCERTAIN':
+                        verdict = 'LIKELY'
+                        explanation += ' (Web search also found no evidence this paper exists.)'
+                except Exception as exc:
+                    logger.debug(f'Web search during assessment failed: {exc}')
 
-        Returns a dict with:
-          verdict: 'PLAUSIBLE' | 'IMPLAUSIBLE' | 'UNSURE' | 'ERROR'
-          justification: str
-          score_delta: float
-        """
-        if not self.available:
-            return {'verdict': 'ERROR', 'justification': 'LLM not available', 'score_delta': 0.0}
-
-        title = error_entry.get('ref_title', '')
-        authors = error_entry.get('ref_authors_cited', '')
-        venue = error_entry.get('original_reference', {}).get('venue',
-                    error_entry.get('original_reference', {}).get('journal', ''))
-        year = error_entry.get('ref_year_cited', '')
-
-        prompt = _AUTHOR_CONSISTENCY_PROMPT.format(
-            title=title, authors=authors, venue=venue, year=year,
+        logger.debug(
+            'Hallucination assessment: title=%r verdict=%s explanation=%s',
+            title[:60], verdict, explanation[:100],
         )
 
-        try:
-            response = self._call(prompt)
-            first_line = response.split('\n')[0].strip().upper()
+        return {
+            'verdict': verdict,
+            'explanation': explanation,
+            'web_search': web_result,
+        }
 
-            if 'IMPLAUSIBLE' in first_line:
-                verdict = 'IMPLAUSIBLE'
-                score_delta = 0.05
-            elif 'PLAUSIBLE' in first_line:
-                verdict = 'PLAUSIBLE'
-                score_delta = 0.0
-            else:
-                verdict = 'UNSURE'
-                score_delta = 0.0
+    def _build_validation_summary(self, error_entry: Dict[str, Any]) -> str:
+        """Build a human-readable summary of validation errors for the prompt."""
+        error_type = error_entry.get('error_type', '')
+        error_details = error_entry.get('error_details', '')
 
-            justification = '\n'.join(response.split('\n')[1:]).strip()
-            return {'verdict': verdict, 'justification': justification, 'score_delta': score_delta}
+        lines = []
+        if error_type == 'unverified':
+            lines.append('- Reference could NOT be found in any academic database '
+                         '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)')
+        elif error_type == 'multiple':
+            lines.append('- Multiple issues detected:')
+            for detail in error_details.split('\n'):
+                detail = detail.strip()
+                if detail.startswith('- '):
+                    lines.append(f'  {detail}')
+                elif detail:
+                    lines.append(f'  - {detail}')
+        elif error_type and error_details:
+            lines.append(f'- {error_type}: {error_details}')
 
-        except Exception as exc:
-            logger.warning(f'LLM author consistency check failed: {exc}')
-            return {'verdict': 'ERROR', 'justification': str(exc), 'score_delta': 0.0}
+        return '\n'.join(lines)
+
+    def _should_web_search(self, error_entry: Dict[str, Any]) -> bool:
+        """Decide if a web search would provide useful signal.
+
+        Skip searches for minor mismatches (author formatting, year off-by-one).
+        """
+        error_type = (error_entry.get('error_type') or '').lower()
+        if error_type == 'unverified':
+            return True
+        if error_type in ('doi', 'arxiv_id', 'arxiv'):
+            return True
+        if error_type == 'multiple':
+            details = (error_entry.get('error_details') or '').lower()
+            if 'title' in details or 'not found' in details:
+                return True
+        return False
+
+    @staticmethod
+    def _parse_verdict(response: str) -> tuple:
+        """Parse the LLM response into verdict and explanation."""
+        lines = response.strip().split('\n')
+        first_line = lines[0].strip().upper() if lines else ''
+
+        if 'LIKELY' in first_line and 'UNLIKELY' not in first_line:
+            verdict = 'LIKELY'
+        elif 'UNLIKELY' in first_line:
+            verdict = 'UNLIKELY'
+        else:
+            verdict = 'UNCERTAIN'
+
+        explanation = '\n'.join(lines[1:]).strip()
+        return verdict, explanation

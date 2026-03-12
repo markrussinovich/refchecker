@@ -45,7 +45,7 @@ import sys
 import json
 import random
 import csv
-from refchecker.core.hallucination_policy import assess_hallucination_candidate
+from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
 from refchecker.core.report_builder import ReportBuilder
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_title_basic,
@@ -5974,11 +5974,19 @@ class ArxivReferenceChecker:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
     def _display_hallucination_assessment(self, reference, errors, debug_mode, print_output):
-        """Display inline hallucination assessment if the reference is a candidate."""
-        if debug_mode or not print_output:
+        """Display inline hallucination assessment using the LLM verifier.
+
+        In normal mode, only LIKELY verdicts are shown with explanation.
+        In debug mode, all verdicts are shown.
+        """
+        if not print_output:
+            return
+        if not self.report_builder.llm_verifier or not self.report_builder.llm_verifier.available:
             return
 
-        # Build a consolidated error entry for the hallucination policy
+        from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
+
+        # Build a consolidated error entry
         error_types = []
         error_details_parts = []
         for e in errors:
@@ -5989,7 +5997,6 @@ class ArxivReferenceChecker:
             if edetail:
                 error_details_parts.append(edetail)
 
-        # Determine the consolidated error_type (matches add_error_to_dataset logic)
         if len(error_types) > 1:
             consolidated_type = 'multiple'
         elif error_types:
@@ -6004,13 +6011,26 @@ class ArxivReferenceChecker:
             'ref_authors_cited': ', '.join(reference.get('authors', [])),
             'ref_year_cited': reference.get('year'),
             'ref_venue_cited': reference.get('venue', ''),
+            'original_reference': reference,
         }
-        assessment = assess_hallucination_candidate(error_entry)
-        if assessment.get('candidate'):
-            level = assessment.get('level', 'none').upper()
-            score = assessment.get('score', 0)
-            reasons = ', '.join(assessment.get('reasons', []))
-            print(f"      🚩 Likely hallucinated [{level} {score:.2f}]: {reasons}")
+
+        if not should_check_hallucination(error_entry):
+            return
+
+        assessment = assess_hallucination(
+            error_entry,
+            llm_client=self.report_builder.llm_verifier,
+            web_searcher=self.report_builder.web_searcher,
+        )
+        verdict = assessment.get('verdict', 'UNCERTAIN')
+        explanation = assessment.get('explanation', '')
+
+        if debug_mode:
+            print(f"      🔍 Hallucination check: {verdict}")
+            if explanation:
+                print(f"         {explanation}")
+        elif verdict == 'LIKELY':
+            print(f"      🚩 Likely hallucinated: {explanation}")
 
     def _output_reference_errors(self, reference, errors, url):
         """
