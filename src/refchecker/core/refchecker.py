@@ -182,6 +182,17 @@ def resolve_input_spec(input_spec):
     expanded_spec = os.path.expanduser(spec)
 
     if spec.startswith('http'):
+        # OpenReview forum URLs → convert to PDF download URL
+        if 'openreview.net/forum' in spec:
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(spec)
+            params = parse_qs(parsed.query)
+            paper_id = params.get('id', [None])[0]
+            if paper_id:
+                pdf_url = f"https://openreview.net/pdf?id={paper_id}"
+                return None, pdf_url
+            raise ValueError(f"Could not extract paper ID from OpenReview URL: {spec}")
+
         if (spec.lower().endswith('.pdf') or
             'pdf' in spec.lower() or
             '/content' in spec or
