@@ -159,6 +159,11 @@ def setup_logging(debug_mode=False, level=None):
     arxiv_logger = logging.getLogger('arxiv')
     arxiv_logger.setLevel(logging.WARNING)  # Only show warnings and errors
     
+    # Suppress HTTP client logs (openai uses httpx) unless debug mode
+    if not debug_mode:
+        for noisy_logger in ('httpx', 'httpcore', 'openai'):
+            logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+    
     # Get logger for this module
     logger = logging.getLogger(__name__)
     
@@ -239,7 +244,7 @@ class ArxivReferenceChecker:
                 verifier = LLMHallucinationVerifier()
                 if verifier.available:
                     llm_verifier = verifier
-                    logger.info('LLM hallucination verifier enabled')
+                    logger.debug('LLM hallucination verifier enabled')
                 else:
                     logger.debug('LLM hallucination verifier not available (no API key)')
             except Exception as exc:
@@ -252,7 +257,7 @@ class ArxivReferenceChecker:
             searcher = create_web_search_checker()
             if searcher.available:
                 web_searcher = searcher
-                logger.info(f'Web search verification enabled (provider: {searcher._provider_name})')
+                logger.debug(f'Web search verification enabled (provider: {searcher._provider_name})')
             else:
                 logger.debug('Web search not available (no API key)')
         except Exception as exc:
@@ -5888,7 +5893,7 @@ class ArxivReferenceChecker:
     
 
     def _display_unverified_error_with_subreason(self, reference, reference_url, errors, debug_mode, print_output):
-        """Display the unverified error message with citation details and subreason"""
+        """Display the unverified error message with citation details, subreason, and hallucination assessment"""
         if not debug_mode and print_output:
             print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
             
@@ -5899,6 +5904,22 @@ class ArxivReferenceChecker:
                 if error_details:
                     subreason = self._categorize_unverified_reason(error_details)
                     print(f"         Subreason: {subreason}")
+
+            # Run inline hallucination assessment
+            error_entry = {
+                'error_type': 'unverified',
+                'error_details': unverified_errors[0].get('error_details', '') if unverified_errors else '',
+                'ref_title': reference.get('title', ''),
+                'ref_authors_cited': ', '.join(reference.get('authors', [])),
+                'ref_year_cited': reference.get('year'),
+                'ref_venue_cited': reference.get('venue', ''),
+            }
+            assessment = assess_hallucination_candidate(error_entry)
+            if assessment.get('candidate'):
+                level = assessment.get('level', 'none').upper()
+                score = assessment.get('score', 0)
+                reasons = ', '.join(assessment.get('reasons', []))
+                print(f"      🚩 Likely hallucinated [{level} {score:.2f}]: {reasons}")
 
     def _categorize_unverified_reason(self, error_details):
         """Categorize the unverified error into checker error or not found"""
