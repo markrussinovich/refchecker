@@ -473,7 +473,7 @@ class ArxivReferenceChecker:
 
     def write_structured_report(self, payload=None):
         """Write structured output for downstream triage workflows."""
-        if not self.report_file:
+        if not self.report_file and self.scan_mode != 'hallucination':
             return
         payload = payload or self._build_structured_report_payload()
         self.report_builder.write_structured_report(payload)
