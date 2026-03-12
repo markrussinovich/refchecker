@@ -35,8 +35,7 @@ export default function LLMSelector({ compact = false }) {
   // Format display name as provider-model
   const formatConfigName = (config) => {
     if (!config) return 'No LLM configured'
-    const model = config.model || 'default'
-    return `${config.provider}-${model}`
+    return config.name || `${config.provider}-${config.model || 'default'}`
   }
 
   // Find a keyless config for the same provider to use as prefill when creating new configs
@@ -172,7 +171,7 @@ export default function LLMSelector({ compact = false }) {
                       className="text-xs truncate"
                       style={{ color: 'var(--color-text-muted)' }}
                     >
-                      {config.name}
+                      {config.provider}{config.model ? ` / ${config.model}` : ''}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
