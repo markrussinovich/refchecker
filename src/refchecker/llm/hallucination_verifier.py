@@ -24,6 +24,8 @@ _ASSESSMENT_PROMPT = """\
 You are an academic-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
 
+Today's date is {today}.
+
 ## Reference metadata
 Title:   {title}
 Authors: {authors}
@@ -155,12 +157,16 @@ class LLMHallucinationVerifier:
         # Build a human-readable summary of validation errors
         validation_lines = self._build_validation_summary(error_entry)
 
+        import datetime
+        today = datetime.date.today().isoformat()
+
         prompt = _ASSESSMENT_PROMPT.format(
             title=title,
             authors=authors,
             venue=venue,
             year=year,
             url=url or '(none)',
+            today=today,
             validation_summary=validation_lines or 'No specific errors detected.',
         )
 

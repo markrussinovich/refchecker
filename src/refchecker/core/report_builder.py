@@ -45,12 +45,18 @@ class ReportBuilder:
         Hallucination assessment is performed via LLM on entries that pass
         the pre-filter (unverified, ID conflicts, multiple major mismatches).
         Requires an LLM to be configured; without one, no assessment is done.
+        Skips entries that have a verified URL (the reference was found).
         """
         records = []
         for error_entry in errors:
             record = dict(error_entry)
 
-            if self.llm_verifier and self.llm_verifier.available and should_check_hallucination(record):
+            # Skip hallucination check if reference was verified against a source
+            has_verified_source = bool(record.get('ref_verified_url'))
+
+            if (self.llm_verifier and self.llm_verifier.available
+                    and not has_verified_source
+                    and should_check_hallucination(record)):
                 assessment = assess_hallucination(
                     record,
                     llm_client=self.llm_verifier,
