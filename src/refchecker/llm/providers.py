@@ -222,7 +222,11 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
                     "timeout": httpx.Timeout(60.0, connect=5.0),
                 }
                 if self.endpoint:
-                    client_kwargs["base_url"] = self.endpoint
+                    base = self.endpoint
+                    for suffix in ('/chat/completions', '/completions'):
+                        if base.endswith(suffix):
+                            base = base[: -len(suffix)]
+                    client_kwargs["base_url"] = base
                 self.client = openai.OpenAI(**client_kwargs)
             except ImportError:
                 logger.error("OpenAI library not installed. Install with: pip install openai")
