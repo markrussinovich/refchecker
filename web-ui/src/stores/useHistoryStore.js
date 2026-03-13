@@ -592,19 +592,21 @@ export const useHistoryStore = create((set, get) => ({
       await api.deleteCheck(id)
       
       set(state => {
+        const deletedIndex = state.history.findIndex(h => h.id === id)
         const newHistory = state.history.filter(h => h.id !== id)
         const wasSelected = state.selectedCheckId === id
         
-        // If the deleted item was selected, try to select the next most recent item
-        // but only if there's no "New refcheck" placeholder (id=-1) in the list
+        // If the deleted item was selected, select the next item in the list
+        // (the one that was below it, i.e. the next oldest)
         let newSelectedCheckId = wasSelected ? null : state.selectedCheckId
         let newSelectedCheck = wasSelected ? null : state.selectedCheck
         
         if (wasSelected && newHistory.length > 0) {
           const hasPlaceholder = newHistory.some(h => h.id === -1)
           if (!hasPlaceholder) {
-            // Select the first (most recent) item
-            const nextItem = newHistory[0]
+            // Select the item at the same position (next oldest), or last if at end
+            const nextIndex = Math.min(deletedIndex, newHistory.length - 1)
+            const nextItem = newHistory[nextIndex]
             newSelectedCheckId = nextItem.id
             newSelectedCheck = nextItem
           }

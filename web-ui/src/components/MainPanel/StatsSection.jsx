@@ -307,26 +307,27 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           </button>
         )}
 
-        {/* Hallucinated */}
-        <button
-          onClick={() => handleFilterClick('hallucination')}
-          disabled={refsHallucinated === 0}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
-            refsHallucinated > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
-          } ${isHallucinationSelected ? 'ring-1' : ''}`}
-          style={{ 
-            backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
-            ringColor: 'var(--color-hallucination)',
-          }}
-          title={refsHallucinated > 0 ? `${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated` : 'No hallucinated references detected'}
-        >
-          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" fill="var(--color-hallucination)" />
-            <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="12" cy="17.5" r="1.2" fill="#fff" />
-          </svg>
-          <span className="text-sm font-bold" style={{ color: refsHallucinated > 0 ? 'var(--color-hallucination)' : 'var(--color-text-muted)' }}>{refsHallucinated}</span>
-        </button>
+        {/* Hallucinated - only show if > 0 */}
+        {refsHallucinated > 0 && (
+          <button
+            onClick={() => handleFilterClick('hallucination')}
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
+              isHallucinationSelected ? 'ring-1' : ''
+            }`}
+            style={{ 
+              backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
+              ringColor: 'var(--color-hallucination)',
+            }}
+            title={`${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated`}
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" fill="var(--color-hallucination)" />
+              <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <circle cx="12" cy="17.5" r="1.2" fill="#fff" />
+            </svg>
+            <span className="text-sm font-bold" style={{ color: 'var(--color-hallucination)' }}>{refsHallucinated}</span>
+          </button>
+        )}
 
         {/* Separator and total */}
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>

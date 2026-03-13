@@ -80,6 +80,7 @@ class Database:
                     refs_with_errors INTEGER DEFAULT 0,
                     refs_with_warnings_only INTEGER DEFAULT 0,
                     refs_verified INTEGER DEFAULT 0,
+                    hallucination_count INTEGER DEFAULT 0,
                     results_json TEXT,
                     llm_provider TEXT,
                     llm_model TEXT,
@@ -192,6 +193,8 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN original_filename TEXT")
         if "user_id" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN user_id INTEGER REFERENCES users(id)")
+        if "hallucination_count" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN hallucination_count INTEGER DEFAULT 0")
 
         # Ensure user_id column in llm_configs
         async with db.execute("PRAGMA table_info(llm_configs)") as cursor:
@@ -222,15 +225,16 @@ class Database:
                          results: List[Dict[str, Any]],
                          llm_provider: Optional[str] = None,
                          llm_model: Optional[str] = None,
-                         extraction_method: Optional[str] = None) -> int:
+                         extraction_method: Optional[str] = None,
+                         hallucination_count: int = 0) -> int:
         """Save a check result to database"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, refs_with_errors, refs_with_warnings_only,
-                 refs_verified, results_json, llm_provider, llm_model, extraction_method)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 refs_verified, hallucination_count, results_json, llm_provider, llm_model, extraction_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -243,6 +247,7 @@ class Database:
                 refs_with_errors,
                 refs_with_warnings_only,
                 refs_verified,
+                hallucination_count,
                 json.dumps(results),
                 llm_provider,
                 llm_model,
@@ -260,6 +265,7 @@ class Database:
                 query = """
                     SELECT id, paper_title, paper_source, custom_label, timestamp,
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                           hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
                            llm_provider, llm_model, status, source_type, batch_id, batch_label,
                            original_filename
@@ -273,6 +279,7 @@ class Database:
                 query = """
                     SELECT id, paper_title, paper_source, custom_label, timestamp,
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                           hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
                            llm_provider, llm_model, status, source_type, batch_id, batch_label,
                            original_filename
@@ -384,16 +391,17 @@ class Database:
                                     refs_verified: int,
                                     results: List[Dict[str, Any]],
                                     status: str = 'completed',
-                                    extraction_method: Optional[str] = None) -> bool:
+                                    extraction_method: Optional[str] = None,
+                                    hallucination_count: int = 0) -> bool:
         """Update a check with its results. If paper_title is None, don't update it."""
         async with aiosqlite.connect(self.db_path) as db:
             if paper_title is not None:
                 await db.execute("""
                     UPDATE check_history
                     SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
-                        suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
-                        refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
-                        extraction_method = ?
+                        suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
+                        refs_with_errors = ?, refs_with_warnings_only = ?, refs_verified = ?,
+                        results_json = ?, status = ?, extraction_method = ?
                     WHERE id = ?
                 """, (
                     paper_title,
@@ -402,6 +410,7 @@ class Database:
                     warnings_count,
                     suggestions_count,
                     unverified_count,
+                    hallucination_count,
                     refs_with_errors,
                     refs_with_warnings_only,
                     refs_verified,
@@ -415,9 +424,9 @@ class Database:
                 await db.execute("""
                     UPDATE check_history
                     SET total_refs = ?, errors_count = ?, warnings_count = ?,
-                        suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
-                        refs_with_warnings_only = ?, refs_verified = ?, results_json = ?, status = ?,
-                        extraction_method = ?
+                        suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
+                        refs_with_errors = ?, refs_with_warnings_only = ?, refs_verified = ?,
+                        results_json = ?, status = ?, extraction_method = ?
                     WHERE id = ?
                 """, (
                     total_refs,
@@ -425,6 +434,7 @@ class Database:
                     warnings_count,
                     suggestions_count,
                     unverified_count,
+                    hallucination_count,
                     refs_with_errors,
                     refs_with_warnings_only,
                     refs_verified,
