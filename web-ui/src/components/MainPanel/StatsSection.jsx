@@ -224,8 +224,9 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         </div>
       </div>
 
-      {/* Main stats row - single compact row */}
+      {/* Reference counts row */}
       <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>References</span>
         {/* Verified */}
         <button
           onClick={() => handleFilterClick('verified')}
@@ -332,30 +333,33 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
 
         {/* Separator and total */}
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
+      </div>
 
-        {/* Divider */}
-        <div className="w-px h-4 mx-1" style={{ backgroundColor: 'var(--color-border)' }} />
-
-        {/* Issue counts as compact chips */}
-        {issueFilters.filter(f => f.value > 0).map(filter => {
-          const isSelected = statusFilter.includes(filter.id)
-          return (
-            <button
-              key={filter.id}
-              onClick={() => handleFilterClick(filter.id)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer hover:opacity-80 border"
-              style={{ 
-                backgroundColor: isSelected ? filter.bgColor : 'transparent',
-                borderColor: isSelected ? filter.color : 'var(--color-border)',
-                color: filter.color,
-              }}
-              title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
-            >
-              <span className="font-bold">{filter.value}</span>
-              <span>{filter.label}</span>
-            </button>
-          )
-        })}
+      {/* Issue counts row - separate line */}
+      {issueFilters.some(f => f.value > 0) && (
+        <div className="flex items-center gap-2 flex-wrap mt-2">
+          <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Issues</span>
+          {issueFilters.filter(f => f.value > 0).map(filter => {
+            const isSelected = statusFilter.includes(filter.id)
+            return (
+              <button
+                key={filter.id}
+                onClick={() => handleFilterClick(filter.id)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer hover:opacity-80 border"
+                style={{ 
+                  backgroundColor: isSelected ? filter.bgColor : 'transparent',
+                  borderColor: isSelected ? filter.color : 'var(--color-border)',
+                  color: filter.color,
+                }}
+                title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
+              >
+                <span className="font-bold">{filter.value}</span>
+                <span>{filter.label}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
       </div>
     </div>
   )
