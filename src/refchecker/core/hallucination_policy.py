@@ -123,6 +123,7 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     - API/infrastructure failures
     - Entries with no meaningful title
     - Entries where the cited URL was checked and references the paper
+    - Web/URL references with no authors (website citations, not papers)
     """
     error_type = (error_entry.get('error_type') or '').lower()
     error_details = (error_entry.get('error_details') or '').lower()
@@ -137,11 +138,22 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     if 'url references paper' in error_details:
         return False
 
-    if error_type in {'api_failure', 'processing_failed'}:
-        return False
-
-    if error_type in {'year', 'venue', 'url'}:
-        return False
+    # Web/URL references with no real authors are not hallucination candidates
+    # (these are website citations like datasets, blog posts, tools)
+    authors = error_entry.get('ref_authors_cited', '')
+    orig_ref = error_entry.get('original_reference', {})
+    orig_authors = orig_ref.get('authors', []) if orig_ref else []
+    is_web_ref = (
+        not authors
+        or authors.strip().lower() in ('', 'unknown author', 'web resource', 'url reference')
+        or (isinstance(orig_authors, list) and len(orig_authors) <= 1
+            and any(a.lower() in ('unknown author', 'web resource', 'url reference')
+                    for a in orig_authors))
+    )
+    if is_web_ref:
+        url = error_entry.get('ref_url_cited', '') or orig_ref.get('url', '')
+        if url and url.startswith('http'):
+            return False
 
     # For 'multiple' type, check if it contains title or author mismatches
     # (not just year+venue)
