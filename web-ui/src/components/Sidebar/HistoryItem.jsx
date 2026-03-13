@@ -161,6 +161,9 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
     if (item.unverified_count > 0) {
       return { color: 'var(--color-text-muted)', label: `${item.unverified_count} unverified`, isAnimated: false }
     }
+    if (item.hallucination_count > 0) {
+      return { color: 'var(--color-hallucination)', label: `${item.hallucination_count} hallucinated`, isAnimated: false }
+    }
     return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
   }
 
