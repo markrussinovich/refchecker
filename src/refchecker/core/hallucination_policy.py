@@ -111,8 +111,20 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     - Year-only, venue-only, or URL-only mismatches
     - API/infrastructure failures
     - Entries with no meaningful title
+    - Entries where the cited URL was checked and references the paper
     """
     error_type = (error_entry.get('error_type') or '').lower()
+    error_details = (error_entry.get('error_details') or '').lower()
+
+    if error_type in {'api_failure', 'processing_failed'}:
+        return False
+
+    if error_type in {'year', 'venue', 'url'}:
+        return False
+
+    # If the URL was checked and references the paper, it's not hallucinated
+    if 'url references paper' in error_details:
+        return False
 
     if error_type in {'api_failure', 'processing_failed'}:
         return False
