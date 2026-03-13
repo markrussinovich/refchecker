@@ -412,9 +412,20 @@ class ProgressRefChecker:
             extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', or None
             
             if source_type == "url":
+                # Check if this is an OpenReview URL — convert to PDF download
+                if 'openreview.net/forum' in paper_source.lower():
+                    from urllib.parse import urlparse, parse_qs
+                    parsed = urlparse(paper_source)
+                    params = parse_qs(parsed.query)
+                    or_paper_id = params.get('id', [None])[0]
+                    if or_paper_id:
+                        paper_source = f"https://openreview.net/pdf?id={or_paper_id}"
+                    else:
+                        raise ValueError(f"Could not extract paper ID from OpenReview URL: {paper_source}")
+
                 # Check if this is a direct PDF URL (not arXiv)
                 is_direct_pdf_url = (
-                    paper_source.lower().endswith('.pdf') and 
+                    (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
                     'arxiv.org' not in paper_source.lower()
                 )
                 
@@ -440,6 +451,21 @@ class ProgressRefChecker:
                     
                     await asyncio.to_thread(download_pdf_url)
                     
+                    # For OpenReview PDFs, try to get metadata from the API
+                    if 'openreview.net' in paper_source.lower():
+                        try:
+                            from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+                            or_checker = OpenReviewReferenceChecker(request_delay=0.0)
+                            or_id = or_checker.extract_paper_id(paper_source)
+                            if or_id:
+                                or_meta = or_checker.get_paper_metadata(or_id)
+                                if or_meta and or_meta.get('title'):
+                                    paper_title = or_meta['title']
+                                    await update_title_if_needed(paper_title)
+                                    logger.info(f"Got title from OpenReview API: {paper_title}")
+                        except Exception as e:
+                            logger.debug(f"Could not get OpenReview metadata: {e}")
+
                     extraction_method = 'pdf'
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
