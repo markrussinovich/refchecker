@@ -345,26 +345,29 @@ export default function InputSection() {
             key={mode.id}
             onClick={() => setInputMode(mode.id)}
             disabled={isChecking}
-            className="px-3 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
+            className="px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-150 whitespace-nowrap flex-shrink-0"
             style={{
               backgroundColor: inputMode === mode.id 
-                ? 'var(--color-accent)' 
-                : 'var(--color-bg-tertiary)',
+                ? 'var(--color-bg-primary)' 
+                : 'var(--color-bg-primary)',
               color: inputMode === mode.id 
-                ? '#ffffff' 
+                ? 'var(--color-text-primary)' 
                 : 'var(--color-text-secondary)',
+              border: inputMode === mode.id 
+                ? '1px solid var(--color-accent)' 
+                : '1px solid var(--color-border)',
               cursor: isChecking ? 'not-allowed' : 'pointer',
             }}
             onMouseEnter={(e) => {
               if (!isChecking && inputMode !== mode.id) {
                 e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)'
-                e.currentTarget.style.color = 'var(--color-text-primary)'
+                e.currentTarget.style.borderColor = 'var(--color-accent)'
               }
             }}
             onMouseLeave={(e) => {
               if (inputMode !== mode.id) {
-                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
-                e.currentTarget.style.color = 'var(--color-text-secondary)'
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-primary)'
+                e.currentTarget.style.borderColor = 'var(--color-border)'
               }
             }}
           >
