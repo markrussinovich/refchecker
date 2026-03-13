@@ -149,20 +149,29 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
     if (item.status === 'error') {
       return { color: 'var(--color-error)', label: 'Error', isAnimated: false }
     }
-    // Hallucination is the most important signal — show first
+    // Build combined status from all issue types
+    const parts = []
+    let color = 'var(--color-success)'
     if (item.hallucination_count > 0) {
-      return { color: 'var(--color-hallucination)', label: `${item.hallucination_count} hallucinated`, isAnimated: false }
+      parts.push(`${item.hallucination_count} hallucinated`)
+      color = 'var(--color-hallucination)'
     }
     if (item.errors_count > 0) {
-      return { color: 'var(--color-error)', label: `${item.errors_count} errors`, isAnimated: false }
+      parts.push(`${item.errors_count} errors`)
+      if (color === 'var(--color-success)') color = 'var(--color-error)'
     }
     if (item.warnings_count > 0) {
-      return { color: 'var(--color-warning)', label: `${item.warnings_count} warnings`, isAnimated: false }
+      parts.push(`${item.warnings_count} warnings`)
+      if (color === 'var(--color-success)') color = 'var(--color-warning)'
     }
     if (item.unverified_count > 0) {
-      return { color: 'var(--color-text-muted)', label: `${item.unverified_count} unverified`, isAnimated: false }
+      parts.push(`${item.unverified_count} unverified`)
+      if (color === 'var(--color-success)') color = 'var(--color-text-muted)'
     }
-    return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
+    if (parts.length === 0) {
+      return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
+    }
+    return { color, label: parts.join(', '), isAnimated: false }
   }
 
   const status = getStatusIndicator()

@@ -73,6 +73,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     { ...allFilters.warning, value: stats.warnings_count || 0 },
     { ...allFilters.suggestion, value: stats.suggestions_count || 0 },
     { ...allFilters.unverified, value: stats.unverified_count || 0 },
+    { ...allFilters.hallucination, value: stats.hallucination_count || 0 },
   ]
 
   const handleFilterClick = (filterId) => {
