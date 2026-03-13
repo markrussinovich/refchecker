@@ -146,6 +146,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
       case 'warning': return 'var(--color-warning)'
       case 'error': return 'var(--color-error)'
       case 'suggestion': return 'var(--color-suggestion)'
+      case 'hallucination': return 'var(--color-hallucination)'
       case 'unverified': return 'var(--color-text-muted)'
       case 'unchecked': return 'var(--color-text-muted)'
       case 'checking': return 'var(--color-accent)'
@@ -265,6 +266,18 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           <svg className={commonSize} viewBox="0 0 24 24" fill="none">
             <circle cx="12" cy="12" r="10" fill="var(--color-text-muted)" />
             <path d="M8 12h8" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </span>
+      )
+    }
+
+    if (status === 'hallucination') {
+      return (
+        <span className="flex-shrink-0 inline-block" title="Likely hallucinated">
+          <svg className={commonSize} viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-hallucination)" />
+            <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="12" cy="17.5" r="1.2" fill="#fff" />
           </svg>
         </span>
       )
@@ -496,6 +509,21 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 {reference.errors?.find(e => e.error_type === 'unverified') && (
                   <div>
                     Subreason: {renderTextWithLinks(reference.errors.find(e => e.error_type === 'unverified')?.error_details || 'Paper not found by any checker')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Hallucination assessment */}
+          {reference.hallucination_assessment?.verdict === 'LIKELY' && (
+            <div className="flex items-start gap-2 text-xs mt-1" style={{ color: 'var(--color-hallucination)' }}>
+              <span className="flex-shrink-0 mt-0.5">🚩</span>
+              <div>
+                <div className="font-medium">Likely hallucinated</div>
+                {reference.hallucination_assessment.explanation && (
+                  <div style={{ color: 'var(--color-text-secondary)' }}>
+                    {reference.hallucination_assessment.explanation}
                   </div>
                 )}
               </div>

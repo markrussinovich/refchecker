@@ -23,6 +23,8 @@
   --color-link: #2563eb;
   --color-suggestion: #8b5cf6;
   --color-suggestion-bg: #f5f3ff;
+  --color-hallucination: #dc6b1d;
+  --color-hallucination-bg: #fff7ed;
   
   /* Sidebar */
   --sidebar-width: 280px;
@@ -51,6 +53,8 @@
   --color-link: #60a5fa;
   --color-suggestion: #a78bfa;
   --color-suggestion-bg: #2e1f4d;
+  --color-hallucination: #fb923c;
+  --color-hallucination-bg: #431c07;
   --sidebar-bg: #171717;
 }
 

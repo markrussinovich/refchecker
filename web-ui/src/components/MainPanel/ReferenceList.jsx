@@ -11,7 +11,7 @@ const computeDerivedStatus = (ref, isCheckComplete = false) => {
   const baseStatus = (ref.status || '').trim().toLowerCase()
   
   // Trust backend's final status values
-  if (['error', 'warning', 'suggestion', 'unverified', 'verified'].includes(baseStatus)) {
+  if (['error', 'warning', 'suggestion', 'unverified', 'verified', 'hallucination'].includes(baseStatus)) {
     return baseStatus
   }
   
@@ -91,6 +91,8 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             return ref.suggestions?.length > 0
           case 'unverified':
             return status === 'unverified' || ref.errors?.some(e => e.error_type === 'unverified')
+          case 'hallucination':
+            return status === 'hallucination' || ref.hallucination_assessment?.verdict === 'LIKELY'
           default:
             // For other statuses (pending, checking, unchecked), match exactly
             return status === filter

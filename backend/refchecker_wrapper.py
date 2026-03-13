@@ -677,7 +677,7 @@ class ProgressRefChecker:
             })
 
             # Process references in parallel
-            results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified = \
+            results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified, hallucination_count = \
                 await self._check_references_parallel(references, total_refs)
 
             # Step 4: Return final results
@@ -693,6 +693,7 @@ class ProgressRefChecker:
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
+                    "hallucination_count": hallucination_count,
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
@@ -1173,6 +1174,7 @@ class ProgressRefChecker:
         warnings_count = 0
         suggestions_count = 0
         unverified_count = 0
+        hallucination_count = 0
         verified_count = 0
         refs_with_errors = 0
         refs_with_warnings_only = 0
@@ -1279,7 +1281,10 @@ class ProgressRefChecker:
                 suggestions_count += num_suggestions
                 
                 # Count references by status for filtering
-                if result['status'] == 'unverified':
+                if result['status'] == 'hallucination':
+                    hallucination_count += 1
+                    unverified_count += 1
+                elif result['status'] == 'unverified':
                     unverified_count += 1
                 elif result['status'] == 'verified':
                     verified_count += 1
@@ -1309,6 +1314,7 @@ class ProgressRefChecker:
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
+                    "hallucination_count": hallucination_count,
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
@@ -1333,4 +1339,4 @@ class ProgressRefChecker:
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
         
-        return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified
+        return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified, hallucination_count

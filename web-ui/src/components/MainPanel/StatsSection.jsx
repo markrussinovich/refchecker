@@ -59,6 +59,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       color: 'var(--color-text-muted)',
       bgColor: 'var(--color-bg-tertiary)',
     },
+    hallucination: {
+      id: 'hallucination',
+      label: 'Hallucinated',
+      color: 'var(--color-hallucination)',
+      bgColor: 'var(--color-hallucination-bg)',
+    },
   }
 
   // Issue type filters for the chips
@@ -67,6 +73,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     { ...allFilters.warning, value: stats.warnings_count || 0 },
     { ...allFilters.suggestion, value: stats.suggestions_count || 0 },
     { ...allFilters.unverified, value: stats.unverified_count || 0 },
+    { ...allFilters.hallucination, value: stats.hallucination_count || 0 },
   ]
 
   const handleFilterClick = (filterId) => {
