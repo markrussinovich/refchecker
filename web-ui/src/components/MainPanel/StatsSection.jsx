@@ -73,7 +73,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     { ...allFilters.warning, value: stats.warnings_count || 0 },
     { ...allFilters.suggestion, value: stats.suggestions_count || 0 },
     { ...allFilters.unverified, value: stats.unverified_count || 0 },
-    { ...allFilters.hallucination, value: stats.hallucination_count || 0 },
   ]
 
   const handleFilterClick = (filterId) => {
@@ -89,11 +88,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsWithWarningsOnly = stats.refs_with_warnings_only ?? 0
   const refsVerified = stats.refs_verified ?? stats.verified_count ?? 0
   const refsUnverified = stats.unverified_count ?? 0
+  const refsHallucinated = stats.hallucination_count ?? 0
   const processedRefs = stats.processed_refs ?? 0
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')
   const isUnverifiedSelected = statusFilter.includes('unverified')
+  const isHallucinationSelected = statusFilter.includes('hallucination')
 
   // Base filename for exports
   const baseFilename = `refchecker-${(paperTitle || 'report').replace(/[^a-z0-9]/gi, '_').substring(0, 50)}`
@@ -305,6 +306,27 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
             <span className="text-sm font-bold" style={{ color: 'var(--color-text-muted)' }}>{refsUnverified}</span>
           </button>
         )}
+
+        {/* Hallucinated */}
+        <button
+          onClick={() => handleFilterClick('hallucination')}
+          disabled={refsHallucinated === 0}
+          className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
+            refsHallucinated > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
+          } ${isHallucinationSelected ? 'ring-1' : ''}`}
+          style={{ 
+            backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
+            ringColor: 'var(--color-hallucination)',
+          }}
+          title={refsHallucinated > 0 ? `${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated` : 'No hallucinated references detected'}
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" fill="var(--color-hallucination)" />
+            <path d="M12 4v10M10 6l2-2 2 2" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="12" cy="17.5" r="1.2" fill="#fff" />
+          </svg>
+          <span className="text-sm font-bold" style={{ color: refsHallucinated > 0 ? 'var(--color-hallucination)' : 'var(--color-text-muted)' }}>{refsHallucinated}</span>
+        </button>
 
         {/* Separator and total */}
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
