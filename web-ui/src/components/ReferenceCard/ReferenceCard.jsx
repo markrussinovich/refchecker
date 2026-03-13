@@ -412,7 +412,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           )}
           
           {/* Year */}
-          {reference.year && (
+          {reference.year && reference.year !== 0 && reference.year !== '0' && (
             <div 
               style={{ color: 'var(--color-text-secondary)' }}
             >
