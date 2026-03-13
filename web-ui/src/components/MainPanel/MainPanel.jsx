@@ -147,6 +147,9 @@ export default function MainPanel() {
       const warningsCount = selectedCheck.warnings_count || 0
       const suggestionsCount = selectedCheck.suggestions_count || 0
       const unverifiedCount = selectedCheck.unverified_count || 0
+      const hallucinationCount = selectedCheck.hallucination_count 
+        ?? displayRefs?.filter(r => r.status === 'hallucination' || r.hallucination_assessment?.verdict === 'LIKELY').length 
+        ?? 0
       
       // Use stored refs_verified if available, otherwise calculate
       const verifiedCount = selectedCheck.refs_verified ?? selectedCheck.verified_count ?? 
@@ -178,6 +181,7 @@ export default function MainPanel() {
         warnings_count: warningsCount,
         suggestions_count: suggestionsCount,
         unverified_count: unverifiedCount,
+        hallucination_count: hallucinationCount,
         refs_with_errors: refsWithErrors ?? 0,
         refs_with_warnings_only: refsWithWarningsOnly ?? 0,
         progress_percent: totalRefs > 0 ? (processedRefs / totalRefs) * 100 : 0,
@@ -199,6 +203,7 @@ export default function MainPanel() {
       warnings_count: 0,
       suggestions_count: 0,
       unverified_count: 0,
+      hallucination_count: 0,
       refs_with_errors: 0,
       refs_with_warnings_only: 0,
       progress_percent: 0,
