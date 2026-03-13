@@ -360,7 +360,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           })}
         </div>
       )}
-      </div>
     </div>
   )
 }
