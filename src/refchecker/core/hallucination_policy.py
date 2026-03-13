@@ -150,35 +150,11 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     orig_authors = orig_ref.get('authors', []) if orig_ref else []
     url = error_entry.get('ref_url_cited', '') or (orig_ref.get('url', '') if orig_ref else '')
 
-    is_web_ref = (
-        not authors
-        or authors.strip().lower() in ('', 'unknown author', 'web resource', 'url reference')
-        or (isinstance(orig_authors, list) and len(orig_authors) <= 1
-            and any(a.lower() in ('unknown author', 'web resource', 'url reference')
-                    for a in orig_authors))
-    )
-    if is_web_ref:
-        if url and url.startswith('http'):
-            return False
-
-    # References with a URL pointing to a known non-academic resource host
-    # (datasets, code repos, blogs, tools) are not hallucination candidates
-    # even if they have an author — these are web resource citations.
-    _NON_ACADEMIC_HOSTS = (
-        'huggingface.co', 'github.com', 'gitlab.com', 'bitbucket.org',
-        'kaggle.com', 'pypi.org', 'npmjs.com', 'crates.io',
-        'zenodo.org', 'figshare.com', 'medium.com', 'blog.',
-        'docs.', 'readthedocs.io', 'wikipedia.org',
-    )
+    # If the reference has a specific cited URL, it's almost certainly not
+    # hallucinated.  Fabricated references don't come with real URLs.
+    # URL correctness is verified separately by the URL checker.
     if url and url.startswith('http'):
-        try:
-            from urllib.parse import urlparse
-            host = urlparse(url).hostname or ''
-            if any(host == d or host.endswith('.' + d) or d in host
-                   for d in _NON_ACADEMIC_HOSTS):
-                return False
-        except Exception:
-            pass
+        return False
 
     # For 'multiple' type, check if it contains title or author mismatches
     # (not just year+venue)

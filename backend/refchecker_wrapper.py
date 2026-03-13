@@ -343,6 +343,7 @@ class ProgressRefChecker:
                 'ref_authors_cited': ', '.join(reference.get('authors', [])),
                 'ref_year_cited': reference.get('year'),
                 'ref_venue_cited': reference.get('venue', ''),
+                'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
                 'original_reference': reference,
             }
             if should_check_hallucination(error_entry) and self.hallucination_verifier and self.hallucination_verifier.available:

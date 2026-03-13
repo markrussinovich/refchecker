@@ -136,11 +136,35 @@ def test_many_authors_low_overlap_should_flag_hallucination():
 
 
 # ------------------------------------------------------------------
-# Non-academic URL tests (should not be checked for hallucination)
+# URL tests (references with cited URLs should not be hallucination-checked)
 # ------------------------------------------------------------------
 
+def test_reference_with_url_should_not_be_checked():
+    """Any reference with a cited URL is not a hallucination candidate."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Fair learning',
+        'ref_authors_cited': 'Mark A. Lemley, Bryan Casey',
+        'ref_url_cited': 'https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3528447',
+    }
+    assert should_check_hallucination(entry) is False
+
+
+def test_web_resource_with_url_should_not_be_checked():
+    """Web resources like Common Crawl with a URL are not hallucination candidates."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Common Crawl',
+        'ref_authors_cited': 'Common Crawl Foundation',
+        'ref_url_cited': 'https://commoncrawl.org/',
+    }
+    assert should_check_hallucination(entry) is False
+
+
 def test_huggingface_dataset_should_not_be_checked():
-    """References pointing to Hugging Face datasets are web resources, not papers."""
+    """References pointing to Hugging Face datasets are not hallucination candidates."""
     entry = {
         'error_type': 'unverified',
         'error_details': 'Reference could not be verified',
@@ -151,20 +175,8 @@ def test_huggingface_dataset_should_not_be_checked():
     assert should_check_hallucination(entry) is False
 
 
-def test_github_repo_should_not_be_checked():
-    """References pointing to GitHub repos are web resources, not papers."""
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
-        'ref_title': 'Some Tool Repository',
-        'ref_authors_cited': 'SomeUser',
-        'ref_url_cited': 'https://github.com/SomeUser/some-tool',
-    }
-    assert should_check_hallucination(entry) is False
-
-
-def test_academic_url_should_still_be_checked():
-    """References with academic URLs that are unverified should still be checked."""
+def test_no_url_unverified_should_be_checked():
+    """Unverified references with NO URL should still be checked."""
     entry = {
         'error_type': 'unverified',
         'error_details': 'Reference could not be verified',

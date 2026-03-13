@@ -6043,6 +6043,7 @@ class ArxivReferenceChecker:
             'ref_authors_cited': ', '.join(reference.get('authors', [])),
             'ref_year_cited': reference.get('year'),
             'ref_venue_cited': reference.get('venue', ''),
+            'ref_url_cited': reference.get('url', ''),
             'original_reference': reference,
         }
         if authors_correct:
