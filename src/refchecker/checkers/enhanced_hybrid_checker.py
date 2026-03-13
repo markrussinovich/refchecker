@@ -592,6 +592,23 @@ class EnhancedHybridReferenceChecker:
         else:
             logger.debug("Enhanced Hybrid: All available APIs failed to verify reference")
         
+        # PHASE 4: If the reference has a URL, try web page verification as final fallback.
+        # This handles non-academic references (websites, datasets, tools) whose
+        # cited URL is valid and contains the reference title.
+        web_url = reference.get('cited_url') or reference.get('url', '')
+        if web_url and web_url.startswith('http'):
+            try:
+                from refchecker.checkers.webpage_checker import WebPageChecker
+                webpage_checker = WebPageChecker()
+                wp_data, wp_errors, wp_url = webpage_checker.verify_reference(reference)
+                if wp_data:
+                    logger.debug(f"Enhanced Hybrid: Web page verification succeeded for {web_url}")
+                    return wp_data, wp_errors, wp_url
+                else:
+                    logger.debug(f"Enhanced Hybrid: Web page verification did not confirm reference")
+            except Exception as exc:
+                logger.debug(f"Enhanced Hybrid: Web page verification failed: {exc}")
+
         # Track how many independent sources were checked and returned negative
         # (used by hallucination_policy for multi-source negative consensus)
         sources_checked = total_attempted
