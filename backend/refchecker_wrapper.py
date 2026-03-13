@@ -153,6 +153,18 @@ class ProgressRefChecker:
                 logger.error(f"Failed to initialize LLM: {e}")
 
         # Initialize reference checker
+        self.hallucination_verifier = None
+        try:
+            from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
+            verifier = LLMHallucinationVerifier(
+                api_key=api_key,
+                endpoint=endpoint,
+            )
+            if verifier.available:
+                self.hallucination_verifier = verifier
+                logger.debug('Hallucination verifier initialized for web UI')
+        except Exception as e:
+            logger.debug(f'Hallucination verifier init failed: {e}')
         # Use provided API key, fall back to environment variable
         ss_api_key = semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
         if ss_api_key:
@@ -299,8 +311,7 @@ class ProgressRefChecker:
             else:
                 formatted_errors.append(err_obj)
 
-        # Run hallucination assessment on unverified references (requires LLM in CLI;
-        # in backend we do a lightweight check — the full LLM assessment runs in report_builder)
+        # Run hallucination assessment on unverified references using LLM
         hallucination_assessment = None
         if is_unverified and not has_errors:
             error_entry = {
@@ -313,14 +324,15 @@ class ProgressRefChecker:
                 'ref_authors_cited': ', '.join(reference.get('authors', [])),
                 'ref_year_cited': reference.get('year'),
                 'ref_venue_cited': reference.get('venue', ''),
+                'original_reference': reference,
             }
-            if should_check_hallucination(error_entry):
-                # Mark as potentially hallucinated — full LLM assessment happens in report_builder
-                hallucination_assessment = {
-                    'verdict': 'UNCERTAIN',
-                    'explanation': 'Awaiting LLM assessment.',
-                }
-                status = 'hallucination'
+            if should_check_hallucination(error_entry) and self.hallucination_verifier and self.hallucination_verifier.available:
+                hallucination_assessment = assess_hallucination(
+                    error_entry,
+                    llm_client=self.hallucination_verifier,
+                )
+                if hallucination_assessment.get('verdict') == 'LIKELY':
+                    status = 'hallucination'
 
         result = {
             "index": index,
