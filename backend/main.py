@@ -543,6 +543,7 @@ async def run_check(
                             warnings_count=data.get("warnings_count", 0),
                             suggestions_count=data.get("suggestions_count", 0),
                             unverified_count=data.get("unverified_count", 0),
+                            hallucination_count=data.get("hallucination_count", 0),
                             refs_with_errors=data.get("refs_with_errors", 0),
                             refs_with_warnings_only=data.get("refs_with_warnings_only", 0),
                             refs_verified=data.get("refs_verified", 0),

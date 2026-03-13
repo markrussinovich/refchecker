@@ -4,26 +4,41 @@ The LLM receives the full reference metadata plus all validation errors
 detected by the checkers, and determines whether the reference is likely
 fabricated (LIKELY), genuine (UNLIKELY), or unclear (UNCERTAIN).
 
-If web search is available, the LLM first decides whether a search would
-provide a useful additional signal. Minor author-name or year mismatches
-don't warrant a search; unverified references with plausible metadata do.
+When using OpenAI, the verifier uses the Responses API with the
+``web_search_preview`` tool so the LLM can search the web during its
+assessment.  For non-OpenAI endpoints or when the Responses API is
+unavailable the verifier falls back to plain chat completions.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from refchecker.config.settings import resolve_api_key, resolve_endpoint
 
 logger = logging.getLogger(__name__)
 
 
-_ASSESSMENT_PROMPT = """\
+_ASSESSMENT_SYSTEM_PROMPT = """\
 You are an academic-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
 
+IMPORTANT: Use web search to look up the paper title and authors before \
+rendering your verdict. Search for the exact title in quotes on the web \
+to check whether the paper actually exists. This is critical — do NOT \
+rely solely on the metadata provided; verify it against the open web.
+
+Reply with EXACTLY one of these verdicts on the FIRST line:
+  LIKELY    — this reference is probably fabricated
+  UNLIKELY  — this reference is probably real despite the errors
+  UNCERTAIN — cannot determine with confidence
+
+Then on the following lines, give a concise explanation (2-3 sentences max). \
+If you found the paper via web search, include the URL(s) where it appears."""
+
+_ASSESSMENT_PROMPT = """\
 Today's date is {today}.
 
 ## Reference metadata
@@ -37,12 +52,15 @@ URL:     {url}
 {validation_summary}
 
 ## Instructions
-Based on the reference metadata and the validation errors above, determine \
-whether this reference is a hallucinated (fabricated) citation.
+First, search the web for the exact paper title (in quotes) to check whether \
+this paper actually exists. Then, based on both the web search results AND \
+the validation errors above, determine whether this reference is a \
+hallucinated (fabricated) citation.
 
 Key signals of hallucination:
 - The reference could not be found in ANY academic database (Semantic Scholar, \
 OpenAlex, CrossRef, DBLP, arXiv)
+- A web search for the exact title returns no matching results
 - Authors are obviously fake ("John Doe", "Jane Smith") or don't work in the \
 cited field
 - The ArXiv ID or DOI points to a completely different paper
@@ -50,17 +68,14 @@ cited field
 - Multiple major metadata fields conflict with what databases found
 
 Key signals that it is NOT hallucinated:
-- The paper was found and verified, even with minor metadata errors
+- The paper was found via web search or verified in a database, even with \
+minor metadata errors
 - Year off-by-one, venue abbreviation differences, or author name formatting \
 differences are common in real citations and NOT signs of hallucination
 - Author count mismatches where the names mostly overlap are NOT hallucination
 
-Reply with EXACTLY one of these verdicts on the FIRST line:
-  LIKELY    — this reference is probably fabricated
-  UNLIKELY  — this reference is probably real despite the errors
-  UNCERTAIN — cannot determine with confidence
-
-Then on the following lines, give a concise explanation (2-3 sentences max)."""
+Reply with your verdict on the FIRST line (LIKELY, UNLIKELY, or UNCERTAIN) \
+followed by your concise explanation (2-3 sentences max)."""
 
 _WEB_SEARCH_DECISION_PROMPT = """\
 Given this reference that could not be verified by academic databases:
@@ -93,6 +108,7 @@ class LLMHallucinationVerifier:
         self.endpoint = endpoint or resolve_endpoint('openai')
         self.model = model
         self.client = None
+        self._use_responses_api = False
 
         if self.api_key:
             try:
@@ -105,7 +121,15 @@ class LLMHallucinationVerifier:
                             base = base[: -len(suffix)]
                     kwargs['base_url'] = base
                 self.client = openai.OpenAI(**kwargs)
-                logger.debug(f'LLM hallucination verifier initialized (model={self.model})')
+                # Use the Responses API (with web_search_preview) when available.
+                # Custom endpoints may not support it, so probe and fall back.
+                if not self.endpoint:
+                    self._use_responses_api = True
+                logger.debug(
+                    'LLM hallucination verifier initialized '
+                    '(model=%s, web_search=%s)',
+                    self.model, self._use_responses_api,
+                )
             except ImportError:
                 logger.warning('openai package not installed — LLM verification disabled')
 
@@ -113,14 +137,64 @@ class LLMHallucinationVerifier:
     def available(self) -> bool:
         return self.client is not None
 
-    def _call(self, prompt: str) -> str:
+    def _call_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Call the LLM via the Responses API with web search enabled.
+
+        Returns (response_text, web_urls) where web_urls is a list of
+        URLs cited by the model from its web search results.
+        """
+        resp = self.client.responses.create(
+            model=self.model,
+            instructions=system_prompt,
+            tools=[{'type': 'web_search_preview'}],
+            input=user_prompt,
+        )
+
+        text_parts: List[str] = []
+        web_urls: List[str] = []
+        seen_urls: set = set()
+
+        for item in resp.output:
+            content = getattr(item, 'content', None)
+            if not content:
+                continue
+            for block in content:
+                text = getattr(block, 'text', '') or ''
+                if text:
+                    text_parts.append(text)
+                for ann in getattr(block, 'annotations', []):
+                    url = getattr(ann, 'url', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        web_urls.append(url)
+
+        return '\n'.join(text_parts).strip(), web_urls
+
+    def _call_chat(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Fallback: plain chat completions without web search."""
         resp = self.client.chat.completions.create(
             model=self.model,
-            messages=[{'role': 'user', 'content': prompt}],
+            messages=[
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt},
+            ],
             max_tokens=300,
             temperature=0.0,
         )
-        return (resp.choices[0].message.content or '').strip()
+        return (resp.choices[0].message.content or '').strip(), []
+
+    def _call(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Call the LLM, using web search when available.
+
+        Returns (response_text, web_urls).
+        """
+        if self._use_responses_api:
+            try:
+                return self._call_with_web_search(system_prompt, user_prompt)
+            except Exception as exc:
+                logger.debug('Responses API failed, falling back to chat: %s', exc)
+                self._use_responses_api = False
+        return self._call_chat(system_prompt, user_prompt)
 
     def assess(
         self,
@@ -160,7 +234,7 @@ class LLMHallucinationVerifier:
         import datetime
         today = datetime.date.today().isoformat()
 
-        prompt = _ASSESSMENT_PROMPT.format(
+        user_prompt = _ASSESSMENT_PROMPT.format(
             title=title,
             authors=authors,
             venue=venue,
@@ -171,7 +245,7 @@ class LLMHallucinationVerifier:
         )
 
         try:
-            response = self._call(prompt)
+            response, web_urls = self._call(_ASSESSMENT_SYSTEM_PROMPT, user_prompt)
             verdict, explanation = self._parse_verdict(response)
         except Exception as exc:
             logger.warning(f'LLM hallucination assessment failed: {exc}')
@@ -181,9 +255,18 @@ class LLMHallucinationVerifier:
                 'web_search': None,
             }
 
-        # Optionally run web search for additional signal
+        # Build web_result from inline web search URLs if the LLM found any
         web_result = None
-        if web_searcher and web_searcher.available and verdict != 'UNLIKELY':
+        if web_urls:
+            web_result = {
+                'found': verdict == 'UNLIKELY',
+                'academic_urls': web_urls[:5],
+                'provider': 'openai_responses',
+            }
+
+        # Fallback: use separate web searcher if the LLM didn't do its own
+        # web search (e.g. non-OpenAI endpoint) and verdict is ambiguous
+        if not web_urls and web_searcher and web_searcher.available and verdict != 'UNLIKELY':
             if self._should_web_search(error_entry):
                 try:
                     web_result = web_searcher.check_reference_exists(error_entry)

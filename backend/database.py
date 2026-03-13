@@ -453,10 +453,11 @@ class Database:
                                      warnings_count: int,
                                      suggestions_count: int,
                                      unverified_count: int,
-                                     refs_with_errors: int,
-                                     refs_with_warnings_only: int,
-                                     refs_verified: int,
-                                     results: List[Dict[str, Any]]) -> bool:
+                                     hallucination_count: int = 0,
+                                     refs_with_errors: int = 0,
+                                     refs_with_warnings_only: int = 0,
+                                     refs_verified: int = 0,
+                                     results: List[Dict[str, Any]] = None) -> bool:
         """Incrementally update a check's results as references are verified.
         
         This is called after each reference is checked to persist progress,
@@ -467,7 +468,8 @@ class Database:
             await db.execute("""
                 UPDATE check_history
                 SET total_refs = ?, errors_count = ?, warnings_count = ?,
-                    suggestions_count = ?, unverified_count = ?, refs_with_errors = ?,
+                    suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
+                    refs_with_errors = ?,
                     refs_with_warnings_only = ?, refs_verified = ?, results_json = ?
                 WHERE id = ?
             """, (
@@ -476,10 +478,11 @@ class Database:
                 warnings_count,
                 suggestions_count,
                 unverified_count,
+                hallucination_count,
                 refs_with_errors,
                 refs_with_warnings_only,
                 refs_verified,
-                json.dumps(results),
+                json.dumps(results or []),
                 check_id
             ))
             await db.commit()

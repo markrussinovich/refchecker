@@ -82,6 +82,11 @@ def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optiona
         if parts and parts[-1] in correct_lastnames:
             matches += 1
 
+    # With only 2 authors, having 1 correct is a normal citation error,
+    # not hallucination — require at least 3 cited authors for overlap scoring
+    if len(cited) <= 2 and matches >= 1:
+        return None
+
     return matches / len(cited)
 
 
@@ -143,6 +148,8 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     authors = error_entry.get('ref_authors_cited', '')
     orig_ref = error_entry.get('original_reference', {})
     orig_authors = orig_ref.get('authors', []) if orig_ref else []
+    url = error_entry.get('ref_url_cited', '') or (orig_ref.get('url', '') if orig_ref else '')
+
     is_web_ref = (
         not authors
         or authors.strip().lower() in ('', 'unknown author', 'web resource', 'url reference')
@@ -151,9 +158,27 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
                     for a in orig_authors))
     )
     if is_web_ref:
-        url = error_entry.get('ref_url_cited', '') or orig_ref.get('url', '')
         if url and url.startswith('http'):
             return False
+
+    # References with a URL pointing to a known non-academic resource host
+    # (datasets, code repos, blogs, tools) are not hallucination candidates
+    # even if they have an author — these are web resource citations.
+    _NON_ACADEMIC_HOSTS = (
+        'huggingface.co', 'github.com', 'gitlab.com', 'bitbucket.org',
+        'kaggle.com', 'pypi.org', 'npmjs.com', 'crates.io',
+        'zenodo.org', 'figshare.com', 'medium.com', 'blog.',
+        'docs.', 'readthedocs.io', 'wikipedia.org',
+    )
+    if url and url.startswith('http'):
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(url).hostname or ''
+            if any(host == d or host.endswith('.' + d) or d in host
+                   for d in _NON_ACADEMIC_HOSTS):
+                return False
+        except Exception:
+            pass
 
     # For 'multiple' type, check if it contains title or author mismatches
     # (not just year+venue)

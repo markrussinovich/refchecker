@@ -2,7 +2,7 @@
 
 import csv
 
-from refchecker.core.hallucination_policy import should_check_hallucination
+from refchecker.core.hallucination_policy import check_author_hallucination, should_check_hallucination
 from refchecker.core.report_builder import ReportBuilder
 
 
@@ -96,6 +96,81 @@ def test_doi_conflict_should_be_checked():
         'error_details': 'DOI points to different paper',
         'ref_title': 'Paper With DOI Conflict That Is Long Enough',
         'ref_authors_cited': 'Author One',
+    }
+    assert should_check_hallucination(entry) is True
+
+
+# ------------------------------------------------------------------
+# Author overlap tests (check_author_hallucination)
+# ------------------------------------------------------------------
+
+def test_two_authors_one_wrong_should_not_flag_hallucination():
+    """With only 2 cited authors and 1 matching, it's a normal citation error."""
+    entry = {
+        'ref_authors_cited': 'Smith, Wrong Author',
+        'ref_authors_correct': 'Smith, Jones',
+    }
+    assert check_author_hallucination(entry) is None
+
+
+def test_two_authors_none_matching_should_flag_hallucination():
+    """With 2 cited authors and 0 matching, it may be hallucinated."""
+    entry = {
+        'ref_authors_cited': 'Fake One, Fake Two',
+        'ref_authors_correct': 'Smith, Jones, Lee',
+    }
+    result = check_author_hallucination(entry)
+    assert result is not None
+    assert result['verdict'] == 'LIKELY'
+
+
+def test_many_authors_low_overlap_should_flag_hallucination():
+    """With many cited authors and low overlap, flag hallucination."""
+    entry = {
+        'ref_authors_cited': 'Fake A, Fake B, Fake C, Smith',
+        'ref_authors_correct': 'Smith, Jones, Lee, Chen',
+    }
+    result = check_author_hallucination(entry)
+    assert result is not None
+    assert result['verdict'] == 'LIKELY'
+
+
+# ------------------------------------------------------------------
+# Non-academic URL tests (should not be checked for hallucination)
+# ------------------------------------------------------------------
+
+def test_huggingface_dataset_should_not_be_checked():
+    """References pointing to Hugging Face datasets are web resources, not papers."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'OpenManus-RL Dataset',
+        'ref_authors_cited': 'CharlieDreemur',
+        'ref_url_cited': 'https://huggingface.co/datasets/CharlieDreemur/OpenManus-RL',
+    }
+    assert should_check_hallucination(entry) is False
+
+
+def test_github_repo_should_not_be_checked():
+    """References pointing to GitHub repos are web resources, not papers."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Some Tool Repository',
+        'ref_authors_cited': 'SomeUser',
+        'ref_url_cited': 'https://github.com/SomeUser/some-tool',
+    }
+    assert should_check_hallucination(entry) is False
+
+
+def test_academic_url_should_still_be_checked():
+    """References with academic URLs that are unverified should still be checked."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'A Suspicious Paper About Neural Networks',
+        'ref_authors_cited': 'John Fakename, Jane Fakename',
+        'ref_url_cited': '',
     }
     assert should_check_hallucination(entry) is True
 

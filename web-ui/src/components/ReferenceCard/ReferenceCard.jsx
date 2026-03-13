@@ -522,7 +522,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
               <div>
                 <div className="font-medium">Likely hallucinated</div>
                 {reference.hallucination_assessment.explanation && (
-                  <div style={{ color: 'var(--color-text-secondary)' }}>
+                  <div>
                     {reference.hallucination_assessment.explanation}
                   </div>
                 )}

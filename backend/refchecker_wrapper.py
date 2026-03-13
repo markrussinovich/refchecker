@@ -357,7 +357,7 @@ class ProgressRefChecker:
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
             "authors": reference.get('authors', []),
-            "year": reference.get('year'),
+            "year": reference.get('year') or None,
             "venue": reference.get('venue'),
             "cited_url": reference.get('cited_url') or reference.get('url'),
             "status": status,
@@ -687,6 +687,7 @@ class ProgressRefChecker:
                     "warnings_count": 0,
                     "suggestions_count": 0,
                     "unverified_count": 0,
+                    "hallucination_count": 0,
                     "verified_count": 0,
                     "extraction_method": extraction_method,
                     "message": "No references could be extracted from this paper."

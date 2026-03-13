@@ -1980,7 +1980,7 @@ class ArxivReferenceChecker:
         # Get reference fields
         title = reference.get('title', '').strip()
         authors = reference.get('authors', [])
-        year = reference.get('year', 0)
+        year = reference.get('year') or 0
         url = reference.get('url', '')
         doi = None
         if 'doi' in reference and reference['doi']:
@@ -4368,7 +4368,7 @@ class ArxivReferenceChecker:
                     final_authors = ["Unknown Author"]
                 structured_ref = {
                     'url': clean_url(arxiv_url),
-                    'year': year if year else 0,
+                    'year': year or None,
                     'authors': final_authors,
                     'title': title,
                     'raw_text': ref,
@@ -4466,7 +4466,7 @@ class ArxivReferenceChecker:
                     structured_ref = {
                         'url': clean_url(url),
                         'doi': clean_doi(doi),
-                        'year': year if year else 0,
+                        'year': year or None,
                         'authors': authors,
                         'title': title,
                         'raw_text': ref,
@@ -4519,7 +4519,7 @@ class ArxivReferenceChecker:
                     structured_ref = {
                         'url': "",
                         'doi': None,
-                        'year': year if year else 0,
+                        'year': year or None,
                         'authors': authors,
                         'title': title,
                         'raw_text': ref,
@@ -5238,7 +5238,7 @@ class ArxivReferenceChecker:
         return {
             'url': arxiv_url or url or "",
             'doi': doi,
-            'year': year or 0,
+            'year': year or None,
             'authors': authors,
             'venue': venue,
             'title': title,
@@ -5326,7 +5326,7 @@ class ArxivReferenceChecker:
         return {
             'url': arxiv_url or url or "",
             'doi': doi,
-            'year': year or 0,
+            'year': year or None,
             'authors': authors,
             'title': title,
             'raw_text': ref_text,
