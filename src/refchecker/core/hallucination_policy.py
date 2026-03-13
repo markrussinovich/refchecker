@@ -7,11 +7,15 @@ LIKELY, UNLIKELY, or UNCERTAIN.
 
 A lightweight pre-filter skips entries that clearly don't warrant LLM
 assessment (e.g. year-only mismatches, API failures).
+
+A deterministic author-overlap check flags references where fewer than
+60% of cited authors match the actual authors — this runs without an LLM.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -26,6 +30,78 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
     'arxiv',            # ArXiv-related conflict
     'multiple',         # Multiple issues (may include title/author mismatches)
 })
+
+_AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match
+
+
+def _normalize_author_name(name: str) -> str:
+    """Normalize an author name for comparison (lowercase, strip initials/punctuation)."""
+    name = name.strip().lower()
+    # Remove common prefixes/suffixes
+    name = re.sub(r'\b(jr|sr|ii|iii|iv)\b\.?', '', name)
+    # Keep only last name + first significant name part
+    parts = [p.strip() for p in re.split(r'[,\s]+', name) if len(p.strip()) > 1]
+    return ' '.join(parts)
+
+
+def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optional[float]:
+    """Compute fraction of cited authors that appear in the correct author list.
+
+    Returns None if either list is empty or has fewer than 2 authors.
+    """
+    if not cited_authors or not correct_authors:
+        return None
+
+    cited = [_normalize_author_name(a) for a in cited_authors.split(',') if a.strip()]
+    correct = [_normalize_author_name(a) for a in correct_authors.split(',') if a.strip()]
+
+    if len(cited) < 2 or len(correct) < 2:
+        return None
+
+    # Check how many cited author last names appear in the correct list
+    correct_lastnames = set()
+    for name in correct:
+        parts = name.split()
+        if parts:
+            correct_lastnames.add(parts[-1])
+
+    matches = 0
+    for name in cited:
+        parts = name.split()
+        if parts and parts[-1] in correct_lastnames:
+            matches += 1
+
+    return matches / len(cited)
+
+
+def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Check if a reference is likely hallucinated based on author overlap.
+
+    Returns a hallucination assessment dict if < 60% of cited authors match
+    the correct authors, or None if this check doesn't apply.
+
+    This is a deterministic check that does not require an LLM.
+    """
+    cited = error_entry.get('ref_authors_cited', '')
+    correct = error_entry.get('ref_authors_correct', '')
+
+    if not cited or not correct:
+        return None
+
+    overlap = _compute_author_overlap(cited, correct)
+    if overlap is None:
+        return None
+
+    if overlap < _AUTHOR_MATCH_THRESHOLD:
+        pct = int(overlap * 100)
+        return {
+            'verdict': 'LIKELY',
+            'explanation': f'Only {pct}% of cited authors match the actual authors — '
+                           f'the reference likely cites a different or fabricated paper.',
+            'web_search': None,
+        }
+
+    return None
 
 
 def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:

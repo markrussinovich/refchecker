@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Dict, IO, List, Optional
 
-from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
+from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination, check_author_hallucination
 
 logger = logging.getLogger(__name__)
 
@@ -42,31 +42,36 @@ class ReportBuilder:
     def build_structured_report_records(self, errors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Convert collected error entries into report records.
 
-        Hallucination assessment is performed via LLM on entries that pass
-        the pre-filter (unverified, ID conflicts, multiple major mismatches).
-        Requires an LLM to be configured; without one, no assessment is done.
-        Skips entries that have a verified URL (the reference was found).
+        Hallucination assessment:
+        1. Deterministic author-overlap check (no LLM needed): flags refs
+           where < 60% of cited authors match the actual authors.
+        2. LLM-based assessment for unverified references that pass the
+           pre-filter (requires configured LLM).
         """
         records = []
         for error_entry in errors:
             record = dict(error_entry)
 
-            # Skip hallucination check if error_type doesn't include unverified
-            # (the reference was found in a database, just has metadata issues)
-            error_type = (record.get('error_type') or '').lower()
-            is_unverified = (error_type == 'unverified'
-                             or (error_type == 'multiple'
-                                 and 'unverified' in (record.get('error_details') or '').lower()))
+            # 1. Deterministic: author-overlap hallucination check (no LLM)
+            author_result = check_author_hallucination(record)
+            if author_result:
+                record['hallucination_assessment'] = author_result
+            else:
+                # 2. LLM-based: only for unverified references
+                error_type = (record.get('error_type') or '').lower()
+                is_unverified = (error_type == 'unverified'
+                                 or (error_type == 'multiple'
+                                     and 'unverified' in (record.get('error_details') or '').lower()))
 
-            if (self.llm_verifier and self.llm_verifier.available
-                    and is_unverified
-                    and should_check_hallucination(record)):
-                assessment = assess_hallucination(
-                    record,
-                    llm_client=self.llm_verifier,
-                    web_searcher=self.web_searcher,
-                )
-                record['hallucination_assessment'] = assessment
+                if (self.llm_verifier and self.llm_verifier.available
+                        and is_unverified
+                        and should_check_hallucination(record)):
+                    assessment = assess_hallucination(
+                        record,
+                        llm_client=self.llm_verifier,
+                        web_searcher=self.web_searcher,
+                    )
+                    record['hallucination_assessment'] = assessment
 
             records.append(record)
 

@@ -5999,30 +5999,26 @@ class ArxivReferenceChecker:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
     def _display_hallucination_assessment(self, reference, errors, debug_mode, print_output, verified_data=None):
-        """Display inline hallucination assessment using the LLM verifier.
+        """Display inline hallucination assessment.
+
+        Runs two checks:
+        1. Deterministic author-overlap check (no LLM needed)
+        2. LLM-based assessment for unverified references
 
         In normal mode, only LIKELY verdicts are shown with explanation.
         In debug mode, all verdicts are shown.
-        Skips assessment if the reference was actually verified (no unverified error).
         """
         if not print_output:
             return
-        if not self.report_builder.llm_verifier or not self.report_builder.llm_verifier.available:
-            return
 
-        # Skip if the reference has no unverified error — it was successfully verified
-        has_unverified = any(
-            e.get('error_type') == 'unverified'
-            for e in errors
+        from refchecker.core.hallucination_policy import (
+            should_check_hallucination, assess_hallucination, check_author_hallucination
         )
-        if not has_unverified:
-            return
-
-        from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
 
         # Build a consolidated error entry
         error_types = []
         error_details_parts = []
+        authors_correct = None
         for e in errors:
             etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
             edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
@@ -6030,6 +6026,8 @@ class ArxivReferenceChecker:
                 error_types.append(etype)
             if edetail:
                 error_details_parts.append(edetail)
+            if e.get('ref_authors_correct'):
+                authors_correct = e['ref_authors_correct']
 
         if len(error_types) > 1:
             consolidated_type = 'multiple'
@@ -6047,6 +6045,28 @@ class ArxivReferenceChecker:
             'ref_venue_cited': reference.get('venue', ''),
             'original_reference': reference,
         }
+        if authors_correct:
+            error_entry['ref_authors_correct'] = authors_correct
+
+        # 1. Deterministic author-overlap check (no LLM)
+        author_result = check_author_hallucination(error_entry)
+        if author_result and author_result.get('verdict') == 'LIKELY':
+            explanation = author_result.get('explanation', '')
+            if debug_mode:
+                print(f"      🔍 Hallucination check: LIKELY")
+                if explanation:
+                    print(f"         {explanation}")
+            else:
+                print(f"      🚩 Likely hallucinated: {explanation}")
+            return
+
+        # 2. LLM-based check for unverified references
+        if not self.report_builder.llm_verifier or not self.report_builder.llm_verifier.available:
+            return
+
+        has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
+        if not has_unverified:
+            return
 
         if not should_check_hallucination(error_entry):
             return

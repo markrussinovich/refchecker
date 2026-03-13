@@ -33,7 +33,7 @@ from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.refchecker import ArxivReferenceChecker
-from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
+from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination, check_author_hallucination
 from refchecker.utils.arxiv_utils import get_bibtex_content
 import arxiv
 
@@ -311,9 +311,28 @@ class ProgressRefChecker:
             else:
                 formatted_errors.append(err_obj)
 
-        # Run hallucination assessment on unverified references using LLM
+        # Run hallucination checks
         hallucination_assessment = None
-        if is_unverified and not has_errors:
+
+        # 1. Deterministic: author-overlap check (no LLM needed)
+        # Extract correct authors from the raw errors if available
+        authors_correct = None
+        for err in errors:
+            if err.get('ref_authors_correct'):
+                authors_correct = err['ref_authors_correct']
+                break
+        if authors_correct:
+            author_entry = {
+                'ref_authors_cited': ', '.join(reference.get('authors', [])),
+                'ref_authors_correct': authors_correct,
+            }
+            author_result = check_author_hallucination(author_entry)
+            if author_result and author_result.get('verdict') == 'LIKELY':
+                hallucination_assessment = author_result
+                status = 'hallucination'
+
+        # 2. LLM-based: for unverified references (only if author check didn't flag)
+        if not hallucination_assessment and is_unverified and not has_errors:
             error_entry = {
                 'error_type': 'unverified',
                 'error_details': next(
