@@ -403,7 +403,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
           )}
           
           {/* Venue */}
-          {reference.venue && (
+          {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
             <div 
               style={{ color: 'var(--color-text-secondary)' }}
             >
