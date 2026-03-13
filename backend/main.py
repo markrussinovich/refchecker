@@ -726,6 +726,15 @@ async def get_thumbnail(check_id: int):
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
         
+        # Convert OpenReview forum URLs to PDF URLs
+        if 'openreview.net/forum' in (paper_source or '').lower():
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(paper_source)
+            params = parse_qs(parsed.query)
+            or_id = params.get('id', [None])[0]
+            if or_id:
+                paper_source = f"https://openreview.net/pdf?id={or_id}"
+
         # Try to extract ArXiv ID
         import re
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
@@ -734,7 +743,7 @@ async def get_thumbnail(check_id: int):
         # Check if this is a direct PDF URL (not ArXiv)
         is_direct_pdf_url = (
             source_type == 'url' and
-            paper_source.lower().endswith('.pdf') and 
+            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
             'arxiv.org' not in paper_source.lower()
         )
         
@@ -827,6 +836,15 @@ async def get_preview(check_id: int):
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
         
+        # Convert OpenReview forum URLs to PDF URLs
+        if 'openreview.net/forum' in (paper_source or '').lower():
+            from urllib.parse import urlparse, parse_qs
+            parsed = urlparse(paper_source)
+            params = parse_qs(parsed.query)
+            or_id = params.get('id', [None])[0]
+            if or_id:
+                paper_source = f"https://openreview.net/pdf?id={or_id}"
+
         # Try to extract ArXiv ID
         import re
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
@@ -835,7 +853,7 @@ async def get_preview(check_id: int):
         # Check if this is a direct PDF URL (not ArXiv)
         is_direct_pdf_url = (
             source_type == 'url' and
-            paper_source.lower().endswith('.pdf') and 
+            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
             'arxiv.org' not in paper_source.lower()
         )
         
