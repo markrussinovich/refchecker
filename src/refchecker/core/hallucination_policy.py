@@ -47,12 +47,23 @@ def _normalize_author_name(name: str) -> str:
 def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optional[float]:
     """Compute fraction of cited authors that appear in the correct author list.
 
-    Returns None if either list is empty or has fewer than 2 authors.
+    Returns None if either list is empty or has fewer than 2 real authors.
+    Filters out "et al." from the cited list since it's not a real author.
     """
     if not cited_authors or not correct_authors:
         return None
 
-    cited = [_normalize_author_name(a) for a in cited_authors.split(',') if a.strip()]
+    # Filter out "et al." and similar markers from cited authors
+    cited = []
+    for a in cited_authors.split(','):
+        name = a.strip()
+        if not name:
+            continue
+        name_lower = name.lower().strip('.')
+        if name_lower in ('et al', 'et al.', 'others', 'and others'):
+            continue
+        cited.append(_normalize_author_name(name))
+
     correct = [_normalize_author_name(a) for a in correct_authors.split(',') if a.strip()]
 
     if len(cited) < 2 or len(correct) < 2:
