@@ -483,27 +483,24 @@ class ProgressRefChecker:
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
                     
                     # Try to extract the paper title from the PDF content
-                    try:
-                        extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, pdf_path)
-                        if extracted_title:
-                            paper_title = extracted_title
-                            await update_title_if_needed(paper_title)
-                            logger.info(f"Extracted title from PDF URL: {paper_title}")
-                        else:
-                            # Fallback to URL filename
-                            from urllib.parse import urlparse, unquote
-                            url_path = urlparse(paper_source).path
-                            pdf_filename = unquote(url_path.split('/')[-1])
-                            paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
-                            await update_title_if_needed(paper_title)
-                    except Exception as e:
-                        logger.warning(f"Could not extract title from PDF: {e}")
-                        # Fallback to URL filename
-                        from urllib.parse import urlparse, unquote
-                        url_path = urlparse(paper_source).path
-                        pdf_filename = unquote(url_path.split('/')[-1])
-                        paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
-                        await update_title_if_needed(paper_title)
+                    # (only if we don't already have a title from the API)
+                    if paper_title == "Unknown Paper":
+                        try:
+                            extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, pdf_path)
+                            if extracted_title:
+                                paper_title = extracted_title
+                                await update_title_if_needed(paper_title)
+                                logger.info(f"Extracted title from PDF URL: {paper_title}")
+                            else:
+                                # Fallback to URL filename
+                                from urllib.parse import urlparse, unquote
+                                url_path = urlparse(paper_source).path
+                                pdf_filename = unquote(url_path.split('/')[-1])
+                                if pdf_filename and pdf_filename.lower() not in ('pdf', 'download', 'content'):
+                                    paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                                    await update_title_if_needed(paper_title)
+                        except Exception as e:
+                            logger.warning(f"Could not extract title from PDF: {e}")
                 else:
                     # Handle ArXiv URLs/IDs
                     arxiv_id = extract_arxiv_id_from_url(paper_source)
