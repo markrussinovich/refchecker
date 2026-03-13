@@ -10,28 +10,36 @@ export default function Button({
   className = '',
   ...props 
 }) {
-  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2'
+  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2'
   
   const variants = {
     primary: {
-      backgroundColor: 'var(--color-accent)',
-      color: '#ffffff',
-      hoverBg: 'var(--color-accent-hover)',
+      backgroundColor: 'var(--color-bg-primary)',
+      color: 'var(--color-text-primary)',
+      border: '1px solid var(--color-border)',
+      hoverBg: 'var(--color-bg-hover)',
+      hoverBorder: 'var(--color-accent)',
     },
     secondary: {
       backgroundColor: 'var(--color-bg-tertiary)',
       color: 'var(--color-text-primary)',
+      border: '1px solid var(--color-border)',
       hoverBg: 'var(--color-border)',
+      hoverBorder: 'var(--color-border)',
     },
     danger: {
       backgroundColor: 'var(--color-error)',
       color: '#ffffff',
+      border: '1px solid var(--color-error)',
       hoverBg: '#dc2626',
+      hoverBorder: '#dc2626',
     },
     ghost: {
       backgroundColor: 'transparent',
       color: 'var(--color-text-secondary)',
+      border: '1px solid transparent',
       hoverBg: 'var(--color-bg-tertiary)',
+      hoverBorder: 'transparent',
     },
   }
 
@@ -49,6 +57,7 @@ export default function Button({
       style={{
         backgroundColor: disabled ? 'var(--color-bg-tertiary)' : style.backgroundColor,
         color: disabled ? 'var(--color-text-muted)' : style.color,
+        border: style.border,
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.6 : 1,
       }}
@@ -56,11 +65,13 @@ export default function Button({
       onMouseEnter={(e) => {
         if (!disabled) {
           e.currentTarget.style.backgroundColor = style.hoverBg
+          e.currentTarget.style.borderColor = style.hoverBorder
         }
       }}
       onMouseLeave={(e) => {
         if (!disabled) {
           e.currentTarget.style.backgroundColor = style.backgroundColor
+          e.currentTarget.style.borderColor = ''
         }
       }}
       {...props}
