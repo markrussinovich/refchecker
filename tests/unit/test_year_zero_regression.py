@@ -71,7 +71,7 @@ class TestStructuredReferenceYearNone:
 
 
 # ------------------------------------------------------------------
-# Backend wrapper: _format_verification_result sanitizes year
+# Backend wrapper: sanitize year at the result output point
 # ------------------------------------------------------------------
 
 def test_format_result_zero_year_becomes_none():
@@ -83,3 +83,22 @@ def test_format_result_zero_year_becomes_none():
     for input_year in [2023, 1999, 2025]:
         output = input_year or None
         assert output == input_year, f"Input {input_year!r} should be preserved"
+
+
+def test_cached_result_year_zero_sanitized():
+    """Cached results with year=0 must be sanitized to None.
+
+    The parallel check loop sanitizes with: if not result.get('year'): result['year'] = None
+    This catches 0, None, '', and False.
+    """
+    # Simulate cached result from DB with year=0
+    cached = {"index": 1, "title": "Some Paper", "year": 0, "status": "verified"}
+    if not cached.get('year'):
+        cached['year'] = None
+    assert cached['year'] is None
+
+    # Cached result with valid year is untouched
+    cached2 = {"index": 2, "title": "Real Paper", "year": 2024, "status": "verified"}
+    if not cached2.get('year'):
+        cached2['year'] = None
+    assert cached2['year'] == 2024

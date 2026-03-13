@@ -225,7 +225,10 @@ class LLMHallucinationVerifier:
         authors = error_entry.get('ref_authors_cited', '')
         orig = error_entry.get('original_reference', {})
         venue = orig.get('venue', orig.get('journal', '')) or ''
-        year = error_entry.get('ref_year_cited', '')
+        year = error_entry.get('ref_year_cited') or ''
+        # Never send "0" as year to the LLM — treat it as unknown
+        if str(year).strip() in ('0', ''):
+            year = '(unknown)'
         url = error_entry.get('ref_url_cited', '')
 
         # Build a human-readable summary of validation errors

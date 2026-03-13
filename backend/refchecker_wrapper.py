@@ -1323,6 +1323,10 @@ class ProgressRefChecker:
                 # Store result
                 results[idx] = result
                 processed_count += 1
+
+                # Sanitize year: never send 0 to the frontend
+                if not result.get('year'):
+                    result['year'] = None
                 
                 # Count individual issues (not just references)
                 # Exclude 'unverified' from error count since it has its own category
