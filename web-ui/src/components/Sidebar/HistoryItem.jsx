@@ -140,8 +140,6 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
 
   // Status indicator based on errors or in-progress state
   const getStatusIndicator = () => {
-    // Check if this is an in-progress check (only show spinner if status is explicitly in_progress)
-    // status will be 'completed', 'cancelled', 'error', or 'in_progress'
     if (item.status === 'in_progress') {
       return { color: 'var(--color-accent)', label: 'In progress', isAnimated: true }
     }
@@ -151,7 +149,10 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
     if (item.status === 'error') {
       return { color: 'var(--color-error)', label: 'Error', isAnimated: false }
     }
-    // For completed checks, show status based on counts
+    // Hallucination is the most important signal — show first
+    if (item.hallucination_count > 0) {
+      return { color: 'var(--color-hallucination)', label: `${item.hallucination_count} hallucinated`, isAnimated: false }
+    }
     if (item.errors_count > 0) {
       return { color: 'var(--color-error)', label: `${item.errors_count} errors`, isAnimated: false }
     }
@@ -160,9 +161,6 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
     }
     if (item.unverified_count > 0) {
       return { color: 'var(--color-text-muted)', label: `${item.unverified_count} unverified`, isAnimated: false }
-    }
-    if (item.hallucination_count > 0) {
-      return { color: 'var(--color-hallucination)', label: `${item.hallucination_count} hallucinated`, isAnimated: false }
     }
     return { color: 'var(--color-success)', label: 'All verified', isAnimated: false }
   }
