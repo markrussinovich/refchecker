@@ -29,6 +29,7 @@ import logging
 import random
 import requests
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Tuple, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -352,11 +353,134 @@ class EnhancedHybridReferenceChecker:
         
         return merged_data, merged_errors
 
+    def _verify_arxiv_parallel(self, reference, failed_apis):
+        """Run ArXiv citation + Semantic Scholar in parallel for ArXiv refs.
+        
+        Returns result tuple or None if both failed.
+        """
+        logger.debug("Enhanced Hybrid: ArXiv reference — running ArXiv citation + Semantic Scholar in parallel")
+        
+        futures = {}
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="HybridAPI") as pool:
+            if self.arxiv_citation:
+                futures['arxiv_citation'] = pool.submit(
+                    self._try_api, 'arxiv_citation', self.arxiv_citation, reference)
+            if self.semantic_scholar:
+                futures['semantic_scholar'] = pool.submit(
+                    self._try_api, 'semantic_scholar', self.semantic_scholar, reference)
+        
+        arxiv_result = None
+        ss_result = None
+        
+        for name, future in futures.items():
+            verified_data, errors, url, success, failure_type = future.result()
+            if name == 'arxiv_citation':
+                if success:
+                    arxiv_result = (verified_data, errors, url)
+                elif failure_type in ('throttled', 'timeout', 'server_error'):
+                    failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
+            elif name == 'semantic_scholar':
+                if success:
+                    ss_result = (verified_data, errors, url)
+                elif failure_type in ('throttled', 'timeout', 'server_error'):
+                    failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
+        
+        # Merge results
+        if arxiv_result and ss_result:
+            ss_data, ss_errors, ss_url = ss_result
+            if ss_data:
+                ss_venue = self.semantic_scholar.get_venue_from_paper_data(ss_data)
+                if ss_venue and 'arxiv' in ss_venue.lower():
+                    logger.debug("Enhanced Hybrid: Semantic Scholar only found ArXiv venue, skipping merge")
+                    return arxiv_result
+            arxiv_data, arxiv_errors, arxiv_url = arxiv_result
+            merged_data, merged_errors = self._merge_arxiv_with_semantic_scholar(
+                arxiv_data, arxiv_errors, arxiv_url,
+                ss_data, ss_errors, ss_url,
+                reference)
+            return merged_data, merged_errors, arxiv_url
+        
+        if arxiv_result:
+            return arxiv_result
+        if ss_result:
+            return ss_result
+        return None
+
+    def _verify_non_arxiv_parallel(self, reference, failed_apis):
+        """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
+        
+        Returns first complete successful result, or None.
+        """
+        self._last_crossref_result = None
+        self._last_openalex_result = None
+        
+        # Try Semantic Scholar first — it succeeds ~92% of the time
+        if self.semantic_scholar:
+            verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
+            if success:
+                if self._is_data_complete(verified_data, reference):
+                    return verified_data, errors, url
+            elif failure_type in ('throttled', 'timeout', 'server_error'):
+                failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
+        
+        # SS failed or incomplete — fire remaining APIs in parallel
+        fallback_apis = []
+        if self.crossref:
+            fallback_apis.append(('crossref', self.crossref))
+        if self.openalex:
+            fallback_apis.append(('openalex', self.openalex))
+        if self.dblp:
+            fallback_apis.append(('dblp', self.dblp))
+        
+        if fallback_apis:
+            logger.debug(f"Enhanced Hybrid: SS failed, launching {len(fallback_apis)} fallback APIs in parallel")
+            futures = {}
+            with ThreadPoolExecutor(max_workers=len(fallback_apis), thread_name_prefix="HybridAPI") as pool:
+                for api_name, api_instance in fallback_apis:
+                    futures[api_name] = pool.submit(
+                        self._try_api, api_name, api_instance, reference)
+            
+            priority = ['crossref', 'openalex', 'dblp']
+            for api_name in priority:
+                if api_name not in futures:
+                    continue
+                verified_data, errors, url, success, failure_type = futures[api_name].result()
+                if not success and failure_type in ('throttled', 'timeout', 'server_error'):
+                    api_inst = dict(fallback_apis)[api_name]
+                    failed_apis.append((api_name, api_inst, failure_type))
+                if success:
+                    if self._is_data_complete(verified_data, reference):
+                        return verified_data, errors, url
+                    if api_name == 'crossref':
+                        self._last_crossref_result = (verified_data, errors, url)
+                    elif api_name == 'openalex':
+                        self._last_openalex_result = (verified_data, errors, url)
+        
+        # Try OpenReview as a secondary step (not parallelized — rare path)
+        if self.openreview:
+            if hasattr(self.openreview, 'is_openreview_reference') and self.openreview.is_openreview_reference(reference):
+                verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
+                if success:
+                    return verified_data, errors, url
+            elif hasattr(self.openreview, 'verify_reference_by_search'):
+                venue = reference.get('venue', reference.get('journal', '')).lower()
+                openreview_venues = ['iclr', 'icml', 'neurips', 'nips', 'aaai', 'ijcai',
+                    'international conference on learning representations',
+                    'international conference on machine learning',
+                    'neural information processing systems']
+                if any(v in venue for v in openreview_venues):
+                    verified_data, errors, url, success, failure_type = self._try_openreview_search(reference)
+                    if success:
+                        return verified_data, errors, url
+        
+        return None
+
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
-        Verify a non-arXiv reference using multiple APIs in priority order
+        Verify a non-arXiv reference using multiple APIs in parallel.
         
-        First tries all APIs once, then retries failed APIs if no success.
+        Phase 1 fires independent APIs concurrently to minimize wall-clock time.
+        Phase 2 retries any transient failures sequentially.
         
         Args:
             reference: Reference data dictionary
@@ -367,169 +491,43 @@ class EnhancedHybridReferenceChecker:
         # Check if this is a URL-only reference (should skip verification)
         authors = reference.get('authors', [])
         if authors and "URL Reference" in authors:
-            # Skip verification for URL references - they're just links, not papers
             logger.debug("Enhanced Hybrid: Skipping verification for URL reference")
             return None, [], reference.get('cited_url') or reference.get('url')
         
-        # Also check if it looks like a URL-only reference (no title, just URL)
         title = reference.get('title', '').strip()
         cited_url = reference.get('cited_url') or reference.get('url')
         if not title and cited_url:
-            # This is a URL-only reference without a title
             logger.debug(f"Enhanced Hybrid: Skipping verification for URL-only reference: {cited_url}")
             return None, [], cited_url
         
-        # Track all APIs that failed and could be retried
         failed_apis = []
+        is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
         
-        # Store ArXiv result for potential merging with Semantic Scholar
-        arxiv_result = None
+        # ── PHASE 1: Parallel API calls ──
         
-        # PHASE 1: Try all APIs once in priority order
-        
-        # Strategy 0: For ArXiv papers, try ArXiv Citation checker first (authoritative source)
-        # This fetches the official BibTeX from ArXiv which is the author-submitted metadata
-        if self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference):
-            logger.debug("Enhanced Hybrid: Reference appears to be ArXiv paper, trying ArXiv Citation checker first")
-            verified_data, errors, url, success, failure_type = self._try_api('arxiv_citation', self.arxiv_citation, reference)
-            if success:
-                logger.debug("Enhanced Hybrid: ArXiv Citation checker succeeded, also querying Semantic Scholar for venue/URLs")
-                arxiv_result = (verified_data, errors, url)
-                # Continue to Semantic Scholar to get venue and additional URLs
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
-        
-        # Strategy 1: Always try local database first (fastest)
-        # Skip if we already have ArXiv result - we'll go straight to Semantic Scholar for venue info
-        if self.local_db and not arxiv_result:
-            verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
-            if success:
-                return verified_data, errors, url
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('local_db', self.local_db, failure_type))
-        
-        # Strategy 2: If reference has DOI, prioritize CrossRef
-        # Skip if we already have ArXiv result - we'll go straight to Semantic Scholar for venue info
-        crossref_result = None
-        if self._should_try_doi_apis_first(reference) and self.crossref and not arxiv_result:
-            verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
-            if success:
-                # Check if the data is complete enough to use
-                if self._is_data_complete(verified_data, reference):
-                    return verified_data, errors, url
-                else:
-                    # Data is incomplete, save it as fallback and continue with other APIs
-                    crossref_result = (verified_data, errors, url)
-                    logger.debug("Enhanced Hybrid: CrossRef data incomplete, continuing with other APIs")
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('crossref', self.crossref, failure_type))
-        
-        # Strategy 3: Try Semantic Scholar API (reliable, good coverage)
-        if self.semantic_scholar:
-            verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
-            if success:
-                # If we have ArXiv result, merge Semantic Scholar venue/URLs into it
-                if arxiv_result:
-                    # Check if SS data is valid and venue is not just arxiv
-                    # (skip merge if SS only found the arxiv version, no published venue)
-                    if verified_data:
-                        ss_venue = self.semantic_scholar.get_venue_from_paper_data(verified_data)
-                        if ss_venue and 'arxiv' in ss_venue.lower():
-                            # SS only found arxiv venue, skip merge and return arxiv result
-                            logger.debug("Enhanced Hybrid: Semantic Scholar only found ArXiv venue, skipping merge")
-                            return arxiv_result
-                    
-                    arxiv_data, arxiv_errors, arxiv_url = arxiv_result
-                    merged_data, merged_errors = self._merge_arxiv_with_semantic_scholar(
-                        arxiv_data, arxiv_errors, arxiv_url,
-                        verified_data, errors, url,
-                        reference
-                    )
-                    return merged_data, merged_errors, arxiv_url
-                return verified_data, errors, url
-            # For Semantic Scholar, only retry retryable failures (not 'not_found')
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
-        
-        # If ArXiv succeeded but Semantic Scholar failed, return ArXiv result
-        if arxiv_result:
-            logger.debug("Enhanced Hybrid: Returning ArXiv result (Semantic Scholar unavailable)")
-            return arxiv_result
-        
-        # Strategy 4: Try OpenAlex API (excellent reliability, replaces Google Scholar)
-        openalex_result = None
-        if self.openalex:
-            verified_data, errors, url, success, failure_type = self._try_api('openalex', self.openalex, reference)
-            if success:
-                # Check if the data is complete enough to use
-                if self._is_data_complete(verified_data, reference):
-                    return verified_data, errors, url
-                else:
-                    # Data is incomplete, save it as fallback and continue with other APIs
-                    openalex_result = (verified_data, errors, url)
-                    logger.debug("Enhanced Hybrid: OpenAlex data incomplete, continuing with other APIs")
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('openalex', self.openalex, failure_type))
-        
-        # Strategy 4b: Try DBLP (curated CS bibliography, strong for conferences)
-        if self.dblp:
-            verified_data, errors, url, success, failure_type = self._try_api('dblp', self.dblp, reference)
-            if success:
-                if self._is_data_complete(verified_data, reference):
-                    return verified_data, errors, url
-                else:
-                    logger.debug("Enhanced Hybrid: DBLP data incomplete, continuing with other APIs")
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('dblp', self.dblp, failure_type))
-        
-        # Strategy 5: Try OpenReview if URL suggests it's an OpenReview paper
-        if (self.openreview and 
-            hasattr(self.openreview, 'is_openreview_reference') and 
-            self.openreview.is_openreview_reference(reference)):
-            logger.debug("Enhanced Hybrid: Trying OpenReview URL-based verification")
-            verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
-            if success:
-                return verified_data, errors, url
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('openreview', self.openreview, failure_type))
-        
-        # Strategy 5b: Try OpenReview by search if venue suggests it might be there
-        elif (self.openreview and 
-              hasattr(self.openreview, 'verify_reference_by_search')):
-            # Check if venue suggests this might be on OpenReview
-            venue = reference.get('venue', reference.get('journal', '')).lower()
-            openreview_venues = [
-                'iclr', 'icml', 'neurips', 'nips', 'aaai', 'ijcai', 
-                'international conference on learning representations',
-                'international conference on machine learning',
-                'neural information processing systems'
-            ]
-            
-            venue_suggests_openreview = any(or_venue in venue for or_venue in openreview_venues)
-            logger.debug(f"Enhanced Hybrid: OpenReview venue check - venue: '{venue}', suggests: {venue_suggests_openreview}")
-            
-            if venue_suggests_openreview:
-                logger.debug("Enhanced Hybrid: Trying OpenReview search-based verification")
-                verified_data, errors, url, success, failure_type = self._try_openreview_search(reference)
+        if is_arxiv:
+            # ArXiv reference: run ArXiv citation + Semantic Scholar in parallel
+            result = self._verify_arxiv_parallel(reference, failed_apis)
+            if result is not None:
+                return result
+        else:
+            # Non-ArXiv: try local DB first (instant), then parallel remote APIs
+            if self.local_db:
+                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
                 if success:
                     return verified_data, errors, url
                 if failure_type in ['throttled', 'timeout', 'server_error']:
-                    failed_apis.append(('openreview_search', self.openreview, failure_type))
+                    failed_apis.append(('local_db', self.local_db, failure_type))
+            
+            result = self._verify_non_arxiv_parallel(reference, failed_apis)
+            if result is not None:
+                return result
         
-        # Strategy 6: Try CrossRef if we haven't already (for non-DOI references)
-        if not self._should_try_doi_apis_first(reference) and self.crossref:
-            verified_data, errors, url, success, failure_type = self._try_api('crossref', self.crossref, reference)
-            if success:
-                # Check if the data is complete enough to use
-                if self._is_data_complete(verified_data, reference):
-                    return verified_data, errors, url
-                else:
-                    # Data is incomplete, save it as fallback
-                    if not crossref_result:  # Only save if we don't already have one
-                        crossref_result = (verified_data, errors, url)
-                        logger.debug("Enhanced Hybrid: CrossRef data incomplete (non-DOI), continuing with other APIs")
-            if failure_type in ['throttled', 'timeout', 'server_error']:
-                failed_apis.append(('crossref', self.crossref, failure_type))
+        # Store incomplete results for Phase 3 fallback
+        crossref_result = getattr(self, '_last_crossref_result', None)
+        openalex_result = getattr(self, '_last_openalex_result', None)
+        self._last_crossref_result = None
+        self._last_openalex_result = None
         
         # PHASE 2: If no API succeeded in Phase 1, retry failed APIs
         if failed_apis:
