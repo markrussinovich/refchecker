@@ -600,12 +600,15 @@ class EnhancedHybridReferenceChecker:
             try:
                 from refchecker.checkers.webpage_checker import WebPageChecker
                 webpage_checker = WebPageChecker()
-                wp_data, wp_errors, wp_url = webpage_checker.verify_reference(reference)
+                wp_data, wp_errors, wp_url = webpage_checker.verify_raw_url_for_unverified_reference(reference)
                 if wp_data:
                     logger.debug(f"Enhanced Hybrid: Web page verification succeeded for {web_url}")
                     return wp_data, wp_errors, wp_url
                 else:
                     logger.debug(f"Enhanced Hybrid: Web page verification did not confirm reference")
+                    # Use the more specific error from web page checker if available
+                    if wp_errors:
+                        return None, wp_errors, wp_url
             except Exception as exc:
                 logger.debug(f"Enhanced Hybrid: Web page verification failed: {exc}")
 
