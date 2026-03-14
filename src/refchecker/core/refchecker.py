@@ -3472,8 +3472,8 @@ class ArxivReferenceChecker:
                         print(f"\n  ❌  Error: Failed to process paper")
                 
                 # Sleep to avoid overloading the ArXiv API
-                sleep_time = random.uniform(1, 3)  # Random sleep between 1-3 seconds
-                time.sleep(sleep_time)
+                # (Reduced: ArXiv rate limiter already enforces 3s between requests)
+                time.sleep(0.5)
             
         except KeyboardInterrupt:
             logger.info("Process interrupted by user.")
