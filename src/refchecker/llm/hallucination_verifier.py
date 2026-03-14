@@ -262,10 +262,16 @@ class LLMHallucinationVerifier:
         web_result = None
         if web_urls:
             web_result = {
-                'found': verdict == 'UNLIKELY',
+                'found': bool(web_urls),
                 'academic_urls': web_urls[:5],
                 'provider': 'openai_responses',
             }
+            # If the LLM's own web search returned real URLs but the LLM
+            # still said LIKELY, the grounded evidence outweighs the guess.
+            if verdict == 'LIKELY':
+                verdict = 'UNLIKELY'
+                explanation += (' (Web search returned real URLs for this '
+                                'reference, overriding hallucination verdict.)')
 
         # Fallback: use separate web searcher if the LLM didn't do its own
         # web search (e.g. non-OpenAI endpoint) and verdict is ambiguous
@@ -273,9 +279,10 @@ class LLMHallucinationVerifier:
             if self._should_web_search(error_entry):
                 try:
                     web_result = web_searcher.check_reference_exists(error_entry)
-                    # Let web search influence the verdict
+                    # Let web search influence the verdict — grounded URL
+                    # evidence is stronger than an LLM guess.
                     web_verdict = web_result.get('verdict', '')
-                    if web_verdict == 'EXISTS' and verdict == 'UNCERTAIN':
+                    if web_verdict == 'EXISTS' and verdict in ('UNCERTAIN', 'LIKELY'):
                         verdict = 'UNLIKELY'
                         explanation += ' (Web search found the paper.)'
                     elif web_verdict == 'NOT_FOUND' and verdict == 'UNCERTAIN':

@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+from refchecker.utils.text_utils import enhanced_name_match
 
 
 # ── Pre-filter: which error types warrant LLM hallucination assessment ──
@@ -34,53 +36,74 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
 _AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match
 
 
-def _normalize_author_name(name: str) -> str:
-    """Normalize an author name for comparison (lowercase, strip initials/punctuation)."""
-    name = name.strip().lower()
-    # Remove common prefixes/suffixes
-    name = re.sub(r'\b(jr|sr|ii|iii|iv)\b\.?', '', name)
-    # Keep only last name + first significant name part
-    parts = [p.strip() for p in re.split(r'[,\s]+', name) if len(p.strip()) > 1]
-    return ' '.join(parts)
+def _split_author_string(author_str: str) -> List[str]:
+    """Split a comma-separated author string into individual author names.
+
+    Handles "LastName, Initials" bibliography format by merging initials
+    back with their preceding last name.  For example:
+        "Goodfellow, I. J., Bengio, Y." → ["Goodfellow, I. J.", "Bengio, Y."]
+    Also handles "FirstName LastName" format (no merging needed).
+    """
+    raw_parts = [p.strip() for p in author_str.split(',') if p.strip()]
+
+    # Detect "LastName, Initials" format: look for parts that are purely
+    # initials (single letters with optional periods/spaces, e.g. "I. J.", "Y.")
+    _INITIAL_RE = re.compile(
+        r'^[A-Za-z]\.?(\s*[A-Za-z]\.?)*\.?$'
+    )
+
+    def _is_initials(part: str) -> bool:
+        """Return True if *part* looks like author initials."""
+        stripped = part.strip().rstrip('.')
+        if not stripped:
+            return False
+        # All "words" are single characters
+        return all(len(w.strip('.')) <= 1 for w in stripped.split())
+
+    merged: List[str] = []
+    i = 0
+    while i < len(raw_parts):
+        part = raw_parts[i]
+        # Check if the *next* part is initials that belong to this last name
+        if i + 1 < len(raw_parts) and _is_initials(raw_parts[i + 1]):
+            merged.append(f"{part}, {raw_parts[i + 1]}")
+            i += 2
+        else:
+            merged.append(part)
+            i += 1
+
+    # Filter out "et al." and similar markers
+    result = []
+    for name in merged:
+        name_lower = name.strip().lower().rstrip('.')
+        if name_lower in ('et al', 'et al.', 'others', 'and others', ''):
+            continue
+        result.append(name.strip())
+    return result
 
 
 def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optional[float]:
     """Compute fraction of cited authors that appear in the correct author list.
 
     Returns None if either list is empty or has fewer than 2 real authors.
-    Filters out "et al." from the cited list since it's not a real author.
+    Uses enhanced_name_match() for fuzzy comparison that handles initials,
+    diacritics, and name-format variations.
     """
     if not cited_authors or not correct_authors:
         return None
 
-    # Filter out "et al." and similar markers from cited authors
-    cited = []
-    for a in cited_authors.split(','):
-        name = a.strip()
-        if not name:
-            continue
-        name_lower = name.lower().strip('.')
-        if name_lower in ('et al', 'et al.', 'others', 'and others'):
-            continue
-        cited.append(_normalize_author_name(name))
-
-    correct = [_normalize_author_name(a) for a in correct_authors.split(',') if a.strip()]
+    cited = _split_author_string(cited_authors)
+    correct = _split_author_string(correct_authors)
 
     if len(cited) < 2 or len(correct) < 2:
         return None
 
-    # Check how many cited author last names appear in the correct list
-    correct_lastnames = set()
-    for name in correct:
-        parts = name.split()
-        if parts:
-            correct_lastnames.add(parts[-1])
-
     matches = 0
-    for name in cited:
-        parts = name.split()
-        if parts and parts[-1] in correct_lastnames:
-            matches += 1
+    for cited_name in cited:
+        for correct_name in correct:
+            if enhanced_name_match(cited_name, correct_name):
+                matches += 1
+                break
 
     # With only 2 authors, having 1 correct is a normal citation error,
     # not hallucination — require at least 3 cited authors for overlap scoring
@@ -96,8 +119,18 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     Returns a hallucination assessment dict if < 60% of cited authors match
     the correct authors, or None if this check doesn't apply.
 
+    Only applies to unverified references.  If a paper was found in a
+    database (author error on a verified paper), low author overlap is
+    a data-quality issue, not hallucination.
+
     This is a deterministic check that does not require an LLM.
     """
+    # Only flag hallucination for unverified references; verified papers
+    # with author mismatches are data-quality issues, not fabrications.
+    error_type = (error_entry.get('error_type') or '').lower()
+    if error_type not in ('unverified', 'multiple', ''):
+        return None
+
     cited = error_entry.get('ref_authors_cited', '')
     correct = error_entry.get('ref_authors_correct', '')
 
