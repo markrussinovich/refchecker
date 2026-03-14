@@ -5,25 +5,107 @@ ArXiv requests a polite delay of 3 seconds between requests.
 This module provides a centralized rate limiter to coordinate all ArXiv API calls
 across different checkers and utilities.
 
+Also provides a thread-safe HTTP response cache for ArXiv pages.  ArXiv content
+is immutable per version URL, so caching HTML responses avoids redundant fetches
+that would otherwise burn rate-limiter slots.
+
 Usage:
-    from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter
+    from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
     
     # Get the shared limiter instance
     limiter = ArXivRateLimiter.get_instance()
     
-    # Wait for rate limit before making a request
-    limiter.wait()
+    # Preferred: cached GET that respects the rate limiter automatically
+    response_text = arxiv_cached_get("https://arxiv.org/abs/1706.03762v7")
     
-    # Then make your request
+    # Manual: wait then make your own request
+    limiter.wait()
     response = requests.get(arxiv_url)
 """
 
 import time
 import threading
 import logging
-from typing import Optional
+from typing import Dict, Optional, Tuple
+
+import requests
 
 logger = logging.getLogger(__name__)
+
+
+# ── Thread-safe ArXiv response cache ──
+
+class _ArxivCache:
+    """Thread-safe in-memory cache for ArXiv HTTP GET responses."""
+
+    def __init__(self, max_size: int = 2000):
+        self._cache: Dict[str, Tuple[int, str]] = {}  # url -> (status_code, text)
+        self._lock = threading.Lock()
+        self._max_size = max_size
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, url: str) -> Optional[Tuple[int, str]]:
+        with self._lock:
+            entry = self._cache.get(url)
+            if entry is not None:
+                self.hits += 1
+                return entry
+            self.misses += 1
+            return None
+
+    def put(self, url: str, status_code: int, text: str) -> None:
+        with self._lock:
+            if len(self._cache) >= self._max_size:
+                # Simple eviction: drop oldest quarter
+                keys = list(self._cache.keys())
+                for k in keys[: len(keys) // 4]:
+                    del self._cache[k]
+            self._cache[url] = (status_code, text)
+
+    def stats(self) -> Dict[str, int]:
+        with self._lock:
+            return {
+                'size': len(self._cache),
+                'hits': self.hits,
+                'misses': self.misses,
+            }
+
+
+_arxiv_cache = _ArxivCache()
+
+
+def arxiv_cached_get(url: str, timeout: float = 30.0) -> Optional[str]:
+    """Fetch an ArXiv URL with caching and rate-limiting.
+
+    Returns the response text (HTML/BibTeX) or None on failure.
+    Raises nothing — failures are logged and return None.
+    """
+    cached = _arxiv_cache.get(url)
+    if cached is not None:
+        status, text = cached
+        if status == 404:
+            return None
+        return text
+
+    limiter = ArXivRateLimiter.get_instance()
+    limiter.wait()
+
+    try:
+        resp = requests.get(url, timeout=timeout)
+        _arxiv_cache.put(url, resp.status_code, resp.text)
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+        return resp.text
+    except requests.exceptions.RequestException as exc:
+        logger.debug(f"arxiv_cached_get failed for {url}: {exc}")
+        return None
+
+
+def get_arxiv_cache_stats() -> Dict[str, int]:
+    """Return cache hit/miss statistics."""
+    return _arxiv_cache.stats()
 
 
 class ArXivRateLimiter:

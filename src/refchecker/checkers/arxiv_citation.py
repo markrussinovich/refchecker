@@ -37,7 +37,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from pybtex.database import parse_string
 from pybtex.exceptions import PybtexError
 
-from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter
+from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
 from refchecker.utils.text_utils import (
     normalize_text,
     compare_authors,
@@ -142,29 +142,18 @@ class ArXivCitationChecker:
         """
         url = f"{self.base_url}/{arxiv_id}"
         
-        # Wait for rate limit
-        self.rate_limiter.wait()
-        
-        try:
-            logger.debug(f"Fetching ArXiv BibTeX from: {url}")
-            response = requests.get(url, timeout=self.timeout)
-            response.raise_for_status()
-            
-            bibtex_content = response.text.strip()
-            
-            # Validate it looks like BibTeX
-            if bibtex_content and bibtex_content.startswith('@'):
-                logger.debug(f"Successfully fetched BibTeX for ArXiv paper {arxiv_id}")
-                return bibtex_content
-            else:
-                logger.debug(f"Invalid BibTeX response for ArXiv paper {arxiv_id}")
-                return None
-                
-        except requests.exceptions.Timeout:
-            logger.warning(f"Timeout fetching ArXiv BibTeX for {arxiv_id}")
+        logger.debug(f"Fetching ArXiv BibTeX from: {url}")
+        text = arxiv_cached_get(url, timeout=self.timeout)
+        if text is None:
+            logger.warning(f"Failed to fetch ArXiv BibTeX for {arxiv_id}")
             return None
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to fetch ArXiv BibTeX for {arxiv_id}: {e}")
+        
+        bibtex_content = text.strip()
+        if bibtex_content and bibtex_content.startswith('@'):
+            logger.debug(f"Successfully fetched BibTeX for ArXiv paper {arxiv_id}")
+            return bibtex_content
+        else:
+            logger.debug(f"Invalid BibTeX response for ArXiv paper {arxiv_id}")
             return None
     
     def parse_bibtex(self, bibtex_str: str) -> Optional[Dict[str, Any]]:
@@ -370,50 +359,37 @@ class ArXivCitationChecker:
         version_str = f"v{version_num}"
         url = f"{self.abs_url}/{arxiv_id}{version_str}"
 
-        # Use shorter delay for version metadata (HTML parsing is lightweight)
-        # Save original delay, use 1 second, then restore
-        original_delay = self.rate_limiter.delay
-        self.rate_limiter.delay = 1.0  # Faster rate for version checking
-        self.rate_limiter.wait()
-        self.rate_limiter.delay = original_delay  # Restore original delay
-        
-        try:
-            logger.debug(f"Checking historical version: {url}")
-            response = requests.get(url, timeout=self.timeout)
-            if response.status_code == 404:
-                return None  # Version does not exist
-            response.raise_for_status()
-            html_content = response.text
-
-            # Parse meta tags for metadata
-            # Title
-            title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
-            title = html.unescape(title_match.group(1)).strip() if title_match else ""
-
-            # Authors
-            authors = []
-            for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
-                authors.append(html.unescape(auth).strip())
-
-            # Date/Year
-            date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
-            year = None
-            if date_match:
-                ym = re.search(r'^(\d{4})', date_match.group(1))
-                if ym:
-                    year = int(ym.group(1))
-
-            return {
-                'version': version_str,
-                'version_num': version_num,
-                'title': title,
-                'authors': [{'name': a} for a in authors],
-                'year': year,
-                'url': url,
-            }
-        except Exception as e:
-            logger.warning(f"Failed to fetch history {version_str}: {e}")
+        logger.debug(f"Checking historical version: {url}")
+        html_content = arxiv_cached_get(url, timeout=self.timeout)
+        if html_content is None:
             return None
+
+        # Parse meta tags for metadata
+        # Title
+        title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
+        title = html.unescape(title_match.group(1)).strip() if title_match else ""
+
+        # Authors
+        authors = []
+        for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
+            authors.append(html.unescape(auth).strip())
+
+        # Date/Year
+        date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
+        year = None
+        if date_match:
+            ym = re.search(r'^(\d{4})', date_match.group(1))
+            if ym:
+                year = int(ym.group(1))
+
+        return {
+            'version': version_str,
+            'version_num': version_num,
+            'title': title,
+            'authors': [{'name': a} for a in authors],
+            'year': year,
+            'url': url,
+        }
 
     def _get_latest_version_number(self, arxiv_id: str) -> Optional[int]:
         """
@@ -427,19 +403,14 @@ class ArXivCitationChecker:
         """
         url = f"{self.abs_url}/{arxiv_id}"
         
-        self.rate_limiter.wait()
-        try:
-            response = requests.get(url, timeout=self.timeout)
-            response.raise_for_status()
-            
-            # Look for version links like "[v1]", "[v2]", etc.
-            versions = re.findall(r'\[v(\d+)\]', response.text)
-            if versions:
-                return max(int(v) for v in versions)
+        text = arxiv_cached_get(url, timeout=self.timeout)
+        if text is None:
             return None
-        except Exception as e:
-            logger.warning(f"Failed to get latest version for {arxiv_id}: {e}")
-            return None
+        
+        versions = re.findall(r'\[v(\d+)\]', text)
+        if versions:
+            return max(int(v) for v in versions)
+        return None
 
     def _calculate_match_score(
             self, cited_title: str, cited_authors: List[str],

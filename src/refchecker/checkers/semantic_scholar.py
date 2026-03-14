@@ -31,7 +31,7 @@ import html
 from typing import Dict, List, Tuple, Optional, Any, Union
 from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from refchecker.utils.error_utils import format_title_mismatch
-from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter
+from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
 from refchecker.config.settings import get_config
 
 # Set up logging
@@ -326,19 +326,14 @@ class NonArxivReferenceChecker:
         """
         url = f"{self.arxiv_abs_url}/{arxiv_id}"
         
-        self.arxiv_rate_limiter.wait()
-        try:
-            response = requests.get(url, timeout=self.arxiv_timeout)
-            response.raise_for_status()
-            
-            # Look for version links like "[v1]", "[v2]", etc.
-            versions = re.findall(r'\[v(\d+)\]', response.text)
-            if versions:
-                return max(int(v) for v in versions)
+        text = arxiv_cached_get(url, timeout=self.arxiv_timeout)
+        if text is None:
             return None
-        except Exception as e:
-            logger.debug(f"Failed to get latest version for {arxiv_id}: {e}")
-            return None
+        
+        versions = re.findall(r'\[v(\d+)\]', text)
+        if versions:
+            return max(int(v) for v in versions)
+        return None
     
     def _fetch_arxiv_version_metadata(self, arxiv_id: str, version_num: int) -> Optional[Dict[str, Any]]:
         """
@@ -354,41 +349,34 @@ class NonArxivReferenceChecker:
         version_str = f"v{version_num}"
         url = f"{self.arxiv_abs_url}/{arxiv_id}{version_str}"
 
-        self.arxiv_rate_limiter.wait()
-        try:
-            logger.debug(f"Checking ArXiv version: {url}")
-            response = requests.get(url, timeout=self.arxiv_timeout)
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
-            html_content = response.text
-
-            # Parse meta tags for metadata
-            title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
-            title = html.unescape(title_match.group(1)).strip() if title_match else ""
-
-            authors = []
-            for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
-                authors.append({'name': html.unescape(auth).strip()})
-
-            date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
-            year = None
-            if date_match:
-                ym = re.search(r'^(\d{4})', date_match.group(1))
-                if ym:
-                    year = int(ym.group(1))
-
-            return {
-                'version': version_str,
-                'version_num': version_num,
-                'title': title,
-                'authors': authors,
-                'year': year,
-                'url': url,
-            }
-        except Exception as e:
-            logger.debug(f"Failed to fetch ArXiv version {version_str}: {e}")
+        logger.debug(f"Checking ArXiv version: {url}")
+        html_content = arxiv_cached_get(url, timeout=self.arxiv_timeout)
+        if html_content is None:
             return None
+
+        # Parse meta tags for metadata
+        title_match = re.search(r'<meta name="citation_title" content="(.*?)"', html_content)
+        title = html.unescape(title_match.group(1)).strip() if title_match else ""
+
+        authors = []
+        for auth in re.findall(r'<meta name="citation_author" content="(.*?)"', html_content):
+            authors.append({'name': html.unescape(auth).strip()})
+
+        date_match = re.search(r'<meta name="citation_date" content="(.*?)"', html_content)
+        year = None
+        if date_match:
+            ym = re.search(r'^(\d{4})', date_match.group(1))
+            if ym:
+                year = int(ym.group(1))
+
+        return {
+            'version': version_str,
+            'version_num': version_num,
+            'title': title,
+            'authors': authors,
+            'year': year,
+            'url': url,
+        }
     
     def _check_arxiv_version_update(self, reference: Dict[str, Any], paper_data: Dict[str, Any], arxiv_id: str, errors: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Optional[int]]:
         """

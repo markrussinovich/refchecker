@@ -406,9 +406,9 @@ class TestRateLimiting:
         
         assert checker.rate_limiter is mock_limiter
     
-    @patch('refchecker.checkers.arxiv_citation.requests.get')
+    @patch('refchecker.utils.arxiv_rate_limiter.requests.get')
     def test_waits_before_request(self, mock_get):
-        """Test that rate limiter is called before making request."""
+        """Test that rate limiter is called before making request (via arxiv_cached_get)."""
         mock_get.return_value = Mock(
             status_code=200,
             text='@misc{test, title={Test}}',
@@ -420,9 +420,17 @@ class TestRateLimiting:
         mock_rate_limiter = MagicMock()
         checker.rate_limiter = mock_rate_limiter
         
-        checker.fetch_bibtex('2301.12345')
-        
-        mock_rate_limiter.wait.assert_called_once()
+        # arxiv_cached_get calls the global limiter, not checker.rate_limiter,
+        # so patch at the module level
+        with patch('refchecker.utils.arxiv_rate_limiter.ArXivRateLimiter.get_instance') as mock_inst:
+            mock_inst.return_value = mock_rate_limiter
+            # Clear cache to force a real fetch
+            from refchecker.utils.arxiv_rate_limiter import _arxiv_cache
+            _arxiv_cache._cache.clear()
+            
+            checker.fetch_bibtex('2301.12345')
+            
+            mock_rate_limiter.wait.assert_called_once()
 
 
 if __name__ == '__main__':
