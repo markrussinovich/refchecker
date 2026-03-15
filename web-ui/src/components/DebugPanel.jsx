@@ -45,8 +45,7 @@ export default function DebugPanel() {
     if (!confirm('Clear all cached verification results?')) return
     setClearing('cache')
     try {
-      const response = await clearCache()
-      alert(response.data.message)
+      await clearCache()
     } catch (err) {
       alert('Failed to clear cache: ' + (err.response?.data?.detail || err.message))
     } finally {
