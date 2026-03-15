@@ -33,7 +33,7 @@ from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.refchecker import ArxivReferenceChecker
-from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination, check_author_hallucination
+from refchecker.core.hallucination_policy import run_hallucination_check
 from refchecker.utils.arxiv_utils import get_bibtex_content
 import arxiv
 
@@ -311,34 +311,28 @@ class ProgressRefChecker:
             else:
                 formatted_errors.append(err_obj)
 
-        # Run hallucination checks
+        # Run hallucination check via the shared unified logic
         hallucination_assessment = None
 
-        # 1. Deterministic: author-overlap check (no LLM needed)
-        # Extract correct authors from the raw errors if available
+        # Build a consolidated error_entry like the CLI/report-builder paths do
+        error_types = []
+        error_details_parts = []
         authors_correct = None
         for err in errors:
+            etype = err.get('error_type') or err.get('warning_type') or err.get('info_type', '')
+            edetail = err.get('error_details') or err.get('warning_details') or err.get('info_details', '')
+            if etype:
+                error_types.append(etype)
+            if edetail:
+                error_details_parts.append(edetail)
             if err.get('ref_authors_correct'):
                 authors_correct = err['ref_authors_correct']
-                break
-        if authors_correct:
-            author_entry = {
-                'ref_authors_cited': ', '.join(reference.get('authors', [])),
-                'ref_authors_correct': authors_correct,
-            }
-            author_result = check_author_hallucination(author_entry)
-            if author_result and author_result.get('verdict') == 'LIKELY':
-                hallucination_assessment = author_result
-                status = 'hallucination'
 
-        # 2. LLM-based: for unverified references (only if author check didn't flag)
-        if not hallucination_assessment and is_unverified and not has_errors:
+        if error_types:
+            consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
             error_entry = {
-                'error_type': 'unverified',
-                'error_details': next(
-                    (e.get('error_details', '') for e in sanitized if e.get('error_type') == 'unverified'),
-                    'Reference could not be verified',
-                ),
+                'error_type': consolidated_type,
+                'error_details': '\n'.join(error_details_parts),
                 'ref_title': reference.get('title', ''),
                 'ref_authors_cited': ', '.join(reference.get('authors', [])),
                 'ref_year_cited': reference.get('year'),
@@ -346,13 +340,16 @@ class ProgressRefChecker:
                 'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
                 'original_reference': reference,
             }
-            if should_check_hallucination(error_entry) and self.hallucination_verifier and self.hallucination_verifier.available:
-                hallucination_assessment = assess_hallucination(
-                    error_entry,
-                    llm_client=self.hallucination_verifier,
-                )
-                if hallucination_assessment.get('verdict') == 'LIKELY':
-                    status = 'hallucination'
+            if authors_correct:
+                error_entry['ref_authors_correct'] = authors_correct
+
+            hallucination_assessment = run_hallucination_check(
+                error_entry,
+                llm_client=self.hallucination_verifier,
+                web_searcher=getattr(self, 'web_searcher', None),
+            )
+            if hallucination_assessment and hallucination_assessment.get('verdict') == 'LIKELY':
+                status = 'hallucination'
 
         result = {
             "index": index,
@@ -1348,12 +1345,21 @@ class ProgressRefChecker:
                 suggestions_count += num_suggestions
                 
                 # Count references by status for filtering
+                # Check if this ref has any 'unverified' error, regardless of overall status
+                has_unverified_error = any(
+                    e.get('error_type') == 'unverified'
+                    for e in result.get('errors', [])
+                )
+                
                 if result['status'] == 'hallucination':
                     hallucination_count += 1
+                
+                # Count refs matching the frontend 'unverified' filter:
+                # status === 'unverified' OR has any error with error_type === 'unverified'
+                if result['status'] == 'unverified' or has_unverified_error:
                     unverified_count += 1
-                elif result['status'] == 'unverified':
-                    unverified_count += 1
-                elif result['status'] == 'verified':
+                
+                if result['status'] == 'verified':
                     verified_count += 1
                     refs_verified += 1
                 elif result['status'] == 'suggestion':

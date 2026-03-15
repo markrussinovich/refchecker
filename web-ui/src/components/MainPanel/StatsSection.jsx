@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { 
   exportResultsAsMarkdown, 
@@ -84,12 +84,39 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const activeFilterId = isFilterActive ? statusFilter[0] : null
   const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
-  // Calculate refs by category - only from processed refs
-  const refsWithErrors = stats.refs_with_errors ?? 0
-  const refsWithWarningsOnly = stats.refs_with_warnings_only ?? 0
-  const refsVerified = stats.refs_verified ?? stats.verified_count ?? 0
-  const refsUnverified = stats.unverified_count ?? 0
-  const refsHallucinated = stats.hallucination_count ?? 0
+  // Compute inclusive badge counts from references using the same filter logic
+  // as ReferenceList.jsx, so clicking a badge always shows the matching count.
+  const inclusiveCounts = useMemo(() => {
+    if (!references || references.length === 0) return null
+    // Only count processed refs (not pending/checking)
+    const processed = references.filter(r => {
+      const s = (r.status || '').toLowerCase()
+      return s && !['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)
+    })
+    return {
+      withErrors: processed.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
+      withWarnings: processed.filter(r => r.warnings?.length > 0).length,
+      withUnverified: processed.filter(r =>
+        (r.status || '').toLowerCase() === 'unverified' ||
+        r.errors?.some(e => e.error_type === 'unverified')
+      ).length,
+      hallucinated: processed.filter(r =>
+        (r.status || '').toLowerCase() === 'hallucination' ||
+        r.hallucination_assessment?.verdict === 'LIKELY'
+      ).length,
+      verified: processed.filter(r => {
+        const s = (r.status || '').toLowerCase()
+        return s === 'verified' || s === 'suggestion'
+      }).length,
+    }
+  }, [references])
+
+  // Use inclusive counts from references when available, otherwise fall back to stats
+  const refsWithErrors = inclusiveCounts?.withErrors ?? stats.refs_with_errors ?? 0
+  const refsWithWarningsOnly = inclusiveCounts?.withWarnings ?? stats.refs_with_warnings_only ?? 0
+  const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
+  const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
+  const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
   const processedRefs = stats.processed_refs ?? 0
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')

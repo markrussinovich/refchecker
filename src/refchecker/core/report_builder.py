@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Dict, IO, List, Optional
 
-from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination, check_author_hallucination
+from refchecker.core.hallucination_policy import run_hallucination_check
 
 logger = logging.getLogger(__name__)
 
@@ -52,25 +52,15 @@ class ReportBuilder:
         for error_entry in errors:
             record = dict(error_entry)
 
-            # 1. Deterministic: author-overlap hallucination check (no LLM)
-            author_result = check_author_hallucination(record)
-            if author_result:
-                record['hallucination_assessment'] = author_result
-            else:
-                # 2. LLM-based: only for unverified references
-                error_type = (record.get('error_type') or '').lower()
-                is_unverified = (error_type == 'unverified'
-                                 or (error_type == 'multiple'
-                                     and 'unverified' in (record.get('error_details') or '').lower()))
-
-                if (self.llm_verifier and self.llm_verifier.available
-                        and is_unverified
-                        and should_check_hallucination(record)):
-                    assessment = assess_hallucination(
-                        record,
-                        llm_client=self.llm_verifier,
-                        web_searcher=self.web_searcher,
-                    )
+            # Use pre-computed assessment from inline check if available;
+            # otherwise run the check now (backward compatibility)
+            if 'hallucination_assessment' not in record:
+                assessment = run_hallucination_check(
+                    record,
+                    llm_client=self.llm_verifier,
+                    web_searcher=self.web_searcher,
+                )
+                if assessment:
                     record['hallucination_assessment'] = assessment
 
             records.append(record)

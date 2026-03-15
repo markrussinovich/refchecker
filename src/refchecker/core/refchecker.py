@@ -3514,9 +3514,9 @@ class ArxivReferenceChecker:
                 if self.total_info_found > 0:
                     print(f"ℹ️  Total information: {self.total_info_found}")
                 if self.total_unverified_refs > 0:
-                    print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                    print(f"❓ Total unverified: {self.total_unverified_refs}")
                 if flagged_count > 0:
-                    print(f"🚩 Likely hallucinated references: {flagged_count}")
+                    print(f"🚩 Total likely hallucinated: {flagged_count}")
                 if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and self.total_unverified_refs == 0:
                     print(f"✅ All references verified successfully!")
                 
@@ -3543,9 +3543,9 @@ class ArxivReferenceChecker:
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"ℹ️  Papers with information: {self.papers_with_info}")
                 print(f"         Total information: {self.total_info_found}")
-                print(f"❓ References that couldn't be verified: {self.total_unverified_refs}")
+                print(f"❓ Total unverified: {self.total_unverified_refs}")
                 if flagged_count > 0:
-                    print(f"🚩 Likely hallucinated references: {flagged_count}")
+                    print(f"🚩 Total Likely hallucinated: {flagged_count}")
                     self._print_hallucination_console_summary(payload=structured_payload)
                 
                 # Show warning if unreliable extraction was used and there are many errors
@@ -5831,8 +5831,8 @@ class ArxivReferenceChecker:
             # Display all non-unverified errors and warnings
             self._display_non_unverified_errors(errors, debug_mode, print_output)
 
-            # Display inline hallucination assessment (only for unverified refs)
-            self._display_hallucination_assessment(reference, errors, debug_mode, print_output)
+            # Run inline hallucination assessment and display if print_output
+            self._run_and_display_hallucination_assessment(reference, errors, debug_mode, print_output)
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -5998,22 +5998,14 @@ class ArxivReferenceChecker:
                     else:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
-    def _display_hallucination_assessment(self, reference, errors, debug_mode, print_output, verified_data=None):
-        """Display inline hallucination assessment.
-
-        Runs two checks:
-        1. Deterministic author-overlap check (no LLM needed)
-        2. LLM-based assessment for unverified references
-
-        In normal mode, only LIKELY verdicts are shown with explanation.
-        In debug mode, all verdicts are shown.
+    def _run_and_display_hallucination_assessment(self, reference, errors, debug_mode, print_output, verified_data=None):
+        """Run hallucination assessment and store result on the error entry.
+        
+        Always runs the check (for both sequential and parallel modes) so the
+        result is available in self.errors for report generation. Only prints
+        to console when print_output is True.
         """
-        if not print_output:
-            return
-
-        from refchecker.core.hallucination_policy import (
-            should_check_hallucination, assess_hallucination, check_author_hallucination
-        )
+        from refchecker.core.hallucination_policy import run_hallucination_check
 
         # Build a consolidated error entry
         error_types = []
@@ -6049,36 +6041,25 @@ class ArxivReferenceChecker:
         if authors_correct:
             error_entry['ref_authors_correct'] = authors_correct
 
-        # 1. Deterministic author-overlap check (no LLM)
-        author_result = check_author_hallucination(error_entry)
-        if author_result and author_result.get('verdict') == 'LIKELY':
-            explanation = author_result.get('explanation', '')
-            if debug_mode:
-                print(f"      🔍 Hallucination check: LIKELY")
-                if explanation:
-                    print(f"         {explanation}")
-            else:
-                print(f"      🚩 Likely hallucinated: {explanation}")
-            return
-
-        # 2. LLM-based check for unverified references
-        if not self.report_builder.llm_verifier or not self.report_builder.llm_verifier.available:
-            return
-
-        has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
-        if not has_unverified:
-            return
-
-        if not should_check_hallucination(error_entry):
-            return
-
-        assessment = assess_hallucination(
+        assessment = run_hallucination_check(
             error_entry,
             llm_client=self.report_builder.llm_verifier,
             web_searcher=self.report_builder.web_searcher,
         )
+
+        if not assessment:
+            return
+
+        # Store assessment on the last error entry added to self.errors
+        # so the report builder can use it without re-running the check
+        if self.errors:
+            self.errors[-1]['hallucination_assessment'] = assessment
+
         verdict = assessment.get('verdict', 'UNCERTAIN')
         explanation = assessment.get('explanation', '')
+
+        if not print_output:
+            return
 
         if debug_mode:
             print(f"      🔍 Hallucination check: {verdict}")

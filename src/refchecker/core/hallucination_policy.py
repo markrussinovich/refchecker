@@ -144,9 +144,15 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
 
     if overlap < _AUTHOR_MATCH_THRESHOLD:
         pct = int(overlap * 100)
+        if pct == 0:
+            overlap_desc = 'None of the cited authors match'
+        elif overlap < 0.25:
+            overlap_desc = 'Almost none of the cited authors match'
+        else:
+            overlap_desc = 'Less than half of the cited authors match'
         return {
             'verdict': 'LIKELY',
-            'explanation': f'Only {pct}% of cited authors match the actual authors — '
+            'explanation': f'{overlap_desc} the actual authors — '
                            f'the reference likely cites a different or fabricated paper.',
             'web_search': None,
         }
@@ -187,15 +193,25 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     # If the reference has a cited URL that was already checked and confirmed
     # the paper, it's not hallucinated.  But if the URL check *failed*
     # (paper not found at URL), the reference is still suspicious.
-    # Only skip when there's no 'unverified' error — meaning the URL worked.
+    # Only skip when errors don't indicate URL verification failure.
     if url and url.startswith('http') and error_type != 'unverified':
-        return False
+        # For 'multiple' or other types, check if the URL verification failed
+        # (non-existent page, doesn't reference the paper, etc.)
+        url_failed = any(
+            kw in error_details
+            for kw in ('unverified', 'non-existent', 'does not reference',
+                       'could not be verified', 'could not verify')
+        )
+        if not url_failed:
+            return False
 
     # For 'multiple' type, check if it contains title or author mismatches
     # (not just year+venue)
     if error_type == 'multiple':
         details = (error_entry.get('error_details') or '').lower()
-        has_major = any(kw in details for kw in ('title', 'author', 'doi', 'arxiv'))
+        has_major = any(kw in details for kw in ('title', 'author', 'doi', 'arxiv', 'unverified',
+                                                  'non-existent', 'does not reference',
+                                                  'could not be verified', 'could not verify'))
         if not has_major:
             return False
 
@@ -250,3 +266,56 @@ def assess_hallucination(
             'explanation': f'Assessment failed: {exc}',
             'web_search': None,
         }
+
+
+def run_hallucination_check(
+    error_entry: Dict[str, Any],
+    llm_client: Any = None,
+    web_searcher: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """Unified hallucination check — single entry point for CLI, WebUI, and report builder.
+
+    Runs the deterministic author-overlap check first, then (if no flag)
+    the LLM-based assessment for unverified / URL-error references.
+
+    Parameters
+    ----------
+    error_entry : dict
+        Reference record with at least: error_type, error_details,
+        ref_title, ref_authors_cited, ref_url_cited.  May also include
+        ref_authors_correct, ref_year_cited, ref_venue_cited, original_reference.
+    llm_client : optional
+        LLMHallucinationVerifier instance (or None to skip LLM).
+    web_searcher : optional
+        Web search checker passed to the LLM verifier.
+
+    Returns
+    -------
+    dict with verdict/explanation/web_search, or None if no assessment needed.
+    """
+    # 1. Deterministic: author-overlap check (no LLM)
+    author_result = check_author_hallucination(error_entry)
+    if author_result:
+        return author_result
+
+    # 2. LLM-based: for unverified or URL-error references
+    if not llm_client or not getattr(llm_client, 'available', False):
+        return None
+
+    error_type = (error_entry.get('error_type') or '').lower()
+    is_unverified = (
+        error_type == 'unverified'
+        or error_type == 'url'
+        or (error_type == 'multiple'
+            and any(kw in (error_entry.get('error_details') or '').lower()
+                    for kw in ('unverified', 'non-existent', 'does not reference',
+                               'could not be verified', 'could not verify')))
+    )
+
+    if not is_unverified:
+        return None
+
+    if not should_check_hallucination(error_entry):
+        return None
+
+    return assess_hallucination(error_entry, llm_client=llm_client, web_searcher=web_searcher)

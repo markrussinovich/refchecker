@@ -367,10 +367,8 @@ class ParallelReferenceProcessor:
                     else:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
-            # Display inline hallucination assessment (only for unverified refs)
-            has_unverified = any(e.get('error_type') == 'unverified' for e in result.errors)
-            if has_unverified:
-                self.base_checker._display_hallucination_assessment(reference, result.errors, debug_mode=False, print_output=True)
+            # Run and display inline hallucination assessment
+            self.base_checker._run_and_display_hallucination_assessment(reference, result.errors, debug_mode=False, print_output=True)
         
         # Show timing info for slow references
         if result.processing_time > 5.0:
