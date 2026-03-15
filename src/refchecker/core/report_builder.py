@@ -10,6 +10,7 @@ import csv
 import datetime
 import json
 import logging
+import re
 from typing import Any, Dict, IO, List, Optional
 
 from refchecker.core.hallucination_policy import run_hallucination_check
@@ -35,6 +36,83 @@ class ReportBuilder:
         self.llm_verifier = llm_verifier
         self.web_searcher = web_searcher
 
+    def _derive_flag_level(self, assessment: Dict[str, Any]) -> str:
+        """Map an assessment to a rollup severity level."""
+        level = (assessment.get('level') or '').lower()
+        if level in {'low', 'medium', 'high'}:
+            return level
+
+        verdict = (assessment.get('verdict') or '').upper()
+        if verdict == 'LIKELY':
+            return 'high'
+        if verdict == 'UNCERTAIN':
+            return 'medium'
+        return 'none'
+
+    def _assessment_matches_record(self, record: Dict[str, Any], assessment: Dict[str, Any]) -> bool:
+        """Return True when a cached assessment appears to belong to this record."""
+        if not assessment:
+            return False
+
+        title = (record.get('ref_title') or '').strip()
+        if not title:
+            return True
+
+        web_search = assessment.get('web_search') or {}
+        query = (web_search.get('query') or '').strip()
+        if query and title not in query:
+            return False
+
+        explanation = (assessment.get('explanation') or '').strip()
+        quoted_title = re.search(r'"([^"]+)"', explanation)
+        if quoted_title:
+            return quoted_title.group(1).strip().lower() == title.lower()
+
+        return True
+
+    def _derive_reason_codes(self, record: Dict[str, Any], assessment: Dict[str, Any]) -> List[str]:
+        """Extract stable signal labels for paper-level hallucination rollups."""
+        explicit_reasons = assessment.get('reasons') or assessment.get('signals') or []
+        if explicit_reasons:
+            return [str(reason) for reason in explicit_reasons if reason]
+
+        reasons: List[str] = []
+        error_type = (record.get('error_type') or '').lower()
+        error_details = (record.get('error_details') or '').lower()
+        web_search = assessment.get('web_search') or {}
+
+        if error_type in {'unverified', 'multiple', 'url'} or any(
+            keyword in error_details
+            for keyword in ('unverified', 'could not be verified', 'could not verify')
+        ):
+            reasons.append('unverified')
+
+        if any(keyword in error_details for keyword in ('non-existent', 'does not reference')):
+            reasons.append('url_verification_failed')
+
+        if error_type in {'arxiv_id', 'arxiv', 'doi'} or any(
+            keyword in error_details for keyword in ('arxiv id', 'doi mismatch', 'incorrect arxiv id')
+        ):
+            reasons.append('identifier_conflict')
+
+        if 'author' in error_details:
+            reasons.append('author_mismatch')
+        if 'title' in error_details:
+            reasons.append('title_mismatch')
+        if 'venue' in error_details:
+            reasons.append('venue_mismatch')
+        if 'year' in error_details:
+            reasons.append('year_mismatch')
+
+        if web_search.get('found') is False or (web_search.get('verdict') or '').upper() == 'NOT_FOUND':
+            reasons.append('web_search_not_found')
+
+        if not reasons:
+            reasons.append(error_type or 'hallucination_candidate')
+
+        # Preserve first-seen order while de-duplicating.
+        return list(dict.fromkeys(reasons))
+
     # ------------------------------------------------------------------
     # Payload construction
     # ------------------------------------------------------------------
@@ -51,10 +129,11 @@ class ReportBuilder:
         records = []
         for error_entry in errors:
             record = dict(error_entry)
+            assessment = record.get('hallucination_assessment')
 
             # Use pre-computed assessment from inline check if available;
             # otherwise run the check now (backward compatibility)
-            if 'hallucination_assessment' not in record:
+            if not self._assessment_matches_record(record, assessment):
                 assessment = run_hallucination_check(
                     record,
                     llm_client=self.llm_verifier,
@@ -62,6 +141,8 @@ class ReportBuilder:
                 )
                 if assessment:
                     record['hallucination_assessment'] = assessment
+                else:
+                    record.pop('hallucination_assessment', None)
 
             records.append(record)
 
@@ -98,9 +179,11 @@ class ReportBuilder:
             assessment = record.get('hallucination_assessment', {}) or {}
             if assessment.get('verdict') == 'LIKELY':
                 rollup['flagged_records'] += 1
-                level = 'high'
+                level = self._derive_flag_level(assessment)
                 if level_rank.get(level, 0) > level_rank.get(rollup['max_flag_level'], 0):
                     rollup['max_flag_level'] = level
+                for reason in self._derive_reason_codes(record, assessment):
+                    rollup['reason_counts'][reason] = rollup['reason_counts'].get(reason, 0) + 1
 
         result = []
         for rollup in rollups.values():

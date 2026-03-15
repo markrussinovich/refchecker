@@ -370,7 +370,7 @@ RefChecker reports these result types:
 | ❓ **Unverified** | Could not verify against any source | Rare publications, preprints |
 | 🚩 **Hallucination** | Likely fabricated reference | Unverifiable with rich metadata, identifier conflicts |
 
-Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements. Hallucination flags include a confidence score and the specific signals detected.
+Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements. Hallucination flags include an explanation and, in structured rollups, the specific signals detected.
 
 You can write machine-readable JSON, JSONL, or CSV reports with `--report-file` and `--report-format`.
 

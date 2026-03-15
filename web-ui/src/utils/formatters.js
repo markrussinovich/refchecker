@@ -273,6 +273,7 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
   lines.push(`| With Errors | ${stats.refs_with_errors ?? 0} |`)
   lines.push(`| With Warnings | ${stats.refs_with_warnings_only ?? 0} |`)
   lines.push(`| Unverified | ${stats.unverified_count ?? 0} |`)
+  lines.push(`| Likely Hallucinated | ${stats.hallucination_count ?? 0} |`)
   lines.push('')
   lines.push(`| Issue Type | Count |`)
   lines.push(`|------------|-------|`)
@@ -296,6 +297,7 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
         error: '❌',
         suggestion: '💡',
         unverified: '❓',
+        hallucination: '🚩',
       }[status] || '❓'
       
       lines.push(`### ${index + 1}. ${ref.title || ref.cited_url || 'Unknown Title'} ${statusEmoji}`)
@@ -367,10 +369,15 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
           })
         }
         
-        if (unverifiedError && status === 'unverified') {
+        if (unverifiedError && (status === 'unverified' || status === 'hallucination')) {
           lines.push('')
           lines.push(`**Could not verify:** ${unverifiedError.error_details || 'Paper not found by any checker'}`)
         }
+      }
+
+      if (ref.hallucination_assessment?.verdict === 'LIKELY') {
+        lines.push('')
+        lines.push(`**Likely hallucinated:** ${ref.hallucination_assessment.explanation || 'Strong fabrication signals detected.'}`)
       }
       
       // Warnings
@@ -476,6 +483,7 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
   lines.push(`Errors: ${stats.errors_count || 0}`)
   lines.push(`Warnings: ${stats.warnings_count || 0}`)
   lines.push(`Unverified: ${stats.unverified_count ?? 0}`)
+  lines.push(`Likely Hallucinated: ${stats.hallucination_count ?? 0}`)
   lines.push('')
   lines.push('REFERENCES')
   lines.push('-'.repeat(30))
@@ -502,6 +510,13 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
         ref.warnings.forEach(w => {
           lines.push(`    WARNING: ${w.error_details || w.error_type}`)
         })
+      }
+      const unverifiedError = ref.errors?.find(e => e.error_type === 'unverified')
+      if (unverifiedError && (status === 'UNVERIFIED' || status === 'HALLUCINATION')) {
+        lines.push(`    Could not verify: ${unverifiedError.error_details || 'Paper not found by any checker'}`)
+      }
+      if (ref.hallucination_assessment?.verdict === 'LIKELY') {
+        lines.push(`    HALLUCINATION: ${ref.hallucination_assessment.explanation || 'Strong fabrication signals detected.'}`)
       }
     })
   }

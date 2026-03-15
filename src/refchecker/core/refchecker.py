@@ -77,7 +77,7 @@ def get_llm_api_key_interactive(provider: str) -> str:
     Returns:
         API key string or None if not available
     """
-    from refchecker.config.settings import resolve_api_key
+    from refchecker.config.settings import _PROVIDER_ENV_VARS, resolve_api_key
 
     # vLLM doesn't need an API key
     if provider == 'vllm':
@@ -102,7 +102,7 @@ def get_llm_api_key_interactive(provider: str) -> str:
     provider_display = provider_names.get(provider, provider.capitalize())
     
     print(f"\n{provider_display} API key not found in environment variables.")
-    print(f"Checked environment variables: {', '.join(env_vars.get(provider, []))}")
+    print(f"Checked environment variables: {', '.join(_PROVIDER_ENV_VARS.get(provider, []))}")
     print(f"Please enter your {provider_display} API key (input will be hidden):")
     
     try:
@@ -240,7 +240,9 @@ class ArxivReferenceChecker:
                  # Deprecated parameters kept for backward compatibility
                  scan_mode='standard', only_flagged=False):
         # Initialize the reference checker for non-arXiv references
-        self.fatal_error = False            
+        self.fatal_error = False
+        self.fatal_error_message = None
+        self.last_download_error = None
         self.db_path = db_path
         self.verification_output_file = output_file
         self.report_file = report_file
@@ -486,10 +488,34 @@ class ArxivReferenceChecker:
 
     def write_structured_report(self, payload=None):
         """Write structured output for downstream triage workflows."""
-        if not self.report_file:
+        if not self.report_file or self.fatal_error:
             return
         payload = payload or self._build_structured_report_payload()
         self.report_builder.write_structured_report(payload)
+
+    def _set_fatal_source_error(self, paper, reason, debug_mode=False):
+        """Mark source-paper acquisition failures as fatal with actionable context."""
+        source_url = self._get_source_paper_url(paper)
+        details = reason.strip().rstrip('.') if reason else 'Unknown source paper error'
+
+        if 'openreview.net' in (source_url or '').lower():
+            message = (
+                f"OpenReview blocked automated access to the source paper: {source_url}. "
+                f"{details}."
+            )
+            guidance = "OpenReview sometimes returns HTTP 403 for automated requests from this environment."
+        else:
+            message = f"Could not access the source paper: {source_url}. {details}."
+            guidance = None
+
+        self.fatal_error = True
+        self.fatal_error_message = message
+        logger.error(message)
+
+        if not debug_mode:
+            print(f"\n  ❌  {message}")
+            if guidance:
+                print(f"      {guidance}")
     
     def _initialize_llm_extractor(self):
         """Initialize LLM-based reference extraction if enabled"""
@@ -1036,6 +1062,7 @@ class ArxivReferenceChecker:
     
     def download_pdf(self, paper):
         """Download the PDF of a paper and return the content as bytes."""
+        self.last_download_error = None
         # Check if this is a local file or URL
         if hasattr(paper, 'file_path') and paper.file_path:
             if hasattr(paper, 'is_url') and paper.is_url:
@@ -1049,6 +1076,7 @@ class ArxivReferenceChecker:
                     with open(paper.file_path, 'rb') as f:
                         return io.BytesIO(f.read())
                 except Exception as e:
+                    self.last_download_error = str(e)
                     logger.error(f"Failed to read local file {paper.file_path}: {e}")
                     return None
         
@@ -1068,24 +1096,50 @@ class ArxivReferenceChecker:
             response.raise_for_status()
             return io.BytesIO(response.content)
         except requests.exceptions.RequestException as e:
+            self.last_download_error = str(e)
             logger.error(f"Failed to download PDF for {paper.get_short_id()}: {e}")
             return None
 
     def download_pdf_from_url(self, url):
-        """Download a PDF from a direct URL and return the content as bytes."""       
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            
-            # Check if the response is actually a PDF
-            content_type = response.headers.get('content-type', '').lower()
-            if 'application/pdf' not in content_type and not url.lower().endswith('.pdf'):
-                logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
-            
-            return io.BytesIO(response.content)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to download PDF from URL {url}: {e}")
-            return None
+        """Download a PDF from a direct URL and return the content as bytes."""
+        self.last_download_error = None
+
+        candidate_urls = [url]
+        if 'openreview.net/forum' in url:
+            from urllib.parse import parse_qs, urlparse
+
+            parsed = urlparse(url)
+            paper_id = parse_qs(parsed.query).get('id', [None])[0]
+            if paper_id:
+                candidate_urls.insert(0, f"https://openreview.net/pdf?id={paper_id}")
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+            'Accept': 'application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.5',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        if 'openreview.net' in url.lower():
+            headers['Referer'] = 'https://openreview.net/'
+
+        last_exception = None
+        for candidate_url in dict.fromkeys(candidate_urls):
+            try:
+                response = requests.get(candidate_url, timeout=30, headers=headers, allow_redirects=True)
+                response.raise_for_status()
+
+                # Check if the response is actually a PDF
+                content_type = response.headers.get('content-type', '').lower()
+                if 'application/pdf' not in content_type and not candidate_url.lower().endswith('.pdf'):
+                    logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
+
+                return io.BytesIO(response.content)
+            except requests.exceptions.RequestException as e:
+                last_exception = e
+                logger.error(f"Failed to download PDF from URL {candidate_url}: {e}")
+
+        if last_exception is not None:
+            self.last_download_error = str(last_exception)
+        return None
 
     def extract_text_from_latex(self, latex_file_path):
         """
@@ -2943,7 +2997,7 @@ class ArxivReferenceChecker:
             verified_data: The verified data from the verification service (for corrected formatting)
         """
         if not errors:
-            return
+            return None
             
         # Consolidate all errors for this reference into a single entry
         if len(errors) > 1:
@@ -3018,6 +3072,7 @@ class ArxivReferenceChecker:
             
             # Store the consolidated entry (write to file at end of run)
             self.errors.append(consolidated_entry)
+            return consolidated_entry
             
         else:
             # Single error - handle as before
@@ -3097,6 +3152,7 @@ class ArxivReferenceChecker:
             
             # Store error in memory (write to file at end of run)
             self.errors.append(error_entry)
+            return error_entry
                 
     def write_all_errors_to_file(self):
         """
@@ -3350,14 +3406,18 @@ class ArxivReferenceChecker:
                 
             for paper in paper_iterator:
                 paper_id = paper.get_short_id()
+                source_url = self._get_source_paper_url(paper) if hasattr(paper, 'file_path') else ''
+                is_url_source = getattr(paper, 'is_url', False)
+                is_local_source = hasattr(paper, 'file_path') and not is_url_source
+                is_openreview_source = 'openreview.net' in (source_url or '').lower()
                 
                 # Set appropriate URL based on paper type
-                if hasattr(paper, 'file_path') and not paper_id.startswith('local_') and not paper_id.startswith('url_'):
+                if hasattr(paper, 'file_path') and not is_url_source and not paper_id.startswith('local_') and not paper_id.startswith('url_'):
                     # Regular ArXiv paper
                     paper_url = f"https://arxiv.org/abs/{paper_id}"
                 elif hasattr(paper, 'file_path'):
                     # Local file or URL in single- or multi-paper mode.
-                    paper_url = self._get_source_paper_url(paper)
+                    paper_url = source_url
                 else:
                     # Fallback to ArXiv URL
                     paper_url = f"https://arxiv.org/abs/{paper_id}"
@@ -3370,29 +3430,50 @@ class ArxivReferenceChecker:
                 # Try to get a meaningful title
                 paper_title = getattr(paper, 'title', None)
                 clean_arxiv_id = paper_id.replace('url_', '') if paper_id.startswith('url_') else paper_id
+                source_label = 'ArXiv ID'
+                source_value = clean_arxiv_id
+
+                if is_openreview_source:
+                    source_label = 'OpenReview ID'
+                    source_value = clean_arxiv_id
+                elif is_url_source:
+                    source_label = 'Source URL'
+                    source_value = source_url
+                elif is_local_source and paper_id.startswith('local_'):
+                    source_label = 'Local File'
+                    source_value = os.path.basename(paper.file_path)
                 
                 # If we have a good title (not just the arXiv ID), use it
                 if paper_title and paper_title.strip() and paper_title != paper_id and paper_title != clean_arxiv_id and len(paper_title) > 10:
                     print(f"\n📄 Processing: {paper_title}")
-                    print(f"   ArXiv ID: {clean_arxiv_id}")
+                    print(f"   {source_label}: {source_value}")
                 else:
-                    # Try to fetch the title directly from arXiv API as fallback
                     title_found = False
-                    try:
-                        import arxiv
-                        logger.debug(f"Attempting to fetch title for arXiv ID: {clean_arxiv_id}")
-                        client = arxiv.Client()
-                        search = arxiv.Search(id_list=[clean_arxiv_id])
-                        arxiv_paper = next(client.results(search))
-                        if arxiv_paper and arxiv_paper.title and len(arxiv_paper.title.strip()) > 10:
-                            print(f"\n📄 Processing: {arxiv_paper.title}")
-                            print(f"   ArXiv ID: {clean_arxiv_id}")
-                            title_found = True
-                    except Exception as e:
-                        logger.debug(f"Could not fetch title from arXiv API: {e}")
+                    if source_label == 'ArXiv ID':
+                        # Try to fetch the title directly from arXiv API as fallback
+                        try:
+                            import arxiv
+                            logger.debug(f"Attempting to fetch title for arXiv ID: {clean_arxiv_id}")
+                            client = arxiv.Client()
+                            search = arxiv.Search(id_list=[clean_arxiv_id])
+                            arxiv_paper = next(client.results(search))
+                            if arxiv_paper and arxiv_paper.title and len(arxiv_paper.title.strip()) > 10:
+                                print(f"\n📄 Processing: {arxiv_paper.title}")
+                                print(f"   {source_label}: {source_value}")
+                                title_found = True
+                        except Exception as e:
+                            logger.debug(f"Could not fetch title from arXiv API: {e}")
                     
                     if not title_found:
-                        print(f"\n📄 Processing: ArXiv Paper {clean_arxiv_id}")
+                        if source_label == 'ArXiv ID':
+                            print(f"\n📄 Processing: ArXiv Paper {clean_arxiv_id}")
+                        elif is_openreview_source:
+                            print(f"\n📄 Processing: OpenReview Paper {clean_arxiv_id}")
+                        elif is_local_source:
+                            print(f"\n📄 Processing: Local Document {source_value}")
+                        else:
+                            print(f"\n📄 Processing: Source Document")
+                        print(f"   {source_label}: {source_value}")
                 
                 print(f"   {paper_url}")
                 
@@ -3485,14 +3566,17 @@ class ArxivReferenceChecker:
             # Cleanup database connections if using thread-safe checker
             self._cleanup_resources()
             
-            # If fatal error occurred, remove the output file to avoid confusion
-            if self.fatal_error and self.verification_output_file:
-                try:
-                    if os.path.exists(self.verification_output_file):
-                        os.remove(self.verification_output_file)
-                        logger.debug(f"Removed output file due to fatal error: {self.verification_output_file}")
-                except Exception as e:
-                    logger.warning(f"Could not remove output file: {e}")
+            # If fatal error occurred, remove generated outputs to avoid confusion.
+            if self.fatal_error:
+                for output_path in [self.verification_output_file, self.report_file]:
+                    if not output_path:
+                        continue
+                    try:
+                        if os.path.exists(output_path):
+                            os.remove(output_path)
+                            logger.debug(f"Removed output file due to fatal error: {output_path}")
+                    except Exception as e:
+                        logger.warning(f"Could not remove output file: {e}")
         
         # Print final summary to console (only if no fatal error occurred)
         structured_payload = None
@@ -5457,6 +5541,7 @@ class ArxivReferenceChecker:
                 
             except Exception as e:
                 logger.error(f"Error reading text file {paper.file_path}: {e}")
+                self._set_fatal_source_error(paper, f"Failed to read text file ({e})", debug_mode=debug_mode)
                 return []
         
         # Check if this is a LaTeX file
@@ -5495,6 +5580,7 @@ class ArxivReferenceChecker:
                     
             except Exception as e:
                 logger.error(f"Error reading BibTeX file {paper.file_path}: {e}")
+                self._set_fatal_source_error(paper, f"Failed to read BibTeX file ({e})", debug_mode=debug_mode)
                 return []
         else:
             # Download the PDF
@@ -5502,6 +5588,11 @@ class ArxivReferenceChecker:
             
             if not pdf_content:
                 logger.warning(f"Could not download PDF for {paper_id}")
+                self._set_fatal_source_error(
+                    paper,
+                    self.last_download_error or 'Could not download PDF content',
+                    debug_mode=debug_mode,
+                )
                 return []
             
             # Extract text from PDF
@@ -5509,6 +5600,11 @@ class ArxivReferenceChecker:
         
         if not text:
             logger.warning(f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} for {paper_id}")
+            self._set_fatal_source_error(
+                paper,
+                f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} source",
+                debug_mode=debug_mode,
+            )
             return []
         
         # Save the extracted text for debugging
@@ -5817,7 +5913,8 @@ class ArxivReferenceChecker:
                 self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
-            self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
+            error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
+            error_entry_index = len(self.errors) - 1 if error_entry_record is not None else None
             paper_errors.extend(errors)
             
             # Count errors vs warnings vs info
@@ -5832,7 +5929,15 @@ class ArxivReferenceChecker:
             self._display_non_unverified_errors(errors, debug_mode, print_output)
 
             # Run inline hallucination assessment and display if print_output
-            self._run_and_display_hallucination_assessment(reference, errors, debug_mode, print_output)
+            self._run_and_display_hallucination_assessment(
+                reference,
+                errors,
+                debug_mode,
+                print_output,
+                verified_data=verified_data,
+                error_entry_record=error_entry_record,
+                error_entry_index=error_entry_index,
+            )
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -5998,7 +6103,16 @@ class ArxivReferenceChecker:
                     else:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
-    def _run_and_display_hallucination_assessment(self, reference, errors, debug_mode, print_output, verified_data=None):
+    def _run_and_display_hallucination_assessment(
+        self,
+        reference,
+        errors,
+        debug_mode,
+        print_output,
+        verified_data=None,
+        error_entry_record=None,
+        error_entry_index=None,
+    ):
         """Run hallucination assessment and store result on the error entry.
         
         Always runs the check (for both sequential and parallel modes) so the
@@ -6007,39 +6121,54 @@ class ArxivReferenceChecker:
         """
         from refchecker.core.hallucination_policy import run_hallucination_check
 
-        # Build a consolidated error entry
-        error_types = []
-        error_details_parts = []
-        authors_correct = None
-        for e in errors:
-            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
-            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
-            if etype:
-                error_types.append(etype)
-            if edetail:
-                error_details_parts.append(edetail)
-            if e.get('ref_authors_correct'):
-                authors_correct = e['ref_authors_correct']
+        target_record = None
+        if error_entry_index is not None and 0 <= error_entry_index < len(self.errors):
+            target_record = self.errors[error_entry_index]
+        elif error_entry_record is not None:
+            target_record = error_entry_record
 
-        if len(error_types) > 1:
-            consolidated_type = 'multiple'
-        elif error_types:
-            consolidated_type = error_types[0]
+        if target_record is not None:
+            error_entry = dict(target_record)
+            error_entry.setdefault('ref_title', reference.get('title', ''))
+            error_entry.setdefault('ref_authors_cited', ', '.join(reference.get('authors', [])))
+            error_entry.setdefault('ref_year_cited', reference.get('year'))
+            error_entry.setdefault('ref_venue_cited', reference.get('venue', ''))
+            error_entry.setdefault('ref_url_cited', reference.get('url', ''))
+            error_entry.setdefault('original_reference', reference)
         else:
-            return
+            # Backward-compatible fallback for callers that don't pass the record handle.
+            error_types = []
+            error_details_parts = []
+            authors_correct = None
+            for e in errors:
+                etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
+                edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
+                if etype:
+                    error_types.append(etype)
+                if edetail:
+                    error_details_parts.append(edetail)
+                if e.get('ref_authors_correct'):
+                    authors_correct = e['ref_authors_correct']
 
-        error_entry = {
-            'error_type': consolidated_type,
-            'error_details': '\n'.join(error_details_parts),
-            'ref_title': reference.get('title', ''),
-            'ref_authors_cited': ', '.join(reference.get('authors', [])),
-            'ref_year_cited': reference.get('year'),
-            'ref_venue_cited': reference.get('venue', ''),
-            'ref_url_cited': reference.get('url', ''),
-            'original_reference': reference,
-        }
-        if authors_correct:
-            error_entry['ref_authors_correct'] = authors_correct
+            if len(error_types) > 1:
+                consolidated_type = 'multiple'
+            elif error_types:
+                consolidated_type = error_types[0]
+            else:
+                return
+
+            error_entry = {
+                'error_type': consolidated_type,
+                'error_details': '\n'.join(error_details_parts),
+                'ref_title': reference.get('title', ''),
+                'ref_authors_cited': ', '.join(reference.get('authors', [])),
+                'ref_year_cited': reference.get('year'),
+                'ref_venue_cited': reference.get('venue', ''),
+                'ref_url_cited': reference.get('url', ''),
+                'original_reference': reference,
+            }
+            if authors_correct:
+                error_entry['ref_authors_correct'] = authors_correct
 
         assessment = run_hallucination_check(
             error_entry,
@@ -6050,9 +6179,11 @@ class ArxivReferenceChecker:
         if not assessment:
             return
 
-        # Store assessment on the last error entry added to self.errors
-        # so the report builder can use it without re-running the check
-        if self.errors:
+        # Store assessment on the exact error record for this reference so
+        # later references cannot overwrite earlier report entries.
+        if target_record is not None:
+            target_record['hallucination_assessment'] = assessment
+        elif self.errors:
             self.errors[-1]['hallucination_assessment'] = assessment
 
         verdict = assessment.get('verdict', 'UNCERTAIN')

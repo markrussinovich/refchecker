@@ -367,9 +367,6 @@ class ParallelReferenceProcessor:
                     else:
                         print_labeled_multiline("ℹ️  Information", error_details)
 
-            # Run and display inline hallucination assessment
-            self.base_checker._run_and_display_hallucination_assessment(reference, result.errors, debug_mode=False, print_output=True)
-        
         # Show timing info for slow references
         if result.processing_time > 5.0:
             logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {title}")
