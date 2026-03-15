@@ -604,9 +604,28 @@ class EnhancedHybridReferenceChecker:
                     return wp_data, wp_errors, wp_url
                 else:
                     logger.debug(f"Enhanced Hybrid: Web page verification did not confirm reference")
-                    # Use the more specific error from web page checker if available
+                    # Build error list: include both a URL-specific error and the
+                    # underlying unverified error so the user sees *why* it failed.
+                    errors_out = []
                     if wp_errors:
-                        return None, wp_errors, wp_url
+                        subreason = wp_errors[0].get('error_details', '')
+                        errors_out.append({
+                            'error_type': 'unverified',
+                            'error_details': f'Could not verify: {reference.get("title", "unknown")}',
+                        })
+                        errors_out.append({
+                            'error_type': 'url',
+                            'error_details': (
+                                f'Cited URL does not reference this paper: {web_url}\n'
+                                f'       Subreason: {subreason}'
+                            ),
+                        })
+                    else:
+                        errors_out.append({
+                            'error_type': 'unverified',
+                            'error_details': 'Could not verify reference using any available API',
+                        })
+                    return None, errors_out, wp_url
             except Exception as exc:
                 logger.debug(f"Enhanced Hybrid: Web page verification failed: {exc}")
 
