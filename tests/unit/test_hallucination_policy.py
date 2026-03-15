@@ -140,10 +140,10 @@ def test_many_authors_low_overlap_should_flag_hallucination():
 # ------------------------------------------------------------------
 
 def test_reference_with_url_should_not_be_checked():
-    """Any reference with a cited URL is not a hallucination candidate."""
+    """Verified references (non-unverified error type) with a URL are not hallucination candidates."""
     entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
+        'error_type': 'author',
+        'error_details': 'Author mismatch',
         'ref_title': 'Fair learning',
         'ref_authors_cited': 'Mark A. Lemley, Bryan Casey',
         'ref_url_cited': 'https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3528447',
@@ -152,10 +152,10 @@ def test_reference_with_url_should_not_be_checked():
 
 
 def test_web_resource_with_url_should_not_be_checked():
-    """Web resources like Common Crawl with a URL are not hallucination candidates."""
+    """Verified web resources with a URL are not hallucination candidates."""
     entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
+        'error_type': 'venue',
+        'error_details': 'Venue mismatch',
         'ref_title': 'Common Crawl',
         'ref_authors_cited': 'Common Crawl Foundation',
         'ref_url_cited': 'https://commoncrawl.org/',
@@ -164,15 +164,27 @@ def test_web_resource_with_url_should_not_be_checked():
 
 
 def test_huggingface_dataset_should_not_be_checked():
-    """References pointing to Hugging Face datasets are not hallucination candidates."""
+    """Verified references pointing to Hugging Face datasets are not hallucination candidates."""
     entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
+        'error_type': 'author',
+        'error_details': 'Author mismatch',
         'ref_title': 'OpenManus-RL Dataset',
         'ref_authors_cited': 'CharlieDreemur',
         'ref_url_cited': 'https://huggingface.co/datasets/CharlieDreemur/OpenManus-RL',
     }
     assert should_check_hallucination(entry) is False
+
+
+def test_unverified_with_url_should_be_checked():
+    """Unverified references WITH a URL should be checked — the URL didn't help verify it."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Knowledge-based reinforcement learning: A survey',
+        'ref_authors_cited': 'Reinaldo A. C. Bianchi, Luis A. Celiberto Jr',
+        'ref_url_cited': 'https://jair.org/index.php/jair/article/view/11182',
+    }
+    assert should_check_hallucination(entry) is True
 
 
 def test_no_url_unverified_should_be_checked():

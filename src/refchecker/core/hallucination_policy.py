@@ -183,10 +183,11 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     orig_authors = orig_ref.get('authors', []) if orig_ref else []
     url = error_entry.get('ref_url_cited', '') or (orig_ref.get('url', '') if orig_ref else '')
 
-    # If the reference has a specific cited URL, it's almost certainly not
-    # hallucinated.  Fabricated references don't come with real URLs.
-    # URL correctness is verified separately by the URL checker.
-    if url and url.startswith('http'):
+    # If the reference has a cited URL that was already checked and confirmed
+    # the paper, it's not hallucinated.  But if the URL check *failed*
+    # (paper not found at URL), the reference is still suspicious.
+    # Only skip when there's no 'unverified' error — meaning the URL worked.
+    if url and url.startswith('http') and error_type != 'unverified':
         return False
 
     # For 'multiple' type, check if it contains title or author mismatches
