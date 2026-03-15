@@ -726,7 +726,7 @@ class ProgressRefChecker:
             await self.emit_progress("progress", {
                 "current": 0,
                 "total": total_refs,
-                "message": f"Checking {total_refs} references (max {limiter.max_concurrent} concurrent)..."
+                "message": f"Checking {total_refs} references..."
             })
 
             # Process references in parallel
