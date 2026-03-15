@@ -31,6 +31,7 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
     'arxiv_id',         # ArXiv ID points to different paper
     'arxiv',            # ArXiv-related conflict
     'multiple',         # Multiple issues (may include title/author mismatches)
+    'url',              # Cited URL is broken or points to wrong paper
 })
 
 _AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match
@@ -169,7 +170,7 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     if error_type in {'api_failure', 'processing_failed'}:
         return False
 
-    if error_type in {'year', 'venue', 'url'}:
+    if error_type in {'year', 'venue'}:
         return False
 
     # If the URL was checked and references the paper, it's not hallucinated

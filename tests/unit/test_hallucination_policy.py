@@ -199,6 +199,17 @@ def test_no_url_unverified_should_be_checked():
     assert should_check_hallucination(entry) is True
 
 
+def test_url_error_should_be_checked():
+    """References with a broken/wrong URL (error_type='url') should be hallucination candidates."""
+    entry = {
+        'error_type': 'url',
+        'error_details': 'Non-existent web page: https://example.com/fake',
+        'ref_title': 'Language-guided reinforcement learning for explainable agents',
+        'ref_authors_cited': 'Yuxuan Jiang, Hongyuan Zha',
+    }
+    assert should_check_hallucination(entry) is True
+
+
 # ------------------------------------------------------------------
 # ReportBuilder integration (no LLM configured = no assessment)
 # ------------------------------------------------------------------

@@ -613,12 +613,14 @@ class EnhancedHybridReferenceChecker:
                             'error_type': 'unverified',
                             'error_details': f'Could not verify: {reference.get("title", "unknown")}',
                         })
+                        # Use specific message based on what went wrong
+                        if 'non-existent' in subreason:
+                            url_msg = f'Non-existent web page: {web_url}'
+                        else:
+                            url_msg = f'Cited URL does not reference this paper: {web_url}'
                         errors_out.append({
                             'error_type': 'url',
-                            'error_details': (
-                                f'Cited URL does not reference this paper: {web_url}\n'
-                                f'       Subreason: {subreason}'
-                            ),
+                            'error_details': url_msg,
                         })
                     else:
                         errors_out.append({
