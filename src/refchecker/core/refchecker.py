@@ -233,6 +233,33 @@ def load_paper_specs_from_file(list_path):
 
     return specs
 
+
+def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='accepted'):
+    """Fetch OpenReview conference papers for a shorthand and persist the generated list."""
+    from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+
+    checker = OpenReviewReferenceChecker()
+    venue_info = checker.get_conference_metadata(venue_spec)
+    papers = checker.list_conference_papers(venue_spec, status=status)
+    if not papers:
+        raise ValueError(f"No {status} OpenReview papers found for {venue_info['display_name']}")
+
+    paper_specs = []
+    for paper in papers:
+        paper_url = (paper.get('forum_url') or '').strip()
+        if paper_url:
+            paper_specs.append(paper_url)
+
+    if not paper_specs:
+        raise ValueError(f"OpenReview returned {status} papers for {venue_info['display_name']}, but none included a forum URL")
+
+    os.makedirs(output_dir, exist_ok=True)
+    list_path = os.path.join(output_dir, f"openreview_{venue_info['slug']}_{status}.txt")
+    with open(list_path, 'w', encoding='utf-8', newline='\n') as handle:
+        handle.write('\n'.join(paper_specs) + '\n')
+
+    return paper_specs, list_path, venue_info
+
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None, 
                  llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4,
@@ -6235,6 +6262,10 @@ def main():
                         help="Validate a specific paper by ArXiv ID, URL, local PDF file path, local LaTeX file path, local text file containing references, or local BibTeX file")
     parser.add_argument("--paper-list", type=str,
                         help="Path to a newline-delimited list of paper specs for bulk CLI scans")
+    parser.add_argument("--openreview", type=str,
+                        help="Fetch accepted papers for an OpenReview venue shorthand such as iclr2024 and run a bulk scan")
+    parser.add_argument("--openreview-status", choices=["accepted", "submitted"], default="accepted",
+                        help="OpenReview paper set to fetch with --openreview (default: accepted)")
     parser.add_argument("--semantic-scholar-api-key", type=str,
                         help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
@@ -6268,11 +6299,12 @@ def main():
 
     report_format = args.report_format
 
-    if args.paper and args.paper_list:
-        print("Error: Use either --paper or --paper-list, not both")
+    input_mode_count = sum(1 for value in (args.paper, args.paper_list, args.openreview) if value)
+    if input_mode_count > 1:
+        print("Error: Use exactly one of --paper, --paper-list, or --openreview")
         return 1
-    if not args.paper and not args.paper_list:
-        print("Error: Please provide --paper or --paper-list")
+    if input_mode_count == 0:
+        print("Error: Please provide --paper, --paper-list, or --openreview")
         return 1
 
     # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
@@ -6283,6 +6315,20 @@ def main():
     if args.paper_list:
         try:
             input_specs = load_paper_specs_from_file(args.paper_list)
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
+
+    if args.openreview:
+        try:
+            input_specs, generated_list_path, venue_info = prepare_openreview_paper_specs(
+                args.openreview,
+                status=args.openreview_status,
+            )
+            print(
+                f"Fetched {len(input_specs)} {args.openreview_status} OpenReview papers for {venue_info['display_name']} "
+                f"into {generated_list_path}"
+            )
         except Exception as e:
             print(f"Error: {e}")
             return 1

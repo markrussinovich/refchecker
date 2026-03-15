@@ -354,6 +354,12 @@ academic-refchecker --paper 1706.03762 --output-file errors.txt
 
 # Bulk verification
 academic-refchecker --paper-list iclr_papers.txt --report-file report.json
+
+# Fetch accepted OpenReview papers, write output/openreview_iclr2024_accepted.txt, then bulk-scan them
+academic-refchecker --openreview iclr2024 --report-file report.json
+
+# Fetch all public submissions instead
+academic-refchecker --openreview iclr2024 --openreview-status submitted --report-file report.json
 ```
 
 Hallucination detection runs automatically on every reference. References that can't be verified and show strong fabrication signals (unverified rich citations, identifier conflicts, multiple major metadata mismatches) are flagged with a 🚩 hallucination assessment in the output.
@@ -424,6 +430,8 @@ academic-refchecker --paper paper.pdf --llm-provider vllm --llm-endpoint http://
 ```bash
 --paper PAPER              # ArXiv ID, URL, or file path
 --paper-list PATH          # Newline-delimited file of paper specs for bulk scans
+--openreview VENUE         # Fetch accepted OpenReview papers like iclr2024 and bulk-scan them
+--openreview-status MODE   # accepted (default) or submitted
 --llm-provider PROVIDER    # openai, anthropic, google, azure, vllm
 --llm-model MODEL          # Override default model
 --db-path PATH             # Local database for offline verification

@@ -43,6 +43,16 @@ from refchecker.utils.text_utils import (
 # Set up logging
 logger = logging.getLogger(__name__)
 
+OPENREVIEW_VENUE_ALIASES = {
+    'iclr': 'ICLR',
+    'neurips': 'NeurIPS',
+    'nips': 'NeurIPS',
+    'icml': 'ICML',
+    'aistats': 'AISTATS',
+    'aaai': 'AAAI',
+    'ijcai': 'IJCAI',
+}
+
 class OpenReviewReferenceChecker:
     """
     A class to verify references using OpenReview
@@ -57,6 +67,7 @@ class OpenReviewReferenceChecker:
         """
         self.base_url = "https://openreview.net"
         self.api_url = "https://api.openreview.net"
+        self.api_v2_url = "https://api2.openreview.net"
         self.request_delay = request_delay
         self.last_request_time = 0
         
@@ -67,6 +78,73 @@ class OpenReviewReferenceChecker:
             'Accept': 'application/json, text/html',
             'Accept-Language': 'en-US,en;q=0.9'
         })
+
+    @staticmethod
+    def parse_venue_spec(venue_spec: str) -> Dict[str, Any]:
+        """Parse a shorthand venue spec like 'iclr2024' or 'NeurIPS-2023'."""
+        spec = (venue_spec or '').strip()
+        if not spec:
+            raise ValueError('OpenReview venue spec cannot be empty')
+
+        match = re.fullmatch(r'([A-Za-z]+)[\s_-]*(20\d{2})', spec)
+        if not match:
+            raise ValueError(
+                f"Unsupported OpenReview venue spec '{venue_spec}'. Use values like 'iclr2024' or 'neurips-2023'."
+            )
+
+        venue_key = match.group(1).lower()
+        year = int(match.group(2))
+        venue_name = OPENREVIEW_VENUE_ALIASES.get(venue_key)
+        if not venue_name:
+            supported = ', '.join(sorted(OPENREVIEW_VENUE_ALIASES))
+            raise ValueError(
+                f"Unsupported OpenReview venue '{match.group(1)}'. Supported prefixes: {supported}."
+            )
+
+        cc_name = 'NeurIPS' if venue_name == 'NeurIPS' else venue_name
+        return {
+            'series': venue_name,
+            'year': year,
+            'accepted_venue': f'{venue_name} {year} Conference',
+            'alternate_venues': [
+                f'{venue_name} {year} Conference',
+                f'{venue_name} {year}',
+            ],
+            'group_id': f'{cc_name}.cc/{year}/Conference',
+            'submission_invitation': f'{cc_name}.cc/{year}/Conference/-/Submission',
+            'slug': f"{venue_name.lower().replace(' ', '')}{year}",
+            'display_name': f'{venue_name} {year}',
+        }
+
+    def get_conference_metadata(self, venue_spec: str) -> Dict[str, Any]:
+        """Load conference metadata from the OpenReview group definition."""
+        venue_info = self.parse_venue_spec(venue_spec)
+        response = self._respectful_request(
+            f"{self.api_url}/groups",
+            params={'id': venue_info['group_id']},
+        )
+        if not response or response.status_code != 200:
+            raise ValueError(f"Could not load OpenReview conference metadata for {venue_info['display_name']}")
+
+        try:
+            groups = response.json().get('groups', [])
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Failed to parse OpenReview conference metadata for {venue_info['display_name']}: {exc}") from exc
+
+        if not groups:
+            raise ValueError(f"OpenReview conference group not found for {venue_info['display_name']}")
+
+        content = groups[0].get('content', {})
+        venue_info.update({
+            'submission_id': self._extract_content_value(content.get('submission_id')) or venue_info['submission_invitation'],
+            'submission_venue_id': self._extract_content_value(content.get('submission_venue_id')),
+            'withdrawn_venue_id': self._extract_content_value(content.get('withdrawn_venue_id')),
+            'desk_rejected_venue_id': self._extract_content_value(content.get('desk_rejected_venue_id')),
+            'rejected_venue_id': self._extract_content_value(content.get('rejected_venue_id')),
+            'decision_heading_map': self._extract_content_value(content.get('decision_heading_map'), {}) or {},
+            'public_submissions': bool(self._extract_content_value(content.get('public_submissions'), False)),
+        })
+        return venue_info
     
     def is_openreview_url(self, url: str) -> bool:
         """
@@ -137,21 +215,183 @@ class OpenReviewReferenceChecker:
     
     def _respectful_request(self, url: str, **kwargs) -> Optional[requests.Response]:
         """Make a respectful HTTP request with rate limiting"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
-        
-        if time_since_last < self.request_delay:
-            time.sleep(self.request_delay - time_since_last)
-        
-        try:
-            logger.debug(f"Making request to: {url}")
-            response = self.session.get(url, timeout=15, **kwargs)
-            self.last_request_time = time.time()
-            logger.debug(f"Request successful: {response.status_code}")
-            return response
-        except requests.exceptions.RequestException as e:
-            logger.debug(f"Request failed for {url}: {type(e).__name__}: {e}")
-            return None
+        max_attempts = kwargs.pop('max_attempts', 4)
+        timeout = kwargs.pop('timeout', 15)
+
+        for attempt in range(max_attempts):
+            current_time = time.time()
+            time_since_last = current_time - self.last_request_time
+
+            if time_since_last < self.request_delay:
+                time.sleep(self.request_delay - time_since_last)
+
+            try:
+                logger.debug(f"Making request to: {url}")
+                response = self.session.get(url, timeout=timeout, **kwargs)
+                self.last_request_time = time.time()
+                logger.debug(f"Request successful: {response.status_code}")
+
+                if response.status_code != 429:
+                    return response
+
+                if attempt == max_attempts - 1:
+                    return response
+
+                retry_after_header = response.headers.get('Retry-After')
+                try:
+                    retry_after = float(retry_after_header) if retry_after_header else 0.0
+                except ValueError:
+                    retry_after = 0.0
+                backoff = max(retry_after, max(1.0, self.request_delay) * (2 ** attempt))
+                logger.debug(f"OpenReview rate limited request to {url}; retrying in {backoff:.1f}s")
+                time.sleep(backoff)
+            except requests.exceptions.RequestException as e:
+                logger.debug(f"Request failed for {url}: {type(e).__name__}: {e}")
+                if attempt == max_attempts - 1:
+                    return None
+                time.sleep(max(1.0, self.request_delay) * (attempt + 1))
+
+        return None
+
+    def _extract_content_value(self, value: Any, default: Any = None) -> Any:
+        """Normalize OpenReview content fields across legacy and value-wrapped payloads."""
+        if value is None:
+            return default
+        if isinstance(value, dict):
+            if 'value' in value:
+                return value['value']
+            if 'values' in value:
+                return value['values']
+            return default
+        return value
+
+    def _fetch_notes_page(self, params: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Fetch a single page of notes from the OpenReview API."""
+        for api_base in (self.api_v2_url, self.api_url):
+            response = self._respectful_request(f"{api_base}/notes", params=params)
+            if not response or response.status_code != 200:
+                logger.debug(
+                    "OpenReview notes request failed for %s params %s: %s",
+                    api_base,
+                    params,
+                    response.status_code if response else 'No response',
+                )
+                continue
+
+            try:
+                data = response.json()
+            except json.JSONDecodeError as exc:
+                logger.debug(f'Failed to decode OpenReview notes response from {api_base}: {exc}')
+                continue
+
+            return data.get('notes', []) or []
+
+        return []
+
+    def _fetch_all_notes(self, params: Dict[str, Any], page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Fetch paginated OpenReview notes until exhaustion."""
+        notes = []
+        offset = 0
+
+        while True:
+            page_params = dict(params)
+            page_params['limit'] = page_size
+            page_params['offset'] = offset
+            batch = self._fetch_notes_page(page_params)
+            if not batch:
+                break
+
+            notes.extend(batch)
+            if len(batch) < page_size:
+                break
+
+            offset += len(batch)
+
+        return notes
+
+    def _accepted_venue_names(self, conference_info: Dict[str, Any]) -> set[str]:
+        """Return accepted venue labels from conference decision metadata."""
+        decision_heading_map = conference_info.get('decision_heading_map') or {}
+        accepted = set()
+        for venue_name, label in decision_heading_map.items():
+            label_text = str(label or '').strip().lower()
+            venue_text = str(venue_name or '').strip().lower()
+            if not venue_text:
+                continue
+            if 'reject' in label_text or 'submitted to' in venue_text:
+                continue
+            accepted.add(venue_text)
+        if conference_info.get('accepted_venue'):
+            accepted.add(str(conference_info['accepted_venue']).strip().lower())
+        return accepted
+
+    def _is_accepted_submission(self, metadata: Dict[str, Any], conference_info: Dict[str, Any]) -> bool:
+        """Classify a submission note as accepted using conference metadata."""
+        venue = str(metadata.get('venue') or '').strip().lower()
+        venue_id = str(metadata.get('venueid') or '').strip()
+
+        if venue and venue in self._accepted_venue_names(conference_info):
+            return True
+
+        rejected_ids = {
+            str(conference_info.get('submission_venue_id') or '').strip(),
+            str(conference_info.get('withdrawn_venue_id') or '').strip(),
+            str(conference_info.get('desk_rejected_venue_id') or '').strip(),
+            str(conference_info.get('rejected_venue_id') or '').strip(),
+        }
+        rejected_ids.discard('')
+
+        if venue_id and venue_id in rejected_ids:
+            return False
+
+        if venue and venue.startswith('submitted to '):
+            return False
+        if 'withdrawn' in venue or 'rejected' in venue:
+            return False
+
+        return bool(venue)
+
+    def list_conference_papers(
+        self,
+        venue_spec: str,
+        status: str = 'accepted',
+        max_results: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """List public conference papers for an OpenReview venue shorthand."""
+        normalized_status = (status or 'accepted').strip().lower()
+        if normalized_status not in {'accepted', 'submitted'}:
+            raise ValueError("OpenReview status must be 'accepted' or 'submitted'")
+
+        conference_info = self.get_conference_metadata(venue_spec)
+        notes = self._fetch_all_notes({'invitation': conference_info['submission_id']})
+
+        papers = []
+        seen_ids = set()
+        for note in notes:
+            metadata = self._parse_api_response(note)
+            paper_id = metadata.get('id')
+            if not paper_id or paper_id in seen_ids:
+                continue
+
+            if normalized_status == 'accepted' and not self._is_accepted_submission(metadata, conference_info):
+                continue
+
+            seen_ids.add(paper_id)
+            papers.append(metadata)
+            if max_results is not None and len(papers) >= max_results:
+                break
+
+        logger.debug(
+            "OpenReview conference lookup for %s status=%s returned %d papers",
+            conference_info['display_name'],
+            normalized_status,
+            len(papers),
+        )
+        return papers
+
+    def list_accepted_papers(self, venue_spec: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Backward-compatible wrapper for accepted conference papers."""
+        return self.list_conference_papers(venue_spec, status='accepted', max_results=max_results)
     
     def get_paper_metadata(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -198,21 +438,27 @@ class OpenReviewReferenceChecker:
         content = note.get('content', {})
         
         # Extract basic metadata
+        title = self._extract_content_value(content.get('title'), '') or ''
+        abstract = self._extract_content_value(content.get('abstract'), '') or ''
+        keywords = self._extract_content_value(content.get('keywords'), []) or []
+        pdf_url = self._extract_content_value(content.get('pdf'))
+
         metadata = {
             'id': note.get('id'),
-            'title': content.get('title', '').strip(),
+            'title': title.strip() if isinstance(title, str) else '',
             'authors': [],
             'year': None,
             'venue': None,
-            'abstract': content.get('abstract', '').strip(),
-            'keywords': content.get('keywords', []),
-            'pdf_url': content.get('pdf'),
+            'venueid': self._extract_content_value(content.get('venueid')),
+            'abstract': abstract.strip() if isinstance(abstract, str) else '',
+            'keywords': keywords if isinstance(keywords, list) else [],
+            'pdf_url': pdf_url,
             'forum_url': f"{self.base_url}/forum?id={note.get('id')}",
             'source': 'openreview_api'
         }
         
         # Parse authors
-        authors_raw = content.get('authors', [])
+        authors_raw = self._extract_content_value(content.get('authors'), []) or []
         if isinstance(authors_raw, list):
             metadata['authors'] = [author.strip() for author in authors_raw if author.strip()]
         elif isinstance(authors_raw, str):
@@ -231,7 +477,7 @@ class OpenReviewReferenceChecker:
                 pass
         
         # Check if venue/conference info is available
-        venue_info = content.get('venue', '')
+        venue_info = self._extract_content_value(content.get('venue'), '') or ''
         if venue_info:
             metadata['venue'] = venue_info.strip()
         
