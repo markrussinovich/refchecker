@@ -518,6 +518,7 @@ class BulkProgressReporter:
             _safe_print(f'\nProcessing: {display_title}')
             if result.source_url:
                 _safe_print(f'   {result.source_url}')
+            _safe_print(f'   References extracted: {result.references_processed}')
 
             # ── Only show full reference blocks for hallucination-flagged refs ──
             flagged_entries = [
@@ -559,7 +560,7 @@ class BulkProgressReporter:
                         line = line[2:]
                     if any(kw in line.lower() for kw in ('could not', 'unverified')):
                         continue
-                    _safe_print(f'      X Error: {line}')
+                    _safe_print(f'      X {line}')
 
                 # Hallucination flag
                 assessment = error_entry.get('hallucination_assessment', {})
@@ -625,6 +626,12 @@ class _BulkCheckerConfig:
 
 def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mode: bool = False) -> None:
     config = _BulkCheckerConfig.from_checker(root_checker)
+
+    # Suppress INFO-level logging in bulk mode to keep output clean.
+    # Only paper-level progress lines are printed; per-reference noise is hidden.
+    if not debug_mode:
+        logging.getLogger().setLevel(logging.WARNING)
+
     reporter = BulkProgressReporter(total_papers=len(input_specs))
     extraction_batcher = BulkLLMExtractionBatcher(enabled=bool(getattr(root_checker, 'llm_enabled', False)))
     hallucination_batcher = BulkHallucinationBatcher(enabled=True)
@@ -744,6 +751,7 @@ def _process_bulk_paper_job(
         checker.total_other_refs = sum(1 for ref in bibliography if ref.get('type') == 'other')
 
         checker.batch_prefetch_arxiv_references(bibliography)
+        _batch_prefetch_ss_metadata(bibliography, checker, verification_cache)
         _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode, verification_cache=verification_cache)
         _apply_batched_hallucination_assessments(checker, hallucination_batcher)
 
@@ -909,6 +917,211 @@ def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batch
 
     checker.fatal_error = True
     return []
+
+
+_SS_BATCH_URL = 'https://api.semanticscholar.org/graph/v1/paper/batch'
+_SS_BATCH_FIELDS = 'title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal'
+_SS_BATCH_MAX = 500  # API limit
+
+
+def _extract_ss_id(reference: Dict[str, Any]) -> Optional[str]:
+    """Extract a Semantic Scholar batch-compatible ID from a reference.
+
+    Returns 'ARXIV:xxxx.xxxxx' or 'DOI:10.xxx/yyy' if the reference has
+    a usable identifier, otherwise None.
+    """
+    # Try ArXiv ID from URL
+    url = reference.get('url', '')
+    if url:
+        import re as _re
+        arxiv_match = _re.search(r'arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})', url, _re.IGNORECASE)
+        if arxiv_match:
+            return f'ARXIV:{arxiv_match.group(1)}'
+
+    # Try DOI
+    doi = reference.get('doi', '')
+    if doi:
+        clean = doi.strip()
+        if clean.startswith('http'):
+            from refchecker.utils.doi_utils import extract_doi_from_url
+            clean = extract_doi_from_url(clean) or ''
+        if clean and clean.startswith('10.'):
+            return f'DOI:{clean}'
+
+    return None
+
+
+def _batch_prefetch_ss_metadata(
+    bibliography: Sequence[Dict[str, Any]],
+    checker: Any,
+    verification_cache: Optional[BulkVerificationCache],
+) -> int:
+    """Resolve DOI / ArXiv ID references via the SS batch API.
+
+    For each reference with a known ID, fetches metadata in a single batch
+    call and runs the checker's comparison logic to produce the same
+    (errors, url, verified_data) tuple that verify_reference would return.
+    Results are injected into the verification_cache so the normal
+    verification loop skips these references entirely.
+
+    Returns the number of references successfully pre-resolved.
+    """
+    if verification_cache is None:
+        return 0
+
+    # Collect batch-eligible references
+    id_map: Dict[int, str] = {}  # index -> SS ID
+    for index, ref in enumerate(bibliography):
+        # Skip if already cached
+        if verification_cache.get(ref) is not None:
+            continue
+        ss_id = _extract_ss_id(ref)
+        if ss_id:
+            id_map[index] = ss_id
+
+    if not id_map:
+        return 0
+
+    # Build headers
+    headers: Dict[str, str] = {}
+    ss_api_key = os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+    if ss_api_key:
+        headers['x-api-key'] = ss_api_key
+
+    # Batch request (respect 500-ID limit)
+    indices = list(id_map.keys())
+    resolved = 0
+
+    for batch_start in range(0, len(indices), _SS_BATCH_MAX):
+        batch_indices = indices[batch_start:batch_start + _SS_BATCH_MAX]
+        batch_ids = [id_map[i] for i in batch_indices]
+
+        try:
+            import requests as _requests
+            resp = _requests.post(
+                _SS_BATCH_URL,
+                params={'fields': _SS_BATCH_FIELDS},
+                json={'ids': batch_ids},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                logger.debug('SS batch prefetch failed: HTTP %d', resp.status_code)
+                continue
+
+            results = resp.json()
+            if not isinstance(results, list) or len(results) != len(batch_indices):
+                logger.debug('SS batch prefetch returned unexpected shape')
+                continue
+
+            for idx, paper_data in zip(batch_indices, results):
+                if paper_data is None:
+                    continue  # Not found — let normal verification handle it
+
+                ref = bibliography[idx]
+                # Run the checker's comparison logic against the batch result
+                try:
+                    errors = _compare_reference_with_ss_data(checker, ref, paper_data)
+                    # Build paper URL from SS data
+                    paper_url = None
+                    if paper_data.get('url'):
+                        paper_url = paper_data['url']
+                    elif paper_data.get('paperId'):
+                        paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
+
+                    result_tuple = (errors if errors else None, paper_url, paper_data)
+                    verification_cache.put(ref, result_tuple)
+                    resolved += 1
+                except Exception as exc:
+                    logger.debug('SS batch comparison failed for index %d: %s', idx, exc)
+
+        except Exception as exc:
+            logger.debug('SS batch prefetch request failed: %s', exc)
+
+    if resolved:
+        logger.debug('SS batch prefetch resolved %d/%d references', resolved, len(id_map))
+
+    return resolved
+
+
+def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], paper_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """Compare a reference against SS batch data and return errors list.
+
+    Uses the same comparison logic as the existing checkers but operates
+    on pre-fetched data instead of making API calls.
+    """
+    from refchecker.utils.text_utils import calculate_title_similarity, compare_authors, strip_latex_commands
+    from refchecker.utils.error_utils import validate_year
+
+    errors: List[Dict[str, Any]] = []
+
+    # Title comparison
+    cited_title = strip_latex_commands(reference.get('title', '')).strip().lower()
+    actual_title = (paper_data.get('title') or '').strip().lower()
+    if cited_title and actual_title:
+        similarity = calculate_title_similarity(cited_title, actual_title)
+        if similarity < 0.8:
+            errors.append({
+                'error_type': 'title',
+                'error_details': f"Title mismatch:\n       cited:  {reference.get('title', '')}\n       actual: {paper_data.get('title', '')}",
+                'ref_title_correct': paper_data.get('title', ''),
+            })
+
+    # Author comparison
+    cited_authors = reference.get('authors', [])
+    actual_authors = paper_data.get('authors', [])
+    if cited_authors and actual_authors:
+        author_dicts = [{'name': a.get('name', '')} for a in actual_authors if a.get('name')]
+        match_result, error_msg = compare_authors(cited_authors, author_dicts)
+        if not match_result and error_msg:
+            correct_authors = ', '.join(a.get('name', '') for a in actual_authors[:5])
+            if len(actual_authors) > 5:
+                correct_authors += ' et al.'
+            errors.append({
+                'error_type': 'author',
+                'error_details': error_msg,
+                'ref_authors_correct': correct_authors,
+            })
+
+    # Year comparison
+    cited_year = reference.get('year')
+    actual_year = paper_data.get('year')
+    year_warning = validate_year(cited_year=cited_year, paper_year=actual_year, year_tolerance=1)
+    if year_warning:
+        errors.append(year_warning)
+
+    # Venue check (info-level: cite as arXiv but published at venue)
+    actual_venue = paper_data.get('venue', '')
+    cited_venue = (reference.get('venue', '') or reference.get('journal', '')).strip().lower()
+    if actual_venue and (not cited_venue or cited_venue in ('arxiv', 'arxiv preprint', 'arxiv.org', 'preprint')):
+        actual_venue_lower = actual_venue.lower().strip()
+        if actual_venue_lower and actual_venue_lower not in ('arxiv', 'arxiv.org', 'preprint', '') and not actual_venue_lower.startswith('arxiv'):
+            errors.append({
+                'warning_type': 'venue',
+                'warning_details': f"Paper was published at venue but cited as arXiv preprint:\n       cited:  arXiv\n       actual: {actual_venue}",
+                'ref_venue_correct': actual_venue,
+            })
+
+    # ArXiv ID check
+    arxiv_errors = checker.check_independent_arxiv_id_mismatch(reference, paper_data)
+    if arxiv_errors:
+        errors.extend(arxiv_errors)
+
+    # URL info
+    external_ids = paper_data.get('externalIds', {})
+    cited_url = reference.get('url', '')
+    if cited_url and external_ids.get('ArXiv'):
+        # Don't add URL info if ArXiv ID already matched
+        pass
+    elif not cited_url and external_ids.get('ArXiv'):
+        arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
+        errors.append({
+            'info_type': 'url',
+            'info_details': f"Reference could include arXiv URL: {arxiv_url}",
+            'ref_url_correct': arxiv_url,
+        })
+
+    return errors if errors else None
 
 
 def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence[Dict[str, Any]], debug_mode: bool, verification_cache: Optional[BulkVerificationCache] = None) -> None:
