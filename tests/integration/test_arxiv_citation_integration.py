@@ -190,6 +190,15 @@ class TestArXivRateLimiting:
     
     def test_multiple_fetches_respect_rate_limit(self):
         """Test that multiple fetches respect rate limiting."""
+        from refchecker.utils.arxiv_rate_limiter import _arxiv_cache, ArXivRateLimiter
+
+        # Clear the module-level cache so fetch_bibtex actually hits the
+        # network (through the rate limiter) instead of returning cached
+        # results from earlier tests.
+        with _arxiv_cache._lock:
+            _arxiv_cache._cache.clear()
+
+        ArXivRateLimiter.reset_instance()
         checker = ArXivCitationChecker()
         
         # Set a shorter delay for testing (but still be polite)

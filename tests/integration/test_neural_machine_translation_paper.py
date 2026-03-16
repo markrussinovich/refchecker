@@ -83,15 +83,30 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
     @patch('requests.get')
     def test_paper_found_in_semantic_scholar(self, mock_get):
         """Test that the paper is found in Semantic Scholar API"""
-        # Mock successful API response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        # Clear the arxiv cache so our mock is actually called
+        from refchecker.utils.arxiv_rate_limiter import _arxiv_cache
+        with _arxiv_cache._lock:
+            _arxiv_cache._cache.clear()
+
+        # Build URL-aware mock: Semantic Scholar returns JSON, ArXiv returns HTML
+        ss_response = Mock()
+        ss_response.status_code = 200
+        ss_response.json.return_value = {
             "total": 1,
             "data": [self.semantic_scholar_response]
         }
-        mock_get.return_value = mock_response
-        
+
+        arxiv_response = Mock()
+        arxiv_response.status_code = 200
+        arxiv_response.text = '<html>[v1] Mon, 31 Oct 2016 [v2] Thu, 9 Mar 2017</html>'
+
+        def side_effect(url, **kwargs):
+            if 'arxiv.org' in url:
+                return arxiv_response
+            return ss_response
+
+        mock_get.side_effect = side_effect
+
         # Test search by title
         from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker
         checker = NonArxivReferenceChecker()
