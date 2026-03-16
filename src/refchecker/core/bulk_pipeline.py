@@ -51,6 +51,76 @@ _HALLUCINATION_MULTI_KEYWORDS = (
 )
 
 
+def _normalize_cache_key(reference: Dict[str, Any]) -> Optional[tuple]:
+    """Build a normalized cache key from a reference dict.
+
+    Returns (title_lower, first_author_last_lower, year_str) or None if
+    the reference doesn't have enough information to cache reliably.
+    """
+    title = (reference.get('title') or '').strip().lower()
+    if not title or len(title) < 15:
+        return None
+
+    # Normalize: collapse whitespace, strip punctuation at edges
+    title = re.sub(r'\s+', ' ', title).strip(' .,;:')
+
+    authors = reference.get('authors') or []
+    first_author_last = ''
+    if authors and isinstance(authors, list) and authors[0]:
+        # Take last token of first author as surname proxy
+        parts = str(authors[0]).strip().split()
+        if parts:
+            first_author_last = parts[-1].lower().strip(' .,;:')
+
+    year = str(reference.get('year') or '').strip()
+
+    return (title, first_author_last, year)
+
+
+class BulkVerificationCache:
+    """Thread-safe cross-paper cache for reference verification results.
+
+    Keyed on normalized (title, first_author_last, year).  Stores the full
+    (errors, url, verified_data) tuple so subsequent papers citing the same
+    reference skip the API calls entirely.
+    """
+
+    def __init__(self) -> None:
+        self._cache: Dict[tuple, Any] = {}
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, reference: Dict[str, Any]) -> Optional[Any]:
+        key = _normalize_cache_key(reference)
+        if key is None:
+            return None
+        with self._lock:
+            if key in self._cache:
+                self.hits += 1
+                return self._cache[key]
+            self.misses += 1
+            return None
+
+    def put(self, reference: Dict[str, Any], result: Any) -> None:
+        key = _normalize_cache_key(reference)
+        if key is None:
+            return
+        with self._lock:
+            self._cache[key] = result
+
+    @property
+    def size(self) -> int:
+        with self._lock:
+            return len(self._cache)
+
+    def stats_line(self) -> str:
+        with self._lock:
+            total = self.hits + self.misses
+            pct = f'{self.hits / total * 100:.0f}%' if total else '0%'
+            return f'cache: {self.size} entries, {self.hits} hits / {total} lookups ({pct})'
+
+
 @dataclass
 class BulkPaperJob:
     index: int
@@ -558,6 +628,7 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
     reporter = BulkProgressReporter(total_papers=len(input_specs))
     extraction_batcher = BulkLLMExtractionBatcher(enabled=bool(getattr(root_checker, 'llm_enabled', False)))
     hallucination_batcher = BulkHallucinationBatcher(enabled=True)
+    verification_cache = BulkVerificationCache()
     result_map: Dict[int, BulkPaperResult] = {}
     job_queue: Queue[Any] = Queue()
     result_queue: Queue[BulkPaperResult] = Queue()
@@ -585,6 +656,7 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
                         debug_mode=debug_mode,
                         extraction_batcher=extraction_batcher,
                         hallucination_batcher=hallucination_batcher,
+                        verification_cache=verification_cache,
                     )
                 except Exception as exc:
                     logger.error('Unhandled exception in bulk worker for %s: %s', job.input_spec, exc)
@@ -613,6 +685,9 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
     extraction_batcher.close()
     hallucination_batcher.close()
 
+    if verification_cache.hits > 0 or verification_cache.size > 0:
+        _safe_print(f'   Reference {verification_cache.stats_line()}')
+
     ordered_results = [result_map[index] for index in sorted(result_map)]
     _apply_bulk_results(root_checker, ordered_results)
     _print_bulk_final_summary(root_checker)
@@ -629,6 +704,7 @@ def _process_bulk_paper_job(
     debug_mode: bool,
     extraction_batcher: BulkLLMExtractionBatcher,
     hallucination_batcher: BulkHallucinationBatcher,
+    verification_cache: BulkVerificationCache,
 ) -> BulkPaperResult:
     start_time = time.perf_counter()
     _reset_worker_state(checker)
@@ -668,7 +744,7 @@ def _process_bulk_paper_job(
         checker.total_other_refs = sum(1 for ref in bibliography if ref.get('type') == 'other')
 
         checker.batch_prefetch_arxiv_references(bibliography)
-        _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode)
+        _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode, verification_cache=verification_cache)
         _apply_batched_hallucination_assessments(checker, hallucination_batcher)
 
         actual_errors = checker.total_errors_found
@@ -835,28 +911,56 @@ def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batch
     return []
 
 
-def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence[Dict[str, Any]], debug_mode: bool) -> None:
+def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence[Dict[str, Any]], debug_mode: bool, verification_cache: Optional[BulkVerificationCache] = None) -> None:
     paper_errors: List[Dict[str, Any]] = []
     if not bibliography:
         return
 
-    if checker.enable_parallel and len(bibliography) > 1:
-        results: Dict[int, Any] = {}
-        with ThreadPoolExecutor(max_workers=checker.max_workers, thread_name_prefix='BulkReference') as executor:
-            future_map = {
-                executor.submit(checker.verify_reference, paper, reference): index
-                for index, reference in enumerate(bibliography)
-            }
-            for future in as_completed(future_map):
-                index = future_map[future]
-                try:
-                    results[index] = future.result()
-                except Exception as exc:
-                    logger.error('Reference %d verification failed: %s', index, exc)
-                    results[index] = ([{'error_type': 'processing_failed', 'error_details': f'Internal error: {exc}'}], None, None)
-        ordered_results = [results[index] for index in range(len(bibliography))]
-    else:
-        ordered_results = [checker.verify_reference(paper, reference) for reference in bibliography]
+    # Split references into cached hits and uncached misses
+    cached_results: Dict[int, Any] = {}
+    uncached_indices: List[int] = []
+    for index, reference in enumerate(bibliography):
+        if verification_cache is not None:
+            cached = verification_cache.get(reference)
+            if cached is not None:
+                cached_results[index] = cached
+                continue
+        uncached_indices.append(index)
+
+    # Verify only uncached references
+    fresh_results: Dict[int, Any] = {}
+    if uncached_indices:
+        uncached_refs = [(index, bibliography[index]) for index in uncached_indices]
+        if checker.enable_parallel and len(uncached_refs) > 1:
+            with ThreadPoolExecutor(max_workers=checker.max_workers, thread_name_prefix='BulkReference') as executor:
+                future_map = {
+                    executor.submit(checker.verify_reference, paper, ref): idx
+                    for idx, ref in uncached_refs
+                }
+                for future in as_completed(future_map):
+                    idx = future_map[future]
+                    try:
+                        fresh_results[idx] = future.result()
+                    except Exception as exc:
+                        logger.error('Reference %d verification failed: %s', idx, exc)
+                        fresh_results[idx] = ([{'error_type': 'processing_failed', 'error_details': f'Internal error: {exc}'}], None, None)
+        else:
+            for idx, ref in uncached_refs:
+                fresh_results[idx] = checker.verify_reference(paper, ref)
+
+        # Store fresh results in cache
+        if verification_cache is not None:
+            for idx, ref in uncached_refs:
+                if idx in fresh_results:
+                    verification_cache.put(ref, fresh_results[idx])
+
+    # Merge cached + fresh in original order
+    ordered_results = []
+    for index in range(len(bibliography)):
+        if index in cached_results:
+            ordered_results.append(cached_results[index])
+        else:
+            ordered_results.append(fresh_results[index])
 
     for reference, result in zip(bibliography, ordered_results):
         errors, reference_url, verified_data = result

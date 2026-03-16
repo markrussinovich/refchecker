@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from refchecker.core.bulk_pipeline import BulkHallucinationBatcher, BulkLLMExtractionBatcher, BulkProgressReporter
+from refchecker.core.bulk_pipeline import BulkHallucinationBatcher, BulkLLMExtractionBatcher, BulkProgressReporter, BulkVerificationCache
 
 
 class _FakeExtractionProvider:
@@ -101,3 +101,51 @@ def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
     assert 'errors=2' in output
     assert 'Totals: refs=10' in output
     assert 'https://example.com/paper-1' in output
+
+
+def test_verification_cache_hit_and_miss():
+    cache = BulkVerificationCache()
+
+    ref_a = {'title': 'Attention Is All You Need', 'authors': ['Ashish Vaswani'], 'year': '2017'}
+    ref_b = {'title': 'Deep Residual Learning for Image Recognition', 'authors': ['Kaiming He'], 'year': '2016'}
+
+    # First lookup is a miss
+    assert cache.get(ref_a) is None
+    assert cache.misses == 1
+    assert cache.hits == 0
+
+    # Store result
+    result_a = ([{'error_type': 'year', 'error_details': 'off by one'}], 'https://arxiv.org/abs/1706.03762', {'title': 'Attention Is All You Need'})
+    cache.put(ref_a, result_a)
+    assert cache.size == 1
+
+    # Second lookup is a hit
+    cached = cache.get(ref_a)
+    assert cached is result_a
+    assert cache.hits == 1
+    assert cache.misses == 1
+
+    # Different reference is a miss
+    assert cache.get(ref_b) is None
+    assert cache.misses == 2
+
+    # Same title from different paper (slightly different author format) still hits
+    # because last name 'Vaswani' normalizes the same way
+    ref_a_variant = {'title': 'Attention Is All You Need', 'authors': ['A. Vaswani'], 'year': '2017'}
+    assert cache.get(ref_a_variant) is result_a
+
+    # Truly different first author last name is a miss
+    ref_a_diff_author = {'title': 'Attention Is All You Need', 'authors': ['Noam Shazeer'], 'year': '2017'}
+    assert cache.get(ref_a_diff_author) is None
+
+    # But exact same normalized key hits
+    ref_a_exact = {'title': '  attention is all you need  ', 'authors': ['Ashish Vaswani'], 'year': '2017'}
+    assert cache.get(ref_a_exact) is result_a
+
+
+def test_verification_cache_skips_short_titles():
+    cache = BulkVerificationCache()
+    ref = {'title': 'Short', 'authors': ['A'], 'year': '2020'}
+    cache.put(ref, 'should_not_store')
+    assert cache.size == 0
+    assert cache.get(ref) is None
