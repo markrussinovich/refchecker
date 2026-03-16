@@ -623,7 +623,9 @@ class NonArxivReferenceChecker:
             # Clean up the title for search using centralized utility function
             cleaned_title = clean_title_for_search(title)
 
-            # Fast path: try exact title match endpoint first (~25% faster than search)
+            # Try exact title match endpoint first — faster than relevance search.
+            # If it finds a match (even partial), use it and skip the search.
+            # Only fall through to the slower search if match returns nothing.
             match_result = self.match_paper_by_title(cleaned_title)
             if match_result:
                 match_title = match_result.get('title', '')
@@ -635,9 +637,11 @@ class NonArxivReferenceChecker:
                     paper_data = match_result
                     found_title = match_title
                     logger.debug(f"Found paper by title match with similarity {match_score:.2f}: {cleaned_title}")
+                else:
+                    logger.debug(f"Title match returned low-score result ({match_score:.2f}), skipping search")
 
-            # Slow path: fall back to relevance search if title match didn't work
-            if not paper_data:
+            # Fall back to relevance search ONLY if match endpoint returned nothing
+            if not paper_data and not match_result:
                 search_results = self.search_paper(cleaned_title, year)
 
                 if search_results:
