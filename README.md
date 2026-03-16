@@ -1,8 +1,24 @@
 # RefChecker
 
-Validate reference accuracy in academic papers. Useful for authors checking bibliographies and reviewers ensuring citations are authentic. RefChecker verifies citations against Semantic Scholar, OpenAlex, and CrossRef.
+<p align="center">
+  <strong>Validate reference accuracy in academic papers.</strong><br>
+  Catch citation errors, fabricated references, and metadata mismatches before they reach reviewers.
+</p>
+
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#features">Features</a> •
+  <a href="#web-ui">Web UI</a> •
+  <a href="#cli">CLI</a> •
+  <a href="#hallucination-detection">Hallucination Detection</a> •
+  <a href="#deployment">Deployment</a>
+</p>
+
+RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, and **CrossRef**, and uses LLM-powered web search to flag likely fabricated references. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
+
+---
 
 ## Contents
 
@@ -10,16 +26,22 @@ Validate reference accuracy in academic papers. Useful for authors checking bibl
 - [Features](#features)
 - [Sample Output](#sample-output)
 - [Install](#install)
-- [Run](#run)
-  - [Web UI](#web-ui)
-  - [Multi-User Hosted Server (OAuth)](#multi-user-hosted-server-oauth)
+- [Web UI](#web-ui)
+- [CLI](#cli)
+- [Hallucination Detection](#hallucination-detection)
+- [Bulk Checking](#bulk-checking)
+- [OpenReview Integration](#openreview-integration)
+- [Output & Reports](#output--reports)
+- [Deployment](#deployment)
   - [Docker](#docker)
-  - [CLI](#cli)
-- [Output](#output)
-- [Configure](#configure)
+  - [Multi-User Server (OAuth)](#multi-user-server-oauth)
+  - [Deploy to Render](#deploy-to-render)
+- [Configuration](#configuration)
 - [Local Database](#local-database)
 - [Testing](#testing)
 - [License](#license)
+
+---
 
 ## Quick Start
 
@@ -46,26 +68,37 @@ academic-refchecker --paper 1706.03762
 academic-refchecker --paper /path/to/paper.pdf
 ```
 
-> **Performance**: Set `SEMANTIC_SCHOLAR_API_KEY` for 1-2s per reference vs 5-10s without.
+> **Tip:** Set `SEMANTIC_SCHOLAR_API_KEY` for 1-2s per reference vs 5-10s without.
+
+---
 
 ## Features
 
-- **Multiple formats**: ArXiv papers, PDFs, LaTeX, text files
-- **LLM-powered extraction**: OpenAI, Anthropic, Google, Azure, vLLM
-- **Multi-source verification**: Semantic Scholar, OpenAlex, CrossRef
-- **Comprehensive checks**: Titles, authors, years, venues, DOIs, ArXiv IDs
-- **Smart matching**: Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained)
-- **Detailed reports**: Errors, warnings, corrected references
-- **Hallucination triage mode**: Bulk-scan papers and surface only high-confidence citation problems
-- **Bulk web checks**: Upload multiple files or a ZIP in the Web UI to validate many papers at once
+| Category | What it does |
+|----------|-------------|
+| **Input formats** | ArXiv IDs/URLs, PDFs, LaTeX (.tex), BibTeX (.bib/.bbl), plain text |
+| **Verification sources** | Semantic Scholar, OpenAlex, CrossRef — cross-checked for accuracy |
+| **LLM extraction** | OpenAI, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
+| **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
+| **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
+| **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters + LLM web search |
+| **Bulk checking** | Upload multiple files or a ZIP in the Web UI; use `--paper-list` or `--openreview` in the CLI |
+| **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
+| **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
+| **Corrections** | Auto-generates corrected BibTeX, plain-text, and bibitem entries for each error |
+| **Web UI** | Real-time progress, history sidebar, batch tracking, export (Markdown/text/BibTeX), dark mode |
+| **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
+
+---
 
 ## Sample Output
 
-**Web UI**
+### Web UI
 
+<!-- screenshot: webui-main — main UI showing a completed check with stats badges and reference cards -->
 ![RefChecker Web UI](assets/webui.png)
 
-**CLI**
+### CLI — Single Paper
 
 ```
 📄 Processing: Attention Is All You Need
@@ -89,69 +122,356 @@ academic-refchecker --paper /path/to/paper.pdf
 ❌ Total errors: 55  ⚠️ Total warnings: 16  ❓ Unverified: 15
 ```
 
+### CLI — Hallucination Flagging
+
+```
+[5/7] Efficient Neural Network Pruning Using Iterative Sparse Retraining
+      Shuang Li, Yifan Chen | 2019
+      ❓ Could not verify
+      🚩 Hallucination assessment: LIKELY
+         A web search for the exact title and authors yields no results in any
+         academic database. The paper does not appear in ICML 2019 proceedings,
+         indicating it is probably fabricated.
+```
+
+---
+
 ## Install
 
-### PyPI (Recommended)
+### PyPI (recommended)
 
 ```bash
 pip install academic-refchecker[llm,webui]  # Web UI + CLI + LLM providers
-pip install academic-refchecker             # CLI only
+pip install academic-refchecker[llm]        # CLI + LLM providers
+pip install academic-refchecker             # CLI only (regex extraction)
 ```
 
-### From Source (Development)
+### From Source (development)
 
 ```bash
 git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[llm,webui]"
+pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 ```
 
-**Requirements:** Python 3.7+ (3.10+ recommended). Node.js 18+ is only needed for Web UI development.
+**Requirements:** Python 3.7+ (3.10+ recommended). Node.js 18+ is only needed for Web UI frontend development.
 
-## Run
+---
+
+## Web UI
+
+The Web UI provides real-time progress, check history, batch tracking, and one-click export of corrections.
+
+```bash
+refchecker-webui                    # default: http://localhost:8000
+refchecker-webui --port 9000        # custom port
+```
+
+**Key features:**
+
+- **Single check** — paste an ArXiv URL/ID or upload a PDF/BibTeX/LaTeX file
+- **Bulk check** — upload multiple files (up to 50) or a single ZIP archive; papers are grouped into a batch with a progress bar
+- **Bulk URL list** — paste up to 50 URLs or ArXiv IDs (one per line) to check in a single batch
+- **Status dashboard** — filterable badge counts for errors, warnings, unverified, and hallucinated references
+- **Reference cards** — per-reference details with corrections, source links (Semantic Scholar, ArXiv, DOI), and hallucination assessment
+- **Export** — download corrections as Markdown, plain text, or BibTeX
+- **History sidebar** — browse and re-run previous checks; batches are grouped together
+- **Settings** — LLM provider/model selection, API key management, dark/light/system theme
+
+<!-- screenshot: webui-batch-progress — batch progress bar during a multi-paper check -->
+<!-- screenshot: webui-hallucination-card — reference card with a 🚩 hallucination flag and explanation -->
+<!-- screenshot: webui-stats-badges — stats section showing clickable filter badges for errors, warnings, etc. -->
+
+#### Frontend Development
+
+```bash
+cd web-ui && npm install && npm start     # http://localhost:5173
+```
+
+Or run backend and frontend separately:
+
+```bash
+# Terminal 1 — Backend
+python -m uvicorn backend.main:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd web-ui && npm run dev
+```
+
+See [web-ui/README.md](web-ui/README.md) for more.
+
+---
+
+## CLI
+
+```bash
+# ArXiv (ID or URL)
+academic-refchecker --paper 1706.03762
+academic-refchecker --paper https://arxiv.org/abs/1706.03762
+
+# Local files (PDF, LaTeX, text, BibTeX)
+academic-refchecker --paper paper.pdf
+academic-refchecker --paper paper.tex
+academic-refchecker --paper refs.bib
+
+# With LLM extraction (recommended for complex bibliographies)
+academic-refchecker --paper paper.pdf --llm-provider anthropic
+
+# Save human-readable output
+academic-refchecker --paper 1706.03762 --output-file errors.txt
+
+# Save structured report (JSON, JSONL, CSV, or text)
+academic-refchecker --paper 1706.03762 --report-file report.json --report-format json
+
+# Bulk: check a list of papers
+academic-refchecker --paper-list papers.txt --report-file report.json
+
+# OpenReview: fetch and scan an entire venue
+academic-refchecker --openreview iclr2024 --report-file report.json
+```
+
+### All CLI Options
+
+```
+Input (choose one):
+  --paper PAPER              ArXiv ID, URL, PDF, LaTeX, text, or BibTeX file
+  --paper-list PATH          Newline-delimited file of paper specs (URLs, IDs, paths)
+  --openreview VENUE         Fetch papers from an OpenReview venue (e.g. iclr2024)
+  --openreview-status MODE   accepted (default) or submitted
+
+LLM:
+  --llm-provider PROVIDER    openai, anthropic, google, azure, or vllm
+  --llm-model MODEL          Override the default model for the provider
+  --llm-endpoint URL         Custom endpoint (e.g. local vLLM server)
+  --llm-parallel-chunks      Enable parallel LLM chunk processing (default)
+  --llm-no-parallel-chunks   Disable parallel LLM chunk processing
+  --llm-max-chunk-workers N  Max workers for parallel LLM chunks (default: 4)
+
+Verification:
+  --db-path PATH             Path to local Semantic Scholar database
+  --semantic-scholar-api-key KEY   Override SEMANTIC_SCHOLAR_API_KEY env var
+  --disable-parallel         Run verification sequentially
+  --max-workers N            Max parallel verification threads (default: 6)
+
+Output:
+  --output-file [PATH]       Human-readable output (default: reference_errors.txt)
+  --report-file PATH         Structured report (includes hallucination assessments)
+  --report-format FORMAT     json (default), jsonl, csv, or text
+  --debug                    Verbose logging
+```
+
+---
+
+## Hallucination Detection
+
+RefChecker automatically evaluates every flagged reference for potential fabrication using a two-stage pipeline.
+
+### Stage 1 — Deterministic Pre-filter (no LLM needed)
+
+References are flagged for deeper inspection when they exhibit:
+
+- **Unverified status** — not found in Semantic Scholar, OpenAlex, or CrossRef
+- **Author overlap below 60%** — fewer than 60% of cited authors match any known paper (applies to references with 3+ authors)
+- **Identifier conflicts** — DOI or ArXiv ID resolves to a different paper
+- **URL verification failure** — cited URL is broken or points to a different paper
+
+References with only minor issues (year off by one, venue variation) are not flagged.
+
+### Stage 2 — LLM Web Search Verification
+
+Flagged references are sent to the configured LLM for a web search. The LLM searches for the exact title, authors, and venue to determine whether the paper actually exists.
+
+Each reference receives a verdict:
+
+| Verdict | Meaning |
+|---------|---------|
+| 🚩 **LIKELY** | Probably fabricated — no evidence the paper exists |
+| ❓ **UNCERTAIN** | Inconclusive — may exist but could not be confirmed |
+| ✅ **UNLIKELY** | Real paper — found in academic databases or on the web |
+
+Hallucination assessments appear inline in CLI output, in Web UI reference cards, and in structured reports (JSON/JSONL/CSV) via the `hallucination_assessment` field.
+
+---
+
+## Bulk Checking
 
 ### Web UI
 
-The Web UI shows live progress, history, and export (including corrected values).
+Upload multiple files or a ZIP archive to check up to 50 papers in a single batch. Alternatively, paste a list of URLs or ArXiv IDs (one per line). Batches track progress per paper and appear as a group in the history sidebar.
 
-```bash
-refchecker-webui --port 8000
+Supported file types: **PDF, TXT, TEX, BIB, BBL, ZIP**.
+
+<!-- screenshot: webui-bulk-upload — file drop zone with multiple files selected -->
+
+### CLI
+
+Create a text file with one paper per line (ArXiv IDs, URLs, or local file paths):
+
+```text
+1706.03762
+https://openreview.net/pdf?id=ZG3RaNIsO8
+paper/local_sample.bib
+/path/to/paper.pdf
 ```
 
-*Tip: You can bulk-check multiple papers by selecting several files or a single ZIP; the Web UI will group them into a batch in the history sidebar.*
-
-#### Development (frontend)
+Then run:
 
 ```bash
-cd web-ui
-npm install
-npm start
+academic-refchecker --paper-list papers.txt --report-file bulk_report.json
 ```
 
-Open **http://localhost:5173**.
+The report includes per-paper rollups and a cross-paper summary with flagged reference counts.
 
-Alternative (separate servers):
+---
+
+## OpenReview Integration
+
+Scan all accepted (or submitted) papers for an OpenReview venue in one command:
 
 ```bash
-# Terminal 1
-python -m uvicorn backend.main:app --reload --port 8000
+# Scan accepted papers
+academic-refchecker --openreview iclr2024 --report-file report.json
 
-# Terminal 2
-cd web-ui
-npm run dev
+# Scan all public submissions instead
+academic-refchecker --openreview iclr2024 --openreview-status submitted --report-file report.json
 ```
 
-Verify the backend is running:
+**Supported venues include:** ICLR, NeurIPS, ICML, AISTATS, AAAI, IJCAI — use formats like `iclr2024`, `NeurIPS-2023`, or `neurips_2024`.
+
+The command fetches the paper list from the OpenReview API, writes it to `output/openreview_<venue>_<status>.txt`, and then runs a bulk scan. The structured report includes per-paper rollups with flagged record counts and error-type distributions, making it easy to triage an entire conference for citation problems.
+
+---
+
+## Output & Reports
+
+### Result Types
+
+| Type | Description | Examples |
+|------|-------------|----------|
+| ❌ **Error** | Critical issues needing correction | Author/title/DOI mismatches, incorrect ArXiv IDs |
+| ⚠️ **Warning** | Minor issues to review | Year differences, venue variations |
+| ℹ️ **Suggestion** | Recommended improvements | Add missing ArXiv/DOI URLs |
+| ❓ **Unverified** | Could not verify against any source | Rare publications, preprints |
+| 🚩 **Hallucination** | Likely fabricated reference | Unverifiable with rich metadata, identifier conflicts |
+
+### Structured Reports
+
+Write machine-readable reports with `--report-file` and `--report-format`:
 
 ```bash
-curl http://localhost:8000/
+academic-refchecker --paper 1706.03762 --report-file report.json --report-format json
 ```
 
-Web UI documentation: see [web-ui/README.md](web-ui/README.md).
+<details>
+<summary>Example JSON report structure</summary>
 
-### Multi-User Hosted Server (OAuth)
+```json
+{
+  "generated_at": "2026-03-15T19:50:52Z",
+  "summary": {
+    "total_papers_processed": 1,
+    "total_references_processed": 7,
+    "total_errors_found": 2,
+    "total_warnings_found": 2,
+    "total_unverified_refs": 4,
+    "flagged_records": 3,
+    "flagged_papers": 1
+  },
+  "papers": [
+    {
+      "source_paper_id": "local_hallucination_7ref_sample",
+      "source_title": "Hallucination 7Ref Sample",
+      "total_records": 6,
+      "flagged_records": 3,
+      "max_flag_level": "high",
+      "error_type_counts": { "unverified": 3, "multiple": 2, "year (v1 vs v2 update)": 1 },
+      "reason_counts": { "unverified": 3, "web_search_not_found": 3 }
+    }
+  ],
+  "records": [
+    {
+      "ref_title": "Deep Residual Learning for Image Recognition",
+      "ref_authors_cited": "Jian He, Xiangyu Zhang, Shaoqing Ren, Jian Sun",
+      "ref_authors_correct": "Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun",
+      "error_type": "multiple",
+      "error_details": "- First author mismatch ...\n- Year mismatch ...",
+      "ref_corrected_bibtex": "@inproceedings{he2016resnet, ... year = {2015} ...}",
+      "hallucination_assessment": { "verdict": "UNLIKELY", "explanation": "..." }
+    }
+  ]
+}
+```
 
-By default, RefChecker runs in **single-user mode** — no login required. To enable multi-user mode with OAuth authentication, set the `REFCHECKER_MULTIUSER=true` environment variable. In this mode every visitor must sign in via OAuth (Google, GitHub, or Microsoft) before using the app. LLM API keys are entered once by each user in the Settings panel, saved in the **browser's `localStorage`**, and sent in the request body on every check — they are never stored on the server.
+</details>
+
+<details>
+<summary>CLI output examples</summary>
+
+```
+❌ Error: First author mismatch: cited 'Jian He', actual 'Kaiming He'
+❌ Error: DOI mismatch: cited '10.5555/3295222.3295349', actual '10.48550/arXiv.1706.03762'
+⚠️ Warning: Year mismatch: cited '2019', actual '2018'
+ℹ️ Suggestion: Add ArXiv URL https://arxiv.org/abs/1706.03762
+❓ Could not verify: Llama guard (M. A. Research, 2024)
+🚩 Hallucination assessment: LIKELY — no matching paper found in academic databases
+```
+
+</details>
+
+Each report record includes the original reference, error details, corrected metadata (BibTeX, plain text, bibitem), verified URLs, and hallucination assessment when applicable.
+
+---
+
+## Deployment
+
+### Docker
+
+Pre-built multi-architecture images are published to GitHub Container Registry on every release.
+
+```bash
+# Quick start
+docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
+
+# With LLM API key (recommended)
+docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+
+# Persistent data
+docker run -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=your_key \
+  -v refchecker-data:/app/data \
+  ghcr.io/markrussinovich/refchecker:latest
+```
+
+Other LLM providers:
+
+```bash
+docker run -p 8000:8000 -e OPENAI_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+docker run -p 8000:8000 -e GOOGLE_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
+```
+
+#### Docker Compose
+
+```bash
+git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
+cp .env.example .env   # Add your API keys
+docker compose up -d
+```
+
+```bash
+docker compose logs -f    # View logs
+docker compose down       # Stop
+docker compose pull       # Update to latest
+```
+
+| Tag | Description | Arch | Size |
+|-----|-------------|------|------|
+| `latest` | Latest stable release | amd64, arm64 | ~800MB |
+| `X.Y.Z` | Specific version (e.g., `2.0.18`) | amd64, arm64 | ~800MB |
+
+### Multi-User Server (OAuth)
+
+By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. LLM API keys are entered per-user in the Settings panel, stored in the **browser's `localStorage`**, and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -159,40 +479,29 @@ By default, RefChecker runs in **single-user mode** — no login required. To en
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Copy the output — this is your `JWT_SECRET_KEY`.
-
 #### 2. Register an OAuth Application
 
 Configure **at least one** provider:
 
-**Google** — [Google Cloud Console](https://console.cloud.google.com/apis/credentials) → *Create credentials → OAuth 2.0 Client ID → Web application*
-- Authorised redirect URI: `https://<your-domain>/api/auth/callback/google`
-
-**GitHub** — [GitHub Settings › Developer settings › OAuth Apps](https://github.com/settings/developers) → *New OAuth App*
-- Authorization callback URL: `https://<your-domain>/api/auth/callback/github`
-
-**Microsoft** — [Azure portal › App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) → *New registration*
-- Redirect URI: `https://<your-domain>/api/auth/callback/microsoft`
+| Provider | Registration URL | Callback URL |
+|----------|-----------------|--------------|
+| **Google** | [Google Cloud Console](https://console.cloud.google.com/apis/credentials) | `https://<domain>/api/auth/callback/google` |
+| **GitHub** | [GitHub Developer Settings](https://github.com/settings/developers) | `https://<domain>/api/auth/callback/github` |
+| **Microsoft** | [Azure App Registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps) | `https://<domain>/api/auth/callback/microsoft` |
 
 #### 3. Configure Environment Variables
 
 ```bash
-git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
-
 ```ini
-# Enable multi-user mode
 REFCHECKER_MULTIUSER=true
-
-# Required
 JWT_SECRET_KEY=<output from step 1>
 SITE_URL=https://<your-domain>
 HTTPS_ONLY=true
 
-# At least one OAuth provider (add whichever you registered in step 2)
+# At least one OAuth provider
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 
@@ -202,29 +511,18 @@ GITHUB_CLIENT_SECRET=...
 MS_CLIENT_ID=...
 MS_CLIENT_SECRET=...
 
-# Optional tuning
-ADMIN_EMAILS=your@email.com   # also grants admin to specific emails (first user is auto-admin)
+# Optional
+ADMIN_EMAILS=your@email.com   # comma-separated; first sign-in is auto-admin
 MAX_CHECKS_PER_USER=3         # max concurrent checks per user (default: 3)
 ```
 
-#### 4. Launch with Docker Compose
+#### 4. Launch
 
 ```bash
 docker compose up -d
 ```
 
-The server starts on port **8000**. Place it behind a TLS-terminating reverse proxy (nginx, Caddy, etc.) for HTTPS.
-
-Verify it is running:
-
-```bash
-curl http://localhost:8000/api/auth/providers
-# {"providers":["google","github"]}
-```
-
-#### Local / Development Launch
-
-Without Docker:
+Or without Docker:
 
 ```bash
 pip install "academic-refchecker[llm,webui]"
@@ -232,170 +530,41 @@ REFCHECKER_MULTIUSER=true JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CL
   refchecker-webui --port 8000
 ```
 
-Or with hot-reload for development:
+Verify:
 
 ```bash
-# Terminal 1 — API
-REFCHECKER_MULTIUSER=true JWT_SECRET_KEY=<secret> GOOGLE_CLIENT_ID=... GOOGLE_CLIENT_SECRET=... \
-  python -m uvicorn backend.main:app --reload --port 8000
-
-# Terminal 2 — Frontend (http://localhost:5173)
-cd web-ui && npm run dev
+curl http://localhost:8000/api/auth/providers
+# {"providers":["google","github"]}
 ```
 
-> **Tip:** You can also place these variables in a `.env` file (see `.env.example`). The server loads it automatically on startup.
+**Notes:**
 
-#### Notes
+- The first user to sign in is automatically admin. Add more via `ADMIN_EMAILS`.
+- Each user may run up to `MAX_CHECKS_PER_USER` concurrent checks (default 3). The 4th returns HTTP 429.
+- The CLI is unaffected — `academic-refchecker` works without any auth configuration.
+- Place the server behind a TLS-terminating reverse proxy (nginx, Caddy) for HTTPS.
 
-- **Admin access**: The first user to sign in is automatically granted admin rights. Additional admins can be designated via the `ADMIN_EMAILS` env var (comma-separated list of email addresses).
-- **LLM API keys**: Each user enters their own key in *Settings → API Keys*. Keys are saved in `localStorage` and sent per-request in the request body — never stored on or logged by the server.
-- **Rate limiting**: Each user may run up to `MAX_CHECKS_PER_USER` concurrent checks (default 3). The 4th simultaneous request returns HTTP 429.
-- **Single-user mode**: Without `REFCHECKER_MULTIUSER=true`, the server runs in single-user mode with no login screen — ideal for local use and the CLI.
-- **CLI mode is unaffected**: `academic-refchecker` (CLI) does not require OAuth and continues to work without any auth configuration.
-
-### Docker
-
-Pre-built multi-architecture images are published to GitHub Container Registry on every release.
-
-#### Quick Start
-
-```bash
-docker run -p 8000:8000 ghcr.io/markrussinovich/refchecker:latest
-```
-
-Open **http://localhost:8000** in your browser.
-
-#### With LLM API Key
-
-Pass your API key for LLM-powered reference extraction (recommended):
-
-```bash
-# Anthropic Claude (recommended)
-docker run -p 8000:8000 -e ANTHROPIC_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-
-# OpenAI
-docker run -p 8000:8000 -e OPENAI_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-
-# Google Gemini
-docker run -p 8000:8000 -e GOOGLE_API_KEY=your_key ghcr.io/markrussinovich/refchecker:latest
-```
-
-#### Persistent Data
-
-Mount a volume to persist check history and settings between restarts:
-
-```bash
-docker run -p 8000:8000 \
-  -e ANTHROPIC_API_KEY=your_key \
-  -v refchecker-data:/app/data \
-  ghcr.io/markrussinovich/refchecker:latest
-```
-
-#### Docker Compose
-
-For easier configuration with an `.env` file:
-
-```bash
-git clone https://github.com/markrussinovich/refchecker.git && cd refchecker
-cp .env.example .env  # Add your API keys
-docker compose up -d
-```
-
-Common commands:
-
-```bash
-docker compose logs -f    # View logs
-docker compose down       # Stop
-docker compose pull       # Update to latest
-```
-
-#### Available Tags
-
-| Tag | Description | Arch | Size |
-|-----|-------------|------|------|
-| `latest` | Latest stable release | amd64, arm64 | ~800MB |
-| `X.Y.Z` | Specific version (e.g., `2.0.18`) | amd64, arm64 | ~800MB |
-
-#### Deploy to Render
+### Deploy to Render
 
 RefChecker includes a [`render.yaml`](render.yaml) Blueprint for one-click deployment to [Render](https://render.com):
 
 1. Fork this repo (or connect your own copy).
 2. On Render, click **New +** → **Blueprint** → select the repo.
 3. Render reads `render.yaml` and creates the service with a persistent disk.
-4. Set the required environment variables in the Render dashboard (**Environment** tab):
-   - `SITE_URL` — your public URL **including `https://`** (e.g., `https://refchecker-xxxx.onrender.com` or `https://www.refchecker.net`). This must match exactly — OAuth will fail if the scheme is `http://` instead of `https://`.
-   - `HTTPS_ONLY` — set to `true` for production (ensures auth cookies have the `Secure` flag).
-   - `REFCHECKER_DATA_DIR` — set to `/data` (matches the persistent disk mount path).
+4. Set environment variables in the Render dashboard (**Environment** tab):
+   - `SITE_URL` — your public URL **including `https://`** (must match exactly — OAuth fails otherwise).
+   - `HTTPS_ONLY=true` for production.
+   - `REFCHECKER_DATA_DIR=/data` (matches the persistent disk mount).
    - At least one OAuth provider's `CLIENT_ID` / `CLIENT_SECRET`.
-5. If deploying **without the Blueprint** (manual service), add a persistent disk: **Disks** → **Add Disk** → Name: `refchecker-data`, Mount Path: `/data`, Size: 1 GB.
-6. Register each provider's callback URL as `https://<your-url>/api/auth/callback/{google,github,microsoft}`.
+5. Register each provider's callback URL as `https://<your-url>/api/auth/callback/{google,github,microsoft}`.
 
-> **Note:** Render assigns the `PORT` dynamically — the app reads it automatically. The persistent disk at `/data` stores the SQLite database and uploaded files, so data survives redeployments. For other PaaS hosts (Railway, Fly.io), the same Docker image works — just set `PORT`, `REFCHECKER_DATA_DIR`, and the auth env vars.
+> **Note:** The persistent disk at `/data` stores the SQLite database and uploaded files, so data survives redeployments. For other PaaS hosts (Railway, Fly.io), the same Docker image works — set `PORT`, `REFCHECKER_DATA_DIR`, and the auth env vars.
 
-### CLI
+---
 
-```bash
-# ArXiv (ID or URL)
-academic-refchecker --paper 1706.03762
-academic-refchecker --paper https://arxiv.org/abs/1706.03762
+## Configuration
 
-# Local files
-academic-refchecker --paper paper.pdf
-academic-refchecker --paper paper.tex
-academic-refchecker --paper paper.txt
-academic-refchecker --paper refs.bib
-
-# Faster/offline verification (local DB)
-academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
-
-# Save results
-academic-refchecker --paper 1706.03762 --output-file errors.txt
-
-# Bulk verification
-academic-refchecker --paper-list iclr_papers.txt --report-file report.json
-
-# Fetch accepted OpenReview papers, write output/openreview_iclr2024_accepted.txt, then bulk-scan them
-academic-refchecker --openreview iclr2024 --report-file report.json
-
-# Fetch all public submissions instead
-academic-refchecker --openreview iclr2024 --openreview-status submitted --report-file report.json
-```
-
-Hallucination detection runs automatically on every reference. References that can't be verified and show strong fabrication signals (unverified rich citations, identifier conflicts, multiple major metadata mismatches) are flagged with a 🚩 hallucination assessment in the output.
-
-## Output
-
-RefChecker reports these result types:
-
-| Type | Description | Examples |
-|------|-------------|----------|
-| ❌ **Error** | Critical issues needing correction | Author/title/DOI mismatches, incorrect ArXiv IDs |
-| ⚠️ **Warning** | Minor issues to review | Year differences, venue variations |
-| ℹ️ **Suggestion** | Recommended improvements | Add missing ArXiv/DOI URLs, small metadata fixes |
-| ❓ **Unverified** | Could not verify against any source | Rare publications, preprints |
-| 🚩 **Hallucination** | Likely fabricated reference | Unverifiable with rich metadata, identifier conflicts |
-
-Verified references include discovered URLs (Semantic Scholar, ArXiv, DOI). Suggestions are non-blocking improvements. Hallucination flags include an explanation and, in structured rollups, the specific signals detected.
-
-You can write machine-readable JSON, JSONL, or CSV reports with `--report-file` and `--report-format`.
-
-<details>
-<summary>Detailed examples</summary>
-
-```
-❌ Error: First author mismatch: cited 'T. Xie', actual 'Zhao Xu'
-❌ Error: DOI mismatch: cited '10.5555/3295222.3295349', actual '10.48550/arXiv.1706.03762'
-⚠️ Warning: Year mismatch: cited '2024', actual '2023'
-ℹ️ Suggestion: Add ArXiv URL https://arxiv.org/abs/1706.03762
-❓ Could not verify: Llama guard (M. A. Research, 2024)
-```
-
-</details>
-
-## Configure
-
-### LLM
+### LLM Providers
 
 LLM-powered extraction improves accuracy with complex bibliographies. Claude Sonnet 4 performs best; GPT-4o may hallucinate DOIs.
 
@@ -415,38 +584,14 @@ academic-refchecker --paper paper.pdf --llm-provider openai --llm-model gpt-5.2-
 academic-refchecker --paper paper.pdf --llm-provider vllm --llm-model meta-llama/Llama-3.3-70B-Instruct
 ```
 
-#### Local models (vLLM)
+#### Local Models (vLLM)
 
-There is no separate “GPU Docker image”. For local inference, install the vLLM extra and run an OpenAI-compatible vLLM server:
+Run an OpenAI-compatible vLLM server for local inference:
 
 ```bash
 pip install "academic-refchecker[vllm]"
 python scripts/start_vllm_server.py --model meta-llama/Llama-3.3-70B-Instruct --port 8001
 academic-refchecker --paper paper.pdf --llm-provider vllm --llm-endpoint http://localhost:8001/v1
-```
-
-### Command Line
-
-```bash
---paper PAPER              # ArXiv ID, URL, or file path
---paper-list PATH          # Newline-delimited file of paper specs for bulk scans
---openreview VENUE         # Fetch accepted OpenReview papers like iclr2024 and bulk-scan them
---openreview-status MODE   # accepted (default) or submitted
---llm-provider PROVIDER    # openai, anthropic, google, azure, vllm
---llm-model MODEL          # Override default model
---db-path PATH             # Local database for offline verification
---output-file [PATH]       # Save results (default: reference_errors.txt)
---report-file PATH         # Structured report output (includes hallucination assessment)
---report-format FORMAT     # json, jsonl, csv, text
---debug                    # Verbose output
-```
-
-Example bulk input file:
-
-```text
-https://openreview.net/pdf?id=ZG3RaNIsO8
-https://openreview.net/pdf?id=fB0hRu9GZUS
-paper/local_sample.bib
 ```
 
 ### Environment Variables
@@ -460,6 +605,8 @@ export ANTHROPIC_API_KEY=your_key           # Also: OPENAI_API_KEY, GOOGLE_API_K
 export SEMANTIC_SCHOLAR_API_KEY=your_key    # Higher rate limits / faster verification
 ```
 
+---
+
 ## Local Database
 
 For offline verification or faster processing:
@@ -472,18 +619,23 @@ python scripts/download_db.py \
 academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
+---
+
 ## Testing
 
-490+ tests covering unit, integration, and end-to-end scenarios.
+680+ tests covering unit, integration, and end-to-end scenarios.
 
 ```bash
 pytest tests/                    # All tests
 pytest tests/unit/              # Unit only
+pytest tests/e2e/               # End-to-end (Playwright)
 pytest --cov=src tests/         # With coverage
 ```
 
 See [tests/README.md](tests/README.md) for details.
 
+---
+
 ## License
 
-MIT License - see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE).
