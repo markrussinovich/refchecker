@@ -7,12 +7,7 @@ work correctly, particularly for the "Neural machine translation in linear time"
 """
 
 import unittest
-import sys
-import os
 from unittest.mock import Mock, patch
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from refchecker.core.refchecker import ArxivReferenceChecker
 

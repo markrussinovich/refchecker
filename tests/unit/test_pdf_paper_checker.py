@@ -4,12 +4,7 @@ Unit tests for PDF Paper Checker
 """
 
 import unittest
-import sys
-import os
 from unittest.mock import Mock, patch, MagicMock
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from refchecker.checkers.pdf_paper_checker import PDFPaperChecker
 

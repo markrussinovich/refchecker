@@ -29,6 +29,7 @@ import logging
 import re
 import html
 from typing import Dict, List, Tuple, Optional, Any, Union
+from refchecker.utils.doi_utils import extract_doi_from_url
 from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from refchecker.utils.error_utils import format_title_mismatch
 from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
@@ -178,57 +179,6 @@ class NonArxivReferenceChecker:
         self._api_failed = True
         self._failure_reason = "rate_limited_or_timeout"
         return None
-    
-    def extract_doi_from_url(self, url: str) -> Optional[str]:
-        """
-        Extract DOI from a URL
-        
-        Args:
-            url: URL that might contain a DOI
-            
-        Returns:
-            Extracted DOI or None if not found
-        """
-        if not url:
-            return None
-        
-        # Check if it's a DOI URL
-        if 'doi.org' in url:
-            # Extract the DOI part after doi.org/
-            match = re.search(r'doi\.org/([^/\s]+)', url)
-            if match:
-                return match.group(1)
-        
-        return None
-    
-    def normalize_author_name(self, name: str) -> str:
-        """
-        Normalize author name for comparison
-        
-        Args:
-            name: Author name
-            
-        Returns:
-            Normalized name
-        """
-        # Remove reference numbers (e.g., "[1]")
-        name = re.sub(r'^\[\d+\]', '', name)
-        
-        # Use common normalization function
-        return normalize_text(name)
-    
-    def compare_authors(self, cited_authors: List[str], correct_authors: List[Dict[str, str]]) -> Tuple[bool, str]:
-        """
-        Compare author lists to check if they match (delegates to shared utility)
-        
-        Args:
-            cited_authors: List of author names as cited
-            correct_authors: List of author data from Semantic Scholar
-            
-        Returns:
-            Tuple of (match_result, error_message)
-        """
-        return compare_authors(cited_authors, correct_authors)
     
     def get_venue_from_paper_data(self, paper_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -584,7 +534,7 @@ class NonArxivReferenceChecker:
         if 'doi' in reference and reference['doi']:
             doi = reference['doi']
         elif url:
-            doi = self.extract_doi_from_url(url)
+            doi = extract_doi_from_url(url)
         
         # If we don't have paper data yet, try DOI
         if not paper_data and doi:
@@ -769,7 +719,7 @@ class NonArxivReferenceChecker:
         
         # Verify authors
         if authors:
-            authors_match, author_error = self.compare_authors(authors, paper_data.get('authors', []))
+            authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:
                 # Check if we have an exact ArXiv ID match - if so, be more lenient with author mismatches

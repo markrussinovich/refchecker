@@ -5,10 +5,6 @@ Integration tests for API interactions and external service integration.
 import pytest
 import requests
 from unittest.mock import Mock, patch, MagicMock
-# Add src to path
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 try:
     from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker as SemanticScholarChecker

@@ -30,6 +30,7 @@ import random
 import requests
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from importlib import import_module
 from typing import Dict, List, Tuple, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,23 @@ class EnhancedHybridReferenceChecker:
     """
     Enhanced hybrid reference checker with multiple API sources for improved reliability
     """
+
+    def _initialize_checker(self, module_name: str, class_name: str, log_name: str,
+                            *args: Any, error_level: str = 'warning', **kwargs: Any) -> Any:
+        """Initialize an optional checker and keep logging behavior consistent."""
+        try:
+            module = import_module(f'.{module_name}', package=__package__)
+            checker_class = getattr(module, class_name)
+            checker = checker_class(*args, **kwargs)
+            logger.debug(f"Enhanced Hybrid: {log_name} initialized")
+            return checker
+        except Exception as exc:
+            log_message = f"Enhanced Hybrid: Failed to initialize {log_name}: {exc}"
+            if error_level == 'error':
+                logger.error(log_message)
+            else:
+                logger.warning(log_message)
+            return None
     
     def __init__(self, semantic_scholar_api_key: Optional[str] = None, 
                  db_path: Optional[str] = None,
@@ -64,72 +82,48 @@ class EnhancedHybridReferenceChecker:
         # Initialize ArXiv Citation checker (authoritative source for ArXiv papers)
         self.arxiv_citation = None
         if enable_arxiv_citation:
-            try:
-                from .arxiv_citation import ArXivCitationChecker
-                self.arxiv_citation = ArXivCitationChecker()
-                logger.debug("Enhanced Hybrid: ArXiv Citation checker initialized")
-            except Exception as e:
-                logger.warning(f"Enhanced Hybrid: Failed to initialize ArXiv Citation checker: {e}")
+            self.arxiv_citation = self._initialize_checker(
+                'arxiv_citation', 'ArXivCitationChecker', 'ArXiv Citation checker'
+            )
         
         # Initialize local database checker if available
         self.local_db = None
         if db_path:
-            try:
-                from .local_semantic_scholar import LocalNonArxivReferenceChecker
-                self.local_db = LocalNonArxivReferenceChecker(db_path=db_path)
+            self.local_db = self._initialize_checker(
+                'local_semantic_scholar', 'LocalNonArxivReferenceChecker', 'local database', db_path=db_path
+            )
+            if self.local_db is not None:
                 logger.debug(f"Enhanced Hybrid: Local database enabled at {db_path}")
-            except Exception as e:
-                logger.warning(f"Enhanced Hybrid: Failed to initialize local database: {e}")
-                self.local_db = None
         
         # Initialize Semantic Scholar API
-        try:
-            from .semantic_scholar import NonArxivReferenceChecker
-            self.semantic_scholar = NonArxivReferenceChecker(api_key=semantic_scholar_api_key)
-            logger.debug("Enhanced Hybrid: Semantic Scholar API initialized")
-        except Exception as e:
-            logger.error(f"Enhanced Hybrid: Failed to initialize Semantic Scholar: {e}")
-            self.semantic_scholar = None
+        self.semantic_scholar = self._initialize_checker(
+            'semantic_scholar', 'NonArxivReferenceChecker', 'Semantic Scholar API',
+            api_key=semantic_scholar_api_key, error_level='error'
+        )
         
         # Initialize OpenAlex API
         self.openalex = None
         if enable_openalex:
-            try:
-                from .openalex import OpenAlexReferenceChecker
-                self.openalex = OpenAlexReferenceChecker(email=contact_email)
-                logger.debug("Enhanced Hybrid: OpenAlex API initialized")
-            except Exception as e:
-                logger.warning(f"Enhanced Hybrid: Failed to initialize OpenAlex: {e}")
+            self.openalex = self._initialize_checker(
+                'openalex', 'OpenAlexReferenceChecker', 'OpenAlex API', email=contact_email
+            )
         
         # Initialize CrossRef API
         self.crossref = None
         if enable_crossref:
-            try:
-                from .crossref import CrossRefReferenceChecker
-                self.crossref = CrossRefReferenceChecker(email=contact_email)
-                logger.debug("Enhanced Hybrid: CrossRef API initialized")
-            except Exception as e:
-                logger.warning(f"Enhanced Hybrid: Failed to initialize CrossRef: {e}")
+            self.crossref = self._initialize_checker(
+                'crossref', 'CrossRefReferenceChecker', 'CrossRef API', email=contact_email
+            )
         
         # Initialize OpenReview checker
-        self.openreview = None
-        try:
-            from .openreview_checker import OpenReviewReferenceChecker
-            self.openreview = OpenReviewReferenceChecker()
-            logger.debug("Enhanced Hybrid: OpenReview checker initialized")
-        except Exception as e:
-            logger.warning(f"Enhanced Hybrid: Failed to initialize OpenReview: {e}")
-            self.openreview = None
+        self.openreview = self._initialize_checker(
+            'openreview_checker', 'OpenReviewReferenceChecker', 'OpenReview checker'
+        )
         
         # Initialize DBLP checker (curated CS bibliography, strong for conferences)
-        self.dblp = None
-        try:
-            from .dblp import DBLPReferenceChecker
-            self.dblp = DBLPReferenceChecker(email=contact_email)
-            logger.debug("Enhanced Hybrid: DBLP checker initialized")
-        except Exception as e:
-            logger.warning(f"Enhanced Hybrid: Failed to initialize DBLP: {e}")
-            self.dblp = None
+        self.dblp = self._initialize_checker(
+            'dblp', 'DBLPReferenceChecker', 'DBLP checker', email=contact_email
+        )
         
         # Google Scholar removed - using more reliable APIs only
         

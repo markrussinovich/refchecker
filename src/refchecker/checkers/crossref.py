@@ -30,7 +30,8 @@ import logging
 import re
 from typing import Dict, List, Tuple, Optional, Any, Union
 from urllib.parse import quote_plus
-from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
+from refchecker.utils.doi_utils import extract_doi_from_url
+from refchecker.utils.text_utils import normalize_author_name, normalize_text, clean_title_basic, find_best_match, is_name_match, compare_authors, clean_title_for_search
 from refchecker.utils.error_utils import format_year_mismatch, format_doi_mismatch
 from refchecker.config.settings import get_config
 
@@ -200,56 +201,6 @@ class CrossRefReferenceChecker:
         logger.error(f"Failed to get work by DOI from CrossRef after {self.max_retries} attempts")
         return None
     
-    def extract_doi_from_url(self, url: str) -> Optional[str]:
-        """
-        Extract DOI from a URL
-        
-        Args:
-            url: URL that might contain a DOI
-            
-        Returns:
-            Extracted DOI or None if not found
-        """
-        if not url:
-            return None
-        
-        # Only extract DOIs from actual DOI URLs, not from other domains
-        # This prevents false positives from URLs like aclanthology.org
-        if 'doi.org' not in url and 'doi:' not in url:
-            return None
-        
-        # Check if it's a DOI URL
-        doi_patterns = [
-            r'doi\.org/([^/\s\?#]+(?:/[^/\s\?#]+)*)',  # Full DOI pattern
-            r'doi:([^/\s\?#]+(?:/[^/\s\?#]+)*)',       # doi: prefix
-        ]
-        
-        for pattern in doi_patterns:
-            match = re.search(pattern, url)
-            if match:
-                doi_candidate = match.group(1)
-                # DOIs must start with "10." and have at least one slash
-                if doi_candidate.startswith('10.') and '/' in doi_candidate and len(doi_candidate) > 6:
-                    return doi_candidate
-        
-        return None
-    
-    def normalize_author_name(self, name: str) -> str:
-        """
-        Normalize author name for comparison
-        
-        Args:
-            name: Author name
-            
-        Returns:
-            Normalized name
-        """
-        # Remove reference numbers (e.g., "[1]")
-        name = re.sub(r'^\[\d+\]', '', name)
-        
-        # Use common normalization function
-        return normalize_text(name)
-    
     def compare_authors(self, cited_authors: List[str], crossref_authors: List[Dict[str, Any]]) -> Tuple[bool, str]:
         """
         Compare author lists to check if they match (delegates to shared utility)
@@ -400,7 +351,7 @@ class CrossRefReferenceChecker:
         if 'doi' in reference and reference['doi']:
             doi = reference['doi']
         elif url:
-            doi = self.extract_doi_from_url(url)
+            doi = extract_doi_from_url(url)
         
         work_data = None
         

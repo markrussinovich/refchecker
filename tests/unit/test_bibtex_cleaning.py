@@ -7,11 +7,6 @@ to prevent regressions in reference extraction quality.
 """
 
 import unittest
-import sys
-import os
-
-# Add src to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 from refchecker.llm.providers import LLMProviderMixin
 from refchecker.utils.text_utils import strip_latex_commands, compare_authors, are_venues_substantially_different
@@ -268,10 +263,6 @@ class TestRegressionScenarios(unittest.TestCase):
     def test_doi_extraction_cleaning(self):
         """Test that DOI extraction removes asterisk contamination"""
         # Test the DOI cleaning functionality in the core module
-        import sys
-        import os
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-        
         from refchecker.core.refchecker import ArxivReferenceChecker
         
         # Create checker instance
