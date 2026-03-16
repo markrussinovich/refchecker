@@ -157,12 +157,14 @@ class ProgressRefChecker:
         try:
             from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
             verifier = LLMHallucinationVerifier(
+                provider=llm_provider,
                 api_key=api_key,
                 endpoint=endpoint,
+                model=llm_model,
             )
             if verifier.available:
                 self.hallucination_verifier = verifier
-                logger.debug('Hallucination verifier initialized for web UI')
+                logger.debug('Hallucination verifier initialized for web UI (provider=%s)', llm_provider)
         except Exception as e:
             logger.debug(f'Hallucination verifier init failed: {e}')
         # Use provided API key, fall back to environment variable

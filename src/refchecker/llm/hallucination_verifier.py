@@ -4,10 +4,11 @@ The LLM receives the full reference metadata plus all validation errors
 detected by the checkers, and determines whether the reference is likely
 fabricated (LIKELY), genuine (UNLIKELY), or unclear (UNCERTAIN).
 
-When using OpenAI, the verifier uses the Responses API with the
-``web_search_preview`` tool so the LLM can search the web during its
-assessment.  For non-OpenAI endpoints or when the Responses API is
-unavailable the verifier falls back to plain chat completions.
+Supports any configured LLM provider (OpenAI, Anthropic, Google, Azure,
+vLLM).  When using OpenAI without a custom endpoint, the verifier uses
+the Responses API with the ``web_search_preview`` tool so the LLM can
+search the web during its assessment.  For other providers the verifier
+falls back to plain chat completions.
 """
 
 from __future__ import annotations
@@ -94,55 +95,98 @@ Minor author-name or year differences do NOT warrant a search."""
 class LLMHallucinationVerifier:
     """LLM-based hallucination verifier.
 
-    Requires an OpenAI-compatible API key. Uses a single prompt to
-    evaluate the reference + its validation errors.
+    Supports OpenAI, Anthropic, Google, Azure, and vLLM providers.
+    When using OpenAI (without a custom endpoint), the Responses API with
+    ``web_search_preview`` is used so the LLM can verify references against
+    the live web.  All other providers use a standard chat completion.
     """
+
+    # Default models per provider (used when caller doesn't specify)
+    _DEFAULT_MODELS: Dict[str, str] = {
+        'openai': 'gpt-4.1-mini',
+        'anthropic': 'claude-sonnet-4-20250514',
+        'google': 'gemini-2.0-flash',
+        'azure': 'gpt-4o',
+        'vllm': 'gpt-4.1-mini',
+    }
 
     def __init__(
         self,
+        provider: Optional[str] = None,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
-        model: str = 'gpt-4.1-mini',
+        model: Optional[str] = None,
     ):
-        self.api_key = api_key or resolve_api_key('openai')
-        self.endpoint = endpoint or resolve_endpoint('openai')
-        self.model = model
+        # Resolve provider — fall back to 'openai' if not specified
+        self.provider = (provider or 'openai').lower()
+        self.api_key = api_key or resolve_api_key(self.provider)
+        self.endpoint = endpoint or resolve_endpoint(self.provider)
+        self.model = model or self._DEFAULT_MODELS.get(self.provider, 'gpt-4.1-mini')
         self.client = None
         self._use_responses_api = False
 
-        if self.api_key:
-            try:
-                import openai
-                kwargs: Dict[str, Any] = {'api_key': self.api_key}
-                if self.endpoint:
-                    base = self.endpoint
-                    for suffix in ('/chat/completions', '/completions'):
-                        if base.endswith(suffix):
-                            base = base[: -len(suffix)]
-                    kwargs['base_url'] = base
-                self.client = openai.OpenAI(**kwargs)
-                # Use the Responses API (with web_search_preview) when available.
-                # Custom endpoints may not support it, so probe and fall back.
-                if not self.endpoint:
-                    self._use_responses_api = True
-                logger.debug(
-                    'LLM hallucination verifier initialized '
-                    '(model=%s, web_search=%s)',
-                    self.model, self._use_responses_api,
-                )
-            except ImportError:
-                logger.warning('openai package not installed — LLM verification disabled')
+        if not self.api_key:
+            logger.debug('No API key for hallucination verifier (provider=%s)', self.provider)
+            return
+
+        try:
+            if self.provider == 'anthropic':
+                self._init_anthropic()
+            elif self.provider == 'google':
+                self._init_google()
+            else:
+                # OpenAI, Azure, vLLM all use the OpenAI client
+                self._init_openai()
+        except ImportError as exc:
+            logger.warning('Provider package not installed for hallucination verifier: %s', exc)
+        except Exception as exc:
+            logger.warning('Failed to init hallucination verifier: %s', exc)
+
+    def _init_openai(self) -> None:
+        import openai
+        kwargs: Dict[str, Any] = {'api_key': self.api_key}
+        if self.endpoint:
+            base = self.endpoint
+            for suffix in ('/chat/completions', '/completions'):
+                if base.endswith(suffix):
+                    base = base[: -len(suffix)]
+            kwargs['base_url'] = base
+        self.client = openai.OpenAI(**kwargs)
+        # Use Responses API (with web_search_preview) only for vanilla OpenAI
+        if not self.endpoint and self.provider == 'openai':
+            self._use_responses_api = True
+        logger.debug(
+            'Hallucination verifier initialized (provider=%s, model=%s, web_search=%s)',
+            self.provider, self.model, self._use_responses_api,
+        )
+
+    def _init_anthropic(self) -> None:
+        import anthropic
+        self.client = anthropic.Anthropic(api_key=self.api_key)
+        logger.debug(
+            'Hallucination verifier initialized (provider=anthropic, model=%s)',
+            self.model,
+        )
+
+    def _init_google(self) -> None:
+        import google.generativeai as genai
+        genai.configure(api_key=self.api_key)
+        self.client = genai.GenerativeModel(self.model)
+        logger.debug(
+            'Hallucination verifier initialized (provider=google, model=%s)',
+            self.model,
+        )
 
     @property
     def available(self) -> bool:
         return self.client is not None
 
-    def _call_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
-        """Call the LLM via the Responses API with web search enabled.
+    # ------------------------------------------------------------------
+    # OpenAI call paths
+    # ------------------------------------------------------------------
 
-        Returns (response_text, web_urls) where web_urls is a list of
-        URLs cited by the model from its web search results.
-        """
+    def _call_openai_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
+        """OpenAI Responses API with web_search_preview tool."""
         resp = self.client.responses.create(
             model=self.model,
             instructions=system_prompt,
@@ -170,8 +214,8 @@ class LLMHallucinationVerifier:
 
         return '\n'.join(text_parts).strip(), web_urls
 
-    def _call_chat(self, system_prompt: str, user_prompt: str) -> tuple:
-        """Fallback: plain chat completions without web search."""
+    def _call_openai_chat(self, system_prompt: str, user_prompt: str) -> tuple:
+        """OpenAI / Azure / vLLM chat completions (no web search)."""
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -183,18 +227,121 @@ class LLMHallucinationVerifier:
         )
         return (resp.choices[0].message.content or '').strip(), []
 
+    # ------------------------------------------------------------------
+    # Anthropic call paths
+    # ------------------------------------------------------------------
+
+    def _call_anthropic_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Anthropic with web_search tool (Citations API)."""
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=1024,
+            system=system_prompt,
+            tools=[{
+                'type': 'web_search_20250305',
+                'name': 'web_search',
+                'max_uses': 3,
+            }],
+            messages=[{'role': 'user', 'content': user_prompt}],
+        )
+
+        text_parts: List[str] = []
+        web_urls: List[str] = []
+        seen_urls: set = set()
+
+        for block in resp.content:
+            if getattr(block, 'type', '') == 'text':
+                text = getattr(block, 'text', '') or ''
+                if text:
+                    text_parts.append(text)
+                # Extract cited URLs from citations
+                for citation in getattr(block, 'citations', []):
+                    url = getattr(citation, 'url', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        web_urls.append(url)
+
+        return '\n'.join(text_parts).strip(), web_urls
+
+    def _call_anthropic_chat(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Anthropic without web search."""
+        resp = self.client.messages.create(
+            model=self.model,
+            max_tokens=300,
+            system=system_prompt,
+            messages=[{'role': 'user', 'content': user_prompt}],
+        )
+        text = ''
+        for block in resp.content:
+            if getattr(block, 'type', '') == 'text':
+                text += getattr(block, 'text', '')
+        return text.strip(), []
+
+    # ------------------------------------------------------------------
+    # Google call paths
+    # ------------------------------------------------------------------
+
+    def _call_google_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Google Gemini with google_search tool."""
+        from google.generativeai.types import Tool
+
+        google_search_tool = Tool(google_search={})
+        resp = self.client.generate_content(
+            f"{system_prompt}\n\n{user_prompt}",
+            tools=[google_search_tool],
+        )
+
+        text = resp.text or ''
+        web_urls: List[str] = []
+        # Extract grounding URLs from metadata if available
+        for candidate in getattr(resp, 'candidates', []):
+            grounding = getattr(candidate, 'grounding_metadata', None)
+            if grounding:
+                for chunk in getattr(grounding, 'grounding_chunks', []):
+                    web_info = getattr(chunk, 'web', None)
+                    if web_info:
+                        url = getattr(web_info, 'uri', '') or ''
+                        if url:
+                            web_urls.append(url)
+
+        return text.strip(), web_urls
+
+    def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Google Gemini without web search."""
+        resp = self.client.generate_content(f"{system_prompt}\n\n{user_prompt}")
+        return (resp.text or '').strip(), []
+
+    # ------------------------------------------------------------------
+    # Unified dispatch
+    # ------------------------------------------------------------------
+
     def _call(self, system_prompt: str, user_prompt: str) -> tuple:
-        """Call the LLM, using web search when available.
+        """Call the configured LLM, using web search when available.
 
         Returns (response_text, web_urls).
         """
+        if self.provider == 'anthropic':
+            try:
+                return self._call_anthropic_with_web_search(system_prompt, user_prompt)
+            except Exception as exc:
+                logger.debug('Anthropic web search failed, falling back to chat: %s', exc)
+                return self._call_anthropic_chat(system_prompt, user_prompt)
+
+        if self.provider == 'google':
+            try:
+                return self._call_google_with_web_search(system_prompt, user_prompt)
+            except Exception as exc:
+                logger.debug('Google web search failed, falling back to chat: %s', exc)
+                return self._call_google_chat(system_prompt, user_prompt)
+
+        # OpenAI, Azure, vLLM
         if self._use_responses_api:
             try:
-                return self._call_with_web_search(system_prompt, user_prompt)
+                return self._call_openai_with_web_search(system_prompt, user_prompt)
             except Exception as exc:
                 logger.debug('Responses API failed, falling back to chat: %s', exc)
                 self._use_responses_api = False
-        return self._call_chat(system_prompt, user_prompt)
+        return self._call_openai_chat(system_prompt, user_prompt)
 
     def assess(
         self,
@@ -264,7 +411,7 @@ class LLMHallucinationVerifier:
             web_result = {
                 'found': bool(web_urls),
                 'academic_urls': web_urls[:5],
-                'provider': 'openai_responses',
+                'provider': self.provider,
             }
             # If the LLM's own web search returned real URLs but the LLM
             # still said LIKELY, the grounded evidence outweighs the guess.

@@ -36,6 +36,7 @@ class ReferenceResult:
     processing_time: float
     reference: Dict[str, Any]
     verified_data: Optional[Dict[str, Any]] = None
+    hallucination_assessment: Optional[Dict[str, Any]] = None
 
 
 class ParallelReferenceProcessor:
@@ -241,6 +242,22 @@ class ParallelReferenceProcessor:
                         
                         # Print the result using base checker's output methods
                         self._print_reference_result(current_result)
+                        
+                        # Run and display inline hallucination assessment
+                        # (must happen after error/warning display, before callback
+                        #  adds the error to the dataset)
+                        if current_result.errors:
+                            assessment = self.base_checker._run_and_return_hallucination_assessment(
+                                current_result.reference,
+                                current_result.errors,
+                                verified_data=current_result.verified_data,
+                            )
+                            if assessment:
+                                current_result.hallucination_assessment = assessment
+                                verdict = assessment.get('verdict', 'UNCERTAIN')
+                                explanation = assessment.get('explanation', '')
+                                if verdict == 'LIKELY':
+                                    print(f"      🚩 Likely hallucinated: {explanation}")
                         
                         # Call callback if provided
                         if result_callback:

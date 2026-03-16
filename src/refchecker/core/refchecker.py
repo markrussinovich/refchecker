@@ -281,10 +281,17 @@ class ArxivReferenceChecker:
         if not llm_disabled:
             try:
                 from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
-                verifier = LLMHallucinationVerifier()
+                h_provider = (llm_config or {}).get('provider')
+                h_model = (llm_config or {}).get('model')
+                h_endpoint = (llm_config or {}).get('endpoint')
+                verifier = LLMHallucinationVerifier(
+                    provider=h_provider,
+                    model=h_model,
+                    endpoint=h_endpoint,
+                )
                 if verifier.available:
                     llm_verifier = verifier
-                    logger.debug('LLM hallucination verifier enabled')
+                    logger.debug('LLM hallucination verifier enabled (provider=%s)', verifier.provider)
                 else:
                     logger.debug('LLM hallucination verifier not available (no API key)')
             except Exception as exc:
@@ -5910,13 +5917,16 @@ class ArxivReferenceChecker:
         # Set up result callback to handle each completed reference  
         def result_callback(result):
             self._process_reference_result(paper, result.reference, result.errors, result.url,
-                                         paper_errors, unverified_count, debug_mode, print_output=False, verified_data=result.verified_data)
+                                         paper_errors, unverified_count, debug_mode, print_output=False,
+                                         verified_data=result.verified_data,
+                                         precomputed_hallucination=result.hallucination_assessment)
         
         # Run parallel verification
         processor.verify_references_parallel(paper, bibliography, result_callback)
     
     def _process_reference_result(self, paper, reference, errors, reference_url, 
-                                paper_errors, unverified_count, debug_mode, print_output=True, verified_data=None):
+                                paper_errors, unverified_count, debug_mode, print_output=True,
+                                verified_data=None, precomputed_hallucination=None):
         """
         Process the result of reference verification (shared by both sequential and parallel)
         
@@ -5929,6 +5939,7 @@ class ArxivReferenceChecker:
             unverified_count: Counter for unverified references (passed by reference)
             debug_mode: Whether debug mode is enabled
             print_output: Whether to print output (False for parallel mode to avoid duplication)
+            precomputed_hallucination: Pre-computed hallucination assessment from parallel printer (skip LLM re-call)
         """
         # If errors found, add to dataset and optionally print details
         if errors:
@@ -5956,15 +5967,23 @@ class ArxivReferenceChecker:
             self._display_non_unverified_errors(errors, debug_mode, print_output)
 
             # Run inline hallucination assessment and display if print_output
-            self._run_and_display_hallucination_assessment(
-                reference,
-                errors,
-                debug_mode,
-                print_output,
-                verified_data=verified_data,
-                error_entry_record=error_entry_record,
-                error_entry_index=error_entry_index,
-            )
+            # If the parallel printer already ran the assessment, just store it
+            # on the error record instead of re-calling the LLM.
+            if precomputed_hallucination:
+                if error_entry_record is not None:
+                    error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                elif self.errors:
+                    self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
+            else:
+                self._run_and_display_hallucination_assessment(
+                    reference,
+                    errors,
+                    debug_mode,
+                    print_output,
+                    verified_data=verified_data,
+                    error_entry_record=error_entry_record,
+                    error_entry_index=error_entry_index,
+                )
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -6225,6 +6244,50 @@ class ArxivReferenceChecker:
                 print(f"         {explanation}")
         elif verdict == 'LIKELY':
             print(f"      🚩 Likely hallucinated: {explanation}")
+
+    def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None):
+        """Run hallucination assessment and return the result without printing or storing.
+
+        Used by the parallel processor to get the assessment before
+        add_error_to_dataset has been called.
+        """
+        from refchecker.core.hallucination_policy import run_hallucination_check
+
+        error_types = []
+        error_details_parts = []
+        authors_correct = None
+        for e in errors:
+            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
+            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
+            if etype:
+                error_types.append(etype)
+            if edetail:
+                error_details_parts.append(edetail)
+            if e.get('ref_authors_correct'):
+                authors_correct = e['ref_authors_correct']
+
+        if not error_types:
+            return None
+
+        consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+        error_entry = {
+            'error_type': consolidated_type,
+            'error_details': '\n'.join(error_details_parts),
+            'ref_title': reference.get('title', ''),
+            'ref_authors_cited': ', '.join(reference.get('authors', [])),
+            'ref_year_cited': reference.get('year'),
+            'ref_venue_cited': reference.get('venue', ''),
+            'ref_url_cited': reference.get('url', ''),
+            'original_reference': reference,
+        }
+        if authors_correct:
+            error_entry['ref_authors_correct'] = authors_correct
+
+        return run_hallucination_check(
+            error_entry,
+            llm_client=self.report_builder.llm_verifier,
+            web_searcher=self.report_builder.web_searcher,
+        )
 
     def _output_reference_errors(self, reference, errors, url):
         """
