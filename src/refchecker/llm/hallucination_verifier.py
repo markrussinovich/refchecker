@@ -438,6 +438,25 @@ class LLMHallucinationVerifier:
                 except Exception as exc:
                     logger.debug(f'Web search during assessment failed: {exc}')
 
+        # Post-hoc consistency check: if the explanation says the paper
+        # exists/is real/was found, override a contradictory LIKELY verdict.
+        if verdict == 'LIKELY':
+            explanation_lower = explanation.lower()
+            real_signals = (
+                'exists on arxiv', 'exists on arXiv',
+                'is a well-known', 'is well-known',
+                'is a real', 'paper exists', 'paper is real',
+                'reference is valid', 'reference is real',
+                'available on arxiv', 'available on arXiv',
+                'found on arxiv', 'found on arXiv',
+                'found the paper', 'found via web',
+                'found in google scholar', 'found in semantic scholar',
+                'published in', 'appeared in',
+            )
+            if any(signal in explanation_lower for signal in real_signals):
+                verdict = 'UNLIKELY'
+                explanation += ' (Verdict corrected: explanation indicates paper is real.)'
+
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
             title[:60], verdict, explanation[:100],

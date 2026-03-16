@@ -270,6 +270,7 @@ class ArxivReferenceChecker:
         self.fatal_error = False
         self.fatal_error_message = None
         self.last_download_error = None
+        self.semantic_scholar_api_key = semantic_scholar_api_key
         self.db_path = db_path
         self.verification_output_file = output_file
         self.report_file = report_file
@@ -2664,23 +2665,6 @@ class ArxivReferenceChecker:
                 logger.debug(f"PDF verification error, falling back to web page verification")
         
         # Fall back to web page checker
-        from refchecker.checkers.pdf_paper_checker import PDFPaperChecker
-        pdf_checker = PDFPaperChecker()
-        
-        if pdf_checker.can_check_reference(reference):
-            logger.debug(f"URL appears to be PDF, trying PDF verification: {web_url}")
-            try:
-                verified_data, errors, url = pdf_checker.verify_reference(reference)
-                if verified_data:
-                    logger.debug(f"PDF verification successful for: {reference.get('title', 'Untitled')}")
-                    return verified_data, errors, url
-                else:
-                    logger.debug(f"PDF verification failed, falling back to web page verification")
-            except Exception as e:
-                logger.error(f"Error in PDF verification: {e}")
-                logger.debug(f"PDF verification error, falling back to web page verification")
-        
-        # Fall back to web page checker
         from refchecker.checkers.webpage_checker import WebPageChecker
         webpage_checker = WebPageChecker()
         
@@ -3388,6 +3372,12 @@ class ArxivReferenceChecker:
                     raw_input_specs = [specific_paper_id]
                 elif local_pdf_path:
                     raw_input_specs = [local_pdf_path]
+
+            if len(raw_input_specs) > 1:
+                from refchecker.core.bulk_pipeline import run_bulk_paper_check
+
+                run_bulk_paper_check(self, raw_input_specs, debug_mode=debug_mode)
+                return None
 
             papers = []
             for input_spec in raw_input_specs:
