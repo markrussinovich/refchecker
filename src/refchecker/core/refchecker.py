@@ -2856,14 +2856,31 @@ class ArxivReferenceChecker:
         logger.debug(f"  Actual ArXiv title: '{actual_title}'")
         logger.debug(f"  Title similarity: {title_similarity:.3f}")
         
-        # If titles are very different (less than 40% similarity), flag as ArXiv ID error
+        # If titles are very different (less than 40% similarity), check authors
+        # before deciding whether this is a wrong ArXiv ID or just an inaccurate title.
         if title_similarity < 0.4:
-            # For ArXiv ID mismatch, we don't provide a correct URL here
-            # The correct URL should be determined by finding the right paper by title/authors
-            return [{
-                'error_type': 'arxiv_id',
-                'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'"
-            }]
+            # Check if the authors match — if so, the ArXiv ID is correct
+            # but the title was paraphrased/inaccurate in the citation.
+            authors_match = False
+            if expected_authors and actual_authors:
+                actual_author_names = [str(a) for a in actual_authors]
+                try:
+                    match_result, _ = compare_authors(expected_authors, actual_author_names)
+                    authors_match = match_result
+                except Exception:
+                    pass
+
+            if authors_match:
+                # Authors match → ArXiv ID is correct, title is inaccurate
+                return [{
+                    'error_type': 'title',
+                    'error_details': f"Inaccurate title: cited as '{expected_title}' but ArXiv paper is titled '{actual_title}'"
+                }]
+            else:
+                return [{
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'"
+                }]
         
         return []
 
