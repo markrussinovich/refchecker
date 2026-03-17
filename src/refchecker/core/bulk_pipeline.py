@@ -513,10 +513,10 @@ class BulkProgressReporter:
             self.total_info += result.total_info_found
             self.total_unverified += result.total_unverified_refs
 
-            # ── Paper header (same format as single-paper CLI) ──
-            display_title = result.title or result.paper_id or result.input_spec
-            _safe_print(f'\nProcessing: {display_title}')
-            if result.source_url:
+            # ── Paper header – prefer the user-supplied spec (URL / arXiv ID) ──
+            display_title = result.input_spec or result.paper_id or result.title
+            _safe_print(f'\n📄 Processing: {display_title}')
+            if result.source_url and result.source_url != display_title:
                 _safe_print(f'   {result.source_url}')
             _safe_print(f'   References extracted: {result.references_processed}')
 
@@ -551,7 +551,7 @@ class BulkProgressReporter:
 
                 # Error details
                 if error_type == 'unverified' or (error_type == 'multiple' and 'unverified' in error_details.lower()):
-                    _safe_print(f'      ? Could not verify: {ref_title}')
+                    _safe_print(f'      ❓ Could not verify: {ref_title}')
                     _safe_print(f'         Subreason: Paper not found by any checker')
                 for line in error_details.split('\n'):
                     line = line.strip()
@@ -561,12 +561,12 @@ class BulkProgressReporter:
                         line = line[2:]
                     if any(kw in line.lower() for kw in ('could not', 'unverified')):
                         continue
-                    _safe_print(f'      X {line}')
+                    _safe_print(f'      ❌ {line}')
 
                 # Hallucination flag
                 assessment = error_entry.get('hallucination_assessment', {})
                 explanation = assessment.get('explanation', '')
-                _safe_print(f'      !! Likely hallucinated: {explanation}')
+                _safe_print(f'      🚩 Likely hallucinated: {explanation}')
 
             # ── Paper summary line ──
             elapsed = f'{result.elapsed_seconds:.0f}s'
@@ -1304,17 +1304,17 @@ def _print_bulk_final_summary(checker: Any) -> None:
     _safe_print(f"\n" + '=' * 60)
     _safe_print('FINAL SUMMARY')
     _safe_print('=' * 60)
-    _safe_print(f'Total papers processed: {checker.total_papers_processed}')
+    _safe_print(f'📄 Total papers processed: {checker.total_papers_processed}')
     _safe_print(f'Total references processed: {checker.total_references_processed}')
-    _safe_print(f'Papers with errors:   {checker.papers_with_errors}')
+    _safe_print(f'❌ Papers with errors:   {checker.papers_with_errors}')
     _safe_print(f'         Total errors:   {checker.total_errors_found}')
-    _safe_print(f'Papers with warnings: {checker.papers_with_warnings}')
+    _safe_print(f'⚠️  Papers with warnings: {checker.papers_with_warnings}')
     _safe_print(f'         Total warnings: {checker.total_warnings_found}')
-    _safe_print(f'Papers with information: {checker.papers_with_info}')
+    _safe_print(f'ℹ️  Papers with information: {checker.papers_with_info}')
     _safe_print(f'         Total information: {checker.total_info_found}')
     _safe_print(f'Total unverified: {checker.total_unverified_refs}')
     if flagged_count > 0:
-        _safe_print(f'Total likely hallucinated: {flagged_count}')
+        _safe_print(f'🚩 Total likely hallucinated: {flagged_count}')
     if checker.used_unreliable_extraction and checker.total_errors_found > 5:
         _safe_print(f'\nResults might be affected by incorrect reference extraction. Consider using LLM extraction.')
     if checker.verification_output_file:
