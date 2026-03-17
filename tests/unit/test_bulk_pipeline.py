@@ -96,7 +96,7 @@ def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
 
     output = capsys.readouterr().out.strip()
     assert '1/3' in output
-    assert 'Example Paper' in output
+    assert 'paper-1' in output
     assert 'refs=10' in output
     assert 'errors=2' in output
     assert 'Totals: refs=10' in output
