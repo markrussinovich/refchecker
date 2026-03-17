@@ -486,7 +486,8 @@ class TestSemanticScholarApiUrlRegression:
             'url': 'https://www.semanticscholar.org/paper/28695052'
         }
         
-        with patch('requests.get', return_value=mock_response):
+        with patch('requests.get', return_value=mock_response), \
+             patch('requests.Session.get', return_value=mock_response):
             checker = SemanticScholarChecker()
             verified_data, errors, url = checker.verify_reference(reference)
             
