@@ -525,7 +525,7 @@ class BulkProgressReporter:
                 e for e in result.errors
                 if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
             ]
-            for error_entry in flagged_entries:
+            for flag_idx, error_entry in enumerate(flagged_entries, 1):
                 ref_title = error_entry.get('ref_title', 'Untitled')
                 ref_authors = error_entry.get('ref_authors_cited', '')
                 ref_year = error_entry.get('ref_year_cited', '')
@@ -535,8 +535,8 @@ class BulkProgressReporter:
                 error_type = error_entry.get('error_type', '')
                 error_details = error_entry.get('error_details', '')
 
-                # Reference header (matches [N/total] Title format)
-                _safe_print(f'       {ref_title}')
+                # Reference header with [n/m] index
+                _safe_print(f'   [{flag_idx}/{len(flagged_entries)}] {ref_title}')
                 if ref_authors:
                     _safe_print(f'       {ref_authors}')
                 if ref_venue:
@@ -552,6 +552,7 @@ class BulkProgressReporter:
                 # Error details
                 if error_type == 'unverified' or (error_type == 'multiple' and 'unverified' in error_details.lower()):
                     _safe_print(f'      ? Could not verify: {ref_title}')
+                    _safe_print(f'         Subreason: Paper not found by any checker')
                 for line in error_details.split('\n'):
                     line = line.strip()
                     if not line:
