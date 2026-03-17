@@ -6,9 +6,66 @@ This module provides utilities for URL construction, validation, and manipulatio
 related to academic references.
 """
 
+import logging
 import re
-from typing import Optional
+from typing import List, Optional
+from urllib.parse import parse_qs, urlparse
+
+import requests
+
 from .doi_utils import normalize_doi
+
+logger = logging.getLogger(__name__)
+
+_PDF_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+    'Accept': 'application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.5',
+    'Accept-Language': 'en-US,en;q=0.9',
+}
+
+
+def _build_pdf_candidate_urls(url: str) -> List[str]:
+    """Build a list of candidate PDF download URLs for a given URL."""
+    candidates = [url]
+    if 'openreview.net/forum' in url:
+        parsed = urlparse(url)
+        paper_id = parse_qs(parsed.query).get('id', [None])[0]
+        if paper_id:
+            candidates.insert(0, f"https://openreview.net/pdf?id={paper_id}")
+    return candidates
+
+
+def download_pdf_bytes(url: str, timeout: int = 60) -> bytes:
+    """Download a PDF from *url* with browser-like headers.
+
+    Tries candidate URLs (e.g. OpenReview forum → pdf) in order and returns
+    the raw PDF bytes on the first success.  Raises on failure.
+    """
+    headers = dict(_PDF_HEADERS)
+    if 'openreview.net' in url.lower():
+        headers['Referer'] = 'https://openreview.net/'
+
+    candidates = _build_pdf_candidate_urls(url)
+
+    last_exc: Optional[Exception] = None
+    for candidate_url in dict.fromkeys(candidates):
+        try:
+            response = requests.get(
+                candidate_url, timeout=timeout,
+                headers=headers, allow_redirects=True,
+            )
+            response.raise_for_status()
+
+            content_type = response.headers.get('content-type', '').lower()
+            if 'application/pdf' not in content_type and not candidate_url.lower().endswith('.pdf'):
+                logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
+
+            return response.content
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+            logger.error(f"Failed to download PDF from URL {candidate_url}: {exc}")
+
+    raise last_exc  # type: ignore[misc]
 
 
 def construct_doi_url(doi: str) -> str:

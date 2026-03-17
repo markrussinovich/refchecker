@@ -754,7 +754,7 @@ async def get_thumbnail(check_id: int):
             logger.info(f"Generating thumbnail from PDF URL: {paper_source}")
             import hashlib
             import tempfile
-            import urllib.request
+            from backend.refchecker_wrapper import download_pdf
             
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
@@ -762,7 +762,7 @@ async def get_thumbnail(check_id: int):
             # Download PDF if not already cached
             if not os.path.exists(pdf_path):
                 try:
-                    await asyncio.to_thread(lambda: urllib.request.urlretrieve(paper_source, pdf_path))
+                    await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
                     logger.error(f"Failed to download PDF for thumbnail: {e}")
                     thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
@@ -866,7 +866,7 @@ async def get_preview(check_id: int):
             logger.info(f"Generating preview from PDF URL: {paper_source}")
             import hashlib
             import tempfile
-            import urllib.request
+            from backend.refchecker_wrapper import download_pdf
             
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
@@ -874,7 +874,7 @@ async def get_preview(check_id: int):
             # Download PDF if not already cached
             if not os.path.exists(pdf_path):
                 try:
-                    await asyncio.to_thread(lambda: urllib.request.urlretrieve(paper_source, pdf_path))
+                    await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
                     logger.error(f"Failed to download PDF for preview: {e}")
                     pdf_path = None

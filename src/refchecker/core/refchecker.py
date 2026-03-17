@@ -1137,44 +1137,13 @@ class ArxivReferenceChecker:
 
     def download_pdf_from_url(self, url):
         """Download a PDF from a direct URL and return the content as bytes."""
+        from refchecker.utils.url_utils import download_pdf_bytes
         self.last_download_error = None
-
-        candidate_urls = [url]
-        if 'openreview.net/forum' in url:
-            from urllib.parse import parse_qs, urlparse
-
-            parsed = urlparse(url)
-            paper_id = parse_qs(parsed.query).get('id', [None])[0]
-            if paper_id:
-                candidate_urls.insert(0, f"https://openreview.net/pdf?id={paper_id}")
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-            'Accept': 'application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.5',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-        if 'openreview.net' in url.lower():
-            headers['Referer'] = 'https://openreview.net/'
-
-        last_exception = None
-        for candidate_url in dict.fromkeys(candidate_urls):
-            try:
-                response = requests.get(candidate_url, timeout=30, headers=headers, allow_redirects=True)
-                response.raise_for_status()
-
-                # Check if the response is actually a PDF
-                content_type = response.headers.get('content-type', '').lower()
-                if 'application/pdf' not in content_type and not candidate_url.lower().endswith('.pdf'):
-                    logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
-
-                return io.BytesIO(response.content)
-            except requests.exceptions.RequestException as e:
-                last_exception = e
-                logger.error(f"Failed to download PDF from URL {candidate_url}: {e}")
-
-        if last_exception is not None:
-            self.last_download_error = str(last_exception)
-        return None
+        try:
+            return io.BytesIO(download_pdf_bytes(url, timeout=30))
+        except Exception as e:
+            self.last_download_error = str(e)
+            return None
 
     def extract_text_from_latex(self, latex_file_path):
         """

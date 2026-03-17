@@ -40,6 +40,13 @@ import arxiv
 logger = logging.getLogger(__name__)
 
 
+def download_pdf(url: str, dest_path: str) -> None:
+    """Download a PDF with browser-like headers (avoids 403 from OpenReview etc.)."""
+    from refchecker.utils.url_utils import download_pdf_bytes
+    with open(dest_path, 'wb') as f:
+        f.write(download_pdf_bytes(url))
+
+
 def _process_llm_references_cli_style(references: List[Any]) -> List[Dict[str, Any]]:
     """Use the CLI's post-processing logic to structure LLM references.
 
@@ -471,16 +478,11 @@ class ProgressRefChecker:
                     })
                     
                     # Download PDF from URL
-                    import urllib.request
                     import hashlib
                     pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
                     pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
                     
-                    def download_pdf_url():
-                        urllib.request.urlretrieve(paper_source, pdf_path)
-                        return pdf_path
-                    
-                    await asyncio.to_thread(download_pdf_url)
+                    await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                     
                     # For OpenReview PDFs, try to get metadata from the API
                     if 'openreview.net' in paper_source.lower():

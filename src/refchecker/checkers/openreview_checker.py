@@ -74,7 +74,7 @@ class OpenReviewReferenceChecker:
         # Session for connection pooling
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'RefChecker/1.0 (Academic Reference Verification)',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
             'Accept': 'application/json, text/html',
             'Accept-Language': 'en-US,en;q=0.9'
         })
@@ -403,18 +403,19 @@ class OpenReviewReferenceChecker:
         Returns:
             Paper metadata dictionary or None if not found
         """
-        # Try API endpoint first
-        api_url = f"{self.api_url}/notes?id={paper_id}"
-        response = self._respectful_request(api_url)
-        
-        if response and response.status_code == 200:
-            try:
-                data = response.json()
-                if 'notes' in data and data['notes']:
-                    note = data['notes'][0]
-                    return self._parse_api_response(note)
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.debug(f"Failed to parse API response: {e}")
+        # Try API endpoints (v2 first, then v1)
+        for api_base in (self.api_v2_url, self.api_url):
+            api_url = f"{api_base}/notes?id={paper_id}"
+            response = self._respectful_request(api_url)
+            
+            if response and response.status_code == 200:
+                try:
+                    data = response.json()
+                    if 'notes' in data and data['notes']:
+                        note = data['notes'][0]
+                        return self._parse_api_response(note)
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.debug(f"Failed to parse API response from {api_base}: {e}")
         
         # Fall back to web scraping
         forum_url = f"{self.base_url}/forum?id={paper_id}"

@@ -354,6 +354,7 @@ class PDFProcessor:
             r'^(preprint|arxiv|draft)',
             r'^(ieee|acm|springer|elsevier)',
             r'^[a-z]+\s+\d{4}$',  # "January 2024" etc
+            r'^(published|accepted|under review)\s+(as|at|in)\b',  # "Published as a conference paper at..."
         ]
         
         # Author indicators that typically follow the title
