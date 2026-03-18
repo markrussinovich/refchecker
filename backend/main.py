@@ -8,6 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Optional, Dict
+from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -62,6 +63,7 @@ from .thumbnail import (
     get_thumbnail_cache_path,
     get_preview_cache_path
 )
+from refchecker.utils.url_utils import validate_remote_fetch_url
 
 # Configure logging
 logging.basicConfig(
@@ -450,6 +452,12 @@ async def start_check(
             paper_source = str(text_file_path)
             paper_title = "Pasted Text"
         elif source_type == "url":
+            parsed_source = urlparse(source_value or "")
+            if parsed_source.scheme or parsed_source.netloc:
+                try:
+                    validate_remote_fetch_url(source_value)
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
             paper_title = source_value
 
         if not paper_source:

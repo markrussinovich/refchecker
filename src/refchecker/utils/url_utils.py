@@ -7,9 +7,11 @@ related to academic references.
 """
 
 import logging
+import ipaddress
 import re
+import socket
 from typing import List, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
@@ -22,6 +24,68 @@ _PDF_HEADERS = {
     'Accept': 'application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.5',
     'Accept-Language': 'en-US,en;q=0.9',
 }
+
+_BLOCKED_HOSTS = {
+    'localhost',
+    'metadata',
+    'metadata.google.internal',
+}
+_BLOCKED_HOST_SUFFIXES = (
+    '.internal',
+    '.local',
+    '.localhost',
+)
+_MAX_REDIRECTS = 5
+
+
+def _ensure_public_ip(ip_text: str) -> None:
+    ip_obj = ipaddress.ip_address(ip_text)
+    if not ip_obj.is_global:
+        raise ValueError(f"Refusing to fetch non-public address: {ip_text}")
+
+
+def validate_remote_fetch_url(url: str) -> str:
+    """Validate that a URL points to a public HTTP(S) endpoint before fetching it."""
+    parsed = urlparse(url)
+    scheme = (parsed.scheme or '').lower()
+    if scheme not in {'http', 'https'}:
+        raise ValueError("Only HTTP(S) URLs are supported")
+    if parsed.username or parsed.password:
+        raise ValueError("URLs with embedded credentials are not allowed")
+
+    hostname = (parsed.hostname or '').rstrip('.').lower()
+    if not hostname:
+        raise ValueError("URL is missing a hostname")
+    if hostname in _BLOCKED_HOSTS or hostname.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise ValueError(f"Refusing to fetch blocked host: {hostname}")
+
+    try:
+        ip_obj = ipaddress.ip_address(hostname)
+    except ValueError:
+        try:
+            addresses = {
+                info[4][0]
+                for info in socket.getaddrinfo(
+                    hostname,
+                    parsed.port or (443 if scheme == 'https' else 80),
+                    type=socket.SOCK_STREAM,
+                )
+            }
+        except socket.gaierror as exc:
+            raise ValueError(f"Could not resolve host: {hostname}") from exc
+
+        if not addresses:
+            raise ValueError(f"Could not resolve host: {hostname}")
+        for address in addresses:
+            _ensure_public_ip(address)
+    else:
+        _ensure_public_ip(str(ip_obj))
+
+    return url
+
+
+def _is_redirect_response(status_code: int) -> bool:
+    return status_code in {301, 302, 303, 307, 308}
 
 
 def _build_pdf_candidate_urls(url: str) -> List[str]:
@@ -50,18 +114,34 @@ def download_pdf_bytes(url: str, timeout: int = 60) -> bytes:
     last_exc: Optional[Exception] = None
     for candidate_url in dict.fromkeys(candidates):
         try:
-            response = requests.get(
-                candidate_url, timeout=timeout,
-                headers=headers, allow_redirects=True,
-            )
+            current_url = candidate_url
+            with requests.Session() as session:
+                for _ in range(_MAX_REDIRECTS + 1):
+                    validate_remote_fetch_url(current_url)
+                    response = session.get(
+                        current_url,
+                        timeout=timeout,
+                        headers=headers,
+                        allow_redirects=False,
+                    )
+                    if _is_redirect_response(response.status_code):
+                        location = response.headers.get('location')
+                        if not location:
+                            response.raise_for_status()
+                        current_url = urljoin(current_url, location)
+                        continue
+                    break
+                else:
+                    raise requests.exceptions.TooManyRedirects(f"Too many redirects for URL: {candidate_url}")
+
             response.raise_for_status()
 
             content_type = response.headers.get('content-type', '').lower()
-            if 'application/pdf' not in content_type and not candidate_url.lower().endswith('.pdf'):
+            if 'application/pdf' not in content_type and not current_url.lower().endswith('.pdf'):
                 logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
 
             return response.content
-        except requests.exceptions.RequestException as exc:
+        except (requests.exceptions.RequestException, ValueError) as exc:
             last_exc = exc
             logger.error(f"Failed to download PDF from URL {candidate_url}: {exc}")
 
