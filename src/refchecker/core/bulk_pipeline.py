@@ -34,12 +34,26 @@ def _safe_print(*args, **kwargs) -> None:
     """Print that falls back to ascii+replace when stdout can't handle Unicode."""
     import sys
     try:
-        print(*args, **kwargs)
+        print(*args, **kwargs, flush=True)
     except UnicodeEncodeError:
         text = ' '.join(str(a) for a in args)
         sys.stdout.buffer.write(text.encode('utf-8', errors='replace'))
         sys.stdout.buffer.write(b'\n')
         sys.stdout.buffer.flush()
+
+
+def _safe_print_labeled(emoji: str, text: str) -> None:
+    """Print a multi-line error/warning with an emoji label, Unicode-safe.
+
+    Mirrors print_labeled_multiline from error_utils but uses _safe_print
+    so bulk output never crashes on Windows cp1252 consoles.
+    """
+    prefix = f'      {emoji} '
+    lines = (text or '').splitlines() or ['']
+    _safe_print(prefix + lines[0])
+    indent = ' ' * 15
+    for line in lines[1:]:
+        _safe_print(indent + line)
 
 
 _HALLUCINATION_MULTI_KEYWORDS = (
@@ -194,7 +208,9 @@ class _QueueBatcher:
 
     def close(self) -> None:
         self._queue.put(self._sentinel)
-        self._thread.join()
+        self._thread.join(timeout=10.0)
+        if self._thread.is_alive():
+            logger.warning('%s batcher thread did not shut down within 10s', self.name)
 
     def _run(self) -> None:
         pending: List[_BatchTask] = []
@@ -493,6 +509,90 @@ class BulkHallucinationBatcher:
         return [grouped.get(index) for index in range(len(payloads))]
 
 
+def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, total_refs: int) -> None:
+    """Print a single hallucination-flagged reference in bulk mode, matching single-paper CLI format.
+    
+    flag_idx: 1-based index among flagged references for this paper (e.g. [1], [2]).
+    total_refs: total references in the paper (for context).
+    """
+    ref_title = error_entry.get('ref_title', 'Untitled')
+    ref_authors = error_entry.get('ref_authors_cited', '')
+    ref_year = error_entry.get('ref_year_cited', '')
+    ref_url = error_entry.get('ref_url_cited', '')
+    ref_venue = error_entry.get('ref_venue_cited', '')
+    ref_verified_url = error_entry.get('ref_verified_url', '')
+
+    # Reference header with simple [n] index
+    _safe_print(f'   [{flag_idx}] {ref_title}')
+    if ref_authors:
+        _safe_print(f'       {ref_authors}')
+    if ref_venue:
+        _safe_print(f'       {ref_venue}')
+    if ref_year:
+        _safe_print(f'       {ref_year}')
+    if ref_url:
+        _safe_print(f'       {ref_url}')
+
+    _safe_print('')
+    if ref_verified_url:
+        _safe_print(f'       Verified URL: {ref_verified_url}')
+
+    # Use original per-error dicts when available (preserves error/warning/info type)
+    original_errors = error_entry.get('_original_errors')
+    if original_errors:
+        has_unverified = any(
+            e.get('error_type') == 'unverified'
+            or e.get('warning_type') == 'unverified'
+            or e.get('info_type') == 'unverified'
+            for e in original_errors
+        )
+        if has_unverified:
+            _safe_print(f'      ❓ Could not verify: {ref_title}')
+            unverified_errs = [
+                e for e in original_errors
+                if e.get('error_type') == 'unverified'
+                   or e.get('warning_type') == 'unverified'
+                   or e.get('info_type') == 'unverified'
+            ]
+            if unverified_errs:
+                detail = (unverified_errs[0].get('error_details')
+                          or unverified_errs[0].get('warning_details')
+                          or unverified_errs[0].get('info_details', ''))
+                if detail:
+                    _safe_print(f'         Subreason: {detail}')
+
+        for error in original_errors:
+            if (error.get('error_type') == 'unverified'
+                    or error.get('warning_type') == 'unverified'
+                    or error.get('info_type') == 'unverified'):
+                continue
+            error_details = (error.get('error_details')
+                             or error.get('warning_details')
+                             or error.get('info_details', 'Unknown error'))
+            if 'error_type' in error:
+                _safe_print_labeled('❌', error_details)
+            elif 'warning_type' in error:
+                _safe_print_labeled('⚠️ ', error_details)
+            else:
+                _safe_print_labeled('ℹ️ ', error_details)
+    else:
+        # Fallback for entries without original errors (legacy / single-error)
+        error_type = error_entry.get('error_type', '')
+        error_details = error_entry.get('error_details', '')
+        if error_type == 'unverified':
+            _safe_print(f'      ❓ Could not verify: {ref_title}')
+            if error_details:
+                _safe_print(f'         Subreason: {error_details}')
+        elif error_details:
+            _safe_print_labeled('❌', error_details)
+
+    # Hallucination flag (only shown for LIKELY)
+    assessment = error_entry.get('hallucination_assessment', {})
+    if assessment.get('verdict') == 'LIKELY':
+        explanation = assessment.get('explanation', '')
+        _safe_print(f'      🚩 Likely hallucinated: {explanation}')
+
+
 class BulkProgressReporter:
     def __init__(self, total_papers: int):
         self.total_papers = total_papers
@@ -513,73 +613,37 @@ class BulkProgressReporter:
             self.total_info += result.total_info_found
             self.total_unverified += result.total_unverified_refs
 
-            # ── Paper header – prefer the user-supplied spec (URL / arXiv ID) ──
+            # Paper ID is 1-based start order (result.index is 0-based)
+            paper_id = result.index + 1
+
+            # ── Paper header ──
             display_title = result.input_spec or result.paper_id or result.title
-            _safe_print(f'\n📄 Processing: {display_title}')
+            _safe_print(f'\n📄 [{paper_id}/{self.total_papers}] {display_title}')
             if result.source_url and result.source_url != display_title:
                 _safe_print(f'   {result.source_url}')
-            _safe_print(f'   References extracted: {result.references_processed}')
 
-            # ── Only show full reference blocks for hallucination-flagged refs ──
+            # ── Paper stats ──
             flagged_entries = [
                 e for e in result.errors
                 if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
             ]
-            for flag_idx, error_entry in enumerate(flagged_entries, 1):
-                ref_title = error_entry.get('ref_title', 'Untitled')
-                ref_authors = error_entry.get('ref_authors_cited', '')
-                ref_year = error_entry.get('ref_year_cited', '')
-                ref_url = error_entry.get('ref_url_cited', '')
-                ref_venue = error_entry.get('ref_venue_cited', '')
-                ref_verified_url = error_entry.get('ref_verified_url', '')
-                error_type = error_entry.get('error_type', '')
-                error_details = error_entry.get('error_details', '')
-
-                # Reference header with [n/m] index
-                _safe_print(f'   [{flag_idx}/{len(flagged_entries)}] {ref_title}')
-                if ref_authors:
-                    _safe_print(f'       {ref_authors}')
-                if ref_venue:
-                    _safe_print(f'       {ref_venue}')
-                if ref_year:
-                    _safe_print(f'       {ref_year}')
-                if ref_url:
-                    _safe_print(f'       {ref_url}')
-                _safe_print('')
-                if ref_verified_url:
-                    _safe_print(f'       Verified URL: {ref_verified_url}')
-
-                # Error details
-                if error_type == 'unverified' or (error_type == 'multiple' and 'unverified' in error_details.lower()):
-                    _safe_print(f'      ❓ Could not verify: {ref_title}')
-                    _safe_print(f'         Subreason: Paper not found by any checker')
-                for line in error_details.split('\n'):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    if line.startswith('- '):
-                        line = line[2:]
-                    if any(kw in line.lower() for kw in ('could not', 'unverified')):
-                        continue
-                    _safe_print(f'      ❌ {line}')
-
-                # Hallucination flag
-                assessment = error_entry.get('hallucination_assessment', {})
-                explanation = assessment.get('explanation', '')
-                _safe_print(f'      🚩 Likely hallucinated: {explanation}')
-
-            # ── Paper summary line ──
-            elapsed = f'{result.elapsed_seconds:.0f}s'
             flagged_count = len(flagged_entries)
+            elapsed = f'{result.elapsed_seconds:.0f}s'
             flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
             _safe_print(
-                f'\n   [{self.completed_papers}/{self.total_papers}] '
-                f'refs={result.references_processed} '
+                f'   refs={result.references_processed} '
                 f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
                 f'info={result.total_info_found} unverified={result.total_unverified_refs}'
                 f'{flag_note} '
                 f'({elapsed})'
             )
+
+            # ── Show only hallucination-flagged references ──
+            for flag_idx, error_entry in enumerate(flagged_entries, 1):
+                _safe_print('')
+                _print_bulk_reference_block(error_entry, flag_idx, result.references_processed)
+
+            # ── Running totals ──
             _safe_print(
                 f'   Totals: refs={self.total_references} '
                 f'errors={self.total_errors} warnings={self.total_warnings} '
@@ -626,12 +690,25 @@ class _BulkCheckerConfig:
 
 
 def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mode: bool = False) -> None:
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_specs: list[str] = []
+    for spec in input_specs:
+        normalised = spec.strip()
+        if normalised not in seen:
+            seen.add(normalised)
+            unique_specs.append(normalised)
+    dropped = len(input_specs) - len(unique_specs)
+    input_specs = unique_specs
+
     config = _BulkCheckerConfig.from_checker(root_checker)
 
     # Suppress INFO-level logging in bulk mode to keep output clean.
     # Only paper-level progress lines are printed; per-reference noise is hidden.
     if not debug_mode:
         logging.getLogger().setLevel(logging.WARNING)
+
+    _safe_print(f'\nBulk check: {len(input_specs)} papers queued' + (f' ({dropped} duplicate(s) removed)' if dropped else ''))
 
     reporter = BulkProgressReporter(total_papers=len(input_specs))
     extraction_batcher = BulkLLMExtractionBatcher(enabled=bool(getattr(root_checker, 'llm_enabled', False)))
@@ -662,6 +739,7 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
             try:
                 if job is None:
                     return
+                _safe_print(f'\n⏳ [{job.index + 1}/{len(input_specs)}] Starting: {job.input_spec}')
                 try:
                     result = _process_bulk_paper_job(
                         checker=checker,
@@ -694,13 +772,21 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
         completed += 1
 
     job_queue.join()
+    # Worker threads should have finished by now; use a generous
+    # timeout as a safety net so we never hang indefinitely.
     for thread in threads:
-        thread.join()
+        thread.join(timeout=30.0)
     extraction_batcher.close()
     hallucination_batcher.close()
 
-    if verification_cache.hits > 0 or verification_cache.size > 0:
-        _safe_print(f'   Reference {verification_cache.stats_line()}')
+    # Cache stats (use raw attributes to avoid lock contention with daemon threads)
+    if verification_cache.hits > 0 or len(verification_cache._cache) > 0:
+        total = verification_cache.hits + verification_cache.misses
+        pct = f'{verification_cache.hits / total * 100:.0f}%' if total else '0%'
+        _safe_print(
+            f'   Reference cache: {len(verification_cache._cache)} entries, '
+            f'{verification_cache.hits} hits / {total} lookups ({pct})'
+        )
 
     ordered_results = [result_map[index] for index in sorted(result_map)]
     _apply_bulk_results(root_checker, ordered_results)

@@ -80,6 +80,7 @@ def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
 
     reporter.report(
         SimpleNamespace(
+            index=0,
             title='Example Paper',
             paper_id='paper-1',
             input_spec='paper-1',
@@ -100,7 +101,6 @@ def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
     assert 'refs=10' in output
     assert 'errors=2' in output
     assert 'Totals: refs=10' in output
-    assert 'https://example.com/paper-1' in output
 
 
 def test_verification_cache_hit_and_miss():

@@ -100,11 +100,11 @@ def test_report_rollups_respect_explicit_assessment_level_and_reasons():
     assert rollups[0]['reason_counts']['rich_metadata_not_found'] == 1
 
 
-def test_report_builder_reruns_stale_cached_assessment_when_title_mismatches():
-    """Regression: stale inline assessments should be recomputed instead of
-    being trusted for the wrong record."""
+def test_report_builder_trusts_precomputed_assessment():
+    """Pre-computed hallucination assessments should be trusted as-is
+    by the report builder — no re-running LLM checks."""
     builder = ReportBuilder()
-    stale_record = {
+    record_with_assessment = {
         'source_paper_id': 'paper-3',
         'source_title': 'Paper Three',
         'source_authors': 'Unknown',
@@ -115,20 +115,12 @@ def test_report_builder_reruns_stale_cached_assessment_when_title_mismatches():
         'error_details': 'Reference could not be verified',
         'hallucination_assessment': {
             'verdict': 'LIKELY',
-            'explanation': 'A web search for the exact title "Efficient Neural Network Pruning Using Iterative Sparse Retraining" found nothing.',
-            'web_search': {
-                'query': 'Title: Efficient Neural Network Pruning Using Iterative Sparse Retraining\nAuthors: Shuang Li, Yifan Chen\nYear: 2019',
-            },
+            'explanation': 'A web search found nothing.',
+            'web_search': None,
         },
     }
-    fresh_assessment = {
-        'verdict': 'UNLIKELY',
-        'explanation': 'The GAN paper is real.',
-        'web_search': None,
-    }
 
-    with patch('refchecker.core.report_builder.run_hallucination_check', return_value=fresh_assessment) as mock_check:
-        records = builder.build_structured_report_records([stale_record])
-
-    assert mock_check.called
-    assert records[0]['hallucination_assessment'] == fresh_assessment
+    records = builder.build_structured_report_records([record_with_assessment])
+    # Assessment is preserved as-is, not re-run
+    assert records[0]['hallucination_assessment']['verdict'] == 'LIKELY'
+    assert records[0]['hallucination_assessment']['explanation'] == 'A web search found nothing.'

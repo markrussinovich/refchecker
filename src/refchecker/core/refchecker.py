@@ -3053,6 +3053,8 @@ class ArxivReferenceChecker:
             # Set consolidated error information
             consolidated_entry['error_type'] = 'multiple'
             consolidated_entry['error_details'] = '\n'.join([f"- {detail}" for detail in error_details])
+            # Keep original per-error dicts for faithful CLI display in bulk mode
+            consolidated_entry['_original_errors'] = list(errors)
             
             # Add verified URL if available
             if reference_url:
@@ -3103,6 +3105,8 @@ class ArxivReferenceChecker:
                 # Error information
                 'error_type': error_type,
                 'error_details': error_details,
+                # Keep original per-error dicts for faithful CLI display in bulk mode
+                '_original_errors': list(errors),
                 
                 # Store original reference for formatting corrections
                 'original_reference': reference

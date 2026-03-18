@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any, Dict, IO, List, Optional
 
-from refchecker.core.hallucination_policy import run_hallucination_check
+from refchecker.core.hallucination_policy import check_author_hallucination
 
 logger = logging.getLogger(__name__)
 
@@ -121,28 +121,22 @@ class ReportBuilder:
         """Convert collected error entries into report records.
 
         Hallucination assessment:
-        1. Deterministic author-overlap check (no LLM needed): flags refs
-           where < 60% of cited authors match the actual authors.
-        2. LLM-based assessment for unverified references that pass the
-           pre-filter (requires configured LLM).
+        - Uses pre-computed assessments from inline checks (CLI / WebUI / bulk).
+        - For entries without an assessment, runs only the deterministic
+          author-overlap check (no LLM) to avoid blocking report generation.
         """
         records = []
         for error_entry in errors:
             record = dict(error_entry)
             assessment = record.get('hallucination_assessment')
 
-            # Use pre-computed assessment from inline check if available;
-            # otherwise run the check now (backward compatibility)
-            if not self._assessment_matches_record(record, assessment):
-                assessment = run_hallucination_check(
-                    record,
-                    llm_client=self.llm_verifier,
-                    web_searcher=self.web_searcher,
-                )
+            # Only run the fast deterministic check for entries that were
+            # never assessed.  LLM-based checks are done inline during
+            # verification and should already be stored on the entry.
+            if assessment is None:
+                assessment = check_author_hallucination(record)
                 if assessment:
                     record['hallucination_assessment'] = assessment
-                else:
-                    record.pop('hallucination_assessment', None)
 
             records.append(record)
 

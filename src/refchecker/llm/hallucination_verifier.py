@@ -75,8 +75,8 @@ minor metadata errors
 differences are common in real citations and NOT signs of hallucination
 - Author count mismatches where the names mostly overlap are NOT hallucination
 
-Reply with your verdict on the FIRST line (LIKELY, UNLIKELY, or UNCERTAIN) \
-followed by your concise explanation (2-3 sentences max)."""
+Provide your concise explanation (2-3 sentences max), then end your \
+response with your verdict as the VERY LAST word: LIKELY, UNLIKELY, or UNCERTAIN."""
 
 _WEB_SEARCH_DECISION_PROMPT = """\
 Given this reference that could not be verified by academic databases:
@@ -508,19 +508,29 @@ class LLMHallucinationVerifier:
 
     @staticmethod
     def _parse_verdict(response: str) -> tuple:
-        """Parse the LLM response into verdict and explanation."""
-        lines = response.strip().split('\n')
-        first_line = lines[0].strip().upper() if lines else ''
+        """Parse the LLM response into verdict and explanation.
 
-        if 'LIKELY' in first_line and 'UNLIKELY' not in first_line:
-            verdict = 'LIKELY'
-        elif 'UNLIKELY' in first_line:
+        The prompt asks the LLM to put the verdict as the very last word.
+        We extract it from there.
+        """
+        import re
+        text = response.strip()
+
+        # Grab the last word and check if it's a verdict keyword
+        last_word = text.split()[-1].strip('.,;:!?').upper() if text else ''
+        if last_word == 'UNLIKELY':
             verdict = 'UNLIKELY'
-        else:
+        elif last_word == 'LIKELY':
+            verdict = 'LIKELY'
+        elif last_word == 'UNCERTAIN':
             verdict = 'UNCERTAIN'
+        else:
+            # Fallback: find the last occurrence of a verdict keyword anywhere
+            matches = re.findall(r'\b(UNLIKELY|LIKELY|UNCERTAIN)\b', text, re.IGNORECASE)
+            verdict = matches[-1].upper() if matches else 'UNCERTAIN'
 
-        explanation = '\n'.join(lines[1:]).strip()
+        # Everything except the trailing verdict word is the explanation
+        explanation = re.sub(r'\s*(UNLIKELY|LIKELY|UNCERTAIN)\s*$', '', text, flags=re.IGNORECASE).strip()
         if not explanation:
-            # Use the full first line as explanation if no separate reasoning
-            explanation = lines[0].strip() if lines else ''
+            explanation = text
         return verdict, explanation
