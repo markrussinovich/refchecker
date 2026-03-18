@@ -2,12 +2,82 @@
 Database module for storing check history and LLM configurations
 """
 import aiosqlite
+import base64
+import hashlib
 import json
 import os
 import sys
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
+from cryptography.fernet import Fernet, InvalidToken
+
+
+SECRET_VALUE_PREFIX = "enc:"
+SECRET_KEY_ENV_VAR = "REFCHECKER_SECRET_KEY"
+SECRET_KEY_FILE_NAME = ".secret.key"
+_fernet_instance: Optional[Fernet] = None
+
+
+def _normalize_secret_key(raw_value: str) -> bytes:
+    """Normalize environment-provided key material into a Fernet key."""
+    candidate = raw_value.strip().encode("utf-8")
+    try:
+        decoded = base64.urlsafe_b64decode(candidate)
+        if len(decoded) == 32:
+            return candidate
+    except Exception:
+        pass
+    return base64.urlsafe_b64encode(hashlib.sha256(candidate).digest())
+
+
+def _get_secret_key_path() -> Path:
+    return get_data_dir() / SECRET_KEY_FILE_NAME
+
+
+def _get_or_create_secret_key() -> bytes:
+    configured_key = os.environ.get(SECRET_KEY_ENV_VAR, "").strip()
+    if configured_key:
+        return _normalize_secret_key(configured_key)
+
+    key_path = _get_secret_key_path()
+    if key_path.exists():
+        return key_path.read_bytes().strip()
+
+    key = Fernet.generate_key()
+    key_path.write_bytes(key)
+    if os.name != "nt":
+        os.chmod(key_path, 0o600)
+    return key
+
+
+def _get_fernet() -> Fernet:
+    global _fernet_instance
+    if _fernet_instance is None:
+        _fernet_instance = Fernet(_get_or_create_secret_key())
+    return _fernet_instance
+
+
+def _is_encrypted_secret(value: Optional[str]) -> bool:
+    return bool(value and value.startswith(SECRET_VALUE_PREFIX))
+
+
+def encrypt_secret(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if value == "" or _is_encrypted_secret(value):
+        return value
+    token = _get_fernet().encrypt(value.encode("utf-8")).decode("ascii")
+    return f"{SECRET_VALUE_PREFIX}{token}"
+
+
+def decrypt_secret(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if value == "" or not _is_encrypted_secret(value):
+        return value
+    token = value[len(SECRET_VALUE_PREFIX):].encode("ascii")
+    return _get_fernet().decrypt(token).decode("utf-8")
 def get_data_dir() -> Path:
     """Get platform-appropriate user data directory for refchecker.
     
@@ -150,6 +220,7 @@ class Database:
             """)
 
             await self._ensure_columns(db)
+            await self._migrate_plaintext_secrets(db)
             
             # Create index for batch queries
             await db.execute("""
@@ -209,6 +280,32 @@ class Database:
             user_columns = {row[1] async for row in cursor}
         if "is_admin" not in user_columns:
             await db.execute("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+
+    async def _migrate_plaintext_secrets(self, db: aiosqlite.Connection):
+        """Encrypt any legacy plaintext values left in secret storage columns."""
+        async with db.execute(
+            "SELECT id, api_key_encrypted FROM llm_configs WHERE api_key_encrypted IS NOT NULL AND api_key_encrypted != ''"
+        ) as cursor:
+            llm_rows = await cursor.fetchall()
+        for config_id, api_key in llm_rows:
+            encrypted = encrypt_secret(api_key)
+            if encrypted != api_key:
+                await db.execute(
+                    "UPDATE llm_configs SET api_key_encrypted = ? WHERE id = ?",
+                    (encrypted, config_id),
+                )
+
+        async with db.execute(
+            "SELECT key, value_encrypted FROM app_settings WHERE value_encrypted IS NOT NULL AND value_encrypted != ''"
+        ) as cursor:
+            setting_rows = await cursor.fetchall()
+        for key, value in setting_rows:
+            encrypted = encrypt_secret(value)
+            if encrypted != value:
+                await db.execute(
+                    "UPDATE app_settings SET value_encrypted = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
+                    (encrypted, key),
+                )
 
     async def save_check(self,
                          paper_title: str,
@@ -585,7 +682,7 @@ class Database:
                 if row:
                     result = dict(row)
                     # Expose stored key as api_key for use during checks
-                    result['api_key'] = result.pop('api_key_encrypted', None)
+                    result['api_key'] = decrypt_secret(result.pop('api_key_encrypted', None))
                     return result
                 return None
 
@@ -601,7 +698,7 @@ class Database:
             cursor = await db.execute("""
                 INSERT INTO llm_configs (name, provider, model, endpoint, api_key_encrypted, user_id)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, provider, model, endpoint, api_key, user_id))
+            """, (name, provider, model, endpoint, encrypt_secret(api_key), user_id))
             await db.commit()
             return cursor.lastrowid
 
@@ -631,7 +728,7 @@ class Database:
             params.append(endpoint)
         if api_key is not None:
             updates.append("api_key_encrypted = ?")
-            params.append(api_key)
+            params.append(encrypt_secret(api_key))
 
         if not updates:
             return False
@@ -696,7 +793,7 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     result = dict(row)
-                    result['api_key'] = result.pop('api_key_encrypted', None)
+                    result['api_key'] = decrypt_secret(result.pop('api_key_encrypted', None))
                     return result
                 return None
 
@@ -815,7 +912,8 @@ class Database:
             ) as cursor:
                 row = await cursor.fetchone()
                 if row and row['value_encrypted']:
-                    return row['value_encrypted']
+                    value = row['value_encrypted']
+                    return decrypt_secret(value) if decrypt else value
                 return None
 
     async def set_setting(self, key: str, value: str) -> bool:
@@ -827,7 +925,7 @@ class Database:
                 ON CONFLICT(key) DO UPDATE SET
                     value_encrypted = excluded.value_encrypted,
                     updated_at = CURRENT_TIMESTAMP
-            """, (key, value))
+            """, (key, encrypt_secret(value)))
             await db.commit()
             return True
 
