@@ -72,12 +72,110 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+MAX_UPLOAD_FILE_BYTES = int(os.environ.get("MAX_UPLOAD_FILE_BYTES", str(25 * 1024 * 1024)))
+MAX_BATCH_UPLOAD_TOTAL_BYTES = int(os.environ.get("MAX_BATCH_UPLOAD_TOTAL_BYTES", str(100 * 1024 * 1024)))
+MAX_BATCH_ARCHIVE_BYTES = int(os.environ.get("MAX_BATCH_ARCHIVE_BYTES", str(50 * 1024 * 1024)))
+
 
 def get_uploads_dir() -> Path:
     """Return the base uploads directory, inside the persistent data dir."""
     d = get_data_dir() / "uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+async def _save_upload_file(upload: UploadFile, dest_path: Path, max_bytes: int) -> int:
+    """Persist an uploaded file with a hard byte cap enforced while streaming."""
+    total_bytes = 0
+    try:
+        with open(dest_path, "wb") as out_file:
+            while True:
+                chunk = await upload.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Upload exceeds maximum size of {max_bytes // (1024 * 1024)} MB",
+                    )
+                out_file.write(chunk)
+    except Exception:
+        if dest_path.exists():
+            dest_path.unlink()
+        raise
+    return total_bytes
+
+
+def _extract_zip_batch_files(zip_path: Path, uploads_dir: Path, batch_id: str, max_batch_size: int) -> list[dict[str, str]]:
+    """Extract supported files from a ZIP archive with strict file-count and byte caps."""
+    import zipfile
+
+    files_to_process: list[dict[str, str]] = []
+    created_paths: list[Path] = []
+    total_bytes = 0
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            for member in zf.infolist():
+                name = member.filename
+                if member.is_dir() or name.startswith('__') or '/.' in name or '\\.' in name:
+                    continue
+
+                lower_name = name.lower()
+                if not any(lower_name.endswith(ext) for ext in ['.pdf', '.txt', '.tex', '.bib', '.bbl']):
+                    continue
+                if len(files_to_process) >= max_batch_size:
+                    break
+                if member.file_size > MAX_UPLOAD_FILE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Archive entry '{os.path.basename(name)}' exceeds maximum size of {MAX_UPLOAD_FILE_BYTES // (1024 * 1024)} MB",
+                    )
+
+                total_bytes += member.file_size
+                if total_bytes > MAX_BATCH_UPLOAD_TOTAL_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Extracted archive content exceeds maximum size of {MAX_BATCH_UPLOAD_TOTAL_BYTES // (1024 * 1024)} MB",
+                    )
+
+                filename = os.path.basename(name)
+                dest_path = uploads_dir / f"{batch_id}_{len(files_to_process) + 1}_{filename}"
+                extracted_bytes = 0
+                try:
+                    with zf.open(member, 'r') as src, open(dest_path, 'wb') as dest:
+                        while True:
+                            chunk = src.read(UPLOAD_CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            extracted_bytes += len(chunk)
+                            if extracted_bytes > MAX_UPLOAD_FILE_BYTES:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail=f"Archive entry '{filename}' exceeds maximum size of {MAX_UPLOAD_FILE_BYTES // (1024 * 1024)} MB",
+                                )
+                            dest.write(chunk)
+                except Exception:
+                    if dest_path.exists():
+                        dest_path.unlink()
+                    raise
+
+                created_paths.append(dest_path)
+                files_to_process.append({
+                    'path': str(dest_path),
+                    'filename': filename,
+                })
+    except Exception:
+        for path in created_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+        raise
+
+    return files_to_process
 
 
 # Pydantic models for requests
@@ -431,9 +529,7 @@ async def start_check(
             # Use check-specific naming to avoid conflicts
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
             file_path = uploads_dir / f"{session_id}_{safe_filename}"
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
+            await _save_upload_file(file, file_path, MAX_UPLOAD_FILE_BYTES)
             paper_source = str(file_path)
             paper_title = file.filename
             original_filename = file.filename  # Store original filename
@@ -1335,46 +1431,34 @@ async def start_batch_check_files(
                 llm_model = config.get('model') or llm_model
         
         files_to_process = []
+        created_paths: list[Path] = []
         
         # Check if single ZIP file
         if len(files) == 1 and files[0].filename.lower().endswith('.zip'):
-            import zipfile
-            import io
-            
-            zip_content = await files[0].read()
-            with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zf:
-                for name in zf.namelist():
-                    # Skip directories and hidden files
-                    if name.endswith('/') or name.startswith('__') or '/.' in name:
-                        continue
-                    
-                    # Only process supported file types
-                    lower_name = name.lower()
-                    if not any(lower_name.endswith(ext) for ext in ['.pdf', '.txt', '.tex', '.bib', '.bbl']):
-                        continue
-                    
-                    if len(files_to_process) >= MAX_BATCH_SIZE:
-                        break
-                    
-                    # Extract file
-                    content = zf.read(name)
-                    filename = os.path.basename(name)
-                    file_path = uploads_dir / f"{batch_id}_{filename}"
-                    with open(file_path, 'wb') as f:
-                        f.write(content)
-                    
-                    files_to_process.append({
-                        'path': str(file_path),
-                        'filename': filename
-                    })
+            zip_name = files[0].filename.replace("/", "_").replace("\\", "_")
+            zip_path = uploads_dir / f"{batch_id}_{zip_name}"
+            await _save_upload_file(files[0], zip_path, MAX_BATCH_ARCHIVE_BYTES)
+            created_paths.append(zip_path)
+            files_to_process = _extract_zip_batch_files(zip_path, uploads_dir, batch_id, MAX_BATCH_SIZE)
+            created_paths.extend(Path(file_info['path']) for file_info in files_to_process)
+            zip_path.unlink(missing_ok=True)
+            created_paths.remove(zip_path)
         else:
             # Process individual files
+            total_uploaded_bytes = 0
             for file in files[:MAX_BATCH_SIZE]:
                 safe_filename = file.filename.replace("/", "_").replace("\\", "_")
-                file_path = uploads_dir / f"{batch_id}_{safe_filename}"
-                content = await file.read()
-                with open(file_path, "wb") as f:
-                    f.write(content)
+                file_path = uploads_dir / f"{batch_id}_{len(files_to_process) + 1}_{safe_filename}"
+                uploaded_bytes = await _save_upload_file(file, file_path, MAX_UPLOAD_FILE_BYTES)
+                total_uploaded_bytes += uploaded_bytes
+                if total_uploaded_bytes > MAX_BATCH_UPLOAD_TOTAL_BYTES:
+                    if file_path.exists():
+                        file_path.unlink()
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Batch upload exceeds maximum total size of {MAX_BATCH_UPLOAD_TOTAL_BYTES // (1024 * 1024)} MB",
+                    )
+                created_paths.append(file_path)
                 
                 files_to_process.append({
                     'path': str(file_path),
@@ -1447,8 +1531,20 @@ async def start_batch_check_files(
         }
     
     except HTTPException:
+        for path in locals().get('created_paths', []):
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
         raise
     except Exception as e:
+        for path in locals().get('created_paths', []):
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
         logger.error(f"Error starting batch file check: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
