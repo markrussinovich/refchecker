@@ -184,6 +184,25 @@ def _session_id_for_check(check_id: int) -> Optional[str]:
     return None
 
 
+async def _get_owned_check_or_404(check_id: int, current_user: UserInfo) -> dict:
+    """Return a check only if it belongs to the current user in multi-user mode."""
+    user_id = get_user_id_filter(current_user)
+    check = await db.get_check_by_id(check_id, user_id=user_id)
+    if not check:
+        raise HTTPException(status_code=404, detail="Check not found")
+    return check
+
+
+async def _get_owned_batch_or_404(batch_id: str, current_user: UserInfo) -> tuple[dict, list[dict]]:
+    """Return a batch summary and checks only if they belong to the current user."""
+    user_id = get_user_id_filter(current_user)
+    summary = await db.get_batch_summary(batch_id, user_id=user_id)
+    if not summary:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    return summary, checks
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database and settings on startup"""
@@ -327,6 +346,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         if not token_data:
             await websocket.close(code=4001, reason="Invalid token")
             return
+        active = active_checks.get(session_id)
+        if not active or active.get("user_id") != token_data.user_id:
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
     await manager.connect(websocket, session_id)
     try:
         # Keep connection alive and handle incoming messages
@@ -458,7 +481,7 @@ async def start_check(
             run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key)
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
-        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id}
+        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id, "user_id": user_id}
 
         return {
             "session_id": session_id,
@@ -701,7 +724,7 @@ async def get_check_detail(
 
 
 @app.get("/api/thumbnail/{check_id}")
-async def get_thumbnail(check_id: int):
+async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get or generate a thumbnail for a check.
     
@@ -711,9 +734,7 @@ async def get_thumbnail(check_id: int):
     For pasted text, returns a placeholder thumbnail.
     """
     try:
-        check = await db.get_check_by_id(check_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_owned_check_or_404(check_id, current_user)
         
         # Check if we already have a cached thumbnail path
         thumbnail_path = check.get('thumbnail_path')
@@ -821,7 +842,7 @@ async def get_thumbnail(check_id: int):
 
 
 @app.get("/api/preview/{check_id}")
-async def get_preview(check_id: int):
+async def get_preview(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get or generate a high-resolution preview for a check.
     
@@ -830,9 +851,7 @@ async def get_preview(check_id: int):
     For uploaded PDFs, generates a preview from the file.
     """
     try:
-        check = await db.get_check_by_id(check_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_owned_check_or_404(check_id, current_user)
         
         # Generate preview based on source type
         paper_source = check.get('paper_source', '')
@@ -934,16 +953,14 @@ async def get_preview(check_id: int):
 
 
 @app.get("/api/text/{check_id}")
-async def get_pasted_text(check_id: int):
+async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the pasted text content for a check.
     
     Returns the text file content as plain text for viewing.
     """
     try:
-        check = await db.get_check_by_id(check_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_owned_check_or_404(check_id, current_user)
         
         source_type = check.get('source_type', '')
         paper_source = check.get('paper_source', '')
@@ -978,16 +995,14 @@ async def get_pasted_text(check_id: int):
 
 
 @app.get("/api/file/{check_id}")
-async def get_uploaded_file(check_id: int):
+async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the uploaded file content for a check.
     
     Returns the file for viewing/download.
     """
     try:
-        check = await db.get_check_by_id(check_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_owned_check_or_404(check_id, current_user)
         
         source_type = check.get('source_type', '')
         paper_source = check.get('paper_source', '')
@@ -1025,7 +1040,7 @@ async def get_uploaded_file(check_id: int):
 
 
 @app.get("/api/bibliography/{check_id}")
-async def get_bibliography_source(check_id: int):
+async def get_bibliography_source(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the bibliography source content (bbl/bib file) for a check.
     
@@ -1033,9 +1048,7 @@ async def get_bibliography_source(check_id: int):
     This is the actual source file used to extract references (from ArXiv source or pasted text).
     """
     try:
-        check = await db.get_check_by_id(check_id)
-        if not check:
-            raise HTTPException(status_code=404, detail="Check not found")
+        check = await _get_owned_check_or_404(check_id, current_user)
         
         bibliography_source_path = check.get('bibliography_source_path', '')
         extraction_method = check.get('extraction_method', '')
@@ -1076,13 +1089,12 @@ async def get_bibliography_source(check_id: int):
 
 
 @app.post("/api/recheck/{check_id}")
-async def recheck(check_id: int):
+async def recheck(check_id: int, current_user: UserInfo = Depends(require_user)):
     """Re-run a previous check"""
     try:
         # Get original check
-        original = await db.get_check_by_id(check_id)
-        if not original:
-            raise HTTPException(status_code=404, detail="Check not found")
+        original = await _get_owned_check_or_404(check_id, current_user)
+        user_id = get_user_id_filter(current_user)
 
         # Generate new session ID
         session_id = str(uuid.uuid4())
@@ -1103,7 +1115,8 @@ async def recheck(check_id: int):
             source_type=source_type,
             llm_provider=llm_provider,
             llm_model=llm_model,
-            original_filename=original.get("original_filename")
+            original_filename=original.get("original_filename"),
+            user_id=user_id,
         )
 
         # Start check in background
@@ -1120,10 +1133,10 @@ async def recheck(check_id: int):
                 None,  # no endpoint for recheck
                 True,
                 cancel_event,
-                0,  # no per-user rate tracking for recheck
+                user_id,
             )
         )
-        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": new_check_id}
+        active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": new_check_id, "user_id": user_id}
 
         return {
             "session_id": session_id,
@@ -1140,10 +1153,13 @@ async def recheck(check_id: int):
 
 
 @app.post("/api/cancel/{session_id}")
-async def cancel_check(session_id: str):
+async def cancel_check(session_id: str, current_user: UserInfo = Depends(require_user)):
     """Cancel an active check"""
     active = active_checks.get(session_id)
     if not active:
+        raise HTTPException(status_code=404, detail="Active check not found")
+    user_id = get_user_id_filter(current_user)
+    if user_id is not None and active.get("user_id") != user_id:
         raise HTTPException(status_code=404, detail="Active check not found")
     active["cancel_event"].set()
     active["task"].cancel()
@@ -1242,7 +1258,8 @@ async def start_batch_check(
                 "task": task, 
                 "cancel_event": cancel_event, 
                 "check_id": check_id,
-                "batch_id": batch_id
+                "batch_id": batch_id,
+                "user_id": user_id,
             }
             
             checks.append({
@@ -1402,7 +1419,8 @@ async def start_batch_check_files(
                 "task": task,
                 "cancel_event": cancel_event,
                 "check_id": check_id,
-                "batch_id": batch_id
+                "batch_id": batch_id,
+                "user_id": user_id,
             }
             
             checks.append({
@@ -1428,14 +1446,10 @@ async def start_batch_check_files(
 
 
 @app.get("/api/batch/{batch_id}")
-async def get_batch(batch_id: str):
+async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Get batch summary and all checks in the batch"""
     try:
-        summary = await db.get_batch_summary(batch_id)
-        if not summary:
-            raise HTTPException(status_code=404, detail="Batch not found")
-        
-        checks = await db.get_batch_checks(batch_id)
+        summary, checks = await _get_owned_batch_or_404(batch_id, current_user)
         
         # Add session_id for in-progress checks
         for check in checks:
@@ -1456,19 +1470,21 @@ async def get_batch(batch_id: str):
 
 
 @app.post("/api/cancel/batch/{batch_id}")
-async def cancel_batch(batch_id: str):
+async def cancel_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Cancel all active checks in a batch"""
     try:
+        user_id = get_user_id_filter(current_user)
+        await _get_owned_batch_or_404(batch_id, current_user)
         # Cancel active tasks
         cancelled_sessions = 0
         for session_id, meta in list(active_checks.items()):
-            if meta.get("batch_id") == batch_id:
+            if meta.get("batch_id") == batch_id and (user_id is None or meta.get("user_id") == user_id):
                 meta["cancel_event"].set()
                 meta["task"].cancel()
                 cancelled_sessions += 1
         
         # Update database status for any remaining in-progress
-        db_cancelled = await db.cancel_batch(batch_id)
+        db_cancelled = await db.cancel_batch(batch_id, user_id=user_id)
         
         logger.info(f"Cancelled batch {batch_id}: {cancelled_sessions} active, {db_cancelled} in DB")
         
@@ -1478,24 +1494,28 @@ async def cancel_batch(batch_id: str):
             "cancelled_active": cancelled_sessions,
             "cancelled_pending": db_cancelled
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error cancelling batch: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/batch/{batch_id}")
-async def delete_batch(batch_id: str):
+async def delete_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Delete all checks in a batch"""
     try:
+        user_id = get_user_id_filter(current_user)
+        await _get_owned_batch_or_404(batch_id, current_user)
         # First cancel any active checks
         for session_id, meta in list(active_checks.items()):
-            if meta.get("batch_id") == batch_id:
+            if meta.get("batch_id") == batch_id and (user_id is None or meta.get("user_id") == user_id):
                 meta["cancel_event"].set()
                 meta["task"].cancel()
                 active_checks.pop(session_id, None)
         
         # Delete from database
-        deleted_count = await db.delete_batch(batch_id)
+        deleted_count = await db.delete_batch(batch_id, user_id=user_id)
         
         if deleted_count == 0:
             raise HTTPException(status_code=404, detail="Batch not found")
@@ -1515,10 +1535,11 @@ async def delete_batch(batch_id: str):
 
 
 @app.patch("/api/batch/{batch_id}")
-async def update_batch_label(batch_id: str, update: BatchLabelUpdate):
+async def update_batch_label(batch_id: str, update: BatchLabelUpdate, current_user: UserInfo = Depends(require_user)):
     """Update the label for a batch"""
     try:
-        success = await db.update_batch_label(batch_id, update.batch_label)
+        user_id = get_user_id_filter(current_user)
+        success = await db.update_batch_label(batch_id, update.batch_label, user_id=user_id)
         if success:
             return {"message": "Batch label updated successfully"}
         else:
@@ -1531,11 +1552,12 @@ async def update_batch_label(batch_id: str, update: BatchLabelUpdate):
 
 
 @app.post("/api/recheck/batch/{batch_id}")
-async def recheck_batch(batch_id: str):
+async def recheck_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
     """Re-run all checks in a batch"""
     try:
         # Get original batch checks
-        original_checks = await db.get_batch_checks(batch_id)
+        user_id = get_user_id_filter(current_user)
+        original_checks = await db.get_batch_checks(batch_id, user_id=user_id)
         if not original_checks:
             raise HTTPException(status_code=404, detail="Batch not found")
         
@@ -1560,21 +1582,23 @@ async def recheck_batch(batch_id: str):
                 llm_model=llm_model,
                 batch_id=new_batch_id,
                 batch_label=new_label,
-                original_filename=original.get("original_filename")
+                original_filename=original.get("original_filename"),
+                user_id=user_id,
             )
             
             cancel_event = asyncio.Event()
             task = asyncio.create_task(
                 run_check(
                     session_id, check_id, source, source_type,
-                    llm_provider, llm_model, None, None, True, cancel_event, 0
+                    llm_provider, llm_model, None, None, True, cancel_event, user_id
                 )
             )
             active_checks[session_id] = {
                 "task": task,
                 "cancel_event": cancel_event,
                 "check_id": check_id,
-                "batch_id": new_batch_id
+                "batch_id": new_batch_id,
+                "user_id": user_id,
             }
             
             checks.append({
@@ -1624,10 +1648,15 @@ async def delete_check(
 
 
 @app.patch("/api/history/{check_id}")
-async def update_check_label(check_id: int, update: CheckLabelUpdate):
+async def update_check_label(
+    check_id: int,
+    update: CheckLabelUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
     """Update the custom label for a check"""
     try:
-        success = await db.update_check_label(check_id, update.custom_label)
+        user_id = get_user_id_filter(current_user)
+        success = await db.update_check_label(check_id, update.custom_label, user_id=user_id)
         if success:
             return {"message": "Label updated successfully"}
         else:
@@ -1686,9 +1715,14 @@ async def create_llm_config(
 
 
 @app.put("/api/llm-configs/{config_id}")
-async def update_llm_config(config_id: int, config: LLMConfigUpdate):
+async def update_llm_config(
+    config_id: int,
+    config: LLMConfigUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
     """Update an existing LLM configuration"""
     try:
+        user_id = get_user_id_filter(current_user)
         # In single-user mode, store the API key in the database
         store_key = config.api_key if not MULTIUSER_MODE else None
         success = await db.update_llm_config(
@@ -1698,10 +1732,11 @@ async def update_llm_config(config_id: int, config: LLMConfigUpdate):
             model=config.model,
             endpoint=config.endpoint,
             api_key=store_key,
+            user_id=user_id,
         )
         if success:
             # Get updated config
-            updated = await db.get_llm_configs()
+            updated = await db.get_llm_configs(user_id=user_id)
             updated_config = next((c for c in updated if c["id"] == config_id), None)
             return updated_config or {"id": config_id, "message": "Updated"}
         else:
@@ -1714,10 +1749,14 @@ async def update_llm_config(config_id: int, config: LLMConfigUpdate):
 
 
 @app.delete("/api/llm-configs/{config_id}")
-async def delete_llm_config(config_id: int):
+async def delete_llm_config(
+    config_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
     """Delete an LLM configuration"""
     try:
-        success = await db.delete_llm_config(config_id)
+        user_id = get_user_id_filter(current_user)
+        success = await db.delete_llm_config(config_id, user_id=user_id)
         if success:
             return {"message": "Config deleted successfully"}
         else:

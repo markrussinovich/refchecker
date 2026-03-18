@@ -318,22 +318,28 @@ class Database:
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             if user_id is not None:
-                await db.execute("DELETE FROM check_history WHERE id = ? AND user_id = ?", (check_id, user_id))
+                cursor = await db.execute("DELETE FROM check_history WHERE id = ? AND user_id = ?", (check_id, user_id))
             else:
-                await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
+                cursor = await db.execute("DELETE FROM check_history WHERE id = ?", (check_id,))
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
-    async def update_check_label(self, check_id: int, label: str) -> bool:
-        """Update the custom label for a check"""
+    async def update_check_label(self, check_id: int, label: str, user_id: Optional[int] = None) -> bool:
+        """Update the custom label for a check, optionally enforcing user ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
-            await db.execute(
-                "UPDATE check_history SET custom_label = ? WHERE id = ?",
-                (label, check_id)
-            )
+            if user_id is not None:
+                cursor = await db.execute(
+                    "UPDATE check_history SET custom_label = ? WHERE id = ? AND user_id = ?",
+                    (label, check_id, user_id)
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE check_history SET custom_label = ? WHERE id = ?",
+                    (label, check_id)
+                )
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
     async def update_check_title(self, check_id: int, paper_title: str) -> bool:
         """Update the paper title for a check"""
@@ -605,7 +611,8 @@ class Database:
                                  provider: Optional[str] = None,
                                  model: Optional[str] = None,
                                  endpoint: Optional[str] = None,
-                                 api_key: Optional[str] = None) -> bool:
+                                 api_key: Optional[str] = None,
+                                 user_id: Optional[int] = None) -> bool:
         """Update an existing LLM configuration"""
         updates = []
         params = []
@@ -630,21 +637,28 @@ class Database:
             return False
 
         params.append(config_id)
+        where_clause = "id = ?"
+        if user_id is not None:
+            where_clause += " AND user_id = ?"
+            params.append(user_id)
 
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                f"UPDATE llm_configs SET {', '.join(updates)} WHERE id = ?",
+            cursor = await db.execute(
+                f"UPDATE llm_configs SET {', '.join(updates)} WHERE {where_clause}",
                 params
             )
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
-    async def delete_llm_config(self, config_id: int) -> bool:
-        """Delete an LLM configuration"""
+    async def delete_llm_config(self, config_id: int, user_id: Optional[int] = None) -> bool:
+        """Delete an LLM configuration, optionally enforcing user ownership."""
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("DELETE FROM llm_configs WHERE id = ?", (config_id,))
+            if user_id is not None:
+                cursor = await db.execute("DELETE FROM llm_configs WHERE id = ? AND user_id = ?", (config_id, user_id))
+            else:
+                cursor = await db.execute("DELETE FROM llm_configs WHERE id = ?", (config_id,))
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
     async def set_default_llm_config(self, config_id: int, user_id: Optional[int] = None) -> bool:
         """Set an LLM config as the default (unsets others for the same user)"""
@@ -655,12 +669,18 @@ class Database:
             else:
                 await db.execute("UPDATE llm_configs SET is_default = 0")
             # Set the new default
-            await db.execute(
-                "UPDATE llm_configs SET is_default = 1 WHERE id = ?",
-                (config_id,)
-            )
+            if user_id is not None:
+                cursor = await db.execute(
+                    "UPDATE llm_configs SET is_default = 1 WHERE id = ? AND user_id = ?",
+                    (config_id, user_id)
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE llm_configs SET is_default = 1 WHERE id = ?",
+                    (config_id,)
+                )
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
     async def get_default_llm_config(self, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get the default LLM configuration, optionally filtered by user."""
@@ -930,29 +950,36 @@ class Database:
 
     # Batch operations
 
-    async def get_batch_checks(self, batch_id: str) -> List[Dict[str, Any]]:
-        """Get all checks belonging to a batch"""
+    async def get_batch_checks(self, batch_id: str, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Get all checks belonging to a batch, optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
+            query = """
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
                        llm_provider, llm_model, status, source_type, batch_id, batch_label
                 FROM check_history
                 WHERE batch_id = ?
-                ORDER BY timestamp ASC
-            """, (batch_id,)) as cursor:
+            """
+            params: tuple[Any, ...]
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params = (batch_id, user_id)
+            else:
+                params = (batch_id,)
+            query += " ORDER BY timestamp ASC"
+            async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
 
-    async def get_batch_summary(self, batch_id: str) -> Optional[Dict[str, Any]]:
-        """Get aggregated summary for a batch"""
+    async def get_batch_summary(self, batch_id: str, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+        """Get aggregated summary for a batch, optionally filtered by user."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
-            async with db.execute("""
+            query = """
                 SELECT 
                     batch_id,
                     batch_label,
@@ -969,46 +996,72 @@ class Database:
                     MIN(timestamp) as started_at
                 FROM check_history
                 WHERE batch_id = ?
-                GROUP BY batch_id
-            """, (batch_id,)) as cursor:
+            """
+            params: tuple[Any, ...]
+            if user_id is not None:
+                query += " AND user_id = ?"
+                params = (batch_id, user_id)
+            else:
+                params = (batch_id,)
+            query += " GROUP BY batch_id"
+            async with db.execute(query, params) as cursor:
                 row = await cursor.fetchone()
                 if row:
                     return dict(row)
                 return None
 
-    async def cancel_batch(self, batch_id: str) -> int:
+    async def cancel_batch(self, batch_id: str, user_id: Optional[int] = None) -> int:
         """Cancel all in-progress checks in a batch. Returns count of cancelled checks."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
-            cursor = await db.execute("""
-                UPDATE check_history 
-                SET status = 'cancelled' 
-                WHERE batch_id = ? AND status = 'in_progress'
-            """, (batch_id,))
+            if user_id is not None:
+                cursor = await db.execute("""
+                    UPDATE check_history 
+                    SET status = 'cancelled' 
+                    WHERE batch_id = ? AND user_id = ? AND status = 'in_progress'
+                """, (batch_id, user_id))
+            else:
+                cursor = await db.execute("""
+                    UPDATE check_history 
+                    SET status = 'cancelled' 
+                    WHERE batch_id = ? AND status = 'in_progress'
+                """, (batch_id,))
             await db.commit()
             return cursor.rowcount
 
-    async def delete_batch(self, batch_id: str) -> int:
+    async def delete_batch(self, batch_id: str, user_id: Optional[int] = None) -> int:
         """Delete all checks in a batch. Returns count of deleted checks."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
-            cursor = await db.execute(
-                "DELETE FROM check_history WHERE batch_id = ?",
-                (batch_id,)
-            )
+            if user_id is not None:
+                cursor = await db.execute(
+                    "DELETE FROM check_history WHERE batch_id = ? AND user_id = ?",
+                    (batch_id, user_id)
+                )
+            else:
+                cursor = await db.execute(
+                    "DELETE FROM check_history WHERE batch_id = ?",
+                    (batch_id,)
+                )
             await db.commit()
             return cursor.rowcount
 
-    async def update_batch_label(self, batch_id: str, label: str) -> bool:
-        """Update the label for all checks in a batch"""
+    async def update_batch_label(self, batch_id: str, label: str, user_id: Optional[int] = None) -> bool:
+        """Update the label for all checks in a batch, optionally enforcing user ownership."""
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
-            await db.execute(
-                "UPDATE check_history SET batch_label = ? WHERE batch_id = ?",
-                (label, batch_id)
-            )
+            if user_id is not None:
+                cursor = await db.execute(
+                    "UPDATE check_history SET batch_label = ? WHERE batch_id = ? AND user_id = ?",
+                    (label, batch_id, user_id)
+                )
+            else:
+                cursor = await db.execute(
+                    "UPDATE check_history SET batch_label = ? WHERE batch_id = ?",
+                    (label, batch_id)
+                )
             await db.commit()
-            return True
+            return cursor.rowcount > 0
 
 
 # Global database instance
