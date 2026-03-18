@@ -21,12 +21,12 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
 
-  // Key store for browser-localStorage LLM API key management
+  // Key store for per-tab in-memory LLM API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
   const configs = useConfigStore(state => state.configs)
 
-  // Check if a provider has a key in browser localStorage OR in any DB config
+  // Check if a provider has a key in the current tab OR in any DB config
   const providerHasKey = (provider) => {
     if (hasKey(provider)) return true
     return configs.some(c => c.provider === provider && c.has_key)
@@ -38,7 +38,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [llmKeyEditing, setLlmKeyEditing] = useState({}) // provider -> bool
   const [llmKeySaving, setLlmKeySaving] = useState({})   // provider -> bool
   
-  // Semantic Scholar API key state (browser localStorage, not server-side)
+  // Semantic Scholar API key state (current tab only, not server-side)
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
   const [ssIsLoading, setSsIsLoading] = useState(false)
@@ -47,7 +47,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [ssError, setSsError] = useState(null)
   const ssHasKey = hasKey('semantic_scholar')
 
-  // No server round-trip needed — SS key lives in localStorage
+  // No server round-trip needed — SS key stays in memory for this tab only
 
   // Close on escape key
   useEffect(() => {
@@ -82,7 +82,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     updateSetting(key, value)
   }
 
-  // Semantic Scholar API key handlers — localStorage only, never sent to server for storage
+  // Semantic Scholar API key handlers — kept in memory only, never sent to server for storage
   const handleSsSave = async () => {
     if (!ssApiKey.trim()) {
       setSsError('API key cannot be empty')
@@ -100,7 +100,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         return
       }
 
-      logger.info('SettingsPanel', 'SS API key validated, saving to localStorage')
+      logger.info('SettingsPanel', 'SS API key validated, storing in memory for this tab')
       setSsIsValidating(false)
 
       setKey('semantic_scholar', ssApiKey.trim())
@@ -120,7 +120,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     setSsIsEditing(false)
     setSsApiKey('')
     setSsError(null)
-    logger.info('SettingsPanel', 'SS API key deleted from localStorage')
+    logger.info('SettingsPanel', 'SS API key cleared from the current tab')
   }
 
   const handleSsCancel = () => {
@@ -208,14 +208,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAPIKeysSection = () => (
     <div className="space-y-1">
-      {/* LLM API Keys (stored in browser localStorage) */}
+      {/* LLM API Keys (stored in memory for the current tab) */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
             LLM API Keys
           </div>
           {multiuser && (
             <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-              Keys are stored in your browser&apos;s local storage only.
+              Keys stay in memory for this tab only and are cleared on refresh or logout.
             </div>
           )}
           <div className="space-y-3">

@@ -1,24 +1,22 @@
 import { create } from 'zustand'
 
-const STORAGE_KEY = 'refchecker_llm_keys'
+const LEGACY_STORAGE_KEY = 'refchecker_llm_keys'
 
-function loadKeys() {
+function clearLegacyKeys() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
+    localStorage.removeItem(LEGACY_STORAGE_KEY)
+  } catch {}
 }
 
-function saveKeys(keys) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(keys)) } catch {}
+if (typeof window !== 'undefined') {
+  clearLegacyKeys()
 }
 
 export const useKeyStore = create((set, get) => ({
-  keys: loadKeys(), // { provider: key, ... }
+  keys: {}, // { provider: key, ... } kept in memory for this tab only
 
   setKey: (provider, key) => {
     const keys = { ...get().keys, [provider]: key }
-    saveKeys(keys)
     set({ keys })
   },
 
@@ -27,9 +25,10 @@ export const useKeyStore = create((set, get) => ({
   deleteKey: (provider) => {
     const keys = { ...get().keys }
     delete keys[provider]
-    saveKeys(keys)
     set({ keys })
   },
 
   hasKey: (provider) => Boolean(get().keys[provider]),
+
+  clearAll: () => set({ keys: {} }),
 }))

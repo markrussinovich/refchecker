@@ -204,7 +204,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         logger.info('LLMConfigModal', 'Config created')
       }
 
-      // Save API key to browser localStorage so it's available for check submissions
+      // Save the API key in memory for this tab so it's available for check submissions
       if (formData.api_key.trim()) {
         useKeyStore.getState().setKey(formData.provider, formData.api_key.trim())
         logger.info('LLMConfigModal', 'API key saved to local key store', { provider: formData.provider })

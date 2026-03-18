@@ -17,7 +17,7 @@ export default function LLMSelector({ compact = false }) {
 
   // A config is "valid" (selectable) if it has a key:
   //   single-user: has_key flag from DB
-  //   multi-user: browser localStorage has a key for that provider
+  //   multi-user: the current tab has a key for that provider
   const configHasKey = (config) => {
     if (!config) return false
     if (multiuser) return hasKeyInBrowser(config.provider)

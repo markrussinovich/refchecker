@@ -103,7 +103,7 @@ export default function InputSection() {
         formData.append('use_llm', 'false')
       }
 
-      // Attach API keys from browser localStorage; in single-user mode the
+      // Attach per-tab API keys from the in-memory browser store; in single-user mode the
       // backend falls back to the key stored in the DB (config.has_key).
       const keyStore = useKeyStore.getState()
       const llmKey = config ? keyStore.getKey(config.provider) : null

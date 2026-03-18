@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { logger } from '../utils/logger'
 import * as api from '../utils/api'
+import { useKeyStore } from './useKeyStore'
 
 /**
  * Store for cookie-based authentication state.
@@ -103,6 +104,7 @@ export const useAuthStore = create((set, get) => {
       try {
         await api.authLogout()
       } catch (_) { /* ignore server-side logout errors */ }
+      useKeyStore.getState().clearAll()
       set({ user: null })
       logger.info('AuthStore', 'Logged out')
     },
