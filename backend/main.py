@@ -35,7 +35,7 @@ from .models import CheckRequest, CheckHistoryItem
 from .concurrency import init_limiter, get_limiter, set_default_max_concurrent, DEFAULT_MAX_CONCURRENT
 from .auth import (
     SITE_URL,
-    MULTIUSER_MODE,
+    is_multiuser_mode,
     require_user,
     get_current_user,
     get_user_id_filter,
@@ -83,6 +83,16 @@ def get_uploads_dir() -> Path:
     d = get_data_dir() / "uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
+    """Reject web-only providers that are unsafe in multi-user deployments."""
+    normalized = (provider_name or "").strip().lower()
+    if is_multiuser_mode() and normalized == "vllm":
+        raise HTTPException(
+            status_code=403,
+            detail="vLLM is only supported in single-user local deployments",
+        )
 
 
 async def _save_upload_file(upload: UploadFile, dest_path: Path, max_bytes: int) -> int:
@@ -365,7 +375,7 @@ _EXCHANGE_FNS = {
 @app.get("/api/auth/providers")
 async def auth_providers():
     """Return which OAuth providers are configured."""
-    return {"providers": get_available_providers(), "multiuser": MULTIUSER_MODE}
+    return {"providers": get_available_providers(), "multiuser": is_multiuser_mode()}
 
 
 @app.get("/api/auth/login/{provider}")
@@ -1794,8 +1804,9 @@ async def create_llm_config(
     """Create a new LLM configuration"""
     try:
         user_id = get_user_id_filter(current_user)
+        _ensure_allowed_web_llm_provider(config.provider)
         # In single-user mode, store the API key in the database
-        store_key = config.api_key if not MULTIUSER_MODE else None
+        store_key = config.api_key if not is_multiuser_mode() else None
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
@@ -1813,6 +1824,8 @@ async def create_llm_config(
             "is_default": False,
             "has_key": bool(store_key),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating LLM config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -1827,8 +1840,10 @@ async def update_llm_config(
     """Update an existing LLM configuration"""
     try:
         user_id = get_user_id_filter(current_user)
+        if config.provider is not None:
+            _ensure_allowed_web_llm_provider(config.provider)
         # In single-user mode, store the API key in the database
-        store_key = config.api_key if not MULTIUSER_MODE else None
+        store_key = config.api_key if not is_multiuser_mode() else None
         success = await db.update_llm_config(
             config_id=config_id,
             name=config.name,
@@ -1898,6 +1913,7 @@ async def validate_llm_config(config: LLMConfigValidate):
     Validate an LLM configuration by making a test API call.
     Returns success or error message.
     """
+    _ensure_allowed_web_llm_provider(config.provider)
     # Map providers to their required packages
     PROVIDER_PACKAGES = {
         "anthropic": ("anthropic", "pip install anthropic"),

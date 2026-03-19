@@ -26,6 +26,7 @@ if _src_path not in sys.path and os.path.exists(_src_path):
     sys.path.insert(0, _src_path)
 
 from backend.concurrency import create_limiter, get_default_max_concurrent
+from backend.auth import is_multiuser_mode
 
 from refchecker.utils.text_utils import extract_latex_references
 from refchecker.utils.url_utils import extract_arxiv_id_from_url
@@ -134,6 +135,8 @@ class ProgressRefChecker:
         # Initialize LLM if requested
         self.llm = None
         if use_llm and llm_provider:
+            if is_multiuser_mode() and llm_provider.strip().lower() == "vllm":
+                raise ValueError("vLLM is only supported in single-user local deployments")
             try:
                 # Build config dict for the LLM provider
                 llm_config = {}

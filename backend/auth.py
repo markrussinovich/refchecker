@@ -27,8 +27,13 @@ def _get_env(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
+def is_multiuser_mode() -> bool:
+    """Return whether multi-user mode is currently enabled."""
+    return os.environ.get("REFCHECKER_MULTIUSER", "").lower() in ("1", "true", "yes")
+
+
 # Multi-user mode (must be explicitly enabled)
-MULTIUSER_MODE: bool = os.environ.get("REFCHECKER_MULTIUSER", "").lower() in ("1", "true", "yes")
+MULTIUSER_MODE: bool = is_multiuser_mode()
 
 # JWT settings
 JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", secrets.token_hex(32))
