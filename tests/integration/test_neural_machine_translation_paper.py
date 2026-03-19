@@ -81,7 +81,8 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
                         "Reference ArXiv ID should match Semantic Scholar ArXiv ID")
     
     @patch('requests.get')
-    def test_paper_found_in_semantic_scholar(self, mock_get):
+    @patch('requests.sessions.Session.get', autospec=True)
+    def test_paper_found_in_semantic_scholar(self, mock_session_get, mock_get):
         """Test that the paper is found in Semantic Scholar API"""
         # Clear the arxiv cache so our mock is actually called
         from refchecker.utils.arxiv_rate_limiter import _arxiv_cache
@@ -100,12 +101,16 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
         arxiv_response.status_code = 200
         arxiv_response.text = '<html>[v1] Mon, 31 Oct 2016 [v2] Thu, 9 Mar 2017</html>'
 
-        def side_effect(url, **kwargs):
+        def session_side_effect(_session, url, **kwargs):
+            return ss_response
+
+        def request_side_effect(url, **kwargs):
             if 'arxiv.org' in url:
                 return arxiv_response
             return ss_response
 
-        mock_get.side_effect = side_effect
+        mock_session_get.side_effect = session_side_effect
+        mock_get.side_effect = request_side_effect
 
         # Test search by title
         from refchecker.checkers.semantic_scholar import NonArxivReferenceChecker
