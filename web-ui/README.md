@@ -151,8 +151,8 @@ export ANTHROPIC_API_KEY=your_key_here
 # or
 export OPENAI_API_KEY=your_key_here
 
-# Optional: For faster verification (1-2s vs 5-10s per reference)
-export SEMANTIC_SCHOLAR_API_KEY=your_key_here
+# Optional: add a Semantic Scholar API key in the Settings panel.
+# The web UI keeps it in browser memory for the current tab only.
 ```
 
 ### LLM Provider
@@ -258,7 +258,7 @@ Message types:
 
 ### Slow verification
 - Get a Semantic Scholar API key for 5x faster verification
-- Set `SEMANTIC_SCHOLAR_API_KEY` environment variable
+- Add it in the web UI Settings panel for the current tab
 
 ## License
 

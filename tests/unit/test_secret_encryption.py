@@ -52,17 +52,17 @@ def test_app_settings_are_encrypted_at_rest(database_module, tmp_path):
     db = database_module.Database(str(db_path))
     _run(db.init_db())
 
-    _run(db.set_setting("semantic_scholar_api_key", "ss-secret"))
+    _run(db.set_setting("service_token", "ss-secret"))
 
     with sqlite3.connect(db_path) as conn:
         stored_value = conn.execute(
             "SELECT value_encrypted FROM app_settings WHERE key = ?",
-            ("semantic_scholar_api_key",),
+            ("service_token",),
         ).fetchone()[0]
 
     assert stored_value != "ss-secret"
     assert stored_value.startswith(database_module.SECRET_VALUE_PREFIX)
-    assert _run(db.get_setting("semantic_scholar_api_key")) == "ss-secret"
+    assert _run(db.get_setting("service_token")) == "ss-secret"
 
 
 def test_init_db_migrates_legacy_plaintext_secrets(database_module, tmp_path):
@@ -77,7 +77,7 @@ def test_init_db_migrates_legacy_plaintext_secrets(database_module, tmp_path):
         )
         conn.execute(
             "INSERT INTO app_settings (key, value_encrypted) VALUES (?, ?)",
-            ("semantic_scholar_api_key", "legacy-setting"),
+            ("service_token", "legacy-setting"),
         )
         conn.commit()
 
@@ -90,7 +90,7 @@ def test_init_db_migrates_legacy_plaintext_secrets(database_module, tmp_path):
         ).fetchone()[0]
         setting_secret = conn.execute(
             "SELECT value_encrypted FROM app_settings WHERE key = ?",
-            ("semantic_scholar_api_key",),
+            ("service_token",),
         ).fetchone()[0]
 
     assert config_secret.startswith(database_module.SECRET_VALUE_PREFIX)
@@ -98,4 +98,4 @@ def test_init_db_migrates_legacy_plaintext_secrets(database_module, tmp_path):
 
     legacy_config = _run(db.get_llm_config_by_id(1))
     assert legacy_config["api_key"] == "legacy-key"
-    assert _run(db.get_setting("semantic_scholar_api_key")) == "legacy-setting"
+    assert _run(db.get_setting("service_token")) == "legacy-setting"

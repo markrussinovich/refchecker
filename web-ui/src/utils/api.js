@@ -55,10 +55,7 @@ export const deleteLLMConfig = (id) => api.delete(`/llm-configs/${id}`)
 export const setDefaultLLMConfig = (id) => api.post(`/llm-configs/${id}/set-default`)
 export const validateLLMConfig = (config) => api.post('/llm-configs/validate', config)
 
-// Semantic Scholar API Key
-export const getSemanticScholarKeyStatus = () => api.get('/settings/semantic-scholar')
-export const setSemanticScholarKey = (apiKey) => api.put('/settings/semantic-scholar', { api_key: apiKey })
-export const deleteSemanticScholarKey = () => api.delete('/settings/semantic-scholar')
+// Semantic Scholar API Key validation (key storage is browser-only)
 export const validateSemanticScholarKey = (apiKey) => api.post('/settings/semantic-scholar/validate', { api_key: apiKey })
 
 // Check operations
@@ -140,9 +137,7 @@ export default {
   updateLLMConfig,
   deleteLLMConfig,
   setDefaultLLMConfig,
-  getSemanticScholarKeyStatus,
-  setSemanticScholarKey,
-  deleteSemanticScholarKey,
+  validateLLMConfig,
   validateSemanticScholarKey,
   startCheck,
   startBatchCheck,

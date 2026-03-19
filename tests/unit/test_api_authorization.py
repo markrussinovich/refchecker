@@ -38,6 +38,7 @@ async def _create_user(api_main, db: Database, provider_id: str):
 @pytest.fixture
 def auth_db(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization")
+    monkeypatch.setenv("REFCHECKER_MULTIUSER", "true")
     api_main = importlib.import_module("backend.main")
     api_main = importlib.reload(api_main)
     temp_db = Database(str(tmp_path / "authz.db"))
@@ -201,3 +202,98 @@ def test_llm_config_mutations_are_user_scoped(auth_db):
     delete_result = _run(api_main.delete_llm_config(config_id, owner))
     assert delete_result["message"] == "Config deleted successfully"
     assert _run(db.get_llm_config_by_id(config_id, user_id=owner.id)) is None
+
+
+def test_multiuser_rejects_vllm_config_creation_and_validation(auth_db):
+    api_main, _db = auth_db
+    owner = _run(_create_user(api_main, _db, "owner-vllm"))
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.create_llm_config(
+            api_main.LLMConfigCreate(name="Local vLLM", provider="vllm", endpoint="http://localhost:8000"),
+            owner,
+        ))
+    assert exc.value.status_code == 403
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.validate_llm_config(
+            api_main.LLMConfigValidate(provider="vllm", endpoint="http://localhost:8000"),
+            owner,
+        ))
+    assert exc.value.status_code == 403
+
+
+def test_private_artifact_routes_disable_shared_caching(auth_db, tmp_path):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-cache"))
+
+    uploaded_file = tmp_path / "paper.pdf"
+    uploaded_file.write_bytes(b"%PDF-1.4 test")
+    file_check_id = _run(db.create_pending_check(
+        paper_title="Owner file",
+        paper_source=str(uploaded_file),
+        source_type="file",
+        user_id=owner.id,
+    ))
+    file_response = _run(api_main.get_uploaded_file(file_check_id, owner))
+    assert file_response.headers["cache-control"] == "private, no-store, max-age=0"
+    assert file_response.headers["vary"] == "Cookie"
+
+    text_file = tmp_path / "pasted.txt"
+    text_file.write_text("reference text", encoding="utf-8")
+    text_check_id = _run(db.create_pending_check(
+        paper_title="Pasted Text",
+        paper_source=str(text_file),
+        source_type="text",
+        user_id=owner.id,
+    ))
+    text_response = _run(api_main.get_pasted_text(text_check_id, owner))
+    assert text_response.headers["cache-control"] == "private, no-store, max-age=0"
+    assert text_response.headers["vary"] == "Cookie"
+
+
+def test_settings_updates_require_admin(auth_db):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-settings"))
+    admin = api_main.UserInfo(
+        id=owner.id,
+        email=owner.email,
+        name=owner.name,
+        provider=owner.provider,
+        is_admin=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.update_setting(
+            "max_concurrent_checks",
+            api_main.SettingUpdate(value="7"),
+            owner,
+        ))
+    assert exc.value.status_code == 403
+
+    result = _run(api_main.update_setting(
+        "max_concurrent_checks",
+        api_main.SettingUpdate(value="7"),
+        admin,
+    ))
+    assert result["value"] == "7"
+
+
+def test_semantic_scholar_keys_are_browser_only(auth_db):
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-ss"))
+
+    status = _run(api_main.get_semantic_scholar_key_status(owner))
+    assert status["has_key"] is False
+    assert status["storage"] == "browser-only"
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.set_semantic_scholar_key(
+            api_main.SemanticScholarKeyUpdate(api_key="ss-key"),
+            owner,
+        ))
+    assert exc.value.status_code == 410
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.delete_semantic_scholar_key(owner))
+    assert exc.value.status_code == 410

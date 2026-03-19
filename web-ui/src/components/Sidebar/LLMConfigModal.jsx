@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Modal from '../common/Modal'
 import Button from '../common/Button'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAuthStore } from '../../stores/useAuthStore'
 import { validateLLMConfig } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -19,6 +20,7 @@ const PROVIDERS = [
  */
 export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null }) {
   const { addConfig, updateConfig } = useConfigStore()
+  const multiuser = useAuthStore(state => state.multiuser)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState(null)
@@ -51,7 +53,27 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     }
   }, [isOpen, editConfig, prefillConfig])
 
-  const selectedProvider = PROVIDERS.find(p => p.id === formData.provider)
+  const availableProviders = useMemo(
+    () => (multiuser ? PROVIDERS.filter(p => p.id !== 'vllm') : PROVIDERS),
+    [multiuser],
+  )
+  const selectedProvider = availableProviders.find(p => p.id === formData.provider)
+
+  useEffect(() => {
+    if (!multiuser) return
+    if (formData.provider === 'vllm') {
+      const fallbackProvider = availableProviders[0]
+      setFormData(prev => ({
+        ...prev,
+        provider: fallbackProvider?.id || 'anthropic',
+        model: '',
+        endpoint: '',
+        name: (!prev.name || prev.name === 'meta-llama/Llama-3.1-8B-Instruct')
+          ? (fallbackProvider?.defaultModel || prev.name)
+          : prev.name,
+      }))
+    }
+  }, [availableProviders, formData.provider, multiuser])
 
   const handleChange = (e) => {
     const { name, value } = e.target
@@ -71,7 +93,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
 
   const handleProviderChange = (e) => {
     const provider = e.target.value
-    const providerInfo = PROVIDERS.find(p => p.id === provider)
+    const providerInfo = availableProviders.find(p => p.id === provider)
     setFormData(prev => {
       const oldModel = prev.model || selectedProvider?.defaultModel || ''
       const newDefaultModel = providerInfo?.defaultModel || ''
@@ -274,7 +296,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               color: 'var(--color-text-primary)',
             }}
           >
-            {PROVIDERS.map(p => (
+            {availableProviders.map(p => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>

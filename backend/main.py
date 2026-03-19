@@ -85,6 +85,18 @@ def get_uploads_dir() -> Path:
     return d
 
 
+def _private_artifact_headers(extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Prevent shared caches from storing authenticated user content."""
+    headers = {
+        "Cache-Control": "private, no-store, max-age=0",
+        "Pragma": "no-cache",
+        "Vary": "Cookie",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    return headers
+
+
 def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
     """Reject web-only providers that are unsafe in multi-user deployments."""
     normalized = (provider_name or "").strip().lower()
@@ -93,6 +105,11 @@ def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
             status_code=403,
             detail="vLLM is only supported in single-user local deployments",
         )
+
+
+def _require_admin(current_user: UserInfo) -> None:
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin required")
 
 
 async def _save_upload_file(upload: UploadFile, dest_path: Path, max_bytes: int) -> int:
@@ -317,6 +334,15 @@ async def _get_owned_batch_or_404(batch_id: str, current_user: UserInfo) -> tupl
 async def startup_event():
     """Initialize database and settings on startup"""
     await db.init_db()
+
+    # Semantic Scholar keys are browser-managed for the web UI and should not
+    # remain persisted on the server after upgrade.
+    try:
+        if await db.has_setting("semantic_scholar_api_key"):
+            await db.delete_setting("semantic_scholar_api_key")
+            logger.info("Removed deprecated server-side Semantic Scholar API key")
+    except Exception as e:
+        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
     
     # Initialize global concurrency limiter with saved setting
     try:
@@ -526,6 +552,8 @@ async def start_check(
                 logger.info(f"Using LLM config {llm_config_id}: {llm_provider}/{llm_model}")
             else:
                 logger.warning(f"LLM config {llm_config_id} not found")
+        if use_llm:
+            _ensure_allowed_web_llm_provider(llm_provider)
         logger.info(f"Effective API key resolved: {'present' if effective_api_key else 'MISSING'}, SS key: {'present' if semantic_scholar_api_key else 'MISSING'}")
 
         # Handle file upload or pasted text
@@ -710,10 +738,6 @@ async def run_check(
             except Exception as e:
                 logger.warning(f"Failed to save bibliography source: {e}")
 
-        # Use per-request Semantic Scholar key from client; fall back to DB for single-user mode
-        if not semantic_scholar_api_key:
-            semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
-        
         # Create checker with progress callback
         checker = ProgressRefChecker(
             llm_provider=llm_provider,
@@ -856,7 +880,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             return FileResponse(
                 thumbnail_path,
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
+                headers=_private_artifact_headers(),
             )
         
         # Generate thumbnail based on source type
@@ -943,7 +967,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             return FileResponse(
                 thumbnail_path,
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}
+                headers=_private_artifact_headers(),
             )
         else:
             raise HTTPException(status_code=404, detail="Could not generate thumbnail")
@@ -1029,7 +1053,7 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
             return FileResponse(
                 preview_path,
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}  # Cache for 1 day
+                headers=_private_artifact_headers(),
             )
         
         # For text sources, generate a high-resolution text preview for overlay display
@@ -1040,7 +1064,7 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                 return FileResponse(
                     preview_path,
                     media_type="image/png",
-                    headers={"Cache-Control": "public, max-age=86400"}
+                    headers=_private_artifact_headers(),
                 )
         
         # For non-PDF file uploads, also generate a text preview
@@ -1054,7 +1078,7 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                 return FileResponse(
                     preview_path,
                     media_type="image/png",
-                    headers={"Cache-Control": "public, max-age=86400"}
+                    headers=_private_artifact_headers(),
                 )
         
         raise HTTPException(status_code=404, detail="Could not generate preview")
@@ -1088,17 +1112,16 @@ async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(requir
                 paper_source,
                 media_type="text/plain; charset=utf-8",
                 filename="pasted_bibliography.txt",
-                headers={
+                headers=_private_artifact_headers({
                     "Content-Type": "text/plain; charset=utf-8",
-                    "Cache-Control": "public, max-age=3600"
-                }
+                }),
             )
         else:
             # Fallback: if paper_source is the actual text content (legacy)
             from fastapi.responses import PlainTextResponse
             return PlainTextResponse(
                 paper_source,
-                headers={"Cache-Control": "public, max-age=3600"}
+                headers=_private_artifact_headers(),
             )
             
     except HTTPException:
@@ -1141,7 +1164,7 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
                 paper_source,
                 media_type=media_type,
                 filename=paper_title,
-                headers={"Cache-Control": "public, max-age=3600"}
+                headers=_private_artifact_headers(),
             )
         else:
             raise HTTPException(status_code=404, detail="File no longer exists")
@@ -1175,10 +1198,9 @@ async def get_bibliography_source(check_id: int, current_user: UserInfo = Depend
                 bibliography_source_path,
                 media_type="text/plain; charset=utf-8",
                 filename=f"bibliography_{check_id}.{extraction_method or 'txt'}",
-                headers={
+                headers=_private_artifact_headers({
                     "Content-Type": "text/plain; charset=utf-8",
-                    "Cache-Control": "public, max-age=3600"
-                }
+                }),
             )
         
         # Fall back to pasted text source if source_type is 'text' and it's bbl/bib
@@ -1187,10 +1209,9 @@ async def get_bibliography_source(check_id: int, current_user: UserInfo = Depend
                 paper_source,
                 media_type="text/plain; charset=utf-8",
                 filename=f"bibliography_{check_id}.{extraction_method}",
-                headers={
+                headers=_private_artifact_headers({
                     "Content-Type": "text/plain; charset=utf-8",
-                    "Cache-Control": "public, max-age=3600"
-                }
+                }),
             )
         
         raise HTTPException(status_code=404, detail="Bibliography source not available for this check")
@@ -1324,6 +1345,8 @@ async def start_batch_check(
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
+        if request.use_llm:
+            _ensure_allowed_web_llm_provider(llm_provider)
 
         valid_urls = [u.strip() for u in request.urls if u.strip()]
 
@@ -1439,6 +1462,8 @@ async def start_batch_check_files(
                 endpoint = config.get('endpoint')
                 llm_provider = config.get('provider', llm_provider)
                 llm_model = config.get('model') or llm_model
+        if use_llm:
+            _ensure_allowed_web_llm_provider(llm_provider)
         
         files_to_process = []
         created_paths: list[Path] = []
@@ -1908,12 +1933,16 @@ async def set_default_llm_config(
 
 
 @app.post("/api/llm-configs/validate")
-async def validate_llm_config(config: LLMConfigValidate):
+async def validate_llm_config(
+    config: LLMConfigValidate,
+    current_user: UserInfo = Depends(require_user),
+):
     """
     Validate an LLM configuration by making a test API call.
     Returns success or error message.
     """
     _ensure_allowed_web_llm_provider(config.provider)
+
     # Map providers to their required packages
     PROVIDER_PACKAGES = {
         "anthropic": ("anthropic", "pip install anthropic"),
@@ -2018,7 +2047,10 @@ class SemanticScholarKeyValidate(BaseModel):
 
 
 @app.post("/api/settings/semantic-scholar/validate")
-async def validate_semantic_scholar_key(data: SemanticScholarKeyValidate):
+async def validate_semantic_scholar_key(
+    data: SemanticScholarKeyValidate,
+    current_user: UserInfo = Depends(require_user),
+):
     """
     Validate a Semantic Scholar API key by making a test API call.
     Returns success or error message.
@@ -2073,43 +2105,34 @@ async def validate_semantic_scholar_key(data: SemanticScholarKeyValidate):
 
 
 @app.get("/api/settings/semantic-scholar")
-async def get_semantic_scholar_key_status():
-    """Check if Semantic Scholar API key is configured (does not return the key)"""
-    try:
-        has_key = await db.has_setting("semantic_scholar_api_key")
-        return {"has_key": has_key}
-    except Exception as e:
-        logger.error(f"Error checking Semantic Scholar key: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+async def get_semantic_scholar_key_status(current_user: UserInfo = Depends(require_user)):
+    """Semantic Scholar keys are now browser-only for the current tab."""
+    return {
+        "has_key": False,
+        "storage": "browser-only",
+        "message": "Semantic Scholar API keys are managed in browser memory for the current tab only",
+    }
 
 
 @app.put("/api/settings/semantic-scholar")
-async def set_semantic_scholar_key(data: SemanticScholarKeyUpdate):
-    """Set or update the Semantic Scholar API key"""
-    try:
-        if not data.api_key or not data.api_key.strip():
-            raise HTTPException(status_code=400, detail="API key cannot be empty")
-        
-        await db.set_setting("semantic_scholar_api_key", data.api_key.strip())
-        logger.info("Semantic Scholar API key updated")
-        return {"message": "Semantic Scholar API key saved", "has_key": True}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error saving Semantic Scholar key: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+async def set_semantic_scholar_key(
+    data: SemanticScholarKeyUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
+    raise HTTPException(
+        status_code=410,
+        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
+    )
 
 
 @app.delete("/api/settings/semantic-scholar")
-async def delete_semantic_scholar_key():
-    """Delete the Semantic Scholar API key"""
-    try:
-        await db.delete_setting("semantic_scholar_api_key")
-        logger.info("Semantic Scholar API key deleted")
-        return {"message": "Semantic Scholar API key deleted", "has_key": False}
-    except Exception as e:
-        logger.error(f"Error deleting Semantic Scholar key: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+async def delete_semantic_scholar_key(current_user: UserInfo = Depends(require_user)):
+    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
+    raise HTTPException(
+        status_code=410,
+        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
+    )
 
 
 # General Settings endpoints
@@ -2119,7 +2142,7 @@ class SettingUpdate(BaseModel):
 
 
 @app.get("/api/settings")
-async def get_all_settings():
+async def get_all_settings(current_user: UserInfo = Depends(require_user)):
     """Get all application settings"""
     try:
         # Define all settings with their defaults and metadata
@@ -2159,9 +2182,14 @@ async def get_all_settings():
 
 
 @app.put("/api/settings/{setting_key}")
-async def update_setting(setting_key: str, update: SettingUpdate):
+async def update_setting(
+    setting_key: str,
+    update: SettingUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
     """Update a specific setting"""
     try:
+        _require_admin(current_user)
         # Validate the setting key
         valid_keys = {"max_concurrent_checks"}
         if setting_key not in valid_keys:
@@ -2203,8 +2231,7 @@ async def update_setting(setting_key: str, update: SettingUpdate):
 @app.delete("/api/admin/cache")
 async def clear_verification_cache(current_user: UserInfo = Depends(require_user)):
     """Clear the verification cache"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    _require_admin(current_user)
     try:
         count = await db.clear_verification_cache()
         logger.info(f"Cleared {count} entries from verification cache")
@@ -2217,8 +2244,7 @@ async def clear_verification_cache(current_user: UserInfo = Depends(require_user
 @app.delete("/api/admin/database")
 async def clear_database(current_user: UserInfo = Depends(require_user)):
     """Clear all data (cache + history) but keep settings and LLM configs"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    _require_admin(current_user)
     try:
         # Clear verification cache
         cache_count = await db.clear_verification_cache()

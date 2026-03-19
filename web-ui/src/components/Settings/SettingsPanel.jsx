@@ -24,7 +24,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Key store for per-tab in-memory LLM API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
+  const currentUser = useAuthStore(state => state.user)
   const configs = useConfigStore(state => state.configs)
+  const canManageSettings = !multiuser || currentUser?.is_admin
 
   // Check if a provider has a key in the current tab OR in any DB config
   const providerHasKey = (provider) => {
@@ -41,7 +43,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Semantic Scholar API key state (current tab only, not server-side)
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
-  const [ssIsLoading, setSsIsLoading] = useState(false)
   const [ssIsSaving, setSsIsSaving] = useState(false)
   const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
@@ -89,6 +90,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       return
     }
     try {
+      setSsIsSaving(true)
       setSsIsValidating(true)
       setSsError(null)
 
@@ -116,11 +118,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   }
 
   const handleSsDelete = () => {
-    deleteKey('semantic_scholar')
-    setSsIsEditing(false)
-    setSsApiKey('')
-    setSsError(null)
-    logger.info('SettingsPanel', 'SS API key cleared from the current tab')
+    setSsIsSaving(true)
+    try {
+      deleteKey('semantic_scholar')
+      setSsIsEditing(false)
+      setSsApiKey('')
+      setSsError(null)
+      logger.info('SettingsPanel', 'SS API key cleared from the current tab')
+    } finally {
+      setSsIsSaving(false)
+    }
   }
 
   const handleSsCancel = () => {
@@ -187,6 +194,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {settings.max_concurrent_checks?.description || 'Maximum number of references to check simultaneously'}
           </div>
+          {!canManageSettings && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+              Admin only
+            </div>
+          )}
         </div>
         <input
           type="number"
@@ -194,12 +206,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           min={settings.max_concurrent_checks?.min ?? 1}
           max={settings.max_concurrent_checks?.max ?? 20}
           onChange={(e) => handleSettingChange('max_concurrent_checks', e.target.value)}
+          disabled={!canManageSettings}
           className="px-3 py-2 rounded-lg border text-sm text-center"
           style={{
             backgroundColor: 'var(--color-bg-primary)',
             borderColor: 'var(--color-border)',
             color: 'var(--color-text-primary)',
-            width: '80px'
+            width: '80px',
+            opacity: canManageSettings ? 1 : 0.6,
           }}
         />
       </div>
@@ -373,9 +387,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
         </div>
         
-        {ssIsLoading ? (
-          <div className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</div>
-        ) : ssIsEditing && (
+        {ssIsEditing && (
           <div className="mt-3 space-y-2">
             <input
               type="password"

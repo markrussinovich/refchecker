@@ -177,8 +177,8 @@ class ProgressRefChecker:
                 logger.debug('Hallucination verifier initialized for web UI (provider=%s)', llm_provider)
         except Exception as e:
             logger.debug(f'Hallucination verifier init failed: {e}')
-        # Use provided API key, fall back to environment variable
-        ss_api_key = semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
+        # Web UI Semantic Scholar keys are supplied per request from the browser.
+        ss_api_key = semantic_scholar_api_key
         if ss_api_key:
             logger.info("Semantic Scholar API key configured")
         self.checker = EnhancedHybridReferenceChecker(

@@ -1,37 +1,23 @@
 import { useState, useEffect } from 'react'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { useKeyStore } from '../../stores/useKeyStore'
 
 /**
  * Semantic Scholar API key configuration component
  */
 export default function SemanticScholarConfig() {
-  const [hasKey, setHasKey] = useState(false)
+  const { hasKey, setKey, deleteKey } = useKeyStore()
   const [isEditing, setIsEditing] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState(null)
 
-  // Load initial status
   useEffect(() => {
-    loadKeyStatus()
+    setError(null)
   }, [])
-
-  const loadKeyStatus = async () => {
-    try {
-      setIsLoading(true)
-      const response = await api.getSemanticScholarKeyStatus()
-      setHasKey(response.data.has_key)
-      logger.info('SemanticScholarConfig', `Key status: ${response.data.has_key ? 'configured' : 'not configured'}`)
-    } catch (err) {
-      logger.error('SemanticScholarConfig', 'Failed to load key status', err)
-      setError('Failed to load status')
-    } finally {
-      setIsLoading(false)
-    }
-  }
 
   const handleSave = async () => {
     if (!apiKey.trim()) {
@@ -43,11 +29,9 @@ export default function SemanticScholarConfig() {
       // First validate the API key
       setIsValidating(true)
       setError(null)
-      console.log('[SemanticScholarConfig] Starting validation...')
-      
+
       const validationResponse = await api.validateSemanticScholarKey(apiKey.trim())
-      console.log('[SemanticScholarConfig] Validation response:', validationResponse.data)
-      
+
       if (!validationResponse.data.valid) {
         setError(validationResponse.data.message || 'Invalid API key')
         setIsValidating(false)
@@ -56,16 +40,14 @@ export default function SemanticScholarConfig() {
       
       logger.info('SemanticScholarConfig', 'API key validated successfully')
       setIsValidating(false)
-      
-      // Now save the key
+
+      // Store in memory for this tab only.
       setIsSaving(true)
-      await api.setSemanticScholarKey(apiKey.trim())
-      setHasKey(true)
+      setKey('semantic_scholar', apiKey.trim())
       setIsEditing(false)
       setApiKey('')
-      logger.info('SemanticScholarConfig', 'API key saved')
+      logger.info('SemanticScholarConfig', 'API key saved in memory for this tab')
     } catch (err) {
-      console.error('[SemanticScholarConfig] Validation/save error:', err)
       logger.error('SemanticScholarConfig', 'Failed to save key', err)
       setError(err.response?.data?.detail || 'Failed to validate API key')
     } finally {
@@ -78,11 +60,10 @@ export default function SemanticScholarConfig() {
     try {
       setIsSaving(true)
       setError(null)
-      await api.deleteSemanticScholarKey()
-      setHasKey(false)
+      deleteKey('semantic_scholar')
       setIsEditing(false)
       setApiKey('')
-      logger.info('SemanticScholarConfig', 'API key deleted')
+      logger.info('SemanticScholarConfig', 'API key cleared from this tab')
     } catch (err) {
       logger.error('SemanticScholarConfig', 'Failed to delete key', err)
       setError(err.response?.data?.detail || 'Failed to delete API key')
@@ -127,7 +108,7 @@ export default function SemanticScholarConfig() {
             >
               API Key:
             </span>
-            {hasKey ? (
+            {hasKey('semantic_scholar') ? (
               <span 
                 className="text-xs px-2 py-0.5 rounded"
                 style={{ 
@@ -151,7 +132,7 @@ export default function SemanticScholarConfig() {
             className="text-sm px-2 py-1 rounded transition-colors cursor-pointer"
             style={{ color: 'var(--color-accent)' }}
           >
-            {hasKey ? 'Edit' : 'Add'}
+            {hasKey('semantic_scholar') ? 'Edit' : 'Add'}
           </button>
         </div>
       ) : (
@@ -165,7 +146,7 @@ export default function SemanticScholarConfig() {
               // Ensure paste works
               e.stopPropagation()
             }}
-            placeholder={hasKey ? "Enter new key..." : "Enter API key..."}
+            placeholder={hasKey('semantic_scholar') ? "Enter new key..." : "Enter API key..."}
             className="w-full px-3 py-2 text-sm rounded border"
             style={{
               backgroundColor: 'var(--color-bg-primary)',
@@ -202,7 +183,7 @@ export default function SemanticScholarConfig() {
             >
               {isValidating ? 'Validating...' : isSaving ? 'Saving...' : 'Save'}
             </button>
-            {hasKey && (
+            {hasKey('semantic_scholar') && (
               <button
                 onClick={handleDelete}
                 disabled={isSaving || isValidating}
@@ -235,7 +216,7 @@ export default function SemanticScholarConfig() {
         className="text-xs mt-2"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Optional. Increases rate limits.
+        Optional. Stored in memory for this tab only.
       </div>
     </div>
   )
