@@ -3,7 +3,7 @@ Auth module for RefChecker multi-user web app.
 - JWT via python-jose stored as HttpOnly cookies
 - OAuth flows: Google, GitHub, Microsoft
 - No AUTH_ENABLED toggle - auth always required
-- No in-memory API keys (keys live in browser localStorage, sent per-request)
+- Browser-provided API keys are kept client-side and sent per-request when needed
 """
 import os
 import secrets
@@ -75,6 +75,13 @@ SITE_URL: str = _get_env("SITE_URL", "/")
 
 # {state_token: {"provider": ..., "created_at": ...}}
 _oauth_states: Dict[str, Dict[str, Any]] = {}
+_SENSITIVE_OAUTH_KEYS = {
+    "access_token",
+    "refresh_token",
+    "id_token",
+    "token",
+    "client_secret",
+}
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -93,6 +100,36 @@ class TokenData(BaseModel):
     user_id: int
     email: Optional[str] = None
     name: Optional[str] = None
+
+
+def _extract_oauth_error_details(response: httpx.Response) -> Dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    details = {}
+    for key in ("error", "error_description", "error_code", "message"):
+        value = payload.get(key)
+        if value:
+            details[key] = value
+    return details
+
+
+def _log_oauth_http_failure(provider: str, stage: str, response: httpx.Response) -> None:
+    details = _extract_oauth_error_details(response)
+    if details:
+        logger.error("%s %s failed with status %s: %s", provider, stage, response.status_code, details)
+        return
+    logger.error("%s %s failed with status %s", provider, stage, response.status_code)
+
+
+def _log_missing_access_token(provider: str, tokens: Dict[str, Any]) -> None:
+    safe_keys = sorted(key for key in tokens.keys() if key not in _SENSITIVE_OAUTH_KEYS)
+    logger.error("%s token response missing access_token; non-sensitive keys=%s", provider, safe_keys)
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +290,7 @@ async def exchange_google_code(code: str, request: Request) -> Optional[Dict[str
             "grant_type": "authorization_code",
         })
         if token_resp.status_code != 200:
-            logger.error(f"Google token exchange failed: {token_resp.text}")
+            _log_oauth_http_failure("Google", "token exchange", token_resp)
             return None
         tokens = token_resp.json()
         access_token = tokens.get("access_token")
@@ -265,7 +302,7 @@ async def exchange_google_code(code: str, request: Request) -> Optional[Dict[str
             headers={"Authorization": f"Bearer {access_token}"},
         )
         if user_resp.status_code != 200:
-            logger.error(f"Google userinfo failed: {user_resp.text}")
+            _log_oauth_http_failure("Google", "userinfo request", user_resp)
             return None
         user_data = user_resp.json()
         return {
@@ -292,12 +329,12 @@ async def exchange_github_code(code: str, request: Request) -> Optional[Dict[str
             headers={"Accept": "application/json"},
         )
         if token_resp.status_code != 200:
-            logger.error(f"GitHub token exchange failed: {token_resp.text}")
+            _log_oauth_http_failure("GitHub", "token exchange", token_resp)
             return None
         tokens = token_resp.json()
         access_token = tokens.get("access_token")
         if not access_token:
-            logger.error(f"GitHub: no access_token in response: {tokens}")
+            _log_missing_access_token("GitHub", tokens)
             return None
 
         user_resp = await client.get(
@@ -308,7 +345,7 @@ async def exchange_github_code(code: str, request: Request) -> Optional[Dict[str
             },
         )
         if user_resp.status_code != 200:
-            logger.error(f"GitHub user info failed: {user_resp.text}")
+            _log_oauth_http_failure("GitHub", "user info request", user_resp)
             return None
         user_data = user_resp.json()
 
@@ -353,12 +390,12 @@ async def exchange_microsoft_code(code: str, request: Request) -> Optional[Dict[
             headers={"Accept": "application/json"},
         )
         if token_resp.status_code != 200:
-            logger.error(f"Microsoft token exchange failed: {token_resp.text}")
+            _log_oauth_http_failure("Microsoft", "token exchange", token_resp)
             return None
         tokens = token_resp.json()
         access_token = tokens.get("access_token")
         if not access_token:
-            logger.error(f"Microsoft: no access_token in response: {tokens}")
+            _log_missing_access_token("Microsoft", tokens)
             return None
 
         # Try to get user info from id_token claims first, fall back to Graph API
@@ -385,7 +422,7 @@ async def exchange_microsoft_code(code: str, request: Request) -> Optional[Dict[
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             if me_resp.status_code != 200:
-                logger.error(f"Microsoft Graph /me failed: {me_resp.text}")
+                _log_oauth_http_failure("Microsoft", "Graph /me request", me_resp)
                 return None
             me_data = me_resp.json()
             provider_id = me_data.get("id")

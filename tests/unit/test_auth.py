@@ -2,6 +2,7 @@
 Unit tests for the authentication module (backend/auth.py).
 These tests verify JWT token handling and OAuth state management.
 """
+import asyncio
 import os
 import sys
 import time
@@ -227,4 +228,89 @@ class TestAvailableProviders:
         assert "google" in providers
         assert "github" in providers
         assert "microsoft" in providers
+
+
+class _FakeOAuthResponse:
+    def __init__(self, status_code, payload=None, text=None):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text if text is not None else str(payload)
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("No JSON payload")
+        return self._payload
+
+
+class _FakeAsyncClient:
+    def __init__(self, post_response=None, get_responses=None):
+        self.post_response = post_response
+        self.get_responses = list(get_responses or [])
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, *args, **kwargs):
+        return self.post_response
+
+    async def get(self, *args, **kwargs):
+        return self.get_responses.pop(0)
+
+
+class TestOAuthLogging:
+    def test_google_token_exchange_logs_are_sanitized(self, monkeypatch, caplog):
+        auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
+            "GOOGLE_CLIENT_ID": "gid",
+            "GOOGLE_CLIENT_SECRET": "gsecret",
+        })
+
+        token_response = _FakeOAuthResponse(
+            400,
+            payload={
+                "error": "invalid_grant",
+                "error_description": "bad code",
+                "access_token": "google-secret-token",
+                "id_token": "google-id-token",
+            },
+            text='{"error":"invalid_grant","access_token":"google-secret-token"}',
+        )
+        monkeypatch.setattr(auth.httpx, "AsyncClient", lambda: _FakeAsyncClient(post_response=token_response))
+
+        with caplog.at_level("ERROR"):
+            result = asyncio.run(auth.exchange_google_code("bad-code", MagicMock(base_url="https://example.com/")))
+
+        assert result is None
+        assert "invalid_grant" in caplog.text
+        assert "bad code" in caplog.text
+        assert "google-secret-token" not in caplog.text
+        assert "google-id-token" not in caplog.text
+
+    def test_missing_github_access_token_logs_only_safe_keys(self, monkeypatch, caplog):
+        auth = _import_auth_direct({
+            "REFCHECKER_MULTIUSER": "true",
+            "GITHUB_CLIENT_ID": "ghid",
+            "GITHUB_CLIENT_SECRET": "ghsecret",
+        })
+
+        token_response = _FakeOAuthResponse(
+            200,
+            payload={
+                "scope": "read:user",
+                "refresh_token": "refresh-secret",
+                "id_token": "id-secret",
+            },
+        )
+        monkeypatch.setattr(auth.httpx, "AsyncClient", lambda: _FakeAsyncClient(post_response=token_response))
+
+        with caplog.at_level("ERROR"):
+            result = asyncio.run(auth.exchange_github_code("bad-code", MagicMock(base_url="https://example.com/")))
+
+        assert result is None
+        assert "scope" in caplog.text
+        assert "refresh-secret" not in caplog.text
+        assert "id-secret" not in caplog.text
 
