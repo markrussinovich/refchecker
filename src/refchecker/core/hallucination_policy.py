@@ -128,6 +128,8 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     """
     # Only flag hallucination for unverified references; verified papers
     # with author mismatches are data-quality issues, not fabrications.
+    if error_entry.get('ref_verified_url'):
+        return None
     error_type = (error_entry.get('error_type') or '').lower()
     if error_type not in ('unverified', 'multiple', ''):
         return None

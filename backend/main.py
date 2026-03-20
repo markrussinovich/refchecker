@@ -347,7 +347,14 @@ async def startup_event():
     # Initialize global concurrency limiter with saved setting
     try:
         concurrency_setting = await db.get_setting("max_concurrent_checks")
-        max_concurrent = int(concurrency_setting) if concurrency_setting else DEFAULT_MAX_CONCURRENT
+        if concurrency_setting and concurrency_setting.isdigit():
+            max_concurrent = int(concurrency_setting)
+        else:
+            max_concurrent = DEFAULT_MAX_CONCURRENT
+            # Clean up corrupt/undecryptable value
+            if concurrency_setting:
+                logger.warning(f"Resetting corrupt concurrency setting to default ({DEFAULT_MAX_CONCURRENT})")
+                await db.set_setting("max_concurrent_checks", str(DEFAULT_MAX_CONCURRENT))
         await init_limiter(max_concurrent)
         logger.info(f"Initialized global concurrency limiter with max={max_concurrent}")
     except Exception as e:

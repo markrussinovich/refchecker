@@ -787,10 +787,20 @@ class NonArxivReferenceChecker:
         if not paper_data and raw_text and not arxiv_id_mismatch_detected:
             # Extract and normalize a reasonable search query from the raw text
             search_query = raw_text.replace('\n', ' ').strip()
-            normalized_raw_query = normalize_text(search_query).lower().strip()
+            
+            # Skip absurdly long raw_text - it's likely malformed LLM output or
+            # full paper text rather than a citation string
+            if len(search_query) > 500:
+                logger.debug(f"Skipping raw text search: text too long ({len(search_query)} chars)")
+                search_query = None
+            
+            if search_query:
+                # Truncate to a reasonable length for API queries
+                search_query = search_query[:300]
+                normalized_raw_query = normalize_text(search_query).lower().strip()
             
             # Search for the paper using normalized query
-            search_results = self.search_paper(normalized_raw_query)
+            search_results = self.search_paper(normalized_raw_query) if search_query else []
             
             if search_results:
                 # Take the first result as a best guess

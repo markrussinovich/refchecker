@@ -62,11 +62,19 @@ def _is_encrypted_secret(value: Optional[str]) -> bool:
     return bool(value and value.startswith(SECRET_VALUE_PREFIX))
 
 
+def _is_legacy_fernet_token(value: str) -> bool:
+    """Check if a value looks like a bare Fernet token (no enc: prefix)."""
+    return bool(value and value.startswith('gAAAAA') and len(value) > 40)
+
+
 def encrypt_secret(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
     if value == "" or _is_encrypted_secret(value):
         return value
+    # If it's already a legacy Fernet token, just add the prefix
+    if _is_legacy_fernet_token(value):
+        return f"{SECRET_VALUE_PREFIX}{value}"
     token = _get_fernet().encrypt(value.encode("utf-8")).decode("ascii")
     return f"{SECRET_VALUE_PREFIX}{token}"
 
@@ -74,10 +82,18 @@ def encrypt_secret(value: Optional[str]) -> Optional[str]:
 def decrypt_secret(value: Optional[str]) -> Optional[str]:
     if value is None:
         return None
-    if value == "" or not _is_encrypted_secret(value):
+    if value == "":
         return value
-    token = value[len(SECRET_VALUE_PREFIX):].encode("ascii")
-    return _get_fernet().decrypt(token).decode("utf-8")
+    if _is_encrypted_secret(value):
+        token = value[len(SECRET_VALUE_PREFIX):].encode("ascii")
+        return _get_fernet().decrypt(token).decode("utf-8")
+    # Handle legacy Fernet tokens without the enc: prefix
+    if _is_legacy_fernet_token(value):
+        try:
+            return _get_fernet().decrypt(value.encode("ascii")).decode("utf-8")
+        except Exception:
+            pass
+    return value
 def get_data_dir() -> Path:
     """Get platform-appropriate user data directory for refchecker.
     

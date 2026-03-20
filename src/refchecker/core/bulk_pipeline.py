@@ -739,7 +739,7 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
             try:
                 if job is None:
                     return
-                _safe_print(f'\n⏳ [{job.index + 1}/{len(input_specs)}] Starting: {job.input_spec}')
+                _safe_print(f'⏳ [{job.index + 1}/{len(input_specs)}] Starting: {job.input_spec}')
                 try:
                     result = _process_bulk_paper_job(
                         checker=checker,
@@ -1349,6 +1349,10 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
 
 
 def _needs_llm_hallucination(error_entry: Dict[str, Any]) -> bool:
+    # If the paper was verified (found in a database), author/venue mismatches
+    # are data-quality issues, not hallucinations
+    if error_entry.get('ref_verified_url'):
+        return False
     error_type = (error_entry.get('error_type') or '').lower()
     if error_type in {'unverified', 'url'}:
         return True

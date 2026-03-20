@@ -193,20 +193,21 @@ def extract_arxiv_id_from_url(url: str) -> Optional[str]:
         # Remove version number if present
         return re.sub(r'v\d+$', '', arxiv_id)
     
-    # Pattern 2: arxiv.org URLs (abs, pdf, html)
-    # Handle URLs with version numbers and various formats
-    arxiv_url_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/([^\s/?#]+?)(?:\.pdf|v\d+)?(?:[?\#]|$)', url, re.IGNORECASE)
-    if arxiv_url_match:
-        arxiv_id = arxiv_url_match.group(1)
-        # Remove version number if present
-        return re.sub(r'v\d+$', '', arxiv_id)
+    # Pattern 2: Old-style arXiv URLs with category (e.g. arxiv.org/abs/astro-ph/9901001)
+    arxiv_old_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/([a-z-]+/\d{7})(?:v\d+)?', url, re.IGNORECASE)
+    if arxiv_old_match:
+        return arxiv_old_match.group(1)
     
-    # Pattern 3: Fallback for simpler URL patterns
-    fallback_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/([^/?#]+)', url, re.IGNORECASE)
+    # Pattern 3: arxiv.org URLs (abs, pdf, html) - new-style numeric IDs
+    # Handle URLs with version numbers and various formats
+    arxiv_url_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})(?:v\d+)?(?:\.pdf)?(?:[?\#]|$)', url, re.IGNORECASE)
+    if arxiv_url_match:
+        return arxiv_url_match.group(1)
+    
+    # Pattern 4: Fallback for simpler URL patterns (only numeric IDs)
+    fallback_match = re.search(r'arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})', url, re.IGNORECASE)
     if fallback_match:
-        arxiv_id = fallback_match.group(1).replace('.pdf', '')
-        # Remove version number if present
-        return re.sub(r'v\d+$', '', arxiv_id)
+        return fallback_match.group(1)
     
     return None
 

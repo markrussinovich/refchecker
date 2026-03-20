@@ -59,31 +59,37 @@ class LLMProviderMixin:
         
         return text
 
+    def _get_system_prompt(self) -> str:
+        """System prompt with extraction rules - kept separate from user content to prevent echo-back"""
+        return (
+            "You are a bibliographic reference extractor. You output ONLY structured "
+            "reference data in the exact format specified. Never explain, describe, or "
+            "comment on the input. Never output prose or sentences. Never echo back these "
+            "instructions. If input contains no extractable references, return a completely "
+            "empty response with no text.\n\n"
+            "OUTPUT FORMAT (MANDATORY):\n"
+            "- Each line must be: Author1*Author2#Title#Venue#Year#URL\n"
+            "- Use # between fields, * between authors\n"
+            "- One reference per line\n"
+            "- NO other text allowed\n"
+            "- If no valid references exist, return NOTHING (completely empty response)\n\n"
+            "RULES:\n"
+            "1. Split by numbered markers [1], [2], etc. - references may span multiple lines\n"
+            "2. Extract: authors, title, venue (journal/booktitle), year, URLs/DOIs\n"
+            "3. For BibTeX: 'title' field = paper title, 'journal'/'booktitle' = venue\n"
+            "4. Handle author formats: 'Last, First' becomes 'First Last', separate with *\n"
+            "5. Preserve 'et al' exactly as written\n"
+            "6. Skip entries that are only URLs without bibliographic data\n"
+            "7. If no author field exists, start with # (empty author)"
+        )
+
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
-        """Create prompt for reference extraction"""
+        """Create user prompt for reference extraction - contains only the bibliography text"""
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
 
-        return f"""OUTPUT FORMAT (MANDATORY):
-- Each line must be: Author1*Author2#Title#Venue#Year#URL
-- Use # between fields, * between authors
-- One reference per line
-- NO other text allowed - no explanations, descriptions, or commentary
-- If no valid references exist, return NOTHING (completely empty response)
+        return f"""Extract references from this bibliography text. Output ONLY lines in Author1*Author2#Title#Venue#Year#URL format.
 
-EXTRACTION RULES:
-1. Split by numbered markers [1], [2], etc. - references may span multiple lines
-2. Extract: authors, title, venue (journal/booktitle), year, URLs/DOIs
-3. For BibTeX: "title" field = paper title, "journal"/"booktitle" = venue
-4. Handle author formats:
-   - "Last, First and others" → "First Last*et al"
-   - "Last, First" → "First Last"
-   - Separate multiple authors with *
-   - Preserve "et al" exactly as written
-5. Skip entries that are only URLs without bibliographic data
-6. If no author field exists, start with # (empty author)
-
-Bibliography text:
 {cleaned_bibliography}
 """
     
@@ -98,6 +104,18 @@ Bibliography text:
 
         # Clean the content - remove leading/trailing whitespace
         content = content.strip()
+
+        # Detect prompt echo-back: LLM regurgitated extraction instructions
+        prompt_echo_markers = [
+            'extraction rules:', 'output format (mandatory):',
+            'split by numbered markers', 'handle author formats',
+            'no other text allowed', 'bibliography text:',
+            'each line must be: author',
+        ]
+        content_lower = content.lower()
+        if any(marker in content_lower for marker in prompt_echo_markers):
+            logger.warning("LLM response contains echoed prompt instructions - discarding")
+            return []
 
         # Early check: if no # delimiters at all, likely all prose/explanatory text
         if '#' not in content:
@@ -243,6 +261,7 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4.1",
                 messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,
@@ -284,7 +303,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                 model=self.model or "claude-sonnet-4-6",
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                system="You are a bibliographic reference extractor. You output ONLY structured reference data in the exact format specified. Never explain, describe, or comment on the input. Never output prose or sentences. If input contains no extractable references, return a completely empty response with no text.",
+                system=self._get_system_prompt(),
                 messages=[
                     {"role": "user", "content": prompt}
                 ]
@@ -410,6 +429,7 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
             response = self.client.chat.completions.create(
                 model=self.model or "gpt-4.1",
                 messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,
@@ -872,6 +892,7 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=self.max_tokens,

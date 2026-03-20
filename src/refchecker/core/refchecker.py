@@ -622,7 +622,11 @@ class ArxivReferenceChecker:
             if reference.get('type') == 'arxiv':
                 arxiv_id = self.extract_arxiv_id_from_url(reference.get('url', ''))
                 if arxiv_id and arxiv_id not in self._metadata_cache:
-                    arxiv_ids_to_fetch.append(arxiv_id)
+                    # Validate arXiv ID format: must be numeric (YYMM.NNNNN) or old-style (category/NNNNNNN)
+                    if re.match(r'^\d{4}\.\d{4,5}$', arxiv_id) or re.match(r'^[a-z-]+/\d{7}$', arxiv_id):
+                        arxiv_ids_to_fetch.append(arxiv_id)
+                    else:
+                        logger.debug(f"Skipping invalid arXiv ID: {arxiv_id}")
         
         if not arxiv_ids_to_fetch:
             return
@@ -769,7 +773,8 @@ class ArxivReferenceChecker:
     
     def get_paper_metadata_with_api_switching(self, arxiv_id):
         """
-        Get paper metadata with intelligent API switching between Semantic Scholar and arXiv APIs
+        Get paper metadata with intelligent API switching between Semantic Scholar and arXiv APIs.
+        Prefers Semantic Scholar (no rate limit) over arXiv API (3s global rate limit).
         
         Args:
             arxiv_id: arXiv ID of the paper
@@ -784,16 +789,7 @@ class ArxivReferenceChecker:
                 'arxiv': {'success': 0, 'rate_limited': 0, 'failed': 0}
             }
 
-        # Try arXiv API
-        logger.debug(f"Semantic Scholar API failed for {arxiv_id}, trying arXiv API")
-        arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
-        
-        if arxiv_result:
-            self._api_performance['arxiv']['success'] += 1
-            logger.debug(f"Successfully fetched {arxiv_id} from arXiv API")
-            return arxiv_result
-        
-        # Try Semantic Scholar API 
+        # Try Semantic Scholar API first (faster, no rate limit)
         logger.debug(f"Trying Semantic Scholar API for {arxiv_id}")
         semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
         
@@ -802,22 +798,18 @@ class ArxivReferenceChecker:
             logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API")
             return semantic_result
         
-        # If both failed, try reverse order (sometimes one API works when the other doesn't)
-        logger.debug(f"Both APIs failed for {arxiv_id}, trying reverse order")
+        # Fall back to arXiv API (has 3s rate limit), skip if already rate-limited
+        if getattr(self, '_arxiv_api_rate_limited', False):
+            logger.debug(f"Skipping arXiv API for {arxiv_id} (rate-limited this session)")
+            return None
         
-        # Try arXiv API first this time
+        logger.debug(f"Trying arXiv API for {arxiv_id}")
         arxiv_result = self.get_paper_metadata_from_arxiv(arxiv_id)
+        
         if arxiv_result:
             self._api_performance['arxiv']['success'] += 1
-            logger.debug(f"Successfully fetched {arxiv_id} from arXiv API (reverse order)")
+            logger.debug(f"Successfully fetched {arxiv_id} from arXiv API")
             return arxiv_result
-        
-        # Try Semantic Scholar API again
-        semantic_result = self.get_paper_metadata_from_semantic_scholar(arxiv_id)
-        if semantic_result:
-            self._api_performance['semantic_scholar']['success'] += 1
-            logger.debug(f"Successfully fetched {arxiv_id} from Semantic Scholar API (reverse order)")
-            return semantic_result
         
         # Both APIs failed
         logger.debug(f"Paper {arxiv_id} not found in any source")
@@ -931,7 +923,12 @@ class ArxivReferenceChecker:
                 
         except Exception as e:
             self._api_performance['arxiv']['failed'] += 1
-            logger.error(f"Error fetching metadata from arXiv API for {arxiv_id}: {str(e)}")
+            # Detect rate limiting (HTTP 429) and short-circuit future calls
+            if '429' in str(e):
+                self._arxiv_api_rate_limited = True
+                logger.warning(f"ArXiv API rate-limited for {arxiv_id}, disabling arXiv API for this session")
+            else:
+                logger.error(f"Error fetching metadata from arXiv API for {arxiv_id}: {str(e)}")
             return None
     
     def _create_local_file_paper(self, file_path):
