@@ -30,7 +30,7 @@ python-jose[cryptography]>=3.5.0  # JWT signing/verification (multi-user auth)
 # Optional dependencies for LLM providers
 openai>=2.29.0
 anthropic>=0.86.0
-google-generativeai>=0.8.6
+google-genai>=1.60.0
 
 # Optional dependencies for enhanced functionality
 lxml>=6.0.2

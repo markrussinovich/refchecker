@@ -13,7 +13,7 @@ Supported providers (reuse the same API keys used for reference extraction)
 ---------------------------------------------------------------------------
 * **OpenAI**  – Responses API with ``web_search_preview`` tool
                (uses OPENAI_API_KEY, ~$0.01 per search)
-* **Gemini**  – Google Search grounding via ``google-generativeai``
+* **Gemini**  -- Google Search grounding via ``google-genai``
                (uses GOOGLE_API_KEY)
 
 The first available provider is used automatically (OpenAI preferred).
@@ -210,27 +210,27 @@ class GeminiSearchProvider(WebSearchProvider):
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = resolve_api_key('google', override=api_key)
-        self._model = None
+        self._client = None
 
         if self.api_key:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self._model = genai.GenerativeModel('gemini-2.5-flash')
+                from google import genai
+                self._client = genai.Client(api_key=self.api_key)
             except ImportError:
-                logger.debug('google-generativeai package not installed')
+                logger.debug('google-genai package not installed')
 
     @property
     def available(self) -> bool:
-        return self._model is not None
+        return self._client is not None
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
-        import google.generativeai as genai
-
-        response = self._model.generate_content(
-            query,
-            tools='google_search_retrieval',
-            generation_config={'temperature': 0.0},
+        response = self._client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=query,
+            config={
+                'tools': [{'google_search': {}}],
+                'temperature': 0.0,
+            },
         )
 
         results: List[Dict[str, str]] = []

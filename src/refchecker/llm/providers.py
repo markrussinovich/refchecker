@@ -343,11 +343,10 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
         
         if self.api_key:
             try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel(self.model or "gemini-2.5-flash")
+                from google import genai
+                self.client = genai.Client(api_key=self.api_key)
             except ImportError:
-                logger.error("Google Generative AI library not installed. Install with: pip install google-generativeai")
+                logger.error("Google Gen AI library not installed. Install with: pip install google-genai")
     
     def is_available(self) -> bool:
         return self.client is not None and self.api_key is not None
@@ -358,12 +357,13 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
-            response = self.client.generate_content(
-                prompt,
-                generation_config={
-                    "max_output_tokens": self.max_tokens,
-                    "temperature": self.temperature,
-                }
+            response = self.client.models.generate_content(
+                model=self.model or 'gemini-2.5-flash',
+                contents=prompt,
+                config={
+                    'max_output_tokens': self.max_tokens,
+                    'temperature': self.temperature,
+                },
             )
             
             # Handle empty responses (content safety filter or other issues)
@@ -371,18 +371,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
                 logger.warning("Google API returned empty candidates (possibly content filtered)")
                 return ""
             
-            # Safely access the text
-            try:
-                return response.text or ""
-            except (ValueError, AttributeError) as e:
-                # response.text raises ValueError if multiple candidates or no text
-                logger.warning(f"Could not get text from Google response: {e}")
-                # Try to extract text from first candidate manually
-                if response.candidates and hasattr(response.candidates[0], 'content'):
-                    content = response.candidates[0].content
-                    if hasattr(content, 'parts') and content.parts:
-                        return content.parts[0].text or ""
-                return ""
+            return response.text or ""
             
         except Exception as e:
             logger.error(f"Google API call failed: {e}")

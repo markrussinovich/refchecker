@@ -14,7 +14,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
@@ -165,6 +165,48 @@ class BulkPaperResult:
     fatal_error_message: Optional[str] = None
     used_regex_extraction: bool = False
     used_unreliable_extraction: bool = False
+
+
+def _get_checkpoint_path(report_file: Optional[str]) -> Optional[str]:
+    """Return the checkpoint file path derived from the report file."""
+    if not report_file:
+        return None
+    base, _ = os.path.splitext(report_file)
+    return base + '.checkpoint.jsonl'
+
+
+def _save_checkpoint(checkpoint_path: str, result: BulkPaperResult) -> None:
+    """Append a completed result to the checkpoint file (JSONL)."""
+    with open(checkpoint_path, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(asdict(result), ensure_ascii=False) + '\n')
+
+
+def _load_checkpoint(
+    checkpoint_path: str, input_specs: Sequence[str]
+) -> Dict[int, BulkPaperResult]:
+    """Load previously completed results from a checkpoint file.
+
+    Only returns results whose input_spec matches the current run's
+    input_specs at the same index, so stale checkpoints are ignored.
+    """
+    result_map: Dict[int, BulkPaperResult] = {}
+    if not checkpoint_path or not os.path.exists(checkpoint_path):
+        return result_map
+    try:
+        with open(checkpoint_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                data = json.loads(line)
+                idx = data['index']
+                # Validate: same spec at same index
+                if idx < len(input_specs) and data.get('input_spec') == input_specs[idx]:
+                    result_map[idx] = BulkPaperResult(**data)
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        logger.warning('Corrupt checkpoint file %s, starting fresh: %s', checkpoint_path, exc)
+        return {}
+    return result_map
 
 
 @dataclass
@@ -618,7 +660,7 @@ class BulkProgressReporter:
 
             # ── Paper header ──
             display_title = result.input_spec or result.paper_id or result.title
-            _safe_print(f'\n📄 [{paper_id}/{self.total_papers}] {display_title}')
+            _safe_print(f'\n📄 {dt.datetime.now().strftime("%H:%M:%S")} [{paper_id}/{self.total_papers}] {display_title}')
             if result.source_url and result.source_url != display_title:
                 _safe_print(f'   {result.source_url}')
 
@@ -710,71 +752,96 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
 
     _safe_print(f'\nBulk check: {len(input_specs)} papers queued' + (f' ({dropped} duplicate(s) removed)' if dropped else ''))
 
+    # --- Resume support: load checkpoint if available ---
+    checkpoint_path = _get_checkpoint_path(getattr(root_checker, 'report_file', None))
+    result_map: Dict[int, BulkPaperResult] = {}
+    if checkpoint_path:
+        result_map = _load_checkpoint(checkpoint_path, input_specs)
+        if result_map:
+            _safe_print(f'♻️  Resuming: {len(result_map)}/{len(input_specs)} papers already completed (checkpoint: {os.path.basename(checkpoint_path)})')
+
     reporter = BulkProgressReporter(total_papers=len(input_specs))
+    # Fast-forward reporter counts for already-completed papers
+    for prev_result in result_map.values():
+        reporter.completed_papers += 1
+        reporter.total_references += prev_result.references_processed
+        reporter.total_errors += prev_result.total_errors_found
+        reporter.total_warnings += prev_result.total_warnings_found
+        reporter.total_info += prev_result.total_info_found
+        reporter.total_unverified += prev_result.total_unverified_refs
     extraction_batcher = BulkLLMExtractionBatcher(enabled=bool(getattr(root_checker, 'llm_enabled', False)))
     hallucination_batcher = BulkHallucinationBatcher(enabled=True)
     verification_cache = BulkVerificationCache()
-    result_map: Dict[int, BulkPaperResult] = {}
     job_queue: Queue[Any] = Queue()
     result_queue: Queue[BulkPaperResult] = Queue()
 
+    remaining = 0
     for index, input_spec in enumerate(input_specs):
-        job_queue.put(BulkPaperJob(index=index, input_spec=input_spec))
+        if index not in result_map:
+            job_queue.put(BulkPaperJob(index=index, input_spec=input_spec))
+            remaining += 1
 
-    # Process up to 3 papers concurrently. Higher values cause API rate-limit
-    # contention that negates the parallelism benefit. 3 workers provide good
-    # I/O overlap while keeping API call rates within limits.
-    paper_worker_count = min(3, len(input_specs))
-    # Shared semaphore limits total concurrent API-bound verification calls
-    # across all paper workers, preventing rate-limit cascading.
-    api_semaphore = threading.Semaphore(max(config.max_workers, paper_worker_count * 2))
-    for _ in range(paper_worker_count):
-        job_queue.put(None)
+    if remaining == 0:
+        _safe_print('All papers already completed in checkpoint. Generating final report.')
 
-    def worker() -> None:
-        checker = config.create_worker_checker()
-        while True:
-            job = job_queue.get()
-            try:
-                if job is None:
-                    return
-                _safe_print(f'⏳ [{job.index + 1}/{len(input_specs)}] Starting: {job.input_spec}')
+    if remaining > 0:
+        # Process up to 3 papers concurrently. Higher values cause API rate-limit
+        # contention that negates the parallelism benefit. 3 workers provide good
+        # I/O overlap while keeping API call rates within limits.
+        paper_worker_count = min(3, remaining)
+        # Shared semaphore limits total concurrent API-bound verification calls
+        # across all paper workers, preventing rate-limit cascading.
+        api_semaphore = threading.Semaphore(max(config.max_workers, paper_worker_count * 2))
+        for _ in range(paper_worker_count):
+            job_queue.put(None)
+
+        def worker() -> None:
+            checker = config.create_worker_checker()
+            while True:
+                job = job_queue.get()
                 try:
-                    result = _process_bulk_paper_job(
-                        checker=checker,
-                        job=job,
-                        debug_mode=debug_mode,
-                        extraction_batcher=extraction_batcher,
-                        hallucination_batcher=hallucination_batcher,
-                        verification_cache=verification_cache,
-                        api_semaphore=api_semaphore,
-                    )
-                except Exception as exc:
-                    logger.error('Unhandled exception in bulk worker for %s: %s', job.input_spec, exc)
-                    _reset_worker_state(checker)
-                    checker.fatal_error = True
-                    checker.fatal_error_message = str(exc)
-                    result = _build_bulk_result(checker, job, job.input_spec, job.input_spec, time.perf_counter())
-                result_queue.put(result)
-            finally:
-                job_queue.task_done()
+                    if job is None:
+                        return
+                    _safe_print(f'⏳ {dt.datetime.now().strftime("%H:%M:%S")} [{job.index + 1}/{len(input_specs)}] Starting: {job.input_spec}')
+                    try:
+                        result = _process_bulk_paper_job(
+                            checker=checker,
+                            job=job,
+                            debug_mode=debug_mode,
+                            extraction_batcher=extraction_batcher,
+                            hallucination_batcher=hallucination_batcher,
+                            verification_cache=verification_cache,
+                            api_semaphore=api_semaphore,
+                        )
+                    except Exception as exc:
+                        logger.error('Unhandled exception in bulk worker for %s: %s', job.input_spec, exc)
+                        _reset_worker_state(checker)
+                        checker.fatal_error = True
+                        checker.fatal_error_message = str(exc)
+                        result = _build_bulk_result(checker, job, job.input_spec, job.input_spec, time.perf_counter())
+                    result_queue.put(result)
+                finally:
+                    job_queue.task_done()
 
-    threads = [threading.Thread(target=worker, name=f'BulkPaperWorker-{index + 1}', daemon=True) for index in range(paper_worker_count)]
-    for thread in threads:
-        thread.start()
+        threads = [threading.Thread(target=worker, name=f'BulkPaperWorker-{index + 1}', daemon=True) for index in range(paper_worker_count)]
+        for thread in threads:
+            thread.start()
 
-    completed = 0
-    while completed < len(input_specs):
-        result = result_queue.get()
-        result_map[result.index] = result
-        reporter.report(result)
-        completed += 1
+        completed = 0
+        while completed < remaining:
+            result = result_queue.get()
+            result_map[result.index] = result
+            reporter.report(result)
+            # Save to checkpoint incrementally
+            if checkpoint_path:
+                _save_checkpoint(checkpoint_path, result)
+            completed += 1
 
-    job_queue.join()
-    # Worker threads should have finished by now; use a generous
-    # timeout as a safety net so we never hang indefinitely.
-    for thread in threads:
-        thread.join(timeout=30.0)
+        job_queue.join()
+        # Worker threads should have finished by now; use a generous
+        # timeout as a safety net so we never hang indefinitely.
+        for thread in threads:
+            thread.join(timeout=30.0)
     extraction_batcher.close()
     hallucination_batcher.close()
 
@@ -794,6 +861,14 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
     if root_checker.report_file:
         payload = root_checker._build_structured_report_payload()
         root_checker.write_structured_report(payload=payload)
+
+    # Remove checkpoint file on successful completion
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        try:
+            os.remove(checkpoint_path)
+            _safe_print(f'Checkpoint file removed: {os.path.basename(checkpoint_path)}')
+        except OSError:
+            pass
 
 
 def _process_bulk_paper_job(

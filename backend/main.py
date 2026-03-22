@@ -1954,8 +1954,8 @@ async def validate_llm_config(
     PROVIDER_PACKAGES = {
         "anthropic": ("anthropic", "pip install anthropic"),
         "openai": ("openai", "pip install openai"),
-        "google": ("google.generativeai", "pip install google-generativeai"),
-        "gemini": ("google.generativeai", "pip install google-generativeai"),
+        "google": ("google.genai", "pip install google-genai"),
+        "gemini": ("google.genai", "pip install google-genai"),
     }
     
     # Check if required package is installed for this provider
