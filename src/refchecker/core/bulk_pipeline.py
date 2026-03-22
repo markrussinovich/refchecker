@@ -272,7 +272,7 @@ class _HallucinationPayload:
 
 
 class BulkLLMExtractionBatcher:
-    def __init__(self, enabled: bool = True, max_batch_size: int = 3, max_wait_seconds: float = 0.15):
+    def __init__(self, enabled: bool = True, max_batch_size: int = 5, max_wait_seconds: float = 0.3):
         self.enabled = enabled
         self._batcher: Optional[_QueueBatcher] = None
         if enabled:
@@ -363,7 +363,7 @@ class BulkLLMExtractionBatcher:
 
 
 class BulkHallucinationBatcher:
-    def __init__(self, enabled: bool = True, max_batch_size: int = 6, max_wait_seconds: float = 0.2):
+    def __init__(self, enabled: bool = True, max_batch_size: int = 8, max_wait_seconds: float = 0.3):
         self.enabled = enabled
         self._batcher: Optional[_QueueBatcher] = None
         if enabled:
@@ -714,9 +714,6 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
     extraction_batcher = BulkLLMExtractionBatcher(enabled=bool(getattr(root_checker, 'llm_enabled', False)))
     hallucination_batcher = BulkHallucinationBatcher(enabled=True)
     verification_cache = BulkVerificationCache()
-    # Shared semaphore limits total concurrent API-bound verification calls
-    # across all paper workers, preventing rate-limit cascading.
-    api_semaphore = threading.Semaphore(config.max_workers)
     result_map: Dict[int, BulkPaperResult] = {}
     job_queue: Queue[Any] = Queue()
     result_queue: Queue[BulkPaperResult] = Queue()
@@ -724,11 +721,13 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
     for index, input_spec in enumerate(input_specs):
         job_queue.put(BulkPaperJob(index=index, input_spec=input_spec))
 
-    # Process 2 papers concurrently. Paper A's idle time (PDF download,
-    # LLM extraction, hallucination assessment) overlaps with Paper B's
-    # API verification. The shared api_semaphore keeps total concurrent
-    # API calls bounded to max_workers.
-    paper_worker_count = min(2, len(input_specs))
+    # Process up to 3 papers concurrently. Higher values cause API rate-limit
+    # contention that negates the parallelism benefit. 3 workers provide good
+    # I/O overlap while keeping API call rates within limits.
+    paper_worker_count = min(3, len(input_specs))
+    # Shared semaphore limits total concurrent API-bound verification calls
+    # across all paper workers, preventing rate-limit cascading.
+    api_semaphore = threading.Semaphore(max(config.max_workers, paper_worker_count * 2))
     for _ in range(paper_worker_count):
         job_queue.put(None)
 
