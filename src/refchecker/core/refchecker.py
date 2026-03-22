@@ -319,24 +319,23 @@ class ArxivReferenceChecker:
         )
         
         if db_path:
-            logger.info(f"Using local Semantic Scholar database at {db_path} (completely offline mode)")
-            if enable_parallel:
-                logger.debug("Using thread-safe database checker for parallel processing")
-                self.non_arxiv_checker = ThreadSafeLocalChecker(db_path=db_path)
-            else:
-                self.non_arxiv_checker = LocalNonArxivReferenceChecker(db_path=db_path)
-            self.service_order = "Local Semantic Scholar Database (offline)"
+            logger.info(f"Using local Semantic Scholar database at {db_path} (DB-first mode with API fallbacks)")
         else:
             logger.debug("Using enhanced hybrid checker with multiple API sources")
-            # Create an enhanced hybrid checker with multiple reliable APIs
-            self.non_arxiv_checker = EnhancedHybridReferenceChecker(
-                semantic_scholar_api_key=semantic_scholar_api_key,
-                db_path=None,  # No local DB in this branch
-                contact_email=None,  # Could be added as parameter
-                enable_openalex=True,  # Enable OpenAlex as reliable fallback
-                enable_crossref=True,   # Enable CrossRef for DOI verification
-                debug_mode=debug_mode  # Pass debug mode for conditional logging
-            )
+        
+        # Always use the enhanced hybrid checker — with db_path it uses the local DB
+        # for S2 lookups first, then falls back to live APIs (CrossRef, OpenAlex, etc.)
+        self.non_arxiv_checker = EnhancedHybridReferenceChecker(
+            semantic_scholar_api_key=semantic_scholar_api_key,
+            db_path=db_path,
+            contact_email=None,
+            enable_openalex=True,
+            enable_crossref=True,
+            debug_mode=debug_mode
+        )
+        if db_path:
+            self.service_order = "Local S2 DB → Semantic Scholar API → OpenAlex → CrossRef"
+        else:
             self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
         
         # debug mode
@@ -2321,121 +2320,7 @@ class ArxivReferenceChecker:
         
         # Route all references through the same non-arxiv path for consistent verification
         
-        # If database mode is enabled, use database for non-ArXiv references
-        if self.db_path:
-            # Check if we have a database checker (either original or thread-safe)
-            if hasattr(self.non_arxiv_checker, 'conn') or hasattr(self.non_arxiv_checker, 'connection_pool'):
-                # Use the local database checker's verify_reference method which returns URLs
-                verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
-                logger.debug(f"Database mode: Initial paper_url from database checker: {paper_url}")
-                
-                if not verified_data:
-                    # Mark as unverified but check URL for more specific reason or verification
-                    if reference.get('url', '').strip():
-                        # Use raw URL verifier to check if it can be verified or get specific reason
-                        url_verified_data, url_errors, url_checked = self.verify_raw_url_reference(reference)
-                        if url_verified_data:
-                            # URL verification succeeded - return as verified
-                            logger.debug(f"Database mode: URL verification succeeded for unverified reference")
-                            return None, url_checked, url_verified_data
-                        else:
-                            # URL verification failed - use specific error reason
-                            url_error_details = url_errors[0].get('error_details', 'Reference could not be verified in database') if url_errors else 'Reference could not be verified in database'
-                            return [{"error_type": "unverified", "error_details": url_error_details}], paper_url, None
-                    else:
-                        return [{"error_type": "unverified", "error_details": "Reference could not be verified in database"}], paper_url, None
-                
-                # Convert database errors to our format
-                formatted_errors = []
-                for error in errors:
-                    formatted_error = {}
-                    
-                    # Handle error_type and warning_type properly
-                    if 'error_type' in error:
-                        formatted_error['error_type'] = error['error_type']
-                        formatted_error['error_details'] = error['error_details']
-                    elif 'warning_type' in error:
-                        formatted_error['warning_type'] = error['warning_type']
-                        formatted_error['warning_details'] = error['warning_details']
-                    elif 'info_type' in error:
-                        formatted_error['info_type'] = error['info_type']
-                        formatted_error['info_details'] = error['info_details']
-                    
-                    # Add correct information based on error type
-                    if error.get('error_type') == 'author':
-                        formatted_error['ref_authors_correct'] = error.get('ref_authors_correct', '')
-                    elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
-                        formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
-                    elif error.get('error_type') == 'doi':
-                        from refchecker.utils.doi_utils import construct_doi_url
-                        formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
-                    elif error.get('info_type') == 'url':
-                        formatted_error['ref_url_correct'] = error.get('ref_url_correct', '')
-                    
-                    formatted_errors.append(formatted_error)
-                
-                # Check for ArXiv ID mismatch in database mode as well
-                arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
-                logger.debug(f"Database mode: ArXiv ID mismatch check for '{reference.get('title', 'Unknown')}': {len(arxiv_errors) if arxiv_errors else 0} errors found")
-                if arxiv_errors:
-                    logger.debug("Database mode: ArXiv ID mismatch detected - replacing other errors with ArXiv ID error only")
-                    logger.debug(f"Original paper_url before ArXiv ID mismatch fix: {paper_url}")
-                    
-                    # For ArXiv ID mismatch, we need to find the CORRECT paper (not the wrong one from ArXiv ID)
-                    # The verified_data contains the wrong paper's data, so we need to search by title/authors
-                    correct_paper_data = None
-                    correct_paper_url = None
-                    try:
-                        title = reference.get('title', '').strip()
-                        authors = reference.get('authors', [])
-                        year = reference.get('year')
-                        
-                        if title or authors:
-                            logger.debug(f"Database mode: Searching for correct paper by title/authors for ArXiv ID mismatch")
-                            # Use the database checker to find the correct paper by title/authors
-                            correct_paper_data = self.non_arxiv_checker.find_best_match(title, authors, year)
-                            
-                            if correct_paper_data:
-                                logger.debug(f"Database mode: Found correct paper: '{correct_paper_data.get('title', '')}'")
-                                # Use the CORRECT paper's Semantic Scholar URL
-                                if correct_paper_data.get('paperId'):
-                                    correct_paper_url = f"https://www.semanticscholar.org/paper/{correct_paper_data['paperId']}"
-                                    paper_url = correct_paper_url  # Update the main URL
-                                    logger.debug(f"Database mode: Using correct paper's Semantic Scholar URL for ArXiv ID mismatch: {paper_url}")
-                                else:
-                                    logger.debug("Database mode: Correct paper found but no paperId available")
-                            else:
-                                logger.debug("Database mode: Could not find correct paper by title/authors")
-                    except Exception as e:
-                        logger.debug(f"Database mode: Error finding correct paper for ArXiv ID mismatch: {e}")
-                    
-                    # Build formatted errors with correct URL
-                    formatted_errors = []
-                    for error in arxiv_errors:
-                        formatted_error = {
-                            'error_type': error['error_type'],
-                            'error_details': error['error_details']
-                        }
-                        # Add the correct URL if we found the correct paper
-                        if correct_paper_url:
-                            formatted_error['ref_url_correct'] = correct_paper_url
-                        elif error.get('ref_url_correct'):
-                            formatted_error['ref_url_correct'] = error['ref_url_correct']
-                        formatted_errors.append(formatted_error)
-                    
-                    # Fallback to wrong paper's URL if we couldn't find the correct one
-                    if not correct_paper_data and verified_data and verified_data.get('paperId'):
-                        paper_url = f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
-                        logger.debug(f"Database mode: Fallback to wrong paper's Semantic Scholar URL: {paper_url}")
-                    elif not correct_paper_data:
-                        logger.debug(f"Database mode: No paperId available for Semantic Scholar URL construction. verified_data keys: {list(verified_data.keys()) if verified_data else 'None'}")
-                
-                return formatted_errors if formatted_errors else None, paper_url, verified_data
-            else:
-                logger.warning("Database path specified but no connection available")
-                return [{"error_type": "unverified", "error_details": "Database connection not available"}], None, None
-        
-        # For non-database mode, use the standard reference verification
+        # Use the standard reference verification (handles local DB + API fallbacks via hybrid checker)
         errors, paper_url, verified_data = self.verify_reference_standard(source_paper, reference)
         
         # If standard verification failed and the reference has a URL, try raw URL verification
