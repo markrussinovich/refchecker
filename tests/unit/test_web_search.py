@@ -274,14 +274,17 @@ def _mock_openai(monkeypatch):
 
 @pytest.fixture()
 def _mock_genai(monkeypatch):
-    """Mock google.generativeai so Gemini provider tests work without the package."""
-    import types
-    fake_genai = types.ModuleType('google.generativeai')
-    fake_genai.configure = lambda **kw: None
-    fake_genai.GenerativeModel = lambda *a, **kw: object()
+    """Mock google.genai so Gemini provider tests work without the package."""
+    import types as pytypes
+
+    fake_client = type('FakeClient', (), {})()
+
+    fake_genai = pytypes.ModuleType('google.genai')
+    fake_genai.Client = lambda **kw: fake_client
+
     # Ensure the parent 'google' namespace package is importable
     if 'google' not in sys.modules:
-        fake_google = types.ModuleType('google')
+        fake_google = pytypes.ModuleType('google')
         fake_google.__path__ = []
         monkeypatch.setitem(sys.modules, 'google', fake_google)
-    monkeypatch.setitem(sys.modules, 'google.generativeai', fake_genai)
+    monkeypatch.setitem(sys.modules, 'google.genai', fake_genai)
