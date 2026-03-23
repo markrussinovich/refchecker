@@ -789,9 +789,8 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
         # contention that negates the parallelism benefit. 3 workers provide good
         # I/O overlap while keeping API call rates within limits.
         paper_worker_count = min(3, remaining)
-        # Shared semaphore limits total concurrent API-bound verification calls
-        # across all paper workers, preventing rate-limit cascading.
-        api_semaphore = threading.Semaphore(max(config.max_workers, paper_worker_count * 2))
+        # Per-API semaphores inside EnhancedHybridChecker now handle rate limiting
+        # independently for each API, so we no longer need a global semaphore.
         for _ in range(paper_worker_count):
             job_queue.put(None)
 
@@ -811,7 +810,6 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
                             extraction_batcher=extraction_batcher,
                             hallucination_batcher=hallucination_batcher,
                             verification_cache=verification_cache,
-                            api_semaphore=api_semaphore,
                         )
                     except Exception as exc:
                         logger.error('Unhandled exception in bulk worker for %s: %s', job.input_spec, exc)
@@ -879,7 +877,6 @@ def _process_bulk_paper_job(
     extraction_batcher: BulkLLMExtractionBatcher,
     hallucination_batcher: BulkHallucinationBatcher,
     verification_cache: BulkVerificationCache,
-    api_semaphore: Optional[threading.Semaphore] = None,
 ) -> BulkPaperResult:
     start_time = time.perf_counter()
     _reset_worker_state(checker)
@@ -920,7 +917,7 @@ def _process_bulk_paper_job(
 
         checker.batch_prefetch_arxiv_references(bibliography)
         _batch_prefetch_ss_metadata(bibliography, checker, verification_cache)
-        _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode, verification_cache=verification_cache, api_semaphore=api_semaphore)
+        _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode, verification_cache=verification_cache)
         _apply_batched_hallucination_assessments(checker, hallucination_batcher)
 
         actual_errors = checker.total_errors_found
@@ -1292,20 +1289,16 @@ def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], pap
     return errors if errors else None
 
 
-def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence[Dict[str, Any]], debug_mode: bool, verification_cache: Optional[BulkVerificationCache] = None, api_semaphore: Optional[threading.Semaphore] = None) -> None:
+def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence[Dict[str, Any]], debug_mode: bool, verification_cache: Optional[BulkVerificationCache] = None) -> None:
     paper_errors: List[Dict[str, Any]] = []
     if not bibliography:
         return
 
-    def _verify_with_semaphore(paper_obj: Any, ref: Dict[str, Any]) -> Any:
-        """Wrap verify_reference with the shared API semaphore."""
-        if api_semaphore is not None:
-            api_semaphore.acquire()
-        try:
-            return checker.verify_reference(paper_obj, ref)
-        finally:
-            if api_semaphore is not None:
-                api_semaphore.release()
+    # No global semaphore needed — per-API semaphores inside
+    # EnhancedHybridChecker limit concurrent calls to each API independently,
+    # so a 429 backoff on one API doesn't block calls to other APIs.
+    def _verify_ref(paper_obj: Any, ref: Dict[str, Any]) -> Any:
+        return checker.verify_reference(paper_obj, ref)
 
     # Split references into cached hits and uncached misses
     cached_results: Dict[int, Any] = {}
@@ -1325,7 +1318,7 @@ def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence
         if checker.enable_parallel and len(uncached_refs) > 1:
             with ThreadPoolExecutor(max_workers=checker.max_workers, thread_name_prefix='BulkReference') as executor:
                 future_map = {
-                    executor.submit(_verify_with_semaphore, paper, ref): idx
+                    executor.submit(_verify_ref, paper, ref): idx
                     for idx, ref in uncached_refs
                 }
                 for future in as_completed(future_map):
@@ -1337,7 +1330,7 @@ def _verify_bibliography_silent(checker: Any, paper: Any, bibliography: Sequence
                         fresh_results[idx] = ([{'error_type': 'processing_failed', 'error_details': f'Internal error: {exc}'}], None, None)
         else:
             for idx, ref in uncached_refs:
-                fresh_results[idx] = _verify_with_semaphore(paper, ref)
+                fresh_results[idx] = _verify_ref(paper, ref)
 
         # Store fresh results in cache
         if verification_cache is not None:

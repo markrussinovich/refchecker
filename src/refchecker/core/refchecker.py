@@ -615,6 +615,10 @@ class ArxivReferenceChecker:
         if not hasattr(self, '_metadata_cache'):
             self._metadata_cache = {}
         
+        # Check local Semantic Scholar DB first to avoid unnecessary ArXiv API calls
+        local_db = getattr(self.non_arxiv_checker, 'local_db', None) if hasattr(self, 'non_arxiv_checker') else None
+        db_hits = 0
+        
         # Collect all ArXiv IDs that need to be fetched
         arxiv_ids_to_fetch = []
         for reference in bibliography:
@@ -623,9 +627,22 @@ class ArxivReferenceChecker:
                 if arxiv_id and arxiv_id not in self._metadata_cache:
                     # Validate arXiv ID format: must be numeric (YYMM.NNNNN) or old-style (category/NNNNNNN)
                     if re.match(r'^\d{4}\.\d{4,5}$', arxiv_id) or re.match(r'^[a-z-]+/\d{7}$', arxiv_id):
+                        # Check local DB before queuing for ArXiv API fetch
+                        if local_db:
+                            try:
+                                paper_data = local_db.get_paper_by_arxiv_id(arxiv_id)
+                                if paper_data:
+                                    self._metadata_cache[arxiv_id] = paper_data
+                                    db_hits += 1
+                                    continue
+                            except Exception:
+                                pass
                         arxiv_ids_to_fetch.append(arxiv_id)
                     else:
                         logger.debug(f"Skipping invalid arXiv ID: {arxiv_id}")
+        
+        if db_hits:
+            logger.debug(f"Pre-fetched {db_hits} ArXiv references from local DB (skipping API)")
         
         if not arxiv_ids_to_fetch:
             return

@@ -28,6 +28,7 @@ Usage:
 import logging
 import random
 import requests
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib import import_module
@@ -142,6 +143,21 @@ class EnhancedHybridReferenceChecker:
         self.retry_base_delay = 1  # Base delay for retrying throttled APIs (seconds)
         self.retry_backoff_factor = 1.5  # Exponential backoff multiplier
         self.max_retry_delay = 20  # Maximum delay cap in seconds
+        
+        # Per-API concurrency semaphores for bulk mode.
+        # Each API independently limits its own concurrent calls, so a 429
+        # backoff on one API doesn't block calls to other APIs.
+        # local_db has no limit (instant), ArXiv is rate-limited to 1 (3s gap),
+        # others allow moderate parallelism.
+        self._api_semaphores: Dict[str, threading.Semaphore] = {
+            'local_db': threading.Semaphore(100),      # unlimited (instant)
+            'arxiv_citation': threading.Semaphore(2),   # ArXiv has 3s rate gap
+            'semantic_scholar': threading.Semaphore(3),  # moderate parallelism
+            'crossref': threading.Semaphore(3),
+            'openalex': threading.Semaphore(3),
+            'dblp': threading.Semaphore(2),
+            'openreview': threading.Semaphore(2),
+        }
     
     def _update_api_stats(self, api_name: str, success: bool, duration: float):
         """Update API performance statistics"""
@@ -158,7 +174,10 @@ class EnhancedHybridReferenceChecker:
     
     def _try_api(self, api_name: str, api_instance: Any, reference: Dict[str, Any], is_retry: bool = False) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
         """
-        Try to verify reference with a specific API and track performance
+        Try to verify reference with a specific API and track performance.
+        
+        Uses per-API semaphores so different APIs don't block each other.
+        A 429 backoff on Semantic Scholar won't prevent ArXiv or DB lookups.
         
         Returns:
             Tuple of (verified_data, errors, url, success, failure_type)
@@ -166,6 +185,11 @@ class EnhancedHybridReferenceChecker:
         """
         if not api_instance:
             return None, [], None, False, 'none'
+        
+        # Acquire per-API semaphore (limits concurrent calls to this specific API)
+        sem = self._api_semaphores.get(api_name)
+        if sem is not None:
+            sem.acquire()
         
         start_time = time.time()
         failure_type = 'none'
@@ -227,6 +251,10 @@ class EnhancedHybridReferenceChecker:
             failure_type = 'other'
             logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
             return None, [], None, False, failure_type
+        finally:
+            # Release per-API semaphore so other refs can use this API
+            if sem is not None:
+                sem.release()
     
     def _should_try_doi_apis_first(self, reference: Dict[str, Any]) -> bool:
         """
@@ -500,6 +528,13 @@ class EnhancedHybridReferenceChecker:
         # ── PHASE 1: Parallel API calls ──
         
         if is_arxiv:
+            # For ArXiv refs, check local DB first (instant) before hitting APIs
+            if self.local_db:
+                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
+                if success and self._is_data_complete(verified_data, reference):
+                    logger.debug("Enhanced Hybrid: ArXiv ref resolved via local DB, skipping API calls")
+                    return verified_data, errors, url
+            
             # ArXiv reference: run ArXiv citation + Semantic Scholar in parallel
             result = self._verify_arxiv_parallel(reference, failed_apis)
             if result is not None:
