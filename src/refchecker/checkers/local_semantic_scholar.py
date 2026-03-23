@@ -343,6 +343,48 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold ({SIMILARITY_THRESHOLD})")
         
+        # Fallback: search by first author + year when title search fails
+        # This handles cases like arXiv papers that changed titles between versions
+        if authors and len(authors) > 0 and year:
+            first_author = authors[0]
+            # Only attempt if we have a meaningful author name (not "et al" or single letter)
+            if len(first_author) > 3 and first_author.lower() not in ('et al', 'et al.', 'others'):
+                logger.debug(f"Local DB: Title search failed, trying author fallback with '{first_author}' year={year}")
+                author_results = self.search_papers_by_author(first_author, year=year)
+                logger.debug(f"Local DB: Author fallback returned {len(author_results)} results")
+                
+                if author_results and len(author_results) <= 100:
+                    # Score by title similarity — even partial overlap helps rank correctly
+                    scored_results = []
+                    for result in author_results:
+                        result_title = result.get('title', '')
+                        score = calculate_title_similarity(title, result_title)
+                        
+                        # Additional author matching bonus for multiple authors
+                        if len(authors) > 1 and result.get('authors'):
+                            matching_authors = 0
+                            for cited_author in authors[1:]:
+                                for result_author in result['authors']:
+                                    r_name = result_author.get('name', '') if isinstance(result_author, dict) else str(result_author)
+                                    if is_name_match(cited_author, r_name):
+                                        matching_authors += 1
+                                        break
+                            if matching_authors > 0:
+                                score += 0.05 * min(matching_authors, 3)
+                        
+                        if score >= 0.3:  # Only consider results with some title overlap
+                            scored_results.append((score, result))
+                    
+                    if scored_results:
+                        scored_results.sort(key=lambda x: (-x[0], x[1].get('title', '')))
+                        best_score, best_match = scored_results[0]
+                        
+                        if best_score >= 0.5:  # Lower threshold for author-based fallback
+                            logger.debug(f"Local DB: Author fallback found match with score {best_score:.2f}: '{best_match.get('title', '')}'")
+                            return best_match
+                        else:
+                            logger.debug(f"Local DB: Author fallback best score {best_score:.2f} below author-fallback threshold (0.5)")
+        
         logger.debug("Local DB: No good match found")
         return None
     

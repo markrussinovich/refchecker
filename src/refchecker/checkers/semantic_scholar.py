@@ -656,6 +656,27 @@ class NonArxivReferenceChecker:
                         logger.debug(f"No good match found for title: {cleaned_title}")
                 else:
                     logger.debug(f"No papers found for title: {cleaned_title}")
+
+            # Author-based fallback: when title search fails, try searching by
+            # first author + key title words. Handles arXiv papers that changed
+            # titles between versions.
+            if not paper_data and authors and len(authors) > 0 and title:
+                first_author = authors[0]
+                if len(first_author) > 3 and first_author.lower() not in ('et al', 'et al.', 'others'):
+                    # Build a combined query: first author + a few distinctive title words
+                    title_words = [w for w in clean_title_for_search(title).split() if len(w) > 3][:4]
+                    author_query = f"{first_author} {' '.join(title_words)}"
+                    logger.debug(f"Trying author-based S2 search: '{author_query}'")
+                    search_results = self.search_paper(author_query, year)
+                    if search_results:
+                        best_match, best_score = find_best_match(search_results, cleaned_title, year, authors)
+                        # Use a lower threshold since the title may have changed
+                        if best_match and best_score >= 0.5:
+                            paper_data = best_match
+                            found_title = best_match['title']
+                            logger.debug(f"Found paper by author-based search with score {best_score:.2f}")
+                        else:
+                            logger.debug(f"Author-based search best score {best_score:.2f} below threshold")
         
         # Track if we found an ArXiv ID mismatch (wrong paper via ArXiv ID)
         arxiv_id_mismatch_detected = False

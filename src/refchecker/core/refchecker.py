@@ -657,7 +657,7 @@ class ArxivReferenceChecker:
         logger.debug(f"Pre-fetched {len(self._metadata_cache)} ArXiv references")
     
     def batch_fetch_from_arxiv(self, arxiv_ids):
-        """Fetch multiple ArXiv papers in a single API call"""
+        """Fetch multiple ArXiv papers in a single API call with retry on rate-limiting"""
         if not arxiv_ids:
             return {}
             
@@ -667,26 +667,42 @@ class ArxivReferenceChecker:
         
         url = f"https://export.arxiv.org/api/query?{search_query}&max_results={len(arxiv_ids)}"
         
-        try:
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            
-            # Parse the XML response
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(response.text)
-            
-            results = {}
-            for entry in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
-                # Extract metadata from each entry
-                metadata = self.parse_arxiv_entry(entry)
-                if metadata and metadata.get('arxiv_id'):
-                    results[metadata['arxiv_id']] = metadata
-                    
-            return results
-            
-        except Exception as e:
-            logger.warning(f"Batch ArXiv fetch failed: {e}")
-            return {}
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(url, timeout=30)
+                
+                if response.status_code == 429:
+                    wait_time = 3.0 * (2 ** attempt)  # 3s, 6s, 12s
+                    logger.debug(f"ArXiv batch fetch rate-limited (429), retrying in {wait_time:.0f}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                
+                response.raise_for_status()
+                
+                # Parse the XML response
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(response.text)
+                
+                results = {}
+                for entry in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
+                    # Extract metadata from each entry
+                    metadata = self.parse_arxiv_entry(entry)
+                    if metadata and metadata.get('arxiv_id'):
+                        results[metadata['arxiv_id']] = metadata
+                        
+                return results
+                
+            except requests.exceptions.Timeout:
+                wait_time = 3.0 * (2 ** attempt)
+                logger.debug(f"ArXiv batch fetch timed out, retrying in {wait_time:.0f}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+            except Exception as e:
+                logger.warning(f"Batch ArXiv fetch failed: {e}")
+                return {}
+        
+        logger.warning(f"Batch ArXiv fetch failed after {max_retries} retries")
+        return {}
     
     def parse_arxiv_entry(self, entry):
         """Parse a single ArXiv entry from XML response"""
@@ -1272,9 +1288,10 @@ class ArxivReferenceChecker:
                     best_pattern = pattern
                     break
             
-            # If no match has [1] following it, fall back to the last match
+            # If no match has [1] following it, fall back to the first match
+            # (earliest in document, most likely the real section heading)
             if not best_match:
-                best_pattern, best_match = all_matches[-1]
+                best_pattern, best_match = all_matches[0]
             
             match = best_match
             start_pos = match.end()
