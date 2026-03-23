@@ -745,10 +745,10 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
 
     config = _BulkCheckerConfig.from_checker(root_checker)
 
-    # Suppress INFO-level logging in bulk mode to keep output clean.
-    # Only paper-level progress lines are printed; per-reference noise is hidden.
+    # Suppress INFO and WARNING logging in bulk mode to keep output clean.
+    # Only errors and paper-level progress lines are printed.
     if not debug_mode:
-        logging.getLogger().setLevel(logging.WARNING)
+        logging.getLogger().setLevel(logging.ERROR)
 
     _safe_print(f'\nBulk check: {len(input_specs)} papers queued' + (f' ({dropped} duplicate(s) removed)' if dropped else ''))
 
