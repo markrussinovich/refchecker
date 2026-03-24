@@ -534,7 +534,7 @@ export const useCheckStore = create((set, get) => ({
         break
         
       case 'completed':
-        store.completeCheck(data.check_id)
+        store.completeCheck(data.check_id || store.currentCheckId)
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'completed',
           total_refs: data.total_refs,

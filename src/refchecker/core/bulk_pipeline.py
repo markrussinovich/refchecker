@@ -902,7 +902,11 @@ def _process_bulk_paper_job(
         paper_id = paper.get_short_id()
         title = getattr(paper, 'title', '') or paper_id or job.input_spec
         source_url = checker._get_source_paper_url(paper) if hasattr(checker, '_get_source_paper_url') else job.input_spec
+
+        phase_times: Dict[str, float] = {}
+        _t = time.perf_counter()
         bibliography = extract_bibliography_bulk(checker, paper, debug_mode=debug_mode, extraction_batcher=extraction_batcher)
+        phase_times['extract_bib'] = time.perf_counter() - _t
         if checker.fatal_error:
             return _build_bulk_result(checker, job, paper_id, title, start_time, source_url=source_url)
 
@@ -915,10 +919,46 @@ def _process_bulk_paper_job(
         checker.total_non_arxiv_refs = sum(1 for ref in bibliography if ref.get('type') == 'non-arxiv')
         checker.total_other_refs = sum(1 for ref in bibliography if ref.get('type') == 'other')
 
+        _t = time.perf_counter()
         checker.batch_prefetch_arxiv_references(bibliography)
+        phase_times['prefetch_arxiv'] = time.perf_counter() - _t
+
+        _t = time.perf_counter()
         _batch_prefetch_ss_metadata(bibliography, checker, verification_cache)
+        phase_times['prefetch_ss'] = time.perf_counter() - _t
+
+        _t = time.perf_counter()
         _verify_bibliography_silent(checker, paper, bibliography, debug_mode=debug_mode, verification_cache=verification_cache)
+        phase_times['verify_refs'] = time.perf_counter() - _t
+
+        _t = time.perf_counter()
         _apply_batched_hallucination_assessments(checker, hallucination_batcher)
+        phase_times['hallucination'] = time.perf_counter() - _t
+
+        # Print phase timing and API stats for this paper
+        total_elapsed = time.perf_counter() - start_time
+        phase_times['total'] = total_elapsed
+        hybrid_checker = getattr(checker, 'non_arxiv_checker', None)
+        api_stats = getattr(hybrid_checker, 'api_stats', {}) if hybrid_checker else {}
+        _safe_print(f'   ⏱️  PHASE TIMING [{paper_id}] ({len(bibliography)} refs):')
+        for phase, dur in phase_times.items():
+            pct = dur / total_elapsed * 100 if total_elapsed > 0 else 0
+            _safe_print(f'      {phase:<20s} {dur:>7.1f}s  ({pct:>5.1f}%)')
+        if api_stats:
+            _safe_print(f'   📊 API STATS [{paper_id}]:')
+            for api_name, stats in sorted(api_stats.items()):
+                total = stats['success'] + stats['failure']
+                if total > 0:
+                    cum_time = getattr(hybrid_checker, '_api_total_time', {}).get(api_name, 0)
+                    sem_wait = getattr(hybrid_checker, '_api_sem_wait_time', {}).get(api_name, 0)
+                    _safe_print(
+                        f'      {api_name:<20s} ok={stats["success"]:<4d} fail={stats["failure"]:<4d} '
+                        f'throttled={stats["throttled"]:<3d} avg={stats["avg_time"]:.2f}s '
+                        f'total_calls={total} cum_time={cum_time:.1f}s sem_wait={sem_wait:.1f}s'
+                    )
+            retry_sleep = getattr(hybrid_checker, '_api_retry_sleep_time', 0)
+            if retry_sleep > 0:
+                _safe_print(f'      {"retry_sleep":<20s} {retry_sleep:.1f}s (cumulative across all threads)')
 
         actual_errors = checker.total_errors_found
         warnings = checker.total_warnings_found
@@ -1110,7 +1150,8 @@ def _extract_ss_id(reference: Dict[str, Any]) -> Optional[str]:
         if clean.startswith('http'):
             from refchecker.utils.doi_utils import extract_doi_from_url
             clean = extract_doi_from_url(clean) or ''
-        if clean and clean.startswith('10.'):
+        from refchecker.utils.doi_utils import is_valid_doi_format
+        if clean and clean.startswith('10.') and is_valid_doi_format(clean):
             return f'DOI:{clean}'
 
     return None

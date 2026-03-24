@@ -29,7 +29,7 @@ import logging
 import re
 import html
 from typing import Dict, List, Tuple, Optional, Any, Union
-from refchecker.utils.doi_utils import extract_doi_from_url
+from refchecker.utils.doi_utils import extract_doi_from_url, is_valid_doi_format
 from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from refchecker.utils.error_utils import format_title_mismatch
 from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
@@ -606,6 +606,11 @@ class NonArxivReferenceChecker:
             doi = reference['doi']
         elif url:
             doi = extract_doi_from_url(url)
+        
+        # Reject truncated/partial DOIs (e.g., "10.1016/j")
+        if doi and not is_valid_doi_format(doi):
+            logger.debug(f"Rejecting invalid DOI format: {doi}")
+            doi = None
         
         # If we don't have paper data yet, try DOI
         if not paper_data and doi:

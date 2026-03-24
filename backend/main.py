@@ -335,15 +335,6 @@ async def startup_event():
     """Initialize database and settings on startup"""
     await db.init_db()
 
-    # Semantic Scholar keys are browser-managed for the web UI and should not
-    # remain persisted on the server after upgrade.
-    try:
-        if await db.has_setting("semantic_scholar_api_key"):
-            await db.delete_setting("semantic_scholar_api_key")
-            logger.info("Removed deprecated server-side Semantic Scholar API key")
-    except Exception as e:
-        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
-    
     # Initialize global concurrency limiter with saved setting
     try:
         concurrency_setting = await db.get_setting("max_concurrent_checks")
@@ -561,6 +552,9 @@ async def start_check(
                 logger.warning(f"LLM config {llm_config_id} not found")
         if use_llm:
             _ensure_allowed_web_llm_provider(llm_provider)
+        # Fall back to DB-stored Semantic Scholar API key if not sent per-request
+        if not semantic_scholar_api_key:
+            semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
         logger.info(f"Effective API key resolved: {'present' if effective_api_key else 'MISSING'}, SS key: {'present' if semantic_scholar_api_key else 'MISSING'}")
 
         # Handle file upload or pasted text
@@ -925,8 +919,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached
-            if not os.path.exists(pdf_path):
+            # Download PDF if not already cached (or if cached file is empty/corrupt)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
@@ -943,6 +937,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
             thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id)
+            if not thumbnail_path:
+                thumbnail_path = await get_text_thumbnail_async(check_id, f"ArXiv: {arxiv_id}")
         elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
             # Generate thumbnail from uploaded PDF
             if os.path.exists(paper_source):
@@ -1035,8 +1031,8 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached
-            if not os.path.exists(pdf_path):
+            # Download PDF if not already cached (or if cached file is empty/corrupt)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
@@ -1372,6 +1368,11 @@ async def start_batch_check(
             slots_acquired += 1
 
         checks = []
+
+        # Fall back to DB-stored Semantic Scholar API key if not sent per-request
+        effective_ss_key = request.semantic_scholar_api_key
+        if not effective_ss_key:
+            effective_ss_key = await db.get_setting("semantic_scholar_api_key")
         
         for url in valid_urls:
             session_id = str(uuid.uuid4())
@@ -1395,7 +1396,7 @@ async def start_batch_check(
                     session_id, check_id, url, 'url',
                     llm_provider, llm_model, effective_api_key, endpoint,
                     request.use_llm, cancel_event, user_id,
-                    semantic_scholar_api_key=request.semantic_scholar_api_key,
+                    semantic_scholar_api_key=effective_ss_key,
                 )
             )
             active_checks[session_id] = {
@@ -2113,11 +2114,11 @@ async def validate_semantic_scholar_key(
 
 @app.get("/api/settings/semantic-scholar")
 async def get_semantic_scholar_key_status(current_user: UserInfo = Depends(require_user)):
-    """Semantic Scholar keys are now browser-only for the current tab."""
+    """Check if a Semantic Scholar API key is stored."""
+    has_key = await db.has_setting("semantic_scholar_api_key")
     return {
-        "has_key": False,
-        "storage": "browser-only",
-        "message": "Semantic Scholar API keys are managed in browser memory for the current tab only",
+        "has_key": has_key,
+        "storage": "server-encrypted",
     }
 
 
@@ -2126,20 +2127,19 @@ async def set_semantic_scholar_key(
     data: SemanticScholarKeyUpdate,
     current_user: UserInfo = Depends(require_user),
 ):
-    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
-    raise HTTPException(
-        status_code=410,
-        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
-    )
+    """Store the Semantic Scholar API key (encrypted)."""
+    if data.api_key:
+        await db.set_setting("semantic_scholar_api_key", data.api_key)
+    else:
+        await db.delete_setting("semantic_scholar_api_key")
+    return {"status": "ok"}
 
 
 @app.delete("/api/settings/semantic-scholar")
 async def delete_semantic_scholar_key(current_user: UserInfo = Depends(require_user)):
-    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
-    raise HTTPException(
-        status_code=410,
-        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
-    )
+    """Delete the stored Semantic Scholar API key."""
+    await db.delete_setting("semantic_scholar_api_key")
+    return {"status": "ok"}
 
 
 # General Settings endpoints

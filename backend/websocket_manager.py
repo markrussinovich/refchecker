@@ -16,14 +16,27 @@ class ConnectionManager:
     def __init__(self):
         # Map of session_id -> set of websocket connections
         self.active_connections: Dict[str, Set[WebSocket]] = {}
+        # Buffer early messages sent before WebSocket connects
+        self._pending_messages: Dict[str, list] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str):
-        """Accept a new WebSocket connection"""
+        """Accept a new WebSocket connection and replay any buffered messages"""
         await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = set()
         self.active_connections[session_id].add(websocket)
         logger.info(f"WebSocket connected for session: {session_id}")
+
+        # Replay buffered messages
+        pending = self._pending_messages.pop(session_id, [])
+        if pending:
+            logger.info(f"Replaying {len(pending)} buffered messages for session {session_id}")
+            for msg_json in pending:
+                try:
+                    await websocket.send_text(msg_json)
+                except Exception as e:
+                    logger.error(f"Error replaying buffered message: {e}")
+                    break
 
     def disconnect(self, websocket: WebSocket, session_id: str):
         """Remove a WebSocket connection"""
@@ -34,15 +47,19 @@ class ConnectionManager:
         logger.info(f"WebSocket disconnected for session: {session_id}")
 
     async def send_message(self, session_id: str, message_type: str, data: dict):
-        """Send a message to all connections for a session"""
-        if session_id not in self.active_connections:
-            logger.debug(f"No active connections for session: {session_id}")
-            return
-
+        """Send a message to all connections for a session, buffering if none connected yet"""
         # Flatten structure: frontend expects {type, session_id, ...data}
-        # Include session_id so the client can ignore stale messages from old sessions
         message = {"type": message_type, "session_id": session_id, **data}
         message_json = json.dumps(message)
+
+        if session_id not in self.active_connections:
+            # Buffer the message for replay when the WebSocket connects
+            if session_id not in self._pending_messages:
+                self._pending_messages[session_id] = []
+            # Cap buffer to avoid unbounded memory growth
+            if len(self._pending_messages[session_id]) < 500:
+                self._pending_messages[session_id].append(message_json)
+            return
         
         logger.debug(f"Sending {message_type} to session {session_id}: {message_json[:200]}...")
 

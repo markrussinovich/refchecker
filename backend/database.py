@@ -86,7 +86,11 @@ def decrypt_secret(value: Optional[str]) -> Optional[str]:
         return value
     if _is_encrypted_secret(value):
         token = value[len(SECRET_VALUE_PREFIX):].encode("ascii")
-        return _get_fernet().decrypt(token).decode("utf-8")
+        try:
+            return _get_fernet().decrypt(token).decode("utf-8")
+        except Exception:
+            logger.warning("Failed to decrypt stored secret (encryption key may have changed)")
+            return None
     # Handle legacy Fernet tokens without the enc: prefix
     if _is_legacy_fernet_token(value):
         try:

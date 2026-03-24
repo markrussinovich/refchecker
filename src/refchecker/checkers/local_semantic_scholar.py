@@ -74,7 +74,7 @@ class LocalNonArxivReferenceChecker:
             db_path: Path to the SQLite database
         """
         self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
     
     # DOI extraction now handled by utility function
@@ -97,6 +97,10 @@ class LocalNonArxivReferenceChecker:
         Returns:
             Paper data dictionary or None if not found
         """
+        # Reject truncated/partial DOIs (e.g., "10.1016/j")
+        if not doi or len(doi.split('/', 1)[-1]) < 2:
+            return None
+
         cursor = self.conn.cursor()
         
         # Query the database for the paper with the given DOI using the column-based schema
@@ -196,93 +200,29 @@ class LocalNonArxivReferenceChecker:
                 if results:
                     logger.debug(f"Found {len(results)} results using normalized title match")
                     return process_semantic_scholar_results(results)
+                
+                # Strategy 1b: The checker's normalize_paper_title() strips
+                # prefixes like "Taichi:", "D-nerf:", etc. but the DB stores
+                # the full normalized title. Try DB-style normalization
+                # (lowercase + strip non-alphanumeric, no prefix removal).
+                db_style_normalized = re.sub(r'[^a-z0-9]', '', title_lower)
+                if db_style_normalized and db_style_normalized != title_normalized:
+                    start_time = time.time()
+                    cursor.execute(query, [db_style_normalized])
+                    results.extend([dict(row) for row in cursor.fetchall()])
+                    execution_time = time.time() - start_time
+                    
+                    log_query_debug(query, [db_style_normalized], execution_time, len(results), "DB-style normalized title match")
+                    
+                    if results:
+                        logger.debug(f"Found {len(results)} results using DB-style normalized title match")
+                        return process_semantic_scholar_results(results)
         except Exception as e:
             logger.warning(f"Error in normalized title search: {e}")
         
         return process_semantic_scholar_results(results)
     
     # Result processing now handled by utility function
-    
-    def search_papers_by_author(self, author_name: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Search for papers by author name in the local database
-        
-        Args:
-            author_name: Author name
-            year: Publication year (optional)
-            
-        Returns:
-            List of paper data dictionaries
-        """
-        cursor = self.conn.cursor()
-        
-        # Clean up the author name for searching
-        search_name = f"%{author_name.replace('%', '').lower()}%"
-        
-        # Build the query using the column-based schema with JSON_EXTRACT for authors
-        query = '''
-        SELECT * FROM papers
-        WHERE LOWER(authors) LIKE ?
-        '''
-        params = [search_name]
-        
-        # Add year filter if provided
-        if year:
-            query += ' AND year = ?'
-            params.append(year)
-        
-        # Execute the query
-        start_time = time.time()
-        cursor.execute(query, params)
-        execution_time = time.time() - start_time
-        
-        # Fetch results
-        results = []
-        raw_results = cursor.fetchall()
-        
-        log_query_debug(query, params, execution_time, len(raw_results), "author name search")
-        
-        for row in raw_results:
-            # Convert row to dictionary and reconstruct paper data structure
-            paper_data = dict(row)
-            
-            # Extract authors from JSON
-            if paper_data.get('authors'):
-                authors_list = json.loads(paper_data['authors'])
-                paper_data['authors'] = authors_list
-                
-                # Check if any author actually matches our search
-                author_match = False
-                for author in authors_list:
-                    author_name_normalized = normalize_author_name(author.get('name', ''))
-                    search_name_normalized = normalize_author_name(author_name)
-                    if search_name_normalized in author_name_normalized:
-                        author_match = True
-                        break
-                
-                # Skip if no actual author match (reduces false positives)
-                if not author_match:
-                    continue
-            else:
-                paper_data['authors'] = []
-            
-            # Reconstruct external IDs from flattened columns
-            external_ids = {}
-            for key, value in paper_data.items():
-                if key.startswith('externalIds_') and value:
-                    external_id_type = key.replace('externalIds_', '')
-                    external_ids[external_id_type] = value
-            paper_data['externalIds'] = external_ids
-            
-            # Add other JSON fields
-            if paper_data.get('s2FieldsOfStudy'):
-                paper_data['s2FieldsOfStudy'] = json.loads(paper_data['s2FieldsOfStudy'])
-            if paper_data.get('publicationTypes'):
-                paper_data['publicationTypes'] = json.loads(paper_data['publicationTypes'])
-            
-            results.append(paper_data)
-        
-        return results
     
     def find_best_match(self, title: str, authors: List[str], year: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """
@@ -343,48 +283,6 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold ({SIMILARITY_THRESHOLD})")
         
-        # Fallback: search by first author + year when title search fails
-        # This handles cases like arXiv papers that changed titles between versions
-        if authors and len(authors) > 0 and year:
-            first_author = authors[0]
-            # Only attempt if we have a meaningful author name (not "et al" or single letter)
-            if len(first_author) > 3 and first_author.lower() not in ('et al', 'et al.', 'others'):
-                logger.debug(f"Local DB: Title search failed, trying author fallback with '{first_author}' year={year}")
-                author_results = self.search_papers_by_author(first_author, year=year)
-                logger.debug(f"Local DB: Author fallback returned {len(author_results)} results")
-                
-                if author_results and len(author_results) <= 100:
-                    # Score by title similarity — even partial overlap helps rank correctly
-                    scored_results = []
-                    for result in author_results:
-                        result_title = result.get('title', '')
-                        score = calculate_title_similarity(title, result_title)
-                        
-                        # Additional author matching bonus for multiple authors
-                        if len(authors) > 1 and result.get('authors'):
-                            matching_authors = 0
-                            for cited_author in authors[1:]:
-                                for result_author in result['authors']:
-                                    r_name = result_author.get('name', '') if isinstance(result_author, dict) else str(result_author)
-                                    if is_name_match(cited_author, r_name):
-                                        matching_authors += 1
-                                        break
-                            if matching_authors > 0:
-                                score += 0.05 * min(matching_authors, 3)
-                        
-                        if score >= 0.3:  # Only consider results with some title overlap
-                            scored_results.append((score, result))
-                    
-                    if scored_results:
-                        scored_results.sort(key=lambda x: (-x[0], x[1].get('title', '')))
-                        best_score, best_match = scored_results[0]
-                        
-                        if best_score >= 0.5:  # Lower threshold for author-based fallback
-                            logger.debug(f"Local DB: Author fallback found match with score {best_score:.2f}: '{best_match.get('title', '')}'")
-                            return best_match
-                        else:
-                            logger.debug(f"Local DB: Author fallback best score {best_score:.2f} below author-fallback threshold (0.5)")
-        
         logger.debug("Local DB: No good match found")
         return None
     
@@ -424,6 +322,12 @@ class LocalNonArxivReferenceChecker:
             if not arxiv_id:
                 # If not arXiv, try extracting DOI
                 doi = extract_doi_from_url(url)
+        
+        # Reject truncated/partial DOIs (e.g., "10.1016/j")
+        from refchecker.utils.doi_utils import is_valid_doi_format
+        if doi and not is_valid_doi_format(doi):
+            logger.debug(f"Local DB: Rejecting invalid DOI format: {doi}")
+            doi = None
         
         paper_data = None
         

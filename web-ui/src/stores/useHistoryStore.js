@@ -621,7 +621,7 @@ export const useHistoryStore = create((set, get) => ({
       
       // If a new check was auto-selected, fetch its full details
       const state = get()
-      if (state.selectedCheckId && state.selectedCheckId !== id) {
+      if (state.selectedCheckId && state.selectedCheckId !== id && state.selectedCheckId !== -1) {
         // Fetch full details for the auto-selected check
         try {
           const response = await api.getCheckDetail(state.selectedCheckId)

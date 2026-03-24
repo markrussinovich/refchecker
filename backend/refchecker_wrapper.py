@@ -43,9 +43,21 @@ logger = logging.getLogger(__name__)
 
 def download_pdf(url: str, dest_path: str) -> None:
     """Download a PDF with browser-like headers (avoids 403 from OpenReview etc.)."""
+    import tempfile, os
     from refchecker.utils.url_utils import download_pdf_bytes
-    with open(dest_path, 'wb') as f:
-        f.write(download_pdf_bytes(url))
+    data = download_pdf_bytes(url)
+    # Write to a temp file first, then atomically rename to avoid race conditions
+    # where another thread sees the partially-written file.
+    dir_name = os.path.dirname(dest_path)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.pdf.tmp')
+    try:
+        os.write(fd, data)
+        os.close(fd)
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        os.close(fd)
+        os.unlink(tmp_path)
+        raise
 
 
 def _process_llm_references_cli_style(references: List[Any]) -> List[Dict[str, Any]]:
@@ -695,7 +707,8 @@ class ProgressRefChecker:
                     "hallucination_count": 0,
                     "verified_count": 0,
                     "extraction_method": extraction_method,
-                    "message": "No references could be extracted from this paper."
+                    "message": "No references could be extracted from this paper.",
+                    "check_id": self.check_id,
                 })
                 return {
                     "paper_title": paper_title,
@@ -763,7 +776,7 @@ class ProgressRefChecker:
                 }
             }
 
-            await self.emit_progress("completed", final_result["summary"])
+            await self.emit_progress("completed", {**final_result["summary"], "check_id": self.check_id})
 
             return final_result
 

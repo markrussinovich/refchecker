@@ -4849,6 +4849,19 @@ class ArxivReferenceChecker:
                 from refchecker.utils.text_utils import strip_latex_commands
                 author_cleaned = strip_latex_commands(author.rstrip('.'))
                 
+                # Fix "Nameet al" concatenation from PDF extraction artifacts
+                import re as _re
+                etal_match = _re.search(r'^(.+?)(et\s*al\.?)$', author_cleaned)
+                if etal_match:
+                    real_name = etal_match.group(1).strip().rstrip(',')
+                    if real_name:
+                        parsed_author = self._parse_single_author_entry(real_name)
+                        if parsed_author:
+                            parsed_authors.append(parsed_author)
+                    if parsed_authors:
+                        parsed_authors.append("et al")
+                    break
+                
                 # Skip special indicators like "others", "et al", etc.
                 if author_cleaned.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
                     # Add "et al" as a standard indicator and stop processing more authors
@@ -4876,6 +4889,16 @@ class ArxivReferenceChecker:
             for author in authors:
                 # Apply LaTeX cleaning to each author
                 author_clean = strip_latex_commands(author)
+                # Fix "Nameet al" concatenation from PDF extraction artifacts
+                import re as _re
+                etal_match = _re.search(r'^(.+?)(et\s*al\.?)$', author_clean)
+                if etal_match:
+                    real_name = etal_match.group(1).strip().rstrip(',')
+                    if real_name:
+                        processed_authors.append(real_name)
+                    if processed_authors:
+                        processed_authors.append("et al")
+                    break
                 if author_clean.lower() in ['others', 'et al', 'et al.', 'and others', 'etc.', '...']:
                     if processed_authors:  # Only add if we have at least one real author
                         processed_authors.append("et al")

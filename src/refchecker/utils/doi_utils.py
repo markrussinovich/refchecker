@@ -37,8 +37,12 @@ def extract_doi_from_url(url: str) -> Optional[str]:
         match = re.search(pattern, url)
         if match:
             doi_candidate = match.group(1)
-            # DOIs must start with "10." and have at least one slash
+            # DOIs must start with "10." and have a meaningful suffix after the slash
             if doi_candidate.startswith('10.') and '/' in doi_candidate and len(doi_candidate) > 6:
+                # Reject truncated DOIs where the suffix is too short (e.g., "10.1016/j")
+                suffix = doi_candidate.split('/', 1)[1]
+                if len(suffix) < 2:
+                    continue
                 return doi_candidate
     
     return None
@@ -90,8 +94,8 @@ def is_valid_doi_format(doi: str) -> bool:
     if not doi:
         return False
     
-    # Basic DOI format: starts with "10." followed by at least one slash
-    doi_format_pattern = r'^10\.\d+/.+'
+    # Basic DOI format: starts with "10." followed by registrant code, slash, and meaningful suffix
+    doi_format_pattern = r'^10\.\d+/.{2,}'
     return bool(re.match(doi_format_pattern, doi))
 
 

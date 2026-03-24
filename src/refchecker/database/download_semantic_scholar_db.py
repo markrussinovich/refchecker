@@ -106,46 +106,18 @@ class SemanticScholarDownloader:
         """Create database tables if they don't exist"""
         cursor = self.conn.cursor()
         
-        # Create papers table with comprehensive schema
+        # Schema with columns needed for reference verification
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS papers (
             paperId TEXT PRIMARY KEY,
-            corpusId INTEGER,
             title TEXT,
             normalized_paper_title TEXT,
-            abstract TEXT,
             venue TEXT,
-            publicationVenueId TEXT,
             year INTEGER,
-            referenceCount INTEGER,
-            citationCount INTEGER,
-            influentialCitationCount INTEGER,
-            isOpenAccess BOOLEAN,
-            publicationDate TEXT,
             url TEXT,
-            
-            -- External IDs (flattened)
-            externalIds_MAG TEXT,
-            externalIds_CorpusId TEXT,
-            externalIds_ACL TEXT,
-            externalIds_PubMed TEXT,
             externalIds_DOI TEXT,
-            externalIds_PubMedCentral TEXT,
-            externalIds_DBLP TEXT,
             externalIds_ArXiv TEXT,
-            
-            -- Journal info (flattened)
-            journal_name TEXT,
-            journal_pages TEXT,
-            journal_volume TEXT,
-            
-            -- Lists stored as JSON for complex queries
-            authors TEXT,  -- JSON array
-            s2FieldsOfStudy TEXT,  -- JSON array
-            publicationTypes TEXT,  -- JSON array
-            
-            -- Full JSON for complete data access
-            json_data TEXT
+            authors TEXT  -- JSON array
         )
         ''')
         
@@ -159,11 +131,7 @@ class SemanticScholarDownloader:
         ''')
         
         # Create indexes for efficient querying
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_year ON papers(year)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_title ON papers(title)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_normalized_title ON papers(normalized_paper_title)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_venue ON papers(venue)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_citationCount ON papers(citationCount)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(externalIds_DOI)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_arxiv ON papers(externalIds_ArXiv)')
         
@@ -844,23 +812,14 @@ class SemanticScholarDownloader:
                 full_json = json.dumps(paper_data)
                 
                 batch.append((
-                    paper_id, corpus_id, title, normalized_title, abstract, venue, publication_venue_id,
-                    year, reference_count, citation_count, influential_citation_count,
-                    is_open_access, publication_date, url,
-                    external_mag, external_corpus_id, external_acl, external_pubmed,
-                    external_doi, external_pmc, external_dblp, external_arxiv,
-                    journal_name, journal_pages, journal_volume,
-                    authors_json, s2_fields_json, pub_types_json, full_json
+                    paper_id, title, normalized_title, venue, year, url,
+                    external_doi, external_arxiv, authors_json
                 ))
             
             # Insert all papers in batch
             if batch:
                 cursor.executemany("""
-                    INSERT OR REPLACE INTO papers VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?
-                    )
+                    INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, batch)
             
             # Commit transaction
@@ -1317,19 +1276,10 @@ class SemanticScholarDownloader:
         
         # Insert or replace the paper
         cursor.execute("""
-            INSERT OR REPLACE INTO papers VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?
-            )
+            INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            paper_id, corpus_id, title, normalized_title, abstract, venue, publication_venue_id,
-            year, reference_count, citation_count, influential_citation_count,
-            is_open_access, publication_date, url,
-            external_mag, external_corpus_id, external_acl, external_pubmed,
-            external_doi, external_pmc, external_dblp, external_arxiv,
-            journal_name, journal_pages, journal_volume,
-            authors_json, s2_fields_json, pub_types_json, full_json
+            paper_id, title, normalized_title, venue, year, url,
+            external_doi, external_arxiv, authors_json
         ))
 
     def close(self):
@@ -1624,7 +1574,7 @@ def main():
         output_dir=args.output_dir,
         batch_size=args.batch_size,
         api_key=args.api_key,
-        fields=args.fields.split(",") if args.fields else None
+        fields=args.fields.split(",") if args.fields else None,
     )
     
     try:

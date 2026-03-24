@@ -273,6 +273,34 @@ async def generate_pdf_preview_async(pdf_path: str, output_path: Optional[str] =
     return await asyncio.to_thread(generate_pdf_preview, pdf_path, output_path)
 
 
+def _download_arxiv_pdf(arxiv_id: str, pdf_path: Path) -> bool:
+    """Download an ArXiv PDF with retry logic for rate limits.
+
+    Returns True if the PDF was successfully downloaded (or already cached).
+    """
+    if pdf_path.exists() and pdf_path.stat().st_size > 0:
+        return True
+
+    import arxiv as arxiv_lib
+    import time as _time
+
+    search = arxiv_lib.Search(id_list=[arxiv_id])
+    paper = next(search.results())
+
+    for attempt in range(3):
+        try:
+            paper.download_pdf(filename=str(pdf_path))
+            if pdf_path.exists() and pdf_path.stat().st_size > 0:
+                return True
+        except Exception as e:
+            wait = 3 * (attempt + 1)
+            logger.warning(f"ArXiv PDF download attempt {attempt + 1}/3 failed ({e}), retrying in {wait}s")
+            _time.sleep(wait)
+
+    logger.error(f"ArXiv PDF download failed after 3 attempts for {arxiv_id}")
+    return False
+
+
 def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
     """
     Generate a thumbnail for an ArXiv paper.
@@ -287,8 +315,6 @@ def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> O
         Path to the generated thumbnail, or None if generation failed
     """
     try:
-        import arxiv as arxiv_lib
-        
         # Check if thumbnail already exists
         output_path = get_thumbnail_cache_path(f"arxiv_{arxiv_id}", check_id)
         if output_path.exists():
@@ -300,12 +326,8 @@ def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> O
         pdf_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
         
-        # Check if PDF is already downloaded
-        if not pdf_path.exists():
-            logger.info(f"Downloading ArXiv PDF: {arxiv_id}")
-            search = arxiv_lib.Search(id_list=[arxiv_id])
-            paper = next(search.results())
-            paper.download_pdf(filename=str(pdf_path))
+        if not _download_arxiv_pdf(arxiv_id, pdf_path):
+            return None
         
         # Generate thumbnail from the PDF
         return generate_pdf_thumbnail(str(pdf_path), str(output_path))
@@ -343,8 +365,6 @@ def generate_arxiv_preview(arxiv_id: str, check_id: Optional[int] = None) -> Opt
         Path to the generated preview, or None if generation failed
     """
     try:
-        import arxiv as arxiv_lib
-        
         # Check if preview already exists
         output_path = get_preview_cache_path(f"arxiv_{arxiv_id}", check_id)
         if output_path.exists():
@@ -356,12 +376,8 @@ def generate_arxiv_preview(arxiv_id: str, check_id: Optional[int] = None) -> Opt
         pdf_dir.mkdir(parents=True, exist_ok=True)
         pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
         
-        # Check if PDF is already downloaded
-        if not pdf_path.exists():
-            logger.info(f"Downloading ArXiv PDF: {arxiv_id}")
-            search = arxiv_lib.Search(id_list=[arxiv_id])
-            paper = next(search.results())
-            paper.download_pdf(filename=str(pdf_path))
+        if not _download_arxiv_pdf(arxiv_id, pdf_path):
+            return None
         
         # Generate preview from the PDF
         return generate_pdf_preview(str(pdf_path), str(output_path))

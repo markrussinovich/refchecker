@@ -158,6 +158,12 @@ class EnhancedHybridReferenceChecker:
             'dblp': threading.Semaphore(2),
             'openreview': threading.Semaphore(2),
         }
+
+        # Cumulative timing accumulators (wall-clock seconds per API, thread-safe)
+        self._api_total_time: Dict[str, float] = {k: 0.0 for k in self.api_stats}
+        self._api_sem_wait_time: Dict[str, float] = {k: 0.0 for k in self.api_stats}
+        self._api_retry_sleep_time: float = 0.0
+        self._api_time_lock = threading.Lock()
     
     def _update_api_stats(self, api_name: str, success: bool, duration: float):
         """Update API performance statistics"""
@@ -188,8 +194,10 @@ class EnhancedHybridReferenceChecker:
         
         # Acquire per-API semaphore (limits concurrent calls to this specific API)
         sem = self._api_semaphores.get(api_name)
+        sem_wait_start = time.time()
         if sem is not None:
             sem.acquire()
+        sem_wait = time.time() - sem_wait_start
         
         start_time = time.time()
         failure_type = 'none'
@@ -252,6 +260,11 @@ class EnhancedHybridReferenceChecker:
             logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
             return None, [], None, False, failure_type
         finally:
+            # Accumulate timing stats
+            call_duration = time.time() - start_time
+            with self._api_time_lock:
+                self._api_total_time[api_name] = self._api_total_time.get(api_name, 0) + call_duration
+                self._api_sem_wait_time[api_name] = self._api_sem_wait_time.get(api_name, 0) + sem_wait
             # Release per-API semaphore so other refs can use this API
             if sem is not None:
                 sem.release()
@@ -428,7 +441,7 @@ class EnhancedHybridReferenceChecker:
             return ss_result
         return None
 
-    def _verify_non_arxiv_parallel(self, reference, failed_apis):
+    def _verify_non_arxiv_parallel(self, reference, failed_apis, skip_ss: bool = False):
         """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
         
         Returns first complete successful result, or None.
@@ -436,8 +449,11 @@ class EnhancedHybridReferenceChecker:
         self._last_crossref_result = None
         self._last_openalex_result = None
         
-        # Try Semantic Scholar first — it succeeds ~92% of the time
-        if self.semantic_scholar:
+        # Try Semantic Scholar first — it succeeds ~92% of the time.
+        # Skip SS when the local DB (233M papers) already returned not_found:
+        # if it's not in the DB, it's almost certainly not on the SS API either,
+        # and the API call just wastes time and rate-limit budget.
+        if self.semantic_scholar and not skip_ss:
             verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
                 if self._is_data_complete(verified_data, reference):
@@ -541,14 +557,19 @@ class EnhancedHybridReferenceChecker:
                 return result
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
+            db_not_found = False
             if self.local_db:
                 verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
                 if success:
                     return verified_data, errors, url
                 if failure_type in ['throttled', 'timeout', 'server_error']:
                     failed_apis.append(('local_db', self.local_db, failure_type))
+                elif failure_type == 'not_found':
+                    db_not_found = True
             
-            result = self._verify_non_arxiv_parallel(reference, failed_apis)
+            # Skip SS API when the 233M-paper local DB returned not_found —
+            # if it's not in the DB, it's almost certainly not on SS either.
+            result = self._verify_non_arxiv_parallel(reference, failed_apis, skip_ss=db_not_found)
             if result is not None:
                 return result
         
@@ -579,6 +600,8 @@ class EnhancedHybridReferenceChecker:
                 
                 logger.debug(f"Enhanced Hybrid: Waiting {final_delay:.1f}s before retrying {api_name} after {failure_type} failure")
                 time.sleep(final_delay)
+                with self._api_time_lock:
+                    self._api_retry_sleep_time += final_delay
                 
                 logger.debug(f"Enhanced Hybrid: Retrying {api_name}")
                 verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
@@ -596,6 +619,8 @@ class EnhancedHybridReferenceChecker:
                         
                         logger.debug(f"Enhanced Hybrid: Additional Semantic Scholar retry {retry_attempt + 2} after {final_retry_delay:.1f}s")
                         time.sleep(final_retry_delay)
+                        with self._api_time_lock:
+                            self._api_retry_sleep_time += final_retry_delay
                         
                         verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
                         if success:

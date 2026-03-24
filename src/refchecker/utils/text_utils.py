@@ -186,6 +186,9 @@ def parse_authors_with_initials(authors_text):
     # by converting to "Haotian Liu and Chunyuan Li and Qingyang Wu"
     authors_text = re.sub(r'\s+', ' ', authors_text.strip())
     
+    # Fix "Nameet al" concatenation from PDF extraction (newline before "et al" collapsed)
+    authors_text = re.sub(r'(\w)(et\s*al\.?)\s*$', r'\1 \2', authors_text)
+    
     # Special case: Handle single author followed by "et al" (e.g., "Mubashara Akhtar et al.")
     # This should be split into ["Mubashara Akhtar", "et al"]
     single_et_al_match = re.match(r'^(.+?)\s+et\s+al\.?$', authors_text, re.IGNORECASE)
