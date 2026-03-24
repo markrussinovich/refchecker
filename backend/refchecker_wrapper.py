@@ -119,7 +119,8 @@ class ProgressRefChecker:
                  check_id: Optional[int] = None,
                  title_update_callback: Optional[Callable] = None,
                  bibliography_source_callback: Optional[Callable] = None,
-                 semantic_scholar_api_key: Optional[str] = None):
+                 semantic_scholar_api_key: Optional[str] = None,
+                 db_path: Optional[str] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -195,8 +196,11 @@ class ProgressRefChecker:
             logger.info("Semantic Scholar API key configured")
         self.checker = EnhancedHybridReferenceChecker(
             semantic_scholar_api_key=ss_api_key,
+            db_path=db_path,
             debug_mode=False
         )
+        if db_path:
+            logger.info(f"Using local Semantic Scholar database at {db_path}")
 
     def _format_verification_result(
         self,

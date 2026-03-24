@@ -49,6 +49,36 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [ssServerHasKey, setSsServerHasKey] = useState(false)
   const ssHasKey = hasKey('semantic_scholar') || ssServerHasKey
 
+  // Local DB path state
+  const [dbPathLocal, setDbPathLocal] = useState(settings.db_path?.value || '')
+  const [dbPathError, setDbPathError] = useState(null)
+  const [dbPathSuccess, setDbPathSuccess] = useState(null)
+  const [dbPathSaving, setDbPathSaving] = useState(false)
+
+  const handleDbPathSave = async () => {
+    setDbPathError(null)
+    setDbPathSuccess(null)
+    setDbPathSaving(true)
+    try {
+      const response = await fetch('/api/settings/db_path', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: dbPathLocal }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setDbPathError(result.detail || 'Failed to save')
+      } else {
+        setDbPathSuccess(result.message || 'Saved')
+        updateSetting('db_path', dbPathLocal)
+      }
+    } catch (err) {
+      setDbPathError(err.message || 'Failed to save')
+    } finally {
+      setDbPathSaving(false)
+    }
+  }
+
   // Load SS key status from server on mount
   useEffect(() => {
     api.getSemanticScholarKeyStatus().then(res => {
@@ -230,6 +260,53 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           }}
         />
       </div>
+
+      {/* Local Database Path (single-user only, rendered when setting exists in API response) */}
+      {settings.db_path && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="mb-2">
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              {settings.db_path.label || 'Local Database'}
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {settings.db_path.description}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={dbPathLocal}
+              placeholder="/path/to/semantic_scholar.db"
+              onChange={(e) => { setDbPathLocal(e.target.value); setDbPathError(null); setDbPathSuccess(null) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleDbPathSave() }}
+              className="flex-1 px-3 py-2 rounded-lg border text-sm"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: dbPathError ? 'var(--color-error, #ef4444)' : 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+            <button
+              onClick={handleDbPathSave}
+              disabled={dbPathSaving}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--color-accent, #3b82f6)',
+                color: 'white',
+                opacity: dbPathSaving ? 0.6 : 1,
+              }}
+            >
+              {dbPathSaving ? '...' : 'Save'}
+            </button>
+          </div>
+          {dbPathError && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{dbPathError}</div>
+          )}
+          {dbPathSuccess && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-success, #22c55e)' }}>{dbPathSuccess}</div>
+          )}
+        </div>
+      )}
     </div>
   )
 
@@ -484,8 +561,8 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           backgroundColor: 'var(--color-bg-secondary)',
           width: '680px',
           maxWidth: '90vw',
-          height: '400px',
-          maxHeight: '80vh',
+          height: '520px',
+          maxHeight: '85vh',
         }}
       >
         {/* Left Navigation */}

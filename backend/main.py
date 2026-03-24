@@ -618,10 +618,13 @@ async def start_check(
         )
         logger.info(f"Created pending check with ID {check_id}")
 
+        # Resolve local DB path from settings or environment
+        effective_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path")
+
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key, db_path=effective_db_path)
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id, "user_id": user_id}
@@ -657,6 +660,7 @@ async def run_check(
     cancel_event: asyncio.Event,
     user_id: int = 0,
     semantic_scholar_api_key: Optional[str] = None,
+    db_path: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -673,6 +677,10 @@ async def run_check(
         semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
     try:
+        # Resolve db_path from env/settings if not explicitly provided
+        if not db_path:
+            db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
+
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
         for _ in range(30):  # Wait up to 3 seconds
@@ -751,7 +759,8 @@ async def run_check(
             check_id=check_id,
             title_update_callback=title_update_callback,
             bibliography_source_callback=bibliography_source_callback,
-            semantic_scholar_api_key=semantic_scholar_api_key
+            semantic_scholar_api_key=semantic_scholar_api_key,
+            db_path=db_path,
         )
 
         # Run the check
@@ -1373,6 +1382,9 @@ async def start_batch_check(
         effective_ss_key = request.semantic_scholar_api_key
         if not effective_ss_key:
             effective_ss_key = await db.get_setting("semantic_scholar_api_key")
+
+        # Resolve local DB path from settings or environment
+        effective_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path")
         
         for url in valid_urls:
             session_id = str(uuid.uuid4())
@@ -1397,6 +1409,7 @@ async def start_batch_check(
                     llm_provider, llm_model, effective_api_key, endpoint,
                     request.use_llm, cancel_event, user_id,
                     semantic_scholar_api_key=effective_ss_key,
+                    db_path=effective_db_path,
                 )
             )
             active_checks[session_id] = {
@@ -2162,8 +2175,18 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "min": 1,
                 "max": 20,
                 "section": "Performance"
-            }
+            },
         }
+
+        # db_path is only available in single-user mode (server-local resource)
+        if not is_multiuser_mode():
+            settings_config["db_path"] = {
+                "default": "",
+                "type": "text",
+                "label": "Local Semantic Scholar Database",
+                "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
+                "section": "Database"
+            }
         
         # Get current values from database
         settings = {}
@@ -2198,7 +2221,7 @@ async def update_setting(
     try:
         _require_admin(current_user)
         # Validate the setting key
-        valid_keys = {"max_concurrent_checks"}
+        valid_keys = {"max_concurrent_checks", "db_path"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
         
@@ -2221,6 +2244,44 @@ async def update_setting(
                 return {"key": setting_key, "value": str(value), "message": "Setting updated"}
             except ValueError:
                 raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
+        
+        if setting_key == "db_path":
+            path = update.value.strip()
+            if not path:
+                await db.set_setting(setting_key, "")
+                logger.info("Cleared db_path setting")
+                return {"key": setting_key, "value": "", "message": "Local database disabled"}
+            if not os.path.isfile(path):
+                raise HTTPException(status_code=400, detail=f"File not found: {path}")
+            # Validate SQLite schema
+            import sqlite3
+            try:
+                conn = sqlite3.connect(path)
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+                conn.close()
+                required = {'paperId', 'title', 'normalized_paper_title', 'authors', 'year', 'externalIds_DOI', 'externalIds_ArXiv'}
+                missing = required - cols
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"Database missing required columns: {', '.join(sorted(missing))}")
+                # Check for indexes
+                idx_conn = sqlite3.connect(path)
+                indexes = {row[0] for row in idx_conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+                idx_conn.close()
+                has_title_idx = any('title' in i.lower() for i in indexes)
+                warnings = []
+                if not has_title_idx:
+                    warnings.append("No title index found — queries may be slow")
+                row_count = sqlite3.connect(path).execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid database: {e}")
+            await db.set_setting(setting_key, path)
+            logger.info(f"Updated db_path to: {path} ({row_count:,} papers)")
+            msg = f"Database validated: {row_count:,} papers, {len(cols)} columns"
+            if warnings:
+                msg += f" (⚠ {'; '.join(warnings)})"
+            return {"key": setting_key, "value": path, "message": msg, "papers": row_count}
         
         # For other settings, just store the value
         await db.set_setting(setting_key, update.value)
