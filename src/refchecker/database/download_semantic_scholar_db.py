@@ -549,10 +549,15 @@ class SemanticScholarDownloader:
     def get_latest_release_id(self):
         """
         Get the latest release ID from the Semantic Scholar API
+        Caches the result to avoid redundant API calls.
         
         Returns:
             str: Latest release ID
         """
+        # Return cached value if available
+        if hasattr(self, '_cached_latest_release_id') and self._cached_latest_release_id:
+            return self._cached_latest_release_id
+        
         try:
             # Use the datasets API to get the latest release
             url = "https://api.semanticscholar.org/datasets/v1/release/latest"
@@ -569,6 +574,7 @@ class SemanticScholarDownloader:
             if not release_id:
                 raise ValueError("No release_id found in API response")
             
+            self._cached_latest_release_id = release_id
             return release_id
             
         except Exception as e:
@@ -1621,26 +1627,32 @@ def main():
                 downloader.process_local_files(incremental=False)
             else:
                 logger.info("Database exists - checking for new or updated data (incremental update)")
-                # Check if there are any .gz files to process
-                gz_files = []
-                for root, dirs, files in os.walk(args.output_dir):
-                    for file in files:
-                        if file.endswith('.gz'):
-                            gz_files.append(os.path.join(root, file))
+                # First try incremental updates (diffs API), then fall back to .gz files or full download
+                downloader.process_local_files(
+                    force_reprocess=args.force_reprocess,
+                    incremental=True
+                )
                 
-                if gz_files:
-                    logger.info(f"Found {len(gz_files)} .gz files to process")
-                    downloader.process_local_files(
-                        force_reprocess=args.force_reprocess,
-                        incremental=True
-                    )
-                else:
-                    logger.info("No .gz files found - downloading latest dataset")
-                    success = downloader.download_dataset_files()
-                    if not success:
-                        logger.error("Failed to download dataset files")
-                        return 1
-                    downloader.process_local_files(incremental=True)
+                # If process_local_files didn't find diffs or .gz files, download dataset
+                # Check if we actually updated anything by comparing timestamps
+                current_release = downloader.get_last_release_id()
+                latest_release = downloader.get_latest_release_id()
+                if current_release != latest_release:
+                    logger.info(f"Still behind (current: {current_release}, latest: {latest_release})")
+                    # Check if there are any .gz files to process now
+                    gz_files = []
+                    for root, dirs, files in os.walk(args.output_dir):
+                        for file in files:
+                            if file.endswith('.gz'):
+                                gz_files.append(os.path.join(root, file))
+                    
+                    if not gz_files:
+                        logger.info("No .gz files found - downloading latest dataset")
+                        success = downloader.download_dataset_files()
+                        if not success:
+                            logger.error("Failed to download dataset files")
+                            return 1
+                        downloader.process_local_files(incremental=True)
         
         logger.info(f"Completed processing in {args.output_dir}")
         

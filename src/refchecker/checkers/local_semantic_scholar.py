@@ -36,8 +36,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from refchecker.utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
-from refchecker.utils.error_utils import create_author_error, create_doi_error
-from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity
+from refchecker.utils.error_utils import create_author_error, create_doi_error, create_venue_warning, format_title_mismatch
+from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, compare_titles_with_latex_cleaning, strip_latex_commands, are_venues_substantially_different
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
@@ -368,6 +368,18 @@ class LocalNonArxivReferenceChecker:
         
         logger.debug(f"Local DB: Found matching paper - Title: '{paper_data.get('title', '')}', Year: {paper_data.get('year', '')}")
         
+        # Check title mismatch using similarity function
+        found_title = paper_data.get('title', '')
+        if title and found_title:
+            title_similarity = compare_titles_with_latex_cleaning(title, found_title)
+            if title_similarity < SIMILARITY_THRESHOLD:
+                clean_cited_title = strip_latex_commands(title)
+                errors.append({
+                    'error_type': 'title',
+                    'error_details': format_title_mismatch(clean_cited_title, found_title),
+                    'ref_title_correct': found_title
+                })
+        
         # Verify authors
         if authors:
             authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
@@ -409,6 +421,42 @@ class LocalNonArxivReferenceChecker:
                 doi_error = create_doi_error(doi, paper_doi)
                 if doi_error:  # Only add if there's actually a mismatch after cleaning
                     errors.append(doi_error)
+        
+        # Verify venue
+        cited_venue = reference.get('journal', '') or reference.get('venue', '')
+        paper_venue = paper_data.get('venue', '')
+        
+        if cited_venue and paper_venue:
+            if are_venues_substantially_different(cited_venue, paper_venue):
+                errors.append(create_venue_warning(cited_venue, paper_venue))
+        elif not cited_venue and paper_venue:
+            # Reference has no venue but paper has one
+            # Skip generic/empty venues like 'arxiv'
+            paper_venue_lower = paper_venue.lower().strip()
+            if (paper_venue_lower and 
+                paper_venue_lower not in ['arxiv', 'arxiv.org', 'preprint', ''] and
+                not paper_venue_lower.startswith('arxiv')):
+                errors.append({
+                    'error_type': 'venue',
+                    'error_details': f"Venue missing: should include '{paper_venue}'",
+                    'ref_venue_correct': paper_venue
+                })
+        
+        # Check for missing arXiv URL when paper has arXiv ID
+        external_ids = paper_data.get('externalIds', {})
+        paper_arxiv_id = external_ids.get('ArXiv') if external_ids else None
+        if paper_arxiv_id:
+            arxiv_url = f"https://arxiv.org/abs/{paper_arxiv_id}"
+            reference_url = reference.get('url', '')
+            has_arxiv_url = arxiv_url in reference_url if reference_url else False
+            arxiv_doi_url = f"https://doi.org/10.48550/arxiv.{paper_arxiv_id}"
+            has_arxiv_doi = arxiv_doi_url.lower() in reference_url.lower() if reference_url else False
+            if not (has_arxiv_url or has_arxiv_doi):
+                errors.append({
+                    'info_type': 'url',
+                    'info_details': f"Reference could include arXiv URL: {arxiv_url}",
+                    'ref_url_correct': arxiv_url
+                })
         
         if errors:
             logger.debug(f"Local DB: Found {len(errors)} errors in reference verification")
