@@ -55,6 +55,13 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [dbPathSuccess, setDbPathSuccess] = useState(null)
   const [dbPathSaving, setDbPathSaving] = useState(false)
 
+  // Sync local db path when settings are fetched from the server
+  useEffect(() => {
+    if (settings.db_path?.value !== undefined) {
+      setDbPathLocal(settings.db_path.value)
+    }
+  }, [settings.db_path?.value])
+
   const handleDbPathSave = async () => {
     setDbPathError(null)
     setDbPathSuccess(null)
