@@ -1233,7 +1233,8 @@ def _batch_prefetch_ss_metadata(
                     if paper_data.get('url'):
                         paper_url = paper_data['url']
                     elif paper_data.get('paperId'):
-                        paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
+                        from refchecker.utils.url_utils import construct_semantic_scholar_url
+                        paper_url = construct_semantic_scholar_url(paper_data['paperId'])
 
                     result_tuple = (errors if errors else None, paper_url, paper_data)
                     verification_cache.put(ref, result_tuple)

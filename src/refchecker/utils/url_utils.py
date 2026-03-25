@@ -240,15 +240,20 @@ def construct_semantic_scholar_url(paper_id: str) -> str:
     Construct a Semantic Scholar URL from a paper ID.
     
     Args:
-        paper_id: Semantic Scholar paper ID (SHA hash, NOT CorpusId)
-                  The paperId is the 40-character hex hash that works in web URLs.
-                  CorpusId (numeric) does NOT work in web URLs.
+        paper_id: Semantic Scholar paper ID — either a 40-character hex hash
+                  (paperId) or a numeric string (CorpusId).
         
     Returns:
         Full Semantic Scholar URL
     """
     if not paper_id:
         return ""
+    
+    # Numeric IDs are CorpusIds — use the API redirect URL which resolves
+    # to the correct paper page.  The web /paper/ path only works with
+    # 40-char SHA-hash paperIds.
+    if paper_id.isdigit():
+        return f"https://api.semanticscholar.org/CorpusID:{paper_id}"
     
     return f"https://www.semanticscholar.org/paper/{paper_id}"
 

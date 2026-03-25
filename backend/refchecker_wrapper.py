@@ -29,7 +29,7 @@ from backend.concurrency import create_limiter, get_default_max_concurrent
 from backend.auth import is_multiuser_mode
 
 from refchecker.utils.text_utils import extract_latex_references
-from refchecker.utils.url_utils import extract_arxiv_id_from_url
+from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -304,7 +304,7 @@ class ProgressRefChecker:
             # Add Semantic Scholar URL if available
             s2_paper_id = external_ids.get('S2PaperId')
             if s2_paper_id:
-                s2_url = f"https://www.semanticscholar.org/paper/{s2_paper_id}"
+                s2_url = construct_semantic_scholar_url(s2_paper_id)
                 if not any(u.get('url') == s2_url for u in authoritative_urls):
                     authoritative_urls.append({"type": "semantic_scholar", "url": s2_url})
             

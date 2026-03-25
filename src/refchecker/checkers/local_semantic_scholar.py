@@ -38,7 +38,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from refchecker.utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
 from refchecker.utils.error_utils import create_author_error, create_doi_error, create_venue_warning, format_title_mismatch
 from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, compare_titles_with_latex_cleaning, strip_latex_commands, are_venues_substantially_different
-from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url
+from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url, construct_semantic_scholar_url
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
 
@@ -467,9 +467,9 @@ class LocalNonArxivReferenceChecker:
         # since this is a Semantic Scholar database checker
         external_ids = paper_data.get('externalIds', {})
         
-        # First try to get the Semantic Scholar URL using paperId (SHA hash)
+        # First try to get the Semantic Scholar URL using paperId
         if paper_data.get('paperId'):
-            paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
+            paper_url = construct_semantic_scholar_url(paper_data['paperId'])
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         else:
             # Fallback to best available URL if Semantic Scholar URL not available

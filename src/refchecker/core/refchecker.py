@@ -5956,7 +5956,7 @@ class ArxivReferenceChecker:
         
         # Second priority: Semantic Scholar URL from paperId (if no direct URL available)
         if verified_data and verified_data.get('paperId'):
-            return f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
+            return construct_semantic_scholar_url(verified_data['paperId'])
         
         # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
         if verified_data and verified_data.get('externalIds', {}).get('DOI'):
@@ -6012,7 +6012,7 @@ class ArxivReferenceChecker:
         """Get fallback URL from external IDs (Semantic Scholar or DOI)"""
         # Prefer paperId for Semantic Scholar URLs
         if verified_data and verified_data.get('paperId'):
-            return f"https://www.semanticscholar.org/paper/{verified_data['paperId']}"
+            return construct_semantic_scholar_url(verified_data['paperId'])
         elif external_ids.get('DOI'):
             from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(external_ids['DOI'])

@@ -30,6 +30,7 @@ import re
 import html
 from typing import Dict, List, Tuple, Optional, Any, Union
 from refchecker.utils.doi_utils import extract_doi_from_url, is_valid_doi_format
+from refchecker.utils.url_utils import construct_semantic_scholar_url
 from refchecker.utils.text_utils import normalize_text, clean_title_basic, find_best_match, is_name_match, are_venues_substantially_different, calculate_title_similarity, compare_authors, clean_title_for_search, strip_latex_commands, compare_titles_with_latex_cleaning
 from refchecker.utils.error_utils import format_title_mismatch
 from refchecker.utils.arxiv_rate_limiter import ArXivRateLimiter, arxiv_cached_get
@@ -1025,7 +1026,7 @@ class NonArxivReferenceChecker:
         # Return the Semantic Scholar URL that was actually used for verification
         # First priority: Semantic Scholar URL using paperId (SHA hash, works in web URLs)
         if paper_data.get('paperId'):
-            paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
+            paper_url = construct_semantic_scholar_url(paper_data['paperId'])
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         
         # Second priority: DOI URL (if this was verified through DOI)
