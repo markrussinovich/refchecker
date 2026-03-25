@@ -38,7 +38,6 @@ def _create_test_db(papers):
             year INTEGER,
             authors TEXT,
             venue TEXT,
-            url TEXT,
             externalIds_DOI TEXT,
             externalIds_ArXiv TEXT
         )
@@ -60,9 +59,13 @@ def _create_test_db(papers):
         norm = re.sub(r'[^a-z0-9]', '', title.lower())
         authors = p.get("authors", [])
         if isinstance(authors, list):
-            authors = json.dumps(authors)
+            # Compact format: store as ["name1", "name2"]
+            if authors and isinstance(authors[0], dict):
+                authors = json.dumps([a.get("name", "") for a in authors])
+            else:
+                authors = json.dumps(authors)
         conn.execute(
-            "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO papers VALUES (?,?,?,?,?,?,?,?)",
             (
                 p.get("paperId", "1"),
                 title,
@@ -70,7 +73,6 @@ def _create_test_db(papers):
                 p.get("year"),
                 authors,
                 p.get("venue", ""),
-                p.get("url", ""),
                 p.get("externalIds_DOI"),
                 p.get("externalIds_ArXiv"),
             ),

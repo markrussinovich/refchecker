@@ -29,6 +29,10 @@ def process_semantic_scholar_result(paper_data: Dict[str, Any]) -> Dict[str, Any
         if paper_data.get('authors'):
             if isinstance(paper_data['authors'], str):
                 paper_data['authors'] = json.loads(paper_data['authors'])
+            # Normalize compact format ["name1", "name2"] to [{"name": "name1"}, ...]
+            # so downstream code can always use author.get('name')
+            if paper_data['authors'] and isinstance(paper_data['authors'][0], str):
+                paper_data['authors'] = [{'name': name} for name in paper_data['authors']]
         else:
             paper_data['authors'] = []
         

@@ -606,6 +606,40 @@ class ArxivReferenceChecker:
         )
         return extractor
     
+    def _dict_to_mock_paper(self, paper_data, arxiv_id):
+        """Convert a dict (from local DB) into a mock paper object with .title etc."""
+        from datetime import datetime
+        import json as _json
+
+        authors_raw = paper_data.get('authors', [])
+        if isinstance(authors_raw, str):
+            authors_raw = _json.loads(authors_raw)
+
+        class _Author:
+            def __init__(self, name):
+                self.name = name
+            def __str__(self):
+                return self.name
+
+        class _Published:
+            def __init__(self, year):
+                self.year = year
+
+        class _MockPaper:
+            pass
+
+        p = _MockPaper()
+        p.title = paper_data.get('title', 'Unknown Title')
+        p.arxiv_id = arxiv_id
+        p.pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+        p.authors = [
+            _Author(a.get('name', 'Unknown Author') if isinstance(a, dict) else str(a))
+            for a in authors_raw
+        ]
+        p.published = _Published(paper_data.get('year', datetime.now().year))
+        p.get_short_id = lambda: arxiv_id
+        return p
+
     def batch_prefetch_arxiv_references(self, bibliography):
         """Pre-fetch all ArXiv references in batches to improve performance"""
         if not bibliography:
@@ -632,7 +666,9 @@ class ArxivReferenceChecker:
                             try:
                                 paper_data = local_db.get_paper_by_arxiv_id(arxiv_id)
                                 if paper_data:
-                                    self._metadata_cache[arxiv_id] = paper_data
+                                    # Store as MockArxivPaper so callers can use .title etc.
+                                    mock = self._dict_to_mock_paper(paper_data, arxiv_id)
+                                    self._metadata_cache[arxiv_id] = mock
                                     db_hits += 1
                                     continue
                             except Exception:
@@ -1154,18 +1190,14 @@ class ArxivReferenceChecker:
             logger.debug(f"PDF URL was None, constructed manually: {pdf_url}")
         
         logger.info(f"Downloading PDF from {pdf_url}")
-        
-        try:
-            response = requests.get(pdf_url, timeout=30)
-            response.raise_for_status()
-            return io.BytesIO(response.content)
-        except requests.exceptions.RequestException as e:
-            self.last_download_error = str(e)
-            logger.error(f"Failed to download PDF for {paper.get_short_id()}: {e}")
-            return None
+        return self.download_pdf_from_url(pdf_url)
 
     def download_pdf_from_url(self, url):
-        """Download a PDF from a direct URL and return the content as bytes."""
+        """Download a PDF from a URL with proper browser-like headers.
+
+        Delegates to ``download_pdf_bytes`` which handles OpenReview
+        Referer headers, redirect following, and candidate-URL expansion.
+        """
         from refchecker.utils.url_utils import download_pdf_bytes
         self.last_download_error = None
         try:
@@ -5673,7 +5705,10 @@ class ArxivReferenceChecker:
                         def __repr__(self):
                             return f"MockAuthor('{self.name}')"
                     
-                    self.authors = [MockAuthor(author.get('name', 'Unknown Author')) for author in authors_data]
+                    self.authors = [
+                        MockAuthor(a.get('name', 'Unknown Author') if isinstance(a, dict) else str(a))
+                        for a in authors_data
+                    ]
                     
                     # Set publication year - try from year field, fallback to current year
                     year = data.get('year', datetime.now().year)

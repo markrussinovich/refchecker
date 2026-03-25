@@ -45,9 +45,15 @@ services:
       - key: MAX_CHECKS_PER_USER
         value: "3"
 
+      # --- Local Semantic Scholar database (optional, improves speed) ---
+      - key: REFCHECKER_DB_PATH
+        value: /data/semantic_scholar_slim.db
+      - key: SEMANTIC_SCHOLAR_API_KEY
+        sync: false                  # Set in Render dashboard
+
     disk:
       name: refchecker-data
       mountPath: /data
-      sizeGB: 1                      # Adjust as needed ($0.25/GB/month on Render)
+      sizeGB: 100                    # Fits ~90 GB slim DB ($25/month on Render)
 
     healthCheckPath: /api/health

@@ -114,10 +114,9 @@ class SemanticScholarDownloader:
             normalized_paper_title TEXT,
             venue TEXT,
             year INTEGER,
-            url TEXT,
             externalIds_DOI TEXT,
             externalIds_ArXiv TEXT,
-            authors TEXT  -- JSON array
+            authors TEXT  -- JSON array of author name strings
         )
         ''')
         
@@ -783,22 +782,13 @@ class SemanticScholarDownloader:
                 normalized_title = self.normalize_paper_title(title)
                 abstract = paper_data.get("abstract", "")
                 venue = paper_data.get("venue", "")
-                publication_venue_id = paper_data.get("publicationVenueId")
+                venue = paper_data.get("venue", "")
                 year = paper_data.get("year")
-                reference_count = paper_data.get("referenceCount")
-                citation_count = paper_data.get("citationCount")
-                influential_citation_count = paper_data.get("influentialCitationCount")
-                is_open_access = paper_data.get("isOpenAccess")
-                publication_date = paper_data.get("publicationDate")
-                url = paper_data.get("url", "")
                 
                 # Extract external IDs
                 external_ids = paper_data.get("externalIds", {}) or {}
-                external_mag = external_ids.get("MAG")
-                external_corpus_id = external_ids.get("CorpusId")
-                external_acl = external_ids.get("ACL")
-                external_pubmed = external_ids.get("PubMed")
                 external_doi = external_ids.get("DOI")
+                external_arxiv = external_ids.get("ArXiv")
                 external_pmc = external_ids.get("PubMedCentral")
                 external_dblp = external_ids.get("DBLP")
                 external_arxiv = external_ids.get("ArXiv")
@@ -809,8 +799,8 @@ class SemanticScholarDownloader:
                 journal_pages = journal.get("pages")
                 journal_volume = journal.get("volume")
                 
-                # Store complex fields as JSON
-                authors_json = json.dumps(paper_data.get("authors", []))
+                # Store authors as compact JSON list of name strings
+                authors_json = json.dumps(self._compact_authors(paper_data.get("authors", [])))
                 s2_fields_json = json.dumps(paper_data.get("s2FieldsOfStudy", []))
                 pub_types_json = json.dumps(paper_data.get("publicationTypes", []))
                 
@@ -818,14 +808,14 @@ class SemanticScholarDownloader:
                 full_json = json.dumps(paper_data)
                 
                 batch.append((
-                    paper_id, title, normalized_title, venue, year, url,
+                    paper_id, title, normalized_title, venue, year,
                     external_doi, external_arxiv, authors_json
                 ))
             
             # Insert all papers in batch
             if batch:
                 cursor.executemany("""
-                    INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, batch)
             
             # Commit transaction
@@ -1219,6 +1209,24 @@ class SemanticScholarDownloader:
         except Exception as e:
             logger.warning(f"Could not track file processing metadata for {filename}: {e}")
 
+    def _compact_authors(self, authors):
+        """Compact authors to a list of name strings.
+        
+        Converts [{"authorId": "X", "name": "Y"}, ...] to ["Y", ...]
+        """
+        if not authors:
+            return []
+        if isinstance(authors, str):
+            try:
+                authors = json.loads(authors)
+            except (json.JSONDecodeError, TypeError):
+                return []
+        if not authors:
+            return []
+        if isinstance(authors[0], dict):
+            return [a.get("name", "") for a in authors if a.get("name")]
+        return authors
+
     def _insert_paper(self, cursor, paper_data):
         """
         Insert a single paper into the database
@@ -1246,34 +1254,15 @@ class SemanticScholarDownloader:
         normalized_title = self.normalize_paper_title(title)
         abstract = paper_data.get("abstract", "")
         venue = paper_data.get("venue", "")
-        publication_venue_id = paper_data.get("publicationVenueId") or paper_data.get("publicationvenueid")
         year = paper_data.get("year")
-        reference_count = paper_data.get("referenceCount") or paper_data.get("referencecount")
-        citation_count = paper_data.get("citationCount") or paper_data.get("citationcount")
-        influential_citation_count = paper_data.get("influentialCitationCount") or paper_data.get("influentialcitationcount")
-        is_open_access = paper_data.get("isOpenAccess") or paper_data.get("isopenaccess")
-        publication_date = paper_data.get("publicationDate") or paper_data.get("publicationdate")
-        url = paper_data.get("url", "")
         
         # Extract external IDs (handle both camelCase and lowercase)
         external_ids = paper_data.get("externalIds") or paper_data.get("externalids") or {}
-        external_mag = external_ids.get("MAG")
-        external_corpus_id = external_ids.get("CorpusId")
-        external_acl = external_ids.get("ACL")
-        external_pubmed = external_ids.get("PubMed")
         external_doi = external_ids.get("DOI")
-        external_pmc = external_ids.get("PubMedCentral")
-        external_dblp = external_ids.get("DBLP")
         external_arxiv = external_ids.get("ArXiv")
         
-        # Extract journal info
-        journal = paper_data.get("journal", {}) or {}
-        journal_name = journal.get("name", "")
-        journal_pages = journal.get("pages")
-        journal_volume = journal.get("volume")
-        
-        # Store complex fields as JSON (handle both camelCase and lowercase)
-        authors_json = json.dumps(paper_data.get("authors", []))
+        # Store authors as compact JSON list of name strings
+        authors_json = json.dumps(self._compact_authors(paper_data.get("authors", [])))
         s2_fields_json = json.dumps(paper_data.get("s2FieldsOfStudy") or paper_data.get("s2fieldsofstudy") or [])
         pub_types_json = json.dumps(paper_data.get("publicationTypes") or paper_data.get("publicationtypes") or [])
         
@@ -1282,9 +1271,9 @@ class SemanticScholarDownloader:
         
         # Insert or replace the paper
         cursor.execute("""
-            INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            paper_id, title, normalized_title, venue, year, url,
+            paper_id, title, normalized_title, venue, year,
             external_doi, external_arxiv, authors_json
         ))
 
