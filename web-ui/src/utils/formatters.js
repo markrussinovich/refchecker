@@ -378,6 +378,9 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
       if (ref.hallucination_assessment?.verdict === 'LIKELY') {
         lines.push('')
         lines.push(`**Likely hallucinated:** ${ref.hallucination_assessment.explanation || 'Strong fabrication signals detected.'}`)
+        if (ref.hallucination_assessment.link) {
+          lines.push(`**Link:** ${ref.hallucination_assessment.link}`)
+        }
       }
       
       // Warnings
@@ -517,6 +520,9 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
       }
       if (ref.hallucination_assessment?.verdict === 'LIKELY') {
         lines.push(`    HALLUCINATION: ${ref.hallucination_assessment.explanation || 'Strong fabrication signals detected.'}`)
+        if (ref.hallucination_assessment.link) {
+          lines.push(`    LINK: ${ref.hallucination_assessment.link}`)
+        }
       }
     })
   }

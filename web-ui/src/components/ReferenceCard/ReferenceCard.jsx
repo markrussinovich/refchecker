@@ -526,6 +526,13 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                     {reference.hallucination_assessment.explanation}
                   </div>
                 )}
+                {reference.hallucination_assessment.link && (
+                  <div className="mt-0.5">
+                    <a href={reference.hallucination_assessment.link} target="_blank" rel="noopener noreferrer" className="underline" style={{ color: 'var(--color-hallucination)' }}>
+                      {reference.hallucination_assessment.link}
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           )}

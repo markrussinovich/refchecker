@@ -31,13 +31,19 @@ rendering your verdict. Search for the exact title in quotes on the web \
 to check whether the paper actually exists. This is critical — do NOT \
 rely solely on the metadata provided; verify it against the open web.
 
-Reply with EXACTLY one of these verdicts on the FIRST line:
+Reply in EXACTLY this structured format (three lines):
+
+VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
+EXPLANATION: <concise 2-3 sentence explanation without URLs>
+LINK: <URL where the exact paper was found, or NONE if not found>
+
+Verdicts:
   LIKELY    — this reference is probably fabricated
   UNLIKELY  — this reference is probably real despite the errors
   UNCERTAIN — cannot determine with confidence
 
-Then on the following lines, give a concise explanation (2-3 sentences max). \
-If you found the paper via web search, include the URL(s) where it appears."""
+The EXPLANATION must be a clean, readable sentence with no URLs embedded. \
+Put the URL only in the LINK field."""
 
 _ASSESSMENT_PROMPT = """\
 Today's date is {today}.
@@ -86,8 +92,11 @@ verified in a database, even with minor metadata errors
 Be strict: if the reference was not found in any academic database and web \
 search only finds similar-but-different papers, the verdict should be LIKELY.
 
-Provide your concise explanation (2-3 sentences max), then end your \
-response with your verdict as the VERY LAST word: LIKELY, UNLIKELY, or UNCERTAIN."""
+Reply in EXACTLY this format:
+
+VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
+EXPLANATION: <concise 2-3 sentence explanation — do NOT include URLs here>
+LINK: <URL of the exact paper if found, or NONE>"""
 
 _WEB_SEARCH_DECISION_PROMPT = """\
 Given this reference that could not be verified by academic databases:
@@ -407,7 +416,7 @@ class LLMHallucinationVerifier:
 
         try:
             response, web_urls = self._call(_ASSESSMENT_SYSTEM_PROMPT, user_prompt)
-            verdict, explanation = self._parse_verdict(response)
+            verdict, explanation, paper_link = self._parse_verdict(response)
         except Exception as exc:
             logger.warning(f'LLM hallucination assessment failed: {exc}')
             return {
@@ -470,6 +479,7 @@ class LLMHallucinationVerifier:
         return {
             'verdict': verdict,
             'explanation': explanation,
+            'link': paper_link,
             'web_search': web_result,
         }
 
@@ -513,29 +523,61 @@ class LLMHallucinationVerifier:
 
     @staticmethod
     def _parse_verdict(response: str) -> tuple:
-        """Parse the LLM response into verdict and explanation.
+        """Parse the LLM response into (verdict, explanation, link).
 
-        The prompt asks the LLM to put the verdict as the very last word.
-        We extract it from there.
+        Expects structured format:
+            VERDICT: LIKELY|UNLIKELY|UNCERTAIN
+            EXPLANATION: ...
+            LINK: <url> | NONE
+
+        Falls back to unstructured parsing if the format isn't followed.
         """
         import re
         text = response.strip()
 
-        # Grab the last word and check if it's a verdict keyword
-        last_word = text.split()[-1].strip('.,;:!?').upper() if text else ''
-        if last_word == 'UNLIKELY':
-            verdict = 'UNLIKELY'
-        elif last_word == 'LIKELY':
-            verdict = 'LIKELY'
-        elif last_word == 'UNCERTAIN':
-            verdict = 'UNCERTAIN'
-        else:
-            # Fallback: find the last occurrence of a verdict keyword anywhere
-            matches = re.findall(r'\b(UNLIKELY|LIKELY|UNCERTAIN)\b', text, re.IGNORECASE)
-            verdict = matches[-1].upper() if matches else 'UNCERTAIN'
+        verdict = 'UNCERTAIN'
+        explanation = ''
+        link = None
 
-        # Everything except the trailing verdict word is the explanation
-        explanation = re.sub(r'\s*(UNLIKELY|LIKELY|UNCERTAIN)\s*$', '', text, flags=re.IGNORECASE).strip()
+        # Try structured format first
+        verdict_match = re.search(r'^VERDICT:\s*(LIKELY|UNLIKELY|UNCERTAIN)', text, re.IGNORECASE | re.MULTILINE)
+        explanation_match = re.search(r'^EXPLANATION:\s*(.+?)(?=^LINK:|\Z)', text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        link_match = re.search(r'^LINK:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+
+        if verdict_match:
+            verdict = verdict_match.group(1).strip().upper()
+
+        if explanation_match:
+            explanation = explanation_match.group(1).strip()
+        else:
+            # Fallback: use full text minus verdict/link lines as explanation
+            lines = [l for l in text.splitlines()
+                     if not re.match(r'^(VERDICT|LINK):', l, re.IGNORECASE)]
+            explanation = ' '.join(lines).strip()
+
+        if link_match:
+            raw_link = link_match.group(1).strip()
+            if raw_link.upper() != 'NONE':
+                # Extract URL from markdown link syntax [text](url) or plain URL
+                md_match = re.search(r'\[.*?\]\((https?://\S+?)\)', raw_link)
+                if md_match:
+                    link = md_match.group(1).rstrip('.)')
+                else:
+                    url_extract = re.search(r'(https?://\S+)', raw_link)
+                    link = url_extract.group(1).rstrip('.)') if url_extract else None
+
+        # Fallback verdict: if structured parse missed it, scan for keywords
+        if not verdict_match:
+            last_word = text.split()[-1].strip('.,;:!?').upper() if text else ''
+            if last_word in ('UNLIKELY', 'LIKELY', 'UNCERTAIN'):
+                verdict = last_word
+            else:
+                matches = re.findall(r'\b(UNLIKELY|LIKELY|UNCERTAIN)\b', text, re.IGNORECASE)
+                verdict = matches[-1].upper() if matches else 'UNCERTAIN'
+
         if not explanation:
-            explanation = text
-        return verdict, explanation
+            explanation = re.sub(r'\s*(UNLIKELY|LIKELY|UNCERTAIN)\s*$', '', text, flags=re.IGNORECASE).strip()
+            if not explanation:
+                explanation = text
+
+        return verdict, explanation, link
