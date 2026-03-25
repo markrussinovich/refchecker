@@ -53,27 +53,38 @@ URL:     {url}
 {validation_summary}
 
 ## Instructions
-First, search the web for the exact paper title (in quotes) to check whether \
-this paper actually exists. Then, based on both the web search results AND \
-the validation errors above, determine whether this reference is a \
-hallucinated (fabricated) citation.
+First, search the web for the exact paper title (in quotes) AND the exact \
+authors to check whether this SPECIFIC paper actually exists. Then, based on \
+both the web search results AND the validation errors above, determine \
+whether this reference is a hallucinated (fabricated) citation.
 
-Key signals of hallucination:
+IMPORTANT: You must find the EXACT paper — same title, same authors, same \
+general timeframe. Finding a *similar* paper with a different title or by \
+different authors is NOT evidence the cited reference is real. AI-generated \
+hallucinated references often resemble real papers but with wrong titles, \
+swapped authors, or fabricated details.
+
+Key signals of hallucination (any ONE of these is sufficient for LIKELY):
 - The reference could not be found in ANY academic database (Semantic Scholar, \
 OpenAlex, CrossRef, DBLP, arXiv)
 - A web search for the exact title returns no matching results
-- Authors are obviously fake ("John Doe", "Jane Smith") or don't work in the \
-cited field
+- Web search finds a SIMILAR but NOT IDENTICAL paper (different title, \
+different authors, or different year by 2+) — this is evidence of \
+hallucination, not evidence the reference is real
+- The title appears truncated, garbled, or unnaturally worded
+- Authors are malformed (e.g. "O. T. et al. Unke" instead of "O. T. Unke et al.")
+- Authors are obviously fake or don't work in the cited field
 - The ArXiv ID or DOI points to a completely different paper
-- The title sounds generic/buzzwordy with no specific contribution
 - Multiple major metadata fields conflict with what databases found
 
-Key signals that it is NOT hallucinated:
-- The paper was found via web search or verified in a database, even with \
-minor metadata errors
-- Year off-by-one, venue abbreviation differences, or author name formatting \
-differences are common in real citations and NOT signs of hallucination
-- Author count mismatches where the names mostly overlap are NOT hallucination
+Key signals that it is NOT hallucinated (verdict should be UNLIKELY):
+- The EXACT paper (same title and same authors) was found via web search or \
+verified in a database, even with minor metadata errors
+- Year off-by-one with otherwise matching title and authors is NOT hallucination
+- Venue abbreviation differences are NOT hallucination
+
+Be strict: if the reference was not found in any academic database and web \
+search only finds similar-but-different papers, the verdict should be LIKELY.
 
 Provide your concise explanation (2-3 sentences max), then end your \
 response with your verdict as the VERY LAST word: LIKELY, UNLIKELY, or UNCERTAIN."""
@@ -413,12 +424,9 @@ class LLMHallucinationVerifier:
                 'academic_urls': web_urls[:5],
                 'provider': self.provider,
             }
-            # If the LLM's own web search returned real URLs but the LLM
-            # still said LIKELY, the grounded evidence outweighs the guess.
-            if verdict == 'LIKELY':
-                verdict = 'UNLIKELY'
-                explanation += (' (Web search returned real URLs for this '
-                                'reference, overriding hallucination verdict.)')
+            # Note: we do NOT auto-override LIKELY just because web search
+            # returned URLs. The URLs may point to similar-but-different
+            # papers. The LLM's verdict already accounts for web results.
 
         # Fallback: use separate web searcher if the LLM didn't do its own
         # web search (e.g. non-OpenAI endpoint) and verdict is ambiguous
@@ -438,24 +446,21 @@ class LLMHallucinationVerifier:
                 except Exception as exc:
                     logger.debug(f'Web search during assessment failed: {exc}')
 
-        # Post-hoc consistency check: if the explanation says the paper
-        # exists/is real/was found, override a contradictory LIKELY verdict.
+        # Post-hoc consistency check: only override LIKELY if the
+        # explanation explicitly confirms the EXACT paper was found with
+        # matching title and authors.  Phrases like "a similar paper was
+        # published in" should NOT override the verdict.
         if verdict == 'LIKELY':
             explanation_lower = explanation.lower()
-            real_signals = (
-                'exists on arxiv', 'exists on arXiv',
-                'is a well-known', 'is well-known',
-                'is a real', 'paper exists', 'paper is real',
-                'reference is valid', 'reference is real',
-                'available on arxiv', 'available on arXiv',
-                'found on arxiv', 'found on arXiv',
-                'found the paper', 'found via web',
-                'found in google scholar', 'found in semantic scholar',
-                'published in', 'appeared in',
+            # Only override for strong, unambiguous confirmation of the exact paper
+            exact_match_signals = (
+                'the exact paper was found',
+                'this exact paper exists',
+                'confirmed the exact reference',
             )
-            if any(signal in explanation_lower for signal in real_signals):
+            if any(signal in explanation_lower for signal in exact_match_signals):
                 verdict = 'UNLIKELY'
-                explanation += ' (Verdict corrected: explanation indicates paper is real.)'
+                explanation += ' (Verdict corrected: explanation confirms exact paper was found.)'
 
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
