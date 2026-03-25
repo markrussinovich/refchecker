@@ -378,6 +378,14 @@ class ProgressRefChecker:
             )
             if hallucination_assessment and hallucination_assessment.get('verdict') == 'LIKELY':
                 status = 'hallucination'
+            elif hallucination_assessment and hallucination_assessment.get('verdict') != 'LIKELY' and is_unverified:
+                # For unverified refs not flagged as hallucinated, include the
+                # LLM explanation as the subreason on the unverified error.
+                ha_explanation = hallucination_assessment.get('explanation', '')
+                if ha_explanation:
+                    for err_obj in formatted_errors:
+                        if err_obj.get('error_type') == 'unverified':
+                            err_obj['error_details'] = f"Reference could not be verified — {ha_explanation}"
 
         result = {
             "index": index,

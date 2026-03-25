@@ -6189,6 +6189,21 @@ class ArxivReferenceChecker:
         verdict = assessment.get('verdict', 'UNCERTAIN')
         explanation = assessment.get('explanation', '')
 
+        # For unverified references not flagged as hallucinated, store the
+        # LLM explanation as the subreason so it's visible in reports.
+        if verdict != 'LIKELY' and explanation and target_record is not None:
+            error_type = (target_record.get('error_type') or '').lower()
+            if error_type == 'unverified':
+                target_record['error_details'] = f"Reference could not be verified — {explanation}"
+            elif error_type == 'multiple':
+                # Update the unverified line within a multi-error entry
+                details = target_record.get('error_details', '')
+                details = details.replace(
+                    'Reference could not be verified',
+                    f'Reference could not be verified — {explanation}',
+                )
+                target_record['error_details'] = details
+
         if not print_output:
             return
 
@@ -6198,6 +6213,14 @@ class ArxivReferenceChecker:
                 print(f"         {explanation}")
         elif verdict == 'LIKELY':
             print(f"      🚩 Likely hallucinated: {explanation}")
+        elif verdict in ('UNLIKELY', 'UNCERTAIN') and explanation:
+            # Show why an unverified reference was not flagged as hallucinated
+            has_unverified = any(
+                e.get('error_type') == 'unverified'
+                for e in errors
+            )
+            if has_unverified:
+                print(f"         Not flagged: {explanation}")
 
     def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None):
         """Run hallucination assessment and return the result without printing or storing.
