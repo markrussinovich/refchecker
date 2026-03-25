@@ -319,14 +319,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAPIKeysSection = () => (
     <div className="space-y-1">
-      {/* LLM API Keys (stored in memory for the current tab) */}
+      {/* LLM API Keys (stored in browser localStorage) */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
             LLM API Keys
           </div>
           {multiuser && (
             <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-              Keys stay in memory for this tab only and are cleared on refresh or logout.
+              Keys are stored in the browser cache and not on the server.
             </div>
           )}
           <div className="space-y-3">
@@ -452,6 +452,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
               Optional. Increases rate limits for reference verification.
             </div>
+            {multiuser && (
+              <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                Stored in the browser cache and not on the server.
+              </div>
+            )}
           </div>
           {!ssIsEditing && (
             <div className="flex items-center gap-2">
