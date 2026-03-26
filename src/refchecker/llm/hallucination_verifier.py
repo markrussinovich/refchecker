@@ -31,10 +31,10 @@ rendering your verdict. Search for the exact title in quotes on the web \
 to check whether the paper actually exists. This is critical — do NOT \
 rely solely on the metadata provided; verify it against the open web.
 
-Reply in EXACTLY this structured format (three lines):
+Reply in EXACTLY this structured format (three lines only, no preamble):
 
 VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
-EXPLANATION: <concise 2-3 sentence explanation without URLs>
+EXPLANATION: <1-2 sentence summary of your finding — NO URLs, NO search narration>
 LINK: <URL where the exact paper was found, or NONE if not found>
 
 Verdicts:
@@ -42,8 +42,14 @@ Verdicts:
   UNLIKELY  — this reference is probably real despite the errors
   UNCERTAIN — cannot determine with confidence
 
-The EXPLANATION must be a clean, readable sentence with no URLs embedded. \
-Put the URL only in the LINK field."""
+CRITICAL formatting rules:
+- The EXPLANATION must be a short factual conclusion (1-2 sentences max).
+- Do NOT narrate your search process (no "I searched for...", "Searching...", \
+"Based on my web search...", "I'll search...").
+- Do NOT embed URLs or markdown links in the EXPLANATION. Put the URL \
+only in the LINK field.
+- Start the EXPLANATION directly with your finding (e.g., "No paper with \
+this exact title exists." or "The exact paper was found in Nature 2024.")."""
 
 _ASSESSMENT_PROMPT = """\
 Today's date is {today}.
@@ -58,39 +64,48 @@ URL:     {url}
 ## Validation results from automated checkers
 {validation_summary}
 
+IMPORTANT CONTEXT: The automated checkers above have already searched \
+Semantic Scholar, OpenAlex, CrossRef, DBLP, and arXiv for this reference. \
+If they report it as unverified, the paper was NOT found in any of these \
+databases. Do not contradict this unless your web search finds a page that \
+shows the paper with the EXACT title listed above.
+
 ## Instructions
-First, search the web for the exact paper title (in quotes) AND the exact \
-authors to check whether this SPECIFIC paper actually exists. Then, based on \
-both the web search results AND the validation errors above, determine \
-whether this reference is a hallucinated (fabricated) citation.
+Search the web for the exact paper title (in quotes) to check whether a \
+paper with THIS SPECIFIC TITLE actually exists.
 
-IMPORTANT: You must find the EXACT paper — same title, same authors, same \
-general timeframe. Finding a *similar* paper with a different title or by \
-different authors is NOT evidence the cited reference is real. AI-generated \
-hallucinated references often resemble real papers but with wrong titles, \
-swapped authors, or fabricated details.
+CRITICAL: Do NOT hallucinate or confabulate results. If your web search \
+does not return a page containing the EXACT title \
+\"{title}\", \
+then the paper does not exist and the verdict must be LIKELY. Do not claim \
+you found the paper if you actually found a DIFFERENT paper with a similar \
+but not identical title.
 
-Key signals of hallucination (any ONE of these is sufficient for LIKELY):
-- The reference could not be found in ANY academic database (Semantic Scholar, \
-OpenAlex, CrossRef, DBLP, arXiv)
-- A web search for the exact title returns no matching results
-- Web search finds a SIMILAR but NOT IDENTICAL paper (different title, \
-different authors, or different year by 2+) — this is evidence of \
-hallucination, not evidence the reference is real
+WARNING: Finding this title mentioned as a CITATION inside another paper \
+(e.g. on OpenReview, arXiv, or in a reference list) does NOT prove this \
+paper exists. The paper must have its OWN dedicated page — a journal \
+article page, arXiv entry, or academic database entry with this exact \
+title as the primary title. A reference list merely shows someone cited \
+it, not that it is real.
+
+Key signals of hallucination (any ONE is sufficient for LIKELY):
+- The reference was not found in any academic database (already confirmed above)
+- Your web search does not return a page with this exact title
+- Web search finds a similar but NOT identical paper (different title, \
+different authors) — this is EVIDENCE of hallucination, not evidence the \
+reference is real
 - The title appears truncated, garbled, or unnaturally worded
-- Authors are malformed (e.g. "O. T. et al. Unke" instead of "O. T. Unke et al.")
-- Authors are obviously fake or don't work in the cited field
+- Authors are malformed (e.g. "O. T. et al. Unke")
 - The ArXiv ID or DOI points to a completely different paper
-- Multiple major metadata fields conflict with what databases found
 
 Key signals that it is NOT hallucinated (verdict should be UNLIKELY):
-- The EXACT paper (same title and same authors) was found via web search or \
-verified in a database, even with minor metadata errors
-- Year off-by-one with otherwise matching title and authors is NOT hallucination
-- Venue abbreviation differences are NOT hallucination
+- Your web search found a page showing a paper with this EXACT title and \
+the same authors
+- Year off-by-one with otherwise matching title and authors is acceptable
+- Venue abbreviation differences are acceptable
 
-Be strict: if the reference was not found in any academic database and web \
-search only finds similar-but-different papers, the verdict should be LIKELY.
+Be strict: if this title was not found in any academic database and your \
+web search does not find this exact title, the verdict MUST be LIKELY.
 
 Reply in EXACTLY this format:
 
@@ -270,13 +285,21 @@ class LLMHallucinationVerifier:
         seen_urls: set = set()
 
         for block in resp.content:
-            if getattr(block, 'type', '') == 'text':
+            block_type = getattr(block, 'type', '')
+            if block_type == 'text':
                 text = getattr(block, 'text', '') or ''
                 if text:
                     text_parts.append(text)
-                # Extract cited URLs from citations
-                for citation in getattr(block, 'citations', []):
+                # Extract cited URLs from inline citations (may be None)
+                for citation in getattr(block, 'citations', None) or []:
                     url = getattr(citation, 'url', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        web_urls.append(url)
+            elif block_type == 'web_search_tool_result':
+                # Extract URLs from web search results
+                for result in getattr(block, 'content', None) or []:
+                    url = getattr(result, 'url', '') or ''
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         web_urls.append(url)
@@ -580,4 +603,44 @@ class LLMHallucinationVerifier:
             if not explanation:
                 explanation = text
 
+        # Clean explanation: strip inline markdown links, citations, and chain-of-thought narration
+        explanation = LLMHallucinationVerifier._clean_explanation(explanation)
+
         return verdict, explanation, link
+
+    @staticmethod
+    def _clean_explanation(explanation: str) -> str:
+        """Strip URLs, markdown links, and search narration from the explanation."""
+        import re
+        text = explanation.strip()
+
+        # Remove markdown links: [text](url) -> text
+        text = re.sub(r'\[([^\]]*?)\]\(https?://[^)]+\)', r'\1', text)
+
+        # Remove bare URLs
+        text = re.sub(r'https?://\S+', '', text)
+
+        # Remove OpenAI citation annotations like ([source](url)) or (source)
+        text = re.sub(r'\(\[.*?\]\(.*?\)\)', '', text)
+
+        # Strip search narration preambles
+        narration_patterns = [
+            r"^I'll search for.*?\.\.+\s*",
+            r'^Searching for.*?\.\.+\s*',
+            r'^A web search for.*?yields?\s+',
+            r'^A search for.*?yields?\s+',
+            r'^Based on my web search,?\s*',
+            r'^I searched for.*?\.',
+            r'^I found that\s+',
+            r'^Let me search.*?\.\.+\s*',
+        ]
+        for pattern in narration_patterns:
+            text = re.sub(pattern, '', text, count=1, flags=re.IGNORECASE)
+
+        # Collapse whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Remove trailing empty parentheses or brackets
+        text = re.sub(r'\s*\(\s*\)', '', text)
+
+        return text

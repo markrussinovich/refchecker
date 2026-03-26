@@ -2017,8 +2017,36 @@ async def validate_llm_config(
                 )
             raise HTTPException(status_code=400, detail=f"Provider '{config.provider}' is not available")
         
-        # Make a simple test call using _call_llm
-        test_response = provider._call_llm("Say 'ok' if you can hear me.")
+        # Make a simple test call — use a direct minimal API call rather than
+        # _call_llm which includes the heavy reference-extraction system prompt
+        if provider_lower in ('openai', 'azure', 'vllm'):
+            import openai as _openai
+            test_client = _openai.OpenAI(api_key=config.api_key or provider.api_key)
+            if hasattr(provider, 'endpoint') and provider.endpoint:
+                base = provider.endpoint
+                for suffix in ('/chat/completions', '/completions'):
+                    if base.endswith(suffix):
+                        base = base[: -len(suffix)]
+                test_client = _openai.OpenAI(api_key=config.api_key or provider.api_key, base_url=base)
+            test_resp = test_client.chat.completions.create(
+                model=config.model or getattr(provider, 'model', None) or 'gpt-4.1',
+                messages=[{"role": "user", "content": "Reply with the word OK"}],
+                max_tokens=10,
+            )
+            test_response = (test_resp.choices[0].message.content or '').strip()
+        elif provider_lower == 'anthropic':
+            import anthropic as _anthropic
+            test_client = _anthropic.Anthropic(api_key=config.api_key or provider.api_key)
+            test_resp = test_client.messages.create(
+                model=config.model or getattr(provider, 'model', None) or 'claude-sonnet-4-20250514',
+                max_tokens=10,
+                messages=[{"role": "user", "content": "Reply with the word OK"}],
+            )
+            test_response = (test_resp.content[0].text if test_resp.content else '').strip()
+        elif provider_lower in ('google', 'gemini'):
+            test_response = provider._call_llm("Reply with the word OK")
+        else:
+            test_response = provider._call_llm("Reply with the word OK")
         
         if test_response:
             return {"valid": True, "message": "Connection successful"}
@@ -2292,6 +2320,84 @@ async def update_setting(
     except Exception as e:
         logger.error(f"Error updating setting: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- S2 Database Update (triggered by Render cron job) ----------
+
+# Background state for the long-running S2 update task
+_s2_update_task: Optional[asyncio.Task] = None
+_s2_update_status: Dict = {"state": "idle"}
+
+
+def _verify_update_token(request: Request):
+    """Verify the S2_UPDATE_TOKEN from the Authorization header."""
+    token = os.environ.get("S2_UPDATE_TOKEN")
+    if not token:
+        raise HTTPException(status_code=503, detail="S2_UPDATE_TOKEN not configured")
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {token}":
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+
+@app.post("/api/admin/update-s2-db")
+async def trigger_s2_db_update(request: Request):
+    """Trigger a background Semantic Scholar database update.
+
+    Secured via a shared S2_UPDATE_TOKEN (Bearer token) so the Render cron
+    job can call it without user-level auth.
+    """
+    _verify_update_token(request)
+
+    global _s2_update_task, _s2_update_status
+
+    # Don't start a second run while one is in progress
+    if _s2_update_task and not _s2_update_task.done():
+        return {"status": "already_running", **_s2_update_status}
+
+    db_path = os.environ.get("REFCHECKER_DB_PATH", "/data/semantic_scholar.db")
+    output_dir = str(Path(db_path).parent)
+    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or await db.get_setting("semantic_scholar_api_key")
+
+    _s2_update_status = {"state": "running", "started_at": __import__("datetime").datetime.utcnow().isoformat()}
+
+    async def _run_update():
+        global _s2_update_status
+        try:
+            logger.info(f"S2 DB update started — output_dir={output_dir}")
+            from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
+            downloader = SemanticScholarDownloader(output_dir=output_dir, api_key=api_key)
+            db_exists = os.path.exists(downloader.db_path)
+            if db_exists:
+                downloader.process_local_files(force_reprocess=False, incremental=True)
+                current_release = downloader.get_last_release_id()
+                latest_release = downloader.get_latest_release_id()
+                if current_release != latest_release:
+                    success = downloader.download_dataset_files()
+                    if success:
+                        downloader.process_local_files(incremental=True)
+            else:
+                success = downloader.download_dataset_files()
+                if success:
+                    downloader.process_local_files(incremental=False)
+            cursor = downloader.conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM papers")
+            count = cursor.fetchone()[0]
+            _s2_update_status = {"state": "completed", "papers": count,
+                                 "finished_at": __import__("datetime").datetime.utcnow().isoformat()}
+            logger.info(f"S2 DB update completed — {count:,} papers")
+        except Exception as e:
+            logger.error(f"S2 DB update failed: {e}", exc_info=True)
+            _s2_update_status = {"state": "failed", "error": str(e)}
+
+    _s2_update_task = asyncio.create_task(asyncio.to_thread(_run_update))
+    return {"status": "started", **_s2_update_status}
+
+
+@app.get("/api/admin/s2-db-status")
+async def get_s2_db_status(request: Request):
+    """Check the current state of the S2 database update."""
+    _verify_update_token(request)
+    return _s2_update_status
 
 
 # Debug/Admin endpoints

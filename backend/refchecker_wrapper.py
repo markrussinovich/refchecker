@@ -230,8 +230,9 @@ class ProgressRefChecker:
             logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
             sanitized.append({
                 # If it was info_type, store as 'info' to ensure proper categorization
-                "error_type": 'info' if is_info else (e_type or 'unknown'),
-                "error_details": details or '',
+                # Map 'timeout' to 'unverified' since timeouts mean we couldn't verify
+                "error_type": 'info' if is_info else ('unverified' if e_type == 'timeout' else (e_type or 'unknown')),
+                "error_details": details if e_type != 'timeout' else 'Verification timed out',
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value'),
                 "is_suggestion": is_info,  # Preserve info_type as suggestion flag
@@ -1109,7 +1110,7 @@ class ProgressRefChecker:
             except asyncio.TimeoutError:
                 logger.warning(f"Reference {index} verification timed out")
                 verified_data = None
-                errors = [{"error_type": "timeout", "error_details": "Verification timed out after 60 seconds"}]
+                errors = [{"error_type": "unverified", "error_details": "Verification timed out"}]
                 url = None
 
             return self._format_verification_result(reference, index, verified_data, errors, url)
@@ -1208,12 +1209,13 @@ class ProgressRefChecker:
                     "year": reference.get('year'),
                     "venue": reference.get('venue'),
                     "cited_url": reference.get('cited_url') or reference.get('url'),
-                    "status": "error",
+                    "status": "unverified",
                     "errors": [{
-                        "error_type": "timeout",
-                        "error_details": "Verification timed out after 120 seconds"
+                        "error_type": "unverified",
+                        "error_details": "Verification timed out"
                     }],
                     "warnings": [],
+                    "suggestions": [],
                     "authoritative_urls": [],
                     "corrected_reference": None
                 }

@@ -342,13 +342,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       <span className="text-sm capitalize font-medium" style={{ color: 'var(--color-text-primary)' }}>
                         {provider}
                       </span>
-                      {hasKeyForProvider ? (
-                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--color-success-bg)', color: 'var(--color-success)' }}>
-                          ✓ Set
-                        </span>
-                      ) : (
-                        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Not set</span>
-                      )}
                     </div>
                     <div className="flex gap-2">
                       {!isEditing && (
@@ -357,7 +350,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                           className="text-xs px-2 py-1 rounded cursor-pointer"
                           style={{ color: 'var(--color-accent)' }}
                         >
-                          {hasKeyForProvider ? 'Change' : 'Set'}
+                          {hasKeyForProvider ? 'Edit' : 'Set'}
                         </button>
                       )}
                       {!isEditing && hasKeyForProvider && (
@@ -460,101 +453,70 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </div>
           {!ssIsEditing && (
             <div className="flex items-center gap-2">
-              {ssHasKey ? (
-                <span 
-                  className="text-xs px-2 py-0.5 rounded"
-                  style={{ 
-                    backgroundColor: 'var(--color-success-bg)',
-                    color: 'var(--color-success)'
-                  }}
-                >
-                  ✓ Configured
-                </span>
-              ) : (
-                <span 
-                  className="text-xs"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Not configured
-                </span>
-              )}
               <button
                 onClick={() => setSsIsEditing(true)}
-                className="text-sm px-3 py-1 rounded transition-colors cursor-pointer"
+                className="text-xs px-2 py-1 rounded cursor-pointer"
                 style={{ color: 'var(--color-accent)' }}
               >
-                {ssHasKey ? 'Edit' : 'Add'}
+                {ssHasKey ? 'Edit' : 'Set'}
               </button>
+              {ssHasKey && (
+                <button
+                  onClick={handleSsDelete}
+                  disabled={ssIsSaving}
+                  className="text-xs px-2 py-1 rounded cursor-pointer"
+                  style={{ color: 'var(--color-error)' }}
+                >
+                  Remove
+                </button>
+              )}
             </div>
           )}
         </div>
         
         {ssIsEditing && (
-          <div className="mt-3 space-y-2">
-            <input
-              type="password"
-              value={ssApiKey}
-              onChange={(e) => setSsApiKey(e.target.value)}
-              placeholder={ssHasKey ? "Enter new key..." : "Enter API key..."}
-              className="w-full px-3 py-2 text-sm rounded border"
-              style={{
-                backgroundColor: 'var(--color-bg-primary)',
-                borderColor: ssError ? 'var(--color-error)' : 'var(--color-border)',
-                color: 'var(--color-text-primary)',
-              }}
-              disabled={ssIsSaving || ssIsValidating}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSsSave()
-                if (e.key === 'Escape') handleSsCancel()
-              }}
-            />
-            
+          <div className="mt-2 space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={ssApiKey}
+                onChange={(e) => setSsApiKey(e.target.value)}
+                placeholder="Enter API key…"
+                className="flex-1 px-2 py-1.5 text-sm rounded border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: ssError ? 'var(--color-error)' : 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                disabled={ssIsSaving || ssIsValidating}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && ssApiKey.trim()) handleSsSave()
+                  if (e.key === 'Escape') handleSsCancel()
+                }}
+              />
+              <button
+                onClick={handleSsSave}
+                disabled={ssIsSaving || ssIsValidating || !ssApiKey.trim()}
+                className="px-3 py-1.5 text-xs rounded cursor-pointer"
+                style={{ backgroundColor: 'var(--color-accent)', color: 'white', opacity: ssIsSaving || ssIsValidating || !ssApiKey.trim() ? 0.5 : 1 }}
+              >
+                {ssIsValidating ? '…' : ssIsSaving ? '…' : 'Save'}
+              </button>
+              <button
+                onClick={handleSsCancel}
+                disabled={ssIsSaving || ssIsValidating}
+                className="px-3 py-1.5 text-xs rounded border cursor-pointer"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
             {ssError && (
               <div className="text-xs" style={{ color: 'var(--color-error)' }}>
                 {ssError}
               </div>
             )}
-
-            <div className="flex gap-2">
-              <button
-                onClick={handleSsSave}
-                disabled={ssIsSaving || ssIsValidating || !ssApiKey.trim()}
-                className="px-4 py-1.5 text-sm rounded cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--color-accent)',
-                  color: 'white',
-                  opacity: ssIsSaving || ssIsValidating || !ssApiKey.trim() ? 0.5 : 1,
-                }}
-              >
-                {ssIsValidating ? 'Validating...' : ssIsSaving ? 'Saving...' : 'Save'}
-              </button>
-              {ssHasKey && (
-                <button
-                  onClick={handleSsDelete}
-                  disabled={ssIsSaving || ssIsValidating}
-                  className="px-4 py-1.5 text-sm rounded cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-error-bg)',
-                    color: 'var(--color-error)',
-                    opacity: ssIsSaving || ssIsValidating ? 0.5 : 1,
-                  }}
-                >
-                  Delete
-                </button>
-              )}
-              <button
-                onClick={handleSsCancel}
-                disabled={ssIsSaving || ssIsValidating}
-                className="px-4 py-1.5 text-sm rounded border cursor-pointer"
-                style={{
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
           </div>
         )}
       </div>
