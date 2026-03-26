@@ -8,6 +8,7 @@ particularly for Semantic Scholar data processing.
 
 import json
 import logging
+import re
 from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ def process_semantic_scholar_result(paper_data: Dict[str, Any]) -> Dict[str, Any
             # so downstream code can always use author.get('name')
             if paper_data['authors'] and isinstance(paper_data['authors'][0], str):
                 paper_data['authors'] = [{'name': name} for name in paper_data['authors']]
+            # Fix corporate author prefixes concatenated with first author name
+            # e.g. "OpenAI Josh Achiam" -> separate "OpenAI" + "Josh Achiam"
+            paper_data['authors'] = _fix_corporate_author_prefix(paper_data['authors'])
         else:
             paper_data['authors'] = []
         
@@ -78,6 +82,48 @@ def process_semantic_scholar_results(results: List[Dict[str, Any]]) -> List[Dict
             processed_results.append(processed_result)
     
     return processed_results
+
+
+# Corporate/organization names that appear as prefixes in Semantic Scholar
+# bulk dataset author entries (e.g. "OpenAI Josh Achiam" should be
+# "OpenAI" + "Josh Achiam")
+_CORPORATE_AUTHOR_PREFIXES = [
+    'OpenAI', 'Google', 'Google DeepMind', 'DeepMind', 'Meta', 'Meta AI',
+    'Microsoft', 'Anthropic', 'Apple', 'Amazon', 'NVIDIA', 'IBM',
+    'Baidu', 'Tencent', 'Alibaba', 'Samsung', 'Intel', 'Adobe',
+]
+# Sort longest first so "Google DeepMind" matches before "Google"
+_CORPORATE_AUTHOR_PREFIXES.sort(key=len, reverse=True)
+
+
+def _fix_corporate_author_prefix(authors: list) -> list:
+    """
+    Fix corporate author names concatenated with the first individual author.
+    
+    In the Semantic Scholar bulk dataset, corporate authors sometimes get
+    concatenated with the first real author, e.g. "OpenAI Josh Achiam".
+    This splits them into separate entries.
+    """
+    if not authors:
+        return authors
+    
+    first = authors[0]
+    name = first.get('name', '') if isinstance(first, dict) else str(first)
+    
+    for prefix in _CORPORATE_AUTHOR_PREFIXES:
+        # Match "Corp Name" at the start followed by a space and a capital letter
+        # (indicating a person's name follows)
+        pattern = re.compile(r'^' + re.escape(prefix) + r'\s+([A-Z])')
+        m = pattern.match(name)
+        if m:
+            remainder = name[len(prefix):].strip()
+            if not remainder or remainder == prefix:
+                break  # e.g. "OpenAI OpenAI" — just the org, no person
+            corp_entry = {'name': prefix}
+            person_entry = {'name': remainder}
+            return [corp_entry, person_entry] + authors[1:]
+    
+    return authors
 
 
 def extract_external_ids(paper_data: Dict[str, Any]) -> Dict[str, str]:
