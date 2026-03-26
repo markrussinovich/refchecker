@@ -361,6 +361,10 @@ async def startup_event():
         logger.error(f"Failed to cancel stale checks: {e}")
     logger.info("Database initialized")
 
+    # Start S2 database auto-update background loop (checks on startup, then every 7 days)
+    global _s2_update_task
+    _s2_update_task = asyncio.create_task(_s2_auto_update_loop())
+
 
 @app.get("/")
 async def root():
@@ -2322,81 +2326,91 @@ async def update_setting(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------- S2 Database Update (triggered by Render cron job) ----------
+# ---------- S2 Database Auto-Update (self-managed background timer) ------
 
-# Background state for the long-running S2 update task
+_S2_UPDATE_INTERVAL = 7 * 24 * 3600  # 7 days in seconds
 _s2_update_task: Optional[asyncio.Task] = None
 _s2_update_status: Dict = {"state": "idle"}
 
 
-def _verify_update_token(request: Request):
-    """Verify the S2_UPDATE_TOKEN from the Authorization header."""
-    token = os.environ.get("S2_UPDATE_TOKEN")
-    if not token:
-        raise HTTPException(status_code=503, detail="S2_UPDATE_TOKEN not configured")
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {token}":
-        raise HTTPException(status_code=403, detail="Invalid token")
+def _s2_db_needs_update(db_path: str) -> bool:
+    """Return True if the S2 database is missing or older than 7 days."""
+    if not os.path.exists(db_path):
+        return True
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("SELECT value FROM metadata WHERE key = 'last_update_time'")
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return True
+        from datetime import datetime, timezone
+        import dateutil.parser
+        last_update = dateutil.parser.parse(row[0])
+        age = (datetime.now(timezone.utc) - last_update).total_seconds()
+        return age >= _S2_UPDATE_INTERVAL
+    except Exception:
+        return True
 
 
-@app.post("/api/admin/update-s2-db")
-async def trigger_s2_db_update(request: Request):
-    """Trigger a background Semantic Scholar database update.
+def _run_s2_update_sync(output_dir: str, api_key: str | None) -> dict:
+    """Run the S2 download/update synchronously (called from a thread)."""
+    from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
+    downloader = SemanticScholarDownloader(output_dir=output_dir, api_key=api_key)
+    db_exists = os.path.exists(downloader.db_path)
+    if db_exists:
+        downloader.process_local_files(force_reprocess=False, incremental=True)
+        current_release = downloader.get_last_release_id()
+        latest_release = downloader.get_latest_release_id()
+        if current_release != latest_release:
+            if downloader.download_dataset_files():
+                downloader.process_local_files(incremental=True)
+    else:
+        if downloader.download_dataset_files():
+            downloader.process_local_files(incremental=False)
+    cursor = downloader.conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM papers")
+    return {"papers": cursor.fetchone()[0]}
 
-    Secured via a shared S2_UPDATE_TOKEN (Bearer token) so the Render cron
-    job can call it without user-level auth.
-    """
-    _verify_update_token(request)
 
-    global _s2_update_task, _s2_update_status
+async def _s2_auto_update_loop():
+    """Background loop: check on startup then every 7 days."""
+    global _s2_update_status
+    while True:
+        db_path = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or ""
+        if not db_path:
+            logger.debug("S2 auto-update: no REFCHECKER_DB_PATH configured, skipping")
+            await asyncio.sleep(_S2_UPDATE_INTERVAL)
+            continue
 
-    # Don't start a second run while one is in progress
-    if _s2_update_task and not _s2_update_task.done():
-        return {"status": "already_running", **_s2_update_status}
+        output_dir = str(Path(db_path).parent)
+        if _s2_db_needs_update(db_path):
+            api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or await db.get_setting("semantic_scholar_api_key")
+            from datetime import datetime, timezone
+            _s2_update_status = {"state": "running", "started_at": datetime.now(timezone.utc).isoformat()}
+            logger.info(f"S2 auto-update: starting background update (output_dir={output_dir})")
+            try:
+                result = await asyncio.to_thread(_run_s2_update_sync, output_dir, api_key)
+                _s2_update_status = {
+                    "state": "completed",
+                    "papers": result["papers"],
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                }
+                logger.info(f"S2 auto-update: completed — {result['papers']:,} papers")
+            except Exception as e:
+                logger.error(f"S2 auto-update: failed — {e}", exc_info=True)
+                _s2_update_status = {"state": "failed", "error": str(e)}
+        else:
+            logger.debug("S2 auto-update: database is up-to-date, sleeping")
 
-    db_path = os.environ.get("REFCHECKER_DB_PATH", "/data/semantic_scholar.db")
-    output_dir = str(Path(db_path).parent)
-    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or await db.get_setting("semantic_scholar_api_key")
-
-    _s2_update_status = {"state": "running", "started_at": __import__("datetime").datetime.utcnow().isoformat()}
-
-    async def _run_update():
-        global _s2_update_status
-        try:
-            logger.info(f"S2 DB update started — output_dir={output_dir}")
-            from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
-            downloader = SemanticScholarDownloader(output_dir=output_dir, api_key=api_key)
-            db_exists = os.path.exists(downloader.db_path)
-            if db_exists:
-                downloader.process_local_files(force_reprocess=False, incremental=True)
-                current_release = downloader.get_last_release_id()
-                latest_release = downloader.get_latest_release_id()
-                if current_release != latest_release:
-                    success = downloader.download_dataset_files()
-                    if success:
-                        downloader.process_local_files(incremental=True)
-            else:
-                success = downloader.download_dataset_files()
-                if success:
-                    downloader.process_local_files(incremental=False)
-            cursor = downloader.conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM papers")
-            count = cursor.fetchone()[0]
-            _s2_update_status = {"state": "completed", "papers": count,
-                                 "finished_at": __import__("datetime").datetime.utcnow().isoformat()}
-            logger.info(f"S2 DB update completed — {count:,} papers")
-        except Exception as e:
-            logger.error(f"S2 DB update failed: {e}", exc_info=True)
-            _s2_update_status = {"state": "failed", "error": str(e)}
-
-    _s2_update_task = asyncio.create_task(asyncio.to_thread(_run_update))
-    return {"status": "started", **_s2_update_status}
+        await asyncio.sleep(_S2_UPDATE_INTERVAL)
 
 
 @app.get("/api/admin/s2-db-status")
-async def get_s2_db_status(request: Request):
-    """Check the current state of the S2 database update."""
-    _verify_update_token(request)
+async def get_s2_db_status(current_user: UserInfo = Depends(require_user)):
+    """Check the current state of the S2 database auto-update."""
+    _require_admin(current_user)
     return _s2_update_status
 
 

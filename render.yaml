@@ -47,10 +47,9 @@ services:
 
       # --- Local Semantic Scholar database (optional, improves speed) ---
       - key: REFCHECKER_DB_PATH
-        value: /data/semantic_scholar_slim.db
+        value: /data/semantic_scholar.db
       - key: SEMANTIC_SCHOLAR_API_KEY
         sync: false                  # Set in Render dashboard
-
     disk:
       name: refchecker-data
       mountPath: /data

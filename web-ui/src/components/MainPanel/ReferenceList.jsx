@@ -90,7 +90,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             // Has any suggestion
             return ref.suggestions?.length > 0
           case 'unverified':
-            return status === 'unverified' || ref.errors?.some(e => e.error_type === 'unverified')
+            return status === 'unverified' || status === 'hallucination' || ref.errors?.some(e => e.error_type === 'unverified')
           case 'hallucination':
             return status === 'hallucination' || ref.hallucination_assessment?.verdict === 'LIKELY'
           default:

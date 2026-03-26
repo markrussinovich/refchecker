@@ -1160,13 +1160,6 @@ class ProgressRefChecker:
         if cached_result:
             # Update the index to match current position
             cached_result['index'] = idx + 1
-            # Strip stale hallucination assessments from cached results:
-            # references with a URL should never be flagged as hallucinated
-            url = reference.get('cited_url') or reference.get('url', '')
-            if url and url.startswith('http') and cached_result.get('hallucination_assessment'):
-                cached_result.pop('hallucination_assessment', None)
-                if cached_result.get('status') == 'hallucination':
-                    cached_result['status'] = 'unverified'
             debug_log(f"Cache hit for reference {idx + 1} in {cache_time:.3f}s")
             return cached_result
         
@@ -1389,8 +1382,9 @@ class ProgressRefChecker:
                     hallucination_count += 1
                 
                 # Count refs matching the frontend 'unverified' filter:
-                # status === 'unverified' OR has any error with error_type === 'unverified'
-                if result['status'] == 'unverified' or has_unverified_error:
+                # status === 'unverified' OR 'hallucination' OR has any error with error_type === 'unverified'
+                # Hallucinated refs are a subset of unverified (they couldn't be verified AND are likely fabricated)
+                if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
                     unverified_count += 1
                 
                 if result['status'] == 'verified':

@@ -98,6 +98,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       withWarnings: processed.filter(r => r.warnings?.length > 0).length,
       withUnverified: processed.filter(r =>
         (r.status || '').toLowerCase() === 'unverified' ||
+        (r.status || '').toLowerCase() === 'hallucination' ||
         r.errors?.some(e => e.error_type === 'unverified')
       ).length,
       hallucinated: processed.filter(r =>
