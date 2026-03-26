@@ -251,15 +251,18 @@ class LLMHallucinationVerifier:
 
     def _call_openai_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """OpenAI / Azure / vLLM chat completions (no web search)."""
-        resp = self.client.chat.completions.create(
+        from refchecker.llm.providers import _openai_token_kwargs, _is_openai_reasoning_model
+        kwargs = dict(
             model=self.model,
             messages=[
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': user_prompt},
             ],
-            max_tokens=300,
-            temperature=0.0,
+            **_openai_token_kwargs(self.model, 300)
         )
+        if not _is_openai_reasoning_model(self.model):
+            kwargs['temperature'] = 0.0
+        resp = self.client.chat.completions.create(**kwargs)
         return (resp.choices[0].message.content or '').strip(), []
 
     # ------------------------------------------------------------------

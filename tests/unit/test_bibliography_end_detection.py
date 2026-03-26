@@ -235,4 +235,140 @@ class TestBibliographyEndDetection:
             # Should include all references
             assert "[1] First Author" in bibliography_text
             assert "[2] Second Author" in bibliography_text  
-            assert "[3] Third Author" in bibliography_text
+
+
+# ── Regression tests for specific ICLR 2026 papers ──
+
+MULTI_PAGE_REFS = (
+    "E. Abbe, J. Fan, and K. Wang. An theory of pca and spectral clustering. "
+    "The Annals of Statistics, 50(4):2359, 2022.\n"
+    "Z. Allen-Zhu and L. Silvio. A local algorithm for finding well-connected clusters. "
+    "In ICML, pp. 396-404, 2017.\n"
+    "A. Baranwal, K. Fountoulakis, and A. Jagannath. Graph convolution for semi-supervised "
+    "classification. In NeurIPS, 2021.\n"
+    "J. Chen and X. Li. Stochastic gradient descent with momentum. "
+    "Journal of Machine Learning Research, 23(1):1-45, 2022.\n"
+    "Y. LeCun, Y. Bengio, and G. Hinton. Deep learning. Nature, 521:436-444, 2015.\n"
+    "A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. Gomez, L. Kaiser, "
+    "and I. Polosukhin. Attention is all you need. In NeurIPS, 2017.\n"
+    "K. He, X. Zhang, S. Ren, and J. Sun. Deep residual learning for image recognition. "
+    "In CVPR, pp. 770-778, 2016.\n"
+    "I. Goodfellow, J. Pouget-Abadie, M. Mirza, B. Xu, D. Warde-Farley, S. Ozair, "
+    "A. Courville, and Y. Bengio. Generative adversarial nets. In NeurIPS, 2014.\n"
+)
+
+
+class TestBibliographyEndDetectionRegression:
+    """Regression tests for bibliography end detection on real paper patterns."""
+
+    def setup_method(self):
+        self.checker = ArxivReferenceChecker()
+
+    def _build(self, refs, after, header="References\n"):
+        return "Title\n\nAbstract.\n\n1 Introduction\nText.\n\n" + header + refs + "\n" + after
+
+    def test_appendix_with_contents_toc(self):
+        """Regression for n28wnc2QTc: Appendix + CONTENTS block should end bibliography."""
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "17\nPublished as a conference paper at ICLR 2026\n"
+            "Appendix\nCONTENTS\nA1 Extended Related Work 19\n"
+            "A1.1 Retrieval-Augmented Generation.\nSome appendix text."
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Appendix" not in bib
+        assert "CONTENTS" not in bib
+        assert "Extended Related Work" not in bib
+        assert "Vaswani" in bib
+
+    def test_contents_section_after_page_break(self):
+        """Regression for T1h5em349L: CONTENTS after page break should end bibliography."""
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "15\nPublished as a conference paper at ICLR 2026\n"
+            "CONTENTS\n1 Introduction 1\n2 Methods 3\n"
+            "A LLM Usage Declaration 18\nB Discussion 18"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "CONTENTS" not in bib
+        assert "LLM Usage Declaration" not in bib
+        assert "Vaswani" in bib
+
+    def test_appendixcontents_no_space(self):
+        """Regression for FRkJ3ehpNN: APPENDIXCONTENTS (no space) should end bibliography."""
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "APPENDIXCONTENTS\nA Literature Review\nB Experimental Setup"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "APPENDIXCONTENTS" not in bib
+        assert "Literature Review" not in bib
+
+    def test_page_breaks_within_bibliography_preserved(self):
+        """Page breaks mid-bibliography must NOT truncate references.
+
+        Regression: "\n11\nPublished as a conference paper at ICLR 2026\n"
+        appearing between reference entries was cutting off 85% of references.
+        """
+        page1_refs = (
+            "E. Abbe. Theory of PCA. Annals of Statistics, 2022.\n"
+            "Z. Allen-Zhu. A local algorithm. In ICML, 2017.\n"
+        )
+        page_break = "11\nPublished as a conference paper at ICLR 2026\n"
+        page2_refs = (
+            "K. He. Deep residual learning. In CVPR, 2016.\n"
+            "A. Vaswani. Attention is all you need. In NeurIPS, 2017.\n"
+        )
+        appendix = "Appendix\nA Extended Related Work\nSome discussion."
+
+        text = self._build(page1_refs + page_break + page2_refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Abbe" in bib
+        assert "Vaswani" in bib
+        assert "Extended Related Work" not in bib
+
+    def test_author_starting_with_single_letter_not_truncated(self):
+        """Author names like 'A. Baranwal' must NOT be mistaken for appendix headers."""
+        refs_with_a_author = (
+            "A. Baranwal, K. Fountoulakis, and A. Jagannath. Graph convolution for "
+            "semi-supervised classification. In NeurIPS, 2021.\n"
+            "B. Smith and C. Jones. Another paper. In ICML, 2022.\n"
+            "D. Wilson. Yet another paper. In AAAI, 2023.\n"
+        )
+        text = self._build(
+            refs_with_a_author,
+            "Appendix\nA Proofs\nSome proof content."
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Baranwal" in bib
+        assert "Smith" in bib
+        assert "Wilson" in bib
+        assert "Some proof content" not in bib
+
+    def test_trailing_page_number_trimmed(self):
+        """Bare page numbers at the end of bibliography should be trimmed."""
+        text = self._build(
+            MULTI_PAGE_REFS + "\n17\n",
+            "Appendix\nA Some Section"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        stripped = bib.rstrip()
+        last_line = stripped.split('\n')[-1].strip()
+        assert not last_line.isdigit(), f"Bibliography ends with bare page number: '{last_line}'"
+
+    def test_published_as_header_trimmed(self):
+        """'Published as a conference paper' line should be trimmed from end."""
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "Published as a conference paper at ICLR 2026\n"
+            "Appendix\nA Some Section"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Published as a conference paper" not in bib

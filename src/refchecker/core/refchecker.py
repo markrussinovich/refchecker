@@ -55,7 +55,7 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
-from refchecker.utils.url_utils import extract_arxiv_id_from_url
+from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -598,8 +598,9 @@ class ArxivReferenceChecker:
             logger.warning(f"Failed to create LLM provider: {provider_name}")
             return None
         
-        # When LLM is explicitly requested, disable fallback to make failures terminal
-        fallback_enabled = False
+        # When LLM is explicitly requested, enable fallback so papers still
+        # get processed even if LLM extraction occasionally fails.
+        fallback_enabled = True
         extractor = ReferenceExtractor(
             llm_provider=llm_provider,
             fallback_enabled=fallback_enabled
@@ -1349,113 +1350,108 @@ class ArxivReferenceChecker:
             logger.debug(f"Match: {match.group(0)}")
             
             # Find the next section heading or end of document
-            # Look for common section endings that come after references
-            next_section_patterns = [
-                # HIGHEST PRIORITY: Table/Data patterns that immediately follow references
-                r'\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',  # "Relation # Samples", "Table 1:", "Figure 1:"
-                r'\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',  # Structured table headers like "Relation # Samples Context Templates Query Templates"
-                # HIGH PRIORITY: Appendix patterns that appear at the end of bibliography
-                # General pattern for single letter appendix sections - must come FIRST to catch earliest occurrence
-                r'\n\s*[A-Z]\s+(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',  # "A LRE Dataset", "A Theoretical Analysis", "B Implementation Details"
-                # Specific patterns (kept for backwards compatibility but won't be reached in most cases)
-                r'\n\s*[A-Z]\s+Evaluation\s+Details\s*\n',  # Specific "C Evaluation Details"
-                # Note: Removed problematic pattern that was matching page numbers in bibliography
-                r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',  # "3.1 Subsection Title"
-                # High priority: Common supplementary material patterns
-                r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
-                r'\n\s*Supplementary\s+Material\s*\n',  
-                r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
-                r'\n\s*Supplemental\s+Material\s*\n',
-                r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
-                r'\n\s*Appendix\s*[A-Z]?\s*\n',
-                r'\n\s*ACKNOWLEDGMENTS?\s*\n',
-                r'\n\s*Acknowledgments?\s*\n',
-                r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
-                r'\n\s*Author\s+Contributions?\s*\n',
-                r'\n\s*DATA\s+AVAILABILITY\s*\n',
-                r'\n\s*Data\s+Availability\s*\n',
-                r'\n\s*CODE\s+AVAILABILITY\s*\n',
-                r'\n\s*Code\s+Availability\s*\n',
-                r'\n\s*SUPPORTING\s+INFORMATION\s*\n',
-                r'\n\s*Supporting\s+Information\s*\n',
-                r'\n\s*SUPPLEMENTARY\s+INFORMATION\s*\n',
-                r'\n\s*Supplementary\s+Information\s*\n',
-                r'\n\s*ETHICS\s+STATEMENT\s*\n',
-                r'\n\s*Ethics\s+Statement\s*\n',
-                r'\n\s*COMPETING\s+INTERESTS\s*\n',
-                r'\n\s*Competing\s+Interests\s*\n',
-                r'\n\s*FUNDING\s+INFORMATION\s*\n',
-                r'\n\s*Funding\s+Information\s*\n',
-                # Pattern for "A Additional...", "B Supplementary...", etc.
-                r'\n\s*[A-Z]\s+(?:Additional|Supplementary|Appendix|Extended|Extra|Further)\b[A-Za-z\s\-]*',
-                # Pattern for appendix sections like "A Proofs for Section 2", "B Details", etc.
-                r'\n\s*[A-Z]\s+(?:Proofs?|Details?|Derivations?|Calculations?|Algorithms?|Examples?|Experiments?|Implementation|Results?)\b[A-Za-z\s\-\d]*',
-                # Original patterns
-                r'\n\s*[A-Z]\s+[A-Z][A-Za-z\s]*\n',  # A APPENDIX, B RESULTS, etc.
-                r'\nA\.\s+Related\s+Work\n',  # Exact match for "A. Related Work"
-                r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|APPENDIX|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE|SURVEY|REVIEW|FUTURE|LIMITATION|CONTRIBUTION|INNOVATION|TECHNICAL|DETAILED|COMPLETE|EXTENDED)\b',  # Other section patterns
-                r'\n\s*[A-Z]\.\s+Implementation\s+Details',  # Specific pattern for "A. Implementation Details"
-                # More specific pattern for numbered sections - only match section headers, not bibliography entries
-                # Look for common section headers like "8. Appendix", "9. Conclusion" but not "8. Smith, J."
-                r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|FUNDING|AUTHOR|CONFLICT|ETHICS|DATA|CODE|SUPPORTING|COMPETING|AVAILABILITY|INFORMATION|STATEMENT|CONTRIBUTIONS?)\b[A-Za-z\s]*\n',
-                r'\n\s*Appendix\s+[A-Z]',  # Appendix A
-                # More restrictive pattern for bracketed sections - only match actual section headers
-                # like [APPENDIX], [CONCLUSIONS] but not reference metadata like [Online], [cs], [PDF]
-                r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY|ADDITIONAL|NOTATION|PROOF|ALGORITHM)\s*\]',
-                # Pattern for consecutive capitalized lines that are clearly section headers (short and uppercase)
-                r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',  # All caps sections like "APPENDIX\nALGORITHM"
-                r'\\end\{thebibliography\}',  # LaTeX bibliography environment end
-                r'\\end\{document\}',  # LaTeX document end
+            # Strategy: find ALL potential end markers, then pick the earliest valid one.
+            # We separate "definitive" markers (Appendix, CONTENTS, page headers)
+            # from "heuristic" markers (Table/Figure patterns) and prefer definitive ones.
+            
+            # ── DEFINITIVE end markers: these always end the reference section ──
+            definitive_patterns = [
+                r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
+                r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
+                r'\n\s*CONTENTS\s*\n',  # Table of contents for appendix
+                r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
+                r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
+                r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
+                r'\n\s*(?:AUTHOR|Author)\s+(?:CONTRIBUTIONS?|Contributions?)\s*\n',
+                r'\n\s*(?:ETHICS|Ethics)\s+(?:STATEMENT|Statement)\s*\n',
+                r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
+                r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
+                r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
+                r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
+                # Numbered post-ref sections
+                r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
+                # LaTeX end markers
+                r'\\end\{thebibliography\}',
+                r'\\end\{document\}',
+            ]
+            
+            # ── Appendix section headers that look like "A Extended Work", "A1 Proofs" ──
+            # These need special validation: only accept if NOT inside a reference entry
+            appendix_section_patterns = [
+                r'\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further)\b[A-Za-z\s\-]*\n',
+                r'\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration)\b[A-Za-z\s\-\d]*\n',
+                # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
+                r'\n\s*[A-Z]\s+(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+            ]
+            
+            # ── HEURISTIC end markers: used only if no definitive marker found ──
+            heuristic_patterns = [
+                r'\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',
+                r'\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
+                r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
+                r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE)\b',
+                r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY)\s*\]',
+                r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',
             ]
             
             end_pos = len(text)  # Default to end of document
             
-            for i, next_pattern in enumerate(next_section_patterns, 1):
-                next_match = re.search(next_pattern, text[start_pos:])
-                if next_match:
-                    section_end = start_pos + next_match.start()
-                    logger.debug(f"PATTERN {i} MATCHED: {next_pattern}")
-                    logger.debug(f"MATCHED TEXT: {repr(next_match.group(0))}")
-                    logger.debug(f"CONTEXT: {repr(text[section_end-30:section_end+30])}")
-                    
-                    # For table/data patterns, make sure we don't cut off mid-reference
-                    # Look backwards to find the end of the previous complete reference
-                    if i <= 2:  # First two patterns are table/data patterns
-                        # Look backwards from the match to find the end of the last reference
-                        # References typically end with a period, year, or arXiv ID
-                        search_back = 500  # Look back up to 500 chars
-                        search_start = max(start_pos, section_end - search_back)
-                        text_before = text[search_start:section_end]
-                        
-                        # Look for patterns that indicate end of a reference
-                        ref_end_patterns = [
-                            r'arXiv:\d+\.\d+[v\d]*\.\s*',  # arXiv ID with period
-                            r'Preprint[,\.]?\s*arXiv:\d+\.\d+[v\d]*\.\s*',  # Preprint with arXiv ID
-                            r'20\d{2}[.\n]\s*',  # Year (2000-2099) with period or newline
-                            r'[A-Za-z]+\.\s*$',  # Word ending with period
-                        ]
-                        
-                        best_end = section_end
-                        for pattern in ref_end_patterns:
-                            matches = list(re.finditer(pattern, text_before, re.MULTILINE))
-                            if matches:
-                                # Get the last match (closest to section_end)
-                                last_match = matches[-1]
-                                potential_end = search_start + last_match.end()
-                                logger.debug(f"Found reference end pattern: {pattern} at position {potential_end}")
-                                best_end = potential_end
-                                break
-                        
-                        section_end = best_end
-                        logger.debug(f"Adjusted end position to: {section_end}")
-                    
-                    # Only use this end position if it's reasonable (not too close to start)
-                    if section_end > start_pos + 100 and section_end < end_pos:
-                        end_pos = section_end
-                        logger.debug(f"ACCEPTED: End position set to {section_end}")
+            # First pass: search for definitive end markers (earliest wins)
+            definitive_end = None
+            for pattern in definitive_patterns:
+                m = re.search(pattern, text[start_pos:])
+                if m:
+                    candidate = start_pos + m.start()
+                    if candidate > start_pos + 100:  # Must have some bibliography content
+                        if definitive_end is None or candidate < definitive_end:
+                            definitive_end = candidate
+                            logger.debug(f"Definitive end candidate at {candidate}: {repr(m.group(0).strip()[:60])}")
+            
+            # Second pass: appendix section patterns — validate that what follows
+            # is NOT a reference entry (to avoid matching author names like "A. Baranwal")
+            for pattern in appendix_section_patterns:
+                for m in re.finditer(pattern, text[start_pos:]):
+                    candidate = start_pos + m.start()
+                    if candidate <= start_pos + 100:
+                        continue
+                    # Validate: text after the match should NOT look like a reference
+                    after_match = text[start_pos + m.end():start_pos + m.end() + 200]
+                    looks_like_ref = bool(re.match(
+                        r'\s*[A-Z][a-z]+[\s,].*(?:19|20)\d{2}', after_match, re.DOTALL
+                    ))
+                    if not looks_like_ref:
+                        if definitive_end is None or candidate < definitive_end:
+                            definitive_end = candidate
+                            logger.debug(f"Appendix section end at {candidate}: {repr(m.group(0).strip()[:60])}")
                         break
-                    else:
-                        logger.debug(f"REJECTED: section_end={section_end}, start_pos={start_pos}, current_end={end_pos}")
+            
+            if definitive_end is not None:
+                end_pos = definitive_end
+                logger.debug(f"Using definitive end marker at {end_pos}")
+            else:
+                # Third pass: try heuristic patterns only if no definitive marker found
+                for pattern in heuristic_patterns:
+                    m = re.search(pattern, text[start_pos:])
+                    if m:
+                        candidate = start_pos + m.start()
+                        if candidate > start_pos + 100 and candidate < end_pos:
+                            end_pos = candidate
+                            logger.debug(f"Using heuristic end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
+                            break
+            
+            # Trim trailing whitespace / page numbers / conference headers at the boundary
+            while end_pos > start_pos + 100:
+                line_start = text.rfind('\n', start_pos, end_pos - 1)
+                if line_start == -1:
+                    break
+                trailing_line = text[line_start:end_pos].strip()
+                if (not trailing_line or
+                    re.fullmatch(r'\d{1,4}', trailing_line) or
+                    'Published as a conference paper' in trailing_line or
+                    'Published as a workshop paper' in trailing_line):
+                    end_pos = line_start
+                else:
+                    break
             
             bibliography_text = text[start_pos:end_pos]
             logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
@@ -3922,22 +3918,20 @@ class ArxivReferenceChecker:
                     logger.debug(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
                 else:
-                    # LLM was specified but failed - this is terminal
-                    logger.error("LLM reference extraction returned no results. Terminating.")
-                    self.fatal_error = True
-                    return []
+                    logger.warning("LLM reference extraction returned no results, falling back to regex parsing")
             except Exception as e:
-                logger.error(f"LLM reference extraction failed: {e}")
-                self.fatal_error = True
-                return []
+                logger.warning(f"LLM reference extraction failed: {e}, falling back to regex parsing")
         
-        # No LLM available and non-standard format — cannot parse reliably
-        logger.error("Cannot parse non-standard bibliography format without an LLM. "
-                     "Use --llm-provider to enable LLM-based extraction.")
-        if not self.debug_mode:
-            print("\n  ❌  Cannot parse this bibliography format without an LLM.")
-            print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
-        self.fatal_error = True
+        # No LLM available (or LLM failed) and non-standard format — cannot parse reliably
+        if not self.llm_extractor:
+            logger.error("Cannot parse non-standard bibliography format without an LLM. "
+                         "Use --llm-provider to enable LLM-based extraction.")
+            if not self.debug_mode:
+                print("\n  ❌  Cannot parse this bibliography format without an LLM.")
+                print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
+            self.fatal_error = True
+        else:
+            logger.warning("LLM extraction failed for non-standard bibliography format; skipping this paper's references")
         return []
     
     def _parse_standard_acm_natbib_references(self, bibliography_text):

@@ -14,6 +14,26 @@ from refchecker.config.settings import resolve_api_key, resolve_endpoint
 logger = logging.getLogger(__name__)
 
 
+def _openai_token_kwargs(model: str, max_tokens: int) -> dict:
+    """Return the right max-token kwarg for OpenAI models.
+
+    GPT-5 family models require ``max_completion_tokens``
+    and do not support custom temperature;
+    older models use ``max_tokens``.
+    """
+    if model and ('gpt-5' in model or 'o3' in model or 'o4' in model):
+        return {'max_completion_tokens': max_tokens}
+    return {'max_tokens': max_tokens}
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    """Return True if *model* is an OpenAI reasoning/restricted model
+    that doesn't support the temperature parameter."""
+    if not model:
+        return False
+    return any(tag in model for tag in ('gpt-5', 'o3', 'o4'))
+
+
 
 class LLMProviderMixin:
     """Common functionality for all LLM providers"""
@@ -258,15 +278,18 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual OpenAI API call and return the response text"""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model or "gpt-4.1",
+            _model = self.model or "gpt-4.1"
+            kwargs = dict(
+                model=_model,
                 messages=[
                     {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature
+                **_openai_token_kwargs(_model, self.max_tokens)
             )
+            if not _is_openai_reasoning_model(_model):
+                kwargs['temperature'] = self.temperature
+            response = self.client.chat.completions.create(**kwargs)
             
             return response.choices[0].message.content or ""
             
@@ -415,15 +438,18 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Azure OpenAI API call and return the response text"""
         try:
-            response = self.client.chat.completions.create(
-                model=self.model or "gpt-4.1",
+            _model = self.model or "gpt-4.1"
+            kwargs = dict(
+                model=_model,
                 messages=[
                     {"role": "system", "content": self._get_system_prompt()},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature
+                **_openai_token_kwargs(_model, self.max_tokens)
             )
+            if not _is_openai_reasoning_model(_model):
+                kwargs['temperature'] = self.temperature
+            response = self.client.chat.completions.create(**kwargs)
             
             return response.choices[0].message.content or ""
             
