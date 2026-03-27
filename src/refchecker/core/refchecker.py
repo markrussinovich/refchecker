@@ -1318,9 +1318,10 @@ class ArxivReferenceChecker:
         bibliography_text = None
         
         # Collect all potential matches from all patterns
+        # Use re.MULTILINE so ^ and $ match line boundaries, not just string start/end
         all_matches = []
         for pattern in section_patterns:
-            matches = list(re.finditer(pattern, text))
+            matches = list(re.finditer(pattern, text, re.MULTILINE))
             for match in matches:
                 all_matches.append((pattern, match))
         
@@ -1338,10 +1339,47 @@ class ArxivReferenceChecker:
                     best_pattern = pattern
                     break
             
-            # If no match has [1] following it, fall back to the first match
-            # (earliest in document, most likely the real section heading)
+            # If no match has [1] following it (e.g. author-year format papers),
+            # use heuristics to find the real section heading rather than a
+            # false-positive "references" mention in body text.
             if not best_match:
-                best_pattern, best_match = all_matches[0]
+                # Strategy 1: prefer matches where "references"/"bibliography" is the
+                # ENTIRE line (standalone section header), which is more likely to be
+                # the real section heading.
+                standalone_patterns = {
+                    r'(?i)^\s*references\s*$',
+                    r'(?i)^\s*bibliography\s*$',
+                    r'(?i)^\s*\d+\.\s*references\s*$',
+                    r'(?i)^\s*[IVX]+\.\s*references\s*$',
+                    r'(?i)^\s*[IVX]+\s*references\s*$',
+                }
+                standalone_matches = [
+                    (p, m) for p, m in all_matches if p in standalone_patterns
+                ]
+                if standalone_matches:
+                    # Use the LAST standalone match — the real References section is
+                    # typically near the end of the paper body
+                    best_pattern, best_match = standalone_matches[-1]
+                
+                # Strategy 2: look for matches followed by author-year bibliography
+                # entries (e.g. "Author1, Author2, and Author3. Title...")
+                if not best_match:
+                    author_year_pattern = re.compile(
+                        r'\s*[A-Z][a-z]+[\s,].*(?:19|20)\d{2}', re.DOTALL
+                    )
+                    for pattern, match in reversed(all_matches):
+                        test_start = match.end()
+                        test_text = text[test_start:test_start + 300]
+                        if author_year_pattern.match(test_text):
+                            best_match = match
+                            best_pattern = pattern
+                            break
+                
+                # Strategy 3: fall back to the LAST match overall — the actual
+                # References section is almost always the last occurrence of the
+                # word "references" used as a section heading
+                if not best_match:
+                    best_pattern, best_match = all_matches[-1]
             
             match = best_match
             start_pos = match.end()

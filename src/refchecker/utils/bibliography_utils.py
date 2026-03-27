@@ -81,13 +81,39 @@ def find_bibliography_section(text):
     bibliography_start = None
     matched_pattern = None
     
+    # Collect all matches from all patterns and pick the best one
+    all_matches = []
     for pattern in section_patterns:
-        matches = re.search(pattern, text, re.MULTILINE)
-        if matches:
-            bibliography_start = matches.end()
-            matched_pattern = pattern
-            logger.debug(f"Bibliography section found using pattern: {pattern}")
-            break
+        for match in re.finditer(pattern, text, re.MULTILINE):
+            all_matches.append((pattern, match))
+    
+    if all_matches:
+        best_match = None
+        # Prefer a match with [1] following it (numbered references)
+        for pattern, match in all_matches:
+            test_text = text[match.end():match.end() + 100]
+            if '[1]' in test_text:
+                best_match = match
+                matched_pattern = pattern
+                break
+        
+        if not best_match:
+            # For author-year format papers: prefer standalone section headers
+            standalone_pats = {
+                r'(?i)^\s*references\s*$',
+                r'(?i)^\s*bibliography\s*$',
+                r'(?i)^\s*\d+\.\s*references\s*$',
+            }
+            standalone = [(p, m) for p, m in all_matches if p in standalone_pats]
+            if standalone:
+                matched_pattern, best_match = standalone[-1]
+        
+        if not best_match:
+            # Fall back to the last match overall (references section is near end)
+            matched_pattern, best_match = all_matches[-1]
+        
+        bibliography_start = best_match.end()
+        logger.debug(f"Bibliography section found using pattern: {matched_pattern}")
     
     if bibliography_start is None:
         logger.debug("No bibliography section header found, trying end-of-document approach")

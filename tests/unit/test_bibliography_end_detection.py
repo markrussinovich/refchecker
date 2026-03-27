@@ -429,4 +429,45 @@ class TestBibliographyEndDetectionRegression:
         )
         bib = self.checker.find_bibliography_section(text)
         assert bib is not None
+
+    def test_author_year_bibliography_not_body_text(self):
+        """Regression for Ig6goVdtjb: author-year papers must not pick body text 'references'.
+
+        When a paper uses author-year citations (no [1], [2] markers), the word
+        "references" appears many times in body text (e.g. "see references therein").
+        The extractor must find the actual REFERENCES section heading near the end,
+        not a false positive from body text.
+        """
+        body_text = (
+            "1 Introduction\n"
+            "Recent work has made references to foundation models for robotics.\n"
+            "We refer to prior references in the field of embodied AI (Wu et al. (2023)).\n"
+            "\n"
+            "2 Related Work\n"
+            "Several references discuss reward learning from language preferences.\n"
+            "\n"
+            "3 Method\n"
+            "Our method builds on references from reinforcement learning.\n"
+        )
+        bib_refs = (
+            "Michael Ahn, Anthony Brohan, and Noah Brown. Do as i can, not as i say: "
+            "Grounding language in robotic affordances, 2022.\n"
+            "Jimmy Wu, Rika Antonova, Adam Kan, and Thomas Funkhouser. Tidybot: "
+            "Personalized robot assistance with large language models. "
+            "Autonomous Robots, 47(8):1087-1102, 2023a.\n"
+            "Yufei Wang and David Held. Rl-vlm-f: Reinforcement learning from "
+            "vision language foundation model feedback, 2024.\n"
+        )
+        text = body_text + "\nREFERENCES\n" + bib_refs
+
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        # Must contain actual bibliography entries
+        assert "Tidybot" in bib
+        assert "Jimmy Wu" in bib
+        assert "Michael Ahn" in bib
+        # Must NOT contain body text
+        assert "1 Introduction" not in bib
+        assert "2 Related Work" not in bib
+        assert "Our method builds on" not in bib
         assert "Published as a conference paper" not in bib

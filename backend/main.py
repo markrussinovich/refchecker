@@ -335,6 +335,15 @@ async def startup_event():
     """Initialize database and settings on startup"""
     await db.init_db()
 
+    # Semantic Scholar keys are browser-managed for the web UI and should not
+    # remain persisted on the server after upgrade.
+    try:
+        if await db.has_setting("semantic_scholar_api_key"):
+            await db.delete_setting("semantic_scholar_api_key")
+            logger.info("Removed deprecated server-side Semantic Scholar API key")
+    except Exception as e:
+        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
+    
     # Initialize global concurrency limiter with saved setting
     try:
         concurrency_setting = await db.get_setting("max_concurrent_checks")
@@ -360,10 +369,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to cancel stale checks: {e}")
     logger.info("Database initialized")
-
-    # Start S2 database auto-update background loop (checks on startup, then every 7 days)
-    global _s2_update_task
-    _s2_update_task = asyncio.create_task(_s2_auto_update_loop())
 
 
 @app.get("/")
@@ -556,9 +561,6 @@ async def start_check(
                 logger.warning(f"LLM config {llm_config_id} not found")
         if use_llm:
             _ensure_allowed_web_llm_provider(llm_provider)
-        # Fall back to DB-stored Semantic Scholar API key if not sent per-request
-        if not semantic_scholar_api_key:
-            semantic_scholar_api_key = await db.get_setting("semantic_scholar_api_key")
         logger.info(f"Effective API key resolved: {'present' if effective_api_key else 'MISSING'}, SS key: {'present' if semantic_scholar_api_key else 'MISSING'}")
 
         # Handle file upload or pasted text
@@ -622,13 +624,10 @@ async def start_check(
         )
         logger.info(f"Created pending check with ID {check_id}")
 
-        # Resolve local DB path from settings or environment
-        effective_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path")
-
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key, db_path=effective_db_path)
+            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key)
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id, "user_id": user_id}
@@ -664,7 +663,6 @@ async def run_check(
     cancel_event: asyncio.Event,
     user_id: int = 0,
     semantic_scholar_api_key: Optional[str] = None,
-    db_path: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -681,10 +679,6 @@ async def run_check(
         semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
     try:
-        # Resolve db_path from env/settings if not explicitly provided
-        if not db_path:
-            db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
-
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
         for _ in range(30):  # Wait up to 3 seconds
@@ -763,8 +757,7 @@ async def run_check(
             check_id=check_id,
             title_update_callback=title_update_callback,
             bibliography_source_callback=bibliography_source_callback,
-            semantic_scholar_api_key=semantic_scholar_api_key,
-            db_path=db_path,
+            semantic_scholar_api_key=semantic_scholar_api_key
         )
 
         # Run the check
@@ -932,8 +925,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached (or if cached file is empty/corrupt)
-            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            # Download PDF if not already cached
+            if not os.path.exists(pdf_path):
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
@@ -950,8 +943,6 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
             thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id)
-            if not thumbnail_path:
-                thumbnail_path = await get_text_thumbnail_async(check_id, f"ArXiv: {arxiv_id}")
         elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
             # Generate thumbnail from uploaded PDF
             if os.path.exists(paper_source):
@@ -1044,8 +1035,8 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached (or if cached file is empty/corrupt)
-            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            # Download PDF if not already cached
+            if not os.path.exists(pdf_path):
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
@@ -1381,14 +1372,6 @@ async def start_batch_check(
             slots_acquired += 1
 
         checks = []
-
-        # Fall back to DB-stored Semantic Scholar API key if not sent per-request
-        effective_ss_key = request.semantic_scholar_api_key
-        if not effective_ss_key:
-            effective_ss_key = await db.get_setting("semantic_scholar_api_key")
-
-        # Resolve local DB path from settings or environment
-        effective_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path")
         
         for url in valid_urls:
             session_id = str(uuid.uuid4())
@@ -1412,8 +1395,7 @@ async def start_batch_check(
                     session_id, check_id, url, 'url',
                     llm_provider, llm_model, effective_api_key, endpoint,
                     request.use_llm, cancel_event, user_id,
-                    semantic_scholar_api_key=effective_ss_key,
-                    db_path=effective_db_path,
+                    semantic_scholar_api_key=request.semantic_scholar_api_key,
                 )
             )
             active_checks[session_id] = {
@@ -2021,36 +2003,8 @@ async def validate_llm_config(
                 )
             raise HTTPException(status_code=400, detail=f"Provider '{config.provider}' is not available")
         
-        # Make a simple test call — use a direct minimal API call rather than
-        # _call_llm which includes the heavy reference-extraction system prompt
-        if provider_lower in ('openai', 'azure', 'vllm'):
-            import openai as _openai
-            test_client = _openai.OpenAI(api_key=config.api_key or provider.api_key)
-            if hasattr(provider, 'endpoint') and provider.endpoint:
-                base = provider.endpoint
-                for suffix in ('/chat/completions', '/completions'):
-                    if base.endswith(suffix):
-                        base = base[: -len(suffix)]
-                test_client = _openai.OpenAI(api_key=config.api_key or provider.api_key, base_url=base)
-            test_resp = test_client.chat.completions.create(
-                model=config.model or getattr(provider, 'model', None) or 'gpt-4.1',
-                messages=[{"role": "user", "content": "Reply with the word OK"}],
-                max_tokens=10,
-            )
-            test_response = (test_resp.choices[0].message.content or '').strip()
-        elif provider_lower == 'anthropic':
-            import anthropic as _anthropic
-            test_client = _anthropic.Anthropic(api_key=config.api_key or provider.api_key)
-            test_resp = test_client.messages.create(
-                model=config.model or getattr(provider, 'model', None) or 'claude-sonnet-4-20250514',
-                max_tokens=10,
-                messages=[{"role": "user", "content": "Reply with the word OK"}],
-            )
-            test_response = (test_resp.content[0].text if test_resp.content else '').strip()
-        elif provider_lower in ('google', 'gemini'):
-            test_response = provider._call_llm("Reply with the word OK")
-        else:
-            test_response = provider._call_llm("Reply with the word OK")
+        # Make a simple test call using _call_llm
+        test_response = provider._call_llm("Say 'ok' if you can hear me.")
         
         if test_response:
             return {"valid": True, "message": "Connection successful"}
@@ -2159,11 +2113,11 @@ async def validate_semantic_scholar_key(
 
 @app.get("/api/settings/semantic-scholar")
 async def get_semantic_scholar_key_status(current_user: UserInfo = Depends(require_user)):
-    """Check if a Semantic Scholar API key is stored."""
-    has_key = await db.has_setting("semantic_scholar_api_key")
+    """Semantic Scholar keys are now browser-only for the current tab."""
     return {
-        "has_key": has_key,
-        "storage": "server-encrypted",
+        "has_key": False,
+        "storage": "browser-only",
+        "message": "Semantic Scholar API keys are managed in browser memory for the current tab only",
     }
 
 
@@ -2172,19 +2126,20 @@ async def set_semantic_scholar_key(
     data: SemanticScholarKeyUpdate,
     current_user: UserInfo = Depends(require_user),
 ):
-    """Store the Semantic Scholar API key (encrypted)."""
-    if data.api_key:
-        await db.set_setting("semantic_scholar_api_key", data.api_key)
-    else:
-        await db.delete_setting("semantic_scholar_api_key")
-    return {"status": "ok"}
+    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
+    raise HTTPException(
+        status_code=410,
+        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
+    )
 
 
 @app.delete("/api/settings/semantic-scholar")
 async def delete_semantic_scholar_key(current_user: UserInfo = Depends(require_user)):
-    """Delete the stored Semantic Scholar API key."""
-    await db.delete_setting("semantic_scholar_api_key")
-    return {"status": "ok"}
+    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
+    raise HTTPException(
+        status_code=410,
+        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
+    )
 
 
 # General Settings endpoints
@@ -2207,18 +2162,8 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "min": 1,
                 "max": 20,
                 "section": "Performance"
-            },
-        }
-
-        # db_path is only available in single-user mode (server-local resource)
-        if not is_multiuser_mode():
-            settings_config["db_path"] = {
-                "default": "",
-                "type": "text",
-                "label": "Local Semantic Scholar Database",
-                "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
-                "section": "Database"
             }
+        }
         
         # Get current values from database
         settings = {}
@@ -2253,7 +2198,7 @@ async def update_setting(
     try:
         _require_admin(current_user)
         # Validate the setting key
-        valid_keys = {"max_concurrent_checks", "db_path"}
+        valid_keys = {"max_concurrent_checks"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
         
@@ -2277,44 +2222,6 @@ async def update_setting(
             except ValueError:
                 raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
         
-        if setting_key == "db_path":
-            path = update.value.strip()
-            if not path:
-                await db.set_setting(setting_key, "")
-                logger.info("Cleared db_path setting")
-                return {"key": setting_key, "value": "", "message": "Local database disabled"}
-            if not os.path.isfile(path):
-                raise HTTPException(status_code=400, detail=f"File not found: {path}")
-            # Validate SQLite schema
-            import sqlite3
-            try:
-                conn = sqlite3.connect(path)
-                cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
-                conn.close()
-                required = {'paperId', 'title', 'normalized_paper_title', 'authors', 'year', 'externalIds_DOI', 'externalIds_ArXiv'}
-                missing = required - cols
-                if missing:
-                    raise HTTPException(status_code=400, detail=f"Database missing required columns: {', '.join(sorted(missing))}")
-                # Check for indexes
-                idx_conn = sqlite3.connect(path)
-                indexes = {row[0] for row in idx_conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
-                idx_conn.close()
-                has_title_idx = any('title' in i.lower() for i in indexes)
-                warnings = []
-                if not has_title_idx:
-                    warnings.append("No title index found — queries may be slow")
-                row_count = sqlite3.connect(path).execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid database: {e}")
-            await db.set_setting(setting_key, path)
-            logger.info(f"Updated db_path to: {path} ({row_count:,} papers)")
-            msg = f"Database validated: {row_count:,} papers, {len(cols)} columns"
-            if warnings:
-                msg += f" (⚠ {'; '.join(warnings)})"
-            return {"key": setting_key, "value": path, "message": msg, "papers": row_count}
-        
         # For other settings, just store the value
         await db.set_setting(setting_key, update.value)
         return {"key": setting_key, "value": update.value, "message": "Setting updated"}
@@ -2324,94 +2231,6 @@ async def update_setting(
     except Exception as e:
         logger.error(f"Error updating setting: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------- S2 Database Auto-Update (self-managed background timer) ------
-
-_S2_UPDATE_INTERVAL = 7 * 24 * 3600  # 7 days in seconds
-_s2_update_task: Optional[asyncio.Task] = None
-_s2_update_status: Dict = {"state": "idle"}
-
-
-def _s2_db_needs_update(db_path: str) -> bool:
-    """Return True if the S2 database is missing or older than 7 days."""
-    if not os.path.exists(db_path):
-        return True
-    try:
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        cursor = conn.execute("SELECT value FROM metadata WHERE key = 'last_update_time'")
-        row = cursor.fetchone()
-        conn.close()
-        if not row:
-            return True
-        from datetime import datetime, timezone
-        import dateutil.parser
-        last_update = dateutil.parser.parse(row[0])
-        age = (datetime.now(timezone.utc) - last_update).total_seconds()
-        return age >= _S2_UPDATE_INTERVAL
-    except Exception:
-        return True
-
-
-def _run_s2_update_sync(output_dir: str, api_key: str | None) -> dict:
-    """Run the S2 download/update synchronously (called from a thread)."""
-    from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
-    downloader = SemanticScholarDownloader(output_dir=output_dir, api_key=api_key)
-    db_exists = os.path.exists(downloader.db_path)
-    if db_exists:
-        downloader.process_local_files(force_reprocess=False, incremental=True)
-        current_release = downloader.get_last_release_id()
-        latest_release = downloader.get_latest_release_id()
-        if current_release != latest_release:
-            if downloader.download_dataset_files():
-                downloader.process_local_files(incremental=True)
-    else:
-        if downloader.download_dataset_files():
-            downloader.process_local_files(incremental=False)
-    cursor = downloader.conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM papers")
-    return {"papers": cursor.fetchone()[0]}
-
-
-async def _s2_auto_update_loop():
-    """Background loop: check on startup then every 7 days."""
-    global _s2_update_status
-    while True:
-        db_path = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or ""
-        if not db_path:
-            logger.debug("S2 auto-update: no REFCHECKER_DB_PATH configured, skipping")
-            await asyncio.sleep(_S2_UPDATE_INTERVAL)
-            continue
-
-        output_dir = str(Path(db_path).parent)
-        if _s2_db_needs_update(db_path):
-            api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY") or await db.get_setting("semantic_scholar_api_key")
-            from datetime import datetime, timezone
-            _s2_update_status = {"state": "running", "started_at": datetime.now(timezone.utc).isoformat()}
-            logger.info(f"S2 auto-update: starting background update (output_dir={output_dir})")
-            try:
-                result = await asyncio.to_thread(_run_s2_update_sync, output_dir, api_key)
-                _s2_update_status = {
-                    "state": "completed",
-                    "papers": result["papers"],
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                }
-                logger.info(f"S2 auto-update: completed — {result['papers']:,} papers")
-            except Exception as e:
-                logger.error(f"S2 auto-update: failed — {e}", exc_info=True)
-                _s2_update_status = {"state": "failed", "error": str(e)}
-        else:
-            logger.debug("S2 auto-update: database is up-to-date, sleeping")
-
-        await asyncio.sleep(_S2_UPDATE_INTERVAL)
-
-
-@app.get("/api/admin/s2-db-status")
-async def get_s2_db_status(current_user: UserInfo = Depends(require_user)):
-    """Check the current state of the S2 database auto-update."""
-    _require_admin(current_user)
-    return _s2_update_status
 
 
 # Debug/Admin endpoints
