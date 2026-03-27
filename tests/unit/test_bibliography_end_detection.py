@@ -362,6 +362,64 @@ class TestBibliographyEndDetectionRegression:
         last_line = stripped.split('\n')[-1].strip()
         assert not last_line.isdigit(), f"Bibliography ends with bare page number: '{last_line}'"
 
+    def test_pdf_word_break_appendix_header(self):
+        """Regression for KR8viVTrX4: PDF word-break in appendix header.
+
+        PDF extraction can break words like 'INTRODUCTORY' into
+        'I NTRODUCTORY', producing appendix headers like
+        'A I NTRODUCTORY MATERIAL'.  The end-detection must still
+        recognise this as a section boundary and not include it
+        (or subsequent appendix content) in the bibliography.
+        """
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "16\nPublished as a conference paper at ICLR 2026\n"
+            "A I NTRODUCTORY MATERIAL\n"
+            "The main purpose of this appendix section is to provide further details.\n"
+            "B C OMPUTATIONAL REDUCTIONS\n"
+            "Further appendix content."
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "NTRODUCTORY" not in bib
+        assert "appendix section" not in bib
+        assert "OMPUTATIONAL" not in bib
+
+    def test_mixed_case_contents_toc(self):
+        """Regression for vxq1OnaAMq: mixed-case 'Contents' should end bibliography."""
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "17\n"
+            "Contents\n"
+            "A Related Work on NN Feasibility 19\n"
+            "B Gauge Mapping over General Convex Sets 19\n"
+            "B.1 Handling Linear Equality Constraints . . . . . . . . . . 20\n"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "Contents" not in bib
+        assert "Feasibility" not in bib
+
+    def test_pdf_broken_appendix_word(self):
+        """Regression for GVVNG2EMQv: 'APPENDIX' broken by PDF extraction.
+
+        PDF extraction can split 'APPENDIX' into 'A PPENDIX', producing
+        headers like 'B A PPENDIX : D ETAILED DERIVATION'.
+        """
+        text = self._build(
+            MULTI_PAGE_REFS,
+            "B A PPENDIX : D ETAILED DERIVATION AND PROOFS\n"
+            "This appendix provides the full mathematical derivation.\n"
+            "B.1 S TEP 1: K INEMATICS\n"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "PPENDIX" not in bib
+        assert "mathematical derivation" not in bib
+
     def test_published_as_header_trimmed(self):
         """'Published as a conference paper' line should be trimmed from end."""
         text = self._build(

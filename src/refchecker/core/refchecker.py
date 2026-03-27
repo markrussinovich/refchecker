@@ -1358,7 +1358,9 @@ class ArxivReferenceChecker:
             definitive_patterns = [
                 r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
                 r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
-                r'\n\s*CONTENTS\s*\n',  # Table of contents for appendix
+                r'\n\s*(?:CONTENTS|Contents)\s*\n',  # Table of contents for appendix (any case)
+                # PDF word-break: "APPENDIX" split into "A PPENDIX" or similar
+                r'\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
                 r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
                 r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
                 r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
@@ -1381,7 +1383,9 @@ class ArxivReferenceChecker:
                 r'\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further)\b[A-Za-z\s\-]*\n',
                 r'\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration)\b[A-Za-z\s\-\d]*\n',
                 # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
-                r'\n\s*[A-Z]\s+(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+                # Also handles PDF word-break artifacts where a letter gets separated from its
+                # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
+                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
             ]
             
             # ── HEURISTIC end markers: used only if no definitive marker found ──
