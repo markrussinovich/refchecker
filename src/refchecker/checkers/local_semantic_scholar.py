@@ -76,6 +76,11 @@ class LocalNonArxivReferenceChecker:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+        # Optimise for read-heavy workloads (reference lookups are read-only)
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA cache_size=-64000")   # 64 MB page cache
+        self.conn.execute("PRAGMA temp_store=MEMORY")
     
     # DOI extraction now handled by utility function
     

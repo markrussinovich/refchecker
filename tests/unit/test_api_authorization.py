@@ -279,25 +279,26 @@ def test_settings_updates_require_admin(auth_db):
     assert result["value"] == "7"
 
 
-def test_semantic_scholar_keys_are_server_encrypted(auth_db):
+def test_semantic_scholar_keys_are_browser_only(auth_db):
+    """Semantic Scholar keys are managed in browser memory, not stored on server."""
     api_main, db = auth_db
     owner = _run(_create_user(api_main, db, "owner-ss"))
 
     status = _run(api_main.get_semantic_scholar_key_status(owner))
     assert status["has_key"] is False
-    assert status["storage"] == "server-encrypted"
+    assert status["storage"] == "browser-only"
 
-    result = _run(api_main.set_semantic_scholar_key(
-        api_main.SemanticScholarKeyUpdate(api_key="ss-key"),
-        owner,
-    ))
-    assert result["status"] == "ok"
+    # POST and DELETE now return 410 Gone
+    with pytest.raises(HTTPException) as exc_info:
+        _run(api_main.set_semantic_scholar_key(
+            api_main.SemanticScholarKeyUpdate(api_key="ss-key"),
+            owner,
+        ))
+    assert exc_info.value.status_code == 410
 
-    status2 = _run(api_main.get_semantic_scholar_key_status(owner))
-    assert status2["has_key"] is True
-
-    result2 = _run(api_main.delete_semantic_scholar_key(owner))
-    assert result2["status"] == "ok"
+    with pytest.raises(HTTPException) as exc_info:
+        _run(api_main.delete_semantic_scholar_key(owner))
+    assert exc_info.value.status_code == 410
 
     status3 = _run(api_main.get_semantic_scholar_key_status(owner))
     assert status3["has_key"] is False

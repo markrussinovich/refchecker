@@ -679,6 +679,9 @@ async def run_check(
         semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
     try:
+        # Resolve local Semantic Scholar database path from environment
+        db_path = os.environ.get('REFCHECKER_DB_PATH') or None
+
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
         for _ in range(30):  # Wait up to 3 seconds
@@ -757,7 +760,8 @@ async def run_check(
             check_id=check_id,
             title_update_callback=title_update_callback,
             bibliography_source_callback=bibliography_source_callback,
-            semantic_scholar_api_key=semantic_scholar_api_key
+            semantic_scholar_api_key=semantic_scholar_api_key,
+            db_path=db_path,
         )
 
         # Run the check
