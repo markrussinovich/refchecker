@@ -504,3 +504,419 @@ class TestBibliographyEndDetectionRegression:
         assert "A.1 RELATED WORK" not in bib
         assert "Machine Text Generation" not in bib
         assert "DETAILS OF THE BASELINES" not in bib
+
+    def test_spaced_out_appendix_marker(self):
+        """Regression for 9ZogcRkhoG: fully spaced 'AP P E N D I X' from PDF extraction."""
+        refs = MULTI_PAGE_REFS
+        appendix = (
+            "AP P E N D I X\n"
+            "B D ETAILS OF THE EXPERIMENTS\n"
+            "Here we provide additional experimental details.\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "AP P E N D I X" not in bib
+        assert "EXPERIMENTS" not in bib
+
+    def test_algorithm_header_ends_bibliography(self):
+        """Regression for EOV1q1U23N: 'Algorithm 3 ...' should end bibliography."""
+        refs = MULTI_PAGE_REFS
+        appendix = (
+            "Algorithm 3 Discounted Regret Matching\n"
+            "Input: Action set A, discount factor gamma\n"
+            "Initialize cumulative regret R_a = 0 for all a in A\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "Algorithm 3" not in bib
+        assert "discount factor" not in bib
+
+    def test_theorem_header_ends_bibliography(self):
+        """Regression for Iw0tMeLed8: 'Theorem 1.' in appendix should end bibliography."""
+        refs = MULTI_PAGE_REFS
+        appendix = (
+            "Theorem 1. Fix a time horizon T >= 4. Let the confidence level\n"
+            "satisfy delta in (0, 1/e). Then with probability at least 1 - delta\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "Theorem 1" not in bib
+        assert "time horizon" not in bib
+
+    def test_fallback_path_applies_end_detection(self):
+        """Regression for 9ZogcRkhoG: fallback regex path must also trim at end markers.
+
+        When no References header is found, the fallback grabs from the first
+        reference-like indicator. It must still stop at definitive end markers
+        like APPENDIX rather than running to end of document.
+        """
+        # No explicit "References" header — simulate paper with no section title
+        body = (
+            "1 Introduction\n"
+            "This paper studies neural networks.\n"
+            "Smith, J. showed improved results (2020).\n"
+            "2 Method\n"
+            "We follow Jones, K. (2021).\n"
+        )
+        refs = (
+            "Smith, J. Neural network advances. Nature, 2020.\n"
+            "Jones, K. Deep learning methods. ICML, 2021.\n"
+            "Brown, A. and White, B. Optimization theory. NeurIPS, 2022.\n"
+        )
+        appendix = (
+            "Appendix\n"
+            "A Proofs\n"
+            "Here we provide the full derivation.\n"
+        )
+        # No "References" header — concatenate directly
+        text = body + refs + appendix
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        # Must NOT include appendix
+        assert "Proofs" not in bib
+
+
+# ── Regression tests for ICLR papers with spaced-out / ALL CAPS appendix headers ──
+
+class TestICLRAppendixOverrun:
+    """Regression tests for bibliography overrun into appendix sections.
+
+    These tests simulate real ICLR 2026 paper patterns where PDF text extraction
+    produces spaced-out or all-caps appendix headers that were not being detected
+    as end markers, causing bibliography extraction to include appendix content.
+    """
+
+    def setup_method(self):
+        self.checker = ArxivReferenceChecker()
+
+    def _build(self, refs, after, header="REFERENCES\n"):
+        return "Title\n\nAbstract.\n\n1 Introduction\nText.\n\n" + header + refs + "\n" + after
+
+    # -- HL3TvE4Afm: spaced-out "A E XTENDED RELATED WORK" --
+
+    def test_HL3TvE4Afm_spaced_extended_related_work(self):
+        """Regression for HL3TvE4Afm: 'A E XTENDED RELATED WORK' with PDF word-break."""
+        refs = (
+            "E. Abbe, J. Fan, and K. Wang. An theory of pca. "
+            "The Annals of Statistics, 50(4):2359, 2022.\n"
+            "Z. Allen-Zhu and L. Silvio. A local algorithm. In ICML, pp. 396, 2017.\n"
+            "A. Vaswani et al. Attention is all you need. In NeurIPS, 2017.\n"
+            "K. He, X. Zhang, S. Ren, and J. Sun. Deep residual learning. In CVPR, 2016.\n"
+        )
+        appendix = (
+            "11\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A E XTENDED RELATED WORK\n"
+            "In this section we provide extended discussion of related work "
+            "in the areas of optimization and neural network theory.\n"
+            "B P ROOF OF THEOREM 3.1\n"
+            "We present the full proof below.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "E XTENDED RELATED WORK" not in bib
+        assert "optimization and neural network" not in bib
+        assert "P ROOF" not in bib
+
+    # -- wWxdT6LB2D: ALL CAPS "A RELATED WORK", "B PROOFS AND SUPPORTING RESULTS" --
+
+    def test_wWxdT6LB2D_all_caps_related_work(self):
+        """Regression for wWxdT6LB2D: ALL CAPS 'A RELATED WORK' appendix header."""
+        refs = (
+            "P. Alquier. User-friendly introduction to PAC-Bayes bounds, 2024.\n"
+            "R. Amit and R. Meir. Meta-learning by adjusting priors. In NeurIPS, 2018.\n"
+            "Y. Balaji et al. MetaReg: Towards domain generalization. In NeurIPS, 2018.\n"
+            "M. Beitner and S. Huckemann. On the geometry of metric spaces. JFA, 2024.\n"
+        )
+        appendix = (
+            "11\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A RELATED WORK\n"
+            "Test-time training has attracted significant attention in recent years.\n"
+            "B PROOFS AND SUPPORTING RESULTS\n"
+            "We provide detailed proofs of our theoretical claims.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Alquier" in bib
+        assert "A RELATED WORK" not in bib
+        assert "test-time training" not in bib.lower()
+        assert "PROOFS AND SUPPORTING" not in bib
+
+    # -- Iw0tMeLed8: "C PROOFS OF THE THEORETICAL RESULTS" --
+
+    def test_Iw0tMeLed8_all_caps_proofs_of_theoretical(self):
+        """Regression for Iw0tMeLed8: 'C PROOFS OF THE THEORETICAL RESULTS'."""
+        refs = (
+            "A. Angelopoulos et al. Prediction-powered inference. Science, 382:669, 2023.\n"
+            "A. Angelopoulos et al. PPI++: When is prediction-powered inference worth it? 2023.\n"
+            "L. Brown and T. Cai. Confidence intervals for a binomial proportion. SS, 2001.\n"
+            "P. Groeneboom and J. Wellner. Information bounds. Birkhauser, 1992.\n"
+        )
+        appendix = (
+            "10\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A E XPERIMENTS ON THE EFFECT OF THE MIXING PARAMETER\n"
+            "We investigate the effect of the mixing parameter on coverage.\n"
+            "B E XTENDED RELATED WORK\n"
+            "Additional references on conformal prediction methods.\n"
+            "C P ROOFS OF THE THEORETICAL RESULTS IN S ECTION 4\n"
+            "Theorem 1. Fix a time horizon T >= 4.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Angelopoulos" in bib
+        assert "XPERIMENTS ON THE EFFECT" not in bib
+        assert "mixing parameter" not in bib
+        assert "P ROOFS" not in bib
+
+    # -- EOV1q1U23N: "A FURTHER RELATED WORK" --
+
+    def test_EOV1q1U23N_further_related_work(self):
+        """Regression for EOV1q1U23N: 'A FURTHER RELATED WORK' with ALL CAPS."""
+        refs = (
+            "G. Brown and Y. Song. Regret matching for stochastic games. In ICML, 2024.\n"
+            "M. Bowling et al. Heads-up limit hold'em poker is solved. Science, 2015.\n"
+            "N. Brown and T. Sandholm. Superhuman AI for multiplayer poker. Science, 2019.\n"
+            "L. Shapley. Stochastic games. PNAS, 39(10):1095-1100, 1953.\n"
+        )
+        appendix = (
+            "11\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A FURTHER RELATED WORK\n"
+            "We extend the discussion of related work on regret minimization "
+            "by Hart and Mas-Colell 2000 and its connections to correlated equilibria.\n"
+            "B FURTHER BACKGROUND\n"
+            "Additional background on extensive-form games.\n"
+            "C OMITTED PROOFS\n"
+            "C.1 PROOFS FROM SECTION 3\n"
+            "Proof of Theorem 3.1. Fix epsilon > 0.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Shapley" in bib
+        assert "FURTHER RELATED WORK" not in bib
+        assert "regret minimization" not in bib
+        assert "OMITTED PROOFS" not in bib
+
+    # -- WjEAMyLDoh: numbered "7 APPENDIX A", "9 APPENDIX C: DERIVATION" --
+
+    def test_WjEAMyLDoh_numbered_appendix_sections(self):
+        """Regression for WjEAMyLDoh: numbered appendix sections without period."""
+        refs = (
+            "C. Szepesvari. Algorithms for reinforcement learning. MC, 2010.\n"
+            "R. Sutton and A. Barto. Reinforcement learning. MIT Press, 2018.\n"
+            "J. Tsitsiklis and B. Van Roy. Analysis of TD-learning. ML, 1997.\n"
+            "C. Watkins and P. Dayan. Q-learning. Machine Learning, 8:279-292, 1992.\n"
+        )
+        appendix = (
+            "11\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "7 APPENDIX A\n"
+            "Here we present additional proofs.\n"
+            "8 APPENDIX B: DISCUSSION ON STRONG APPROXIMATION OF Q-LEARNING\n"
+            "We provide analysis of the convergence rate.\n"
+            "9 APPENDIX C: DERIVATION OF ASSUMPTION 3.2\n"
+            "Starting from the definition...\n"
+            "10 ADDITIONAL EXPERIMENTS\n"
+            "We report additional experimental results.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Watkins" in bib
+        assert "APPENDIX A" not in bib
+        assert "additional proofs" not in bib
+        assert "APPENDIX B" not in bib
+        assert "ADDITIONAL EXPERIMENTS" not in bib
+
+    def test_WjEAMyLDoh_pdf_wordbreak_numbered_appendix(self):
+        """Regression for WjEAMyLDoh: numbered appendix with PDF word-break 'A PPENDIX'."""
+        refs = (
+            "C. Szepesvari. Algorithms for reinforcement learning. MC, 2010.\n"
+            "R. Sutton and A. Barto. Reinforcement learning. MIT Press, 2018.\n"
+            "J. Tsitsiklis and B. Van Roy. Analysis of TD-learning. ML, 1997.\n"
+        )
+        appendix = (
+            "7 A PPENDIX A\n"
+            "Here we present additional proofs.\n"
+            "8 A PPENDIX B: D ISCUSSION ON S TRONG APPROXIMATION\n"
+            "Analysis of convergence.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Szepesvari" in bib
+        assert "PPENDIX" not in bib
+        assert "additional proofs" not in bib
+
+    # -- vLFqOoMBol: mixed-case appendix headers --
+
+    def test_vLFqOoMBol_comparison_appendix(self):
+        """Regression for vLFqOoMBol: 'B Comparison to existing verification systems'."""
+        refs = (
+            "A. Blum et al. On-line algorithms in machine teaching. ML, 2020.\n"
+            "A. Goldwasser and S. Micali. Probabilistic encryption. JCSS, 1984.\n"
+            "S. Garg et al. Can neural network memorization be localized? In ICML, 2023.\n"
+            "P. Kirchner. Forgery-resistant cryptographic attestation. In IEEE S&P, 2024.\n"
+        )
+        appendix = (
+            "10\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A Centered logits also lie on an ellipse\n"
+            "Lemma A.1. Let f be a classifier with centered logits.\n"
+            "B Comparison to existing verification systems\n"
+            "We compare our approach to C2PA and other systems.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Kirchner" in bib
+        assert "Comparison to existing" not in bib
+        assert "C2PA" not in bib
+
+    def test_vLFqOoMBol_centered_logits_appendix(self):
+        """Regression for vLFqOoMBol: 'A Centered logits also lie on an ellipse'.
+
+        This appendix header starts with a single uppercase letter followed by
+        a Capitalized word + lowercase words. The keyword 'Centered' is matched.
+        """
+        refs = (
+            "A. Goldwasser and S. Micali. Probabilistic encryption. JCSS, 1984.\n"
+            "S. Garg et al. Can neural network memorization be localized? ICML, 2023.\n"
+            "P. Kirchner. Forgery-resistant attestation. In IEEE S&P, 2024.\n"
+        )
+        appendix = (
+            "A Centered logits also lie on an ellipse\n"
+            "Lemma A.1. Let f be a classifier with K classes.\n"
+        )
+        bib = self.checker.find_bibliography_section(self._build(refs, appendix))
+        assert bib is not None
+        assert "Kirchner" in bib
+        assert "Centered logits" not in bib
+        assert "Lemma A.1" not in bib
+
+    # -- 9ZogcRkhoG: fallback start detection picks up body text --
+
+    def test_9ZogcRkhoG_fallback_prefers_late_matches(self):
+        """Regression for 9ZogcRkhoG: fallback regex must prefer matches in last 50%.
+
+        When no References header is found, the fallback uses indicator patterns
+        like '\\d+.\\s+[A-Z]'. Body text with numbered lists can match this early
+        in the document. The fix prefers matches in the last 50% of the document.
+        """
+        body_early = (
+            "1. Introduction\n"
+            "This paper studies protein ML models.\n"
+            "2. Related Work\n"
+            "Prior work includes several approaches.\n"
+            "3. Methods\n"
+            "We propose a novel framework.\n"
+            "4. Results\n"
+            "Our experiments show improvements.\n"
+            "5. Discussion\n"
+            "We discuss the implications of our results.\n"
+        )
+        # Pad to ensure body is > 50% of document
+        body_padding = "Additional body text. " * 100 + "\n"
+        refs = (
+            "Baranwal, A., Fountoulakis, K., and Jagannath, A. Graph convolution for "
+            "semi-supervised classification. In NeurIPS, 2021.\n"
+            "Chen, J. and Li, X. Stochastic gradient descent with momentum. "
+            "JMLR, 23(1):1-45, 2022.\n"
+            "LeCun, Y., Bengio, Y., and Hinton, G. Deep learning. Nature, 521:436, 2015.\n"
+            "Vaswani, A. et al. Attention is all you need. In NeurIPS, 2017.\n"
+        )
+        appendix = (
+            "Appendix\n"
+            "A Summary of experiments\n"
+            "We summarize our experimental configurations.\n"
+        )
+        # No "References" header — body + refs + appendix
+        text = body_early + body_padding + refs + appendix
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        # Must contain actual references (from the late section)
+        assert "Vaswani" in bib
+        assert "LeCun" in bib
+        # Must NOT contain body text
+        assert "1. Introduction" not in bib
+        assert "This paper studies" not in bib
+        # Must NOT contain appendix
+        assert "Summary of experiments" not in bib
+
+    # -- General: ALL CAPS keywords should be detected --
+
+    def test_all_caps_keywords_detected(self):
+        """Test that ALL CAPS appendix keywords are correctly detected."""
+        keywords_to_test = [
+            ("A EXTENDED RELATED WORK", "extended discussion"),
+            ("A ADDITIONAL EXPERIMENTS", "more experiments"),
+            ("B FURTHER ANALYSIS", "deeper analysis"),
+            ("A SUPPLEMENTARY MATERIAL", "extra material"),
+            ("B BACKGROUND ON METHODS", "method background"),
+            ("A RELATED WORK", "related work discussion"),
+            ("A SUMMARY OF RESULTS", "results summary"),
+        ]
+        for header, content in keywords_to_test:
+            refs = MULTI_PAGE_REFS
+            appendix = f"{header}\n{content.capitalize()} here.\n"
+            text = self._build(refs, appendix)
+            bib = self.checker.find_bibliography_section(text)
+            assert bib is not None, f"No bib found for appendix header: {header}"
+            assert header not in bib, f"Bib should not include appendix header: {header}"
+            assert content not in bib.lower(), f"Bib should not include content after: {header}"
+            assert "Vaswani" in bib, f"Bib should include refs before: {header}"
+
+    def test_looks_like_ref_validation_not_too_broad(self):
+        """Test that looks_like_ref doesn't reject valid appendix headers.
+
+        When appendix content after the header mentions years (e.g., citing
+        prior work like 'Smith 2020'), the validator must NOT treat this as
+        a reference entry and reject the header.
+        """
+        refs = MULTI_PAGE_REFS
+        appendix = (
+            "A FURTHER RELATED WORK\n"
+            "Recent advances in deep learning, following the seminal work "
+            "of LeCun 2015 and Goodfellow 2014, have led to significant progress "
+            "in computer vision and natural language processing.\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "FURTHER RELATED WORK" not in bib
+        assert "seminal work" not in bib
+
+    def test_page_breaks_mid_references_not_split(self):
+        """Page breaks within the reference section must not truncate bibliography.
+
+        ICLR papers have page numbers and 'Published as a conference paper'
+        headers mid-references. These must be treated as part of the references.
+        """
+        refs_page1 = (
+            "E. Abbe. Theory of PCA. Annals of Statistics, 2022.\n"
+            "Z. Allen-Zhu. Local algorithm. In ICML, 2017.\n"
+        )
+        page_break = "11\nPublished as a conference paper at ICLR 2026\n"
+        refs_page2 = (
+            "K. He. Deep residual learning. In CVPR, 2016.\n"
+            "A. Vaswani. Attention is all you need. In NeurIPS, 2017.\n"
+        )
+        appendix = (
+            "13\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A EXTENDED RELATED WORK\n"
+            "Here we discuss additional related work.\n"
+        )
+        text = self._build(refs_page1 + page_break + refs_page2, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Abbe" in bib
+        assert "Vaswani" in bib
+        assert "EXTENDED RELATED WORK" not in bib
+        assert "full derivation" not in bib

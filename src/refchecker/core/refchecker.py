@@ -1317,6 +1317,41 @@ class ArxivReferenceChecker:
         # Try to find the bibliography section
         bibliography_text = None
         
+        # ── DEFINITIVE end markers: these always end the reference section ──
+        # Defined here so both the main path and fallback path can use them.
+        definitive_patterns = [
+            r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
+            r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
+            r'\n\s*(?:CONTENTS|Contents)\s*\n',  # Table of contents for appendix (any case)
+            # PDF word-break: "APPENDIX" split into "A PPENDIX" or similar
+            r'\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
+            # Fully spaced-out APPENDIX: "AP P E N D I X" (each letter separated)
+            r'\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
+            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
+            r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
+            r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
+            r'\n\s*(?:AUTHOR|Author)\s+(?:CONTRIBUTIONS?|Contributions?)\s*\n',
+            r'\n\s*(?:ETHICS|Ethics)\s+(?:STATEMENT|Statement)\s*\n',
+            r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
+            r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
+            r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
+            r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
+            # Numbered post-ref sections (with period)
+            r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
+            # Numbered post-ref sections (without period): "7 APPENDIX A", "9 APPENDIX C:"
+            r'\n\s*\d+\s+(?:APPENDIX|Appendix)\b',
+            # Numbered post-ref sections with PDF word-break: "7 A PPENDIX"
+            r'\n\s*\d+\s+A\s*PPENDIX\b',
+            # Numbered post-ref sections: "11 AUXILIARY RESULTS", "10 ADDITIONAL EXPERIMENTS"
+            r'\n\s*\d+\s+(?:ADDITIONAL|AUXILIARY|SUPPLEMENTARY)\b[A-Za-z\s]*\n',
+            # Algorithm / Theorem / Lemma headers (appendix math content)
+            r'\nAlgorithm\s+\d+[:\s]',
+            r'\n(?:Theorem|Lemma|Proposition|Corollary)\s+\d+[.:\s]',
+            # LaTeX end markers
+            r'\\end\{thebibliography\}',
+            r'\\end\{document\}',
+        ]
+        
         # Collect all potential matches from all patterns
         # Use re.MULTILINE so ^ and $ match line boundaries, not just string start/end
         all_matches = []
@@ -1392,34 +1427,11 @@ class ArxivReferenceChecker:
             # We separate "definitive" markers (Appendix, CONTENTS, page headers)
             # from "heuristic" markers (Table/Figure patterns) and prefer definitive ones.
             
-            # ── DEFINITIVE end markers: these always end the reference section ──
-            definitive_patterns = [
-                r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
-                r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
-                r'\n\s*(?:CONTENTS|Contents)\s*\n',  # Table of contents for appendix (any case)
-                # PDF word-break: "APPENDIX" split into "A PPENDIX" or similar
-                r'\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
-                r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
-                r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
-                r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
-                r'\n\s*(?:AUTHOR|Author)\s+(?:CONTRIBUTIONS?|Contributions?)\s*\n',
-                r'\n\s*(?:ETHICS|Ethics)\s+(?:STATEMENT|Statement)\s*\n',
-                r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
-                r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
-                r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
-                r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
-                # Numbered post-ref sections
-                r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
-                # LaTeX end markers
-                r'\\end\{thebibliography\}',
-                r'\\end\{document\}',
-            ]
-            
             # ── Appendix section headers that look like "A Extended Work", "A1 Proofs" ──
             # These need special validation: only accept if NOT inside a reference entry
             appendix_section_patterns = [
-                r'\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further)\b[A-Za-z\s\-]*\n',
-                r'\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration)\b[A-Za-z\s\-\d]*\n',
+                r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
+                r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered)\b[A-Za-z\s\-\d]*\n',
                 # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
                 # Also handles PDF word-break artifacts where a letter gets separated from its
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
@@ -1462,10 +1474,24 @@ class ArxivReferenceChecker:
                     if candidate <= start_pos + 100:
                         continue
                     # Validate: text after the match should NOT look like a reference
+                    # entry. Only reject if the first line starts with an author-name
+                    # pattern (e.g. "Smith, J." or "E. Abbe" or "Smith J.").
+                    # Do NOT reject based on bare capitalized words or year mentions,
+                    # as appendix body text often mentions authors and years.
                     after_match = text[start_pos + m.end():start_pos + m.end() + 200]
+                    first_line = after_match.split('\n')[0] if after_match else ''
                     looks_like_ref = bool(re.match(
-                        r'\s*[A-Z][a-z]+[\s,].*(?:19|20)\d{2}', after_match, re.DOTALL
-                    ))
+                        r'\s*(?:'
+                        r'[A-Z][a-z]+,\s+[A-Z]\.'   # "Smith, J."
+                        r'|[A-Z]\.\s+[A-Z][a-z]+'    # "J. Smith" or "E. Abbe"
+                        r'|[A-Z][a-z]+\s+[A-Z]\.'    # "Smith J."
+                        r')',
+                        first_line
+                    )) and not re.match(
+                        r'\s*(?:Lemma|Theorem|Proposition|Corollary|Definition|'
+                        r'Remark|Proof|Claim|Conjecture|Axiom|Algorithm|Table|Figure)\b',
+                        first_line
+                    )
                     if not looks_like_ref:
                         if definitive_end is None or candidate < definitive_end:
                             definitive_end = candidate
@@ -1475,16 +1501,16 @@ class ArxivReferenceChecker:
             if definitive_end is not None:
                 end_pos = definitive_end
                 logger.debug(f"Using definitive end marker at {end_pos}")
-            else:
-                # Third pass: try heuristic patterns only if no definitive marker found
-                for pattern in heuristic_patterns:
-                    m = re.search(pattern, text[start_pos:])
-                    if m:
-                        candidate = start_pos + m.start()
-                        if candidate > start_pos + 100 and candidate < end_pos:
-                            end_pos = candidate
-                            logger.debug(f"Using heuristic end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
-                            break
+
+            # Also check heuristic patterns — use earliest of definitive and heuristic
+            for pattern in heuristic_patterns:
+                m = re.search(pattern, text[start_pos:])
+                if m:
+                    candidate = start_pos + m.start()
+                    if candidate > start_pos + 100 and candidate < end_pos:
+                        end_pos = candidate
+                        logger.debug(f"Using heuristic end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
+                        break
             
             # Trim trailing whitespace / page numbers / conference headers at the boundary
             while end_pos > start_pos + 100:
@@ -1523,8 +1549,14 @@ class ArxivReferenceChecker:
             for indicator in reference_indicators:
                 matches = list(re.finditer(indicator, text))
                 if len(matches) > 5:  # If we find multiple matches, it might be a reference section
-                    # Find the first match
-                    first_match = matches[0]
+                    # Prefer matches in the last 50% of the document to avoid
+                    # matching body text (numbered lists, etc.)
+                    half_pos = len(text) // 2
+                    late_matches = [m for m in matches if m.start() >= half_pos]
+                    if late_matches:
+                        first_match = late_matches[0]
+                    else:
+                        first_match = matches[0]
                     # Look for the beginning of the line
                     line_start = text.rfind('\n', 0, first_match.start())
                     if line_start == -1:
@@ -1532,8 +1564,47 @@ class ArxivReferenceChecker:
                     else:
                         line_start += 1  # Skip the newline
                     
-                    # Take from there to the end
-                    bibliography_text = text[line_start:]
+                    # Apply end detection (same patterns as main path)
+                    end_pos = len(text)
+                    # Check definitive patterns
+                    for pattern in definitive_patterns:
+                        m = re.search(pattern, text[line_start:])
+                        if m:
+                            candidate = line_start + m.start()
+                            if candidate > line_start + 100 and candidate < end_pos:
+                                end_pos = candidate
+                                logger.debug(f"Fallback end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
+                    # Also check appendix section patterns (same validation as main path)
+                    fallback_appendix_patterns = [
+                        r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
+                        r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary)\b[A-Za-z\s\-\d]*\n',
+                        r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+                    ]
+                    for pattern in fallback_appendix_patterns:
+                        for m2 in re.finditer(pattern, text[line_start:]):
+                            candidate = line_start + m2.start()
+                            if candidate <= line_start + 100:
+                                continue
+                            after_match = text[line_start + m2.end():line_start + m2.end() + 200]
+                            first_line = after_match.split('\n')[0] if after_match else ''
+                            looks_like_ref = bool(re.match(
+                                r'\s*(?:'
+                                r'[A-Z][a-z]+,\s+[A-Z]\.'
+                                r'|[A-Z]\.\s+[A-Z][a-z]+'
+                                r'|[A-Z][a-z]+\s+[A-Z]\.'
+                                r')',
+                                first_line
+                            )) and not re.match(
+                                r'\s*(?:Lemma|Theorem|Proposition|Corollary|Definition|'
+                                r'Remark|Proof|Claim|Conjecture|Axiom|Algorithm|Table|Figure)\b',
+                                first_line
+                            )
+                            if not looks_like_ref and candidate < end_pos:
+                                end_pos = candidate
+                                logger.debug(f"Fallback appendix end at {end_pos}: {repr(m2.group(0).strip()[:60])}")
+                            break
+                    
+                    bibliography_text = text[line_start:end_pos]
                     logger.info(f"Found potential bibliography section using indicator: {indicator}")
                     break
         

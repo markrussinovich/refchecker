@@ -94,13 +94,18 @@ class LLMProviderMixin:
             "- NO other text allowed\n"
             "- If no valid references exist, return NOTHING (completely empty response)\n\n"
             "RULES:\n"
-            "1. Split by numbered markers [1], [2], etc. - references may span multiple lines\n"
+            "1. Split by numbered markers [1], [2], etc. OR by author-year entries - references may span multiple lines\n"
             "2. Extract: authors, title, venue (journal/booktitle), year, URLs/DOIs\n"
             "3. For BibTeX: 'title' field = paper title, 'journal'/'booktitle' = venue\n"
             "4. Handle author formats: 'Last, First' becomes 'First Last', separate with *\n"
             "5. Preserve 'et al' exactly as written\n"
             "6. Skip entries that are only URLs without bibliographic data\n"
-            "7. If no author field exists, start with # (empty author)"
+            "7. If no author field exists, start with # (empty author)\n"
+            "8. Use the EXACT title from the bibliography text - never shorten, paraphrase, or summarize titles\n"
+            "9. IGNORE non-reference text: theorems, proofs, algorithms, equations, discussion prose, "
+            "section headers, figure/table captions. Only extract actual bibliographic entries\n"
+            "10. If references suddenly change format (e.g. numbered refs followed by unnumbered prose), "
+            "stop extracting - the later text is likely appendix content, not references"
         )
 
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
