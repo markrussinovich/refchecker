@@ -471,3 +471,36 @@ class TestBibliographyEndDetectionRegression:
         assert "2 Related Work" not in bib
         assert "Our method builds on" not in bib
         assert "Published as a conference paper" not in bib
+
+    def test_appendix_with_dotted_subsections(self):
+        """Regression for l9mqzHROGu: appendix subsections like A.1 should end bibliography.
+
+        Some papers use "A.1 RELATED WORK", "A.2 DETAILS OF THE BASELINES" etc.
+        as appendix headings, preceded by a standalone "A" line. The extractor
+        must stop before these.
+        """
+        refs = (
+            "Sara Abdali and Jia He. Detecting ai text. In KDD, pp. 6428, 2024.\n"
+            "Xianjun Yang and Haifeng Chen. DNA-GPT: Divergent n-gram analysis. "
+            "In ICLR, 2024.\n"
+        )
+        appendix = (
+            "14\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A\n"
+            "A.1 RELATED WORK\n"
+            "Machine Text Generation. Modern large language models are predominantly\n"
+            "autoregressive Transformers trained with next-token prediction.\n"
+            "A.2 DETAILS OF THE BASELINES\n"
+            "DetectGPT uses random perturbations to detect machine text.\n"
+        )
+        text = self._build(refs, appendix, header="REFERENCES\n")
+
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Sara Abdali" in bib
+        assert "DNA-GPT" in bib
+        # Appendix content must NOT be included
+        assert "A.1 RELATED WORK" not in bib
+        assert "Machine Text Generation" not in bib
+        assert "DETAILS OF THE BASELINES" not in bib

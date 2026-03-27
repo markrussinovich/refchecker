@@ -1424,6 +1424,11 @@ class ArxivReferenceChecker:
                 # Also handles PDF word-break artifacts where a letter gets separated from its
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+                # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
+                r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
+                # Standalone appendix letter on its own line followed by a subsection:
+                # \nA\nA.1 ... or \nA\nA Extended ...
+                r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
             ]
             
             # ── HEURISTIC end markers: used only if no definitive marker found ──
