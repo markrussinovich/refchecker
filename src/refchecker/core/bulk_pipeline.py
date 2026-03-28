@@ -579,16 +579,6 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, tota
     if ref_verified_url:
         _safe_print(f'       Verified URL: {ref_verified_url}')
 
-    # Check if LLM verified this reference (determines display)
-    assessment = error_entry.get('hallucination_assessment', {})
-    llm_verified = False
-    llm_verified_url = None
-    if assessment.get('verdict') == 'UNLIKELY' and assessment.get('link'):
-        ha_link = assessment['link']
-        if ha_link.startswith('http'):
-            llm_verified = True
-            llm_verified_url = ha_link
-
     # Use original per-error dicts when available (preserves error/warning/info type)
     original_errors = error_entry.get('_original_errors')
     if original_errors:
@@ -599,23 +589,19 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, tota
             for e in original_errors
         )
         if has_unverified:
-            if llm_verified:
-                # Show clean verified URL instead of 'Could not verify'
-                _safe_print(f'       Verified URL: {llm_verified_url}')
-            else:
-                _safe_print(f'      ❓ Could not verify: {ref_title}')
-                unverified_errs = [
-                    e for e in original_errors
-                    if e.get('error_type') == 'unverified'
-                       or e.get('warning_type') == 'unverified'
-                       or e.get('info_type') == 'unverified'
-                ]
-                if unverified_errs:
-                    detail = (unverified_errs[0].get('error_details')
-                              or unverified_errs[0].get('warning_details')
-                              or unverified_errs[0].get('info_details', ''))
-                    if detail:
-                        _safe_print(f'         Subreason: {detail}')
+            _safe_print(f'      ❓ Could not verify: {ref_title}')
+            unverified_errs = [
+                e for e in original_errors
+                if e.get('error_type') == 'unverified'
+                   or e.get('warning_type') == 'unverified'
+                   or e.get('info_type') == 'unverified'
+            ]
+            if unverified_errs:
+                detail = (unverified_errs[0].get('error_details')
+                          or unverified_errs[0].get('warning_details')
+                          or unverified_errs[0].get('info_details', ''))
+                if detail:
+                    _safe_print(f'         Subreason: {detail}')
 
         for error in original_errors:
             if (error.get('error_type') == 'unverified'
@@ -635,24 +621,18 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, tota
         # Fallback for entries without original errors (legacy / single-error)
         error_type = error_entry.get('error_type', '')
         error_details = error_entry.get('error_details', '')
-        if error_type in ('unverified', 'llm_verified'):
-            if llm_verified:
-                _safe_print(f'       Verified URL: {llm_verified_url}')
-            else:
-                _safe_print(f'      ❓ Could not verify: {ref_title}')
-                if error_details:
-                    _safe_print(f'         Subreason: {error_details}')
+        if error_type == 'unverified':
+            _safe_print(f'      ❓ Could not verify: {ref_title}')
+            if error_details:
+                _safe_print(f'         Subreason: {error_details}')
         elif error_details:
             _safe_print_labeled('❌', error_details)
 
-    # Hallucination/verification flag (LLM-verified handled above)
+    # Hallucination flag (only shown for LIKELY)
+    assessment = error_entry.get('hallucination_assessment', {})
     if assessment.get('verdict') == 'LIKELY':
         explanation = assessment.get('explanation', '')
         _safe_print(f'      🚩 Likely hallucinated: {explanation}')
-    elif not llm_verified and assessment.get('verdict') in ('UNLIKELY', 'UNCERTAIN'):
-        explanation = assessment.get('explanation', '')
-        if explanation:
-            _safe_print(f'         Not flagged: {explanation}')
 
 
 class BulkProgressReporter:
@@ -1473,17 +1453,6 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
         assessment = task.wait()
         if assessment:
             error_entry['hallucination_assessment'] = assessment
-            # Promote unverified to llm_verified when LLM confirms with URL
-            ha_verdict = assessment.get('verdict')
-            ha_link = assessment.get('link')
-            ha_explanation = assessment.get('explanation', '')
-            if ha_verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http'):
-                err_type = (error_entry.get('error_type') or '').lower()
-                if err_type == 'unverified':
-                    error_entry['error_type'] = 'llm_verified'
-                    error_entry['error_details'] = f"Verified by LLM — {ha_explanation}"
-                    error_entry['llm_verified_url'] = ha_link
-                    checker.total_unverified_refs = max(0, checker.total_unverified_refs - 1)
 
 
 def _needs_llm_hallucination(error_entry: Dict[str, Any]) -> bool:

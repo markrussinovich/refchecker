@@ -379,48 +379,9 @@ class ProgressRefChecker:
             )
             if hallucination_assessment and hallucination_assessment.get('verdict') == 'LIKELY':
                 status = 'hallucination'
-            elif hallucination_assessment and hallucination_assessment.get('verdict') == 'UNLIKELY' and is_unverified:
-                ha_link = hallucination_assessment.get('link')
-                # If the LLM found the paper with a valid URL, promote to verified
-                if ha_link and ha_link.startswith('http'):
-                    # Only the unverified error exists — promote to verified
-                    has_only_unverified = all(
-                        e.get('error_type') == 'unverified' or e.get('is_suggestion') or e.get('error_type') == 'info'
-                        for e in sanitized
-                    )
-                    if has_only_unverified:
-                        status = 'verified'
-                        # Remove unverified errors
-                        formatted_errors = [e for e in formatted_errors if e.get('error_type') != 'unverified']
-                        # Add the LLM-found URL as an authoritative URL
-                        url_type = 'other'
-                        if 'arxiv.org' in ha_link:
-                            url_type = 'arxiv'
-                        elif 'doi.org' in ha_link:
-                            url_type = 'doi'
-                        elif 'semanticscholar.org' in ha_link:
-                            url_type = 'semantic_scholar'
-                        elif 'openreview.net' in ha_link:
-                            url_type = 'openreview'
-                        if not any(u.get('url') == ha_link for u in authoritative_urls):
-                            authoritative_urls.append({'type': url_type, 'url': ha_link})
-                        logger.info(f"LLM verified reference with URL: {ha_link}")
-                    else:
-                        # Has other real errors besides unverified — keep status but add URL
-                        ha_explanation = hallucination_assessment.get('explanation', '')
-                        if ha_explanation:
-                            for err_obj in formatted_errors:
-                                if err_obj.get('error_type') == 'unverified':
-                                    err_obj['error_details'] = f"Reference could not be verified — {ha_explanation}"
-                else:
-                    # UNLIKELY but no valid link — keep as unverified with explanation
-                    ha_explanation = hallucination_assessment.get('explanation', '')
-                    if ha_explanation:
-                        for err_obj in formatted_errors:
-                            if err_obj.get('error_type') == 'unverified':
-                                err_obj['error_details'] = f"Reference could not be verified — {ha_explanation}"
-            elif hallucination_assessment and hallucination_assessment.get('verdict') not in ('LIKELY', 'UNLIKELY') and is_unverified:
-                # UNCERTAIN verdict — keep as unverified with explanation
+            elif hallucination_assessment and hallucination_assessment.get('verdict') != 'LIKELY' and is_unverified:
+                # For unverified refs not flagged as hallucinated, include the
+                # LLM explanation as the subreason on the unverified error.
                 ha_explanation = hallucination_assessment.get('explanation', '')
                 if ha_explanation:
                     for err_obj in formatted_errors:

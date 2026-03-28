@@ -6014,7 +6014,7 @@ class ArxivReferenceChecker:
             
             if has_unverified_error:
                 self.total_unverified_refs += 1
-                # DON'T display unverified yet — defer until after hallucination check
+                self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
@@ -6035,29 +6035,11 @@ class ArxivReferenceChecker:
             # Run inline hallucination assessment and display if print_output
             # If the parallel printer already ran the assessment, just store it
             # on the error record instead of re-calling the LLM.
-            llm_verified = False
-            llm_verified_url = None
             if precomputed_hallucination:
-                target_record = error_entry_record if error_entry_record is not None else (self.errors[-1] if self.errors else None)
-                if target_record is not None:
-                    target_record['hallucination_assessment'] = precomputed_hallucination
-                    # Apply LLM-verified promotion for precomputed results
-                    ha_verdict = precomputed_hallucination.get('verdict')
-                    ha_link = precomputed_hallucination.get('link')
-                    ha_explanation = precomputed_hallucination.get('explanation', '')
-                    if ha_verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http') and has_unverified_error:
-                        err_type = (target_record.get('error_type') or '').lower()
-                        if err_type == 'unverified':
-                            target_record['error_type'] = 'llm_verified'
-                            target_record['error_details'] = f"Verified by LLM — {ha_explanation}"
-                            target_record['llm_verified_url'] = ha_link
-                            self.total_unverified_refs = max(0, self.total_unverified_refs - 1)
-                            llm_verified = True
-                            llm_verified_url = ha_link
-                    elif ha_verdict != 'LIKELY' and ha_explanation and has_unverified_error:
-                        err_type = (target_record.get('error_type') or '').lower()
-                        if err_type == 'unverified':
-                            target_record['error_details'] = f"Reference could not be verified — {ha_explanation}"
+                if error_entry_record is not None:
+                    error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                elif self.errors:
+                    self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
             else:
                 self._run_and_display_hallucination_assessment(
                     reference,
@@ -6068,17 +6050,6 @@ class ArxivReferenceChecker:
                     error_entry_record=error_entry_record,
                     error_entry_index=error_entry_index,
                 )
-                # Check if hallucination assessment promoted to llm_verified
-                if error_entry_record and error_entry_record.get('error_type') == 'llm_verified':
-                    llm_verified = True
-                    llm_verified_url = error_entry_record.get('llm_verified_url')
-
-            # NOW display unverified status based on hallucination result
-            if has_unverified_error:
-                if llm_verified and print_output and not debug_mode:
-                    print(f"       Verified URL: {llm_verified_url}")
-                elif not llm_verified:
-                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
     
     def _has_arxiv_id_error(self, errors):
         """Check if there's an ArXiv ID error in the error list"""
@@ -6330,27 +6301,9 @@ class ArxivReferenceChecker:
         verdict = assessment.get('verdict', 'UNCERTAIN')
         explanation = assessment.get('explanation', '')
 
-        # For unverified references not flagged as hallucinated, check if
-        # the LLM confirmed it with a URL — if so, promote to verified.
-        ha_link = assessment.get('link')
-        if verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http') and target_record is not None:
-            error_type = (target_record.get('error_type') or '').lower()
-            if error_type == 'unverified':
-                # Promote: change type to 'llm_verified' so it's no longer counted as unverified
-                target_record['error_type'] = 'llm_verified'
-                target_record['error_details'] = f"Verified by LLM — {explanation}"
-                target_record['llm_verified_url'] = ha_link
-                self.total_unverified_refs = max(0, self.total_unverified_refs - 1)
-                logger.info(f"LLM verified reference with URL: {ha_link}")
-            elif error_type == 'multiple':
-                details = target_record.get('error_details', '')
-                if 'Reference could not be verified' in details:
-                    target_record['error_details'] = details.replace(
-                        'Reference could not be verified',
-                        f'Verified by LLM — {explanation}',
-                    )
-                    target_record['llm_verified_url'] = ha_link
-        elif verdict != 'LIKELY' and explanation and target_record is not None:
+        # For unverified references not flagged as hallucinated, store the
+        # LLM explanation as the subreason so it's visible in reports.
+        if verdict != 'LIKELY' and explanation and target_record is not None:
             error_type = (target_record.get('error_type') or '').lower()
             if error_type == 'unverified':
                 target_record['error_details'] = f"Reference could not be verified — {explanation}"
@@ -6372,9 +6325,6 @@ class ArxivReferenceChecker:
                 print(f"         {explanation}")
         elif verdict == 'LIKELY':
             print(f"      🚩 Likely hallucinated: {explanation}")
-        elif verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http'):
-            # LLM confirmed the paper — clean display handled by caller
-            pass
         elif verdict in ('UNLIKELY', 'UNCERTAIN') and explanation:
             # Show why an unverified reference was not flagged as hallucinated
             has_unverified = any(
