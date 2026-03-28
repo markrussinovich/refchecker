@@ -192,20 +192,23 @@ def _load_checkpoint(
     result_map: Dict[int, BulkPaperResult] = {}
     if not checkpoint_path or not os.path.exists(checkpoint_path):
         return result_map
-    try:
-        with open(checkpoint_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
+    skipped = 0
+    with open(checkpoint_path, 'r', encoding='utf-8') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
                 data = json.loads(line)
                 idx = data['index']
                 # Validate: same spec at same index
                 if idx < len(input_specs) and data.get('input_spec') == input_specs[idx]:
                     result_map[idx] = BulkPaperResult(**data)
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        logger.warning('Corrupt checkpoint file %s, starting fresh: %s', checkpoint_path, exc)
-        return {}
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                skipped += 1
+                logger.warning('Skipping corrupt checkpoint entry at line %d: %s', line_num, exc)
+    if skipped:
+        logger.warning('Loaded %d entries from checkpoint, skipped %d corrupt entries', len(result_map), skipped)
     return result_map
 
 
