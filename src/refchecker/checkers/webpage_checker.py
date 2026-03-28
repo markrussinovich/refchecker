@@ -820,7 +820,10 @@ class WebPageChecker:
             'foundation', 'association', 'society', 'center', 'centre',
             'council', 'committee', 'board', 'union', 'federation', 'alliance',
             'coalition', 'consortium', 'network', 'group', 'organization',
-            'organisation', 'corp', 'corporation', 'company', 'ltd', 'inc'
+            'organisation', 'corp', 'corporation', 'company', 'ltd', 'inc',
+            'update', 'bulletin', 'newsletter',
+            'ezine', 'e-zine', 'briefing', 'advisory', 'alert', 'insight',
+            'insights', 'memo', 'memorandum', 'circular', 'notice',
         ]
         
         # Documentation and technical resources
@@ -860,6 +863,19 @@ class WebPageChecker:
         if is_academic:
             return False
         
+        # Known academic domains in URL - if URL is from an academic domain, not web content
+        academic_domains = [
+            'ieee.org', 'acm.org', 'springer.com', 'sciencedirect.com',
+            'wiley.com', 'nature.com', 'science.org', 'cell.com',
+            'thelancet.com', 'plos.org', 'arxiv.org', 'pubmed.ncbi.nlm.nih.gov',
+            'scholar.google.com', 'researchgate.net', 'academia.edu',
+            'ssrn.com', 'jstor.org', 'elsevier.com', 'sagepub.com',
+            'tandfonline.com', 'oup.com', 'cambridge.org',
+        ]
+        url_is_academic = any(domain in url_lower for domain in academic_domains)
+        if url_is_academic:
+            return False
+        
         # Check if venue matches any web content indicators
         venue_matches = any(indicator and indicator in venue_lower for indicator in all_indicators)
         
@@ -867,7 +883,7 @@ class WebPageChecker:
         url_matches = any(domain in url_lower for domain in web_domains)
         
         # Special case: if URL contains news/blog/docs indicators, lean towards web content
-        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy']
+        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy', 'insights', 'publications', 'updates', 'ezine']
         url_has_content_indicators = any(indicator in url_lower for indicator in url_content_indicators)
         
         # Special case: Check if venue is an organizational acronym/name that matches the URL domain

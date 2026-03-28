@@ -670,6 +670,8 @@ class EnhancedHybridReferenceChecker:
                         # Use specific message based on what went wrong
                         if 'non-existent' in subreason:
                             url_msg = f'Non-existent web page: {web_url}'
+                        elif 'URL references paper' in subreason:
+                            url_msg = f'Paper not verified but URL references paper: {web_url}'
                         else:
                             url_msg = f'Cited URL does not reference this paper: {web_url}'
                         errors_out.append({
