@@ -6013,7 +6013,14 @@ class ArxivReferenceChecker:
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in errors)
             
             if has_unverified_error:
-                self.total_unverified_refs += 1
+                # Don't count "url references paper" as unverified — the URL
+                # was confirmed to contain the paper.
+                url_references_paper = any(
+                    'url references paper' in (e.get('error_details') or '').lower()
+                    for e in errors
+                )
+                if not url_references_paper:
+                    self.total_unverified_refs += 1
                 self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
@@ -6140,6 +6147,16 @@ class ArxivReferenceChecker:
     def _display_unverified_error_with_subreason(self, reference, reference_url, errors, debug_mode, print_output):
         """Display the unverified error message with citation details and subreason"""
         if not debug_mode and print_output:
+            # Check if the URL was confirmed to reference the paper
+            url_references_paper = any(
+                'url references paper' in (e.get('error_details') or '').lower()
+                for e in errors
+            )
+            if url_references_paper:
+                cited_url = reference.get('cited_url') or reference.get('url', '')
+                print(f"       ✅ Verified via URL: {cited_url}")
+                return
+
             print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
             
             # Extract and display the subreason from unverified errors

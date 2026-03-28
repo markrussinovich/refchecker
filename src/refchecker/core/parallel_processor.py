@@ -383,14 +383,32 @@ class ParallelReferenceProcessor:
             if assessment and has_unverified_error:
                 ha_verdict = assessment.get('verdict')
                 ha_link = assessment.get('link')
-                if ha_verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http'):
+                if ha_verdict == 'UNLIKELY':
                     llm_verified = True
-                    llm_verified_url = ha_link
+                    if ha_link and ha_link.startswith('http'):
+                        llm_verified_url = ha_link
+            
+            # Also treat "url references paper" as verified (webpage checker
+            # confirmed the cited URL contains the paper)
+            url_references_paper = any(
+                'url references paper' in (e.get('error_details') or '').lower()
+                for e in result.errors
+            )
             
             if has_unverified_error:
-                if llm_verified:
+                if llm_verified and llm_verified_url:
                     # Show clean verified URL instead of 'Could not verify'
                     print(f"       Verified URL: {llm_verified_url}")
+                elif llm_verified:
+                    # LLM confirmed real but no URL — keep as unverified, show explanation
+                    ha_explanation = assessment.get('explanation', '')
+                    self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
+                    if ha_explanation:
+                        print(f"         Not flagged: {ha_explanation}")
+                elif url_references_paper:
+                    # Webpage checker confirmed the cited URL references the paper
+                    cited_url = reference.get('cited_url') or reference.get('url', '')
+                    print(f"       ✅ Verified via URL: {cited_url}")
                 else:
                     # Use the centralized unverified error display function from base checker
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
