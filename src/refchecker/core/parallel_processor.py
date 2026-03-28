@@ -240,12 +240,8 @@ class ParallelReferenceProcessor:
                     while self.next_print_index in self.result_buffer:
                         current_result = self.result_buffer[self.next_print_index]
                         
-                        # Print the result using base checker's output methods
-                        self._print_reference_result(current_result)
-                        
-                        # Run and display inline hallucination assessment
-                        # (must happen after error/warning display, before callback
-                        #  adds the error to the dataset)
+                        # Run hallucination assessment BEFORE printing so we can
+                        # show clean 'Verified URL' instead of 'Could not verify'
                         if current_result.errors:
                             assessment = self.base_checker._run_and_return_hallucination_assessment(
                                 current_result.reference,
@@ -254,10 +250,28 @@ class ParallelReferenceProcessor:
                             )
                             if assessment:
                                 current_result.hallucination_assessment = assessment
-                                verdict = assessment.get('verdict', 'UNCERTAIN')
-                                explanation = assessment.get('explanation', '')
-                                if verdict == 'LIKELY':
-                                    print(f"      🚩 Likely hallucinated: {explanation}")
+                        
+                        # Print the result using base checker's output methods
+                        # (hallucination_assessment is now available for display decisions)
+                        self._print_reference_result(current_result)
+                        
+                        # Print hallucination flags (LLM-verified handled in _print_reference_result)
+                        if current_result.hallucination_assessment:
+                            verdict = current_result.hallucination_assessment.get('verdict', 'UNCERTAIN')
+                            explanation = current_result.hallucination_assessment.get('explanation', '')
+                            ha_link = current_result.hallucination_assessment.get('link')
+                            if verdict == 'LIKELY':
+                                print(f"      🚩 Likely hallucinated: {explanation}")
+                            elif verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http'):
+                                # LLM-verified — already handled in _print_reference_result
+                                pass
+                            elif verdict in ('UNLIKELY', 'UNCERTAIN') and explanation:
+                                has_unverified = any(
+                                    e.get('error_type') == 'unverified'
+                                    for e in current_result.errors
+                                )
+                                if has_unverified:
+                                    print(f"         Not flagged: {explanation}")
                         
                         # Call callback if provided
                         if result_callback:
@@ -362,9 +376,24 @@ class ParallelReferenceProcessor:
             # Check if there's an unverified error
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in result.errors)
             
+            # Check if LLM verified this reference
+            llm_verified = False
+            llm_verified_url = None
+            assessment = result.hallucination_assessment
+            if assessment and has_unverified_error:
+                ha_verdict = assessment.get('verdict')
+                ha_link = assessment.get('link')
+                if ha_verdict == 'UNLIKELY' and ha_link and ha_link.startswith('http'):
+                    llm_verified = True
+                    llm_verified_url = ha_link
+            
             if has_unverified_error:
-                # Use the centralized unverified error display function from base checker
-                self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
+                if llm_verified:
+                    # Show clean verified URL instead of 'Could not verify'
+                    print(f"       Verified URL: {llm_verified_url}")
+                else:
+                    # Use the centralized unverified error display function from base checker
+                    self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
             
             # Display all non-unverified errors and warnings
             for error in result.errors:

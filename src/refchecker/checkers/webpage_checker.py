@@ -631,13 +631,14 @@ class WebPageChecker:
             return None, [{"error_type": "unverified", "error_details": "non-existent web page"}], web_url
         elif response.status_code == 403:
             # For blocked resources, we can't check content but assume page exists
-            # If no venue, treat as verified since URL is accessible
-            if not reference.get('journal') and not reference.get('venue') and not reference.get('booktitle'):
+            venue_field = reference.get('journal') or reference.get('venue') or reference.get('booktitle')
+            if not venue_field or self._is_web_content_venue(venue_field, web_url):
+                # No venue, or venue is a web content source (news, blog, etc.) — treat as verified
                 verified_data = {
                     'title': reference.get('title', ''),
                     'authors': reference.get('authors', []),
                     'year': reference.get('year'),
-                    'venue': 'Web Page',
+                    'venue': venue_field or 'Web Page',
                     'url': web_url,
                     'web_metadata': {
                         'status_code': 403,
@@ -654,13 +655,14 @@ class WebPageChecker:
             # Parse HTML content to search for title
             content_type = response.headers.get('content-type', '').lower()
             if 'pdf' in content_type or web_url.lower().endswith('.pdf'):
-                # For PDFs, if no venue specified, treat as verified
-                if not reference.get('journal') and not reference.get('venue') and not reference.get('booktitle'):
+                # For PDFs, treat as verified if no venue or venue is web content
+                venue_field = reference.get('journal') or reference.get('venue') or reference.get('booktitle')
+                if not venue_field or self._is_web_content_venue(venue_field, web_url):
                     verified_data = {
                         'title': reference.get('title', ''),
                         'authors': reference.get('authors', []),
                         'year': reference.get('year'),
-                        'venue': 'PDF Document',
+                        'venue': venue_field or 'PDF Document',
                         'url': web_url,
                         'web_metadata': {
                             'content_type': response.headers.get('content-type', ''),
