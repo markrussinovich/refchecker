@@ -157,3 +157,4 @@ backend/.encryption_key
 ehthumbs.db
 Thumbs.db
 CLAUDE.md
+output/
