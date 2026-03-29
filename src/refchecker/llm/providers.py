@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .base import LLMProvider
-from refchecker.config.settings import resolve_api_key, resolve_endpoint
+from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_EXTRACTION_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +283,7 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual OpenAI API call and return the response text"""
         try:
-            _model = self.model or "gpt-4.1"
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['openai']
             kwargs = dict(
                 model=_model,
                 messages=[
@@ -328,7 +328,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
         """Make the actual Anthropic API call and return the response text"""
         try:
             response = self.client.messages.create(
-                model=self.model or "claude-sonnet-4-6",
+                model=self.model or DEFAULT_EXTRACTION_MODELS['anthropic'],
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 system=self._get_system_prompt(),
@@ -386,7 +386,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
         """Make the actual Google API call and return the response text"""
         try:
             response = self.client.models.generate_content(
-                model=self.model or 'gemini-2.5-flash',
+                model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
                 contents=prompt,
                 config={
                     'max_output_tokens': self.max_tokens,
@@ -443,7 +443,7 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Azure OpenAI API call and return the response text"""
         try:
-            _model = self.model or "gpt-4.1"
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['azure']
             kwargs = dict(
                 model=_model,
                 messages=[

@@ -48,6 +48,32 @@ def resolve_endpoint(provider: str, override: Optional[str] = None) -> Optional[
     return None
 
 
+# ── Default models per provider ───────────────────────────────────────
+# Single source of truth for all model names used across the codebase.
+
+DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
+    'openai':    'gpt-4.1',
+    'anthropic': 'claude-sonnet-4-20250514',
+    'google':    'gemini-2.5-flash',
+    'azure':     'gpt-4.1',
+    'vllm':      'meta-llama/Llama-3.1-8B-Instruct',
+}
+
+DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
+    'openai':    'gpt-4.1-mini',
+    'anthropic': 'claude-sonnet-4-20250514',
+    'google':    'gemini-2.0-flash',
+    'azure':     'gpt-4o',
+    'vllm':      'gpt-4.1-mini',
+}
+
+DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
+    'openai':    'gpt-4o-mini',
+    'anthropic': 'claude-sonnet-4-20250514',
+    'google':    'gemini-2.5-flash',
+}
+
+
 # Default configuration
 DEFAULT_CONFIG = {
     # API Settings
@@ -110,31 +136,31 @@ DEFAULT_CONFIG = {
         "parallel_chunks": True,  # Enable parallel chunk processing
         "max_chunk_workers": 4,   # Maximum number of parallel workers for chunk processing
         "openai": {
-            "model": "gpt-4.1",
+            "model": DEFAULT_EXTRACTION_MODELS['openai'],
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
         },
         "anthropic": {
-            "model": "claude-sonnet-4-6",
+            "model": DEFAULT_EXTRACTION_MODELS['anthropic'],
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
         },
         "google": {
-            "model": "gemini-2.5-flash",
+            "model": DEFAULT_EXTRACTION_MODELS['google'],
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
         },
         "azure": {
-            "model": "gpt-4.1",
+            "model": DEFAULT_EXTRACTION_MODELS['azure'],
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,
         },
         "vllm": {
-            "model": "meta-llama/Llama-3.1-8B-Instruct",
+            "model": DEFAULT_EXTRACTION_MODELS['vllm'],
             "max_tokens": 4000,
             "temperature": 0.1,
             "timeout": 30,

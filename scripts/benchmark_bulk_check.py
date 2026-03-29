@@ -6,6 +6,12 @@ import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
+sys_path = str(Path(__file__).resolve().parent.parent / 'src')
+import sys
+if sys_path not in sys.path:
+    sys.path.insert(0, sys_path)
+
+from refchecker.config.settings import DEFAULT_EXTRACTION_MODELS
 from refchecker.core.refchecker import ArxivReferenceChecker
 
 
@@ -19,7 +25,7 @@ def build_llm_config() -> dict:
 
     return {
         'provider': 'openai',
-        'model': 'gpt-4.1',
+        'model': DEFAULT_EXTRACTION_MODELS['openai'],
         'api_key': api_key,
         'endpoint': None,
     }

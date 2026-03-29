@@ -31,7 +31,7 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from refchecker.config.settings import resolve_api_key, resolve_endpoint
+from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_WEB_SEARCH_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class OpenAISearchProvider(WebSearchProvider):
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
         response = self._client.responses.create(
-            model='gpt-4o-mini',
+            model=DEFAULT_WEB_SEARCH_MODELS['openai'],
             instructions=self._SYSTEM_PROMPT,
             tools=[{'type': 'web_search_preview'}],
             input=query,
@@ -242,7 +242,7 @@ class AnthropicSearchProvider(WebSearchProvider):
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
         resp = self._client.messages.create(
-            model='claude-sonnet-4-20250514',
+            model=DEFAULT_WEB_SEARCH_MODELS['anthropic'],
             max_tokens=1024,
             system=self._SYSTEM_PROMPT,
             tools=[{
@@ -328,7 +328,7 @@ class GeminiSearchProvider(WebSearchProvider):
 
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
         response = self._client.models.generate_content(
-            model='gemini-2.5-flash',
+            model=DEFAULT_WEB_SEARCH_MODELS['google'],
             contents=query,
             config={
                 'tools': [{'google_search': {}}],

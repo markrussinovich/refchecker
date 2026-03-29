@@ -33,7 +33,7 @@ install-dev:
 
 # Run tests
 test:
-	python scripts/run_tests.py
+	python -m pytest tests/
 
 # Clean up generated files
 clean:

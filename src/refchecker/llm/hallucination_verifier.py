@@ -17,7 +17,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from refchecker.config.settings import resolve_api_key, resolve_endpoint
+from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_HALLUCINATION_MODELS
 
 logger = logging.getLogger(__name__)
 
@@ -137,13 +137,7 @@ class LLMHallucinationVerifier:
     """
 
     # Default models per provider (used when caller doesn't specify)
-    _DEFAULT_MODELS: Dict[str, str] = {
-        'openai': 'gpt-4.1-mini',
-        'anthropic': 'claude-sonnet-4-20250514',
-        'google': 'gemini-2.0-flash',
-        'azure': 'gpt-4o',
-        'vllm': 'gpt-4.1-mini',
-    }
+    _DEFAULT_MODELS = DEFAULT_HALLUCINATION_MODELS
 
     def __init__(
         self,
@@ -156,7 +150,7 @@ class LLMHallucinationVerifier:
         self.provider = (provider or 'openai').lower()
         self.api_key = api_key or resolve_api_key(self.provider)
         self.endpoint = endpoint or resolve_endpoint(self.provider)
-        self.model = model or self._DEFAULT_MODELS.get(self.provider, 'gpt-4.1-mini')
+        self.model = model or self._DEFAULT_MODELS.get(self.provider, DEFAULT_HALLUCINATION_MODELS['openai'])
         self.client = None
         self._use_responses_api = False
 
