@@ -298,11 +298,13 @@ class ArxivReferenceChecker:
             except Exception as exc:
                 logger.debug(f'LLM hallucination verifier init failed: {exc}')
 
-        # Initialize optional web search
+        # Initialize optional web search — prefer the same provider used
+        # for bib extraction so only one API key is required.
         web_searcher = None
+        web_search_provider = (llm_config or {}).get('provider')
         try:
             from refchecker.checkers.web_search import create_web_search_checker
-            searcher = create_web_search_checker()
+            searcher = create_web_search_checker(preferred_provider=web_search_provider)
             if searcher.available:
                 web_searcher = searcher
                 logger.debug(f'Web search verification enabled (provider: {searcher._provider_name})')

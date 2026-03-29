@@ -14,6 +14,7 @@ from refchecker.checkers.web_search import (
     DELTA_MODERATE_HIT,
     DELTA_NO_RESULTS,
     DELTA_STRONG_HIT,
+    AnthropicSearchProvider,
     GeminiSearchProvider,
     OpenAISearchProvider,
     WebSearchChecker,
@@ -72,11 +73,17 @@ class TestProviderInterface:
     def test_gemini_is_subclass(self):
         assert issubclass(GeminiSearchProvider, WebSearchProvider)
 
+    def test_anthropic_is_subclass(self):
+        assert issubclass(AnthropicSearchProvider, WebSearchProvider)
+
     def test_openai_provider_name(self):
         assert OpenAISearchProvider.name == 'openai'
 
     def test_gemini_provider_name(self):
         assert GeminiSearchProvider.name == 'gemini'
+
+    def test_anthropic_provider_name(self):
+        assert AnthropicSearchProvider.name == 'anthropic'
 
     def test_openai_available_with_key(self, _clean_env, _mock_openai):
         """OpenAI provider should be available when a key is set and openai is installed."""
@@ -86,6 +93,15 @@ class TestProviderInterface:
 
     def test_gemini_not_available_without_key(self, _clean_env):
         p = GeminiSearchProvider()
+        assert not p.available
+
+    def test_anthropic_available_with_key(self, _clean_env, _mock_anthropic):
+        os.environ['ANTHROPIC_API_KEY'] = 'test-key'
+        p = AnthropicSearchProvider()
+        assert p.available
+
+    def test_anthropic_not_available_without_key(self, _clean_env):
+        p = AnthropicSearchProvider()
         assert not p.available
 
 
@@ -211,6 +227,29 @@ class TestFactory:
         checker = create_web_search_checker(preferred_provider='gemini')
         assert checker._provider_name == 'gemini'
 
+    def test_factory_preferred_anthropic(self, _clean_env, _mock_anthropic):
+        os.environ['OPENAI_API_KEY'] = 'openai-key'
+        os.environ['ANTHROPIC_API_KEY'] = 'anthropic-key'
+        checker = create_web_search_checker(preferred_provider='anthropic')
+        assert checker._provider_name == 'anthropic'
+
+    def test_factory_llm_provider_google_maps_to_gemini(self, _clean_env, _mock_genai):
+        os.environ['GOOGLE_API_KEY'] = 'google-key'
+        checker = create_web_search_checker(preferred_provider='google')
+        assert checker._provider_name == 'gemini'
+
+    def test_factory_llm_provider_azure_maps_to_openai(self, _clean_env, _mock_openai):
+        os.environ['OPENAI_API_KEY'] = 'openai-key'
+        checker = create_web_search_checker(preferred_provider='azure')
+        assert checker._provider_name == 'openai'
+
+    def test_factory_falls_through_when_preferred_unavailable(self, _clean_env, _mock_openai):
+        """When preferred provider isn't available, fall through to auto-detect."""
+        os.environ['OPENAI_API_KEY'] = 'openai-key'
+        checker = create_web_search_checker(preferred_provider='anthropic')
+        assert checker.available
+        assert checker._provider_name == 'openai'
+
     def test_factory_no_keys_returns_unavailable(self, _clean_env):
         checker = create_web_search_checker()
         assert not checker.available
@@ -255,6 +294,7 @@ def _clean_env():
     """Temporarily remove web-search-related env vars to isolate tests."""
     keys = ('OPENAI_API_KEY', 'REFCHECKER_OPENAI_API_KEY', 'OPENAI_CHAT_KEY',
             'GOOGLE_API_KEY', 'REFCHECKER_GOOGLE_API_KEY',
+            'ANTHROPIC_API_KEY', 'REFCHECKER_ANTHROPIC_API_KEY',
             'SERPER_API_KEY', 'REFCHECKER_SERPER_API_KEY',
             'BRAVE_SEARCH_API_KEY', 'REFCHECKER_BRAVE_SEARCH_API_KEY')
     saved = {k: os.environ.pop(k) for k in keys if k in os.environ}
@@ -288,3 +328,16 @@ def _mock_genai(monkeypatch):
         fake_google.__path__ = []
         monkeypatch.setitem(sys.modules, 'google', fake_google)
     monkeypatch.setitem(sys.modules, 'google.genai', fake_genai)
+
+
+@pytest.fixture()
+def _mock_anthropic(monkeypatch):
+    """Mock anthropic module so provider tests work without the package."""
+    import types as pytypes
+
+    fake_client = type('FakeClient', (), {})()
+
+    fake_anthropic = pytypes.ModuleType('anthropic')
+    fake_anthropic.Anthropic = lambda **kw: fake_client
+
+    monkeypatch.setitem(sys.modules, 'anthropic', fake_anthropic)

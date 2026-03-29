@@ -11,12 +11,15 @@ handle the API calls while ``WebSearchChecker`` owns the scoring logic.
 
 Supported providers (reuse the same API keys used for reference extraction)
 ---------------------------------------------------------------------------
-* **OpenAI**  – Responses API with ``web_search_preview`` tool
-               (uses OPENAI_API_KEY, ~$0.01 per search)
-* **Gemini**  -- Google Search grounding via ``google-genai``
-               (uses GOOGLE_API_KEY)
+* **OpenAI**     – Responses API with ``web_search_preview`` tool
+                   (uses OPENAI_API_KEY, ~$0.01 per search)
+* **Anthropic**  – Messages API with ``web_search_20250305`` tool
+                   (uses ANTHROPIC_API_KEY)
+* **Gemini**     -- Google Search grounding via ``google-genai``
+                   (uses GOOGLE_API_KEY)
 
-The first available provider is used automatically (OpenAI preferred).
+The provider matching the bib-extraction LLM is preferred; otherwise the
+first available provider is used automatically.
 """
 
 from __future__ import annotations
@@ -197,6 +200,106 @@ class OpenAISearchProvider(WebSearchProvider):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Anthropic provider (web_search tool)
+# ══════════════════════════════════════════════════════════════════════
+
+class AnthropicSearchProvider(WebSearchProvider):
+    """Anthropic web search via the Messages API.
+
+    Reuses the same key as reference extraction (ANTHROPIC_API_KEY).
+    Uses the ``web_search_20250305`` tool so Claude performs a grounded
+    web search and returns cited URLs.
+    """
+
+    name = 'anthropic'
+
+    _SYSTEM_PROMPT = (
+        'You are an academic reference verifier. The user will give you the '
+        'title, authors, venue, and year of an academic paper. Use web search '
+        'to determine whether this EXACT paper exists.\n\n'
+        'Respond with EXACTLY one of these verdicts on the first line:\n'
+        '  EXISTS   — you found this specific paper (matching title and at least one author)\n'
+        '  NOT_FOUND — web search returned no credible evidence this paper exists\n'
+        '  UNSURE   — results are ambiguous (similar but not identical papers found)\n\n'
+        'Then on the following lines, briefly explain your reasoning (2-3 sentences max). '
+        'If you found the paper, include the URL(s) where it appears.'
+    )
+
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = resolve_api_key('anthropic', override=api_key)
+        self._client = None
+
+        if self.api_key:
+            try:
+                import anthropic
+                self._client = anthropic.Anthropic(api_key=self.api_key)
+            except ImportError:
+                logger.debug('anthropic package not installed')
+
+    @property
+    def available(self) -> bool:
+        return self._client is not None
+
+    def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
+        resp = self._client.messages.create(
+            model='claude-sonnet-4-20250514',
+            max_tokens=1024,
+            system=self._SYSTEM_PROMPT,
+            tools=[{
+                'type': 'web_search_20250305',
+                'name': 'web_search',
+                'max_uses': 3,
+            }],
+            messages=[{'role': 'user', 'content': query}],
+        )
+
+        verdict_text = ''
+        results: List[Dict[str, str]] = []
+        seen_urls: set = set()
+
+        for block in resp.content:
+            block_type = getattr(block, 'type', '')
+            if block_type == 'text':
+                text = getattr(block, 'text', '') or ''
+                if text:
+                    verdict_text += text + '\n'
+                for citation in getattr(block, 'citations', None) or []:
+                    url = getattr(citation, 'url', '') or ''
+                    title = getattr(citation, 'title', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        results.append({
+                            'link': url,
+                            'title': title,
+                            'snippet': '',
+                        })
+            elif block_type == 'web_search_tool_result':
+                for item in getattr(block, 'content', None) or []:
+                    url = getattr(item, 'url', '') or ''
+                    title = getattr(item, 'title', '') or ''
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        results.append({
+                            'link': url,
+                            'title': title,
+                            'snippet': '',
+                        })
+
+        # Stash verdict text on the results so the checker can use it
+        if results:
+            results[0]['_verdict_text'] = verdict_text.strip()
+        elif verdict_text.strip():
+            results.append({
+                'link': '',
+                'title': '',
+                'snippet': '',
+                '_verdict_text': verdict_text.strip(),
+            })
+
+        return results
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Google Gemini provider (Google Search grounding)
 # ══════════════════════════════════════════════════════════════════════
 
@@ -257,7 +360,16 @@ class GeminiSearchProvider(WebSearchProvider):
 # ══════════════════════════════════════════════════════════════════════
 
 # Default preference order when auto-selecting a provider.
-_PROVIDER_CLASSES: List[type] = [OpenAISearchProvider, GeminiSearchProvider]
+_PROVIDER_CLASSES: List[type] = [OpenAISearchProvider, AnthropicSearchProvider, GeminiSearchProvider]
+
+# Map LLM provider names (as used in llm_config) to web search provider names.
+_LLM_TO_SEARCH_PROVIDER: Dict[str, str] = {
+    'openai': 'openai',
+    'anthropic': 'anthropic',
+    'google': 'gemini',
+    'azure': 'openai',
+    'vllm': 'openai',
+}
 
 
 class WebSearchChecker:
@@ -353,9 +465,18 @@ def create_web_search_checker(preferred_provider: Optional[str] = None) -> WebSe
     Parameters
     ----------
     preferred_provider : str, optional
-        Force a specific provider (``'openai'`` or ``'gemini'``).
+        Force a specific web-search provider name (``'openai'``,
+        ``'anthropic'``, or ``'gemini'``).  Also accepts LLM-config
+        provider names (``'google'``, ``'azure'``, ``'vllm'``) which
+        are mapped to the corresponding web-search provider.
         If *None*, tries providers in default preference order.
     """
+    # Translate LLM provider names to web-search provider names
+    if preferred_provider:
+        preferred_provider = _LLM_TO_SEARCH_PROVIDER.get(
+            preferred_provider, preferred_provider
+        )
+
     if preferred_provider:
         for cls in _PROVIDER_CLASSES:
             if cls.name == preferred_provider:
@@ -363,8 +484,9 @@ def create_web_search_checker(preferred_provider: Optional[str] = None) -> WebSe
                 if provider.available:
                     return WebSearchChecker(provider)
                 logger.debug(f'{cls.name} provider requested but not available')
-                return WebSearchChecker(None)
+                break
 
+    # Fall through to auto-detect if preferred wasn't available
     for cls in _PROVIDER_CLASSES:
         provider = cls()
         if provider.available:
