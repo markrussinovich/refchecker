@@ -1433,11 +1433,13 @@ class ArxivReferenceChecker:
             # These need special validation: only accept if NOT inside a reference entry
             appendix_section_patterns = [
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered)\b[A-Za-z\s\-\d]*\n',
+                r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                 # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
                 # Also handles PDF word-break artifacts where a letter gets separated from its
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
-                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+                # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
+                # in section titles, e.g. "A Theoretical Arguments for Section 3"
+                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                 # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
                 r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
                 # Standalone appendix letter on its own line followed by a subsection:
@@ -1579,8 +1581,8 @@ class ArxivReferenceChecker:
                     # Also check appendix section patterns (same validation as main path)
                     fallback_appendix_patterns = [
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary)\b[A-Za-z\s\-\d]*\n',
-                        r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+))*\s*\n',
+                        r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                        r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                     ]
                     for pattern in fallback_appendix_patterns:
                         for m2 in re.finditer(pattern, text[line_start:]):

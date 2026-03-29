@@ -91,10 +91,15 @@ class EnhancedHybridReferenceChecker:
         self.local_db = None
         if db_path:
             self.local_db = self._initialize_checker(
-                'local_semantic_scholar', 'LocalNonArxivReferenceChecker', 'local database', db_path=db_path
+                'local_semantic_scholar', 'LocalNonArxivReferenceChecker', 'local database',
+                db_path=db_path, error_level='error'
             )
-            if self.local_db is not None:
-                logger.debug(f"Enhanced Hybrid: Local database enabled at {db_path}")
+            if self.local_db is None:
+                raise RuntimeError(
+                    f"Failed to open local Semantic Scholar database at {db_path}. "
+                    f"Check that the file exists and contains a valid 'papers' table."
+                )
+            logger.debug(f"Enhanced Hybrid: Local database enabled at {db_path}")
         
         # Initialize Semantic Scholar API
         self.semantic_scholar = self._initialize_checker(

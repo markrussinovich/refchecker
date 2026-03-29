@@ -72,10 +72,26 @@ class LocalNonArxivReferenceChecker:
         
         Args:
             db_path: Path to the SQLite database
+        
+        Raises:
+            FileNotFoundError: If the database file does not exist
+            ValueError: If the database is missing the required 'papers' table
         """
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"Local Semantic Scholar database not found: {db_path}")
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+        # Validate that the required 'papers' table exists
+        cursor = self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='papers'"
+        )
+        if cursor.fetchone() is None:
+            self.conn.close()
+            raise ValueError(
+                f"Database at {db_path} is missing the required 'papers' table. "
+                f"Ensure --db-path points to a valid Semantic Scholar database."
+            )
         # Optimise for read-heavy workloads (reference lookups are read-only)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")

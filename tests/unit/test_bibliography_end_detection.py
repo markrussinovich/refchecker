@@ -919,4 +919,71 @@ class TestICLRAppendixOverrun:
         assert "Abbe" in bib
         assert "Vaswani" in bib
         assert "EXTENDED RELATED WORK" not in bib
+
+    def test_WZYxJhvAvD_mixed_case_appendix_with_lowercase_words(self):
+        """Regression for WZYxJhvAvD: 'A Theoretical Arguments for Section 3'.
+
+        Appendix headers containing lowercase connecting words ('for', 'of', 'the')
+        and digits were not detected as end markers because the generic
+        single-letter pattern required every word to be title-case or ALL CAPS.
+        """
+        refs = (
+            "Arditi, A. & Chughtai, A. Refusal in language models is mediated by a single direction. "
+            "arXiv preprint, 2024.\n"
+            "Hong, S., Lee, J., & Kim, J. Probing concept representations in LLMs. "
+            "In NeurIPS, 2024.\n"
+            "Lucki, M. et al. An adversarial perspective on machine unlearning. "
+            "In ICLR, 2024.\n"
+            "Sun, T. et al. Evaluating machine unlearning methods. "
+            "ACM Computing Surveys, 2025.\n"
+        )
+        appendix = (
+            "16\n"
+            "Preprint. Under review.\n"
+            "A Theoretical Arguments for Section 3\n"
+            "Proof of Theorem 3.1. Let z1,...,z n-1 be the calibration samples "
+            "for a fixed direction, and let zn be a fresh in-distribution sample.\n"
+            "B Algorithm Details\n"
+            "We provide an illustration of our main algorithm in Figure 4.\n"
+        )
+        text = self._build(refs, appendix, header="References\n")
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        # Must include references
+        assert "Arditi" in bib
+        assert "Hong" in bib
+        assert "Lucki" in bib
+        assert "Sun" in bib
+        # Must NOT include appendix content
+        assert "A Theoretical Arguments" not in bib
+        assert "Proof of Theorem" not in bib
+        assert "calibration samples" not in bib
+        assert "B Algorithm Details" not in bib
+
+    def test_appendix_with_lowercase_connecting_words(self):
+        """Appendix headers with lowercase prepositions must end bibliography.
+
+        Patterns like 'A Proof of Theorem 4.2', 'B Analysis on the Effect',
+        'C Bounds for k = 5' contain lowercase words and digits that the
+        generic pattern must handle.
+        """
+        test_cases = [
+            "A Proof of Theorem 4",
+            "B Analysis on the Effect",
+            "C Bounds for Large Networks",
+            "D Details of the Experimental Setup",
+            "E Convergence in the Limit",
+        ]
+        for header in test_cases:
+            refs = MULTI_PAGE_REFS
+            appendix = (
+                f"{header}\n"
+                "This is appendix content that should not be in bibliography.\n"
+            )
+            text = self._build(refs, appendix)
+            bib = self.checker.find_bibliography_section(text)
+            assert bib is not None, f"No bibliography found for appendix header: {header}"
+            assert header not in bib, f"Bibliography includes appendix header: {header}"
+            assert "appendix content" not in bib
+            assert "Vaswani" in bib
         assert "full derivation" not in bib
