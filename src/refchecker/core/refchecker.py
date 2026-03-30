@@ -1384,12 +1384,19 @@ class ArxivReferenceChecker:
             r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
             r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
             r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
-            r'\n\s*(?:AUTHOR|Author)\s+(?:CONTRIBUTIONS?|Contributions?)\s*\n',
-            r'\n\s*(?:ETHICS|Ethics)\s+(?:STATEMENT|Statement)\s*\n',
+            r'\n\s*(?:AUTHOR|Author)\s*(?:CONTRIBUTIONS?|Contributions?)\s*\n',
+            r'\n\s*(?:ETHICS|Ethics)\s*(?:STATEMENT|Statement)\s*\n',
             r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
             r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
             r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
             r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
+            # Common post-bibliography headings (handle PDF concatenation with \s*)
+            r'\n\s*(?:LIMITATIONS?|Limitations?)\s*\n',
+            r'\n\s*(?:BROADER\s*)?(?:IMPACT|Impact)\s*(?:STATEMENT|Statement)?\s*\n',
+            r'\n\s*(?:REPRODUCIBILITY|Reproducibility)\s*(?:STATEMENT|Statement)?\s*\n',
+            r'\n\s*(?:RELATED|Related)\s*(?:WORKS?|Works?)\s*\n',
+            r'\n\s*(?:SOCIETAL|Societal)\s*(?:IMPACT|Impact)\s*\n',
+            r'\n\s*(?:LLM|CONTRIBUTION)\s*(?:CONTRIBUTION|STATEMENT)\s*(?:STATEMENT)?\s*\n',
             # Numbered post-ref sections (with period)
             r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
             # Numbered post-ref sections (without period): "7 APPENDIX A", "9 APPENDIX C:"
