@@ -1091,6 +1091,42 @@ def extract_bibliography_bulk(checker: Any, paper: Any, debug_mode: bool, extrac
 
     bibliography_text = checker.find_bibliography_section(text)
     if not bibliography_text:
+        # If bibliography not found, try pdftotext as fallback (handles garbled pypdf output)
+        if hasattr(paper, 'file_path') and paper.file_path:
+            try:
+                import subprocess, tempfile, os as _os
+                pdf_path = paper.file_path
+                if not _os.path.exists(pdf_path):
+                    # If it's a URL-based paper, we need to save pdf_content to disk
+                    if pdf_content:
+                        pdf_content.seek(0)
+                        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                            tmp.write(pdf_content.read())
+                            pdf_path = tmp.name
+                result = subprocess.run(['pdftotext', pdf_path, '-'], capture_output=True, text=True, timeout=60)
+                if pdf_path != paper.file_path:
+                    _os.unlink(pdf_path)
+                if result.returncode == 0 and result.stdout.strip():
+                    logger.info("Retrying bibliography extraction with pdftotext fallback")
+                    bibliography_text = checker.find_bibliography_section(result.stdout)
+            except Exception as e:
+                logger.debug(f"pdftotext fallback failed: {e}")
+        # Also try for URL-based papers where pdf_content is available
+        if not bibliography_text and pdf_content:
+            try:
+                import subprocess, tempfile, os as _os
+                pdf_content.seek(0)
+                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                    tmp.write(pdf_content.read())
+                    tmp_path = tmp.name
+                result = subprocess.run(['pdftotext', tmp_path, '-'], capture_output=True, text=True, timeout=60)
+                _os.unlink(tmp_path)
+                if result.returncode == 0 and result.stdout.strip():
+                    logger.info("Retrying bibliography extraction with pdftotext fallback (from pdf_content)")
+                    bibliography_text = checker.find_bibliography_section(result.stdout)
+            except Exception as e:
+                logger.debug(f"pdftotext fallback from pdf_content failed: {e}")
+    if not bibliography_text:
         return []
     return parse_references_bulk(checker, bibliography_text, extraction_batcher)
 

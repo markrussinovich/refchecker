@@ -340,6 +340,11 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
             logger.debug(f"Anthropic response type: {type(response.content)}")
             logger.debug(f"Anthropic response content: {response.content}")
             
+            # Handle empty content list (e.g., when no references found)
+            if not response.content:
+                logger.debug("Anthropic returned empty content list")
+                return ""
+            
             # Handle different response formats
             if hasattr(response.content[0], 'text'):
                 content = response.content[0].text

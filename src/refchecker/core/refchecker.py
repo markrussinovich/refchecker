@@ -1246,6 +1246,32 @@ class ArxivReferenceChecker:
         """
         if not pdf_content:
             return None
+        
+        def _is_garbled(text, sample_size=5000):
+            """Check if extracted text appears garbled (e.g., font encoding issues)"""
+            import re
+            sample = text[:sample_size]
+            words = sample.split()
+            if not words:
+                return True
+            garbled_ratio = len(re.findall(r'[A-Z][a-z]{1,3}(?=[A-Z])', sample)) / max(len(words), 1)
+            return garbled_ratio > 2.0
+        
+        def _try_pdftotext(pdf_content):
+            """Try extracting text using pdftotext (poppler-utils)"""
+            import subprocess, tempfile
+            pdf_content.seek(0)
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                tmp.write(pdf_content.read())
+                tmp_path = tmp.name
+            try:
+                result = subprocess.run(['pdftotext', tmp_path, '-'], capture_output=True, text=True, timeout=60)
+                if result.returncode == 0 and result.stdout.strip():
+                    logger.info("Successfully extracted text using pdftotext fallback")
+                    return result.stdout
+            finally:
+                os.unlink(tmp_path)
+            return None
             
         try:
             # Try with pypdf first
@@ -1256,6 +1282,17 @@ class ArxivReferenceChecker:
             for page_num in range(len(pdf_reader.pages)):
                 page = pdf_reader.pages[page_num]
                 text += page.extract_text() + "\n"
+            
+            # Quality check: if text has garbled font encoding, try pdftotext directly
+            if text and _is_garbled(text):
+                logger.warning(f"pypdf text appears garbled, trying pdftotext fallback")
+                try:
+                    pdftotext_result = _try_pdftotext(pdf_content)
+                    if pdftotext_result and not _is_garbled(pdftotext_result):
+                        return pdftotext_result
+                except Exception as e:
+                    logger.error(f"pdftotext fallback failed: {e}")
+                # Fall through to return garbled text as last resort
             
             return text
         except Exception as e:
@@ -1268,10 +1305,22 @@ class ArxivReferenceChecker:
                     text = ""
                     for page in pdf.pages:
                         text += page.extract_text() + "\n"
-                    return text
+                    if text and not _is_garbled(text):
+                        return text
+                    # pdfplumber also garbled, try pdftotext
+                    if text and _is_garbled(text):
+                        logger.warning("pdfplumber text also garbled, trying pdftotext")
             except Exception as e2:
                 logger.error(f"Error extracting text with pdfplumber: {str(e2)}")
-                return None
+                
+            try:
+                pdftotext_result = _try_pdftotext(pdf_content)
+                if pdftotext_result:
+                    return pdftotext_result
+            except Exception as e3:
+                logger.error(f"Error extracting text with pdftotext: {str(e3)}")
+            
+            return None
     
     def find_bibliography_section(self, text):
         """
@@ -5724,6 +5773,33 @@ class ArxivReferenceChecker:
         
         # Find bibliography section
         bibliography_text = self.find_bibliography_section(text)
+        
+        if not bibliography_text:
+            # Try pdftotext fallback for garbled PDF text
+            try:
+                import subprocess, tempfile
+                pdf_path = paper.file_path if hasattr(paper, 'file_path') and paper.file_path and os.path.exists(paper.file_path) else None
+                if pdf_path:
+                    result = subprocess.run(['pdftotext', pdf_path, '-'], capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0 and result.stdout.strip():
+                        logger.info(f"Retrying bibliography extraction with pdftotext fallback for {paper_id}")
+                        bibliography_text = self.find_bibliography_section(result.stdout)
+                        if bibliography_text:
+                            text = result.stdout  # Use pdftotext output for subsequent processing
+                elif pdf_content:
+                    pdf_content.seek(0)
+                    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                        tmp.write(pdf_content.read())
+                        tmp_path = tmp.name
+                    result = subprocess.run(['pdftotext', tmp_path, '-'], capture_output=True, text=True, timeout=60)
+                    os.unlink(tmp_path)
+                    if result.returncode == 0 and result.stdout.strip():
+                        logger.info(f"Retrying bibliography extraction with pdftotext fallback for {paper_id}")
+                        bibliography_text = self.find_bibliography_section(result.stdout)
+                        if bibliography_text:
+                            text = result.stdout
+            except Exception as e:
+                logger.debug(f"pdftotext fallback failed for {paper_id}: {e}")
         
         if not bibliography_text:
             logger.warning(f"Could not find bibliography section for {paper_id}")
