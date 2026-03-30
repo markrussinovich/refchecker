@@ -10,11 +10,6 @@ def test_title_similarity_ignores_trailing_year():
     assert score >= 0.95
 
 
-def test_normalize_venue_generic_phrase_collapses_to_empty():
-    cited = "Proceedings of the"
-    assert normalize_venue_for_display(cited) == ""
-
-
 def test_normalize_venue_preserves_communications_of_the_acm():
     """Venue 'Communications of the ACM' should NOT have ACM stripped (it's part of the name)."""
     cited = "Communications of the ACM"

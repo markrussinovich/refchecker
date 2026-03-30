@@ -1341,6 +1341,9 @@ class ArxivReferenceChecker:
             r'(?i)\d+\s*references\s*\n',  # "12References" or "12 References"
             r'(?i)^\s*\d+\.\s*references\s*$',  # Numbered section: "7. References"
             r'(?i)\d+\s+references\s*\.',  # "9 References." format used in Georgia Tech paper
+            # Spaced-out "REFERENCES" from PDF letter-spacing artifacts
+            # Matches "RE F E R E N C E S" or "R E F E R E N C E S"
+            r'R\s*E\s*F\s*E\s*R\s*E\s*N\s*C\s*E\s*S\s*\n',
             # Standard reference patterns
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
@@ -1494,6 +1497,9 @@ class ArxivReferenceChecker:
                 # Standalone appendix letter on its own line followed by a subsection:
                 # \nA\nA.1 ... or \nA\nA Extended ...
                 r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
+                # Fully spaced-out appendix heading from PDF letter-spacing artifacts
+                # e.g. "A R E L AT E D WO R K S", "B E X P E R I M E N TA L ..."
+                r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
             ]
             
             # ── HEURISTIC end markers: used only if no definitive marker found ──
@@ -1632,6 +1638,8 @@ class ArxivReferenceChecker:
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                         r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                        # Fully spaced-out appendix heading from PDF letter-spacing artifacts
+                        r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
                     ]
                     for pattern in fallback_appendix_patterns:
                         for m2 in re.finditer(pattern, text[line_start:]):
