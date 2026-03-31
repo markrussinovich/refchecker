@@ -26,7 +26,7 @@ Given a PDF, LaTeX source, plain-text bibliography, or arXiv ID, the program:
 2. **Queries** authoritative bibliographic APIs—Semantic Scholar, OpenAlex, and Crossref
 3. **Reports** discrepancies such as misspelled authors, wrong publication years, malformed DOIs, incorrect arXiv IDs, and broken URLs  
 
-A single run produces a color-coded report together with drop-in corrected BibTeX entries, enabling authors, reviewers, and editors to safeguard citation integrity in seconds. Academic RefChecker is released under the MIT licence and currently comprises approximately 11k lines of tested Python with continuous integration on GitHub.
+A single run produces a color-coded report together with drop-in corrected BibTeX entries, enabling authors, reviewers, and editors to safeguard citation integrity in seconds. Academic RefChecker is released under the MIT licence and currently comprises approximately 32k lines of tested Python with continuous integration on GitHub.
 
 # Statement of need
 

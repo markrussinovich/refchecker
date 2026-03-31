@@ -1264,13 +1264,30 @@ class ArxivReferenceChecker:
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
                 tmp.write(pdf_content.read())
                 tmp_path = tmp.name
+            repaired_path = None
             try:
                 result = subprocess.run(['pdftotext', tmp_path, '-'], capture_output=True, text=True, timeout=60)
                 if result.returncode == 0 and result.stdout.strip():
                     logger.info("Successfully extracted text using pdftotext fallback")
                     return result.stdout
+                # pdftotext failed — try repairing the PDF with pikepdf first
+                try:
+                    import pikepdf
+                    repaired_path = tmp_path + '_repaired.pdf'
+                    with pikepdf.open(tmp_path) as pdf:
+                        pdf.save(repaired_path)
+                    result = subprocess.run(['pdftotext', repaired_path, '-'], capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0 and result.stdout.strip():
+                        logger.info("Successfully extracted text after pikepdf repair + pdftotext")
+                        return result.stdout
+                except ImportError:
+                    pass
+                except Exception as repair_err:
+                    logger.debug(f"pikepdf repair failed: {repair_err}")
             finally:
                 os.unlink(tmp_path)
+                if repaired_path and os.path.exists(repaired_path):
+                    os.unlink(repaired_path)
             return None
             
         try:
@@ -1453,15 +1470,29 @@ class ArxivReferenceChecker:
                     (p, m) for p, m in all_matches if p in standalone_patterns
                 ]
                 if standalone_matches:
-                    # Use the LAST standalone match — the real References section is
-                    # typically near the end of the paper body
-                    best_pattern, best_match = standalone_matches[-1]
+                    # Iterate from LAST to FIRST standalone match.
+                    # Validate that the text following each candidate looks like
+                    # actual bibliography entries (not chart labels or table data).
+                    for sp, sm in reversed(standalone_matches):
+                        following = text[sm.end():sm.end() + 500]
+                        # Reference indicators: years, URLs/DOIs, academic terms
+                        ref_indicators = (
+                            len(re.findall(r'(?:19|20)\d{2}', following)),
+                            bool(re.search(r'https?://|doi[:\s]', following, re.IGNORECASE)),
+                            bool(re.search(r'arXiv|preprint|proceedings|conference|journal|et\sal', following, re.IGNORECASE)),
+                        )
+                        if sum(bool(x) for x in ref_indicators) >= 2:
+                            best_pattern, best_match = sp, sm
+                            break
+                    else:
+                        # No validated match; fall back to the last standalone
+                        best_pattern, best_match = standalone_matches[-1]
                 
                 # Strategy 2: look for matches followed by author-year bibliography
                 # entries (e.g. "Author1, Author2, and Author3. Title...")
                 if not best_match:
                     author_year_pattern = re.compile(
-                        r'\s*[A-Z][a-z]+[\s,].*(?:19|20)\d{2}', re.DOTALL
+                        r'\s*(?:[A-Z][a-z]+|[A-Z]\.)\s*[\s,].*(?:19|20)\d{2}', re.DOTALL
                     )
                     for pattern, match in reversed(all_matches):
                         test_start = match.end()
