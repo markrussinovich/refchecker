@@ -314,7 +314,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
         if self.api_key:
             try:
                 import anthropic
-                self.client = anthropic.Anthropic(api_key=self.api_key)
+                self.client = anthropic.Anthropic(api_key=self.api_key, timeout=120.0)
             except ImportError:
                 logger.error("Anthropic library not installed. Install with: pip install anthropic")
     

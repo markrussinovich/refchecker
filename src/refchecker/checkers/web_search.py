@@ -232,7 +232,7 @@ class AnthropicSearchProvider(WebSearchProvider):
         if self.api_key:
             try:
                 import anthropic
-                self._client = anthropic.Anthropic(api_key=self.api_key)
+                self._client = anthropic.Anthropic(api_key=self.api_key, timeout=120.0)
             except ImportError:
                 logger.debug('anthropic package not installed')
 

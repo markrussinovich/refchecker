@@ -191,7 +191,10 @@ class LLMHallucinationVerifier:
 
     def _init_anthropic(self) -> None:
         import anthropic
-        self.client = anthropic.Anthropic(api_key=self.api_key)
+        self.client = anthropic.Anthropic(
+            api_key=self.api_key,
+            timeout=120.0,  # 2 min timeout (web search calls can be slow)
+        )
         logger.debug(
             'Hallucination verifier initialized (provider=anthropic, model=%s)',
             self.model,
