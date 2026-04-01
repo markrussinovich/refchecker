@@ -350,62 +350,11 @@ class ProgressRefChecker:
                 formatted_errors.append(err_obj)
 
         # Run hallucination check via the shared unified logic
+        # NOTE: Hallucination check is deferred to the async layer
+        # (_check_single_reference_with_limit) so that the initial result
+        # can be streamed to the UI immediately without waiting for the
+        # slow Anthropic web-search API call.
         hallucination_assessment = None
-
-        # Build a consolidated error_entry like the CLI/report-builder paths do
-        error_types = []
-        error_details_parts = []
-        authors_correct = None
-        for err in errors:
-            etype = err.get('error_type') or err.get('warning_type') or err.get('info_type', '')
-            edetail = err.get('error_details') or err.get('warning_details') or err.get('info_details', '')
-            if etype:
-                error_types.append(etype)
-            if edetail:
-                error_details_parts.append(edetail)
-            if err.get('ref_authors_correct'):
-                authors_correct = err['ref_authors_correct']
-
-        if error_types:
-            consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
-            error_entry = {
-                'error_type': consolidated_type,
-                'error_details': '\n'.join(error_details_parts),
-                'ref_title': reference.get('title', ''),
-                'ref_authors_cited': ', '.join(reference.get('authors', [])),
-                'ref_year_cited': reference.get('year'),
-                'ref_venue_cited': reference.get('venue', ''),
-                'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
-                'original_reference': reference,
-            }
-            if authors_correct:
-                error_entry['ref_authors_correct'] = authors_correct
-
-            hallucination_assessment = run_hallucination_check(
-                error_entry,
-                llm_client=self.hallucination_verifier,
-                web_searcher=getattr(self, 'web_searcher', None),
-            )
-            if hallucination_assessment and hallucination_assessment.get('verdict') == 'LIKELY':
-                status = 'hallucination'
-            elif hallucination_assessment and hallucination_assessment.get('verdict') == 'UNLIKELY' and is_unverified:
-                ha_link = hallucination_assessment.get('link')
-                ha_explanation = hallucination_assessment.get('explanation', '')
-                if ha_link and ha_link.startswith('http'):
-                    # LLM confirmed real AND returned a URL — mark as verified
-                    status = 'verified'
-                    authoritative_urls.append({"type": "llm_verified", "url": ha_link})
-                if ha_explanation:
-                    for err_obj in formatted_errors:
-                        if err_obj.get('error_type') == 'unverified':
-                            err_obj['error_details'] = f"Reference could not be verified — {ha_explanation}"
-            elif hallucination_assessment and hallucination_assessment.get('verdict') != 'LIKELY' and is_unverified:
-                # UNCERTAIN verdict — keep as unverified but include explanation
-                ha_explanation = hallucination_assessment.get('explanation', '')
-                if ha_explanation:
-                    for err_obj in formatted_errors:
-                        if err_obj.get('error_type') == 'unverified':
-                            err_obj['error_details'] = f"Reference could not be verified — {ha_explanation}"
 
         result = {
             "index": index,
@@ -421,6 +370,7 @@ class ProgressRefChecker:
             "authoritative_urls": authoritative_urls,
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
+            "_raw_errors": errors,  # Stashed for deferred hallucination check
         }
         logger.info(f"_format_verification_result output: suggestions={formatted_suggestions}, status={status}")
         return result
@@ -1153,6 +1103,86 @@ class ProgressRefChecker:
             logger.error(f"Error checking reference {index}: {e}")
             return self._format_error_result(reference, index, e)
 
+    def _run_hallucination_check_sync(self, result: Dict[str, Any], reference: Dict[str, Any]) -> Dict[str, Any]:
+        """Run hallucination check synchronously and return updated result.
+
+        Called from a thread pool *after* the initial result has already
+        been streamed to the UI, so the user sees the reference immediately.
+        """
+        from refchecker.core.hallucination_policy import run_hallucination_check
+
+        errors = result.get('_raw_errors', [])
+        if not errors:
+            return result
+
+        error_types = []
+        error_details_parts = []
+        authors_correct = None
+        for err in errors:
+            etype = err.get('error_type') or err.get('warning_type') or err.get('info_type', '')
+            edetail = err.get('error_details') or err.get('warning_details') or err.get('info_details', '')
+            if etype:
+                error_types.append(etype)
+            if edetail:
+                error_details_parts.append(edetail)
+            if err.get('ref_authors_correct'):
+                authors_correct = err['ref_authors_correct']
+
+        if not error_types:
+            return result
+
+        consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+        error_entry = {
+            'error_type': consolidated_type,
+            'error_details': '\n'.join(error_details_parts),
+            'ref_title': reference.get('title', ''),
+            'ref_authors_cited': ', '.join(reference.get('authors', [])),
+            'ref_year_cited': reference.get('year'),
+            'ref_venue_cited': reference.get('venue', ''),
+            'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
+            'original_reference': reference,
+        }
+        if authors_correct:
+            error_entry['ref_authors_correct'] = authors_correct
+
+        assessment = run_hallucination_check(
+            error_entry,
+            llm_client=self.hallucination_verifier,
+            web_searcher=getattr(self, 'web_searcher', None),
+        )
+        if not assessment:
+            return result
+
+        result = dict(result)  # shallow copy
+        result['hallucination_assessment'] = assessment
+        is_unverified = result.get('status') == 'unverified'
+
+        if assessment.get('verdict') == 'LIKELY':
+            result['status'] = 'hallucination'
+        elif assessment.get('verdict') == 'UNLIKELY' and is_unverified:
+            ha_link = assessment.get('link')
+            ha_explanation = assessment.get('explanation', '')
+            if ha_link and ha_link.startswith('http'):
+                result['status'] = 'verified'
+                result['authoritative_urls'] = list(result.get('authoritative_urls', []))
+                result['authoritative_urls'].append({"type": "llm_verified", "url": ha_link})
+            if ha_explanation:
+                result['errors'] = [
+                    {**e, 'error_details': f"Reference could not be verified — {ha_explanation}"}
+                    if e.get('error_type') == 'unverified' else e
+                    for e in result.get('errors', [])
+                ]
+        elif assessment.get('verdict') != 'LIKELY' and is_unverified:
+            ha_explanation = assessment.get('explanation', '')
+            if ha_explanation:
+                result['errors'] = [
+                    {**e, 'error_details': f"Reference could not be verified — {ha_explanation}"}
+                    if e.get('error_type') == 'unverified' else e
+                    for e in result.get('errors', [])
+                ]
+
+        return result
+
     async def _check_single_reference_with_limit(
         self,
         reference: Dict[str, Any],
@@ -1455,6 +1485,98 @@ class ProgressRefChecker:
         # Small delay to ensure all WebSocket messages are sent before returning
         # This prevents the 'completed' event from arriving before final progress updates
         await asyncio.sleep(0.1)
+
+        # ── Deferred hallucination checks ──
+        # Run hallucination checks AFTER all refs are verified and streamed
+        # to the UI, so users see results immediately.
+        if self.hallucination_verifier:
+            # Collect refs that need hallucination checking (those with errors)
+            ha_candidates = [
+                (idx, results[idx], references[idx])
+                for idx in range(total_refs)
+                if results.get(idx) and results[idx].get('_raw_errors')
+            ]
+            if ha_candidates:
+                debug_log(f"[TIMING] Running deferred hallucination checks for {len(ha_candidates)} refs")
+                await self.emit_progress("phase", {"message": "Running hallucination detection..."})
+
+                ha_tasks = []
+                for c_idx, c_result, c_ref in ha_candidates:
+                    ha_task = asyncio.create_task(
+                        asyncio.wait_for(
+                            loop.run_in_executor(
+                                None, self._run_hallucination_check_sync, c_result, c_ref
+                            ),
+                            timeout=150.0,
+                        ),
+                        name=f"hallucination-{c_idx}",
+                    )
+                    ha_tasks.append((c_idx, ha_task))
+
+                ha_pending = {t for _, t in ha_tasks}
+                ha_task_to_idx = {t: i for i, t in ha_tasks}
+
+                while ha_pending:
+                    try:
+                        await self._check_cancelled()
+                    except asyncio.CancelledError:
+                        for t in ha_pending:
+                            t.cancel()
+                        raise
+
+                    ha_done, ha_pending = await asyncio.wait(
+                        ha_pending, return_when=asyncio.FIRST_COMPLETED
+                    )
+
+                    for ha_task in ha_done:
+                        ha_idx = ha_task_to_idx[ha_task]
+                        try:
+                            updated = ha_task.result()
+                        except Exception as ha_err:
+                            logger.debug(f"Hallucination check failed for ref {ha_idx + 1}: {ha_err}")
+                            continue
+
+                        old_result = results[ha_idx]
+                        if updated.get('hallucination_assessment') and updated.get('status') != old_result.get('status'):
+                            # Status changed — update counters
+                            old_status = old_result.get('status')
+                            new_status = updated.get('status')
+
+                            if new_status == 'hallucination' and old_status != 'hallucination':
+                                hallucination_count += 1
+                                # hallucinated refs are a subset of unverified
+                                if old_status not in ('unverified', 'hallucination'):
+                                    unverified_count += 1
+                            elif new_status == 'verified' and old_status == 'unverified':
+                                unverified_count = max(0, unverified_count - 1)
+                                verified_count += 1
+                                refs_verified += 1
+
+                            results[ha_idx] = updated
+                            # Re-emit the updated result so the UI refreshes
+                            await self.emit_progress("reference_result", updated)
+                            await self.emit_progress("summary_update", {
+                                "total_refs": total_refs,
+                                "processed_refs": processed_count,
+                                "errors_count": errors_count,
+                                "warnings_count": warnings_count,
+                                "suggestions_count": suggestions_count,
+                                "unverified_count": unverified_count,
+                                "hallucination_count": hallucination_count,
+                                "verified_count": verified_count,
+                                "refs_with_errors": refs_with_errors,
+                                "refs_with_warnings_only": refs_with_warnings_only,
+                                "refs_verified": refs_verified,
+                                "progress_percent": 100.0,
+                            })
+                            await asyncio.sleep(0)  # flush
+
+                debug_log(f"[TIMING] Hallucination checks completed in {time.time() - total_time - start_time:.3f}s")
+
+        # Clean up _raw_errors from final results (internal field)
+        for idx in range(total_refs):
+            if results.get(idx):
+                results[idx].pop('_raw_errors', None)
         
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
