@@ -2169,14 +2169,17 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "max": 20,
                 "section": "Performance"
             },
-            "db_path": {
+        }
+
+        # db_path is only available in single-user mode (server-local resource)
+        if not is_multiuser_mode():
+            settings_config["db_path"] = {
                 "default": "",
                 "type": "text",
                 "label": "Local Semantic Scholar Database",
                 "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
                 "section": "Database"
             }
-        }
         
         # Get current values from database
         settings = {}
@@ -2234,6 +2237,44 @@ async def update_setting(
                 return {"key": setting_key, "value": str(value), "message": "Setting updated"}
             except ValueError:
                 raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
+        
+        if setting_key == "db_path":
+            path = update.value.strip()
+            if not path:
+                await db.set_setting(setting_key, "")
+                logger.info("Cleared db_path setting")
+                return {"key": setting_key, "value": "", "message": "Local database disabled"}
+            if not os.path.isfile(path):
+                raise HTTPException(status_code=400, detail=f"File not found: {path}")
+            # Validate SQLite schema
+            import sqlite3
+            try:
+                conn = sqlite3.connect(path)
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+                conn.close()
+                required = {'paperId', 'title', 'normalized_paper_title', 'authors', 'year', 'externalIds_DOI', 'externalIds_ArXiv'}
+                missing = required - cols
+                if missing:
+                    raise HTTPException(status_code=400, detail=f"Database missing required columns: {', '.join(sorted(missing))}")
+                # Check for indexes
+                idx_conn = sqlite3.connect(path)
+                indexes = {row[0] for row in idx_conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
+                idx_conn.close()
+                has_title_idx = any('title' in i.lower() for i in indexes)
+                warnings = []
+                if not has_title_idx:
+                    warnings.append("No title index found — queries may be slow")
+                row_count = sqlite3.connect(path).execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid database: {e}")
+            await db.set_setting(setting_key, path)
+            logger.info(f"Updated db_path to: {path} ({row_count:,} papers)")
+            msg = f"Database validated: {row_count:,} papers, {len(cols)} columns"
+            if warnings:
+                msg += f" (⚠ {'; '.join(warnings)})"
+            return {"key": setting_key, "value": path, "message": msg, "papers": row_count}
         
         # For other settings, just store the value
         await db.set_setting(setting_key, update.value)

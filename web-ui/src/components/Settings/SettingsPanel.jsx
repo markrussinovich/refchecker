@@ -269,7 +269,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       </div>
 
       {/* Local Database Path (single-user only, rendered when setting exists in API response) */}
-      {settings.db_path && (
+      {settings.db_path && !multiuser && (
         <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <div className="mb-2">
             <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
