@@ -1273,15 +1273,22 @@ class ArxivReferenceChecker:
                 # pdftotext failed — try repairing the PDF with pikepdf first
                 try:
                     import pikepdf
+                    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
                     repaired_path = tmp_path + '_repaired.pdf'
-                    with pikepdf.open(tmp_path) as pdf:
-                        pdf.save(repaired_path)
+                    def _pikepdf_repair():
+                        with pikepdf.open(tmp_path) as pdf:
+                            pdf.save(repaired_path)
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        future = executor.submit(_pikepdf_repair)
+                        future.result(timeout=30)  # 30s timeout for pikepdf repair
                     result = subprocess.run(['pdftotext', repaired_path, '-'], capture_output=True, text=True, timeout=60)
                     if result.returncode == 0 and result.stdout.strip():
                         logger.info("Successfully extracted text after pikepdf repair + pdftotext")
                         return result.stdout
                 except ImportError:
                     pass
+                except FuturesTimeoutError:
+                    logger.warning("pikepdf repair timed out after 30s, skipping")
                 except Exception as repair_err:
                     logger.debug(f"pikepdf repair failed: {repair_err}")
             finally:

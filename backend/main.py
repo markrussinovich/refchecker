@@ -679,8 +679,8 @@ async def run_check(
         semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
     try:
-        # Resolve local Semantic Scholar database path from environment
-        db_path = os.environ.get('REFCHECKER_DB_PATH') or None
+        # Resolve local Semantic Scholar database path from environment or settings
+        db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
 
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
@@ -2166,6 +2166,13 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "min": 1,
                 "max": 20,
                 "section": "Performance"
+            },
+            "db_path": {
+                "default": "",
+                "type": "text",
+                "label": "Local Semantic Scholar Database",
+                "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
+                "section": "Database"
             }
         }
         
@@ -2202,7 +2209,7 @@ async def update_setting(
     try:
         _require_admin(current_user)
         # Validate the setting key
-        valid_keys = {"max_concurrent_checks"}
+        valid_keys = {"max_concurrent_checks", "db_path"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
         
