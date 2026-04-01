@@ -446,10 +446,12 @@ export const useHistoryStore = create((set, get) => ({
         )
         
         // For selectedCheck, merge in-memory data into fetched results
-        // Preserve in-memory results if they exist and have more data than API results
+        // Only prefer in-memory results for in-progress checks where WS updates are fresher.
+        // For completed/error/cancelled, the API has the authoritative final results.
         const existingResults = existingItem?.results || []
         const fetchedResults = check.results || []
-        const useExistingResults = existingResults.length > 0 && 
+        const isInProgress = existingItem?.status === 'in_progress' || check.status === 'in_progress'
+        const useExistingResults = isInProgress && existingResults.length > 0 && 
           (fetchedResults.length === 0 || existingResults.length >= fetchedResults.length)
         
         const mergedSelectedCheck = keepExisting && existingItem.status === 'in_progress'

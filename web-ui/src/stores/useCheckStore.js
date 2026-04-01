@@ -417,18 +417,22 @@ export const useCheckStore = create((set, get) => ({
             refs_with_warnings_only: data.refs_with_warnings_only,
             refs_verified: data.refs_verified,
             extraction_method: data.extraction_method,
+            // Clear in-memory results so selectCheck fetches authoritative data from API
+            results: undefined,
           })
           break
         case 'error':
           logger.error('CheckStore', `Check ${checkIdForMessage} failed (concurrent session ${messageSessionId?.slice(0,8)})`, data)
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'error',
+            results: undefined,
           })
           break
         case 'cancelled':
           logger.info('CheckStore', `Check ${checkIdForMessage} cancelled (concurrent session ${messageSessionId?.slice(0,8)})`)
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'cancelled',
+            results: undefined,
           })
           break
         default:

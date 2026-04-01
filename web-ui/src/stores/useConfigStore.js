@@ -42,6 +42,12 @@ export const useConfigStore = create((set, get) => ({
         lastError = error
         logger.warn('ConfigStore', `Attempt ${attempt}/${maxRetries} failed: ${error.message}`)
         
+        // Don't retry on 401 - user needs to authenticate first
+        if (error.response?.status === 401) {
+          logger.info('ConfigStore', 'Not authenticated, skipping retries')
+          break
+        }
+        
         if (attempt < maxRetries) {
           // Exponential backoff: 1s, 2s, 4s, 8s, 16s
           const delay = baseDelay * Math.pow(2, attempt - 1)
@@ -54,12 +60,6 @@ export const useConfigStore = create((set, get) => ({
     // All retries exhausted
     logger.error('ConfigStore', `Failed to fetch configs after ${maxRetries} attempts`, lastError)
     set({ error: lastError?.message || 'Failed to connect to server', isLoading: false })
-    
-    // Schedule a background retry
-    setTimeout(() => {
-      logger.info('ConfigStore', 'Background retry: attempting to fetch configs')
-      get().fetchConfigs()
-    }, 5000)
   },
 
   addConfig: async (config) => {

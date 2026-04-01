@@ -285,8 +285,8 @@ MAX_CHECKS_PER_USER = int(os.environ.get("MAX_CHECKS_PER_USER", "3"))
 
 
 async def _acquire_user_check_slot(user_id: int) -> bool:
-    if user_id == 0:
-        return True  # opt-out sentinel (e.g., unauthenticated recheck)
+    if user_id is None or user_id == 0:
+        return True  # opt-out sentinel: single-user mode (None) or unauthenticated recheck (0)
     async with _user_active_checks_lock:
         current = _user_active_checks.get(user_id, 0)
         if current >= MAX_CHECKS_PER_USER:
@@ -296,8 +296,8 @@ async def _acquire_user_check_slot(user_id: int) -> bool:
 
 
 async def _release_user_check_slot(user_id: int) -> None:
-    if user_id == 0:
-        return  # opt-out sentinel — nothing to release
+    if user_id is None or user_id == 0:
+        return  # opt-out sentinel: single-user mode (None) or unauthenticated recheck (0)
     async with _user_active_checks_lock:
         current = _user_active_checks.get(user_id, 0)
         _user_active_checks[user_id] = max(0, current - 1)
@@ -699,7 +699,9 @@ async def run_check(
         # Create progress callback that also saves to DB
         async def progress_callback(event_type: str, data: dict):
             nonlocal accumulated_results, last_save_count
-            await manager.send_message(session_id, event_type, data)
+            # Always include check_id so the frontend can reliably route messages
+            data_with_id = {**data, "check_id": check_id}
+            await manager.send_message(session_id, event_type, data_with_id)
             
             # Save reference results to DB as they come in
             if event_type == "reference_result":

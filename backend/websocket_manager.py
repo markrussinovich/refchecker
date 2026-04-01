@@ -3,11 +3,15 @@ WebSocket connection manager for real-time updates
 """
 import asyncio
 import json
+import time
 from typing import Dict, Set
 from fastapi import WebSocket
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Pending message buffers older than this are discarded
+_PENDING_MAX_AGE_SECONDS = 300  # 5 minutes
 
 
 class ConnectionManager:
@@ -18,6 +22,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, Set[WebSocket]] = {}
         # Buffer early messages sent before WebSocket connects
         self._pending_messages: Dict[str, list] = {}
+        # Track when each pending buffer was created
+        self._pending_timestamps: Dict[str, float] = {}
 
     async def connect(self, websocket: WebSocket, session_id: str):
         """Accept a new WebSocket connection and replay any buffered messages"""
@@ -29,6 +35,7 @@ class ConnectionManager:
 
         # Replay buffered messages
         pending = self._pending_messages.pop(session_id, [])
+        self._pending_timestamps.pop(session_id, None)
         if pending:
             logger.info(f"Replaying {len(pending)} buffered messages for session {session_id}")
             for msg_json in pending:
@@ -56,9 +63,12 @@ class ConnectionManager:
             # Buffer the message for replay when the WebSocket connects
             if session_id not in self._pending_messages:
                 self._pending_messages[session_id] = []
+                self._pending_timestamps[session_id] = time.monotonic()
             # Cap buffer to avoid unbounded memory growth
             if len(self._pending_messages[session_id]) < 500:
                 self._pending_messages[session_id].append(message_json)
+            # Periodically evict stale buffers
+            self._evict_stale_pending()
             return
         
         logger.debug(f"Sending {message_type} to session {session_id}: {message_json[:200]}...")
