@@ -929,8 +929,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached
-            if not os.path.exists(pdf_path):
+            # Download PDF if not already cached (or if cached file is empty/corrupt)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
@@ -947,6 +947,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
             thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id)
+            if not thumbnail_path:
+                thumbnail_path = await get_text_thumbnail_async(check_id, f"ArXiv: {arxiv_id}")
         elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
             # Generate thumbnail from uploaded PDF
             if os.path.exists(paper_source):
@@ -1039,8 +1041,8 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
             pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
             pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
             
-            # Download PDF if not already cached
-            if not os.path.exists(pdf_path):
+            # Download PDF if not already cached (or if cached file is empty/corrupt)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:

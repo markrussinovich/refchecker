@@ -1189,7 +1189,8 @@ def _extract_ss_id(reference: Dict[str, Any]) -> Optional[str]:
         if clean.startswith('http'):
             from refchecker.utils.doi_utils import extract_doi_from_url
             clean = extract_doi_from_url(clean) or ''
-        if clean and clean.startswith('10.'):
+        from refchecker.utils.doi_utils import is_valid_doi_format
+        if clean and clean.startswith('10.') and is_valid_doi_format(clean):
             return f'DOI:{clean}'
 
     return None
@@ -1271,7 +1272,8 @@ def _batch_prefetch_ss_metadata(
                     if paper_data.get('url'):
                         paper_url = paper_data['url']
                     elif paper_data.get('paperId'):
-                        paper_url = f"https://www.semanticscholar.org/paper/{paper_data['paperId']}"
+                        from refchecker.utils.url_utils import construct_semantic_scholar_url
+                        paper_url = construct_semantic_scholar_url(paper_data['paperId'])
 
                     result_tuple = (errors if errors else None, paper_url, paper_data)
                     verification_cache.put(ref, result_tuple)
