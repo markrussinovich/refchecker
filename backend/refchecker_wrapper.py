@@ -1132,6 +1132,9 @@ class ProgressRefChecker:
             return result
 
         consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+        # Extract verified URL from authoritative_urls for hallucination policy
+        auth_urls = result.get('authoritative_urls') or []
+        ref_verified_url = auth_urls[0]['url'] if auth_urls else ''
         error_entry = {
             'error_type': consolidated_type,
             'error_details': '\n'.join(error_details_parts),
@@ -1140,6 +1143,7 @@ class ProgressRefChecker:
             'ref_year_cited': reference.get('year'),
             'ref_venue_cited': reference.get('venue', ''),
             'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
+            'ref_verified_url': ref_verified_url,
             'original_reference': reference,
         }
         if authors_correct:

@@ -6509,6 +6509,15 @@ class ArxivReferenceChecker:
             return None
 
         consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+        # Extract verified URL from verified_data if available
+        ref_verified_url = ''
+        if verified_data:
+            ref_verified_url = (
+                verified_data.get('url', '')
+                or verified_data.get('semantic_scholar_url', '')
+                or verified_data.get('arxiv_url', '')
+                or verified_data.get('doi_url', '')
+            )
         error_entry = {
             'error_type': consolidated_type,
             'error_details': '\n'.join(error_details_parts),
@@ -6517,6 +6526,7 @@ class ArxivReferenceChecker:
             'ref_year_cited': reference.get('year'),
             'ref_venue_cited': reference.get('venue', ''),
             'ref_url_cited': reference.get('url', ''),
+            'ref_verified_url': ref_verified_url,
             'original_reference': reference,
         }
         if authors_correct:

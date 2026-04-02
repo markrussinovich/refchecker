@@ -89,7 +89,8 @@ RUN mkdir -p /app/data && chown refchecker:refchecker /app/data
 # Environment variables
 ENV PYTHONPATH="/app/src:/app" \
     PYTHONUNBUFFERED=1 \
-    REFCHECKER_DATA_DIR="/app/data"
+    REFCHECKER_DATA_DIR="/app/data" \
+    UVICORN_LIMIT_MAX_REQUESTS=5000
 
 # Switch to non-root user
 USER refchecker

@@ -4,6 +4,7 @@ import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
+import { useAuthStore } from '../../stores/useAuthStore'
 import { logger } from '../../utils/logger'
 
 const MIN_WIDTH = 220
@@ -21,6 +22,7 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const { initializeWithPlaceholder, ensureNewRefcheckItem, selectCheck } = useHistoryStore()
   const { status, reset } = useCheckStore()
   const { toggleSettings } = useSettingsStore()
+  const isAuthLoading = useAuthStore(s => s.isLoading)
   const [width, setWidth] = useState(() => {
     const saved = localStorage.getItem(STORAGE_KEY)
     return saved ? Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parseInt(saved, 10))) : DEFAULT_WIDTH
@@ -29,11 +31,13 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   const sidebarRef = useRef(null)
 
   useEffect(() => {
+    // Don't fetch configs until auth check has finished
+    if (isAuthLoading) return
     logger.info('Sidebar', 'Initializing sidebar data')
     fetchConfigs()
     // Use initializeWithPlaceholder for startup - adds placeholder and selects it
     initializeWithPlaceholder()
-  }, [fetchConfigs, initializeWithPlaceholder])
+  }, [fetchConfigs, initializeWithPlaceholder, isAuthLoading])
 
   // Save width to localStorage when it changes
   useEffect(() => {

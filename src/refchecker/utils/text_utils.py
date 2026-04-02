@@ -1966,6 +1966,7 @@ def surname_similarity(surname1: str, surname2: str) -> bool:
 def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     Enhanced name matching that handles initial-to-full-name and surname variations.
+    Also handles FirstName LastName ↔ LastName FirstName swaps.
     
     Args:
         name1: First author name
@@ -2060,6 +2061,19 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
         # "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan" vs "Kenneth McMillan"
         if (first1 == first2 and surname_similarity(last1, last2)):
             return True
+    
+    # Handle FirstName LastName ↔ LastName FirstName swaps
+    # e.g. "Deng Ailin" vs "Ailin Deng", "Liu Zhuang" vs "Zhuang Liu"
+    if len(parts1) >= 2 and len(parts2) >= 2:
+        reversed1 = list(reversed(parts1))
+        # Check if reversing one name's word order makes it match
+        if len(reversed1) == len(parts2):
+            all_match = all(
+                p1 == p2 or surname_similarity(p1, p2)
+                for p1, p2 in zip(reversed1, parts2)
+            )
+            if all_match:
+                return True
     
     return False
 

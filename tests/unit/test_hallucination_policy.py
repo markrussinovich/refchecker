@@ -2,7 +2,16 @@
 
 import csv
 
-from refchecker.core.hallucination_policy import check_author_hallucination, should_check_hallucination
+from unittest.mock import MagicMock
+
+from refchecker.core.hallucination_policy import (
+    check_author_hallucination,
+    detect_name_order_warning,
+    run_hallucination_check,
+    should_check_hallucination,
+    _compute_author_overlap,
+    _strip_team_names,
+)
 from refchecker.core.report_builder import ReportBuilder
 
 
@@ -310,3 +319,183 @@ def test_summary_counts_likely_verdicts():
     # Without LLM, no flagged records
     payload = rb.build_structured_report_payload(errors, stats)
     assert payload['summary']['flagged_records'] == 0
+
+
+# ------------------------------------------------------------------
+# Name-order swap detection
+# ------------------------------------------------------------------
+
+def test_name_order_swap_detected_as_unlikely():
+    """LastName FirstName vs FirstName LastName should be UNLIKELY (warning)."""
+    entry = {
+        'error_type': 'author',
+        'ref_title': 'Words or vision: Do vision-language models have blind faith in text',
+        'ref_authors_cited': 'Deng Ailin, Cao Tri, Chen Zhirui, Hooi Bryan',
+        'ref_authors_correct': 'Ailin Deng, Tri Cao, Zhirui Chen, Bryan Hooi',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:12345',
+    }
+    result = detect_name_order_warning(entry)
+    assert result is not None
+    assert result['verdict'] == 'UNLIKELY'
+    assert 'order' in result['explanation'].lower()
+
+
+def test_name_order_swap_not_triggered_for_different_people():
+    """Completely different authors should not be flagged as name-order swap."""
+    entry = {
+        'error_type': 'author',
+        'ref_title': 'Some paper title that is long enough for the check',
+        'ref_authors_cited': 'Junyi Chen, Shuming Shen, Andi Chen, Wen Wu',
+        'ref_authors_correct': 'Junyi Ao, Rui Wang, Long Zhou, Shujie Liu',
+    }
+    result = detect_name_order_warning(entry)
+    assert result is None
+
+
+def test_name_order_swap_integrated_in_run_hallucination_check():
+    """run_hallucination_check should return UNLIKELY for name-order swaps."""
+    entry = {
+        'error_type': 'author',
+        'ref_title': 'Multi-modal hallucination control by visual information grounding',
+        'ref_authors_cited': 'Favero Alessandro, Zancato Luca, Trager Matthew',
+        'ref_authors_correct': 'Alessandro Favero, Luca Zancato, Matthew Trager',
+        'ref_verified_url': 'https://example.com/paper',
+    }
+    result = run_hallucination_check(entry, llm_client=None)
+    assert result is not None
+    assert result['verdict'] == 'UNLIKELY'
+
+
+# ------------------------------------------------------------------
+# Team-name stripping in author overlap
+# ------------------------------------------------------------------
+
+def test_team_name_stripped_from_cited_authors():
+    """Team names like 'DeepSeek-AI' should be stripped before overlap."""
+    overlap = _compute_author_overlap(
+        'DeepSeek-AI, Xiao Bi, Deli Chen, Guanting Chen',
+        'DeepSeek-AI Xiao Bi, Deli Chen, Guanting Chen',
+    )
+    assert overlap is not None
+    assert overlap >= 0.9
+
+
+def test_qwen_team_name_stripped():
+    """Qwen team prefix should be stripped."""
+    overlap = _compute_author_overlap(
+        'Qwen, An Yang, Baosong Yang, Beichen Zhang',
+        'Qwen An Yang, Baosong Yang, Beichen Zhang',
+    )
+    assert overlap is not None
+    assert overlap >= 0.9
+
+
+def test_strip_team_names_function():
+    """_strip_team_names should remove known team names and handle DB concatenation."""
+    result = _strip_team_names(['DeepSeek-AI', 'Xiao Bi', 'Deli Chen'])
+    assert result == ['Xiao Bi', 'Deli Chen']
+
+    result2 = _strip_team_names(['Qwen An Yang', 'Baosong Yang'])
+    assert result2 == ['An Yang', 'Baosong Yang']
+
+
+def test_team_name_does_not_affect_genuine_mismatch():
+    """Team name stripping should not mask genuinely fabricated authors."""
+    overlap = _compute_author_overlap(
+        'Qwen, Fake Author One, Fake Author Two, Fake Author Three',
+        'Qwen An Yang, Baosong Yang, Beichen Zhang',
+    )
+    assert overlap is not None
+    assert overlap < 0.2  # Genuinely different authors
+
+
+# ------------------------------------------------------------------
+# Verified ref with fabricated authors — hallucination detection
+# ------------------------------------------------------------------
+
+def test_verified_ref_zero_overlap_flagged_as_likely():
+    """A verified ref with 0% author overlap should be LIKELY hallucinated."""
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Author 1 mismatch',
+        'ref_title': 'Speecht5: Unified-modal encoder-decoder pre-training',
+        'ref_authors_cited': 'Junyi Chen, Shuming Shen, Andi Chen, Wen Wu, Jiantao Kang, Haohe Li',
+        'ref_authors_correct': 'Junyi Ao, Rui Wang, Long Zhou, Shujie Liu, Shuo Ren, Yu Wu',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:238856828',
+    }
+    result = run_hallucination_check(entry, llm_client=None)
+    assert result is not None
+    assert result['verdict'] == 'LIKELY'
+
+
+def test_verified_ref_high_overlap_not_flagged():
+    """A verified ref with good author overlap should not be flagged."""
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Year mismatch',
+        'ref_title': 'Attention Is All You Need: A Long Title For Testing',
+        'ref_authors_cited': 'Ashish Vaswani, Noam Shazeer, Niki Parmar',
+        'ref_authors_correct': 'Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit',
+        'ref_verified_url': 'https://arxiv.org/abs/1706.03762',
+    }
+    result = run_hallucination_check(entry, llm_client=None)
+    assert result is None  # No hallucination for well-matching authors
+
+
+# ------------------------------------------------------------------
+# LLM override behavior
+# ------------------------------------------------------------------
+
+def test_llm_can_override_deterministic_likely_to_unlikely():
+    """LLM should be able to override a deterministic LIKELY when it finds
+    the paper exists with the cited authors (e.g. different DB entry)."""
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Author mismatch',
+        'ref_title': 'Fairness in machine learning: a survey with some extra words',
+        'ref_authors_cited': 'Solon Barocas, Moritz Hardt, Arvind Narayanan',
+        'ref_authors_correct': 'L. Oneto, S. Chiappa',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:12345',
+    }
+    mock_llm = MagicMock()
+    mock_llm.available = True
+    mock_llm.assess.return_value = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Paper found: NeurIPS 2017 tutorial by Barocas and Hardt.',
+        'web_search': None,
+    }
+    result = run_hallucination_check(entry, llm_client=mock_llm)
+    assert result['verdict'] == 'UNLIKELY'  # LLM overrides
+
+
+def test_llm_likely_overrides_no_deterministic():
+    """When deterministic check returns None but LLM says LIKELY, use LLM."""
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'A totally fabricated paper that does not exist anywhere',
+        'ref_authors_cited': 'Fake Author One, Fake Author Two, Fake Author Three',
+    }
+    mock_llm = MagicMock()
+    mock_llm.available = True
+    mock_llm.assess.return_value = {
+        'verdict': 'LIKELY',
+        'explanation': 'No paper with this title exists.',
+        'web_search': None,
+    }
+    result = run_hallucination_check(entry, llm_client=mock_llm)
+    assert result['verdict'] == 'LIKELY'
+
+
+# ------------------------------------------------------------------
+# enhanced_name_match: reversed name order
+# ------------------------------------------------------------------
+
+def test_enhanced_name_match_reversed_order():
+    """enhanced_name_match should handle FirstName/LastName reversal."""
+    from refchecker.utils.text_utils import enhanced_name_match
+    assert enhanced_name_match('Deng Ailin', 'Ailin Deng') is True
+    assert enhanced_name_match('Liu Zhuang', 'Zhuang Liu') is True
+    assert enhanced_name_match('Favero Alessandro', 'Alessandro Favero') is True
+    # Different people should still not match
+    assert enhanced_name_match('John Smith', 'Jane Doe') is False

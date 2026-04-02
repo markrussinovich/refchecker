@@ -53,6 +53,19 @@ class ConnectionManager:
                 del self.active_connections[session_id]
         logger.info(f"WebSocket disconnected for session: {session_id}")
 
+    def _evict_stale_pending(self):
+        """Remove pending message buffers that have been waiting too long."""
+        now = time.monotonic()
+        stale = [
+            sid for sid, ts in self._pending_timestamps.items()
+            if now - ts > _PENDING_MAX_AGE_SECONDS
+        ]
+        for sid in stale:
+            self._pending_messages.pop(sid, None)
+            self._pending_timestamps.pop(sid, None)
+        if stale:
+            logger.info(f"Evicted {len(stale)} stale pending message buffers")
+
     async def send_message(self, session_id: str, message_type: str, data: dict):
         """Send a message to all connections for a session, buffering if none connected yet"""
         # Flatten structure: frontend expects {type, session_id, ...data}

@@ -39,6 +39,12 @@ def main():
         action="store_true",
         help="Enable auto-reload for development"
     )
+    parser.add_argument(
+        "--limit-max-requests",
+        type=int,
+        default=int(os.environ.get("UVICORN_LIMIT_MAX_REQUESTS", "0")),
+        help="Recycle worker after this many requests (0 = no limit, default: UVICORN_LIMIT_MAX_REQUESTS env var or 0)"
+    )
     
     args = parser.parse_args()
     
@@ -60,12 +66,15 @@ def main():
         print("Note: Frontend not bundled. Start it separately: cd web-ui && npm run dev")
     print()
     
-    uvicorn.run(
-        "backend.main:app",
+    uvicorn_kwargs = dict(
         host=args.host,
         port=args.port,
-        reload=args.reload
+        reload=args.reload,
     )
+    if args.limit_max_requests > 0:
+        uvicorn_kwargs["limit_max_requests"] = args.limit_max_requests
+    
+    uvicorn.run("backend.main:app", **uvicorn_kwargs)
 
 
 if __name__ == "__main__":

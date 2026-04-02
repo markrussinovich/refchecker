@@ -32,9 +32,20 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
     'arxiv',            # ArXiv-related conflict
     'multiple',         # Multiple issues (may include title/author mismatches)
     'url',              # Cited URL is broken or points to wrong paper
+    'author',           # Author mismatch (may indicate fabricated citation)
 })
 
-_AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match
+_AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match (unverified refs)
+_AUTHOR_VERIFIED_THRESHOLD = 0.2  # Stricter: flag if < 20% match (verified refs)
+
+# Team/organisation names that appear as first "author" in large collaborative
+# papers.  These are stripped before computing author overlap because the DB
+# may concatenate them with the first real author.
+_TEAM_NAMES = frozenset({
+    'deepseek-ai', 'qwen', 'openai', 'microsoft', 'google', 'meta',
+    'team glm', 'gemini team', 'core team', 'v team',
+    '01.ai', 'ai', 'lcm team', 'the lcm team',
+})
 
 
 def _split_author_string(author_str: str) -> List[str]:
@@ -88,7 +99,14 @@ def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optiona
 
     Returns None if either list is empty or has fewer than 2 real authors.
     Uses enhanced_name_match() for fuzzy comparison that handles initials,
-    diacritics, and name-format variations.
+    diacritics, name-format variations, and FirstName/LastName swaps.
+
+    Strips known team/organisation names (e.g. "DeepSeek-AI", "Qwen") that
+    the DB may concatenate with the first real author, causing false mismatches.
+
+    For long author lists (>10 authors), compares only the first 10 from each
+    list.  Database records often truncate differently, so comparing the full
+    30+-author list produces false-low overlap.
     """
     if not cited_authors or not correct_authors:
         return None
@@ -96,22 +114,58 @@ def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optiona
     cited = _split_author_string(cited_authors)
     correct = _split_author_string(correct_authors)
 
+    # Strip team-name prefixes from both lists
+    cited = _strip_team_names(cited)
+    correct = _strip_team_names(correct)
+
     if len(cited) < 2 or len(correct) < 2:
         return None
 
+    # For long author lists, cap comparison to first N authors.
+    # Databases often store author lists differently (truncated, reordered
+    # after first author, different "et al." handling), so comparing the
+    # full 30+-author list produces artificially low overlap.
+    MAX_AUTHORS_TO_COMPARE = 10
+    cited_cmp = cited[:MAX_AUTHORS_TO_COMPARE]
+    correct_cmp = correct  # search against the full correct list
+
     matches = 0
-    for cited_name in cited:
-        for correct_name in correct:
+    for cited_name in cited_cmp:
+        for correct_name in correct_cmp:
             if enhanced_name_match(cited_name, correct_name):
                 matches += 1
                 break
 
     # With only 2 authors, having 1 correct is a normal citation error,
     # not hallucination — require at least 3 cited authors for overlap scoring
-    if len(cited) <= 2 and matches >= 1:
+    if len(cited_cmp) <= 2 and matches >= 1:
         return None
 
-    return matches / len(cited)
+    return matches / len(cited_cmp)
+
+
+def _strip_team_names(authors: List[str]) -> List[str]:
+    """Remove known team/org names from an author list.
+
+    Also handles the DB concatenation pattern where the team name is joined
+    to the first real author, e.g. "Qwen An Yang" → "An Yang".
+    """
+    result = []
+    for i, name in enumerate(authors):
+        name_lower = name.strip().lower()
+        # Direct match: skip team name entirely
+        if name_lower in _TEAM_NAMES:
+            continue
+        # Check if this name starts with a team name prefix (DB concatenation)
+        # e.g. "Qwen An Yang" → extract "An Yang"
+        if i == 0:
+            for team in _TEAM_NAMES:
+                if name_lower.startswith(team + ' '):
+                    # Strip the team prefix
+                    name = name[len(team):].strip()
+                    break
+        result.append(name)
+    return result
 
 
 def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -120,19 +174,26 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     Returns a hallucination assessment dict if < 60% of cited authors match
     the correct authors, or None if this check doesn't apply.
 
-    Only applies to unverified references.  If a paper was found in a
-    database (author error on a verified paper), low author overlap is
-    a data-quality issue, not hallucination.
+    For verified references (found in a database), only flags hallucination
+    when author overlap is critically low (< 20%) — i.e. the LLM found a
+    real paper title but fabricated nearly all authors.  Moderate mismatches
+    on verified papers are treated as data-quality issues, not hallucination.
+
+    For unverified references, uses the standard 60% threshold.
 
     This is a deterministic check that does not require an LLM.
     """
-    # Only flag hallucination for unverified references; verified papers
-    # with author mismatches are data-quality issues, not fabrications.
-    if error_entry.get('ref_verified_url'):
-        return None
     error_type = (error_entry.get('error_type') or '').lower()
-    if error_type not in ('unverified', 'multiple', ''):
-        return None
+    is_verified = bool(error_entry.get('ref_verified_url'))
+
+    # For unverified refs, allow 'unverified', 'multiple', or empty error_type
+    # For verified refs, allow 'author' and 'multiple' (they have author errors)
+    if is_verified:
+        if error_type not in ('author', 'multiple', ''):
+            return None
+    else:
+        if error_type not in ('unverified', 'multiple', ''):
+            return None
 
     cited = error_entry.get('ref_authors_cited', '')
     correct = error_entry.get('ref_authors_correct', '')
@@ -144,7 +205,11 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     if overlap is None:
         return None
 
-    if overlap < _AUTHOR_MATCH_THRESHOLD:
+    # For verified references, use a stricter threshold: only flag when
+    # author overlap is critically low (< 20%), indicating the LLM found
+    # a real title but fabricated the authors.
+    threshold = _AUTHOR_VERIFIED_THRESHOLD if is_verified else _AUTHOR_MATCH_THRESHOLD
+    if overlap < threshold:
         pct = int(overlap * 100)
         if pct == 0:
             overlap_desc = 'None of the cited authors match'
@@ -156,6 +221,72 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
             'verdict': 'LIKELY',
             'explanation': f'{overlap_desc} the actual authors — '
                            f'the reference likely cites a different or fabricated paper.',
+            'web_search': None,
+        }
+
+    return None
+
+
+def _is_name_order_swap(name1: str, name2: str) -> bool:
+    """Return True if two names are the same person in different order.
+
+    Detects "LastName FirstName" ↔ "FirstName LastName" swaps such as
+    "Deng Ailin" vs "Ailin Deng".  Only for 2-part names where the
+    words are the same but reversed.
+    """
+    parts1 = [w.lower().rstrip('.') for w in name1.strip().split() if len(w.rstrip('.')) > 1]
+    parts2 = [w.lower().rstrip('.') for w in name2.strip().split() if len(w.rstrip('.')) > 1]
+    if len(parts1) != 2 or len(parts2) != 2:
+        return False
+    return parts1[0] == parts2[1] and parts1[1] == parts2[0]
+
+
+def detect_name_order_warning(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Detect if the author "mismatch" is just a FirstName/LastName ordering issue.
+
+    Returns an UNLIKELY assessment with a warning explanation if most cited
+    authors are the same people in reversed name order.  Returns None if
+    this is not a name-ordering issue.
+
+    This allows the reference to be treated as verified with a warning
+    rather than flagged as hallucination.
+    """
+    cited = error_entry.get('ref_authors_cited', '')
+    correct = error_entry.get('ref_authors_correct', '')
+    if not cited or not correct:
+        return None
+
+    cited_list = _split_author_string(cited)
+    correct_list = _split_author_string(correct)
+
+    # Strip team names for comparison
+    cited_list = _strip_team_names(cited_list)
+    correct_list = _strip_team_names(correct_list)
+
+    if len(cited_list) < 2 or len(correct_list) < 2:
+        return None
+
+    # Count how many cited names are name-order swaps of correct names
+    swap_count = 0
+    match_count = 0
+    for cn in cited_list:
+        for corr in correct_list:
+            if enhanced_name_match(cn, corr):
+                match_count += 1
+                if _is_name_order_swap(cn, corr):
+                    swap_count += 1
+                break
+
+    # If most authors match and at least some are name-order swaps, it's formatting
+    if match_count / len(cited_list) >= 0.5 and swap_count >= 1:
+        return {
+            'verdict': 'UNLIKELY',
+            'explanation': (
+                f'Author names appear to use reversed ordering '
+                f'(e.g. "LastName FirstName" instead of "FirstName LastName"). '
+                f'{swap_count} of {len(cited_list)} names are order-swapped — '
+                f'this is a formatting issue, not hallucination.'
+            ),
             'web_search': None,
         }
 
@@ -277,8 +408,10 @@ def run_hallucination_check(
 ) -> Optional[Dict[str, Any]]:
     """Unified hallucination check — single entry point for CLI, WebUI, and report builder.
 
-    Runs the deterministic author-overlap check first, then (if no flag)
-    the LLM-based assessment for unverified / URL-error references.
+    Runs the deterministic author-overlap check first, then the LLM-based
+    assessment.  When an LLM is available, it always runs (for any error
+    type, verified or not) so it can override the deterministic verdict —
+    e.g. the LLM may find a different paper that actually matches.
 
     Parameters
     ----------
@@ -295,29 +428,25 @@ def run_hallucination_check(
     -------
     dict with verdict/explanation/web_search, or None if no assessment needed.
     """
-    # 1. Deterministic: author-overlap check (no LLM)
+    # 1. Deterministic: check for name-ordering issues first (warning, not hallucination)
+    name_order_result = detect_name_order_warning(error_entry)
+    if name_order_result:
+        return name_order_result
+
+    # 2. Deterministic: author-overlap check (no LLM)
     author_result = check_author_hallucination(error_entry)
-    if author_result:
-        return author_result
 
-    # 2. LLM-based: for unverified or URL-error references
-    if not llm_client or not getattr(llm_client, 'available', False):
-        return None
+    # 3. LLM-based: always run when LLM is available, for any error type.
+    #    The LLM can override the deterministic verdict — e.g. it may find
+    #    a different paper with the same title where the cited authors DO
+    #    match, proving the citation is real despite the DB mismatch.
+    if llm_client and getattr(llm_client, 'available', False):
+        if should_check_hallucination(error_entry):
+            llm_result = assess_hallucination(
+                error_entry, llm_client=llm_client, web_searcher=web_searcher,
+            )
+            if llm_result:
+                return llm_result
 
-    error_type = (error_entry.get('error_type') or '').lower()
-    is_unverified = (
-        error_type == 'unverified'
-        or error_type == 'url'
-        or (error_type == 'multiple'
-            and any(kw in (error_entry.get('error_details') or '').lower()
-                    for kw in ('unverified', 'non-existent', 'does not reference',
-                               'could not be verified', 'could not verify')))
-    )
-
-    if not is_unverified:
-        return None
-
-    if not should_check_hallucination(error_entry):
-        return None
-
-    return assess_hallucination(error_entry, llm_client=llm_client, web_searcher=web_searcher)
+    # Fall back to deterministic result if LLM was unavailable or didn't run
+    return author_result
