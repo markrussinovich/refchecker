@@ -7,6 +7,7 @@ import { useAuthStore } from '../../stores/useAuthStore'
 import { validateLLMConfig } from '../../utils/api'
 import { logger } from '../../utils/logger'
 
+// Keep in sync with src/refchecker/config/settings.py DEFAULT_EXTRACTION_MODELS
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true },
