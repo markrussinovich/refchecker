@@ -97,15 +97,34 @@ reference is real
 - The title appears truncated, garbled, or unnaturally worded
 - Authors are malformed (e.g. "O. T. et al. Unke")
 - The ArXiv ID or DOI points to a completely different paper
+- The paper title exists but the cited authors are COMPLETELY WRONG — \
+i.e. NONE or almost none of the cited authors match the real authors. \
+This is the most common form of AI hallucination: grafting a real paper \
+title onto fabricated author names. Verdict MUST be LIKELY even though \
+the paper itself is real, because the reference as cited is fabricated.
+
+CRITICAL AUTHOR RULE: A reference with a real title but entirely \
+fabricated authors is STILL a hallucinated reference. The verdict must \
+be LIKELY. The ONLY exceptions are:
+  (a) Large collaborative papers (100+ authors) where the citation uses \
+a team name (e.g. "Gemini Team", "Llama Team") instead of individual \
+names — this is acceptable shorthand, verdict UNLIKELY.
+  (b) Minor author-name formatting differences (initials vs full names, \
+transliteration variants) — verdict UNLIKELY.
+  (c) The paper has been revised and the author list changed between \
+versions — verdict UNLIKELY if the cited authors match an earlier version.
 
 Key signals that it is NOT hallucinated (verdict should be UNLIKELY):
 - Your web search found a page showing a paper with this EXACT title and \
-the same authors
+the same authors (or substantially overlapping authors)
 - Year off-by-one with otherwise matching title and authors is acceptable
 - Venue abbreviation differences are acceptable
+- Team/consortium authorship shorthand for large collaborative papers
 
 Be strict: if this title was not found in any academic database and your \
-web search does not find this exact title, the verdict MUST be LIKELY.
+web search does not find this exact title, the verdict MUST be LIKELY. \
+If the title exists but the authors are completely different, the verdict \
+MUST also be LIKELY.
 
 Reply in EXACTLY this format:
 

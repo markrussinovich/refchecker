@@ -1182,7 +1182,13 @@ class ProgressRefChecker:
                 result['status'] = 'verified'
                 result['authoritative_urls'] = list(result.get('authoritative_urls', []))
                 result['authoritative_urls'].append({"type": "llm_verified", "url": ha_link})
-            if ha_explanation:
+                # Remove the unverified error so frontend filters no longer
+                # treat this reference as unverified
+                result['errors'] = [
+                    e for e in result.get('errors', [])
+                    if e.get('error_type') != 'unverified'
+                ]
+            elif ha_explanation:
                 result['errors'] = [
                     {**e, 'error_details': f"Reference could not be verified — {ha_explanation}"}
                     if e.get('error_type') == 'unverified' else e
