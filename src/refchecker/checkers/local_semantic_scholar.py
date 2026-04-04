@@ -351,13 +351,36 @@ class LocalNonArxivReferenceChecker:
             doi = None
         
         paper_data = None
+        arxiv_tried = False
         
-        # LOOKUP ORDER: title first, then DOI, then ArXiv ID.
-        # Title-first prevents a wrong arXiv URL from pulling up the wrong
-        # paper and masking the real one.
+        # If the reference has an arXiv URL, try arXiv ID first and validate
+        # the title matches.  If the title doesn't match the arXiv result,
+        # the URL is wrong — fall back to title/DOI lookup so we find the
+        # real paper and can flag the incorrect arXiv URL.
+        if arxiv_id:
+            arxiv_tried = True
+            logger.debug(f"Local DB: Searching by arXiv ID first: {arxiv_id}")
+            arxiv_paper = self.get_paper_by_arxiv_id(arxiv_id)
+            
+            if arxiv_paper:
+                arxiv_title = arxiv_paper.get('title', '')
+                if title and arxiv_title:
+                    title_sim = compare_titles_with_latex_cleaning(title, arxiv_title)
+                    if title_sim >= SIMILARITY_THRESHOLD:
+                        logger.debug(f"ArXiv ID lookup matched title (similarity={title_sim:.2f}), using arXiv result")
+                        paper_data = arxiv_paper
+                    else:
+                        logger.debug(f"ArXiv ID lookup title mismatch (similarity={title_sim:.2f}): "
+                                     f"cited '{title}' vs arXiv '{arxiv_title}' — falling back to title/DOI lookup")
+                else:
+                    # No title to compare — accept the arXiv result
+                    logger.debug(f"Found paper by arXiv ID (no title to cross-check)")
+                    paper_data = arxiv_paper
+            else:
+                logger.debug(f"Could not find paper with arXiv ID: {arxiv_id}")
         
-        # Try title/author search first (most reliable identity)
-        if title or authors:
+        # Try title/author search (primary fallback, or first if no arXiv URL)
+        if not paper_data and (title or authors):
             logger.debug(f"Local DB: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
             paper_data = self.find_best_match(title, authors, year)
             
@@ -376,8 +399,8 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.debug(f"Could not find paper with DOI: {doi}")
         
-        # Try arXiv ID as last resort
-        if not paper_data and arxiv_id:
+        # Try arXiv ID as last resort (only if we haven't tried it above)
+        if not paper_data and arxiv_id and not arxiv_tried:
             logger.debug(f"Local DB: Searching by arXiv ID: {arxiv_id}")
             paper_data = self.get_paper_by_arxiv_id(arxiv_id)
             

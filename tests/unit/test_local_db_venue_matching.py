@@ -420,3 +420,78 @@ def test_correct_arxiv_url_no_error(_make_checker):
     assert verified_data is not None
     arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
     assert len(arxiv_errors) == 0, f"No arxiv_id error expected for correct URL, got: {errors}"
+
+
+def test_arxiv_lookup_first_matches_title_uses_arxiv_result(_make_checker):
+    """
+    When the reference has an arXiv URL and the arXiv paper's title matches,
+    the arXiv result should be used directly (arXiv-first behaviour).
+    """
+    checker = _make_checker([
+        {
+            "paperId": "ARXIV1",
+            "title": "Attention Is All You Need",
+            "year": 2017,
+            "authors": [{"authorId": "1", "name": "A. Vaswani"}],
+            "venue": "NeurIPS",
+            "externalIds_ArXiv": "1706.03762",
+        },
+    ])
+
+    reference = {
+        "title": "Attention Is All You Need",
+        "authors": ["A. Vaswani"],
+        "year": 2017,
+        "url": "https://arxiv.org/abs/1706.03762",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+    assert verified_data is not None
+    assert verified_data["paperId"] == "ARXIV1"
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert len(arxiv_errors) == 0
+
+
+def test_arxiv_lookup_first_title_mismatch_falls_back_to_title(_make_checker):
+    """
+    When the arXiv URL points to a paper with a different title, the checker
+    must fall back to title/author lookup, find the correct paper, and flag
+    the wrong arXiv URL.
+    """
+    checker = _make_checker([
+        {
+            "paperId": "CORRECT",
+            "title": "Attention Is All You Need",
+            "year": 2017,
+            "authors": [{"authorId": "1", "name": "A. Vaswani"}],
+            "venue": "NeurIPS",
+            "externalIds_ArXiv": "1706.03762",
+        },
+        {
+            "paperId": "WRONG",
+            "title": "Completely Different Paper",
+            "year": 2019,
+            "authors": [{"authorId": "2", "name": "B. Smith"}],
+            "venue": "",
+            "externalIds_ArXiv": "1901.99999",
+        },
+    ])
+
+    reference = {
+        "title": "Attention Is All You Need",
+        "authors": ["A. Vaswani"],
+        "year": 2017,
+        # Wrong arXiv URL — points to "Completely Different Paper"
+        "url": "https://arxiv.org/abs/1901.99999",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+    # Should fall back and find the correct paper by title
+    assert verified_data is not None
+    assert verified_data["paperId"] == "CORRECT"
+
+    # Must flag the incorrect arXiv URL
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert len(arxiv_errors) >= 1
+    assert "1706.03762" in arxiv_errors[0].get("error_details", "") or \
+           "1706.03762" in arxiv_errors[0].get("ref_url_correct", "")
