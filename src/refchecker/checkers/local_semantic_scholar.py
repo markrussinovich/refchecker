@@ -331,7 +331,7 @@ class LocalNonArxivReferenceChecker:
         
         logger.debug(f"Local DB: Verifying reference - Title: '{title}', Authors: {authors}, Year: {year}")
         
-        # Try to get the paper by DOI or arXiv ID first
+        # Extract identifiers from the reference
         doi = None
         arxiv_id = None
         
@@ -352,17 +352,21 @@ class LocalNonArxivReferenceChecker:
         
         paper_data = None
         
-        # Try arXiv ID first if available
-        if arxiv_id:
-            logger.debug(f"Local DB: Searching by arXiv ID: {arxiv_id}")
-            paper_data = self.get_paper_by_arxiv_id(arxiv_id)
+        # LOOKUP ORDER: title first, then DOI, then ArXiv ID.
+        # Title-first prevents a wrong arXiv URL from pulling up the wrong
+        # paper and masking the real one.
+        
+        # Try title/author search first (most reliable identity)
+        if title or authors:
+            logger.debug(f"Local DB: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
+            paper_data = self.find_best_match(title, authors, year)
             
             if paper_data:
-                logger.debug(f"Found paper by arXiv ID: {arxiv_id}")
+                logger.debug(f"Found paper by title/author search")
             else:
-                logger.warning(f"Could not find paper with arXiv ID: {arxiv_id}")
+                logger.debug(f"Could not find matching paper by title/authors")
         
-        # Try DOI if we haven't found the paper yet
+        # Try DOI if title search didn't find it
         if not paper_data and doi:
             logger.debug(f"Local DB: Searching by DOI: {doi}")
             paper_data = self.get_paper_by_doi(doi)
@@ -372,15 +376,15 @@ class LocalNonArxivReferenceChecker:
             else:
                 logger.debug(f"Could not find paper with DOI: {doi}")
         
-        # If we couldn't get the paper by DOI or arXiv ID, try searching by title and authors
-        if not paper_data and (title or authors):
-            logger.debug(f"Local DB: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
-            paper_data = self.find_best_match(title, authors, year)
+        # Try arXiv ID as last resort
+        if not paper_data and arxiv_id:
+            logger.debug(f"Local DB: Searching by arXiv ID: {arxiv_id}")
+            paper_data = self.get_paper_by_arxiv_id(arxiv_id)
             
             if paper_data:
-                logger.debug(f"Found paper by title/author search")
+                logger.debug(f"Found paper by arXiv ID: {arxiv_id}")
             else:
-                logger.debug(f"Could not find matching paper for reference")
+                logger.debug(f"Could not find paper with arXiv ID: {arxiv_id}")
         
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
@@ -463,10 +467,30 @@ class LocalNonArxivReferenceChecker:
                     'ref_venue_correct': paper_venue
                 })
         
-        # Check for missing arXiv URL when paper has arXiv ID
+        # Check for incorrect arXiv URL: if the reference has an arXiv URL,
+        # verify it matches the paper we found (which was resolved by title).
         external_ids = paper_data.get('externalIds', {})
         paper_arxiv_id = external_ids.get('ArXiv') if external_ids else None
-        if paper_arxiv_id:
+        if arxiv_id:
+            # Reference has an arXiv URL — cross-check against the found paper
+            if paper_arxiv_id and arxiv_id.lower() != paper_arxiv_id.lower():
+                correct_arxiv_url = f"https://arxiv.org/abs/{paper_arxiv_id}"
+                logger.debug(f"Local DB: ArXiv ID mismatch - cited: {arxiv_id}, actual: {paper_arxiv_id}")
+                errors.append({
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Incorrect ArXiv ID: cited {arxiv_id} should be {paper_arxiv_id}",
+                    'ref_url_correct': correct_arxiv_url
+                })
+            elif not paper_arxiv_id:
+                # Paper has no ArXiv ID in the DB but reference cites one —
+                # the arXiv URL is spurious / points to another paper.
+                logger.debug(f"Local DB: Reference cites arXiv ID {arxiv_id} but matched paper has no ArXiv ID")
+                errors.append({
+                    'error_type': 'arxiv_id',
+                    'error_details': f"Incorrect ArXiv ID: paper '{paper_data.get('title', '')}' does not have ArXiv ID {arxiv_id}",
+                })
+        elif paper_arxiv_id:
+            # No arXiv URL in reference but paper has one — suggest it
             arxiv_url = f"https://arxiv.org/abs/{paper_arxiv_id}"
             reference_url = reference.get('url', '')
             has_arxiv_url = arxiv_url in reference_url if reference_url else False

@@ -312,3 +312,111 @@ def test_arxiv_url_suggestion_not_when_present(_make_checker):
     assert verified_data is not None
     url_infos = [e for e in errors if e.get("info_type") == "url"]
     assert len(url_infos) == 0, f"Should not suggest arXiv URL when already present: {url_infos}"
+
+
+# ── ArXiv URL mismatch (wrong arXiv URL, real paper) ──────────────
+
+def test_wrong_arxiv_url_detected_when_paper_found_by_title(_make_checker):
+    """
+    Regression: a reference with an incorrect arXiv URL but a real paper
+    title must flag an arxiv_id error — the wrong URL should NOT be silently
+    accepted as the desired citation.
+    """
+    # DB contains two papers: the "correct" one (Paper A) with its own ArXiv ID,
+    # and a different paper (Paper B) at the ArXiv ID that the reference cites.
+    checker = _make_checker([
+        {
+            "paperId": "A1",
+            "title": "Attention Is All You Need",
+            "year": 2017,
+            "authors": [{"authorId": "1", "name": "A. Vaswani"}],
+            "venue": "NeurIPS",
+            "externalIds_ArXiv": "1706.03762",
+        },
+        {
+            "paperId": "B2",
+            "title": "Completely Different Paper",
+            "year": 2019,
+            "authors": [{"authorId": "2", "name": "B. Smith"}],
+            "venue": "",
+            "externalIds_ArXiv": "1901.99999",
+        },
+    ])
+
+    reference = {
+        "title": "Attention Is All You Need",
+        "authors": ["A. Vaswani"],
+        "year": 2017,
+        # Wrong arXiv URL — points to Paper B
+        "url": "https://arxiv.org/abs/1901.99999",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+    # Should still resolve the correct paper by title
+    assert verified_data is not None
+    assert verified_data["title"] == "Attention Is All You Need"
+
+    # Must flag the wrong arXiv ID
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert len(arxiv_errors) >= 1, f"Expected arxiv_id error, got: {errors}"
+    assert "1706.03762" in arxiv_errors[0].get("ref_url_correct", "") or \
+           "1706.03762" in arxiv_errors[0].get("error_details", "")
+
+
+def test_wrong_arxiv_url_paper_has_no_arxiv_id(_make_checker):
+    """
+    When the reference cites an arXiv URL but the matched paper has NO ArXiv ID,
+    the arXiv URL should be flagged as incorrect.
+    """
+    checker = _make_checker([
+        {
+            "paperId": "C3",
+            "title": "Some Conference Paper",
+            "year": 2020,
+            "authors": [{"authorId": "3", "name": "C. Author"}],
+            "venue": "ICML",
+            "externalIds_DOI": "10.1234/conf2020",
+            # No ArXiv ID
+        },
+    ])
+
+    reference = {
+        "title": "Some Conference Paper",
+        "authors": ["C. Author"],
+        "year": 2020,
+        "url": "https://arxiv.org/abs/2005.12345",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+    assert verified_data is not None
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert len(arxiv_errors) >= 1, f"Expected arxiv_id error for spurious arXiv URL, got: {errors}"
+
+
+def test_correct_arxiv_url_no_error(_make_checker):
+    """
+    When the arXiv URL in the reference matches the paper's ArXiv ID,
+    no arxiv_id error should be produced.
+    """
+    checker = _make_checker([
+        {
+            "paperId": "D4",
+            "title": "Attention Is All You Need",
+            "year": 2017,
+            "authors": [{"authorId": "1", "name": "A. Vaswani"}],
+            "venue": "NeurIPS",
+            "externalIds_ArXiv": "1706.03762",
+        },
+    ])
+
+    reference = {
+        "title": "Attention Is All You Need",
+        "authors": ["A. Vaswani"],
+        "year": 2017,
+        "url": "https://arxiv.org/abs/1706.03762",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+    assert verified_data is not None
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert len(arxiv_errors) == 0, f"No arxiv_id error expected for correct URL, got: {errors}"
