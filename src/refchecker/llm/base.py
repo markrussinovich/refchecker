@@ -20,6 +20,7 @@ class LLMProvider(ABC):
         self.model = config.get("model")
         self.max_tokens = config.get("max_tokens", 4000)
         self.temperature = config.get("temperature", 0.1)
+        self.progress_callback = None  # Optional callback: fn(chunk_completed, total_chunks)
     
     @abstractmethod
     def extract_references(self, bibliography_text: str) -> List[str]:
@@ -141,6 +142,10 @@ class LLMProvider(ABC):
             logger.debug(f"Bibliography too long ({estimated_tokens} estimated tokens), splitting into chunks")
             chunks = self._chunk_bibliography(bibliography_text, max_input_tokens)
             
+            # Notify total chunks
+            if self.progress_callback:
+                self.progress_callback(0, len(chunks))
+            
             # Process chunks in parallel
             all_references = self._process_chunks_parallel(chunks)
             
@@ -246,15 +251,22 @@ class LLMProvider(ABC):
             
             # Collect results as they complete
             chunk_results = {}
+            completed_count = 0
             for future in as_completed(future_to_chunk):
                 chunk_index = future_to_chunk[future]
                 try:
                     result_index, references = future.result()
                     chunk_results[result_index] = references
+                    completed_count += 1
                     logger.debug(f"Completed chunk {result_index + 1}/{len(chunks)}")
+                    if self.progress_callback:
+                        self.progress_callback(completed_count, len(chunks))
                 except Exception as e:
                     logger.error(f"Chunk {chunk_index + 1} processing failed: {e}")
                     chunk_results[chunk_index] = []
+                    completed_count += 1
+                    if self.progress_callback:
+                        self.progress_callback(completed_count, len(chunks))
         
         # Combine results in original order
         for i in range(len(chunks)):
@@ -291,6 +303,8 @@ class LLMProvider(ABC):
                 logger.debug(f"Chunk {i+1} extracted {len(chunk_references)} references")
             except Exception as e:
                 logger.error(f"Failed to process chunk {i+1}: {e}")
+            if self.progress_callback:
+                self.progress_callback(i + 1, len(chunks))
         
         processing_time = time.time() - start_time
         logger.info(f"Sequential chunk processing completed in {processing_time:.2f}s, "
@@ -307,13 +321,14 @@ class ReferenceExtractor:
         self.fallback_enabled = fallback_enabled
         self.logger = logging.getLogger(__name__)
     
-    def extract_references(self, bibliography_text: str, fallback_func=None) -> List[str]:
+    def extract_references(self, bibliography_text: str, fallback_func=None, progress_callback=None) -> List[str]:
         """
         Extract references with LLM and fallback to regex if needed
         
         Args:
             bibliography_text: Raw bibliography text
             fallback_func: Function to call if LLM extraction fails
+            progress_callback: Optional callback fn(chunk_completed, total_chunks)
             
         Returns:
             List of extracted references
@@ -326,6 +341,8 @@ class ReferenceExtractor:
             try:
                 model_name = self.llm_provider.model or "unknown"
                 self.logger.info(f"Attempting LLM-based reference extraction using {model_name}")
+                if progress_callback:
+                    self.llm_provider.progress_callback = progress_callback
                 references = self.llm_provider.extract_references(bibliography_text)
                 if references:
                     return references

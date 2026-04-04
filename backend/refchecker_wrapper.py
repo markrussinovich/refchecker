@@ -946,8 +946,20 @@ class ProgressRefChecker:
                 "message": "Found bibliography section. Parsing references..."
             })
 
+            # Create a thread-safe callback to emit chunk progress back to the event loop
+            loop = asyncio.get_event_loop()
+
+            def _chunk_progress(completed: int, total: int):
+                if total > 1:
+                    asyncio.run_coroutine_threadsafe(
+                        self.emit_progress("extracting", {
+                            "message": f"Extracting references via LLM (chunk {completed}/{total})..."
+                        }),
+                        loop,
+                    )
+
             # Step 2: parse references (CLI logic, including LLM and post-processing) - run in thread
-            refs = await asyncio.to_thread(cli_checker.parse_references, bib_section)
+            refs = await asyncio.to_thread(cli_checker.parse_references, bib_section, progress_callback=_chunk_progress)
             if cli_checker.fatal_error:
                 logger.error("Reference parsing failed (CLI fatal_error)")
                 return []

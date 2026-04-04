@@ -4079,7 +4079,7 @@ class ArxivReferenceChecker:
         # Default to False for safety
         return False
 
-    def parse_references(self, bibliography_text):
+    def parse_references(self, bibliography_text, progress_callback=None):
         """
         Parse references from bibliography text
         """
@@ -4119,7 +4119,7 @@ class ArxivReferenceChecker:
             if not biblatex_refs and self.llm_extractor:
                 logger.debug("Biblatex is incompatible with parser")
                 try:
-                    references = self.llm_extractor.extract_references(bibliography_text)
+                    references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
                     if references:
                         logger.debug(f"LLM fallback extracted {len(references)} references")
                         return self._process_llm_extracted_references(references)
@@ -4137,7 +4137,7 @@ class ArxivReferenceChecker:
         if self.llm_extractor:
             try:
                 logger.info("Non-standard bibliography format detected, using LLM-based extraction")
-                references = self.llm_extractor.extract_references(bibliography_text)
+                references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
                 if references:
                     logger.debug(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
