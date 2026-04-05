@@ -321,6 +321,8 @@ class NonArxivReferenceChecker:
             reference.get('url', ''),
             reference.get('cited_url', ''),
             reference.get('raw_text', ''),
+            reference.get('venue', ''),
+            reference.get('journal', ''),
         ]
         
         for source in sources:

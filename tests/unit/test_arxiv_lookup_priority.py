@@ -50,13 +50,14 @@ class TestArxivLookupPriority(unittest.TestCase):
         }
 
     def _reference(self, title="DeepSeek-R1", url="https://arxiv.org/abs/2501.12948",
-                    raw_text=""):
+                    raw_text="", venue=""):
         return {
             "title": title,
             "authors": ["Daya Guo", "Dejian Yang"],
             "year": "2025",
             "url": url,
             "raw_text": raw_text,
+            "venue": venue,
         }
 
     # -- tests ------------------------------------------------------------
@@ -134,7 +135,7 @@ class TestArxivLookupPriority(unittest.TestCase):
         good = self._good_paper()
         mock_match.return_value = good
 
-        ref = self._reference(url="https://doi.org/10.1000/example")
+        ref = self._reference(url="https://doi.org/10.1000/example", venue="NeurIPS")
         result = self.checker.verify_reference(ref)
 
         mock_arxiv.assert_not_called()
@@ -164,19 +165,17 @@ class TestArxivLookupPriority(unittest.TestCase):
     def test_arxiv_id_in_venue_triggers_direct_lookup(
         self, _doi, mock_arxiv, mock_search, mock_match
     ):
-        """ArXiv ID in venue/raw_text (no URL) should trigger direct lookup.
+        """ArXiv ID in venue field (no URL) should trigger direct lookup.
 
         This is the DeepSeek-R1 scenario: the reference has no URL field,
-        but has 'arXiv preprint arXiv:2501.12948' in venue/raw_text.
+        but has 'arXiv preprint arXiv:2501.12948' in the venue field.
         """
         good = self._good_paper()
         mock_arxiv.return_value = good
 
         ref = self._reference(
             url="",
-            raw_text="Daya Guo*et al#Deepseek-r1: Incentivizing reasoning "
-                     "capability in llms via reinforcement learning#"
-                     "arXiv preprint arXiv:2501.12948#2025#",
+            venue="arXiv preprint arXiv:2501.12948",
         )
         result = self.checker.verify_reference(ref)
 
