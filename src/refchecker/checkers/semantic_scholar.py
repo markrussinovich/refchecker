@@ -623,8 +623,37 @@ class NonArxivReferenceChecker:
             else:
                 logger.debug(f"Could not find paper with DOI: {doi}")
         
-        # If we couldn't get the paper by DOI, try finding by title
+        # If we have an ArXiv ID (from URL, venue text, or raw_text), try direct
+        # ArXiv ID lookup before title match. ArXiv IDs are authoritative
+        # identifiers and more reliable than title matching, which can return
+        # corrupt/duplicate Semantic Scholar entries.
         found_title = ''
+        arxiv_id_mismatch_detected = False
+        arxiv_id = None
+        if not paper_data:
+            arxiv_id, _ = self._extract_arxiv_id_and_version(reference)
+            if arxiv_id:
+                logger.debug(f"Trying direct ArXiv ID lookup before title match: {arxiv_id}")
+                direct_result = self.get_paper_by_arxiv_id(arxiv_id)
+                if direct_result:
+                    result_title = direct_result.get('title', '').strip()
+                    cited_title = title.strip() if title else ''
+                    if cited_title and result_title:
+                        title_similarity = compare_titles_with_latex_cleaning(cited_title, result_title)
+                        if title_similarity >= SIMILARITY_THRESHOLD:
+                            paper_data = direct_result
+                            found_title = result_title
+                            logger.debug(f"Found paper by direct ArXiv ID lookup: {arxiv_id} (similarity {title_similarity:.2f})")
+                        else:
+                            arxiv_id_mismatch_detected = True
+                            paper_data = direct_result
+                            found_title = result_title
+                            logger.debug(f"Direct ArXiv ID lookup found mismatch: cited '{cited_title[:50]}' vs actual '{result_title[:50]}'")
+                    else:
+                        paper_data = direct_result
+                        found_title = result_title
+
+        # If we couldn't get the paper by ArXiv ID or DOI, try finding by title
         if not paper_data and title:
             # Clean up the title for search using centralized utility function
             cleaned_title = clean_title_for_search(title)
@@ -684,71 +713,41 @@ class NonArxivReferenceChecker:
                         else:
                             logger.debug(f"Author-based search best score {best_score:.2f} below threshold")
         
-        # Track if we found an ArXiv ID mismatch (wrong paper via ArXiv ID)
-        arxiv_id_mismatch_detected = False
-        
-        # If we still couldn't find the paper, try by ArXiv ID if available
-        if not paper_data and url and 'arxiv.org/abs/' in url:
-            # Extract ArXiv ID from URL
-            arxiv_match = re.search(r'arxiv\.org/abs/([^\s/?#]+)', url)
-            if arxiv_match:
-                arxiv_id = arxiv_match.group(1)
-                logger.debug(f"Trying to find paper by ArXiv ID: {arxiv_id}")
-
-                # Fast path: direct ArXiv ID lookup (~49% faster than search)
-                direct_result = self.get_paper_by_arxiv_id(arxiv_id)
-                if direct_result:
-                    # Check if the direct result matches the cited title
-                    result_title = direct_result.get('title', '').strip()
-                    cited_title = title.strip()
-                    if cited_title and result_title:
-                        title_similarity = compare_titles_with_latex_cleaning(cited_title, result_title)
-                        if title_similarity >= SIMILARITY_THRESHOLD:
-                            paper_data = direct_result
-                            found_title = result_title
-                            logger.debug(f"Found paper by direct ArXiv ID lookup: {arxiv_id}")
-                        else:
-                            # ArXiv ID points to a different paper
-                            arxiv_id_mismatch_detected = True
-                            paper_data = direct_result
-                            found_title = result_title
-                            logger.debug(f"Direct ArXiv ID lookup found mismatch: cited '{cited_title[:50]}' vs actual '{result_title[:50]}'")
-                    else:
-                        paper_data = direct_result
-                        found_title = result_title
-                
-                # Slow path: fall back to search if direct lookup failed
-                if not paper_data:
-                    search_results = self.search_paper(f"arXiv:{arxiv_id}")
-                
-                    if search_results:
-                        # For ArXiv searches, check if the found paper matches the cited title
-                        for result in search_results:
-                            external_ids = result.get('externalIds', {})
-                            if external_ids and external_ids.get('ArXiv') == arxiv_id:
-                                # Found the paper by ArXiv ID, but check if title matches cited title
-                                result_title = result.get('title', '').strip()
-                                cited_title = title.strip()
+        # If we still couldn't find the paper, try ArXiv search/API fallbacks
+        # (direct ArXiv ID lookup was already tried above before title match)
+        if not paper_data and arxiv_id:
+            if arxiv_id:
+                logger.debug(f"Trying ArXiv search fallback for: {arxiv_id}")
+                search_results = self.search_paper(f"arXiv:{arxiv_id}")
+            
+                if search_results:
+                    # For ArXiv searches, check if the found paper matches the cited title
+                    for result in search_results:
+                        external_ids = result.get('externalIds', {})
+                        if external_ids and external_ids.get('ArXiv') == arxiv_id:
+                            # Found the paper by ArXiv ID, but check if title matches cited title
+                            result_title = result.get('title', '').strip()
+                            cited_title = title.strip()
+                        
+                            if cited_title and result_title:
+                                title_similarity = compare_titles_with_latex_cleaning(cited_title, result_title)
+                                logger.debug(f"Semantic Scholar ArXiv search title similarity: {title_similarity:.3f}")
+                                logger.debug(f"Cited title: '{cited_title}'")
+                                logger.debug(f"Found title: '{result_title}'")
                             
-                                if cited_title and result_title:
-                                    title_similarity = compare_titles_with_latex_cleaning(cited_title, result_title)
-                                    logger.debug(f"Semantic Scholar ArXiv search title similarity: {title_similarity:.3f}")
-                                    logger.debug(f"Cited title: '{cited_title}'")
-                                    logger.debug(f"Found title: '{result_title}'")
-                                
-                                    if title_similarity >= SIMILARITY_THRESHOLD:
-                                        paper_data = result
-                                        found_title = result['title']
-                                        logger.debug(f"Found matching paper by ArXiv ID: {arxiv_id}")
-                                    else:
-                                        logger.debug(f"ArXiv ID points to different paper (similarity: {title_similarity:.3f})")
-                                        arxiv_id_mismatch_detected = True
-                                else:
-                                    # If no title to compare, accept the paper (fallback)
+                                if title_similarity >= SIMILARITY_THRESHOLD:
                                     paper_data = result
                                     found_title = result['title']
-                                    logger.debug(f"Found paper by ArXiv ID (no title comparison): {arxiv_id}")
-                                break
+                                    logger.debug(f"Found matching paper by ArXiv ID: {arxiv_id}")
+                                else:
+                                    logger.debug(f"ArXiv ID points to different paper (similarity: {title_similarity:.3f})")
+                                    arxiv_id_mismatch_detected = True
+                            else:
+                                # If no title to compare, accept the paper (fallback)
+                                paper_data = result
+                                found_title = result['title']
+                                logger.debug(f"Found paper by ArXiv ID (no title comparison): {arxiv_id}")
+                            break
                 
                 # If still not found after ArXiv ID search, try ArXiv API directly
                 if not paper_data:
