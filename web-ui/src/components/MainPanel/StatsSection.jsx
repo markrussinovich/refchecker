@@ -97,6 +97,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       return true
     })
     return {
+      count: processed.length,
       withErrors: processed.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
       withWarnings: processed.filter(r =>
         r.warnings?.length > 0 &&
@@ -124,7 +125,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
   const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
   const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  const processedRefs = stats.processed_refs ?? 0
+  const processedRefs = inclusiveCounts?.count ?? stats.processed_refs ?? 0
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')
