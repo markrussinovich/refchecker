@@ -110,6 +110,7 @@ class ArXivCitationChecker:
             reference.get('cited_url', ''),
             reference.get('raw_text', ''),
             reference.get('eprint', ''),  # BibTeX field
+            reference.get('venue', ''),
             reference.get('journal', ''),
             reference.get('doi', ''),  # DOI field (may contain arXiv ID)
         ]

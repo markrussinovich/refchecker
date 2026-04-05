@@ -1472,10 +1472,6 @@ class ProgressRefChecker:
                 elif result['status'] == 'warning' or num_warnings > 0:
                     refs_with_warnings_only += 1
                 
-                # Mark refs that will get a deferred hallucination check
-                if self.hallucination_verifier and result.get('_raw_errors'):
-                    result['hallucination_check_pending'] = True
-                
                 # Emit result immediately
                 emit_start = time.time()
                 await self.emit_progress("reference_result", result)
@@ -1525,6 +1521,11 @@ class ProgressRefChecker:
             if ha_candidates:
                 debug_log(f"[TIMING] Running deferred hallucination checks for {len(ha_candidates)} refs")
                 await self.emit_progress("phase", {"message": "Running hallucination detection..."})
+
+                # Mark all candidate refs as pending before starting checks
+                for c_idx, c_result, _c_ref in ha_candidates:
+                    c_result['hallucination_check_pending'] = True
+                    await self.emit_progress("reference_result", c_result)
 
                 ha_tasks = []
                 for c_idx, c_result, c_ref in ha_candidates:

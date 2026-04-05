@@ -549,14 +549,10 @@ class EnhancedHybridReferenceChecker:
         # ── PHASE 1: Parallel API calls ──
         
         if is_arxiv:
-            # For ArXiv refs, check local DB first (instant) before hitting APIs
-            if self.local_db:
-                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
-                if success and self._is_data_complete(verified_data, reference):
-                    logger.debug("Enhanced Hybrid: ArXiv ref resolved via local DB, skipping API calls")
-                    return verified_data, errors, url
-            
-            # ArXiv reference: run ArXiv citation + Semantic Scholar in parallel
+            # For ArXiv refs, skip local DB — go straight to ArXiv BibTeX
+            # (authoritative source). The local S2 DB may contain corrupt
+            # duplicate entries with wrong authors (e.g. CorpusID:284488789).
+            # ArXiv citation + Semantic Scholar in parallel
             result = self._verify_arxiv_parallel(reference, failed_apis)
             if result is not None:
                 return result
