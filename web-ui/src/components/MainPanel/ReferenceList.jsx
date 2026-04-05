@@ -90,6 +90,8 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             // Has any suggestion
             return ref.suggestions?.length > 0
           case 'unverified':
+            // Don't include refs still being checked by LLM
+            if (ref.hallucination_check_pending) return false
             return status === 'unverified' || status === 'hallucination' || ref.errors?.some(e => e.error_type === 'unverified')
           case 'hallucination':
             return status === 'hallucination' || ref.hallucination_assessment?.verdict === 'LIKELY'

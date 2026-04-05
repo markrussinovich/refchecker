@@ -88,10 +88,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // as ReferenceList.jsx, so clicking a badge always shows the matching count.
   const inclusiveCounts = useMemo(() => {
     if (!references || references.length === 0) return null
-    // Only count processed refs (not pending/checking)
+    // Only count processed refs (not pending/checking/hallucination-pending)
     const processed = references.filter(r => {
       const s = (r.status || '').toLowerCase()
-      return s && !['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)
+      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
+      // Refs awaiting LLM hallucination check are not finalized yet
+      if (r.hallucination_check_pending) return false
+      return true
     })
     return {
       withErrors: processed.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,

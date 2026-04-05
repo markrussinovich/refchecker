@@ -1472,6 +1472,10 @@ class ProgressRefChecker:
                 elif result['status'] == 'warning' or num_warnings > 0:
                     refs_with_warnings_only += 1
                 
+                # Mark refs that will get a deferred hallucination check
+                if self.hallucination_verifier and result.get('_raw_errors'):
+                    result['hallucination_check_pending'] = True
+                
                 # Emit result immediately
                 emit_start = time.time()
                 await self.emit_progress("reference_result", result)
@@ -1556,9 +1560,14 @@ class ProgressRefChecker:
                             updated = ha_task.result()
                         except Exception as ha_err:
                             logger.debug(f"Hallucination check failed for ref {ha_idx + 1}: {ha_err}")
+                            # Clear pending flag even on failure
+                            if results.get(ha_idx):
+                                results[ha_idx]['hallucination_check_pending'] = False
+                                await self.emit_progress("reference_result", results[ha_idx])
                             continue
 
                         old_result = results[ha_idx]
+                        updated['hallucination_check_pending'] = False
                         if updated.get('hallucination_assessment') and updated.get('status') != old_result.get('status'):
                             # Status changed — update counters
                             old_status = old_result.get('status')
@@ -1592,6 +1601,11 @@ class ProgressRefChecker:
                                 "progress_percent": 100.0,
                             })
                             await asyncio.sleep(0)  # flush
+                        else:
+                            # Status didn't change but still update to clear pending flag
+                            results[ha_idx] = updated
+                            await self.emit_progress("reference_result", updated)
+                            await asyncio.sleep(0)
 
                 debug_log(f"[TIMING] Hallucination checks completed in {time.time() - total_time - start_time:.3f}s")
 
