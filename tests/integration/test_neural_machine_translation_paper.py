@@ -90,9 +90,15 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
             _arxiv_cache._cache.clear()
 
         # Build URL-aware mock: Semantic Scholar returns JSON, ArXiv returns HTML
-        ss_response = Mock()
-        ss_response.status_code = 200
-        ss_response.json.return_value = {
+        # Direct paper lookup (e.g. /paper/ARXIV:...) returns bare paper object
+        ss_direct_response = Mock()
+        ss_direct_response.status_code = 200
+        ss_direct_response.json.return_value = self.semantic_scholar_response
+
+        # Search endpoint returns wrapped response with total/data
+        ss_search_response = Mock()
+        ss_search_response.status_code = 200
+        ss_search_response.json.return_value = {
             "total": 1,
             "data": [self.semantic_scholar_response]
         }
@@ -102,12 +108,16 @@ class TestNeuralMachineTranslationPaper(unittest.TestCase):
         arxiv_response.text = '<html>[v1] Mon, 31 Oct 2016 [v2] Thu, 9 Mar 2017</html>'
 
         def session_side_effect(_session, url, **kwargs):
-            return ss_response
+            if '/paper/' in url:
+                return ss_direct_response
+            return ss_search_response
 
         def request_side_effect(url, **kwargs):
             if 'arxiv.org' in url:
                 return arxiv_response
-            return ss_response
+            if '/paper/' in url:
+                return ss_direct_response
+            return ss_search_response
 
         mock_session_get.side_effect = session_side_effect
         mock_get.side_effect = request_side_effect

@@ -1425,39 +1425,49 @@ class ProgressRefChecker:
                 
                 # Store result
                 results[idx] = result
-                processed_count += 1
 
                 # Sanitize year: never send 0 to the frontend
                 if not result.get('year'):
                     result['year'] = None
-                
+
                 # Count individual issues (not just references)
                 # Exclude 'unverified' from error count since it has its own category
                 real_errors = [e for e in result.get('errors', []) if e.get('error_type') != 'unverified']
                 num_errors = len(real_errors)
                 num_warnings = len(result.get('warnings', []))
                 num_suggestions = len(result.get('suggestions', []))
-                
+
                 errors_count += num_errors
                 warnings_count += num_warnings
                 suggestions_count += num_suggestions
-                
-                # Count references by status for filtering
+
                 # Check if this ref has any 'unverified' error, regardless of overall status
                 has_unverified_error = any(
                     e.get('error_type') == 'unverified'
                     for e in result.get('errors', [])
                 )
-                
+
+                # If hallucination verifier is enabled, unverified refs are NOT yet
+                # finalized — they'll get an LLM check after all refs are processed.
+                # Don't count them as processed or unverified until the LLM check completes.
+                is_unverified_pending_llm = (
+                    self.hallucination_verifier
+                    and result.get('_raw_errors')
+                    and result['status'] == 'unverified'
+                )
+
+                if not is_unverified_pending_llm:
+                    processed_count += 1
+
                 if result['status'] == 'hallucination':
                     hallucination_count += 1
-                
-                # Count refs matching the frontend 'unverified' filter:
-                # status === 'unverified' OR 'hallucination' OR has any error with error_type === 'unverified'
-                # Hallucinated refs are a subset of unverified (they couldn't be verified AND are likely fabricated)
-                if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
-                    unverified_count += 1
-                
+
+                # Count refs matching the frontend 'unverified' filter — but only if
+                # finalized (not awaiting LLM hallucination check)
+                if not is_unverified_pending_llm:
+                    if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
+                        unverified_count += 1
+
                 if result['status'] == 'verified':
                     verified_count += 1
                     refs_verified += 1
@@ -1465,13 +1475,13 @@ class ProgressRefChecker:
                     # Suggestion-only refs are considered verified (no errors or warnings)
                     verified_count += 1
                     refs_verified += 1
-                
+
                 # Track references by issue type (excluding unverified from error check)
                 if result['status'] == 'error' or num_errors > 0:
                     refs_with_errors += 1
                 elif result['status'] == 'warning' or num_warnings > 0:
                     refs_with_warnings_only += 1
-                
+
                 # Emit result immediately
                 emit_start = time.time()
                 await self.emit_progress("reference_result", result)
@@ -1557,6 +1567,11 @@ class ProgressRefChecker:
 
                     for ha_task in ha_done:
                         ha_idx = ha_task_to_idx[ha_task]
+                        # Only unverified refs were deferred from processed_count;
+                        # other refs (error, warning) were already counted.
+                        old_result = results.get(ha_idx, {})
+                        was_deferred = old_result.get('status') == 'unverified'
+
                         try:
                             updated = ha_task.result()
                         except Exception as ha_err:
@@ -1564,49 +1579,61 @@ class ProgressRefChecker:
                             # Clear pending flag even on failure
                             if results.get(ha_idx):
                                 results[ha_idx]['hallucination_check_pending'] = False
+                                if was_deferred:
+                                    processed_count += 1
+                                    unverified_count += 1
                                 await self.emit_progress("reference_result", results[ha_idx])
                             continue
 
-                        old_result = results[ha_idx]
                         updated['hallucination_check_pending'] = False
+
+                        if was_deferred:
+                            processed_count += 1
+
                         if updated.get('hallucination_assessment') and updated.get('status') != old_result.get('status'):
-                            # Status changed — update counters
                             old_status = old_result.get('status')
                             new_status = updated.get('status')
 
                             if new_status == 'hallucination' and old_status != 'hallucination':
                                 hallucination_count += 1
-                                # hallucinated refs are a subset of unverified
-                                if old_status not in ('unverified', 'hallucination'):
+                                if was_deferred:
+                                    unverified_count += 1
+                                elif old_status not in ('unverified', 'hallucination'):
                                     unverified_count += 1
                             elif new_status == 'verified' and old_status == 'unverified':
-                                unverified_count = max(0, unverified_count - 1)
+                                if not was_deferred:
+                                    unverified_count = max(0, unverified_count - 1)
                                 verified_count += 1
                                 refs_verified += 1
-
-                            results[ha_idx] = updated
-                            # Re-emit the updated result so the UI refreshes
-                            await self.emit_progress("reference_result", updated)
-                            await self.emit_progress("summary_update", {
-                                "total_refs": total_refs,
-                                "processed_refs": processed_count,
-                                "errors_count": errors_count,
-                                "warnings_count": warnings_count,
-                                "suggestions_count": suggestions_count,
-                                "unverified_count": unverified_count,
-                                "hallucination_count": hallucination_count,
-                                "verified_count": verified_count,
-                                "refs_with_errors": refs_with_errors,
-                                "refs_with_warnings_only": refs_with_warnings_only,
-                                "refs_verified": refs_verified,
-                                "progress_percent": 100.0,
-                            })
-                            await asyncio.sleep(0)  # flush
+                            elif was_deferred:
+                                unverified_count += 1
                         else:
-                            # Status didn't change but still update to clear pending flag
-                            results[ha_idx] = updated
-                            await self.emit_progress("reference_result", updated)
-                            await asyncio.sleep(0)
+                            if was_deferred:
+                                unverified_count += 1
+
+                        results[ha_idx] = updated
+                        # Emit ref update immediately so the card updates in real-time.
+                        # Summary counts are sent once after all checks complete to avoid
+                        # out-of-sync flicker between cards and stats.
+                        await self.emit_progress("reference_result", updated)
+                        await asyncio.sleep(0)
+
+                # Emit a single summary_update after all hallucination checks complete
+                # so counts and cards stay in sync (no rapid increments mid-phase)
+                await self.emit_progress("summary_update", {
+                    "total_refs": total_refs,
+                    "processed_refs": processed_count,
+                    "errors_count": errors_count,
+                    "warnings_count": warnings_count,
+                    "suggestions_count": suggestions_count,
+                    "unverified_count": unverified_count,
+                    "hallucination_count": hallucination_count,
+                    "verified_count": verified_count,
+                    "refs_with_errors": refs_with_errors,
+                    "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_verified": refs_verified,
+                    "progress_percent": round((processed_count / total_refs) * 100, 1),
+                })
 
                 debug_log(f"[TIMING] Hallucination checks completed in {time.time() - total_time - start_time:.3f}s")
 

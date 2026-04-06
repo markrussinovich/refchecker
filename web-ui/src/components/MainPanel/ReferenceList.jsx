@@ -9,7 +9,16 @@ import { useCheckStore } from '../../stores/useCheckStore'
  */
 const computeDerivedStatus = (ref, isCheckComplete = false) => {
   const baseStatus = (ref.status || '').trim().toLowerCase()
-  
+
+  // Unverified refs awaiting LLM hallucination check show as in-progress.
+  // Only unverified refs get overridden — error/warning/verified refs keep
+  // their existing icon even while their hallucination check runs in background.
+  if (baseStatus === 'unverified' && !ref.hallucination_assessment) {
+    if (ref.hallucination_check_pending || !isCheckComplete) {
+      return 'checking'
+    }
+  }
+
   // Trust backend's final status values
   if (['error', 'warning', 'suggestion', 'unverified', 'verified', 'hallucination'].includes(baseStatus)) {
     return baseStatus
@@ -90,8 +99,8 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             // Has any suggestion
             return ref.suggestions?.length > 0
           case 'unverified':
-            // Don't include refs still being checked by LLM
-            if (ref.hallucination_check_pending) return false
+            // Don't match refs currently showing as 'checking' (awaiting LLM check)
+            if (status === 'checking') return false
             return status === 'unverified' || status === 'hallucination' || ref.errors?.some(e => e.error_type === 'unverified')
           case 'hallucination':
             return status === 'hallucination' || ref.hallucination_assessment?.verdict === 'LIKELY'

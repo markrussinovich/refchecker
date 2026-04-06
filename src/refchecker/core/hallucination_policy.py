@@ -33,6 +33,7 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
     'multiple',         # Multiple issues (may include title/author mismatches)
     'url',              # Cited URL is broken or points to wrong paper
     'author',           # Author mismatch (may indicate fabricated citation)
+    'title',            # Title mismatch (URL/ID points to a different paper)
 })
 
 _AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match (unverified refs)
@@ -330,10 +331,12 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     if url and url.startswith('http') and error_type != 'unverified':
         # For 'multiple' or other types, check if the URL verification failed
         # (non-existent page, doesn't reference the paper, etc.)
+        # A title mismatch also means the URL points to a different paper.
         url_failed = any(
             kw in error_details
             for kw in ('unverified', 'non-existent', 'does not reference',
-                       'could not be verified', 'could not verify')
+                       'could not be verified', 'could not verify',
+                       'title mismatch', 'inaccurate title')
         )
         if not url_failed:
             return False

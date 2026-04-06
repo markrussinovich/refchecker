@@ -226,6 +226,9 @@ export const useCheckStore = create((set, get) => ({
 
   setReferences: (references) => {
     logger.info('CheckStore', `References extracted: ${references.length}`)
+    if (get().references?.length > 0 && get().references.some(r => r.status !== 'pending')) {
+      console.warn('[REFS RESET DEBUG] setReferences called when refs already have non-pending statuses!', { currentCount: get().references.length, newCount: references.length, stack: new Error().stack })
+    }
     const mappedRefs = references.map((ref, index) => ({
       ...ref,
       index,
@@ -251,6 +254,9 @@ export const useCheckStore = create((set, get) => ({
 
   updateStats: (stats) => {
     logger.debug('CheckStore', 'Stats updated', stats)
+    if (stats && (stats.total_refs === 0 || stats.processed_refs === 0) && get().stats?.total_refs > 0) {
+      console.warn('[STATS RESET DEBUG] Stats being reset to 0!', { incoming: stats, current: get().stats, stack: new Error().stack })
+    }
     set({ stats, progress: stats.progress_percent || 0 })
   },
 

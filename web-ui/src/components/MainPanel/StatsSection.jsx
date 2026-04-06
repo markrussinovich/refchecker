@@ -86,46 +86,51 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
 
   // Compute inclusive badge counts from references using the same filter logic
   // as ReferenceList.jsx, so clicking a badge always shows the matching count.
+  // Only used for badge breakdowns — processedRefs always comes from backend stats.
   const inclusiveCounts = useMemo(() => {
     if (!references || references.length === 0) return null
-    // Only count processed refs (not pending/checking/hallucination-pending)
+    // Only count finalized refs (not pending/checking)
+    // Unverified refs without LLM assessment are excluded during active check.
+    // Error/warning refs keep their counts even during hallucination phase.
     const processed = references.filter(r => {
       const s = (r.status || '').toLowerCase()
       if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      // Refs awaiting LLM hallucination check are not finalized yet
-      if (r.hallucination_check_pending) return false
+      if (s === 'unverified' && !r.hallucination_assessment && !isComplete) return false
       return true
     })
+    const finalized = processed
     return {
       count: processed.length,
-      withErrors: processed.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
-      withWarnings: processed.filter(r =>
+      withErrors: finalized.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
+      withWarnings: finalized.filter(r =>
         r.warnings?.length > 0 &&
         !r.errors?.some(e => e.error_type !== 'unverified')
       ).length,
-      withUnverified: processed.filter(r =>
+      withUnverified: finalized.filter(r =>
         (r.status || '').toLowerCase() === 'unverified' ||
         (r.status || '').toLowerCase() === 'hallucination' ||
         r.errors?.some(e => e.error_type === 'unverified')
       ).length,
-      hallucinated: processed.filter(r =>
+      hallucinated: finalized.filter(r =>
         (r.status || '').toLowerCase() === 'hallucination' ||
         r.hallucination_assessment?.verdict === 'LIKELY'
       ).length,
-      verified: processed.filter(r => {
+      verified: finalized.filter(r => {
         const s = (r.status || '').toLowerCase()
         return s === 'verified' || s === 'suggestion'
       }).length,
     }
-  }, [references])
+  }, [references, isComplete])
 
-  // Use inclusive counts from references when available, otherwise fall back to stats
+  // Use inclusive counts from references for badge breakdowns, backend stats for totals
   const refsWithErrors = inclusiveCounts?.withErrors ?? stats.refs_with_errors ?? 0
   const refsWithWarningsOnly = inclusiveCounts?.withWarnings ?? stats.refs_with_warnings_only ?? 0
   const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
   const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
   const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  const processedRefs = inclusiveCounts?.count ?? stats.processed_refs ?? 0
+  // processedRefs: backend now properly defers counting unverified refs until
+  // their LLM hallucination check completes, so we trust it directly.
+  const processedRefs = stats.processed_refs ?? 0
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')

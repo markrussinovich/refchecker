@@ -393,8 +393,53 @@ class EnhancedHybridReferenceChecker:
         
         return merged_data, merged_errors
 
+    def _has_major_author_discrepancy(self, errors):
+        """Check if errors indicate a major author discrepancy.
+        
+        A major discrepancy means the DB entry's authors are completely
+        different from the cited authors — suggesting a corrupt or wrong
+        database entry (e.g., S2 duplicate with fabricated authors).
+        
+        Returns True only when there's zero overlap between cited and
+        actual author last names, indicating the DB matched the wrong paper.
+        """
+        for error in errors:
+            if error.get('error_type') != 'author':
+                continue
+            details = error.get('error_details', '')
+            actual_str = error.get('ref_authors_correct', '')
+            if not actual_str or not details:
+                continue
+            # Only flag if it says "not found in author list" (zero match)
+            if 'not found in author list' not in details:
+                continue
+            # Extract cited author name from the error details
+            # Format: "Author 1 mismatch\n       cited:  Name (not found...)\n       actual: ..."
+            import re
+            cited_match = re.search(r'cited:\s+(.+?)(?:\s+\(not found)', details)
+            if not cited_match:
+                continue
+            cited_name = cited_match.group(1).strip().lower()
+            actual_names = actual_str.lower()
+            # Extract last names from cited author
+            cited_parts = cited_name.split()
+            # Check if ANY part of the cited name appears in actual authors
+            has_overlap = False
+            for part in cited_parts:
+                if len(part) > 2 and part in actual_names:
+                    has_overlap = True
+                    break
+            if not has_overlap:
+                logger.debug(f"Enhanced Hybrid: Major author discrepancy — cited '{cited_name}' has no overlap with actual '{actual_str}'")
+                return True
+        return False
+
     def _verify_arxiv_parallel(self, reference, failed_apis):
-        """Run ArXiv citation + Semantic Scholar in parallel for ArXiv refs.
+        """Run ArXiv citation + Semantic Scholar API in parallel for ArXiv refs.
+        
+        Called after local DB was tried and either failed or had discrepancies.
+        ArXiv BibTeX is the authoritative source for authors/title.
+        S2 API provides venue metadata for merging.
         
         Returns result tuple or None if both failed.
         """
@@ -549,10 +594,20 @@ class EnhancedHybridReferenceChecker:
         # ── PHASE 1: Parallel API calls ──
         
         if is_arxiv:
-            # For ArXiv refs, skip local DB — go straight to ArXiv BibTeX
-            # (authoritative source). The local S2 DB may contain corrupt
-            # duplicate entries with wrong authors (e.g. CorpusID:284488789).
-            # ArXiv citation + Semantic Scholar in parallel
+            # For ArXiv refs: try local DB first (instant). If result looks
+            # clean, use it. If there's a major discrepancy (e.g., wrong
+            # authors from a corrupt S2 entry), fall back to ArXiv BibTeX.
+            if self.local_db:
+                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
+                if success:
+                    if not self._has_major_author_discrepancy(errors):
+                        return verified_data, errors, url
+                    else:
+                        logger.debug("Enhanced Hybrid: Local DB has major author discrepancy for ArXiv ref, falling back to ArXiv citation")
+                elif failure_type in ('throttled', 'timeout', 'server_error'):
+                    failed_apis.append(('local_db', self.local_db, failure_type))
+            
+            # Local DB failed or had discrepancy — use ArXiv citation checker
             result = self._verify_arxiv_parallel(reference, failed_apis)
             if result is not None:
                 return result
