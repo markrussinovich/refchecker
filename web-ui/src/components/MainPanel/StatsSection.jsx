@@ -271,12 +271,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {/* Verified */}
         <button
           onClick={() => handleFilterClick('verified')}
-          className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
-            isVerifiedSelected ? 'ring-1' : ''
+          className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
+            isVerifiedSelected ? 'ring-1 shadow-sm' : ''
           }`}
           style={{ 
             backgroundColor: isVerifiedSelected ? 'var(--color-success-bg)' : 'transparent',
             ringColor: 'var(--color-success)',
+          }}
+          onMouseEnter={(e) => {
+            if (!isVerifiedSelected) {
+              e.currentTarget.style.backgroundColor = 'var(--color-success-bg)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!isVerifiedSelected) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
           }}
           title={`${refsVerified} reference${refsVerified === 1 ? '' : 's'} fully verified`}
         >
@@ -292,11 +302,21 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           onClick={() => handleFilterClick('error')}
           disabled={refsWithErrors === 0}
           className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
-            refsWithErrors > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
-          } ${isErrorSelected ? 'ring-1' : ''}`}
+            refsWithErrors > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : 'cursor-default opacity-50'
+          } ${isErrorSelected ? 'ring-1 shadow-sm' : ''}`}
           style={{ 
             backgroundColor: isErrorSelected ? 'var(--color-error-bg)' : 'transparent',
             ringColor: 'var(--color-error)',
+          }}
+          onMouseEnter={(e) => {
+            if (refsWithErrors > 0 && !isErrorSelected) {
+              e.currentTarget.style.backgroundColor = 'var(--color-error-bg)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (refsWithErrors > 0 && !isErrorSelected) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
           }}
           title={refsWithErrors > 0 ? `${refsWithErrors} reference${refsWithErrors === 1 ? '' : 's'} with errors` : 'No references with errors'}
         >
@@ -313,11 +333,21 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           onClick={() => handleFilterClick('warning')}
           disabled={refsWithWarningsOnly === 0}
           className={`flex items-center gap-1 px-2 py-1 rounded transition-all ${
-            refsWithWarningsOnly > 0 ? 'cursor-pointer hover:opacity-80' : 'cursor-default opacity-50'
-          } ${isWarningSelected ? 'ring-1' : ''}`}
+            refsWithWarningsOnly > 0 ? 'cursor-pointer hover:scale-105 hover:shadow-sm' : 'cursor-default opacity-50'
+          } ${isWarningSelected ? 'ring-1 shadow-sm' : ''}`}
           style={{ 
             backgroundColor: isWarningSelected ? 'var(--color-warning-bg)' : 'transparent',
             ringColor: 'var(--color-warning)',
+          }}
+          onMouseEnter={(e) => {
+            if (refsWithWarningsOnly > 0 && !isWarningSelected) {
+              e.currentTarget.style.backgroundColor = 'var(--color-warning-bg)'
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (refsWithWarningsOnly > 0 && !isWarningSelected) {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }
           }}
           title={refsWithWarningsOnly > 0 ? `${refsWithWarningsOnly} reference${refsWithWarningsOnly === 1 ? '' : 's'} with warnings only` : 'No references with warnings only'}
         >
@@ -333,12 +363,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {refsUnverified > 0 && (
           <button
             onClick={() => handleFilterClick('unverified')}
-            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
-              isUnverifiedSelected ? 'ring-1' : ''
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
+              isUnverifiedSelected ? 'ring-1 shadow-sm' : ''
             }`}
             style={{ 
               backgroundColor: isUnverifiedSelected ? 'var(--color-bg-tertiary)' : 'transparent',
               ringColor: 'var(--color-text-muted)',
+            }}
+            onMouseEnter={(e) => {
+              if (!isUnverifiedSelected) {
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-tertiary)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isUnverifiedSelected) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
             }}
             title={`${refsUnverified} reference${refsUnverified === 1 ? '' : 's'} could not be verified`}
           >
@@ -354,12 +394,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         {refsHallucinated > 0 && (
           <button
             onClick={() => handleFilterClick('hallucination')}
-            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:opacity-80 ${
-              isHallucinationSelected ? 'ring-1' : ''
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
+              isHallucinationSelected ? 'ring-1 shadow-sm' : ''
             }`}
             style={{ 
               backgroundColor: isHallucinationSelected ? 'var(--color-hallucination-bg)' : 'transparent',
               ringColor: 'var(--color-hallucination)',
+            }}
+            onMouseEnter={(e) => {
+              if (!isHallucinationSelected) {
+                e.currentTarget.style.backgroundColor = 'var(--color-hallucination-bg)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isHallucinationSelected) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
             }}
             title={`${refsHallucinated} reference${refsHallucinated === 1 ? '' : 's'} likely hallucinated`}
           >
@@ -386,11 +436,28 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               <button
                 key={filter.id}
                 onClick={() => handleFilterClick(filter.id)}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer hover:opacity-80 border"
+                className={`group flex items-center gap-1 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer border hover:scale-105 hover:shadow-sm ${
+                  isSelected ? 'ring-1 shadow-sm' : ''
+                }`}
                 style={{ 
                   backgroundColor: isSelected ? filter.bgColor : 'transparent',
                   borderColor: isSelected ? filter.color : 'var(--color-border)',
                   color: filter.color,
+                  '--hover-bg': filter.bgColor,
+                  '--hover-border': filter.color,
+                  ringColor: isSelected ? filter.color : undefined,
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.backgroundColor = filter.bgColor
+                    e.currentTarget.style.borderColor = filter.color
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) {
+                    e.currentTarget.style.backgroundColor = 'transparent'
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                  }
                 }}
                 title={`${filter.value} ${filter.label.toLowerCase()} (total issues)`}
               >
