@@ -89,12 +89,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // Only used for badge breakdowns — processedRefs always comes from backend stats.
   const inclusiveCounts = useMemo(() => {
     if (!references || references.length === 0) return null
-    // Only count finalized refs (not pending/checking)
-    // Unverified refs without LLM assessment are excluded during active check.
-    // Error/warning refs keep their counts even during hallucination phase.
+    // Only count finalized refs (not pending/checking/hallucination-pending).
+    // ALL refs with hallucination_check_pending are excluded until their
+    // check completes and final status is known.
     const processed = references.filter(r => {
       const s = (r.status || '').toLowerCase()
       if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
+      if (r.hallucination_check_pending && !r.hallucination_assessment) return false
       if (s === 'unverified' && !r.hallucination_assessment && !isComplete) return false
       return true
     })

@@ -345,7 +345,8 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     # (not just year+venue)
     if error_type == 'multiple':
         details = (error_entry.get('error_details') or '').lower()
-        has_major = any(kw in details for kw in ('title', 'author', 'doi', 'arxiv', 'unverified',
+        has_major = any(kw in details for kw in ('title', 'author', 'doi', 'arxiv_id', 'arxiv id',
+                                                  'unverified',
                                                   'non-existent', 'does not reference',
                                                   'could not be verified', 'could not verify'))
         if not has_major:
@@ -358,6 +359,24 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     title = (error_entry.get('ref_title') or '').strip()
     if not title or len(title) < 10:
         return False
+
+    # If the reference was found in a database (verified URL exists), there
+    # are no title mismatches, and author overlap is reasonable (>= 60%),
+    # this is a data-quality issue (version differences, et-al handling)
+    # rather than hallucination.  Skip LLM assessment.
+    # This generalises the ArXiv version-match shortcut to all verified refs.
+    if error_entry.get('ref_verified_url') and error_type != 'unverified':
+        has_title_issue = any(
+            kw in error_details
+            for kw in ('title mismatch', 'inaccurate title')
+        )
+        if not has_title_issue:
+            cited = error_entry.get('ref_authors_cited', '')
+            correct = error_entry.get('ref_authors_correct', '')
+            if cited and correct:
+                overlap = _compute_author_overlap(cited, correct)
+                if overlap is not None and overlap >= _AUTHOR_MATCH_THRESHOLD:
+                    return False
 
     return True
 

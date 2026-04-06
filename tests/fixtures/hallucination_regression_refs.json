@@ -1,0 +1,326 @@
+[
+  {
+    "id": "clap_arxiv_version",
+    "description": "CLAP ref [8]: verified via S2 + ArXiv, author count mismatch (v2 vs v3), high overlap ~86%. Should NOT be flagged for hallucination.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Year mismatch: cited 2026 actual 2024\nVenue mismatch: cited International Conference on Learning Representations actual arXiv.org\nAuthor count mismatch: 7 cited vs 6 correct",
+      "ref_title": "Clap: Unsupervised 3d representation learning for fusion 3d perception via curvature sampling and prototype learning",
+      "ref_authors_cited": "Runjian Chen, Hang Zhang, Avinash Ravichandran, Hyoungseob Park, Wenqi Shao, Alex Wong, Ping Luo",
+      "ref_authors_correct": "Runjian Chen, Han Zhang, Avinash Ravichandran, Wenqi Shao, Alex Wong, Ping Luo",
+      "ref_year_cited": "2026",
+      "ref_venue_cited": "The Fourteenth International Conference on Learning Representations",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:274464966"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "cross_arch_kd_hallucinated",
+    "description": "Ref [13]: 0% author overlap, completely fabricated authors. Should be flagged as LIKELY hallucination.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 4 cited vs 6 correct\nVenue mismatch: cited Conference on Computer Vision and Pattern Recognition (CVPR) actual International Journal of Computer Vision",
+      "ref_title": "Cross-architecture knowledge distillation",
+      "ref_authors_cited": "Y. Deng, X. Chen, J. Zhao, Z. Wu",
+      "ref_authors_correct": "Yufan Liu, Jiajiong Cao, Bing Li, Weiming Hu, Jin-Fei Ding, Liang Li",
+      "ref_year_cited": "2023",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://arxiv.org/abs/2207.05273"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  },
+  {
+    "id": "distilled_dual_encoder_hallucinated",
+    "description": "Ref [22]: 0% author overlap, fabricated authors. Should be flagged as LIKELY hallucination.",
+    "error_entry": {
+      "error_type": "author",
+      "error_details": "Author count mismatch: 3 cited vs 6 correct",
+      "ref_title": "Distilled dual-encoder model for vision-language understanding",
+      "ref_authors_cited": "A. Gupta, M. Brown, R. Clark",
+      "ref_authors_correct": "Zekun Wang, Wenhui Wang, Haichao Zhu, Ming Liu, Bing Qin, Furu Wei",
+      "ref_year_cited": "2022",
+      "ref_venue_cited": "Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing (EMNLP)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://aclanthology.org/2022.emnlp-main.608/"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  },
+  {
+    "id": "crkd_hallucinated",
+    "description": "Ref [29]: 0% author overlap, fabricated authors. Should be flagged as LIKELY hallucination.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 4 cited vs 3 correct",
+      "ref_title": "Crkd: Enhanced camera-radar object detection with cross-modality knowledge distillation",
+      "ref_authors_cited": "Y. Huang, J. Zhou, X. Wang, H. Zhang",
+      "ref_authors_correct": "Lingjun Zhao, Jingyu Song, Katherine A. Skinner",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://openaccess.thecvf.com/content/CVPR2024/html/Zhao_CRKD_CVPR_2024_paper.html"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  },
+  {
+    "id": "ponder_minor_author_diff",
+    "description": "Ref [27]: 5/6 authors match (83% overlap), one author dropped. Should NOT be flagged.",
+    "error_entry": {
+      "error_type": "author",
+      "error_details": "Author count mismatch: 6 cited vs 5 correct",
+      "ref_title": "Ponder: Point cloud pre-training via neural rendering",
+      "ref_authors_cited": "Di Huang, Sida Peng, Tong He, Honghui Yang, Xiaowei Zhou, Wanli Ouyang",
+      "ref_authors_correct": "Di Huang, Sida Peng, Tong He, Xiaowei Zhou, Wanli Ouyang",
+      "ref_year_cited": "2023",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:123456"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "ode_gs_minor_author_diff",
+    "description": "Ref [68]: 5/6 authors match (83% overlap), one author dropped in DB. Should NOT be flagged.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 6 cited vs 5 correct\nVenue mismatch: cited International Conference on Learning Representations actual arXiv.org",
+      "ref_title": "Ode-gs: Latent odes for dynamic scene extrapolation with 3d gaussian splatting",
+      "ref_authors_cited": "Daniel Wang, Patrick Rim, Tian Tian, Dong Lao, Alex Wong, Ganesh Sundaramoorthi",
+      "ref_authors_correct": "Daniel Wang, P. Rim, Tian Tian, Alex Wong, Ganesh Sundaramoorthi",
+      "ref_year_cited": "2026",
+      "ref_venue_cited": "The Fourteenth International Conference on Learning Representations",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:789012"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": "UNLIKELY"
+  },
+  {
+    "id": "year_only_mismatch",
+    "description": "Year-only mismatch should never trigger hallucination check.",
+    "error_entry": {
+      "error_type": "year",
+      "error_details": "Year mismatch: cited 2024 actual 2022",
+      "ref_title": "Mavil: Masked audio-video learners",
+      "ref_authors_cited": "Po-Yao Huang, Vasu Sharma, Hu Xu, Chaitanya Ryali",
+      "ref_authors_correct": "Po-Yao Huang, Vasu Sharma, Hu Xu, Chaitanya Ryali",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Advances in Neural Information Processing Systems",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:111222"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "venue_only_mismatch",
+    "description": "Venue-only mismatch should never trigger hallucination check.",
+    "error_entry": {
+      "error_type": "venue",
+      "error_details": "Venue mismatch: cited arXiv.org actual European Conference on Computer Vision",
+      "ref_title": "Siamese vision transformers are scalable audio-visual learners",
+      "ref_authors_cited": "Yan-Bo Lin, Gedas Bertasius",
+      "ref_authors_correct": "Yan-Bo Lin, Gedas Bertasius",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "arXiv preprint arXiv:2403.19638",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:333444"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "unverified_ref",
+    "description": "Unverified reference (no DB match at all) should trigger hallucination check.",
+    "error_entry": {
+      "error_type": "unverified",
+      "error_details": "Reference could not be verified by any source",
+      "ref_title": "A completely made-up reference for testing purposes",
+      "ref_authors_cited": "John Doe, Jane Smith",
+      "ref_authors_correct": "",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Fictional Conference",
+      "ref_url_cited": "",
+      "ref_verified_url": ""
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "mmanet_hallucinated",
+    "description": "Ref [91]: 0% author overlap, completely fabricated. Should be flagged LIKELY.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "First author mismatch\nVenue mismatch: cited European Conference on Computer Vision (ECCV) actual Computer Vision and Pattern Recognition",
+      "ref_title": "Mmanet: Margin-aware distillation and modality-aware regularization for incomplete multimodal learning",
+      "ref_authors_cited": "F. Zheng, R. Li, W. Xu",
+      "ref_authors_correct": "Shicai Wei, Chunbo Luo, Yang Luo",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Proceedings of the European Conference on Computer Vision (ECCV)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://openaccess.thecvf.com/content/CVPR2023/html/Wei_MMANet_CVPR_2023_paper.html"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  },
+  {
+    "id": "positive_congruent_hallucinated",
+    "description": "Ref [95]: 0% author overlap, completely fabricated. Should be flagged LIKELY.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 4 cited vs 8 correct\nYear mismatch: cited 2024 actual 2020",
+      "ref_title": "Positive-congruent training: Towards regression-free model updates",
+      "ref_authors_cited": "L. Zhou, Y. Zheng, T. Li, Y. Wang",
+      "ref_authors_correct": "Sijie Yan, Yuanjun Xiong, Kaustav Kundu, Shuo Yang, Siqi Deng, Meng Wang, Wei Xia, Stefano Soatto",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://openaccess.thecvf.com/content/CVPR2021/html/Yan_PCT_CVPR_2021_paper.html"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  },
+  {
+    "id": "wordepth_minor_author_diff",
+    "description": "Ref [89]: 7/9 match (78% overlap), two missing authors from DB. Should NOT be flagged.",
+    "error_entry": {
+      "error_type": "author",
+      "error_details": "Author count mismatch: 7 cited vs 9 correct",
+      "ref_title": "Wordepth: Variational language prior for monocular depth estimation",
+      "ref_authors_cited": "Ziyao Zeng, Daniel Wang, Fengyu Yang, Hyoungseob Park, Stefano Soatto, Dong Lao, Alex Wong",
+      "ref_authors_correct": "Ziyao Zeng, Daniel Wang, Fengyu Yang, Hyoungseob Park, Yangchao Wu, Stefano Soatto, Byung-Woo Hong, Dong Lao, Alex Wong",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:555666"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "protodepth_minor_author_diff",
+    "description": "Ref [61]: 5/6 match (83% overlap), one extra author in DB. Should NOT be flagged.",
+    "error_entry": {
+      "error_type": "author",
+      "error_details": "Author count mismatch: 5 cited vs 6 correct",
+      "ref_title": "Protodepth: Unsupervised continual depth completion with prototypes",
+      "ref_authors_cited": "Patrick Rim, Hyoungseob Park, Ziyao Zeng, Younjoon Chung, Alex Wong",
+      "ref_authors_correct": "P. Rim, Hyoungseob Park, Suchisrit Gangopadhyay, Ziyao Zeng, Younjoon Chung, Alex Wong",
+      "ref_year_cited": "2025",
+      "ref_venue_cited": "Proceedings of the Computer Vision and Pattern Recognition Conference",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:777888"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "learnable_crossmodal_hallucinated",
+    "description": "Ref [69]: 0% author overlap, fabricated authors. Should be flagged LIKELY.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 3 cited vs 6 correct\nVenue mismatch: cited Neural Information Processing Systems (NeurIPS) actual International Conference on Medical Image Computing and Computer-Assisted Intervention",
+      "ref_title": "Learnable cross-modal knowledge distillation for multi-modal learning with missing modality",
+      "ref_authors_cited": "H. Wang, X. Li, Q. Zhang",
+      "ref_authors_correct": "Hu Wang, Yuanhong Chen, Congbo Ma, Jodie Avery, Louise Hull, G. Carneiro",
+      "ref_year_cited": "2023",
+      "ref_venue_cited": "Advances in Neural Information Processing Systems (NeurIPS)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://arxiv.org/abs/2310.01035"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "knowledge_distillation_suggestion_only",
+    "description": "Ref [3]: verified paper with only arXiv URL suggestion. No real errors → should NOT trigger hallucination.",
+    "error_entry": {
+      "error_type": "suggestion_arxiv_url",
+      "error_details": "Reference could include arXiv URL: https://arxiv.org/abs/2106.05237",
+      "ref_title": "Knowledge distillation: A good teacher is patient and consistent",
+      "ref_authors_cited": "Lucas Beyer, Xiaohua Zhai, Amélie Royer, Larisa Markeeva, Rohan Anil, Alexander Kolesnikov",
+      "ref_authors_correct": "Lucas Beyer, Xiaohua Zhai, Amélie Royer, Larisa Markeeva, Rohan Anil, Alexander Kolesnikov",
+      "ref_year_cited": "2022",
+      "ref_venue_cited": "CVPR",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:235376877"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "dino_suggestion_only",
+    "description": "Ref [4]: verified paper with only arXiv URL suggestion. No real errors → should NOT trigger hallucination.",
+    "error_entry": {
+      "error_type": "suggestion_arxiv_url",
+      "error_details": "Reference could include arXiv URL: https://arxiv.org/abs/2104.14294",
+      "ref_title": "Emerging properties in self-supervised vision transformers",
+      "ref_authors_cited": "Mathilde Caron, Hugo Touvron, Ishan Misra, Hervé Jégou, Julien Mairal, Piotr Bojanowski, Armand Joulin",
+      "ref_authors_correct": "Mathilde Caron, Hugo Touvron, Ishan Misra, Hervé Jégou, Julien Mairal, Piotr Bojanowski, Armand Joulin",
+      "ref_year_cited": "2021",
+      "ref_venue_cited": "ICCV",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:233444273"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "omni_dc_venue_plus_info",
+    "description": "Ref [97] Omni-DC: venue mismatch + info suggestion (arXiv URL). Verified paper, no author issues. Should NOT be flagged — venue-only is not suspicious. The 'arxiv' substring in venue 'arXiv.org' must not trigger has_major.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Venue mismatch: cited International Conference on Computer Vision actual arXiv.org\nReference could include arXiv URL: https://arxiv.org/abs/2411.19278",
+      "ref_title": "Omni-dc: Highly robust depth completion with multiresolution depth integration",
+      "ref_authors_cited": "Yiming Zuo, Willow Yang, Zeyu Ma, Jia Deng",
+      "ref_authors_correct": "",
+      "ref_year_cited": "2025",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:274423381"
+    },
+    "expect_should_check": false,
+    "expect_deterministic_verdict": null,
+    "expect_run_no_llm_verdict": null
+  },
+  {
+    "id": "positive_congruent_0pct_overlap",
+    "description": "Ref [95] Positive-congruent training: verified paper but 0% author overlap — completely fabricated authors. Should be LIKELY hallucinated.",
+    "error_entry": {
+      "error_type": "multiple",
+      "error_details": "Author count mismatch: 4 cited vs 8 correct\nYear mismatch: cited 2024 actual 2020",
+      "ref_title": "Positive-congruent training: Towards regression-free model updates",
+      "ref_authors_cited": "L. Zhou, Y. Zheng, T. Li, Y. Wang",
+      "ref_authors_correct": "Sijie Yan, Yuanjun Xiong, Kaustav Kundu, Shuo Yang, Siqi Deng, Meng Wang, Wei Xia, Stefano Soatto",
+      "ref_year_cited": "2024",
+      "ref_venue_cited": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+      "ref_url_cited": "",
+      "ref_verified_url": "https://api.semanticscholar.org/CorpusID:227013720"
+    },
+    "expect_should_check": true,
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
+  }
+]

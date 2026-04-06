@@ -3251,6 +3251,7 @@ class ArxivReferenceChecker:
         else:
             # Single error - handle as before
             error = errors[0]
+            is_info_only = not error.get('error_type') and not error.get('warning_type') and error.get('info_type')
             error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type', 'unknown')
             error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', '')
             
@@ -3279,6 +3280,8 @@ class ArxivReferenceChecker:
                 # Store original reference for formatting corrections
                 'original_reference': reference
             }
+            if is_info_only:
+                error_entry['_info_only'] = True
             
             # Add correct information based on error type
             if error_type == 'author':
@@ -6390,6 +6393,11 @@ class ArxivReferenceChecker:
             target_record = error_entry_record
 
         if target_record is not None:
+            # Skip hallucination assessment for info-only entries (e.g. "Reference
+            # could include arXiv URL").  These are stored with error_type='url' for
+            # report formatting but are not real errors that warrant LLM assessment.
+            if target_record.get('_info_only'):
+                return
             error_entry = dict(target_record)
             error_entry.setdefault('ref_title', reference.get('title', ''))
             error_entry.setdefault('ref_authors_cited', ', '.join(reference.get('authors', [])))
@@ -6399,12 +6407,17 @@ class ArxivReferenceChecker:
             error_entry.setdefault('original_reference', reference)
         else:
             # Backward-compatible fallback for callers that don't pass the record handle.
+            # Filter out info/suggestion-only entries — not real errors
+            real_errors = [e for e in errors if e.get('error_type') or e.get('warning_type')]
+            if not real_errors:
+                return
+
             error_types = []
             error_details_parts = []
             authors_correct = None
-            for e in errors:
-                etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
-                edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
+            for e in real_errors:
+                etype = e.get('error_type') or e.get('warning_type', '')
+                edetail = e.get('error_details') or e.get('warning_details', '')
                 if etype:
                     error_types.append(etype)
                 if edetail:
@@ -6429,6 +6442,15 @@ class ArxivReferenceChecker:
                 'ref_url_cited': reference.get('url', ''),
                 'original_reference': reference,
             }
+            # Set ref_verified_url from verified_data so should_check_hallucination
+            # can skip LLM for verified refs with minor data-quality issues.
+            if verified_data:
+                error_entry['ref_verified_url'] = (
+                    verified_data.get('url', '')
+                    or verified_data.get('semantic_scholar_url', '')
+                    or verified_data.get('arxiv_url', '')
+                    or verified_data.get('doi_url', '')
+                )
             if authors_correct:
                 error_entry['ref_authors_correct'] = authors_correct
 
@@ -6492,12 +6514,18 @@ class ArxivReferenceChecker:
         """
         from refchecker.core.hallucination_policy import run_hallucination_check
 
+        # Filter out info/suggestion-only entries — they are not real errors
+        # and should not trigger hallucination assessment.
+        real_errors = [e for e in errors if e.get('error_type') or e.get('warning_type')]
+        if not real_errors:
+            return None
+
         error_types = []
         error_details_parts = []
         authors_correct = None
-        for e in errors:
-            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
-            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
+        for e in real_errors:
+            etype = e.get('error_type') or e.get('warning_type', '')
+            edetail = e.get('error_details') or e.get('warning_details', '')
             if etype:
                 error_types.append(etype)
             if edetail:
@@ -6518,6 +6546,10 @@ class ArxivReferenceChecker:
                 or verified_data.get('arxiv_url', '')
                 or verified_data.get('doi_url', '')
             )
+            # Local DB returns paperId without a URL field — construct it
+            if not ref_verified_url and verified_data.get('paperId'):
+                from refchecker.utils.url_utils import construct_semantic_scholar_url
+                ref_verified_url = construct_semantic_scholar_url(verified_data['paperId'])
         error_entry = {
             'error_type': consolidated_type,
             'error_details': '\n'.join(error_details_parts),

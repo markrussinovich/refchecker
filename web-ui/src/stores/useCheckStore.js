@@ -226,17 +226,30 @@ export const useCheckStore = create((set, get) => ({
 
   setReferences: (references) => {
     logger.info('CheckStore', `References extracted: ${references.length}`)
-    if (get().references?.length > 0 && get().references.some(r => r.status !== 'pending')) {
-      console.warn('[REFS RESET DEBUG] setReferences called when refs already have non-pending statuses!', { currentCount: get().references.length, newCount: references.length, stack: new Error().stack })
+    const existing = get().references || []
+    // Build a map of existing refs that already have real (non-pending) data
+    // so we never overwrite a more-advanced status with 'pending'.
+    const existingByIndex = new Map()
+    for (const r of existing) {
+      if (r.status && r.status !== 'pending') {
+        existingByIndex.set(r.index, r)
+      }
     }
-    const mappedRefs = references.map((ref, index) => ({
-      ...ref,
-      index,
-      status: 'pending',
-      errors: [],
-      warnings: [],
-      authoritative_urls: [],
-    }))
+    const mappedRefs = references.map((ref, index) => {
+      const prev = existingByIndex.get(index)
+      if (prev) {
+        // Keep the already-processed ref — it has more up-to-date data
+        return prev
+      }
+      return {
+        ...ref,
+        index,
+        status: ref.status || 'pending',
+        errors: ref.errors || [],
+        warnings: ref.warnings || [],
+        authoritative_urls: ref.authoritative_urls || [],
+      }
+    })
     set({ references: mappedRefs })
   },
 
