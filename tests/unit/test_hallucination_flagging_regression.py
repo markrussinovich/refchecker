@@ -272,3 +272,93 @@ class TestPreScreenRawInfoOnly:
                'year': '2024'}
         outcome, _ = self._call(result, ref)
         assert outcome == 'skip'
+
+
+class TestArxivReVerify:
+    """Tests for RefChecker._try_arxiv_re_verify (wrong-DB-match fallback)."""
+
+    @staticmethod
+    def _make_checker():
+        """Create a minimal RefChecker for testing _try_arxiv_re_verify."""
+        from unittest.mock import MagicMock
+        from refchecker.core.refchecker import ArxivReferenceChecker
+        checker = object.__new__(ArxivReferenceChecker)
+        # Minimum attributes needed
+        checker.db_path = None
+        checker.non_arxiv_checker = MagicMock()
+        return checker
+
+    def test_no_author_error_returns_none(self):
+        """No author error → no re-verification attempted."""
+        checker = self._make_checker()
+        errors = [{'error_type': 'year', 'error_details': 'Year mismatch'}]
+        verified_data = {'title': 'Some paper'}
+        ref = {'title': 'Some paper', 'authors': ['A B'], 'year': '2024'}
+        result = checker._try_arxiv_re_verify(errors, 'http://s2/123', verified_data, ref)
+        assert result == (None, None, None)
+
+    def test_high_overlap_returns_none(self):
+        """Author error with high overlap → no re-verification (not a wrong match)."""
+        checker = self._make_checker()
+        errors = [{
+            'error_type': 'author',
+            'error_details': 'Author count mismatch: 7 vs 6',
+            'ref_authors_cited': 'Runjian Chen, Hang Zhang, Avinash Ravichandran, Hyoungseob Park, Wenqi Shao, Alex Wong, Ping Luo',
+            'ref_authors_correct': 'Runjian Chen, Han Zhang, Avinash Ravichandran, Wenqi Shao, Alex Wong, Ping Luo',
+        }]
+        verified_data = {'title': 'CLAP paper', 'externalIds': {'ArXiv': '2412.03059'}}
+        ref = {'title': 'CLAP paper', 'authors': ['Runjian Chen', 'Hang Zhang'], 'year': '2026'}
+        result = checker._try_arxiv_re_verify(errors, 'http://s2/123', verified_data, ref)
+        assert result == (None, None, None)
+
+    def test_zero_overlap_no_arxiv_returns_none(self):
+        """0% overlap but no ArXiv ID → no re-verification possible."""
+        checker = self._make_checker()
+        errors = [{
+            'error_type': 'author',
+            'error_details': 'Author count mismatch',
+            'ref_authors_cited': 'L. Zhou, Y. Zheng, T. Li, Y. Wang',
+            'ref_authors_correct': 'Sijie Yan, Yuanjun Xiong, Kaustav Kundu, Shuo Yang, Siqi Deng, Meng Wang, Wei Xia, Stefano Soatto',
+        }]
+        verified_data = {'title': 'Other paper', 'externalIds': {}}
+        ref = {'title': 'Some paper', 'authors': ['L. Zhou'], 'year': '2024'}
+        result = checker._try_arxiv_re_verify(errors, 'http://s2/123', verified_data, ref)
+        assert result == (None, None, None)
+
+    def test_zero_overlap_with_arxiv_triggers_reverify(self):
+        """0% overlap + ArXiv ID → re-verification is attempted (mocked)."""
+        from unittest.mock import patch, MagicMock
+        checker = self._make_checker()
+        errors = [{
+            'error_type': 'author',
+            'error_details': 'Author count mismatch: 100 cited vs 2 correct',
+            'ref_authors_cited': 'Author1, Author2, Author3, Author4, Author5',
+            'ref_authors_correct': 'DifferentA, DifferentB',
+        }]
+        verified_data = {
+            'title': 'DeepSeek-R1',
+            'externalIds': {'ArXiv': '2501.12948'},
+        }
+        ref = {
+            'title': 'DeepSeek-R1',
+            'authors': ['Author1', 'Author2', 'Author3', 'Author4', 'Author5'],
+            'year': '2025',
+            'url': 'https://arxiv.org/abs/2501.12948',
+        }
+        # Mock ArXivCitationChecker.verify_reference to return success
+        mock_arxiv_data = {'title': 'DeepSeek-R1: Real Paper', 'authors': []}
+        mock_arxiv_errors = []
+        mock_arxiv_url = 'https://arxiv.org/abs/2501.12948'
+
+        with patch('refchecker.checkers.arxiv_citation.ArXivCitationChecker') as MockChecker:
+            instance = MockChecker.return_value
+            instance.extract_arxiv_id.return_value = ('2501.12948', None)
+            instance.verify_reference.return_value = (mock_arxiv_data, mock_arxiv_errors, mock_arxiv_url)
+
+            result_errors, result_url, result_data = checker._try_arxiv_re_verify(
+                errors, 'http://s2/wrong', verified_data, ref
+            )
+
+        assert result_data is not None
+        assert result_data['title'] == 'DeepSeek-R1: Real Paper'
+        assert result_url == mock_arxiv_url

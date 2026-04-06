@@ -2609,6 +2609,17 @@ class ArxivReferenceChecker:
         # Use the standard reference verification (handles local DB + API fallbacks via hybrid checker)
         errors, paper_url, verified_data = self.verify_reference_standard(source_paper, reference)
         
+        # If the DB/S2 returned a match but the authors are catastrophically
+        # wrong (0% overlap), the DB likely matched the wrong paper.  When
+        # the reference (or the matched paper) carries an ArXiv ID, re-verify
+        # directly against ArXiv — the canonical source of truth.
+        if errors and verified_data is not None:
+            arxiv_errors, arxiv_url, arxiv_data = self._try_arxiv_re_verify(
+                errors, paper_url, verified_data, reference
+            )
+            if arxiv_data is not None:
+                errors, paper_url, verified_data = arxiv_errors, arxiv_url, arxiv_data
+        
         # If standard verification failed and the reference has a URL, try raw URL verification
         if errors and verified_data is None:
             # Check if there's an unverified error
@@ -2630,7 +2641,96 @@ class ArxivReferenceChecker:
                             break
         
         return errors, paper_url, verified_data
-    
+
+    # ------------------------------------------------------------------
+    # ArXiv re-verification fallback for wrong DB matches
+    # ------------------------------------------------------------------
+
+    def _try_arxiv_re_verify(self, errors, paper_url, verified_data, reference):
+        """Re-verify against ArXiv when the DB likely matched the wrong paper.
+
+        Triggers only when:
+          1. There is an author-count error in the error list.
+          2. Author overlap between cited and DB-returned authors is ≤ 10 %
+             (catastrophic mismatch — the DB matched a different paper).
+          3. An ArXiv ID can be extracted from either the reference URL/text
+             or the matched paper's externalIds.
+
+        Returns (errors, url, verified_data) from ArXiv verification on
+        success, or (None, None, None) if re-verification is not applicable
+        or fails.
+        """
+        # Step 1: check for an author error with zero/near-zero overlap
+        author_err = None
+        for e in errors:
+            if (e.get('error_type') or '').lower() == 'author':
+                author_err = e
+                break
+        if author_err is None:
+            return None, None, None
+
+        cited_authors = author_err.get('ref_authors_cited', '')
+        correct_authors = author_err.get('ref_authors_correct', '')
+        if not cited_authors:
+            # Fall back to the reference's author list
+            ref_authors = reference.get('authors', [])
+            if isinstance(ref_authors, list):
+                cited_authors = ', '.join(
+                    a.get('name', a) if isinstance(a, dict) else str(a)
+                    for a in ref_authors
+                )
+            elif isinstance(ref_authors, str):
+                cited_authors = ref_authors
+
+        if not cited_authors or not correct_authors:
+            return None, None, None
+
+        from refchecker.core.hallucination_policy import _compute_author_overlap
+        overlap = _compute_author_overlap(cited_authors, correct_authors)
+        # overlap is None for very short author lists — skip those
+        if overlap is None or overlap > 0.1:
+            return None, None, None
+
+        logger.info(
+            "DB match has catastrophic author mismatch (%.0f%% overlap) — "
+            "attempting ArXiv re-verification for '%s'",
+            overlap * 100,
+            reference.get('title', '')[:60],
+        )
+
+        # Step 2: extract an ArXiv ID from the reference or the matched paper
+        arxiv_id = None
+        try:
+            from refchecker.checkers.arxiv_citation import ArXivCitationChecker
+            checker = ArXivCitationChecker()
+            arxiv_id, _ = checker.extract_arxiv_id(reference)
+        except Exception:
+            pass
+
+        if not arxiv_id and verified_data:
+            ext = verified_data.get('externalIds') or {}
+            arxiv_id = ext.get('ArXiv') or ext.get('arxiv') or ''
+            if not arxiv_id:
+                arxiv_id = None
+
+        if not arxiv_id:
+            logger.debug("No ArXiv ID available for re-verification")
+            return None, None, None
+
+        # Step 3: verify against ArXiv directly
+        try:
+            arxiv_data, arxiv_errors, arxiv_url = checker.verify_reference(reference)
+            if arxiv_data is not None:
+                logger.info(
+                    "ArXiv re-verification succeeded for %s — "
+                    "using ArXiv result instead of wrong DB match",
+                    arxiv_id,
+                )
+                return arxiv_errors or None, arxiv_url, arxiv_data
+        except Exception as exc:
+            logger.debug("ArXiv re-verification failed: %s", exc)
+
+        return None, None, None
 
     def verify_github_reference(self, reference):
         """
@@ -3251,7 +3351,6 @@ class ArxivReferenceChecker:
         else:
             # Single error - handle as before
             error = errors[0]
-            is_info_only = not error.get('error_type') and not error.get('warning_type') and error.get('info_type')
             error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type', 'unknown')
             error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', '')
             
@@ -3280,8 +3379,6 @@ class ArxivReferenceChecker:
                 # Store original reference for formatting corrections
                 'original_reference': reference
             }
-            if is_info_only:
-                error_entry['_info_only'] = True
             
             # Add correct information based on error type
             if error_type == 'author':
@@ -6393,11 +6490,6 @@ class ArxivReferenceChecker:
             target_record = error_entry_record
 
         if target_record is not None:
-            # Skip hallucination assessment for info-only entries (e.g. "Reference
-            # could include arXiv URL").  These are stored with error_type='url' for
-            # report formatting but are not real errors that warrant LLM assessment.
-            if target_record.get('_info_only'):
-                return
             error_entry = dict(target_record)
             error_entry.setdefault('ref_title', reference.get('title', ''))
             error_entry.setdefault('ref_authors_cited', ', '.join(reference.get('authors', [])))
@@ -6407,17 +6499,12 @@ class ArxivReferenceChecker:
             error_entry.setdefault('original_reference', reference)
         else:
             # Backward-compatible fallback for callers that don't pass the record handle.
-            # Filter out info/suggestion-only entries — not real errors
-            real_errors = [e for e in errors if e.get('error_type') or e.get('warning_type')]
-            if not real_errors:
-                return
-
             error_types = []
             error_details_parts = []
             authors_correct = None
-            for e in real_errors:
-                etype = e.get('error_type') or e.get('warning_type', '')
-                edetail = e.get('error_details') or e.get('warning_details', '')
+            for e in errors:
+                etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
+                edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
                 if etype:
                     error_types.append(etype)
                 if edetail:
@@ -6442,15 +6529,6 @@ class ArxivReferenceChecker:
                 'ref_url_cited': reference.get('url', ''),
                 'original_reference': reference,
             }
-            # Set ref_verified_url from verified_data so should_check_hallucination
-            # can skip LLM for verified refs with minor data-quality issues.
-            if verified_data:
-                error_entry['ref_verified_url'] = (
-                    verified_data.get('url', '')
-                    or verified_data.get('semantic_scholar_url', '')
-                    or verified_data.get('arxiv_url', '')
-                    or verified_data.get('doi_url', '')
-                )
             if authors_correct:
                 error_entry['ref_authors_correct'] = authors_correct
 
@@ -6514,18 +6592,12 @@ class ArxivReferenceChecker:
         """
         from refchecker.core.hallucination_policy import run_hallucination_check
 
-        # Filter out info/suggestion-only entries — they are not real errors
-        # and should not trigger hallucination assessment.
-        real_errors = [e for e in errors if e.get('error_type') or e.get('warning_type')]
-        if not real_errors:
-            return None
-
         error_types = []
         error_details_parts = []
         authors_correct = None
-        for e in real_errors:
-            etype = e.get('error_type') or e.get('warning_type', '')
-            edetail = e.get('error_details') or e.get('warning_details', '')
+        for e in errors:
+            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
+            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
             if etype:
                 error_types.append(etype)
             if edetail:
@@ -6546,10 +6618,6 @@ class ArxivReferenceChecker:
                 or verified_data.get('arxiv_url', '')
                 or verified_data.get('doi_url', '')
             )
-            # Local DB returns paperId without a URL field — construct it
-            if not ref_verified_url and verified_data.get('paperId'):
-                from refchecker.utils.url_utils import construct_semantic_scholar_url
-                ref_verified_url = construct_semantic_scholar_url(verified_data['paperId'])
         error_entry = {
             'error_type': consolidated_type,
             'error_details': '\n'.join(error_details_parts),
