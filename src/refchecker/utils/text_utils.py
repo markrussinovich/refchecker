@@ -2179,7 +2179,7 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         return True, "No authors to compare"
     
     if not correct_names:
-        return False, "No correct authors provided"
+        return True, "No correct authors available for comparison"
     
     # When "et al" is present, only compare the explicitly listed authors
     # The key insight: if the citation has "et al", we should only verify the listed authors
