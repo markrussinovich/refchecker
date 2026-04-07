@@ -6246,15 +6246,45 @@ class ArxivReferenceChecker:
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in errors)
             
             if has_unverified_error:
-                # Don't count "url references paper" as unverified — the URL
-                # was confirmed to contain the paper.
+                # Check if the URL was confirmed to contain the paper
                 url_references_paper = any(
                     'url references paper' in (e.get('error_details') or '').lower()
                     for e in errors
                 )
-                if not url_references_paper:
+                
+                if url_references_paper:
+                    # URL contains the paper — ask the LLM to validate
+                    # whether this is a real reference before recording an error.
+                    url_assessment = precomputed_hallucination
+                    if not url_assessment:
+                        url_assessment = self._run_and_return_hallucination_assessment(
+                            reference, errors, verified_data=verified_data
+                        )
+                    
+                    if url_assessment and url_assessment.get('verdict') == 'UNLIKELY':
+                        # LLM confirmed the reference is real — treat as verified
+                        cited_url = reference.get('cited_url') or reference.get('url', '')
+                        if print_output:
+                            print(f"       ✅ Verified via URL: {cited_url}")
+                            explanation = url_assessment.get('explanation', '')
+                            if explanation:
+                                print(f"         LLM confirmed: {explanation}")
+                        return  # Don't add to errors — reference is verified
+                    elif url_assessment and url_assessment.get('verdict') == 'LIKELY':
+                        # LLM says likely hallucinated despite URL containing title
+                        self.total_unverified_refs += 1
+                        if not debug_mode and print_output:
+                            print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
+                        # Store assessment so it isn't re-run below
+                        precomputed_hallucination = url_assessment
+                    else:
+                        # UNCERTAIN or no LLM — fall back to current display
+                        # (shows "✅ Verified via URL" via subreason display)
+                        self._display_unverified_error_with_subreason(
+                            reference, reference_url, errors, debug_mode, print_output)
+                else:
                     self.total_unverified_refs += 1
-                self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
+                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)

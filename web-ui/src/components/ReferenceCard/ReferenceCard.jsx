@@ -95,6 +95,96 @@ const renderTextWithLinks = (text) => {
   })
 }
 
+// Render long text collapsed to 3 visible rows with a chevron toggle to the left
+const COLLAPSE_LINES = 3
+const LINE_HEIGHT_EM = 1.4
+
+function CollapsibleText({ text }) {
+  const [expanded, setExpanded] = useState(false)
+  const [needsCollapse, setNeedsCollapse] = useState(false)
+  const contentRef = useRef(null)
+  const collapsedMaxHeight = `${COLLAPSE_LINES * LINE_HEIGHT_EM}em`
+
+  useEffect(() => {
+    if (contentRef.current) {
+      const el = contentRef.current
+      const lineH = parseFloat(getComputedStyle(el).lineHeight) || (parseFloat(getComputedStyle(el).fontSize) * LINE_HEIGHT_EM)
+      setNeedsCollapse(el.scrollHeight > lineH * COLLAPSE_LINES + 2)
+    }
+  }, [text])
+
+  if (!text) return null
+
+  return (
+    <div style={{ position: 'relative', minWidth: 0 }}>
+      {needsCollapse && (
+        <button
+          onClick={() => setExpanded(e => !e)}
+          title={expanded ? 'Collapse' : 'Expand'}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-hover, #3a3a3a)'
+            e.currentTarget.style.borderColor = 'var(--color-text-secondary, #aaa)'
+            e.currentTarget.style.color = 'var(--color-text-primary, #eee)'
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--color-bg-secondary, #2a2a2a)'
+            e.currentTarget.style.borderColor = 'var(--color-border, #555)'
+            e.currentTarget.style.color = 'var(--color-text-secondary, #aaa)'
+          }}
+          style={{
+            position: 'absolute',
+            left: '-28px',
+            top: `calc(${COLLAPSE_LINES} * ${LINE_HEIGHT_EM}em - 22px)`,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '20px',
+            height: '20px',
+            border: '1px solid var(--color-border, #555)',
+            borderRadius: '4px',
+            background: 'var(--color-bg-secondary, #2a2a2a)',
+            color: 'var(--color-text-secondary, #aaa)',
+            cursor: 'pointer',
+            padding: 0,
+            fontSize: '12px',
+            lineHeight: 1,
+            zIndex: 1,
+            transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+          }}
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{
+              transform: expanded ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.15s ease',
+            }}
+          >
+            <polyline points="2,4 6,8 10,4" />
+          </svg>
+        </button>
+      )}
+      <span
+        ref={contentRef}
+        style={{
+          display: 'block',
+          lineHeight: `${LINE_HEIGHT_EM}em`,
+          maxHeight: (!expanded && needsCollapse) ? collapsedMaxHeight : 'none',
+          overflow: 'hidden',
+        }}
+      >
+        {renderTextWithLinks(text)}
+      </span>
+    </div>
+  )
+}
+
 /**
  * Individual reference card matching CLI output format
  */
@@ -585,13 +675,13 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 {(parsedDetails?.cited || warning.cited_value) && (
                   <div className="flex ml-6">
                     <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">cited:</span></span>
-                    <span>{renderTextWithLinks(parsedDetails?.cited || warning.cited_value)}</span>
+                    <CollapsibleText text={parsedDetails?.cited || warning.cited_value} />
                   </div>
                 )}
                 {(parsedDetails?.actual || warning.actual_value) && (
                   <div className="flex ml-6">
                     <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">actual:</span></span>
-                    <span>{renderTextWithLinks(parsedDetails?.actual || warning.actual_value)}</span>
+                    <CollapsibleText text={parsedDetails?.actual || warning.actual_value} />
                   </div>
                 )}
               </div>
@@ -645,13 +735,13 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
                 {(parsedDetails?.cited || error.cited_value) && (
                   <div className="flex ml-6">
                     <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">cited:</span></span>
-                    <span>{renderTextWithLinks(parsedDetails?.cited || error.cited_value)}</span>
+                    <CollapsibleText text={parsedDetails?.cited || error.cited_value} />
                   </div>
                 )}
                 {(parsedDetails?.actual || error.actual_value) && (
                   <div className="flex ml-6">
                     <span className="flex-shrink-0" style={{ width: '70px' }}><span className="font-bold">actual:</span></span>
-                    <span>{renderTextWithLinks(parsedDetails?.actual || error.actual_value)}</span>
+                    <CollapsibleText text={parsedDetails?.actual || error.actual_value} />
                   </div>
                 )}
               </div>

@@ -393,15 +393,29 @@ class ParallelReferenceProcessor:
                     if ha_link and ha_link.startswith('http'):
                         llm_verified_url = ha_link
             
-            # Also treat "url references paper" as verified (webpage checker
-            # confirmed the cited URL contains the paper)
+            # Check if "url references paper" (webpage checker confirmed
+            # the cited URL contains the paper)
             url_references_paper = any(
                 'url references paper' in (e.get('error_details') or '').lower()
                 for e in result.errors
             )
             
             if has_unverified_error:
-                if llm_verified and llm_verified_url:
+                if url_references_paper and llm_verified:
+                    # URL references paper AND LLM confirmed — show as verified
+                    cited_url = reference.get('cited_url') or reference.get('url', '')
+                    print(f"       ✅ Verified via URL: {cited_url}")
+                    ha_explanation = assessment.get('explanation', '')
+                    if ha_explanation:
+                        print(f"         LLM confirmed: {ha_explanation}")
+                elif url_references_paper and assessment and assessment.get('verdict') == 'LIKELY':
+                    # URL references paper but LLM says likely hallucinated
+                    self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
+                elif url_references_paper:
+                    # URL references paper, no LLM or UNCERTAIN — show as verified via URL
+                    cited_url = reference.get('cited_url') or reference.get('url', '')
+                    print(f"       ✅ Verified via URL: {cited_url}")
+                elif llm_verified and llm_verified_url:
                     # Show clean verified URL instead of 'Could not verify'
                     print(f"       Verified URL: {llm_verified_url}")
                 elif llm_verified:
@@ -410,10 +424,6 @@ class ParallelReferenceProcessor:
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
                     if ha_explanation:
                         print(f"         Not flagged: {ha_explanation}")
-                elif url_references_paper:
-                    # Webpage checker confirmed the cited URL references the paper
-                    cited_url = reference.get('cited_url') or reference.get('url', '')
-                    print(f"       ✅ Verified via URL: {cited_url}")
                 else:
                     # Use the centralized unverified error display function from base checker
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)

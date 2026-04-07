@@ -315,9 +315,9 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     if error_type in {'year', 'venue'}:
         return False
 
-    # If the URL was checked and references the paper, it's not hallucinated
-    if 'url references paper' in error_details:
-        return False
+    # "url references paper" cases are now passed to the LLM for validation.
+    # The LLM can override the unverified status to verified if it confirms
+    # the URL is the correct source for the reference.
 
     # Web/URL references with no real authors are not hallucination candidates
     # (these are website citations like datasets, blog posts, tools)

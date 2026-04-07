@@ -589,6 +589,7 @@ class EnhancedHybridReferenceChecker:
             return None, [], cited_url
         
         failed_apis = []
+        db_not_found = False
         is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
         
         # ── PHASE 1: Parallel API calls ──
@@ -604,16 +605,50 @@ class EnhancedHybridReferenceChecker:
                         return verified_data, errors, url
                     else:
                         logger.debug("Enhanced Hybrid: Local DB has major author discrepancy for ArXiv ref, falling back to ArXiv citation")
+                elif failure_type == 'not_found':
+                    db_not_found = True
                 elif failure_type in ('throttled', 'timeout', 'server_error'):
                     failed_apis.append(('local_db', self.local_db, failure_type))
             
             # Local DB failed or had discrepancy — use ArXiv citation checker
             result = self._verify_arxiv_parallel(reference, failed_apis)
             if result is not None:
-                return result
+                verified_data, errors, url = result
+                # Check if the ArXiv URL points to a completely different paper.
+                # A title *error* (not warning) means the cited title didn't match
+                # ANY version of the ArXiv paper at this ID — the URL is wrong.
+                has_title_error = any(
+                    e.get('error_type') == 'title' for e in errors
+                )
+                if has_title_error:
+                    # The ArXiv URL points to a completely different paper.
+                    # This is strong evidence the reference is fabricated
+                    # (wrong ArXiv ID).  Return immediately so the
+                    # hallucination checker can evaluate it — don't waste
+                    # time searching fallback APIs for a paper that almost
+                    # certainly doesn't exist under the cited metadata.
+                    cited_title = reference.get('title', 'unknown')
+                    actual_title = (verified_data or {}).get('title', 'unknown')
+                    arxiv_url = reference.get('cited_url') or reference.get('url', '')
+                    logger.debug(
+                        f"Enhanced Hybrid: ArXiv URL points to a different paper "
+                        f"(cited: '{cited_title}', actual: '{actual_title}') — "
+                        f"returning as unverified for hallucination check"
+                    )
+                    return None, [
+                        {
+                            'error_type': 'unverified',
+                            'error_details': f'Could not verify: {cited_title}',
+                        },
+                        {
+                            'error_type': 'url',
+                            'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
+                        },
+                    ], arxiv_url
+                else:
+                    return result
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
-            db_not_found = False
             if self.local_db:
                 verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
                 if success:
@@ -635,8 +670,14 @@ class EnhancedHybridReferenceChecker:
         self._last_crossref_result = None
         self._last_openalex_result = None
         
-        # PHASE 2: If no API succeeded in Phase 1, retry failed APIs
-        if failed_apis:
+        # PHASE 2: If no API succeeded in Phase 1, retry failed APIs.
+        # Skip retries when the local DB definitively returned not_found —
+        # if a paper isn't in a 233M-paper database, retrying throttled
+        # remote APIs is almost certainly wasted time and the main cause
+        # of verification timeouts.
+        if failed_apis and self.local_db and db_not_found:
+            logger.debug(f"Enhanced Hybrid: Skipping Phase 2 retries — local DB (233M papers) returned not_found, retrying remote APIs is unlikely to help")
+        elif failed_apis:
             logger.debug(f"Enhanced Hybrid: Phase 1 complete, no success. Retrying {len(failed_apis)} failed APIs")
             
             # Sort failed APIs to prioritize Semantic Scholar retries

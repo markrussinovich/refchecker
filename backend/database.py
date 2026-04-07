@@ -1045,6 +1045,11 @@ class Database:
         if status in ('error', 'cancelled', 'timeout', 'checking', 'pending'):
             return False
         
+        # Don't cache timeout results that slipped through as 'unverified'
+        for err in result.get('errors', []):
+            if 'timed out' in (err.get('error_details') or '').lower():
+                return False
+        
         cache_key = self._compute_reference_cache_key(reference)
         
         async with aiosqlite.connect(self.db_path) as db:

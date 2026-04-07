@@ -67,15 +67,6 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     },
   }
 
-  // Issue type filters for the chips
-  const issueFilters = [
-    { ...allFilters.error, value: stats.errors_count || 0 },
-    { ...allFilters.warning, value: stats.warnings_count || 0 },
-    { ...allFilters.suggestion, value: stats.suggestions_count || 0 },
-    { ...allFilters.unverified, value: stats.unverified_count || 0 },
-    { ...allFilters.hallucination, value: stats.hallucination_count || 0 },
-  ]
-
   const handleFilterClick = (filterId) => {
     setStatusFilter(filterId)
   }
@@ -89,6 +80,13 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // Only used for badge breakdowns — processedRefs always comes from backend stats.
   const inclusiveCounts = useMemo(() => {
     if (!references || references.length === 0) return null
+    // totalProcessed: count of ALL refs that have completed verification,
+    // regardless of status (used for the "of N" progress denominator).
+    const totalProcessed = references.filter(r => {
+      const s = (r.status || '').toLowerCase()
+      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
+      return true
+    }).length
     // Only count finalized refs (not pending/checking/hallucination-pending).
     // ALL refs with hallucination_check_pending are excluded until their
     // check completes and final status is known.
@@ -100,8 +98,23 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       return true
     })
     const finalized = processed
+    // Compute total individual issue counts from reference objects so they
+    // stay accurate even when the backend defers counting for refs pending
+    // hallucination checks.
+    let errorsCount = 0
+    let warningsCount = 0
+    let suggestionsCount = 0
+    for (const r of finalized) {
+      errorsCount += (r.errors?.filter(e => e.error_type !== 'unverified') || []).length
+      warningsCount += (r.warnings || []).length
+      suggestionsCount += (r.suggestions || []).length
+    }
     return {
       count: processed.length,
+      totalProcessed,
+      errorsCount,
+      warningsCount,
+      suggestionsCount,
       withErrors: finalized.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
       withWarnings: finalized.filter(r =>
         r.warnings?.length > 0 &&
@@ -129,9 +142,21 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
   const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
   const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  // processedRefs: backend now properly defers counting unverified refs until
-  // their LLM hallucination check completes, so we trust it directly.
-  const processedRefs = stats.processed_refs ?? 0
+  // processedRefs: Use the count of all completed references from inclusiveCounts
+  // when available, since the backend defers counting refs pending hallucination
+  // checks.  Fall back to backend stats only when references aren't loaded yet.
+  const processedRefs = inclusiveCounts?.totalProcessed ?? stats.processed_refs ?? 0
+
+  // Issue type filters for the chips
+  // Compute from reference objects (inclusiveCounts) when available so that
+  // counts stay correct even while refs are deferred for hallucination checks.
+  const issueFilters = [
+    { ...allFilters.error, value: inclusiveCounts?.errorsCount ?? stats.errors_count ?? 0 },
+    { ...allFilters.warning, value: inclusiveCounts?.warningsCount ?? stats.warnings_count ?? 0 },
+    { ...allFilters.suggestion, value: inclusiveCounts?.suggestionsCount ?? stats.suggestions_count ?? 0 },
+    { ...allFilters.unverified, value: refsUnverified },
+    { ...allFilters.hallucination, value: refsHallucinated },
+  ]
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')

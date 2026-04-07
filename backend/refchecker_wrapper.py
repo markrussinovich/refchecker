@@ -1086,7 +1086,7 @@ class ProgressRefChecker:
             try:
                 verified_data, errors, url = await asyncio.wait_for(
                     loop.run_in_executor(None, self.checker.verify_reference, reference),
-                    timeout=60.0  # 60 second timeout per reference
+                    timeout=90.0  # 90 second timeout per reference
                 )
             except asyncio.TimeoutError:
                 logger.warning(f"Reference {index} verification timed out")
@@ -1559,7 +1559,7 @@ class ProgressRefChecker:
                         reference,
                         idx + 1
                     ),
-                    timeout=120.0  # 2 minute timeout per reference
+                    timeout=90.0  # 90 second timeout per reference
                 )
             except asyncio.TimeoutError:
                 result = {

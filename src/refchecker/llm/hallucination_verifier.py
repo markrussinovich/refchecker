@@ -565,8 +565,21 @@ class LLMHallucinationVerifier:
 
         lines = []
         if error_type == 'unverified':
-            lines.append('- Reference could NOT be found in any academic database '
-                         '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)')
+            # Check if the reference has an ArXiv URL that was checked and
+            # pointed to a different paper (the URL is fabricated/wrong).
+            url = error_entry.get('ref_url_cited', '')
+            if url and 'arxiv.org' in url:
+                lines.append(
+                    '- Reference could NOT be found in any academic database '
+                    '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv).\n'
+                    '  NOTE: The cited ArXiv URL points to a COMPLETELY DIFFERENT '
+                    'paper — the URL is likely fabricated along with the rest of '
+                    'the reference. Search for the cited TITLE to determine if '
+                    'the paper exists at all.'
+                )
+            else:
+                lines.append('- Reference could NOT be found in any academic database '
+                             '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)')
         elif error_type == 'multiple':
             lines.append('- Multiple issues detected:')
             for detail in error_details.split('\n'):

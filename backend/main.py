@@ -377,7 +377,11 @@ async def root():
     # If static frontend is bundled, serve it
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path), media_type="text/html")
+        return FileResponse(
+            str(index_path),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
     # Otherwise return API health check
     return {"status": "ok", "message": "RefChecker Web UI API"}
 
@@ -2377,7 +2381,11 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
         
         # For all other paths, serve index.html (SPA routing)
         index_path = STATIC_DIR / "index.html"
-        return FileResponse(str(index_path), media_type="text/html")
+        return FileResponse(
+            str(index_path),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
 
 if __name__ == "__main__":
