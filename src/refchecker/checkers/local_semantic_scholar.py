@@ -429,7 +429,7 @@ class LocalNonArxivReferenceChecker:
                 })
         
         # Verify authors
-        if authors:
+        if authors and paper_data.get('authors'):
             authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:

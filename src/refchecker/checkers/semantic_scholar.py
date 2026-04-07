@@ -648,9 +648,11 @@ class NonArxivReferenceChecker:
                             logger.debug(f"Found paper by direct ArXiv ID lookup: {arxiv_id} (similarity {title_similarity:.2f})")
                         else:
                             arxiv_id_mismatch_detected = True
-                            paper_data = direct_result
-                            found_title = result_title
-                            logger.debug(f"Direct ArXiv ID lookup found mismatch: cited '{cited_title[:50]}' vs actual '{result_title[:50]}'")
+                            # Do NOT set paper_data here — the ArXiv ID
+                            # points to a completely different paper.  Let
+                            # the title-based search below find the actual
+                            # cited paper (if it exists).
+                            logger.debug(f"Direct ArXiv ID lookup found mismatch: cited '{cited_title[:50]}' vs actual '{result_title[:50]}' — skipping, will try title search")
                     else:
                         paper_data = direct_result
                         found_title = result_title
@@ -868,7 +870,7 @@ class NonArxivReferenceChecker:
             })
         
         # Verify authors
-        if authors:
+        if authors and paper_data.get('authors'):
             authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:
