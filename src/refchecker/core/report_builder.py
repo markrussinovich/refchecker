@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any, Dict, IO, List, Optional
 
-from refchecker.core.hallucination_policy import check_author_hallucination
+from refchecker.core.hallucination_policy import check_author_hallucination, _detect_garbled_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +133,10 @@ class ReportBuilder:
             # Only run the fast deterministic check for entries that were
             # never assessed.  LLM-based checks are done inline during
             # verification and should already be stored on the entry.
+            if assessment is None:
+                assessment = _detect_garbled_metadata(record)
+                if assessment:
+                    record['hallucination_assessment'] = assessment
             if assessment is None:
                 assessment = check_author_hallucination(record)
                 if assessment:

@@ -94,7 +94,6 @@ Key signals of hallucination (any ONE is sufficient for LIKELY):
 - Web search finds a similar but NOT identical paper (different title, \
 different authors) — this is EVIDENCE of hallucination, not evidence the \
 reference is real
-- The title appears truncated, garbled, or unnaturally worded
 - Authors are malformed (e.g. "O. T. et al. Unke")
 - The ArXiv ID or DOI points to a completely different paper
 - The paper title exists but the cited authors are COMPLETELY WRONG — \
@@ -120,6 +119,40 @@ the same authors (or substantially overlapping authors)
 - Year off-by-one with otherwise matching title and authors is acceptable
 - Venue abbreviation differences are acceptable
 - Team/consortium authorship shorthand for large collaborative papers
+
+IMPORTANT: The following are NOT hallucinations — verdict MUST be UNLIKELY:
+
+(1) TRUNCATED OR INCOMPLETE TITLES: If the title appears cut off or the \
+reference is marked "incomplete" or "truncated", this is a PDF extraction \
+or parsing failure, NOT an AI fabrication. If you can identify a real paper \
+that the truncated title is a prefix of AND the authors match, verdict \
+MUST be UNLIKELY. Even if you cannot identify the paper, an obviously \
+truncated or incomplete reference should be UNCERTAIN, not LIKELY.
+
+(2) GARBLED OR SWAPPED METADATA: If the title and author fields appear \
+swapped, garbled, or contain data from the wrong field (e.g. the title \
+field contains author names, or vice versa), this is a metadata extraction \
+error, not hallucination. Verdict MUST be UNLIKELY if you can identify \
+the real paper being referenced despite the garbled fields.
+
+(3) MINOR AUTHOR NAME TYPOS: If a single-author or few-author paper has \
+an author name that is a clear typo or OCR error of the real author \
+(e.g. "J. Queen" instead of "J. MacQueen", or "Nestrov" instead of \
+"Nesterov"), and the title matches a known paper, this is a human \
+citation error, not AI hallucination. Verdict MUST be UNLIKELY.
+
+(4) NON-ACADEMIC REAL-WORLD SOURCES: References to competitions, datasets, \
+ethics codes, standards documents, technical blog posts, software tools, \
+or other real-world non-paper sources (e.g. "American Invitational \
+Mathematics Examination", "SPJ Code of Ethics", "Gemini CLI") are valid \
+citations even though they are not academic papers. If the cited source \
+is a real, identifiable entity, verdict MUST be UNLIKELY regardless of \
+whether it appears in academic databases.
+
+(5) INFORMAL OR COLLOQUIAL TITLES: If an author uses a widely recognized \
+informal name for a paper or model (e.g. "Llama" instead of the full \
+"The Llama 3 Herd of Models"), and the authors substantially match, \
+this is a citation style choice, not hallucination. Verdict UNLIKELY.
 
 Be strict: if this title was not found in any academic database and your \
 web search does not find this exact title, the verdict MUST be LIKELY. \

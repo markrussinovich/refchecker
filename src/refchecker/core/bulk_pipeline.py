@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import check_author_hallucination, run_hallucination_check, should_check_hallucination
+from refchecker.core.hallucination_policy import check_author_hallucination, _detect_garbled_metadata, run_hallucination_check, should_check_hallucination
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.biblatex_parser import detect_biblatex_format
 from refchecker.utils.bibtex_parser import detect_bibtex_format
@@ -1476,6 +1476,11 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
     tasks: List[tuple[Dict[str, Any], _BatchTask]] = []
 
     for error_entry in checker.errors:
+        garbled_result = _detect_garbled_metadata(error_entry)
+        if garbled_result:
+            error_entry['hallucination_assessment'] = garbled_result
+            continue
+
         author_result = check_author_hallucination(error_entry)
         if author_result:
             error_entry['hallucination_assessment'] = author_result

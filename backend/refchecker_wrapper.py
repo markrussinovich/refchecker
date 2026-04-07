@@ -1234,6 +1234,7 @@ class ProgressRefChecker:
             check_author_hallucination,
             detect_name_order_warning,
             should_check_hallucination,
+            _detect_garbled_metadata,
         )
 
         error_entry = self._build_hallucination_error_entry(result, reference)
@@ -1245,6 +1246,13 @@ class ProgressRefChecker:
         if name_order:
             updated = dict(result)
             updated['hallucination_assessment'] = name_order
+            return ('resolved', updated)
+
+        # Garbled/swapped metadata (extraction error, not hallucination)
+        garbled = _detect_garbled_metadata(error_entry)
+        if garbled:
+            updated = dict(result)
+            updated['hallucination_assessment'] = garbled
             return ('resolved', updated)
 
         # Author overlap (deterministic LIKELY/None)

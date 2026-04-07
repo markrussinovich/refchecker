@@ -187,13 +187,15 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     error_type = (error_entry.get('error_type') or '').lower()
     is_verified = bool(error_entry.get('ref_verified_url'))
 
-    # For unverified refs, allow 'unverified', 'multiple', or empty error_type
+    # For unverified refs, allow 'unverified', 'author', 'multiple', or empty
+    # error_type.  A ref can lack ref_verified_url yet still carry an 'author'
+    # error when the checker found the paper but the cited authors don't match.
     # For verified refs, allow 'author' and 'multiple' (they have author errors)
     if is_verified:
         if error_type not in ('author', 'multiple', ''):
             return None
     else:
-        if error_type not in ('unverified', 'multiple', ''):
+        if error_type not in ('unverified', 'author', 'multiple', ''):
             return None
 
     cited = error_entry.get('ref_authors_cited', '')
@@ -339,7 +341,24 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
                        'title mismatch', 'inaccurate title')
         )
         if not url_failed:
-            return False
+            # For author-type errors (including 'multiple' with author issues),
+            # a valid URL only proves the paper exists — it does not validate
+            # cited authors.  If we have correct author data and overlap is
+            # critically low, don't skip: the reference may cite a real title
+            # with fabricated authors.
+            if error_type in ('author', 'multiple'):
+                cited = error_entry.get('ref_authors_cited', '')
+                correct = error_entry.get('ref_authors_correct', '')
+                if cited and correct:
+                    overlap = _compute_author_overlap(cited, correct)
+                    if overlap is not None and overlap < _AUTHOR_VERIFIED_THRESHOLD:
+                        pass  # Don't skip — authors critically mismatched
+                    else:
+                        return False
+                else:
+                    return False
+            else:
+                return False
 
     # For 'multiple' type, check if it contains title or author mismatches
     # (not just year+venue)
@@ -423,6 +442,82 @@ def assess_hallucination(
         }
 
 
+def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Detect if reference metadata fields are garbled or swapped.
+
+    Returns an UNLIKELY assessment if the title and author fields appear to be
+    swapped (e.g. title contains author names, author field contains a paper
+    title or description).  This is a PDF extraction error, not hallucination.
+
+    Also detects references where the title is a list of author names
+    concatenated with special characters.
+    """
+    title = (error_entry.get('ref_title') or '').strip()
+    authors = (error_entry.get('ref_authors_cited') or '').strip()
+    raw_text = ''
+    orig = error_entry.get('original_reference', {})
+    if orig:
+        raw_text = orig.get('raw_text', '') or ''
+
+    if not title or not authors:
+        return None
+
+    # Pattern 1: Author field looks like a title (contains colon suggesting
+    # "Title: Subtitle" pattern, and title is very short / org-like)
+    authors_has_colon = ':' in authors
+    title_is_short = len(title) < 20
+    # Common org/team names that might end up as the title
+    org_names = {'alibaba', 'google', 'meta', 'microsoft', 'openai', 'deepmind',
+                 'deepseek', 'qwen', 'anthropic', 'nvidia', 'kuaishou', 'baidu',
+                 'tencent', 'huawei', 'bytedance', 'apple', 'amazon'}
+    title_is_org = title.lower().strip() in org_names
+
+    if authors_has_colon and (title_is_short or title_is_org):
+        return {
+            'verdict': 'UNLIKELY',
+            'explanation': (
+                f'The title and author fields appear to be swapped or garbled '
+                f'(title="{title}", authors="{authors[:60]}..."). '
+                f'This is a metadata extraction error, not hallucination.'
+            ),
+            'web_search': None,
+        }
+
+    # Pattern 2: Title field contains author names concatenated with asterisks
+    # or other separators (common PDF extraction artifact)
+    if '*' in title and title.count('*') >= 2:
+        # Title looks like "Author1*Author2*Author3" — it's an author list
+        parts = [p.strip() for p in title.split('*') if p.strip()]
+        # Check if most parts look like person names (2-4 words each)
+        name_like = sum(1 for p in parts if 1 <= len(p.split()) <= 5)
+        if name_like >= len(parts) * 0.5:
+            return {
+                'verdict': 'UNLIKELY',
+                'explanation': (
+                    f'The title field contains what appears to be an author list '
+                    f'concatenated with asterisks — this is a metadata extraction '
+                    f'error, not hallucination.'
+                ),
+                'web_search': None,
+            }
+
+    # Pattern 3: Title is explicitly a truncation/parsing placeholder
+    title_lower = title.lower().strip('() ')
+    if title_lower in ('incomplete reference - truncated', 'incomplete reference',
+                        'truncated', 'incomplete entry', 'incomplete reference - insufficient data',
+                        'incomplete reference insufficient data'):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                f'The reference title is a placeholder indicating a parsing or '
+                f'extraction failure ("{title}"), not an AI-fabricated citation.'
+            ),
+            'web_search': None,
+        }
+
+    return None
+
+
 def run_hallucination_check(
     error_entry: Dict[str, Any],
     llm_client: Any = None,
@@ -454,6 +549,14 @@ def run_hallucination_check(
     name_order_result = detect_name_order_warning(error_entry)
     if name_order_result:
         return name_order_result
+
+    # 1b. Detect garbled/swapped metadata fields — a PDF extraction error, not hallucination.
+    #     Key signal: the author field looks like a title/description (contains colons
+    #     or is very long with spaces), or the title field is extremely short and looks
+    #     like an organization name while the author field looks like a title.
+    garbled_result = _detect_garbled_metadata(error_entry)
+    if garbled_result:
+        return garbled_result
 
     # 2. Deterministic: author-overlap check (no LLM)
     author_result = check_author_hallucination(error_entry)
