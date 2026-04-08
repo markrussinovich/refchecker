@@ -13,17 +13,17 @@ export default function DebugPanel() {
   const [clearing, setClearing] = useState(null)
   const logsEndRef = useRef(null)
 
-  // In multi-user mode, only admins can see the debug panel
-  if (multiuser && !user?.is_admin) {
-    return null
-  }
-
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (isVisible && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
     }
   }, [logs, isVisible])
+
+  // In multi-user mode, only admins can see the debug panel
+  if (multiuser && !user?.is_admin) {
+    return null
+  }
 
   const filteredLogs = logs.filter(log => {
     if (filter === 'all') return true
