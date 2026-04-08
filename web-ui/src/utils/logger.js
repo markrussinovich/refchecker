@@ -32,24 +32,12 @@ function addToDebugStore(level, component, message, data) {
 export const logger = {
   debug(component, message, data = null) {
     if (!shouldLog('DEBUG')) return
-    const timestamp = formatTimestamp()
     addToDebugStore('DEBUG', component, message, data)
-    if (data) {
-      console.debug(`[${timestamp}] [DEBUG] [${component}] ${message}`, data)
-    } else {
-      console.debug(`[${timestamp}] [DEBUG] [${component}] ${message}`)
-    }
   },
 
   info(component, message, data = null) {
     if (!shouldLog('INFO')) return
-    const timestamp = formatTimestamp()
     addToDebugStore('INFO', component, message, data)
-    if (data) {
-      console.info(`[${timestamp}] [INFO] [${component}] ${message}`, data)
-    } else {
-      console.info(`[${timestamp}] [INFO] [${component}] ${message}`)
-    }
   },
 
   warn(component, message, data = null) {

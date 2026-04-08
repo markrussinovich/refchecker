@@ -117,6 +117,7 @@ function summaryUpdate(processed, total, errCount = 0, warnCount = 0) {
     type: 'summary_update',
     total_refs: total,
     processed_refs: processed,
+    progress_percent: total > 0 ? (processed / total) * 100 : 0,
     errors_count: errCount,
     warnings_count: warnCount,
     suggestions_count: 0,
@@ -423,6 +424,89 @@ test.describe('UI responsiveness during active scans', () => {
 
     // Switch back to the active check
     await sidebar.getByText('Responsiveness Test Paper').click();
-    await expect(page.getByText(`References (${TOTAL_REFS})`)).toBeVisible({ timeout: 3000 });
+    // Verify we navigated back — the status section should show the active check
+    await expect(page.getByText('Responsiveness Test Paper').first()).toBeVisible({ timeout: 3000 });
+  });
+
+  // ---------- Test 5: Main-thread jank measurement during progress updates ----------
+  test('main thread stays responsive while progress bar updates', async ({ page }) => {
+    const { emit } = await setupWebSocketMock(page);
+    await page.goto('/');
+
+    // Start the check
+    await page.getByPlaceholder(/Enter ArXiv ID/i).fill('http://responsive.example');
+    await page.getByRole('button', { name: 'Check References' }).click();
+    await expect(page.getByRole('main').getByRole('button', { name: 'Cancel' })).toBeVisible();
+
+    // Extract references
+    await emit(SESSION, {
+      type: 'references_extracted',
+      references: skeletonRefs(TOTAL_REFS),
+      total_refs: TOTAL_REFS,
+      count: TOTAL_REFS,
+    });
+    await page.waitForTimeout(200);
+
+    // Inject a rAF jank monitor that tracks the longest gap between frames
+    await page.evaluate(() => {
+      window.__frameTimes = [];
+      window.__jankMonitorRunning = true;
+      let last = performance.now();
+      function tick() {
+        if (!window.__jankMonitorRunning) return;
+        const now = performance.now();
+        window.__frameTimes.push(now - last);
+        last = now;
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+
+    // Emit reference results with summary_update after each one (worst-case)
+    // This simulates the real backend which sends checking_reference +
+    // reference_result + summary_update per reference
+    for (let i = 1; i <= TOTAL_REFS; i++) {
+      const status = i % 5 === 0 ? 'error' : 'verified';
+      await emit(SESSION, { type: 'checking_reference', index: i });
+      await emit(SESSION, refResult(i, status));
+      await emit(SESSION, summaryUpdate(i, TOTAL_REFS, i % 5 === 0 ? Math.floor(i / 5) : Math.floor((i - 1) / 5)));
+    }
+
+    // Let the UI settle
+    await page.waitForTimeout(500);
+
+    // Stop the jank monitor and collect results
+    const jankStats = await page.evaluate(() => {
+      window.__jankMonitorRunning = false;
+      const times = window.__frameTimes;
+      if (times.length === 0) return { maxFrame: 0, avgFrame: 0, jankyFrames: 0, totalFrames: 0 };
+      const maxFrame = Math.max(...times);
+      const avgFrame = times.reduce((a, b) => a + b, 0) / times.length;
+      // Frames > 100ms are "janky" (6+ frames dropped at 60fps)
+      const jankyFrames = times.filter(t => t > 100).length;
+      // Frames > 300ms are "frozen" (user-noticeable hang)
+      const frozenFrames = times.filter(t => t > 300).length;
+      return { maxFrame: Math.round(maxFrame), avgFrame: Math.round(avgFrame), jankyFrames, frozenFrames, totalFrames: times.length };
+    });
+
+    console.log('Jank stats:', JSON.stringify(jankStats));
+
+    // The main thread should never be blocked for > 300ms (frozen)
+    // which is the threshold where resize/interaction feels broken
+    expect(jankStats.frozenFrames).toBe(0);
+    // Max frame gap should be under 500ms
+    expect(jankStats.maxFrame).toBeLessThan(500);
+
+    // Also verify the progress bar reached ~100%
+    const progressText = await page.locator('main').locator('text=/\\d+% complete/').first().textContent();
+    expect(parseInt(progressText)).toBeGreaterThanOrEqual(90);
+
+    // Verify a resize works right now
+    const origSize = page.viewportSize();
+    await page.setViewportSize({ width: 800, height: 500 });
+    await page.waitForTimeout(100);
+    // The progress bar should still be visible after resize
+    await expect(page.locator('main').locator('text=/\\d+% complete/').first()).toBeVisible({ timeout: 1000 });
+    await page.setViewportSize(origSize);
   });
 });

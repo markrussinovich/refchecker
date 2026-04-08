@@ -613,4 +613,108 @@ export const useCheckStore = create((set, get) => ({
         logger.warn('CheckStore', `Unknown message type: ${type}`, data)
     }
   },
+
+  /**
+   * Process a batch of WS messages in a single state update.
+   * Called from LiveWebSocketManager's rAF flush.  Messages that arrived
+   * within the same animation frame are folded into one set() call so
+   * React renders only once for the whole batch.
+   */
+  flushBatchedMessages: (messages) => {
+    if (!messages || messages.length === 0) return
+    const store = get()
+
+    // Accumulate mutations across all messages
+    let refs = store.references   // will be replaced once if any ref message present
+    let latestStats = null
+    let latestProgress = null
+    let latestStatusMessage = null
+    let historyPayload = null     // last summary_update payload for history
+
+    // Track which refs changed to avoid unnecessary .map() per message
+    const refPatches = new Map()  // index -> patch object
+
+    for (const message of messages) {
+      const { type, session_id: messageSessionId, ...data } = message
+
+      // Only handle hot-path messages here; everything else falls through
+      // to the standard per-message handler.
+      switch (type) {
+        case 'checking_reference':
+          if (typeof data.index === 'number') {
+            const idx = data.index - 1
+            refPatches.set(idx, { ...(refPatches.get(idx) || {}), status: 'checking' })
+          }
+          break
+
+        case 'reference_result': {
+          const idx = data.index - 1
+          const normalizedStatus = data?.status ? data.status.toLowerCase() : 'checked'
+          const { index: _backendIndex, ...dataWithoutIndex } = data
+          refPatches.set(idx, {
+            ...(refPatches.get(idx) || {}),
+            ...dataWithoutIndex,
+            index: idx,
+            status: normalizedStatus,
+          })
+          break
+        }
+
+        case 'summary_update':
+          latestStats = data
+          latestProgress = data.progress_percent || 0
+          latestStatusMessage = `Processed ${data.processed_refs} of ${data.total_refs} references...`
+          historyPayload = {
+            status: 'in_progress',
+            total_refs: data.total_refs,
+            processed_refs: data.processed_refs,
+            errors_count: data.errors_count,
+            warnings_count: data.warnings_count,
+            suggestions_count: data.suggestions_count,
+            unverified_count: data.unverified_count,
+            hallucination_count: data.hallucination_count || 0,
+            verified_count: data.verified_count,
+            refs_with_errors: data.refs_with_errors,
+            refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_verified: data.refs_verified,
+          }
+          break
+
+        case 'progress':
+          latestProgress = data.percent || (data.current / data.total * 100)
+          if (data.message) latestStatusMessage = data.message
+          break
+
+        default:
+          // Non-hot-path message (started, extracting, etc.) – handle individually
+          store.handleWebSocketMessage(message)
+          break
+      }
+    }
+
+    // Build a single state patch
+    const patch = {}
+
+    // Apply ref patches in one pass
+    if (refPatches.size > 0) {
+      patch.references = refs.map((ref, i) => {
+        const p = refPatches.get(i)
+        return p ? { ...ref, ...p } : ref
+      })
+    }
+
+    if (latestStats !== null) patch.stats = latestStats
+    if (latestProgress !== null) patch.progress = latestProgress
+    if (latestStatusMessage !== null) patch.statusMessage = latestStatusMessage
+
+    // Single set() for the whole batch
+    if (Object.keys(patch).length > 0) {
+      set(patch)
+    }
+
+    // Update history store once with the latest payload (not per-message)
+    if (historyPayload && store.currentCheckId) {
+      useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, historyPayload)
+    }
+  },
 }))

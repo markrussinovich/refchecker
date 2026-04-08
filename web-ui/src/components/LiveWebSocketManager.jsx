@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { createWebSocket, getCheckDetail } from '../utils/api'
 import { useCheckStore } from '../stores/useCheckStore'
 import { useHistoryStore } from '../stores/useHistoryStore'
@@ -9,10 +9,15 @@ import { logger } from '../utils/logger'
  * Keeps old session connections alive so they can receive completed messages.
  * Also reconnects to in_progress sessions on page refresh.
  * Includes a polling fallback to recover from lost WebSocket messages.
+ *
+ * Messages are batched via requestAnimationFrame so that bursts of 3+ messages
+ * per reference (checking_reference, reference_result, summary_update) are
+ * collapsed into a single React re-render cycle.
  */
 export default function LiveWebSocketManager() {
   const activeSessions = useCheckStore(state => state.activeSessions)
   const handleWebSocketMessage = useCheckStore(state => state.handleWebSocketMessage)
+  const flushBatchedMessages = useCheckStore(state => state.flushBatchedMessages)
   const setError = useCheckStore(state => state.setError)
   const unregisterSession = useCheckStore(state => state.unregisterSession)
   
@@ -20,6 +25,26 @@ export default function LiveWebSocketManager() {
   const wsMapRef = useRef(new Map())
   // Track last WS message time per session for stale detection
   const lastMessageTimeRef = useRef(new Map())
+  // rAF-based message batching
+  const pendingMessagesRef = useRef([])
+  const rafIdRef = useRef(null)
+
+  // Flush all pending messages in a single batch (called from rAF)
+  const flushMessages = useCallback(() => {
+    rafIdRef.current = null
+    const messages = pendingMessagesRef.current
+    if (messages.length === 0) return
+    pendingMessagesRef.current = []
+    flushBatchedMessages(messages)
+  }, [flushBatchedMessages])
+
+  // Enqueue a message and schedule a rAF flush
+  const enqueueMessage = useCallback((msg) => {
+    pendingMessagesRef.current.push(msg)
+    if (rafIdRef.current === null) {
+      rafIdRef.current = requestAnimationFrame(flushMessages)
+    }
+  }, [flushMessages])
 
   // Connect to all active sessions
   useEffect(() => {
@@ -40,10 +65,23 @@ export default function LiveWebSocketManager() {
         },
         onMessage: (data) => {
           lastMessageTimeRef.current.set(sessionId, Date.now())
-          // Inject session_id into the message so the handler knows which session it's from
           const messageWithSession = { ...data, session_id: sessionId }
-          logger.info('WebSocket', `Message from ${sessionId}: ${data.type}`, data)
-          handleWebSocketMessage(messageWithSession)
+          // Critical messages (completed, error, cancelled) are handled immediately;
+          // hot-path messages are batched to avoid per-message re-renders.
+          const immediate = data.type === 'completed' || data.type === 'error' || data.type === 'cancelled'
+          if (immediate) {
+            // Flush any pending messages first so ordering is preserved
+            if (pendingMessagesRef.current.length > 0) {
+              cancelAnimationFrame(rafIdRef.current)
+              rafIdRef.current = null
+              const pending = pendingMessagesRef.current
+              pendingMessagesRef.current = []
+              flushBatchedMessages(pending)
+            }
+            handleWebSocketMessage(messageWithSession)
+          } else {
+            enqueueMessage(messageWithSession)
+          }
         },
         onError: (error) => {
           logger.error('WebSocket', `Error on session ${sessionId}`, { error: error?.toString() })
@@ -71,7 +109,17 @@ export default function LiveWebSocketManager() {
         lastMessageTimeRef.current.delete(sessionId)
       }
     }
-  }, [activeSessions, handleWebSocketMessage, setError, unregisterSession])
+  }, [activeSessions, handleWebSocketMessage, flushBatchedMessages, setError, unregisterSession, enqueueMessage])
+
+  // Cancel any pending rAF on unmount
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+    }
+  }, [])
 
   // Polling fallback: detect stalled checks and recover from lost WS messages
   useEffect(() => {
