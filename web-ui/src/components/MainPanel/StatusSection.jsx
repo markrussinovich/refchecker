@@ -217,7 +217,9 @@ export default function StatusSection() {
     
     // Build status message based on state
     if (displayStatus === 'in_progress') {
-      if (displayProcessedRefs > 0) {
+      if (displayProcessedRefs > 0 && displayProcessedRefs >= displayTotalRefs && displayTotalRefs > 0) {
+        displayMessage = 'Finishing hallucination check...'
+      } else if (displayProcessedRefs > 0) {
         displayMessage = `Processed ${displayProcessedRefs} of ${displayTotalRefs} references...`
       } else if (displayTotalRefs > 0) {
         displayMessage = `Found ${displayTotalRefs} references, starting verification...`

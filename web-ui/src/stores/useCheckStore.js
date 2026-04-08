@@ -547,7 +547,9 @@ export const useCheckStore = create((set, get) => ({
         set({
           stats: data,
           progress: data.progress_percent || 0,
-          statusMessage: `Processed ${data.processed_refs} of ${data.total_refs} references...`,
+          statusMessage: data.processed_refs >= data.total_refs && data.total_refs > 0
+            ? 'Finishing hallucination check...'
+            : `Processed ${data.processed_refs} of ${data.total_refs} references...`,
         })
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'in_progress',
@@ -677,7 +679,9 @@ export const useCheckStore = create((set, get) => ({
         case 'summary_update':
           latestStats = data
           latestProgress = data.progress_percent || 0
-          latestStatusMessage = `Processed ${data.processed_refs} of ${data.total_refs} references...`
+          latestStatusMessage = data.processed_refs >= data.total_refs && data.total_refs > 0
+            ? 'Finishing hallucination check...'
+            : `Processed ${data.processed_refs} of ${data.total_refs} references...`
           historyPayload = {
             status: 'in_progress',
             total_refs: data.total_refs,
