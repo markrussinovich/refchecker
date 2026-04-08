@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { useDebugStore } from '../stores/useDebugStore'
+import { useAuthStore } from '../stores/useAuthStore'
 import { clearCache, clearDatabase } from '../utils/api'
 
 /**
- * Debug log panel that shows real-time logs
+ * Debug log panel that shows real-time logs.
+ * Only visible to admin users in multi-user mode.
  */
 export default function DebugPanel() {
+  const { user, multiuser } = useAuthStore()
+
+  // In multi-user mode, only admins can see the debug panel
+  if (multiuser && !user?.is_admin) {
+    return null
+  }
   const { logs, isEnabled, isVisible, filter, toggleEnabled, toggleVisible, setFilter, clearLogs } = useDebugStore()
   const [clearing, setClearing] = useState(null)
   const logsEndRef = useRef(null)

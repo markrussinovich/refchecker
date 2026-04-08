@@ -844,7 +844,7 @@ class Database:
             if oa_row:
                 user_id = oa_row[0]
                 # Re-evaluate admin status on every login so config changes take effect
-                is_admin = await self._should_be_admin(db, email, login)
+                is_admin = await self._should_be_admin(db, email, login, provider)
                 await db.execute("""
                     UPDATE users SET email = ?, name = ?, avatar_url = ?, is_admin = ?
                     WHERE id = ?
@@ -859,13 +859,13 @@ class Database:
 
                 if legacy_row:
                     user_id = legacy_row[0]
-                    is_admin = await self._should_be_admin(db, email, login)
+                    is_admin = await self._should_be_admin(db, email, login, provider)
                     await db.execute("""
                         UPDATE users SET email = ?, name = ?, avatar_url = ?, is_admin = ?
                         WHERE id = ?
                     """, (email, name, avatar_url, 1 if is_admin else 0, user_id))
                 else:
-                    is_admin = await self._should_be_admin(db, email, login)
+                    is_admin = await self._should_be_admin(db, email, login, provider)
                     cursor = await db.execute("""
                         INSERT INTO users (provider, provider_id, email, name, avatar_url, is_admin)
                         VALUES (?, ?, ?, ?, ?, ?)
@@ -882,20 +882,34 @@ class Database:
             return user_id
 
     @staticmethod
-    def _load_admin_users() -> set:
-        """Load the set of admin identifiers from config file + env vars.
+    def _load_admin_users() -> tuple:
+        """Load admin identifiers from config file + env vars.
 
-        Sources (all merged, case-insensitive):
-        1. ``admin_users.conf`` file in the project root (one entry per line,
-           GitHub usernames or emails, ``#`` comments ignored).
-        2. ``ADMIN_USERS`` env var (comma-separated GitHub usernames or emails).
-        3. ``ADMIN_EMAILS`` env var (comma-separated emails, kept for backward compat).
+        Returns ``(qualified, unqualified)`` where *qualified* is a set of
+        ``"provider:identity"`` strings and *unqualified* is a set of bare
+        identities (email or username) that match any provider.
+
+        Entries support two formats:
+        - ``github:markrussinovich`` — provider-qualified (recommended)
+        - ``user@example.com`` — bare email / username, matches any provider
+
+        Sources:
+        1. ``admin_users.conf`` file (one entry per line, ``#`` comments).
+        2. ``ADMIN_USERS`` env var (comma-separated).
+        3. ``ADMIN_EMAILS`` env var (comma-separated emails, legacy).
         """
         import os, pathlib
-        admins: set = set()
+        qualified: set = set()    # e.g. {"github:markrussinovich"}
+        unqualified: set = set()  # e.g. {"user@example.com"}
 
-        # 1. Config file: check next to this file's parent (project root),
-        #    then fall back to cwd.
+        def _add(raw: str) -> None:
+            raw = raw.lstrip("@").lower()
+            if ":" in raw:
+                qualified.add(raw)  # already provider:identity
+            else:
+                unqualified.add(raw)
+
+        # 1. Config file
         for candidate in [
             pathlib.Path(__file__).resolve().parent.parent / "admin_users.conf",
             pathlib.Path("admin_users.conf"),
@@ -905,40 +919,49 @@ class Database:
                     for line in candidate.read_text().splitlines():
                         entry = line.strip()
                         if entry and not entry.startswith("#"):
-                            admins.add(entry.lstrip("@").lower())
+                            _add(entry)
                 except OSError:
                     pass
-                break  # use first found
+                break
 
         # 2. ADMIN_USERS env var
         for val in os.environ.get("ADMIN_USERS", "").split(","):
             val = val.strip()
             if val:
-                admins.add(val.lstrip("@").lower())
+                _add(val)
 
-        # 3. Legacy ADMIN_EMAILS env var
+        # 3. Legacy ADMIN_EMAILS env var (always unqualified)
         for val in os.environ.get("ADMIN_EMAILS", "").split(","):
             val = val.strip()
             if val:
-                admins.add(val.lower())
+                unqualified.add(val.lower())
 
-        return admins
+        return qualified, unqualified
 
     async def _should_be_admin(self, db: aiosqlite.Connection,
                                email: Optional[str],
-                               login: Optional[str] = None) -> bool:
+                               login: Optional[str] = None,
+                               provider: Optional[str] = None) -> bool:
         """Return True if the user should be granted admin rights.
 
         A user is an admin if:
         1. They are the very first user in the database, OR
-        2. Their email or GitHub username is in the admin users list
-           (config file, ADMIN_USERS env var, or ADMIN_EMAILS env var).
+        2. Their provider-qualified identity (e.g. ``github:markrussinovich``)
+           or bare email/username is in the admin users list.
         """
-        admin_set = self._load_admin_users()
-        if admin_set:
-            if email and email.lower() in admin_set:
+        qualified, unqualified = self._load_admin_users()
+        if qualified or unqualified:
+            # Check provider-qualified entries first (most specific)
+            if provider and login:
+                if f"{provider}:{login.lower()}" in qualified:
+                    return True
+            if provider and email:
+                if f"{provider}:{email.lower()}" in qualified:
+                    return True
+            # Then check unqualified entries
+            if email and email.lower() in unqualified:
                 return True
-            if login and login.lower() in admin_set:
+            if login and login.lower() in unqualified:
                 return True
 
         # First user heuristic: no existing users yet
