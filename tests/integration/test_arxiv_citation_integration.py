@@ -188,32 +188,34 @@ class TestArXivRateLimiting:
         # Reset for other tests
         ArXivRateLimiter.reset_instance()
     
-    def test_multiple_fetches_respect_rate_limit(self):
-        """Test that multiple fetches respect rate limiting."""
+    def test_multiple_fetches_no_rate_limit(self):
+        """Test that web page fetches are not rate-limited.
+        
+        ArXiv's 3-second rule applies only to legacy API endpoints
+        (OAI-PMH, RSS, /api/), not to standard web pages (/abs/, /bibtex/)
+        which are served from static CDN caches.
+        """
         from refchecker.utils.arxiv_rate_limiter import _arxiv_cache, ArXivRateLimiter
 
         # Clear the module-level cache so fetch_bibtex actually hits the
-        # network (through the rate limiter) instead of returning cached
-        # results from earlier tests.
+        # network instead of returning cached results from earlier tests.
         with _arxiv_cache._lock:
             _arxiv_cache._cache.clear()
 
         ArXivRateLimiter.reset_instance()
         checker = ArXivCitationChecker()
         
-        # Set a shorter delay for testing (but still be polite)
-        checker.rate_limiter.delay = 1.0
-        
         start = time.time()
         
-        # Make two requests
+        # Make two requests — should complete quickly without artificial delay
         checker.fetch_bibtex('1706.03762')
         checker.fetch_bibtex('2303.08774')
         
         elapsed = time.time() - start
         
-        # Should have waited at least ~1 second between requests
-        assert elapsed >= 0.9
+        # Without rate limiting, two fetches should complete well under 10 seconds
+        # (network latency only, no artificial delay)
+        assert elapsed < 10.0
 
 
 class TestEnhancedHybridIntegration:

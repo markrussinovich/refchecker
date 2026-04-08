@@ -617,34 +617,53 @@ class EnhancedHybridReferenceChecker:
                 # Check if the ArXiv URL points to a completely different paper.
                 # A title *error* (not warning) means the cited title didn't match
                 # ANY version of the ArXiv paper at this ID — the URL is wrong.
+                # However, version checking may have failed (rate-limiting,
+                # timeout) even though the paper IS the same — just with a
+                # revised title.  Only short-circuit when the titles are truly
+                # unrelated (similarity < 0.5); moderate similarity suggests a
+                # title revision that the version checker couldn't confirm.
                 has_title_error = any(
                     e.get('error_type') == 'title' for e in errors
                 )
                 if has_title_error:
-                    # The ArXiv URL points to a completely different paper.
-                    # This is strong evidence the reference is fabricated
-                    # (wrong ArXiv ID).  Return immediately so the
-                    # hallucination checker can evaluate it — don't waste
-                    # time searching fallback APIs for a paper that almost
-                    # certainly doesn't exist under the cited metadata.
                     cited_title = reference.get('title', 'unknown')
                     actual_title = (verified_data or {}).get('title', 'unknown')
-                    arxiv_url = reference.get('cited_url') or reference.get('url', '')
-                    logger.debug(
-                        f"Enhanced Hybrid: ArXiv URL points to a different paper "
-                        f"(cited: '{cited_title}', actual: '{actual_title}') — "
-                        f"returning as unverified for hallucination check"
-                    )
-                    return None, [
-                        {
-                            'error_type': 'unverified',
-                            'error_details': f'Could not verify: {cited_title}',
-                        },
-                        {
-                            'error_type': 'url',
-                            'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
-                        },
-                    ], arxiv_url
+                    # Compute similarity to distinguish "completely different
+                    # paper" from "same paper, revised title between versions".
+                    # Truly different papers score 0.0–0.1; revised titles
+                    # score 0.3–0.5+.  Use 0.25 as a conservative cutoff.
+                    from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+                    title_sim = compare_titles_with_latex_cleaning(cited_title, actual_title)
+                    if title_sim < 0.25:
+                        # Titles are truly unrelated — the ArXiv ID points to
+                        # a different paper.  Short-circuit to avoid wasting
+                        # time on fallback APIs for a likely fabricated ref.
+                        arxiv_url = reference.get('cited_url') or reference.get('url', '')
+                        logger.debug(
+                            f"Enhanced Hybrid: ArXiv URL points to a different paper "
+                            f"(cited: '{cited_title}', actual: '{actual_title}', "
+                            f"sim={title_sim:.2f}) — returning as unverified"
+                        )
+                        return None, [
+                            {
+                                'error_type': 'unverified',
+                                'error_details': f'Could not verify: {cited_title}',
+                            },
+                            {
+                                'error_type': 'url',
+                                'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
+                            },
+                        ], arxiv_url
+                    else:
+                        # Titles share significant overlap — likely the same
+                        # paper with a revised title.  Return the ArXiv data
+                        # so downstream can evaluate it normally.
+                        logger.debug(
+                            f"Enhanced Hybrid: ArXiv title mismatch but titles "
+                            f"are similar (sim={title_sim:.2f}), treating as "
+                            f"version update: '{cited_title}' vs '{actual_title}'"
+                        )
+                        return result
                 else:
                     return result
         else:

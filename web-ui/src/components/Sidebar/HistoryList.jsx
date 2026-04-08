@@ -11,7 +11,21 @@ export default function HistoryList() {
   const [showTimeoutMessage, setShowTimeoutMessage] = useState(false)
   const [collapsedBatches, setCollapsedBatches] = useState({})
   const scrollContainerRef = useRef(null)
-  
+  const fetchHistory = useHistoryStore(state => state.fetchHistory)
+
+  // Periodically refresh history while any items are in-progress so that cards
+  // whose WebSocket connections were lost (or never established) stay current.
+  useEffect(() => {
+    const hasInProgress = history.some(h => h.status === 'in_progress')
+    if (!hasInProgress) return
+
+    const interval = setInterval(() => {
+      fetchHistory()
+    }, 5000) // 5-second refresh while work is running
+
+    return () => clearInterval(interval)
+  }, [history, fetchHistory])
+
   // Group history items by batch_id
   const groupedHistory = useMemo(() => {
     const groups = []

@@ -205,6 +205,109 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         # No ArXiv fallback for non-ArXiv refs
         arxiv_citation.verify_reference.assert_not_called()
 
+    def test_arxiv_title_revision_not_treated_as_different_paper(self):
+        """When ArXiv returns a title error due to a version revision (e.g.
+        'Vision-reasoner' v1 → 'VisionReasoner' v5), the checker must NOT
+        short-circuit with 'Cited URL does not reference this paper'.
+        It should return the ArXiv data with the title error for normal
+        downstream processing.
+
+        Regression test for the 1ecd201 commit which added a short-circuit
+        on any title error without checking title similarity.
+        """
+        local_db = MagicMock()
+        arxiv_citation = MagicMock()
+        arxiv_citation.is_arxiv_reference.return_value = True
+
+        # Simulate ArXiv citation returning a title error due to version revision
+        # (version checker timed out / failed so the error wasn't converted to a warning)
+        arxiv_verified_data = {
+            'title': 'VisionReasoner: Unified Reasoning-Integrated Visual Perception via Reinforcement Learning',
+            'authors': [
+                {'name': 'Yuqi Liu'}, {'name': 'Tianyuan Qu'},
+                {'name': 'Zhisheng Zhong'}, {'name': 'Bohao Peng'},
+                {'name': 'Shu Liu'}, {'name': 'Bei Yu'}, {'name': 'Jiaya Jia'},
+            ],
+            'year': 2025,
+        }
+        arxiv_errors = [{
+            'error_type': 'title',
+            'error_details': 'Title mismatch: Vision-reasoner: Unified visual perception and reasoning via reinforcement learning vs VisionReasoner: Unified Reasoning-Integrated Visual Perception via Reinforcement Learning',
+            'ref_title_correct': 'VisionReasoner: Unified Reasoning-Integrated Visual Perception via Reinforcement Learning',
+        }]
+        arxiv_url = 'https://arxiv.org/abs/2505.12081'
+        arxiv_citation.verify_reference.return_value = (arxiv_verified_data, arxiv_errors, arxiv_url)
+
+        # Local DB returns not found
+        local_db.verify_reference.return_value = (None, [], None)
+
+        checker = self._make_checker(local_db=local_db, arxiv_citation=arxiv_citation)
+
+        ref = {
+            'title': 'Vision-reasoner: Unified visual perception and reasoning via reinforcement learning',
+            'authors': ['Yuqi Liu', 'Tianyuan Qu', 'Zhisheng Zhong', 'Bohao Peng', 'Shu Liu', 'Bei Yu', 'Jiaya Jia'],
+            'year': '2025',
+            'url': 'https://arxiv.org/abs/2505.12081',
+            'venue': 'arXiv preprint arXiv:2505.12081',
+        }
+        paper_data, errors, url = checker.verify_reference(ref)
+
+        # Should return the ArXiv data (NOT None with 'does not reference' error)
+        assert paper_data is not None, \
+            "Title revision should not be treated as a different paper"
+        assert paper_data['title'] == arxiv_verified_data['title']
+
+        # Should NOT contain 'does not reference this paper'
+        url_errors = [e for e in errors if e.get('error_type') == 'url'
+                      and 'does not reference' in (e.get('error_details') or '')]
+        assert len(url_errors) == 0, \
+            f"Should not have 'does not reference' error for title revision: {url_errors}"
+
+    def test_arxiv_truly_different_paper_short_circuits(self):
+        """When ArXiv confirms the URL points to a completely different paper
+        (very low title similarity), the checker should short-circuit and
+        return the 'does not reference' error to avoid wasting time on
+        fallback API calls.
+        """
+        local_db = MagicMock()
+        arxiv_citation = MagicMock()
+        arxiv_citation.is_arxiv_reference.return_value = True
+
+        # ArXiv returns a completely different paper at this ID
+        arxiv_verified_data = {
+            'title': 'Attention Is All You Need',
+            'authors': [{'name': 'Ashish Vaswani'}],
+            'year': 2017,
+        }
+        arxiv_errors = [{
+            'error_type': 'title',
+            'error_details': 'Title mismatch',
+            'ref_title_correct': 'Attention Is All You Need',
+        }]
+        arxiv_url = 'https://arxiv.org/abs/1706.03762'
+        arxiv_citation.verify_reference.return_value = (arxiv_verified_data, arxiv_errors, arxiv_url)
+
+        local_db.verify_reference.return_value = (None, [], None)
+
+        checker = self._make_checker(local_db=local_db, arxiv_citation=arxiv_citation)
+
+        ref = {
+            'title': 'Deep Reinforcement Learning for Robotic Manipulation',
+            'authors': ['John Smith'],
+            'year': '2024',
+            'url': 'https://arxiv.org/abs/1706.03762',
+            'venue': 'arXiv preprint',
+        }
+        paper_data, errors, url = checker.verify_reference(ref)
+
+        # Should short-circuit: return None with unverified + url error
+        assert paper_data is None, \
+            "Truly different paper should short-circuit as unverified"
+        url_errors = [e for e in errors if e.get('error_type') == 'url'
+                      and 'does not reference' in (e.get('error_details') or '')]
+        assert len(url_errors) == 1, \
+            f"Should have 'does not reference' error for truly different paper"
+
 
 if __name__ == '__main__':
     unittest.main()

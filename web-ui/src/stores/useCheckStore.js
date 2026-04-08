@@ -571,6 +571,12 @@ export const useCheckStore = create((set, get) => ({
           store.setStatusMessage(data.message)
         }
         break
+
+      case 'phase':
+        if (data.message) {
+          store.setStatusMessage(data.message)
+        }
+        break
         
       case 'completed':
         store.completeCheck(data.check_id || store.currentCheckId)
@@ -634,10 +640,19 @@ export const useCheckStore = create((set, get) => ({
     const refPatches = new Map()  // index -> patch object
 
     for (const message of messages) {
-      const { type, session_id: messageSessionId, ...data } = message
+      const { type, session_id: messageSessionId, check_id: _checkId, ...data } = message
 
-      // Only handle hot-path messages here; everything else falls through
-      // to the standard per-message handler.
+      // Route messages from other sessions through the standard handler
+      // which applies session-aware routing (updates history store, not current check).
+      // Without this guard, a concurrent session's summary_update / reference_result
+      // would overwrite the current session's stats and references.
+      const isOtherSession = messageSessionId && store.sessionId && messageSessionId !== store.sessionId
+      if (isOtherSession) {
+        store.handleWebSocketMessage(message)
+        continue
+      }
+
+      // Only accumulate batch patches for the current session.
       switch (type) {
         case 'checking_reference':
           if (typeof data.index === 'number') {

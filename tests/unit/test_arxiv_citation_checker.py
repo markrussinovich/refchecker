@@ -407,30 +407,31 @@ class TestRateLimiting:
         assert checker.rate_limiter is mock_limiter
     
     @patch('refchecker.utils.arxiv_rate_limiter.requests.get')
-    def test_waits_before_request(self, mock_get):
-        """Test that rate limiter is called before making request (via arxiv_cached_get)."""
+    def test_no_rate_limit_on_web_page_fetch(self, mock_get):
+        """Test that web page fetches skip rate limiting.
+        
+        ArXiv's 3-second rule applies to legacy API endpoints only,
+        not to /abs/ and /bibtex/ pages served from static CDN caches.
+        """
         mock_get.return_value = Mock(
             status_code=200,
             text='@misc{test, title={Test}}',
             raise_for_status=Mock()
         )
         
-        # Create checker with mocked rate limiter
         checker = ArXivCitationChecker()
         mock_rate_limiter = MagicMock()
         checker.rate_limiter = mock_rate_limiter
         
-        # arxiv_cached_get calls the global limiter, not checker.rate_limiter,
-        # so patch at the module level
         with patch('refchecker.utils.arxiv_rate_limiter.ArXivRateLimiter.get_instance') as mock_inst:
             mock_inst.return_value = mock_rate_limiter
-            # Clear cache to force a real fetch
             from refchecker.utils.arxiv_rate_limiter import _arxiv_cache
             _arxiv_cache._cache.clear()
             
             checker.fetch_bibtex('2301.12345')
             
-            mock_rate_limiter.wait.assert_called_once()
+            # Rate limiter should NOT be called for web page fetches
+            mock_rate_limiter.wait.assert_not_called()
 
 
 if __name__ == '__main__':

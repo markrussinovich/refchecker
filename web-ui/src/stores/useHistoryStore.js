@@ -172,6 +172,13 @@ export const useHistoryStore = create((set, get) => ({
           })
           return { ...fetched, ...existing }
         }
+        // For in_progress items, always prefer in-memory data over API data.
+        // WebSocket delivers real-time stats (refs_with_errors, etc.) that
+        // the DB may not have persisted yet (saves happen every 3 refs).
+        // Without this, API polling overwrites live WS values with stale data.
+        if (existing.status === 'in_progress' && fetched.status === 'in_progress') {
+          return { ...fetched, ...existing }
+        }
         return fetched
       })
       

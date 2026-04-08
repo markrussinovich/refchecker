@@ -1288,13 +1288,11 @@ class ProgressRefChecker:
         return ('needs_async', None)
 
     @staticmethod
-    def _compute_deferred_ref_deltas(result: Dict[str, Any]) -> Dict[str, int]:
-        """Compute stat counter deltas for a ref deferred during hallucination phase.
+    def _compute_ref_stats(result: Dict[str, Any]) -> Dict[str, int]:
+        """Compute the stat contribution of a single reference result.
 
-        Refs with real errors are deferred when the hallucination verifier is
-        active — their stats are not counted during the initial processing
-        loop.  This method returns the deltas to add once the hallucination
-        check completes and the final status is known.
+        Returns a dict of stat counters (all non-negative) representing
+        what this ref contributes to the aggregate totals.
         """
         real_errors = [
             e for e in result.get('errors', [])
@@ -1339,6 +1337,21 @@ class ProgressRefChecker:
             d['refs_with_warnings_only'] = 1
 
         return d
+
+    @staticmethod
+    def _compute_deferred_ref_deltas(result: Dict[str, Any], old_result: Dict[str, Any] = None) -> Dict[str, int]:
+        """Compute stat counter deltas for a ref whose status changed.
+
+        When ``old_result`` is provided, returns the *difference* between
+        the new and old stat contributions (new − old) so callers can
+        adjust running totals incrementally.  When ``old_result`` is None,
+        returns the absolute contribution of *result* (legacy behaviour).
+        """
+        new_d = ProgressRefChecker._compute_ref_stats(result)
+        if old_result is None:
+            return new_d
+        old_d = ProgressRefChecker._compute_ref_stats(old_result)
+        return {k: new_d[k] - old_d.get(k, 0) for k in new_d}
 
     def _try_arxiv_version_match(self, result: Dict[str, Any], reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Check if errors are explained by an older ArXiv version.
@@ -1671,6 +1684,7 @@ class ProgressRefChecker:
         refs_with_warnings_only = 0
         refs_verified = 0
         processed_count = 0
+        checked_count = 0  # Tracks refs that finished verification (including deferred ones)
         
         loop = asyncio.get_event_loop()
         
@@ -1787,53 +1801,52 @@ class ProgressRefChecker:
                 # If hallucination verifier is enabled, refs with real errors
                 # (not just suggestions/info) are deferred — they'll get a
                 # deterministic or LLM check after all refs are processed.
-                # Don't count them toward any stats until final status is known.
+                # Stats are always counted immediately so the UI updates in
+                # real-time; the hallucination phase will adjust them later
+                # (subtract old contribution, add new) when status changes.
                 is_pending_hallucination_check = (
                     self.hallucination_verifier
                     and self._has_real_errors(result.get('_raw_errors'))
                 )
 
-                if not is_pending_hallucination_check:
-                    processed_count += 1
-                    errors_count += num_errors
-                    warnings_count += num_warnings
-                    suggestions_count += num_suggestions
+                # Always count stats for all refs so the UI updates progressively.
+                checked_count += 1
+                processed_count += 1
+                errors_count += num_errors
+                warnings_count += num_warnings
+                suggestions_count += num_suggestions
 
-                if not is_pending_hallucination_check:
-                    if result['status'] == 'hallucination':
-                        hallucination_count += 1
+                if result['status'] == 'hallucination':
+                    hallucination_count += 1
 
-                # Count refs matching the frontend 'unverified' filter — but only if
-                # finalized (not awaiting hallucination check)
-                if not is_pending_hallucination_check:
-                    if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
-                        unverified_count += 1
+                if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
+                    unverified_count += 1
 
-                if not is_pending_hallucination_check:
-                    if result['status'] == 'verified':
-                        verified_count += 1
-                        refs_verified += 1
-                    elif result['status'] == 'suggestion':
-                        verified_count += 1
-                        refs_verified += 1
+                if result['status'] == 'verified':
+                    verified_count += 1
+                    refs_verified += 1
+                elif result['status'] == 'suggestion':
+                    verified_count += 1
+                    refs_verified += 1
 
                 # Track references by issue type (excluding unverified from error check)
-                if not is_pending_hallucination_check:
-                    if result['status'] == 'error' or num_errors > 0:
-                        refs_with_errors += 1
-                    elif result['status'] == 'warning' or num_warnings > 0:
-                        refs_with_warnings_only += 1
+                if result['status'] == 'error' or num_errors > 0:
+                    refs_with_errors += 1
+                elif result['status'] == 'warning' or num_warnings > 0:
+                    refs_with_warnings_only += 1
 
-                # Emit result immediately
+                # Emit result immediately.
+                # Use checked_count for progress so the UI shows verification
+                # advancing in real-time.
                 emit_start = time.time()
                 await self.emit_progress("reference_result", result)
                 await self.emit_progress("progress", {
-                    "current": processed_count,
+                    "current": checked_count,
                     "total": total_refs
                 })
                 await self.emit_progress("summary_update", {
                     "total_refs": total_refs,
-                    "processed_refs": processed_count,
+                    "processed_refs": checked_count,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,
@@ -1843,7 +1856,7 @@ class ProgressRefChecker:
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
                     "refs_verified": refs_verified,
-                    "progress_percent": round((processed_count / total_refs) * 100, 1)
+                    "progress_percent": round((checked_count / total_refs) * 100, 1)
                 })
                 emit_time = time.time() - emit_start
                 if emit_time > 0.1:
@@ -1880,9 +1893,8 @@ class ProgressRefChecker:
                     outcome, resolved = self._pre_screen_hallucination(c_result, c_ref)
                     if outcome == 'resolved':
                         resolved['hallucination_check_pending'] = False
-                        results[c_idx] = resolved
-                        processed_count += 1
-                        d = self._compute_deferred_ref_deltas(resolved)
+                        # Adjust stats: subtract old contribution, add new
+                        d = self._compute_deferred_ref_deltas(resolved, c_result)
                         errors_count += d['errors_count']
                         warnings_count += d['warnings_count']
                         suggestions_count += d['suggestions_count']
@@ -1892,21 +1904,11 @@ class ProgressRefChecker:
                         refs_verified += d['refs_verified']
                         refs_with_errors += d['refs_with_errors']
                         refs_with_warnings_only += d['refs_with_warnings_only']
+                        results[c_idx] = resolved
                         await self.emit_progress("reference_result", resolved)
                     elif outcome == 'skip':
-                        # No hallucination check needed — account for deferred stats
+                        # No hallucination check needed — no stat change
                         c_result['hallucination_check_pending'] = False
-                        processed_count += 1
-                        d = self._compute_deferred_ref_deltas(c_result)
-                        errors_count += d['errors_count']
-                        warnings_count += d['warnings_count']
-                        suggestions_count += d['suggestions_count']
-                        hallucination_count += d['hallucination_count']
-                        unverified_count += d['unverified_count']
-                        verified_count += d['verified_count']
-                        refs_verified += d['refs_verified']
-                        refs_with_errors += d['refs_with_errors']
-                        refs_with_warnings_only += d['refs_with_warnings_only']
                         await self.emit_progress("reference_result", c_result)
                     else:
                         # needs_async — will go to LLM/ArXiv pool
@@ -1915,6 +1917,21 @@ class ProgressRefChecker:
                 det_count = len(ha_candidates) - len(needs_async)
                 if det_count:
                     debug_log(f"[TIMING] {det_count} refs resolved deterministically, {len(needs_async)} need LLM/ArXiv")
+                    # Emit summary after deterministic phase so stats update in UI
+                    await self.emit_progress("summary_update", {
+                        "total_refs": total_refs,
+                        "processed_refs": checked_count,
+                        "errors_count": errors_count,
+                        "warnings_count": warnings_count,
+                        "suggestions_count": suggestions_count,
+                        "unverified_count": unverified_count,
+                        "hallucination_count": hallucination_count,
+                        "verified_count": verified_count,
+                        "refs_with_errors": refs_with_errors,
+                        "refs_with_warnings_only": refs_with_warnings_only,
+                        "refs_verified": refs_verified,
+                        "progress_percent": round((checked_count / total_refs) * 100, 1),
+                    })
 
                 # ── Phase 2: async tasks for refs needing LLM/ArXiv (smaller pool) ──
                 if needs_async:
@@ -1959,29 +1976,30 @@ class ProgressRefChecker:
                                 updated = ha_task.result()
                             except Exception as ha_err:
                                 logger.debug(f"Hallucination check failed for ref {ha_idx + 1}: {ha_err}")
-                                # Clear pending flag even on failure — account for
-                                # deferred stats using the original (pre-hallucination) result.
+                                # Clear pending flag — no stat change since result unchanged
                                 if results.get(ha_idx):
                                     results[ha_idx]['hallucination_check_pending'] = False
-                                    processed_count += 1
-                                    d = self._compute_deferred_ref_deltas(results[ha_idx])
-                                    errors_count += d['errors_count']
-                                    warnings_count += d['warnings_count']
-                                    suggestions_count += d['suggestions_count']
-                                    hallucination_count += d['hallucination_count']
-                                    unverified_count += d['unverified_count']
-                                    verified_count += d['verified_count']
-                                    refs_verified += d['refs_verified']
-                                    refs_with_errors += d['refs_with_errors']
-                                    refs_with_warnings_only += d['refs_with_warnings_only']
                                     await self.emit_progress("reference_result", results[ha_idx])
+                                    await self.emit_progress("summary_update", {
+                                        "total_refs": total_refs,
+                                        "processed_refs": checked_count,
+                                        "errors_count": errors_count,
+                                        "warnings_count": warnings_count,
+                                        "suggestions_count": suggestions_count,
+                                        "unverified_count": unverified_count,
+                                        "hallucination_count": hallucination_count,
+                                        "verified_count": verified_count,
+                                        "refs_with_errors": refs_with_errors,
+                                        "refs_with_warnings_only": refs_with_warnings_only,
+                                        "refs_verified": refs_verified,
+                                        "progress_percent": round((checked_count / total_refs) * 100, 1),
+                                    })
                                 continue
 
                             updated['hallucination_check_pending'] = False
-                            processed_count += 1
 
-                            # Account for all deferred stats based on the final result
-                            d = self._compute_deferred_ref_deltas(updated)
+                            # Adjust stats: subtract old contribution, add new
+                            d = self._compute_deferred_ref_deltas(updated, old_result)
                             errors_count += d['errors_count']
                             warnings_count += d['warnings_count']
                             suggestions_count += d['suggestions_count']
@@ -1993,17 +2011,28 @@ class ProgressRefChecker:
                             refs_with_warnings_only += d['refs_with_warnings_only']
 
                             results[ha_idx] = updated
-                            # Emit ref update immediately so the card updates in real-time.
-                            # Summary counts are sent once after all checks complete to avoid
-                            # out-of-sync flicker between cards and stats.
+                            # Emit ref update and summary so the UI updates progressively.
                             await self.emit_progress("reference_result", updated)
+                            await self.emit_progress("summary_update", {
+                                "total_refs": total_refs,
+                                "processed_refs": checked_count,
+                                "errors_count": errors_count,
+                                "warnings_count": warnings_count,
+                                "suggestions_count": suggestions_count,
+                                "unverified_count": unverified_count,
+                                "hallucination_count": hallucination_count,
+                                "verified_count": verified_count,
+                                "refs_with_errors": refs_with_errors,
+                                "refs_with_warnings_only": refs_with_warnings_only,
+                                "refs_verified": refs_verified,
+                                "progress_percent": round((checked_count / total_refs) * 100, 1),
+                            })
                             await asyncio.sleep(0)
 
-                # Emit a single summary_update after all hallucination checks complete
-                # so counts and cards stay in sync (no rapid increments mid-phase)
+                # Emit a final summary_update after all hallucination checks complete
                 await self.emit_progress("summary_update", {
                     "total_refs": total_refs,
-                    "processed_refs": processed_count,
+                    "processed_refs": checked_count,
                     "errors_count": errors_count,
                     "warnings_count": warnings_count,
                     "suggestions_count": suggestions_count,
@@ -2013,7 +2042,7 @@ class ProgressRefChecker:
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
                     "refs_verified": refs_verified,
-                    "progress_percent": round((processed_count / total_refs) * 100, 1),
+                    "progress_percent": round((checked_count / total_refs) * 100, 1),
                 })
 
                 debug_log(f"[TIMING] Hallucination checks completed in {time.time() - total_time - start_time:.3f}s")

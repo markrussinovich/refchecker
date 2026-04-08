@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { createWebSocket, getCheckDetail } from '../utils/api'
 import { useCheckStore } from '../stores/useCheckStore'
 import { useHistoryStore } from '../stores/useHistoryStore'
@@ -28,6 +28,9 @@ export default function LiveWebSocketManager() {
   // rAF-based message batching
   const pendingMessagesRef = useRef([])
   const rafIdRef = useRef(null)
+  // WebSocket reconnection trigger
+  const reconnectCounterRef = useRef(0)
+  const [reconnectTrigger, setReconnectTrigger] = useState(0)
 
   // Flush all pending messages in a single batch (called from rAF)
   const flushMessages = useCallback(() => {
@@ -93,7 +96,14 @@ export default function LiveWebSocketManager() {
         onClose: (event) => {
           logger.info('WebSocket', `Session ${sessionId} closed with code ${event?.code || 'unknown'}`)
           wsMapRef.current.delete(sessionId)
-          // Don't unregister - the session might still be active on the server
+          // Schedule a reconnection attempt if the session is still active.
+          // The useEffect won't re-run on its own because activeSessions hasn't
+          // changed, so we bump a counter to force it.
+          if (useCheckStore.getState().activeSessions.includes(sessionId)) {
+            reconnectCounterRef.current += 1
+            // Use a state setter to trigger re-render so the effect re-runs
+            setReconnectTrigger(reconnectCounterRef.current)
+          }
         },
       })
 
@@ -109,7 +119,7 @@ export default function LiveWebSocketManager() {
         lastMessageTimeRef.current.delete(sessionId)
       }
     }
-  }, [activeSessions, handleWebSocketMessage, flushBatchedMessages, setError, unregisterSession, enqueueMessage])
+  }, [activeSessions, handleWebSocketMessage, flushBatchedMessages, setError, unregisterSession, enqueueMessage, reconnectTrigger])
 
   // Cancel any pending rAF on unmount
   useEffect(() => {
@@ -188,6 +198,28 @@ export default function LiveWebSocketManager() {
                   lastMessageTimeRef.current.set(sessionId, Date.now())
                   store.setStatusMessage(`Checking references (${processedRefs}/${detail.total_refs || '?'})...`)
                   store.setReferences(detail.results)
+
+                  // Sync stats so the progress bar and history card stay current
+                  // when the WebSocket connection has stalled.
+                  const totalRefs = detail.total_refs || 0
+                  const verifiedCount = Math.max(
+                    totalRefs - (detail.errors_count || 0) -
+                    (detail.warnings_count || 0) - (detail.suggestions_count || 0) -
+                    (detail.unverified_count || 0), 0)
+                  store.updateStats({
+                    total_refs: totalRefs,
+                    processed_refs: processedRefs,
+                    verified_count: verifiedCount,
+                    errors_count: detail.errors_count || 0,
+                    warnings_count: detail.warnings_count || 0,
+                    suggestions_count: detail.suggestions_count || 0,
+                    unverified_count: detail.unverified_count || 0,
+                    hallucination_count: detail.hallucination_count || 0,
+                    refs_with_errors: detail.refs_with_errors || 0,
+                    refs_with_warnings_only: detail.refs_with_warnings_only || 0,
+                    refs_verified: detail.refs_verified || verifiedCount,
+                    progress_percent: totalRefs > 0 ? Math.round((processedRefs / totalRefs) * 100) : 0,
+                  })
                 }
               }
             }

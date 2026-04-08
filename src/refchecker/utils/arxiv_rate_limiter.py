@@ -76,10 +76,15 @@ _arxiv_cache = _ArxivCache()
 
 
 def arxiv_cached_get(url: str, timeout: float = 30.0) -> Optional[str]:
-    """Fetch an ArXiv URL with caching and rate-limiting.
+    """Fetch an ArXiv URL with caching.
 
     Returns the response text (HTML/BibTeX) or None on failure.
     Raises nothing — failures are logged and return None.
+
+    Note: No rate-limiting delay is applied.  These are standard web-page
+    fetches (/abs/, /bibtex/) served from ArXiv's static CDN cache, not
+    calls to the legacy API (OAI-PMH, RSS, /api/).  ArXiv's 3-second
+    rule applies only to those legacy endpoints.
     """
     cached = _arxiv_cache.get(url)
     if cached is not None:
@@ -87,9 +92,6 @@ def arxiv_cached_get(url: str, timeout: float = 30.0) -> Optional[str]:
         if status == 404:
             return None
         return text
-
-    limiter = ArXivRateLimiter.get_instance()
-    limiter.wait()
 
     try:
         resp = requests.get(url, timeout=timeout)
