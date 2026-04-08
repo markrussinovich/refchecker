@@ -625,7 +625,6 @@ export const useCheckStore = create((set, get) => ({
     const store = get()
 
     // Accumulate mutations across all messages
-    let refs = store.references   // will be replaced once if any ref message present
     let latestStats = null
     let latestProgress = null
     let latestStatusMessage = null
@@ -696,8 +695,11 @@ export const useCheckStore = create((set, get) => ({
     const patch = {}
 
     // Apply ref patches in one pass
+    // Re-read references from store in case a default-case handler
+    // (e.g. references_extracted) replaced them mid-batch.
     if (refPatches.size > 0) {
-      patch.references = refs.map((ref, i) => {
+      const currentRefs = get().references
+      patch.references = currentRefs.map((ref, i) => {
         const p = refPatches.get(i)
         return p ? { ...ref, ...p } : ref
       })
