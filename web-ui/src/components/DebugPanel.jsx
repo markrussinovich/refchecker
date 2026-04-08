@@ -9,14 +9,14 @@ import { clearCache, clearDatabase } from '../utils/api'
  */
 export default function DebugPanel() {
   const { user, multiuser } = useAuthStore()
+  const { logs, isEnabled, isVisible, filter, toggleEnabled, toggleVisible, setFilter, clearLogs } = useDebugStore()
+  const [clearing, setClearing] = useState(null)
+  const logsEndRef = useRef(null)
 
   // In multi-user mode, only admins can see the debug panel
   if (multiuser && !user?.is_admin) {
     return null
   }
-  const { logs, isEnabled, isVisible, filter, toggleEnabled, toggleVisible, setFilter, clearLogs } = useDebugStore()
-  const [clearing, setClearing] = useState(null)
-  const logsEndRef = useRef(null)
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
