@@ -58,7 +58,7 @@ const computeDerivedStatus = (ref, isCheckComplete = false) => {
  * List of references being checked
  */
 export default function ReferenceList({ references, isLoading, isCheckComplete = false }) {
-  const { statusFilter } = useCheckStore()
+  const statusFilter = useCheckStore(s => s.statusFilter)
 
   // Memoize all derived data to ensure consistency within a render
   const { sortedReferences, filteredReferences, normalizedFilters } = useMemo(() => {

@@ -227,7 +227,7 @@ test.describe('RefChecker Web UI', () => {
     await page.goto('/');
 
     // Start first check
-    const sidebar = page.locator('aside');
+    const sidebar = page.locator('aside.sidebar-desktop');
 
     await page.getByPlaceholder(/Enter ArXiv ID/i).fill('http://paper-one.example');
     await page.getByRole('button', { name: 'Check References' }).click();
@@ -264,7 +264,7 @@ test.describe('RefChecker Web UI', () => {
   });
 
   test('should display history sidebar', async ({ page }) => {
-    await expect(page.getByText('History')).toBeVisible();
+    await expect(page.locator('aside.sidebar-desktop').getByRole('heading', { name: 'History' })).toBeVisible();
   });
 
   test.skip('should load and display history items', async ({ page }) => {

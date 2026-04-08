@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, memo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'
@@ -30,7 +30,7 @@ function expandArxivId(source) {
  * @param {boolean} props.isSelected - Whether this item is currently selected
  * @param {boolean} [props.compact=false] - Whether to show in compact mode (for batch groups)
  */
-export default function HistoryItem({ item, isSelected, compact = false }) {
+const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = false }) {
   const { selectCheck, updateLabel, deleteCheck, updateHistoryProgress } = useHistoryStore()
   // Only subscribe to the specific values we need to minimize re-renders
   const currentSessionId = useCheckStore(state => state.sessionId)
@@ -471,4 +471,6 @@ export default function HistoryItem({ item, isSelected, compact = false }) {
       )}
     </div>
   )
-}
+})
+
+export default HistoryItem

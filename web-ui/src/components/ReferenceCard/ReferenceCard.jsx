@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, memo } from 'react'
 import { 
   formatAuthors, 
   exportReferenceAsMarkdown, 
@@ -188,7 +188,7 @@ function CollapsibleText({ text }) {
 /**
  * Individual reference card matching CLI output format
  */
-export default function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
+const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const status = (reference.status || '').toLowerCase()
@@ -410,7 +410,7 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
   return (
     <div 
       className="py-4 border-b font-mono text-sm"
-      style={{ borderColor: 'var(--color-border)' }}
+      style={{ borderColor: 'var(--color-border)', contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
     >
       {/* Reference with status column on left */}
       <div className="flex items-start gap-3 pl-4 pr-8">
@@ -774,4 +774,28 @@ export default function ReferenceCard({ reference, index, displayIndex, totalRef
       </div>
     </div>
   )
-}
+}, (prevProps, nextProps) => {
+  // Custom comparator: skip re-render if reference data hasn't changed
+  if (prevProps.index !== nextProps.index) return false
+  if (prevProps.displayIndex !== nextProps.displayIndex) return false
+  if (prevProps.totalRefs !== nextProps.totalRefs) return false
+  const prev = prevProps.reference
+  const next = nextProps.reference
+  if (prev === next) return true
+  if (!prev || !next) return false
+  return (
+    prev.status === next.status &&
+    prev.title === next.title &&
+    prev.authors === next.authors &&
+    prev.year === next.year &&
+    prev.venue === next.venue &&
+    prev.hallucination_check_pending === next.hallucination_check_pending &&
+    prev.hallucination_assessment === next.hallucination_assessment &&
+    prev.errors === next.errors &&
+    prev.warnings === next.warnings &&
+    prev.suggestions === next.suggestions &&
+    prev.authoritative_urls === next.authoritative_urls
+  )
+})
+
+export default ReferenceCard

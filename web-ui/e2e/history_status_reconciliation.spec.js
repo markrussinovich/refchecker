@@ -52,7 +52,7 @@ test('reconciles in-progress history with completed detail on load', async ({ pa
 
   await page.goto('/')
 
-  const sidebar = page.locator('aside')
+  const sidebar = page.locator('aside.sidebar-desktop')
 
   // Should eventually flip from "Verifying" to completed refs after reconciliation
   await expect(sidebar.getByText('14 refs')).toBeVisible({ timeout: 5000 })

@@ -6,6 +6,7 @@ import { useCheckStore } from '../../stores/useCheckStore'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useFileUpload } from '../../hooks/useFileUpload'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
@@ -48,7 +49,13 @@ export default function InputSection() {
     reset,
     cancelCheck: storeCancelCheck,
     setError,
-  } = useCheckStore()
+  } = useCheckStore(useShallow(s => ({
+    status: s.status,
+    startCheck: s.startCheck,
+    reset: s.reset,
+    cancelCheck: s.cancelCheck,
+    setError: s.setError,
+  })))
   
   const { getSelectedConfig } = useConfigStore()
   const { fetchHistory, clearSelection, selectCheck } = useHistoryStore()

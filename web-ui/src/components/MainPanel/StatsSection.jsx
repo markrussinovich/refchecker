@@ -12,7 +12,8 @@ import {
  * Compact design with refs summary and individual issue counts
  */
 export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource }) {
-  const { statusFilter, setStatusFilter } = useCheckStore()
+  const statusFilter = useCheckStore(s => s.statusFilter)
+  const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef(null)
 
@@ -142,10 +143,15 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
   const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
   const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  // processedRefs: Use the count of all completed references from inclusiveCounts
+  // processedRefs: Use the count of finalized references from inclusiveCounts
   // when available, since the backend defers counting refs pending hallucination
   // checks.  Fall back to backend stats only when references aren't loaded yet.
-  const processedRefs = inclusiveCounts?.totalProcessed ?? stats.processed_refs ?? 0
+  // During active checks, unverified refs show as "checking" and should not
+  // count toward processed; inclusiveCounts.count excludes them correctly.
+  // Once complete, use totalProcessed to include all refs.
+  const processedRefs = isComplete
+    ? (inclusiveCounts?.totalProcessed ?? stats.processed_refs ?? 0)
+    : (inclusiveCounts?.count ?? stats.processed_refs ?? 0)
 
   // Issue type filters for the chips
   // Compute from reference objects (inclusiveCounts) when available so that

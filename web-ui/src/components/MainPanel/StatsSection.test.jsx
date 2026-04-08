@@ -7,11 +7,9 @@ vi.mock('../../utils/logger', () => ({
 }))
 
 vi.mock('../../stores/useCheckStore', () => {
-  const useCheckStore = () => ({
-    statusFilter: [],
-    setStatusFilter: vi.fn(),
-  })
-  useCheckStore.getState = () => ({ statusFilter: [], setStatusFilter: vi.fn() })
+  const state = { statusFilter: [], setStatusFilter: vi.fn() }
+  const useCheckStore = (selector) => selector ? selector(state) : state
+  useCheckStore.getState = () => state
   return { useCheckStore }
 })
 

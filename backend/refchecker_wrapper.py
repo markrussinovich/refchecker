@@ -247,6 +247,13 @@ class ProgressRefChecker:
             e.get('error_type') not in ['unverified', 'info'] 
             and not e.get('is_suggestion')
             and not e.get('is_warning')
+            # 'url' errors where the URL references the paper are informational,
+            # not real errors — the webpage checker confirmed the cited URL
+            # contains the paper title.
+            and not (
+                e.get('error_type') == 'url'
+                and 'url references paper' in (e.get('error_details') or '').lower()
+            )
             for e in sanitized
         )
         has_warnings = any(
@@ -272,6 +279,16 @@ class ProgressRefChecker:
             # The cited URL was checked and confirmed to contain the paper —
             # treat as verified even though it wasn't found in academic databases.
             status = 'verified'
+            # Strip the unverified + url-references-paper errors since they're
+            # now resolved — the URL confirms the paper exists.
+            sanitized = [
+                e for e in sanitized
+                if e.get('error_type') != 'unverified'
+                and not (
+                    e.get('error_type') == 'url'
+                    and 'url references paper' in (e.get('error_details') or '').lower()
+                )
+            ]
         elif is_unverified:
             status = 'unverified'
         else:
@@ -1279,7 +1296,14 @@ class ProgressRefChecker:
         loop.  This method returns the deltas to add once the hallucination
         check completes and the final status is known.
         """
-        real_errors = [e for e in result.get('errors', []) if e.get('error_type') != 'unverified']
+        real_errors = [
+            e for e in result.get('errors', [])
+            if e.get('error_type') != 'unverified'
+            and not (
+                e.get('error_type') == 'url'
+                and 'url references paper' in (e.get('error_details') or '').lower()
+            )
+        ]
         num_errors = len(real_errors)
         num_warnings = len(result.get('warnings', []))
         num_suggestions = len(result.get('suggestions', []))
@@ -1468,21 +1492,34 @@ class ProgressRefChecker:
         result = dict(result)  # shallow copy
         result['hallucination_assessment'] = assessment
         is_unverified = result.get('status') == 'unverified'
+        # Also treat status='error' as upgradeable when the only real error
+        # is a "url references paper" (webpage checker confirmed the URL)
+        url_references_paper = any(
+            'url references paper' in (e.get('error_details') or '').lower()
+            for e in result.get('errors', []) + result.get('_raw_errors', [])
+        )
+        is_upgradeable = is_unverified or (
+            result.get('status') == 'error' and url_references_paper
+        )
 
         if assessment.get('verdict') == 'LIKELY':
             result['status'] = 'hallucination'
-        elif assessment.get('verdict') == 'UNLIKELY' and is_unverified:
+        elif assessment.get('verdict') == 'UNLIKELY' and is_upgradeable:
             ha_link = assessment.get('link')
             ha_explanation = assessment.get('explanation', '')
             if ha_link and ha_link.startswith('http'):
                 result['status'] = 'verified'
                 result['authoritative_urls'] = list(result.get('authoritative_urls', []))
                 result['authoritative_urls'].append({"type": "llm_verified", "url": ha_link})
-                # Remove the unverified error so frontend filters no longer
-                # treat this reference as unverified
+                # Remove unverified and url-references-paper errors so frontend
+                # filters no longer treat this reference as unverified/error
                 result['errors'] = [
                     e for e in result.get('errors', [])
                     if e.get('error_type') != 'unverified'
+                    and not (
+                        e.get('error_type') == 'url'
+                        and 'url references paper' in (e.get('error_details') or '').lower()
+                    )
                 ]
             elif ha_explanation:
                 result['errors'] = [
@@ -1728,7 +1765,15 @@ class ProgressRefChecker:
 
                 # Count individual issues (not just references)
                 # Exclude 'unverified' from error count since it has its own category
-                real_errors = [e for e in result.get('errors', []) if e.get('error_type') != 'unverified']
+                # Also exclude 'url' errors where the URL references the paper (informational)
+                real_errors = [
+                    e for e in result.get('errors', [])
+                    if e.get('error_type') != 'unverified'
+                    and not (
+                        e.get('error_type') == 'url'
+                        and 'url references paper' in (e.get('error_details') or '').lower()
+                    )
+                ]
                 num_errors = len(real_errors)
                 num_warnings = len(result.get('warnings', []))
                 num_suggestions = len(result.get('suggestions', []))

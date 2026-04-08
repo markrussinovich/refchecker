@@ -20,7 +20,8 @@ const STORAGE_KEY = 'refchecker-sidebar-width'
 export default function Sidebar({ mobileOpen, onMobileClose }) {
   const { fetchConfigs } = useConfigStore()
   const { initializeWithPlaceholder, ensureNewRefcheckItem, selectCheck } = useHistoryStore()
-  const { status, reset } = useCheckStore()
+  const status = useCheckStore(s => s.status)
+  const reset = useCheckStore(s => s.reset)
   const { toggleSettings } = useSettingsStore()
   const isAuthLoading = useAuthStore(s => s.isLoading)
   const [width, setWidth] = useState(() => {

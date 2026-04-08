@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import InputSection from './InputSection'
 import StatusSection from './StatusSection'
 import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useShallow } from 'zustand/react/shallow'
 
 /**
  * Main panel containing input, status, stats, and references
@@ -22,7 +23,13 @@ export default function MainPanel() {
     stats: checkStoreStats, 
     currentCheckId,
     clearStatusFilter 
-  } = useCheckStore()
+  } = useCheckStore(useShallow(s => ({
+    status: s.status,
+    references: s.references,
+    stats: s.stats,
+    currentCheckId: s.currentCheckId,
+    clearStatusFilter: s.clearStatusFilter,
+  })))
   const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
 
   // Track scroll position to show/hide scroll-to-top button
@@ -108,7 +115,7 @@ export default function MainPanel() {
     : null
   // Build unified references list FIRST (needed by buildStats)
   // For current check, prefer live checkStore data; for other checks, use selectedCheck
-  const getReferences = () => {
+  const displayRefs = useMemo(() => {
     // Current check: use live WebSocket data from checkStore
     if (isCurrentCheck && checkStoreRefs && checkStoreRefs.length > 0) {
       return checkStoreRefs
@@ -124,13 +131,11 @@ export default function MainPanel() {
     }
     
     return []
-  }
-
-  const displayRefs = getReferences()
+  }, [isCurrentCheck, checkStoreRefs, hasSelectedCheckData, selectedCheck])
 
   // Build unified stats
   // For current check, prefer live checkStore stats; for other checks, compute from selectedCheck
-  const buildStats = () => {
+  const displayStats = useMemo(() => {
     // Current check: use live WebSocket data from checkStore
     if (isCurrentCheck && checkStoreStats && checkStoreStats.total_refs > 0) {
       return checkStoreStats
@@ -208,9 +213,7 @@ export default function MainPanel() {
       refs_with_warnings_only: 0,
       progress_percent: 0,
     }
-  }
-
-  const displayStats = buildStats()
+  }, [isCurrentCheck, checkStoreStats, hasSelectedCheckData, selectedCheck, displayRefs, isInProgress])
 
   return (
     <main 

@@ -375,6 +375,7 @@ async def exchange_github_code(code: str, request: Request) -> Optional[Dict[str
             "email": email,
             "name": user_data.get("name") or user_data.get("login"),
             "avatar_url": user_data.get("avatar_url"),
+            "login": user_data.get("login"),
         }
 
 

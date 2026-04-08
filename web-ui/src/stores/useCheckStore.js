@@ -519,20 +519,36 @@ export const useCheckStore = create((set, get) => ({
       case 'checking_reference':
         // Don't update status message here - it causes flashing. Let summary_update handle it.
         if (typeof data.index === 'number') {
-          store.updateReference(data.index - 1, { status: 'checking' })
+          // Inline the update to avoid extra set() call
+          set(state => ({
+            references: state.references.map((ref, i) =>
+              i === data.index - 1 ? { ...ref, status: 'checking' } : ref
+            )
+          }))
         }
         break
         
       case 'reference_result':
-        store.updateReference(data.index - 1, {
-          ...data,
-          status: data.status || 'checked',
-        })
+        // Inline the update to avoid extra set() call
+        {
+          const refIndex = data.index - 1
+          const normalizedStatus = data?.status ? data.status.toLowerCase() : 'checked'
+          const { index: _backendIndex, ...dataWithoutIndex } = data
+          set(state => ({
+            references: state.references.map((ref, i) =>
+              i === refIndex ? { ...ref, ...dataWithoutIndex, index: i, status: normalizedStatus } : ref
+            )
+          }))
+        }
         break
         
       case 'summary_update':
-        store.updateStats(data)
-        store.setStatusMessage(`Processed ${data.processed_refs} of ${data.total_refs} references...`)
+        // Batch stats + statusMessage into a single set() call
+        set({
+          stats: data,
+          progress: data.progress_percent || 0,
+          statusMessage: `Processed ${data.processed_refs} of ${data.total_refs} references...`,
+        })
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
           status: 'in_progress',
           total_refs: data.total_refs,

@@ -138,6 +138,7 @@ web-ui/playwright-report/
 
 # Sensitive files
 backend/.encryption_key
+admin_users.conf
 
 # IDE
 .vscode/

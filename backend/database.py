@@ -826,7 +826,8 @@ class Database:
                                      provider_id: str,
                                      email: Optional[str] = None,
                                      name: Optional[str] = None,
-                                     avatar_url: Optional[str] = None) -> int:
+                                     avatar_url: Optional[str] = None,
+                                     login: Optional[str] = None) -> int:
         """Create a new user or update an existing one. Returns the user's internal ID.
 
         Also upserts the matching row in ``oauth_accounts``.
@@ -842,10 +843,12 @@ class Database:
 
             if oa_row:
                 user_id = oa_row[0]
+                # Re-evaluate admin status on every login so config changes take effect
+                is_admin = await self._should_be_admin(db, email, login)
                 await db.execute("""
-                    UPDATE users SET email = ?, name = ?, avatar_url = ?
+                    UPDATE users SET email = ?, name = ?, avatar_url = ?, is_admin = ?
                     WHERE id = ?
-                """, (email, name, avatar_url, user_id))
+                """, (email, name, avatar_url, 1 if is_admin else 0, user_id))
             else:
                 # Try the legacy users unique constraint (existing rows pre-migration)
                 async with db.execute(
@@ -856,13 +859,13 @@ class Database:
 
                 if legacy_row:
                     user_id = legacy_row[0]
+                    is_admin = await self._should_be_admin(db, email, login)
                     await db.execute("""
-                        UPDATE users SET email = ?, name = ?, avatar_url = ?
+                        UPDATE users SET email = ?, name = ?, avatar_url = ?, is_admin = ?
                         WHERE id = ?
-                    """, (email, name, avatar_url, user_id))
+                    """, (email, name, avatar_url, 1 if is_admin else 0, user_id))
                 else:
-                    # Determine is_admin: first-ever user, or email in ADMIN_EMAILS
-                    is_admin = await self._should_be_admin(db, email)
+                    is_admin = await self._should_be_admin(db, email, login)
                     cursor = await db.execute("""
                         INSERT INTO users (provider, provider_id, email, name, avatar_url, is_admin)
                         VALUES (?, ?, ?, ?, ?, ?)
@@ -878,21 +881,66 @@ class Database:
             await db.commit()
             return user_id
 
-    async def _should_be_admin(self, db: aiosqlite.Connection, email: Optional[str]) -> bool:
-        """Return True if the new user should be granted admin rights.
+    @staticmethod
+    def _load_admin_users() -> set:
+        """Load the set of admin identifiers from config file + env vars.
+
+        Sources (all merged, case-insensitive):
+        1. ``admin_users.conf`` file in the project root (one entry per line,
+           GitHub usernames or emails, ``#`` comments ignored).
+        2. ``ADMIN_USERS`` env var (comma-separated GitHub usernames or emails).
+        3. ``ADMIN_EMAILS`` env var (comma-separated emails, kept for backward compat).
+        """
+        import os, pathlib
+        admins: set = set()
+
+        # 1. Config file: check next to this file's parent (project root),
+        #    then fall back to cwd.
+        for candidate in [
+            pathlib.Path(__file__).resolve().parent.parent / "admin_users.conf",
+            pathlib.Path("admin_users.conf"),
+        ]:
+            if candidate.is_file():
+                try:
+                    for line in candidate.read_text().splitlines():
+                        entry = line.strip()
+                        if entry and not entry.startswith("#"):
+                            admins.add(entry.lstrip("@").lower())
+                except OSError:
+                    pass
+                break  # use first found
+
+        # 2. ADMIN_USERS env var
+        for val in os.environ.get("ADMIN_USERS", "").split(","):
+            val = val.strip()
+            if val:
+                admins.add(val.lstrip("@").lower())
+
+        # 3. Legacy ADMIN_EMAILS env var
+        for val in os.environ.get("ADMIN_EMAILS", "").split(","):
+            val = val.strip()
+            if val:
+                admins.add(val.lower())
+
+        return admins
+
+    async def _should_be_admin(self, db: aiosqlite.Connection,
+                               email: Optional[str],
+                               login: Optional[str] = None) -> bool:
+        """Return True if the user should be granted admin rights.
 
         A user is an admin if:
         1. They are the very first user in the database, OR
-        2. Their email is listed in the ADMIN_EMAILS env var
-           (comma-separated, case-insensitive).
+        2. Their email or GitHub username is in the admin users list
+           (config file, ADMIN_USERS env var, or ADMIN_EMAILS env var).
         """
-        import os
-        # Check ADMIN_EMAILS
-        admin_emails_env = os.environ.get("ADMIN_EMAILS", "")
-        if email and admin_emails_env:
-            admin_list = [e.strip().lower() for e in admin_emails_env.split(",") if e.strip()]
-            if email.lower() in admin_list:
+        admin_set = self._load_admin_users()
+        if admin_set:
+            if email and email.lower() in admin_set:
                 return True
+            if login and login.lower() in admin_set:
+                return True
+
         # First user heuristic: no existing users yet
         async with db.execute("SELECT COUNT(*) FROM users") as cursor:
             row = await cursor.fetchone()

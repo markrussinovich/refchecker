@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useShallow } from 'zustand/react/shallow'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -138,7 +139,19 @@ export default function StatusSection() {
     stats: checkStoreStats,
     cancelCheck: storeCancelCheck,
     setError,
-  } = useCheckStore()
+  } = useCheckStore(useShallow(s => ({
+    status: s.status,
+    statusMessage: s.statusMessage,
+    progress: s.progress,
+    paperTitle: s.paperTitle,
+    paperSource: s.paperSource,
+    sourceType: s.sourceType,
+    currentCheckId: s.currentCheckId,
+    sessionId: s.sessionId,
+    stats: s.stats,
+    cancelCheck: s.cancelCheck,
+    setError: s.setError,
+  })))
   const { selectedCheck, selectedCheckId, isLoadingDetail, updateHistoryProgress, history } = useHistoryStore()
 
   // Get the history item for the current check (may have the correct title from addToHistory)
@@ -856,7 +869,7 @@ export default function StatusSection() {
             style={{ backgroundColor: 'var(--color-bg-tertiary)' }}
           >
             <div 
-              className="h-full rounded-full transition-all duration-300 progress-bar"
+              className="h-full rounded-full transition-[width] duration-300 ease-linear progress-bar"
               style={{ 
                 width: `${Math.round(displayProgress)}%`,
               }}
