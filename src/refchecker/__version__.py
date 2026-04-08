@@ -1,3 +1,3 @@
 """Version information for RefChecker."""
 
-__version__ = "3.0.73"
+__version__ = "3.0.74"
