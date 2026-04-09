@@ -512,7 +512,7 @@ MS_CLIENT_ID=...
 MS_CLIENT_SECRET=...
 
 # Optional
-ADMIN_EMAILS=your@email.com   # comma-separated; first sign-in is auto-admin
+REFCHECKER_ADMINS=github:you  # comma-separated; first sign-in is auto-admin
 MAX_CHECKS_PER_USER=3         # max concurrent checks per user (default: 3)
 ```
 
@@ -539,7 +539,7 @@ curl http://localhost:8000/api/auth/providers
 
 **Notes:**
 
-- The first user to sign in is automatically admin. Add more via `ADMIN_EMAILS`.
+- The first user to sign in is automatically admin. Add more via `REFCHECKER_ADMINS`.
 - Each user may run up to `MAX_CHECKS_PER_USER` concurrent checks (default 3). The 4th returns HTTP 429.
 - The CLI is unaffected — `academic-refchecker` works without any auth configuration.
 - Place the server behind a TLS-terminating reverse proxy (nginx, Caddy) for HTTPS.

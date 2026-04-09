@@ -895,8 +895,7 @@ class Database:
 
         Sources:
         1. ``admin_users.conf`` file (one entry per line, ``#`` comments).
-        2. ``ADMIN_USERS`` env var (comma-separated).
-        3. ``ADMIN_EMAILS`` env var (comma-separated emails, legacy).
+        2. ``REFCHECKER_ADMINS`` env var (comma-separated).
         """
         import os, pathlib
         qualified: set = set()    # e.g. {"github:markrussinovich"}
@@ -924,17 +923,11 @@ class Database:
                     pass
                 break
 
-        # 2. ADMIN_USERS env var
-        for val in os.environ.get("ADMIN_USERS", "").split(","):
+        # 2. REFCHECKER_ADMINS env var
+        for val in os.environ.get("REFCHECKER_ADMINS", "").split(","):
             val = val.strip()
             if val:
                 _add(val)
-
-        # 3. Legacy ADMIN_EMAILS env var (always unqualified)
-        for val in os.environ.get("ADMIN_EMAILS", "").split(","):
-            val = val.strip()
-            if val:
-                unqualified.add(val.lower())
 
         return qualified, unqualified
 

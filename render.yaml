@@ -40,10 +40,8 @@ services:
         sync: false
 
       # --- Optional ---
-      - key: ADMIN_USERS
+      - key: REFCHECKER_ADMINS
         sync: false                  # e.g. github:markrussinovich,user@example.com
-      - key: ADMIN_EMAILS
-        sync: false                  # Legacy: email-only admin list
       - key: MAX_CHECKS_PER_USER
         value: "3"
 
