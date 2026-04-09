@@ -96,7 +96,7 @@ export default function UserMenu() {
           {/* Actions */}
           <button
             onClick={() => { setOpen(false); logout() }}
-            className="w-full text-left px-4 py-2 text-sm transition-colors hover:bg-red-500 hover:text-white"
+            className="w-full text-left px-4 py-2 text-sm transition-colors hover:bg-red-800 hover:text-white"
             style={{ color: 'var(--color-text-primary)' }}
           >
             Sign out

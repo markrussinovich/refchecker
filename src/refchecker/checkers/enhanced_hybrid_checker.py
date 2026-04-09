@@ -494,10 +494,14 @@ class EnhancedHybridReferenceChecker:
     def _verify_non_arxiv_parallel(self, reference, failed_apis, skip_ss: bool = False):
         """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
         
-        Returns first complete successful result, or None.
+        Returns (result, incomplete_results) where result is a complete
+        (verified_data, errors, url) tuple or None, and incomplete_results
+        is a dict of {'crossref': ..., 'openalex': ...} for Phase 3 fallback.
+        incomplete_results are kept as local variables to avoid thread-safety
+        issues when multiple threads share the same checker instance.
         """
-        self._last_crossref_result = None
-        self._last_openalex_result = None
+        last_crossref_result = None
+        last_openalex_result = None
         
         # Try Semantic Scholar first — it succeeds ~92% of the time.
         # Skip SS when the local DB (233M papers) already returned not_found:
@@ -507,7 +511,7 @@ class EnhancedHybridReferenceChecker:
             verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
                 if self._is_data_complete(verified_data, reference):
-                    return verified_data, errors, url
+                    return (verified_data, errors, url), {}
             elif failure_type in ('throttled', 'timeout', 'server_error'):
                 failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
         
@@ -538,18 +542,18 @@ class EnhancedHybridReferenceChecker:
                     failed_apis.append((api_name, api_inst, failure_type))
                 if success:
                     if self._is_data_complete(verified_data, reference):
-                        return verified_data, errors, url
+                        return (verified_data, errors, url), {}
                     if api_name == 'crossref':
-                        self._last_crossref_result = (verified_data, errors, url)
+                        last_crossref_result = (verified_data, errors, url)
                     elif api_name == 'openalex':
-                        self._last_openalex_result = (verified_data, errors, url)
+                        last_openalex_result = (verified_data, errors, url)
         
         # Try OpenReview as a secondary step (not parallelized — rare path)
         if self.openreview:
             if hasattr(self.openreview, 'is_openreview_reference') and self.openreview.is_openreview_reference(reference):
                 verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
                 if success:
-                    return verified_data, errors, url
+                    return (verified_data, errors, url), {}
             elif hasattr(self.openreview, 'verify_reference_by_search'):
                 venue = reference.get('venue', reference.get('journal', '')).lower()
                 openreview_venues = ['iclr', 'icml', 'neurips', 'nips', 'aaai', 'ijcai',
@@ -559,9 +563,15 @@ class EnhancedHybridReferenceChecker:
                 if any(v in venue for v in openreview_venues):
                     verified_data, errors, url, success, failure_type = self._try_openreview_search(reference)
                     if success:
-                        return verified_data, errors, url
+                        return (verified_data, errors, url), {}
         
-        return None
+        # Return None with any incomplete results for Phase 3 fallback
+        incomplete = {}
+        if last_crossref_result:
+            incomplete['crossref'] = last_crossref_result
+        if last_openalex_result:
+            incomplete['openalex'] = last_openalex_result
+        return None, incomplete
 
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -590,6 +600,7 @@ class EnhancedHybridReferenceChecker:
         
         failed_apis = []
         db_not_found = False
+        incomplete_data = None
         is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
         
         # ── PHASE 1: Parallel API calls ──
@@ -679,15 +690,14 @@ class EnhancedHybridReferenceChecker:
             
             # Skip SS API when the 233M-paper local DB returned not_found —
             # if it's not in the DB, it's almost certainly not on SS either.
-            result = self._verify_non_arxiv_parallel(reference, failed_apis, skip_ss=db_not_found)
+            result, incomplete_data = self._verify_non_arxiv_parallel(reference, failed_apis, skip_ss=db_not_found)
             if result is not None:
                 return result
         
-        # Store incomplete results for Phase 3 fallback
-        crossref_result = getattr(self, '_last_crossref_result', None)
-        openalex_result = getattr(self, '_last_openalex_result', None)
-        self._last_crossref_result = None
-        self._last_openalex_result = None
+        # Store incomplete results for Phase 3 fallback (thread-safe: returned
+        # as local values from _verify_non_arxiv_parallel, not shared state)
+        crossref_result = incomplete_data.get('crossref') if incomplete_data else None
+        openalex_result = incomplete_data.get('openalex') if incomplete_data else None
         
         # PHASE 2: If no API succeeded in Phase 1, retry failed APIs.
         # Skip retries when the local DB definitively returned not_found —

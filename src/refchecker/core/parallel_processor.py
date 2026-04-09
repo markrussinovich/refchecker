@@ -243,18 +243,17 @@ class ParallelReferenceProcessor:
                         # Run hallucination assessment BEFORE printing so we can
                         # show clean 'Verified URL' instead of 'Could not verify'
                         # Only for refs with real errors (not info/suggestion-only)
-                        has_real_errors = any(
-                            e.get('error_type') or e.get('warning_type')
-                            for e in (current_result.errors or [])
-                        )
-                        if current_result.errors and has_real_errors:
-                            assessment = self.base_checker._run_and_return_hallucination_assessment(
-                                current_result.reference,
-                                current_result.errors,
-                                verified_data=current_result.verified_data,
-                            )
-                            if assessment:
-                                current_result.hallucination_assessment = assessment
+                        if current_result.errors:
+                            from refchecker.core.hallucination_policy import has_real_raw_errors
+                            if has_real_raw_errors(current_result.errors):
+                                assessment = self.base_checker._run_and_return_hallucination_assessment(
+                                    current_result.reference,
+                                    current_result.errors,
+                                    verified_data=current_result.verified_data,
+                                    reference_url=current_result.url,
+                                )
+                                if assessment:
+                                    current_result.hallucination_assessment = assessment
                         
                         # Print the result using base checker's output methods
                         # (hallucination_assessment is now available for display decisions)

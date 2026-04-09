@@ -34,7 +34,12 @@ from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.refchecker import ArxivReferenceChecker
-from refchecker.core.hallucination_policy import run_hallucination_check
+from refchecker.core.hallucination_policy import (
+    build_hallucination_error_entry,
+    has_real_raw_errors,
+    pre_screen_hallucination,
+    run_hallucination_check,
+)
 from refchecker.utils.arxiv_utils import get_bibtex_content
 import arxiv
 
@@ -1148,95 +1153,14 @@ class ProgressRefChecker:
                 names.add(parts[-1].lower().rstrip('.'))
         return names
 
-    @staticmethod
-    def _has_real_errors(raw_errors: list) -> bool:
-        """Return True if raw_errors contains actual errors (not just suggestions/info).
-
-        Raw errors use the verifier's original format where info entries
-        have an ``info_type`` key (no ``error_type``/``warning_type``), and
-        warning-only entries have ``warning_type`` (no ``error_type``).
-        Sanitized entries use ``is_suggestion`` / ``is_info`` instead.
-        We check both formats so the helper works on either.
-        """
-        for e in (raw_errors or []):
-            # Skip entries already flagged as suggestion/info (sanitized format)
-            if e.get('is_suggestion') or e.get('is_info'):
-                continue
-            if (e.get('error_type') or '').startswith('suggestion'):
-                continue
-            # Skip entries in the raw verifier format that only have info_type
-            if 'info_type' in e and 'error_type' not in e and 'warning_type' not in e:
-                continue
-            return True
-        return False
-
-    @staticmethod
-    def _build_hallucination_error_entry(
-        result: Dict[str, Any], reference: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """Build the error_entry dict consumed by hallucination_policy functions.
-
-        Filters out suggestion/info entries so the policy only sees real
-        errors.  Returns *None* when no real errors remain.
-        """
-        raw = result.get('_raw_errors', [])
-        # Only consider real errors, not suggestions/info.
-        # Raw errors may use verifier format (info_type key) or
-        # sanitized format (is_suggestion / is_info flags).
-        errors = []
-        for e in raw:
-            if e.get('is_suggestion') or e.get('is_info'):
-                continue
-            if (e.get('error_type') or '').startswith('suggestion'):
-                continue
-            # Raw verifier format: info-only entries have info_type but
-            # no error_type / warning_type
-            if 'info_type' in e and 'error_type' not in e and 'warning_type' not in e:
-                continue
-            errors.append(e)
-        if not errors:
-            return None
-
-        error_types = []
-        error_details_parts = []
-        authors_correct = None
-        for err in errors:
-            etype = err.get('error_type') or err.get('warning_type') or err.get('info_type', '')
-            edetail = err.get('error_details') or err.get('warning_details') or err.get('info_details', '')
-            if etype:
-                error_types.append(etype)
-            if edetail:
-                error_details_parts.append(edetail)
-            if err.get('ref_authors_correct'):
-                authors_correct = err['ref_authors_correct']
-
-        if not error_types:
-            return None
-
-        consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
-        auth_urls = result.get('authoritative_urls') or []
-        ref_verified_url = auth_urls[0]['url'] if auth_urls else ''
-
-        error_entry = {
-            'error_type': consolidated_type,
-            'error_details': '\n'.join(error_details_parts),
-            'ref_title': reference.get('title', ''),
-            'ref_authors_cited': ', '.join(reference.get('authors', [])),
-            'ref_year_cited': reference.get('year'),
-            'ref_venue_cited': reference.get('venue', ''),
-            'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
-            'ref_verified_url': ref_verified_url,
-            'original_reference': reference,
-        }
-        if authors_correct:
-            error_entry['ref_authors_correct'] = authors_correct
-
-        return error_entry
-
     def _pre_screen_hallucination(
         self, result: Dict[str, Any], reference: Dict[str, Any]
     ) -> tuple:
         """Run instant deterministic hallucination checks (no network/LLM).
+
+        Delegates to the shared ``pre_screen_hallucination`` in
+        hallucination_policy so all three code paths (CLI, Batch, WebUI)
+        use identical filtering and deterministic verdict logic.
 
         Returns
         -------
@@ -1247,45 +1171,25 @@ class ProgressRefChecker:
         ('needs_async', None)
             Needs LLM and/or ArXiv version check — create async task.
         """
-        from refchecker.core.hallucination_policy import (
-            check_author_hallucination,
-            detect_name_order_warning,
-            should_check_hallucination,
-            _detect_garbled_metadata,
+        auth_urls = result.get('authoritative_urls') or []
+        verified_url = auth_urls[0]['url'] if auth_urls else ''
+        error_entry = build_hallucination_error_entry(
+            result.get('_raw_errors', []), reference, verified_url=verified_url,
         )
-
-        error_entry = self._build_hallucination_error_entry(result, reference)
         if error_entry is None:
             return ('skip', None)
 
-        # Name ordering (warning, not hallucination)
-        name_order = detect_name_order_warning(error_entry)
-        if name_order:
+        outcome, assessment = pre_screen_hallucination(error_entry)
+        if outcome == 'resolved':
             updated = dict(result)
-            updated['hallucination_assessment'] = name_order
-            return ('resolved', updated)
-
-        # Garbled/swapped metadata (extraction error, not hallucination)
-        garbled = _detect_garbled_metadata(error_entry)
-        if garbled:
-            updated = dict(result)
-            updated['hallucination_assessment'] = garbled
-            return ('resolved', updated)
-
-        # Author overlap (deterministic LIKELY/None)
-        author_result = check_author_hallucination(error_entry)
-        if author_result:
-            updated = dict(result)
-            updated['hallucination_assessment'] = author_result
-            if author_result.get('verdict') == 'LIKELY':
+            updated['hallucination_assessment'] = assessment
+            if assessment.get('verdict') == 'LIKELY':
                 updated['status'] = 'hallucination'
             return ('resolved', updated)
-
-        # Would the LLM even run?
-        if not should_check_hallucination(error_entry):
+        elif outcome == 'skip':
             return ('skip', None)
-
-        return ('needs_async', None)
+        else:
+            return ('needs_async', None)
 
     @staticmethod
     def _compute_ref_stats(result: Dict[str, Any]) -> Dict[str, int]:
@@ -1482,15 +1386,17 @@ class ProgressRefChecker:
         by _pre_screen_hallucination — this method focuses on ArXiv version
         match and LLM assessment.
         """
-        from refchecker.core.hallucination_policy import run_hallucination_check
-
         # Before running the LLM, check if metadata mismatches are explained
         # by a different ArXiv version (e.g. v1 preprint vs v2 conference).
         version_result = self._try_arxiv_version_match(result, reference)
         if version_result is not None:
             return version_result
 
-        error_entry = self._build_hallucination_error_entry(result, reference)
+        auth_urls = result.get('authoritative_urls') or []
+        verified_url = auth_urls[0]['url'] if auth_urls else ''
+        error_entry = build_hallucination_error_entry(
+            result.get('_raw_errors', []), reference, verified_url=verified_url,
+        )
         if error_entry is None:
             return result
 
@@ -1806,7 +1712,7 @@ class ProgressRefChecker:
                 # (subtract old contribution, add new) when status changes.
                 is_pending_hallucination_check = (
                     self.hallucination_verifier
-                    and self._has_real_errors(result.get('_raw_errors'))
+                    and has_real_raw_errors(result.get('_raw_errors'))
                 )
 
                 # Always count stats for all refs so the UI updates progressively.
@@ -1881,7 +1787,7 @@ class ProgressRefChecker:
             ha_candidates = [
                 (idx, results[idx], references[idx])
                 for idx in range(total_refs)
-                if results.get(idx) and self._has_real_errors(results[idx].get('_raw_errors'))
+                if results.get(idx) and has_real_raw_errors(results[idx].get('_raw_errors'))
             ]
             if ha_candidates:
                 debug_log(f"[TIMING] Running deferred hallucination checks for {len(ha_candidates)} refs")

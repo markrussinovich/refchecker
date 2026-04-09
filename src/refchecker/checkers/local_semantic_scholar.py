@@ -392,10 +392,28 @@ class LocalNonArxivReferenceChecker:
         # Try DOI if title search didn't find it
         if not paper_data and doi:
             logger.debug(f"Local DB: Searching by DOI: {doi}")
-            paper_data = self.get_paper_by_doi(doi)
+            doi_paper = self.get_paper_by_doi(doi)
             
-            if paper_data:
-                logger.debug(f"Found paper by DOI: {doi}")
+            if doi_paper:
+                # ArXiv-style DOIs (10.48550/arxiv.XXXX) are redirector DOIs
+                # that can match an unrelated paper in the DB.  Validate the
+                # title before accepting the result — same guard we already
+                # apply to ArXiv-ID lookups above.  Regular DOIs are
+                # authoritative, so we keep the result even on title mismatch
+                # (the downstream code will flag it as a title error).
+                is_arxiv_doi = doi.lower().startswith('10.48550/arxiv')
+                doi_title = doi_paper.get('title', '')
+                if is_arxiv_doi and title and doi_title:
+                    title_sim = compare_titles_with_latex_cleaning(title, doi_title)
+                    if title_sim >= SIMILARITY_THRESHOLD:
+                        logger.debug(f"ArXiv DOI lookup matched title (similarity={title_sim:.2f}), using DOI result")
+                        paper_data = doi_paper
+                    else:
+                        logger.debug(f"ArXiv DOI lookup title mismatch (similarity={title_sim:.2f}): "
+                                     f"cited '{title}' vs DOI '{doi_title}' — ignoring DOI result")
+                else:
+                    paper_data = doi_paper
+                    logger.debug(f"Found paper by DOI: {doi}")
             else:
                 logger.debug(f"Could not find paper with DOI: {doi}")
         

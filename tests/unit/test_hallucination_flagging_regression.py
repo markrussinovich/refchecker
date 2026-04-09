@@ -94,12 +94,12 @@ def test_run_hallucination_check_no_llm(case):
 # ── Backend-level tests for _has_real_errors and _pre_screen_hallucination ──
 
 class TestHasRealErrors:
-    """Tests for RefCheckerWrapper._has_real_errors (suggestion filtering)."""
+    """Tests for has_real_raw_errors (suggestion filtering)."""
 
     @staticmethod
     def _call(raw_errors):
-        from backend.refchecker_wrapper import ProgressRefChecker
-        return ProgressRefChecker._has_real_errors(raw_errors)
+        from refchecker.core.hallucination_policy import has_real_raw_errors
+        return has_real_raw_errors(raw_errors)
 
     def test_suggestion_only(self):
         raw = [{'is_suggestion': True, 'error_type': 'suggestion_arxiv_url',
@@ -204,12 +204,12 @@ class TestPreScreenHallucination:
 
 
 class TestHasRealErrorsRawFormat:
-    """Tests for _has_real_errors with verifier's raw format (info_type key)."""
+    """Tests for has_real_raw_errors with verifier's raw format (info_type key)."""
 
     @staticmethod
     def _call(raw_errors):
-        from backend.refchecker_wrapper import ProgressRefChecker
-        return ProgressRefChecker._has_real_errors(raw_errors)
+        from refchecker.core.hallucination_policy import has_real_raw_errors
+        return has_real_raw_errors(raw_errors)
 
     def test_raw_info_type_only(self):
         """Raw verifier entries with only info_type are NOT real errors."""

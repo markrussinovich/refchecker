@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import check_author_hallucination, _detect_garbled_metadata, run_hallucination_check, should_check_hallucination
+from refchecker.core.hallucination_policy import pre_screen_hallucination
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.biblatex_parser import detect_biblatex_format
 from refchecker.utils.bibtex_parser import detect_bibtex_format
@@ -54,15 +54,6 @@ def _safe_print_labeled(emoji: str, text: str) -> None:
     indent = ' ' * 15
     for line in lines[1:]:
         _safe_print(indent + line)
-
-
-_HALLUCINATION_MULTI_KEYWORDS = (
-    'unverified',
-    'non-existent',
-    'does not reference',
-    'could not be verified',
-    'could not verify',
-)
 
 
 def _normalize_cache_key(reference: Dict[str, Any]) -> Optional[tuple]:
@@ -1476,43 +1467,22 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
     tasks: List[tuple[Dict[str, Any], _BatchTask]] = []
 
     for error_entry in checker.errors:
-        garbled_result = _detect_garbled_metadata(error_entry)
-        if garbled_result:
-            error_entry['hallucination_assessment'] = garbled_result
+        outcome, assessment = pre_screen_hallucination(error_entry)
+        if outcome == 'resolved':
+            error_entry['hallucination_assessment'] = assessment
+            continue
+        if outcome == 'skip':
             continue
 
-        author_result = check_author_hallucination(error_entry)
-        if author_result:
-            error_entry['hallucination_assessment'] = author_result
-            continue
-
+        # 'needs_llm' — submit to batch pool
         if not llm_verifier or not getattr(llm_verifier, 'available', False):
             continue
-        if not _needs_llm_hallucination(error_entry):
-            continue
-        if not should_check_hallucination(error_entry):
-            continue
-
         tasks.append((error_entry, hallucination_batcher.submit(error_entry, llm_verifier, web_searcher)))
 
     for error_entry, task in tasks:
         assessment = task.wait()
         if assessment:
             error_entry['hallucination_assessment'] = assessment
-
-
-def _needs_llm_hallucination(error_entry: Dict[str, Any]) -> bool:
-    # If the paper was verified (found in a database), author/venue mismatches
-    # are data-quality issues, not hallucinations
-    if error_entry.get('ref_verified_url'):
-        return False
-    error_type = (error_entry.get('error_type') or '').lower()
-    if error_type in {'unverified', 'url'}:
-        return True
-    if error_type != 'multiple':
-        return False
-    details = (error_entry.get('error_details') or '').lower()
-    return any(keyword in details for keyword in _HALLUCINATION_MULTI_KEYWORDS)
 
 
 def _apply_bulk_results(root_checker: Any, results: Sequence[BulkPaperResult]) -> None:

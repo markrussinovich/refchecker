@@ -446,9 +446,13 @@ def test_verified_ref_high_overlap_not_flagged():
 # LLM override behavior
 # ------------------------------------------------------------------
 
-def test_llm_can_override_deterministic_likely_to_unlikely():
-    """LLM should be able to override a deterministic LIKELY when it finds
-    the paper exists with the cited authors (e.g. different DB entry)."""
+def test_deterministic_likely_is_final():
+    """When deterministic author-overlap returns LIKELY, the LLM is NOT called.
+
+    All three paths (CLI, Batch, WebUI) now treat a deterministic LIKELY as
+    final — the LLM is only invoked when deterministic screening is
+    inconclusive ('needs_llm').
+    """
     entry = {
         'error_type': 'multiple',
         'error_details': 'Author mismatch',
@@ -465,7 +469,8 @@ def test_llm_can_override_deterministic_likely_to_unlikely():
         'web_search': None,
     }
     result = run_hallucination_check(entry, llm_client=mock_llm)
-    assert result['verdict'] == 'UNLIKELY'  # LLM overrides
+    assert result['verdict'] == 'LIKELY'  # deterministic is final
+    mock_llm.assess.assert_not_called()  # LLM never invoked
 
 
 def test_llm_likely_overrides_no_deterministic():

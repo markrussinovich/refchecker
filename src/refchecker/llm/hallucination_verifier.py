@@ -104,7 +104,11 @@ the paper itself is real, because the reference as cited is fabricated.
 
 CRITICAL AUTHOR RULE: A reference with a real title but entirely \
 fabricated authors is STILL a hallucinated reference. The verdict must \
-be LIKELY. The ONLY exceptions are:
+be LIKELY. You may ONLY override this to UNLIKELY if you find a \
+specific paper (with a URL you can cite in the LINK field) that has \
+BOTH a matching title AND a substantially matching author list. \
+Finding the title alone is NOT sufficient — the authors must also match. \
+The ONLY exceptions where author mismatch is acceptable are:
   (a) Large collaborative papers (100+ authors) where the citation uses \
 a team name (e.g. "Gemini Team", "Llama Team") instead of individual \
 names — this is acceptable shorthand, verdict UNLIKELY.
@@ -114,11 +118,16 @@ transliteration variants) — verdict UNLIKELY.
 versions — verdict UNLIKELY if the cited authors match an earlier version.
 
 Key signals that it is NOT hallucinated (verdict should be UNLIKELY):
-- Your web search found a page showing a paper with this EXACT title and \
-the same authors (or substantially overlapping authors)
+- Your web search found a page showing a paper with this EXACT title AND \
+the same authors (or substantially overlapping authors) — BOTH must match
 - Year off-by-one with otherwise matching title and authors is acceptable
 - Venue abbreviation differences are acceptable
 - Team/consortium authorship shorthand for large collaborative papers
+
+CRITICAL: If the title matches but the authors are completely different, \
+do NOT verdict UNLIKELY. A "grafted" reference (real title, fake authors) \
+is hallucinated. Only override to UNLIKELY if you find a version of the \
+paper where the cited authors actually appear as authors.
 
 IMPORTANT: The following are NOT hallucinations — verdict MUST be UNLIKELY:
 

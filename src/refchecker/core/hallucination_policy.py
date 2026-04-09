@@ -49,6 +49,119 @@ _TEAM_NAMES = frozenset({
 })
 
 
+def has_real_errors(error_entry: Dict[str, Any]) -> bool:
+    """Return True if this error entry has real errors/warnings, not just info/suggestions.
+
+    Matches the WebUI's ``_has_real_errors`` logic so CLI and Batch paths
+    skip hallucination assessment for refs that only have informational
+    suggestions (e.g. "could include arXiv URL").
+    """
+    # Check the consolidated error_type field
+    error_type = (error_entry.get('error_type') or '').lower()
+
+    # If '_original_errors' is present (consolidated entry), check each sub-error
+    original_errors = error_entry.get('_original_errors')
+    if original_errors:
+        for e in original_errors:
+            if e.get('error_type') and e['error_type'] != 'unverified':
+                return True
+            if e.get('warning_type'):
+                return True
+            if e.get('error_type') == 'unverified':
+                return True
+        return False
+
+    # Single-error entries
+    if error_type in ('info', 'suggestion', 'suggestion_type', ''):
+        return False
+    return True
+
+
+def has_real_raw_errors(raw_errors: list) -> bool:
+    """Return True if *raw_errors* contains actual errors (not just suggestions/info).
+
+    Works on the raw verifier format where info entries have an ``info_type``
+    key (no ``error_type``/``warning_type``), and sanitised entries use
+    ``is_suggestion`` / ``is_info``.  Used by the WebUI path which stores
+    raw errors before consolidation.
+    """
+    for e in (raw_errors or []):
+        if e.get('is_suggestion') or e.get('is_info'):
+            continue
+        if (e.get('error_type') or '').startswith('suggestion'):
+            continue
+        if 'info_type' in e and 'error_type' not in e and 'warning_type' not in e:
+            continue
+        return True
+    return False
+
+
+def build_hallucination_error_entry(
+    raw_errors: list,
+    reference: Dict[str, Any],
+    verified_url: str = '',
+) -> Optional[Dict[str, Any]]:
+    """Build a consolidated error_entry from raw verifier errors.
+
+    Filters out suggestion/info entries so hallucination screening only
+    sees real errors.  Returns *None* when no real errors remain.
+
+    Parameters
+    ----------
+    raw_errors : list
+        The raw error list from the verifier (``result['_raw_errors']``).
+    reference : dict
+        The parsed reference dict (title, authors, year, venue, url, …).
+    verified_url : str
+        Authoritative URL found by the verifier (empty string if none).
+    """
+    errors = []
+    for e in (raw_errors or []):
+        if e.get('is_suggestion') or e.get('is_info'):
+            continue
+        if (e.get('error_type') or '').startswith('suggestion'):
+            continue
+        if 'info_type' in e and 'error_type' not in e and 'warning_type' not in e:
+            continue
+        errors.append(e)
+    if not errors:
+        return None
+
+    error_types: List[str] = []
+    error_details_parts: List[str] = []
+    authors_correct = None
+    for err in errors:
+        etype = err.get('error_type') or err.get('warning_type') or err.get('info_type', '')
+        edetail = err.get('error_details') or err.get('warning_details') or err.get('info_details', '')
+        if etype:
+            error_types.append(etype)
+        if edetail:
+            error_details_parts.append(edetail)
+        if err.get('ref_authors_correct'):
+            authors_correct = err['ref_authors_correct']
+
+    if not error_types:
+        return None
+
+    consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+
+    error_entry: Dict[str, Any] = {
+        'error_type': consolidated_type,
+        'error_details': '\n'.join(error_details_parts),
+        'ref_title': reference.get('title', ''),
+        'ref_authors_cited': ', '.join(reference.get('authors', [])),
+        'ref_year_cited': reference.get('year'),
+        'ref_venue_cited': reference.get('venue', ''),
+        'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
+        'ref_verified_url': verified_url,
+        'original_reference': reference,
+    }
+    if authors_correct:
+        error_entry['ref_authors_correct'] = authors_correct
+
+    return error_entry
+
+
 def _split_author_string(author_str: str) -> List[str]:
     """Split a comma-separated author string into individual author names.
 
@@ -518,6 +631,45 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
     return None
 
 
+def pre_screen_hallucination(
+    error_entry: Dict[str, Any],
+) -> tuple:
+    """Run deterministic hallucination pre-screening (no network / LLM).
+
+    This is the **single source of truth** for deciding whether a reference
+    needs LLM assessment.  All three code paths (CLI, Batch, WebUI) call
+    this function so filtering logic stays consistent.
+
+    Returns
+    -------
+    ('resolved', assessment_dict)
+        A deterministic verdict was reached — apply immediately.
+    ('skip', None)
+        No hallucination check needed (no real errors, or not suspicious).
+    ('needs_llm', None)
+        Deterministic checks were inconclusive — run LLM assessment.
+    """
+    if not has_real_errors(error_entry):
+        return ('skip', None)
+
+    name_order = detect_name_order_warning(error_entry)
+    if name_order:
+        return ('resolved', name_order)
+
+    garbled = _detect_garbled_metadata(error_entry)
+    if garbled:
+        return ('resolved', garbled)
+
+    author_result = check_author_hallucination(error_entry)
+    if author_result:
+        return ('resolved', author_result)
+
+    if not should_check_hallucination(error_entry):
+        return ('skip', None)
+
+    return ('needs_llm', None)
+
+
 def run_hallucination_check(
     error_entry: Dict[str, Any],
     llm_client: Any = None,
@@ -525,10 +677,8 @@ def run_hallucination_check(
 ) -> Optional[Dict[str, Any]]:
     """Unified hallucination check — single entry point for CLI, WebUI, and report builder.
 
-    Runs the deterministic author-overlap check first, then the LLM-based
-    assessment.  When an LLM is available, it always runs (for any error
-    type, verified or not) so it can override the deterministic verdict —
-    e.g. the LLM may find a different paper that actually matches.
+    Runs deterministic screening via ``pre_screen_hallucination`` first.
+    If inconclusive, runs the LLM-based assessment.
 
     Parameters
     ----------
@@ -545,33 +695,18 @@ def run_hallucination_check(
     -------
     dict with verdict/explanation/web_search, or None if no assessment needed.
     """
-    # 1. Deterministic: check for name-ordering issues first (warning, not hallucination)
-    name_order_result = detect_name_order_warning(error_entry)
-    if name_order_result:
-        return name_order_result
+    outcome, assessment = pre_screen_hallucination(error_entry)
+    if outcome == 'resolved':
+        return assessment
+    if outcome == 'skip':
+        return None
 
-    # 1b. Detect garbled/swapped metadata fields — a PDF extraction error, not hallucination.
-    #     Key signal: the author field looks like a title/description (contains colons
-    #     or is very long with spaces), or the title field is extremely short and looks
-    #     like an organization name while the author field looks like a title.
-    garbled_result = _detect_garbled_metadata(error_entry)
-    if garbled_result:
-        return garbled_result
-
-    # 2. Deterministic: author-overlap check (no LLM)
-    author_result = check_author_hallucination(error_entry)
-
-    # 3. LLM-based: always run when LLM is available, for any error type.
-    #    The LLM can override the deterministic verdict — e.g. it may find
-    #    a different paper with the same title where the cited authors DO
-    #    match, proving the citation is real despite the DB mismatch.
+    # 'needs_llm' — run LLM assessment if available
     if llm_client and getattr(llm_client, 'available', False):
-        if should_check_hallucination(error_entry):
-            llm_result = assess_hallucination(
-                error_entry, llm_client=llm_client, web_searcher=web_searcher,
-            )
-            if llm_result:
-                return llm_result
+        llm_result = assess_hallucination(
+            error_entry, llm_client=llm_client, web_searcher=web_searcher,
+        )
+        if llm_result:
+            return llm_result
 
-    # Fall back to deterministic result if LLM was unavailable or didn't run
-    return author_result
+    return None
