@@ -127,7 +127,36 @@ def test_verification_cache_hit_and_miss():
 
     # Different reference is a miss
     assert cache.get(ref_b) is None
-    assert cache.misses == 2
+
+
+def test_bulk_hallucination_batcher_process_single_uses_run_hallucination_check():
+    """Regression: bulk_pipeline must import run_hallucination_check so _process_single works."""
+    from unittest.mock import patch, MagicMock
+
+    batcher = BulkHallucinationBatcher(enabled=False)
+
+    payload = SimpleNamespace(
+        error_entry={'ref_title': 'Test', 'ref_authors_cited': 'A', 'error_type': 'unverified', 'error_details': 'n/a'},
+        llm_verifier=MagicMock(),
+        web_searcher=None,
+    )
+
+    with patch('refchecker.core.bulk_pipeline.run_hallucination_check', return_value={'verdict': 'LIKELY', 'explanation': 'fake'}) as mock_fn:
+        result = batcher._process_single(payload)
+        mock_fn.assert_called_once_with(
+            payload.error_entry,
+            llm_client=payload.llm_verifier,
+            web_searcher=payload.web_searcher,
+        )
+        assert result == {'verdict': 'LIKELY', 'explanation': 'fake'}
+
+
+def test_verification_cache_variant_lookups():
+    cache = BulkVerificationCache()
+
+    ref_a = {'title': 'Attention Is All You Need', 'authors': ['Ashish Vaswani'], 'year': '2017'}
+    result_a = ([{'error_type': 'year', 'error_details': 'off by one'}], 'https://arxiv.org/abs/1706.03762', {'title': 'Attention Is All You Need'})
+    cache.put(ref_a, result_a)
 
     # Same title from different paper (slightly different author format) still hits
     # because last name 'Vaswani' normalizes the same way

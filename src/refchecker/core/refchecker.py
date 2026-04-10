@@ -6283,34 +6283,8 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(
                             reference, reference_url, errors, debug_mode, print_output)
                 else:
-                    # No 'url references paper' flag, but LLM may still
-                    # confirm this is a real reference (e.g. GitHub repo,
-                    # ICML workshop page, etc.).
-                    url_assessment = precomputed_hallucination
-                    if not url_assessment:
-                        url_assessment = self._run_and_return_hallucination_assessment(
-                            reference, errors, verified_data=verified_data
-                        )
-
-                    if url_assessment and url_assessment.get('verdict') == 'UNLIKELY':
-                        # LLM confirmed the reference is real — don't count as unverified
-                        cited_url = reference.get('cited_url') or reference.get('url', '')
-                        if print_output:
-                            print(f"       ✅ Verified via URL: {cited_url}")
-                            explanation = url_assessment.get('explanation', '')
-                            if explanation:
-                                print(f"         LLM confirmed: {explanation}")
-                        precomputed_hallucination = url_assessment
-                    elif url_assessment and url_assessment.get('verdict') == 'LIKELY':
-                        # LLM says likely hallucinated
-                        self.total_unverified_refs += 1
-                        if not debug_mode and print_output:
-                            print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-                        precomputed_hallucination = url_assessment
-                    else:
-                        # UNCERTAIN or no LLM — count as unverified
-                        self.total_unverified_refs += 1
-                        self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
+                    self.total_unverified_refs += 1
+                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
@@ -6640,7 +6614,7 @@ class ArxivReferenceChecker:
             if has_unverified:
                 print(f"         Not flagged: {explanation}")
 
-    def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None, reference_url=None):
+    def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None):
         """Run hallucination assessment and return the result without printing or storing.
 
         Used by the parallel processor to get the assessment before
@@ -6665,11 +6639,9 @@ class ArxivReferenceChecker:
             return None
 
         consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
-        # Use the already-constructed reference_url (e.g. S2 CorpusID URL)
-        # which is authoritative.  Fall back to verified_data extraction
-        # only when reference_url is not provided.
-        ref_verified_url = reference_url or ''
-        if not ref_verified_url and verified_data:
+        # Extract verified URL from verified_data if available
+        ref_verified_url = ''
+        if verified_data:
             ref_verified_url = (
                 verified_data.get('url', '')
                 or verified_data.get('semantic_scholar_url', '')

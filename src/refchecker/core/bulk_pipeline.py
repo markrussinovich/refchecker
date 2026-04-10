@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import pre_screen_hallucination
+from refchecker.core.hallucination_policy import pre_screen_hallucination, run_hallucination_check
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.biblatex_parser import detect_biblatex_format
 from refchecker.utils.bibtex_parser import detect_bibtex_format
@@ -782,7 +782,7 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
         # Process up to 3 papers concurrently. Higher values cause API rate-limit
         # contention that negates the parallelism benefit. 3 workers provide good
         # I/O overlap while keeping API call rates within limits.
-        paper_worker_count = min(3, remaining)
+        paper_worker_count = min(6, remaining)
         # Per-API semaphores inside EnhancedHybridChecker now handle rate limiting
         # independently for each API, so we no longer need a global semaphore.
         for _ in range(paper_worker_count):
