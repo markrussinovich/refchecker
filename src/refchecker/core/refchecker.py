@@ -6584,7 +6584,10 @@ class ArxivReferenceChecker:
         elif error_entry_record is not None:
             target_record = error_entry_record
 
-        verified_url = self._extract_verified_url(verified_data)
+        has_arxiv_mismatch = any(
+            e.get('error_type') == 'arxiv_id' for e in (errors or [])
+        )
+        verified_url = '' if has_arxiv_mismatch else self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             return
@@ -6665,16 +6668,30 @@ class ArxivReferenceChecker:
             build_hallucination_error_entry, run_hallucination_check,
         )
 
-        verified_url = self._extract_verified_url(verified_data)
+        # Don't trust verified_data when the ArXiv ID points to a different paper —
+        # the verified_data comes from the wrong paper's lookup.
+        has_arxiv_mismatch = any(
+            e.get('error_type') == 'arxiv_id' for e in (errors or [])
+        )
+        verified_url = '' if has_arxiv_mismatch else self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
+            logger.debug("Hallucination skip (no real errors): %s", reference.get('title', '')[:60])
             return None
 
-        return run_hallucination_check(
+        result = run_hallucination_check(
             error_entry,
             llm_client=self.report_builder.llm_verifier,
             web_searcher=self.report_builder.web_searcher,
         )
+        if result:
+            logger.debug(
+                "Hallucination assessment: title='%s' verdict=%s explanation=%s",
+                reference.get('title', '')[:60], result.get('verdict'), (result.get('explanation') or '')[:200],
+            )
+        else:
+            logger.debug("Hallucination assessment returned None for: %s", reference.get('title', '')[:60])
+        return result
 
     def _output_reference_errors(self, reference, errors, url):
         """

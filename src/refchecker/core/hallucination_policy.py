@@ -450,8 +450,10 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
         url_failed = any(
             kw in error_details
             for kw in ('unverified', 'non-existent', 'does not reference',
+                       "doesn't reference", 'not found',
                        'could not be verified', 'could not verify',
-                       'title mismatch', 'inaccurate title')
+                       'title mismatch', 'inaccurate title',
+                       'incorrect arxiv id', 'arxiv id')
         )
         if not url_failed:
             # For author-type errors (including 'multiple' with author issues),
