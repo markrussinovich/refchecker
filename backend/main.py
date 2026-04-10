@@ -686,6 +686,9 @@ async def run_check(
         # Resolve local Semantic Scholar database path from environment or settings
         db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
 
+        # Resolve cache directory from environment or settings
+        cache_dir = os.environ.get('REFCHECKER_CACHE_DIR') or await db.get_setting("cache_dir") or None
+
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
         for _ in range(30):  # Wait up to 3 seconds
@@ -768,6 +771,7 @@ async def run_check(
             bibliography_source_callback=bibliography_source_callback,
             semantic_scholar_api_key=semantic_scholar_api_key,
             db_path=db_path,
+            cache_dir=cache_dir,
         )
 
         # Run the check
@@ -2177,13 +2181,20 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
             },
         }
 
-        # db_path is only available in single-user mode (server-local resource)
+        # db_path and cache_dir are only available in single-user mode (server-local resources)
         if not is_multiuser_mode():
             settings_config["db_path"] = {
                 "default": "",
                 "type": "text",
                 "label": "Local Semantic Scholar Database",
                 "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
+                "section": "Database"
+            }
+            settings_config["cache_dir"] = {
+                "default": "",
+                "type": "text",
+                "label": "Cache Directory",
+                "description": "Directory for caching PDFs, extracted bibliographies, and LLM responses to speed up repeated checks",
                 "section": "Database"
             }
         
@@ -2220,7 +2231,7 @@ async def update_setting(
     try:
         _require_admin(current_user)
         # Validate the setting key
-        valid_keys = {"max_concurrent_checks", "db_path"}
+        valid_keys = {"max_concurrent_checks", "db_path", "cache_dir"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
         
@@ -2282,6 +2293,23 @@ async def update_setting(
                 msg += f" (⚠ {'; '.join(warnings)})"
             return {"key": setting_key, "value": path, "message": msg, "papers": row_count}
         
+        if setting_key == "cache_dir":
+            path = update.value.strip()
+            if not path:
+                await db.set_setting(setting_key, "")
+                logger.info("Cleared cache_dir setting")
+                return {"key": setting_key, "value": "", "message": "Cache disabled"}
+            # Create the directory if it doesn't exist
+            try:
+                os.makedirs(path, exist_ok=True)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Cannot create cache directory: {e}")
+            if not os.access(path, os.W_OK):
+                raise HTTPException(status_code=400, detail=f"Cache directory is not writable: {path}")
+            await db.set_setting(setting_key, path)
+            logger.info(f"Updated cache_dir to: {path}")
+            return {"key": setting_key, "value": path, "message": "Cache directory configured"}
+
         # For other settings, just store the value
         await db.set_setting(setting_key, update.value)
         return {"key": setting_key, "value": update.value, "message": "Setting updated"}

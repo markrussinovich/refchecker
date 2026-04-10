@@ -55,12 +55,25 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [dbPathSuccess, setDbPathSuccess] = useState(null)
   const [dbPathSaving, setDbPathSaving] = useState(false)
 
+  // Cache directory state
+  const [cacheDirLocal, setCacheDirLocal] = useState(settings.cache_dir?.value || '')
+  const [cacheDirError, setCacheDirError] = useState(null)
+  const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
+  const [cacheDirSaving, setCacheDirSaving] = useState(false)
+
   // Sync local db path when settings are fetched from the server
   useEffect(() => {
     if (settings.db_path?.value !== undefined) {
       setDbPathLocal(settings.db_path.value)
     }
   }, [settings.db_path?.value])
+
+  // Sync cache dir when settings are fetched from the server
+  useEffect(() => {
+    if (settings.cache_dir?.value !== undefined) {
+      setCacheDirLocal(settings.cache_dir.value)
+    }
+  }, [settings.cache_dir?.value])
 
   const handleDbPathSave = async () => {
     setDbPathError(null)
@@ -83,6 +96,30 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setDbPathError(err.message || 'Failed to save')
     } finally {
       setDbPathSaving(false)
+    }
+  }
+
+  const handleCacheDirSave = async () => {
+    setCacheDirError(null)
+    setCacheDirSuccess(null)
+    setCacheDirSaving(true)
+    try {
+      const response = await fetch('/api/settings/cache_dir', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: cacheDirLocal }),
+      })
+      const result = await response.json()
+      if (!response.ok) {
+        setCacheDirError(result.detail || 'Failed to save')
+      } else {
+        setCacheDirSuccess(result.message || 'Saved')
+        updateSetting('cache_dir', cacheDirLocal)
+      }
+    } catch (err) {
+      setCacheDirError(err.message || 'Failed to save')
+    } finally {
+      setCacheDirSaving(false)
     }
   }
 
@@ -311,6 +348,53 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
           {dbPathSuccess && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-success, #22c55e)' }}>{dbPathSuccess}</div>
+          )}
+        </div>
+      )}
+
+      {/* Cache Directory (single-user only) */}
+      {settings.cache_dir && !multiuser && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="mb-2">
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              {settings.cache_dir.label || 'Cache Directory'}
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {settings.cache_dir.description}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={cacheDirLocal}
+              placeholder="/path/to/cache"
+              onChange={(e) => { setCacheDirLocal(e.target.value); setCacheDirError(null); setCacheDirSuccess(null) }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCacheDirSave() }}
+              className="flex-1 px-3 py-2 rounded-lg border text-sm"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: cacheDirError ? 'var(--color-error, #ef4444)' : 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            />
+            <button
+              onClick={handleCacheDirSave}
+              disabled={cacheDirSaving}
+              className="px-4 py-2 rounded-lg text-sm font-medium"
+              style={{
+                backgroundColor: 'var(--color-accent, #3b82f6)',
+                color: 'white',
+                opacity: cacheDirSaving ? 0.6 : 1,
+              }}
+            >
+              {cacheDirSaving ? '...' : 'Save'}
+            </button>
+          </div>
+          {cacheDirError && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{cacheDirError}</div>
+          )}
+          {cacheDirSuccess && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-success, #22c55e)' }}>{cacheDirSuccess}</div>
           )}
         </div>
       )}

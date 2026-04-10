@@ -125,7 +125,8 @@ class ProgressRefChecker:
                  title_update_callback: Optional[Callable] = None,
                  bibliography_source_callback: Optional[Callable] = None,
                  semantic_scholar_api_key: Optional[str] = None,
-                 db_path: Optional[str] = None):
+                 db_path: Optional[str] = None,
+                 cache_dir: Optional[str] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -170,6 +171,7 @@ class ProgressRefChecker:
                     config=llm_config
                 )
                 if provider.is_available():
+                    provider.cache_dir = cache_dir
                     self.llm = provider
                     logger.info(f"LLM provider '{llm_provider}' initialized and available")
                 else:
@@ -191,6 +193,7 @@ class ProgressRefChecker:
                 model=llm_model,
             )
             if verifier.available:
+                verifier.cache_dir = cache_dir
                 self.hallucination_verifier = verifier
                 logger.debug('Hallucination verifier initialized for web UI (provider=%s)', llm_provider)
         except Exception as e:
