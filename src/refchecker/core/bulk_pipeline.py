@@ -664,12 +664,13 @@ class BulkProgressReporter:
                 if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
             ]
             flagged_count = len(flagged_entries)
+            paper_unverified = max(result.total_unverified_refs, flagged_count)
             elapsed = f'{result.elapsed_seconds:.0f}s'
             flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
             _safe_print(
                 f'   refs={result.references_processed} '
                 f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
-                f'info={result.total_info_found} unverified={result.total_unverified_refs}'
+                f'info={result.total_info_found} unverified={paper_unverified}'
                 f'{flag_note} '
                 f'({elapsed})'
             )
@@ -1546,7 +1547,8 @@ def _print_bulk_final_summary(checker: Any) -> None:
     _safe_print(f'         Total warnings: {checker.total_warnings_found}')
     _safe_print(f'ℹ️  Papers with information: {checker.papers_with_info}')
     _safe_print(f'         Total information: {checker.total_info_found}')
-    _safe_print(f'Total unverified: {checker.total_unverified_refs}')
+    total_unverified = max(checker.total_unverified_refs, flagged_count)
+    _safe_print(f'Total unverified: {total_unverified}')
     if flagged_count > 0:
         _safe_print(f'🚩 Total likely hallucinated: {flagged_count}')
     if checker.used_unreliable_extraction and checker.total_errors_found > 5:
