@@ -2633,48 +2633,10 @@ class ArxivReferenceChecker:
             - url: URL of the paper if found, None otherwise
             - verified_data: The verified paper data from the verification service, None if not found
         """
-        # Check if reference authors contains "URL Reference" marker
-        if reference.get('authors') and "URL Reference" in reference.get('authors', []):
-            # Skip verification for URL references
-            return None, None, None
-        
-        # Route all references through the same non-arxiv path for consistent verification
-        
-        # Use the standard reference verification (handles local DB + API fallbacks via hybrid checker)
-        errors, paper_url, verified_data = self.verify_reference_standard(source_paper, reference)
-        
-        # If the DB/S2 returned a match but the authors are catastrophically
-        # wrong (0% overlap), the DB likely matched the wrong paper.  When
-        # the reference (or the matched paper) carries an ArXiv ID, re-verify
-        # directly against ArXiv — the canonical source of truth.
-        if errors and verified_data is not None:
-            arxiv_errors, arxiv_url, arxiv_data = self._try_arxiv_re_verify(
-                errors, paper_url, verified_data, reference
-            )
-            if arxiv_data is not None:
-                errors, paper_url, verified_data = arxiv_errors, arxiv_url, arxiv_data
-        
-        # If standard verification failed and the reference has a URL, try raw URL verification
-        if errors and verified_data is None:
-            # Check if there's an unverified error
-            unverified_errors = [e for e in errors if e.get('error_type') == 'unverified']
-            if unverified_errors and reference.get('url', '').strip():
-                # Use raw URL verifier to check if it can be verified or get specific reason
-                url_verified_data, url_errors, url_checked = self.verify_raw_url_reference(reference)
-                if url_verified_data:
-                    # URL verification succeeded - return as verified
-                    logger.debug(f"Non-database mode: URL verification succeeded for unverified reference")
-                    return None, url_checked, url_verified_data
-                else:
-                    # URL verification failed - use specific error reason
-                    url_error_details = url_errors[0].get('error_details', 'Reference could not be verified') if url_errors else 'Reference could not be verified'
-                    # Update the unverified error with the specific reason
-                    for error in errors:
-                        if error.get('error_type') == 'unverified':
-                            error['error_details'] = url_error_details
-                            break
-        
-        return errors, paper_url, verified_data
+        # All verification logic (ArXiv ID checks, re-verification, URL
+        # fallbacks) is inside the hybrid checker so every code path gets
+        # identical results.
+        return self.verify_reference_standard(source_paper, reference)
 
     # ------------------------------------------------------------------
     # ArXiv re-verification fallback for wrong DB matches
@@ -2948,128 +2910,23 @@ class ArxivReferenceChecker:
             return None, [{"error_type": "unverified", "error_details": "Reference could not be verified"}], web_url
 
     def verify_reference_standard(self, source_paper, reference):
+        """Verify a reference via the hybrid checker.
+
+        Thin pass-through — all verification logic (including ArXiv ID
+        checks, re-verification, and URL fallbacks) lives in the hybrid
+        checker so CLI, WebUI, and bulk paths get identical results.
         """
-        Verify if a reference is accurate using GitHub, Semantic Scholar, or other checkers
-        
-        Args:
-            source_paper: The paper containing the reference
-            reference: The reference to verify
-            
-        Returns:
-            Tuple of (errors, url, verified_data) where:
-            - errors: List of errors or None if no errors found
-            - url: URL of the paper if found, None otherwise
-            - verified_data: The verified paper data from the verification service, None if not found
-        """
-        logger.debug(f"Verifying non-arXiv reference: {reference.get('title', 'Untitled')}")
-        
-        # First, check if this is a GitHub repository reference
+        # GitHub references bypass the hybrid checker
         github_result = self.verify_github_reference(reference)
         if github_result:
             return github_result
-        
-        # Use the Semantic Scholar client to verify the reference
+
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
-        
-        logger.debug(f"Non-arXiv verification result: verified_data={verified_data is not None}, errors={len(errors) if errors else 0}, paper_url={paper_url}")
-        
-        # Check for ArXiv ID mismatch, but skip if the checker already reported one
-        already_has_arxiv_error = any(
-            e.get('error_type') == 'arxiv_id' for e in (errors or [])
-        )
-        arxiv_errors = (
-            self.check_independent_arxiv_id_mismatch(reference, verified_data)
-            if not already_has_arxiv_error else []
-        )
-        
-        if not verified_data:
-            logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
-            logger.debug(f"Raw text: {reference['raw_text']}")
-            
-            # If there's also an ArXiv ID mismatch, report both errors
-            if arxiv_errors:
-                logger.debug("ArXiv ID mismatch detected with unverified paper")
-                combined_errors = [
-                    {"error_type": "unverified", "error_details": "Reference could not be verified"},
-                    *arxiv_errors
-                ]
-                return combined_errors, paper_url, verified_data
-            else:
-                # Only unverified error
-                return [{"error_type": "unverified", "error_details": "Reference could not be verified"}], paper_url, verified_data
-        
-        # verified_data exists, check if there's an ArXiv ID mismatch
-        if arxiv_errors:
-            logger.debug("ArXiv ID mismatch detected with verified paper")
-            
-            # Check if the verified paper has any displayable URLs after ArXiv ID filtering
-            has_displayable_verified_url = False
-            if verified_data:
-                external_ids = verified_data.get('externalIds', {})
-                # Check for non-ArXiv URLs that would be displayed
-                if (external_ids.get('DOI') or 
-                    external_ids.get('CorpusId') or 
-                    (verified_data.get('url') and 'arxiv.org' not in verified_data.get('url', ''))):
-                    has_displayable_verified_url = True
-            
-            if has_displayable_verified_url:
-                # Paper has other verification URLs to display, combine ArXiv ID error with original verification errors
-                combined_errors = (errors or []) + arxiv_errors
-                errors = combined_errors
-                logger.debug("ArXiv ID mismatch error for verified paper with displayable URLs")
-            else:
-                # Paper only has ArXiv URLs which will be filtered out, treat as unverified
-                logger.debug("Verified paper has only ArXiv URLs - treating as unverified due to ArXiv ID mismatch")
-                combined_errors = [
-                    {"error_type": "unverified", "error_details": "Reference could not be verified"},
-                    *arxiv_errors
-                ]
-                errors = combined_errors
-            
-            # Don't use the wrong paper's URL - return None to indicate no valid URL
-            paper_url = None
-            logger.debug("Setting paper_url to None due to ArXiv ID mismatch")
-        elif errors:
-            # Only keep other errors if there's no ArXiv ID mismatch
-            logger.debug("No ArXiv ID mismatch, keeping original verification errors")
-            pass
-        
-        # If no errors were found by the Semantic Scholar client, we're done
+
         if not errors:
             return None, paper_url, verified_data
-        
-        # Convert the errors to our format
-        formatted_errors = []
-        
-        logger.debug(f"DEBUG: Converting {len(errors)} errors to formatted errors")
-        for i, error in enumerate(errors):
-            logger.debug(f"DEBUG: Error {i}: {error}")
-            formatted_error = {}
-            
-            # Handle error_type, warning_type, and info_type properly
-            if 'error_type' in error:
-                formatted_error['error_type'] = error['error_type']
-                formatted_error['error_details'] = error['error_details']
-            elif 'warning_type' in error:
-                formatted_error['warning_type'] = error['warning_type']
-                formatted_error['warning_details'] = error['warning_details']
-            elif 'info_type' in error:
-                formatted_error['info_type'] = error['info_type']
-                formatted_error['info_details'] = error['info_details']
-            
-            # Add correct information based on error type
-            if error.get('error_type') == 'author':
-                formatted_error['ref_authors_correct'] = error.get('ref_authors_correct', '')
-            elif error.get('error_type') == 'year' or error.get('warning_type') == 'year':
-                formatted_error['ref_year_correct'] = error.get('ref_year_correct', '')
-            elif error.get('error_type') == 'doi':
-                from refchecker.utils.doi_utils import construct_doi_url
-                formatted_error['ref_url_correct'] = construct_doi_url(error.get('ref_doi_correct', ''))
-            
-            formatted_errors.append(formatted_error)
-        
-        logger.debug(f"DEBUG: Returning {len(formatted_errors)} formatted errors: {formatted_errors}")
-        return formatted_errors if formatted_errors else None, paper_url, verified_data
+
+        return errors, paper_url, verified_data
     
     def check_independent_arxiv_id_mismatch(self, reference, verified_data):
         """
@@ -3364,9 +3221,11 @@ class ArxivReferenceChecker:
             # Keep original per-error dicts for faithful CLI display in bulk mode
             consolidated_entry['_original_errors'] = list(errors)
             
-            # Add verified URL if available
+            # Add verified URL if available (from reference_url or verified_data)
             if reference_url:
                 consolidated_entry['ref_verified_url'] = reference_url
+            elif verified_data:
+                consolidated_entry['ref_verified_url'] = self._extract_verified_url(verified_data)
             
             # Generate corrected reference using all available corrections
             corrected_data = self._extract_corrected_data_from_error(consolidated_entry, verified_data)
@@ -3440,9 +3299,11 @@ class ArxivReferenceChecker:
             if 'sources_negative' in error:
                 error_entry['sources_negative'] = error['sources_negative']
             
-            # Add verified URL if available (from verification service)
+            # Add verified URL if available (from verification service or verified_data)
             if reference_url:
                 error_entry['ref_verified_url'] = reference_url
+            elif verified_data:
+                error_entry['ref_verified_url'] = self._extract_verified_url(verified_data)
             
             # Add standard format using the correct information (only for non-unverified errors)
             if error_type != 'unverified':
@@ -6584,10 +6445,7 @@ class ArxivReferenceChecker:
         elif error_entry_record is not None:
             target_record = error_entry_record
 
-        has_arxiv_mismatch = any(
-            e.get('error_type') == 'arxiv_id' for e in (errors or [])
-        )
-        verified_url = '' if has_arxiv_mismatch else self._extract_verified_url(verified_data)
+        verified_url = self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             return
@@ -6668,12 +6526,7 @@ class ArxivReferenceChecker:
             build_hallucination_error_entry, run_hallucination_check,
         )
 
-        # Don't trust verified_data when the ArXiv ID points to a different paper —
-        # the verified_data comes from the wrong paper's lookup.
-        has_arxiv_mismatch = any(
-            e.get('error_type') == 'arxiv_id' for e in (errors or [])
-        )
-        verified_url = '' if has_arxiv_mismatch else self._extract_verified_url(verified_data)
+        verified_url = self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             logger.debug("Hallucination skip (no real errors): %s", reference.get('title', '')[:60])

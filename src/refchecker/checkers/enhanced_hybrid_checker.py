@@ -581,19 +581,193 @@ class EnhancedHybridReferenceChecker:
             incomplete['openalex'] = last_openalex_result
         return None, incomplete
 
+    # ------------------------------------------------------------------
+    # Post-verification checks (shared by CLI, WebUI, and bulk paths)
+    # ------------------------------------------------------------------
+
+    def _check_arxiv_id_mismatch(self, reference: Dict[str, Any],
+                                  verified_data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Check if the cited ArXiv ID actually points to the cited paper.
+
+        Returns a list of errors (arxiv_id or title type) if there's a
+        mismatch, or an empty list if the ID is correct or absent.
+        """
+        from refchecker.utils.url_utils import extract_arxiv_id_from_url
+        from refchecker.utils.text_utils import calculate_title_similarity, compare_authors
+
+        ref_arxiv_id = None
+        if reference.get('url') and 'arxiv.org/abs/' in reference['url']:
+            ref_arxiv_id = extract_arxiv_id_from_url(reference['url'])
+        if not ref_arxiv_id and reference.get('venue'):
+            ref_arxiv_id = extract_arxiv_id_from_url(reference['venue'])
+        if not ref_arxiv_id:
+            return []
+
+        # Look up what the ArXiv ID actually points to
+        actual_paper = None
+        if self.arxiv_citation:
+            try:
+                actual_data, _, _ = self.arxiv_citation.verify_reference(
+                    {'url': f'https://arxiv.org/abs/{ref_arxiv_id}',
+                     'title': '', 'authors': [], 'raw_text': ''}
+                )
+                if actual_data:
+                    actual_paper = actual_data
+            except Exception:
+                pass
+
+        # Check verified_data for ArXiv ID mismatch
+        if verified_data:
+            ext = verified_data.get('externalIds', {})
+            correct_id = ext.get('ArXiv') or ext.get('arxiv')
+            if correct_id and ref_arxiv_id != correct_id:
+                return [{'error_type': 'arxiv_id',
+                         'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} should be {correct_id}"}]
+
+        if not actual_paper:
+            return []
+
+        expected_title = reference.get('title', '').strip()
+        if not expected_title:
+            return []
+
+        actual_title = actual_paper.get('title', '')
+        title_sim = calculate_title_similarity(expected_title.lower(), actual_title.lower())
+
+        if title_sim < 0.4:
+            # Titles very different — check authors to distinguish wrong ID vs inaccurate title
+            expected_authors = reference.get('authors', [])
+            actual_authors_raw = actual_paper.get('authors', [])
+            actual_author_names = [
+                a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                for a in actual_authors_raw
+            ]
+            authors_match = False
+            if expected_authors and actual_author_names:
+                try:
+                    authors_match, _ = compare_authors(expected_authors, actual_author_names)
+                except Exception:
+                    pass
+            if authors_match:
+                return [{'error_type': 'title',
+                         'error_details': f"Inaccurate title: cited as '{expected_title}' but ArXiv paper is titled '{actual_title}'"}]
+            else:
+                return [{'error_type': 'arxiv_id',
+                         'error_details': f"Incorrect ArXiv ID: ArXiv ID {ref_arxiv_id} points to '{actual_title}'"}]
+        return []
+
+    def _try_arxiv_re_verify(self, errors: List[Dict[str, Any]],
+                              verified_data: Optional[Dict[str, Any]],
+                              reference: Dict[str, Any]) -> Optional[Tuple]:
+        """Re-verify against ArXiv when the DB likely matched the wrong paper.
+
+        Triggers when there's an author error with ≤10% overlap (catastrophic
+        mismatch). Returns (errors, url, verified_data) on success, or None.
+        """
+        author_err = next(
+            (e for e in errors if (e.get('error_type') or '').lower() == 'author'),
+            None,
+        )
+        if author_err is None:
+            return None
+
+        cited_authors = author_err.get('ref_authors_cited', '')
+        correct_authors = author_err.get('ref_authors_correct', '')
+        if not cited_authors:
+            ref_authors = reference.get('authors', [])
+            cited_authors = ', '.join(
+                a.get('name', a) if isinstance(a, dict) else str(a)
+                for a in ref_authors
+            ) if isinstance(ref_authors, list) else str(ref_authors)
+        if not cited_authors or not correct_authors:
+            return None
+
+        from refchecker.core.hallucination_policy import _compute_author_overlap
+        overlap = _compute_author_overlap(cited_authors, correct_authors)
+        if overlap is None or overlap > 0.1:
+            return None
+
+        logger.debug(
+            "DB match has catastrophic author mismatch (%.0f%% overlap) — "
+            "attempting ArXiv re-verification for '%s'",
+            overlap * 100, reference.get('title', '')[:60],
+        )
+
+        if not self.arxiv_citation:
+            return None
+
+        arxiv_id = None
+        try:
+            arxiv_id, _ = self.arxiv_citation.extract_arxiv_id(reference)
+        except Exception:
+            pass
+        if not arxiv_id and verified_data:
+            ext = verified_data.get('externalIds') or {}
+            arxiv_id = ext.get('ArXiv') or ext.get('arxiv') or None
+
+        if not arxiv_id:
+            return None
+
+        try:
+            arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(reference)
+            if arxiv_data is not None:
+                logger.debug("ArXiv re-verification succeeded for %s", arxiv_id)
+                return arxiv_errors or [], arxiv_url, arxiv_data
+        except Exception as exc:
+            logger.debug("ArXiv re-verification failed: %s", exc)
+
+        return None
+
+    def _postprocess_verification(
+        self,
+        verified_data: Optional[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        url: Optional[str],
+        reference: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """Apply post-verification checks shared by all code paths.
+
+        1. ArXiv re-verification for catastrophic author mismatches
+        2. Independent ArXiv ID mismatch check
+        3. Error formatting
+
+        Called at the end of verify_reference() so CLI, WebUI, and bulk
+        all get identical results.
+        """
+        # 1. ArXiv re-verify when the DB matched the wrong paper
+        if errors and verified_data is not None:
+            re_result = self._try_arxiv_re_verify(errors, verified_data, reference)
+            if re_result is not None:
+                errors, url, verified_data = re_result
+
+        # 2. Independent ArXiv ID check — skip when the hybrid checker
+        #    already verified the paper with no errors (avoids false
+        #    positives from paraphrased titles in the S2 API)
+        if errors is not None:  # only when there are existing errors
+            already_has_arxiv = any(e.get('error_type') == 'arxiv_id' for e in errors)
+            if not already_has_arxiv:
+                arxiv_errors = self._check_arxiv_id_mismatch(reference, verified_data)
+                if arxiv_errors:
+                    errors = (errors or []) + arxiv_errors
+
+        return verified_data, errors or [], url
+
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """Verify a reference and apply post-processing checks.
+
+        This is the single entry point used by CLI, WebUI, and bulk paths.
+        All verification logic lives here so every mode gets identical results.
         """
-        Verify a non-arXiv reference using multiple APIs in parallel.
-        
-        Phase 1 fires independent APIs concurrently to minimize wall-clock time.
-        Phase 2 retries any transient failures sequentially.
-        
-        Args:
-            reference: Reference data dictionary
-            
-        Returns:
-            Tuple of (verified_data, errors, url)
-        """
+        verified_data, errors, url = self._verify_reference_core(reference)
+
+        # Post-process: ArXiv re-verify, independent ArXiv ID check
+        verified_data, errors, url = self._postprocess_verification(
+            verified_data, errors, url, reference,
+        )
+        return verified_data, errors, url
+
+    def _verify_reference_core(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """Core verification logic — parallel API calls + retries + fallbacks."""
         # Check if this is a URL-only reference (should skip verification)
         authors = reference.get('authors', [])
         if authors and "URL Reference" in authors:

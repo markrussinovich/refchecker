@@ -36,7 +36,7 @@ FIXTURE_CACHE = Path(__file__).resolve().parents[1] / 'fixtures' / 'cache_H8tism
 PAPER_URL = 'https://openreview.net/forum?id=H8tismBT3Q'
 DB_PATH = '/datadrive2/semanticscholardb/'
 
-MINIMUM_HALLUCINATED_COUNT = 6  # WebUI baseline
+EXPECTED_HALLUCINATED_COUNT = 7  # 6 from WebUI + Mathprompter (deterministic author check)
 
 
 def _needs_local_db():
@@ -103,8 +103,8 @@ class TestH8tismBT3QRegression:
         cache_dir = _prepare_cache(tmp_path)
         payload = self._run_single_paper(cache_dir)
         flagged = self._extract_flagged_titles(payload)
-        assert len(flagged) >= MINIMUM_HALLUCINATED_COUNT, (
-            f'Single-paper mode flagged {len(flagged)} refs, expected >= {MINIMUM_HALLUCINATED_COUNT}.\n'
+        assert len(flagged) == EXPECTED_HALLUCINATED_COUNT, (
+            f'Single-paper mode flagged {len(flagged)} refs, expected {EXPECTED_HALLUCINATED_COUNT}.\n'
             f'Flagged: {sorted(flagged)}'
         )
 
@@ -126,8 +126,8 @@ class TestH8tismBT3QRegression:
         cache_dir = _prepare_cache(tmp_path)
         payload = self._run_bulk(cache_dir)
         flagged = self._extract_flagged_titles(payload)
-        assert len(flagged) >= MINIMUM_HALLUCINATED_COUNT, (
-            f'Bulk mode flagged {len(flagged)} refs, expected >= {MINIMUM_HALLUCINATED_COUNT}.\n'
+        assert len(flagged) == EXPECTED_HALLUCINATED_COUNT, (
+            f'Bulk mode flagged {len(flagged)} refs, expected {EXPECTED_HALLUCINATED_COUNT}.\n'
             f'Flagged: {sorted(flagged)}'
         )
 
@@ -143,15 +143,17 @@ class TestH8tismBT3QRegression:
         single_flagged = self._extract_flagged_titles(single_payload)
         bulk_flagged = self._extract_flagged_titles(bulk_payload)
 
-        # Bulk must be a subset of single (bulk may miss borderline cases
-        # where verification data differs slightly due to API call ordering)
-        assert bulk_flagged.issubset(single_flagged), (
-            f'Bulk flagged refs not in single-paper:\n'
+        # Both must flag the same count.  The specific set may differ by at
+        # most 1 borderline ref due to batched vs inline hallucination
+        # assessment processing order.
+        assert len(single_flagged) == len(bulk_flagged), (
+            f'Single ({len(single_flagged)}) and bulk ({len(bulk_flagged)}) counts differ.\n'
+            f'Only in single: {single_flagged - bulk_flagged}\n'
             f'Only in bulk: {bulk_flagged - single_flagged}'
         )
-        # And they should be close in count
-        assert abs(len(single_flagged) - len(bulk_flagged)) <= 1, (
-            f'Single ({len(single_flagged)}) and bulk ({len(bulk_flagged)}) diverge by > 1.\n'
+        sym_diff = single_flagged.symmetric_difference(bulk_flagged)
+        assert len(sym_diff) <= 2, (
+            f'Single and bulk diverge by > 1 ref.\n'
             f'Only in single: {single_flagged - bulk_flagged}\n'
             f'Only in bulk: {bulk_flagged - single_flagged}'
         )

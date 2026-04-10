@@ -37,7 +37,7 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
 })
 
 _AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match (unverified refs)
-_AUTHOR_VERIFIED_THRESHOLD = 0.2  # Stricter: flag if < 20% match (verified refs)
+_AUTHOR_VERIFIED_THRESHOLD = 0.3  # Stricter: flag if < 30% match (verified refs)
 
 # Team/organisation names that appear as first "author" in large collaborative
 # papers.  These are stripped before computing author overlap because the DB
@@ -144,6 +144,12 @@ def build_hallucination_error_entry(
         return None
 
     consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
+
+    # When there's an ArXiv ID mismatch, the verification matched a wrong
+    # paper — don't trust its author data for deterministic hallucination checks.
+    has_arxiv_mismatch = any(et == 'arxiv_id' for et in error_types)
+    if has_arxiv_mismatch:
+        authors_correct = None
 
     error_entry: Dict[str, Any] = {
         'error_type': consolidated_type,
@@ -322,7 +328,7 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
         return None
 
     # For verified references, use a stricter threshold: only flag when
-    # author overlap is critically low (< 20%), indicating the LLM found
+    # author overlap is critically low (< 30%), indicating the LLM found
     # a real title but fabricated the authors.
     threshold = _AUTHOR_VERIFIED_THRESHOLD if is_verified else _AUTHOR_MATCH_THRESHOLD
     if overlap < threshold:
@@ -426,6 +432,12 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
         return False
 
     if error_type in {'year', 'venue'}:
+        return False
+
+    # Title-only errors on verified refs mean the paper was found but has
+    # a slightly different title (e.g. paraphrase in Semantic Scholar).
+    # This is a metadata quality issue, not hallucination.
+    if error_type == 'title' and error_entry.get('ref_verified_url'):
         return False
 
     # "url references paper" cases are now passed to the LLM for validation.

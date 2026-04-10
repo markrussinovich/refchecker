@@ -1482,13 +1482,9 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
     for error_entry in checker.errors:
         # Rebuild the error entry via the shared function so suggestions/info
         # are filtered out — identical to WebUI and CLI paths.
-        raw_errors = error_entry.get('_original_errors') or []
         reference = error_entry.get('original_reference') or {}
-        # Don't trust verified_url when the ArXiv ID points to a different paper
-        has_arxiv_mismatch = any(
-            e.get('error_type') == 'arxiv_id' for e in raw_errors
-        )
-        verified_url = '' if has_arxiv_mismatch else error_entry.get('ref_verified_url', '')
+        raw_errors = error_entry.get('_original_errors') or []
+        verified_url = error_entry.get('ref_verified_url', '')
         filtered = build_hallucination_error_entry(raw_errors, reference, verified_url=verified_url)
         if filtered is None:
             continue
