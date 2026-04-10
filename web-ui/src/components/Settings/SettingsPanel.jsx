@@ -619,8 +619,8 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           backgroundColor: 'var(--color-bg-secondary)',
           width: '680px',
           maxWidth: '90vw',
-          height: '520px',
-          maxHeight: '85vh',
+          height: '620px',
+          maxHeight: '95vh',
         }}
       >
         {/* Left Navigation */}

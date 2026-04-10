@@ -344,7 +344,8 @@ class ArxivReferenceChecker:
             contact_email=None,
             enable_openalex=True,
             enable_crossref=True,
-            debug_mode=debug_mode
+            debug_mode=debug_mode,
+            cache_dir=cache_dir,
         )
         if db_path:
             self.service_order = "Local S2 DB → Semantic Scholar API → OpenAlex → CrossRef"
@@ -903,25 +904,41 @@ class ArxivReferenceChecker:
     def get_paper_metadata_from_semantic_scholar(self, arxiv_id):
         """
         Get paper metadata from Semantic Scholar API
-        
+
         Args:
             arxiv_id: arXiv ID of the paper
-            
+
         Returns:
             MockArxivPaper object or None if not found
         """
         try:
             import requests
-            
-            url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}"
-            params = {
-                'fields': 'title,authors,year,externalIds,abstract,url'
-            }
-            
-            response = requests.get(url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
+            from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+
+            # Check API cache
+            cached = cached_api_response(self.cache_dir, 'semantic_scholar', 'paper_metadata', arxiv_id)
+            if cached is not None:
+                data = cached
+            else:
+                url = f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}"
+                params = {
+                    'fields': 'title,authors,year,externalIds,abstract,url'
+                }
+
+                response = requests.get(url, params=params, timeout=10)
+
+                if response.status_code == 200:
+                    data = response.json()
+                    cache_api_response(self.cache_dir, 'semantic_scholar', 'paper_metadata', arxiv_id, data)
+                elif response.status_code == 429:
+                    self._api_performance['semantic_scholar']['rate_limited'] += 1
+                    logger.debug(f"Rate limited by Semantic Scholar API for {arxiv_id}")
+                    return None
+                else:
+                    self._api_performance['semantic_scholar']['failed'] += 1
+                    return None
+
+            if data:
                 
                 # Create a mock arXiv paper object from Semantic Scholar data
                 class MockArxivPaper:
@@ -966,16 +983,9 @@ class ArxivReferenceChecker:
                         return self.__str__()
                 
                 return MockArxivPaper(data, arxiv_id)
-                
-            elif response.status_code == 429:
-                self._api_performance['semantic_scholar']['rate_limited'] += 1
-                logger.debug(f"Rate limited by Semantic Scholar API for {arxiv_id}")
-                return None
-            else:
-                self._api_performance['semantic_scholar']['failed'] += 1
-                logger.debug(f"Semantic Scholar API returned status {response.status_code} for {arxiv_id}")
-                return None
-                
+
+            return None
+
         except requests.exceptions.RequestException as e:
             self._api_performance['semantic_scholar']['failed'] += 1
             logger.warning(f"Error fetching from Semantic Scholar API for {arxiv_id}: {str(e)}")

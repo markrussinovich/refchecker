@@ -394,15 +394,15 @@ class OpenReviewReferenceChecker:
         return self.list_conference_papers(venue_spec, status='accepted', max_results=max_results)
     
     def get_paper_metadata(self, paper_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get paper metadata from OpenReview
-        
-        Args:
-            paper_id: OpenReview paper ID
-            
-        Returns:
-            Paper metadata dictionary or None if not found
-        """
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'openreview', 'get_metadata', paper_id)
+        if hit is not None:
+            return hit
+        result = self._get_paper_metadata_uncached(paper_id)
+        cache_api_response(getattr(self, 'cache_dir', None), 'openreview', 'get_metadata', paper_id, result)
+        return result
+
+    def _get_paper_metadata_uncached(self, paper_id: str) -> Optional[Dict[str, Any]]:
         # Try API endpoints (v2 first, then v1)
         for api_base in (self.api_v2_url, self.api_url):
             api_url = f"{api_base}/notes?id={paper_id}"

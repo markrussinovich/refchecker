@@ -58,13 +58,14 @@ class EnhancedHybridReferenceChecker:
                 logger.warning(log_message)
             return None
     
-    def __init__(self, semantic_scholar_api_key: Optional[str] = None, 
+    def __init__(self, semantic_scholar_api_key: Optional[str] = None,
                  db_path: Optional[str] = None,
                  contact_email: Optional[str] = None,
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
-                 debug_mode: bool = False):
+                 debug_mode: bool = False,
+                 cache_dir: Optional[str] = None):
         """
         Initialize the enhanced hybrid reference checker
         
@@ -132,7 +133,14 @@ class EnhancedHybridReferenceChecker:
         )
         
         # Google Scholar removed - using more reliable APIs only
-        
+
+        # Propagate cache_dir to all sub-checkers for API response caching
+        self.cache_dir = cache_dir
+        for checker in (self.arxiv_citation, self.local_db, self.semantic_scholar,
+                        self.openalex, self.crossref, self.openreview, self.dblp):
+            if checker is not None:
+                checker.cache_dir = cache_dir
+
         # Track API performance for adaptive selection
         self.api_stats = {
             'arxiv_citation': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},

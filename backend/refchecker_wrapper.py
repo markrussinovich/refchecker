@@ -205,7 +205,8 @@ class ProgressRefChecker:
         self.checker = EnhancedHybridReferenceChecker(
             semantic_scholar_api_key=ss_api_key,
             db_path=db_path,
-            debug_mode=False
+            debug_mode=False,
+            cache_dir=cache_dir,
         )
         if db_path:
             logger.info(f"Using local Semantic Scholar database at {db_path}")

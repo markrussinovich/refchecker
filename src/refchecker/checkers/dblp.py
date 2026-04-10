@@ -65,6 +65,16 @@ class DBLPReferenceChecker:
             time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
 
     def _search(self, query: str, max_hits: int = 5) -> List[Dict[str, Any]]:
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        cache_q = f"{query}|{max_hits}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'dblp', 'search', cache_q)
+        if hit is not None:
+            return hit
+        result = self._search_uncached(query, max_hits)
+        cache_api_response(getattr(self, 'cache_dir', None), 'dblp', 'search', cache_q, result)
+        return result
+
+    def _search_uncached(self, query: str, max_hits: int = 5) -> List[Dict[str, Any]]:
         self._throttle()
         params = {
             'q': query,

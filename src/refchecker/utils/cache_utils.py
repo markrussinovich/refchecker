@@ -246,3 +246,63 @@ def cache_llm_response(cache_dir: Optional[str], model: str, *prompt_parts: str,
         return
     key = _llm_cache_key(model, *prompt_parts)
     save_cached_llm_response(cache_dir, key, response)
+
+
+# ---------------------------------------------------------------------------
+# External API response cache (Semantic Scholar, CrossRef, OpenAlex, etc.)
+# ---------------------------------------------------------------------------
+
+def _api_cache_key(service: str, method: str, query: str) -> str:
+    """Derive a hex digest from service + method + exact query string."""
+    h = hashlib.sha256()
+    h.update(service.encode())
+    h.update(b'\x00')
+    h.update(method.encode())
+    h.update(b'\x00')
+    h.update(query.encode())
+    return h.hexdigest()
+
+
+def cached_api_response(cache_dir: Optional[str], service: str, method: str, query: str) -> Optional[Any]:
+    """Return a cached API response, or None on miss/disabled.
+
+    Parameters
+    ----------
+    cache_dir : str or None
+        Root cache directory (None disables caching).
+    service : str
+        Service name (e.g. ``'semantic_scholar'``, ``'crossref'``).
+    method : str
+        Method name (e.g. ``'search_paper'``, ``'get_by_doi'``).
+    query : str
+        Exact query string — cache only hits on exact match.
+    """
+    if not cache_dir:
+        return None
+    key = _api_cache_key(service, method, query)
+    path = os.path.join(cache_dir, 'api_cache', service, f'{key}.json')
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        logger.debug("API cache hit: %s/%s %s", service, method, key[:12])
+        return data
+    except Exception as exc:
+        logger.debug("API cache read error for %s: %s", key[:12], exc)
+    return None
+
+
+def cache_api_response(cache_dir: Optional[str], service: str, method: str, query: str, response: Any) -> None:
+    """Save an API response (no-op when caching is disabled or response is None)."""
+    if not cache_dir or response is None:
+        return
+    key = _api_cache_key(service, method, query)
+    resp_dir = os.path.join(cache_dir, 'api_cache', service)
+    os.makedirs(resp_dir, exist_ok=True)
+    path = os.path.join(resp_dir, f'{key}.json')
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(response, f, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("Failed to write API cache %s: %s", key[:12], exc)

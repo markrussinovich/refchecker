@@ -84,13 +84,25 @@ class NonArxivReferenceChecker:
     def search_paper(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Search for papers matching the query
-        
+
         Args:
             query: Search query (title, authors, etc.)
             year: Publication year to filter by
-            
+
         Returns:
             List of paper data dictionaries
+        """
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        cache_q = f"{query}|{year}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'search_paper', cache_q)
+        if hit is not None:
+            return hit
+        result = self._search_paper_uncached(query, year)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'search_paper', cache_q, result)
+        return result
+
+    def _search_paper_uncached(self, query: str, year: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
         """
         endpoint = f"{self.base_url}/paper/search"
         
@@ -136,15 +148,15 @@ class NonArxivReferenceChecker:
         return []
     
     def get_paper_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
-        """
-        Get paper data by DOI
-        
-        Args:
-            doi: DOI of the paper
-            
-        Returns:
-            Paper data dictionary or None if not found
-        """
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_doi', doi)
+        if hit is not None:
+            return hit
+        result = self._get_paper_by_doi_uncached(doi)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_doi', doi, result)
+        return result
+
+    def _get_paper_by_doi_uncached(self, doi: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/DOI:{doi}"
         
         params = {
@@ -186,13 +198,16 @@ class NonArxivReferenceChecker:
         return None
 
     def get_paper_by_arxiv_id(self, arxiv_id: str) -> Optional[Dict[str, Any]]:
-        """Get paper data by ArXiv ID using the direct /paper/ARXIV:xxx endpoint.
-
-        This is faster than searching by title or using the ArXiv search query
-        because it's a direct ID lookup (no ranking, no pagination).
-        """
-        # Strip version suffix for SS lookup
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         clean_id = re.sub(r'v\d+$', '', arxiv_id.strip().rstrip('.'))
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_arxiv', clean_id)
+        if hit is not None:
+            return hit
+        result = self._get_paper_by_arxiv_id_uncached(clean_id)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'get_by_arxiv', clean_id, result)
+        return result
+
+    def _get_paper_by_arxiv_id_uncached(self, clean_id: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/ARXIV:{clean_id}"
         params = {
             "fields": "title,authors,year,externalIds,url,abstract,openAccessPdf,isOpenAccess,venue,publicationVenue,journal"
@@ -218,12 +233,15 @@ class NonArxivReferenceChecker:
         return None
 
     def match_paper_by_title(self, title: str) -> Optional[Dict[str, Any]]:
-        """Look up a paper using the /paper/search/match title-match endpoint.
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'match_title', title)
+        if hit is not None:
+            return hit
+        result = self._match_paper_by_title_uncached(title)
+        cache_api_response(getattr(self, 'cache_dir', None), 'semantic_scholar', 'match_title', title, result)
+        return result
 
-        Returns the best matching paper if the match score is sufficiently high,
-        or None.  This endpoint is ~25% faster than the relevance search endpoint
-        for exact-title lookups and doesn't consume the search rate-limit budget.
-        """
+    def _match_paper_by_title_uncached(self, title: str) -> Optional[Dict[str, Any]]:
         endpoint = f"{self.base_url}/paper/search/match"
         params = {
             "query": title,

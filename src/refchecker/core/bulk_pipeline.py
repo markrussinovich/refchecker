@@ -1548,7 +1548,7 @@ def _print_bulk_final_summary(checker: Any) -> None:
     _safe_print(f'ℹ️  Papers with information: {checker.papers_with_info}')
     _safe_print(f'         Total information: {checker.total_info_found}')
     total_unverified = max(checker.total_unverified_refs, flagged_count)
-    _safe_print(f'Total unverified: {total_unverified}')
+    _safe_print(f'❓ Total unverified: {total_unverified}')
     if flagged_count > 0:
         _safe_print(f'🚩 Total likely hallucinated: {flagged_count}')
     if checker.used_unreliable_extraction and checker.total_errors_found > 5:

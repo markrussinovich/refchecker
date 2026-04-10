@@ -72,14 +72,17 @@ class OpenAlexReferenceChecker:
         self.backoff_factor = 2  # Exponential backoff factor
     
     def search_works(self, query: str, year: Optional[int] = None, limit: int = 5) -> List[Dict[str, Any]]:
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        cache_q = f"{query}|{year}|{limit}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'openalex', 'search_works', cache_q)
+        if hit is not None:
+            return hit
+        result = self._search_works_uncached(query, year, limit)
+        cache_api_response(getattr(self, 'cache_dir', None), 'openalex', 'search_works', cache_q, result)
+        return result
+
+    def _search_works_uncached(self, query: str, year: Optional[int] = None, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        Search for works matching the query
-        
-        Args:
-            query: Search query (title, authors, etc.)
-            year: Publication year to filter by
-            limit: Maximum number of results to return
-            
         Returns:
             List of work data dictionaries
         """
@@ -128,15 +131,15 @@ class OpenAlexReferenceChecker:
         return []
     
     def get_work_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
-        """
-        Get work data by DOI
-        
-        Args:
-            doi: DOI of the work
-            
-        Returns:
-            Work data dictionary or None if not found
-        """
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'openalex', 'get_by_doi', doi)
+        if hit is not None:
+            return hit
+        result = self._get_work_by_doi_uncached(doi)
+        cache_api_response(getattr(self, 'cache_dir', None), 'openalex', 'get_by_doi', doi, result)
+        return result
+
+    def _get_work_by_doi_uncached(self, doi: str) -> Optional[Dict[str, Any]]:
         # Clean DOI - remove any prefixes
         clean_doi = doi
         if doi.startswith('doi:'):
