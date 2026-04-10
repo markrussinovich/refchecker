@@ -422,8 +422,26 @@ class LLMHallucinationVerifier:
     def _call(self, system_prompt: str, user_prompt: str) -> tuple:
         """Call the configured LLM, using web search when available.
 
-        Returns (response_text, web_urls).
+        Returns (response_text, web_urls).  Results are cached when
+        ``self.cache_dir`` is set so repeated runs skip the LLM call.
         """
+        # Check cache
+        cache_dir = getattr(self, 'cache_dir', None)
+        if cache_dir:
+            from refchecker.utils.cache_utils import cached_llm_response, cache_llm_response
+            hit = cached_llm_response(cache_dir, self.model, system_prompt, user_prompt)
+            if hit is not None:
+                return hit['text'], hit.get('web_urls', [])
+
+        text, urls = self._call_uncached(system_prompt, user_prompt)
+
+        if cache_dir:
+            cache_llm_response(cache_dir, self.model, system_prompt, user_prompt,
+                               response={'text': text, 'web_urls': urls})
+        return text, urls
+
+    def _call_uncached(self, system_prompt: str, user_prompt: str) -> tuple:
+        """Actually call the LLM (no caching)."""
         if self.provider == 'anthropic':
             try:
                 return self._call_anthropic_with_web_search(system_prompt, user_prompt)

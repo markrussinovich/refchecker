@@ -301,6 +301,7 @@ class ArxivReferenceChecker:
                     endpoint=h_endpoint,
                 )
                 if verifier.available:
+                    verifier.cache_dir = self.cache_dir
                     llm_verifier = verifier
                     logger.debug('LLM hallucination verifier enabled (provider=%s)', verifier.provider)
                 else:
@@ -609,7 +610,10 @@ class ArxivReferenceChecker:
         if not llm_provider:
             logger.warning(f"Failed to create LLM provider: {provider_name}")
             return None
-        
+
+        # Propagate cache directory to the provider for LLM response caching
+        llm_provider.cache_dir = self.cache_dir
+
         # When LLM is explicitly requested, enable fallback so papers still
         # get processed even if LLM extraction occasionally fails.
         fallback_enabled = True

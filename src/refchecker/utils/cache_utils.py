@@ -189,3 +189,60 @@ def cache_pdf(cache_dir: Optional[str], input_spec: Optional[str], pdf_content: 
     if not cache_dir or not input_spec or not pdf_content:
         return
     save_cached_pdf(cache_dir, cache_key_for_spec(input_spec), pdf_content)
+
+
+# ---------------------------------------------------------------------------
+# LLM response cache
+# ---------------------------------------------------------------------------
+
+def _llm_cache_key(model: str, *prompt_parts: str) -> str:
+    """Derive a hex digest from the model name and all prompt parts."""
+    h = hashlib.sha256()
+    h.update(model.encode())
+    for part in prompt_parts:
+        h.update(part.encode())
+    return h.hexdigest()
+
+
+def load_cached_llm_response(cache_dir: str, key: str) -> Optional[Dict[str, Any]]:
+    """Return cached LLM response dict, or None on miss."""
+    path = os.path.join(cache_dir, 'llm_responses', f'{key}.json')
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            logger.debug("LLM cache hit: %s", key[:16])
+            return data
+    except Exception as exc:
+        logger.debug("LLM cache read error for %s: %s", key[:16], exc)
+    return None
+
+
+def save_cached_llm_response(cache_dir: str, key: str, response: Dict[str, Any]) -> None:
+    """Persist an LLM response dict to the cache."""
+    resp_dir = os.path.join(cache_dir, 'llm_responses')
+    os.makedirs(resp_dir, exist_ok=True)
+    path = os.path.join(resp_dir, f'{key}.json')
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(response, f, ensure_ascii=False)
+    except Exception as exc:
+        logger.warning("Failed to write LLM cache %s: %s", key[:16], exc)
+
+
+def cached_llm_response(cache_dir: Optional[str], model: str, *prompt_parts: str) -> Optional[Dict[str, Any]]:
+    """Return a cached LLM response, or None on miss/disabled."""
+    if not cache_dir:
+        return None
+    key = _llm_cache_key(model, *prompt_parts)
+    return load_cached_llm_response(cache_dir, key)
+
+
+def cache_llm_response(cache_dir: Optional[str], model: str, *prompt_parts: str, response: Dict[str, Any]) -> None:
+    """Save an LLM response (no-op when caching is disabled)."""
+    if not cache_dir:
+        return
+    key = _llm_cache_key(model, *prompt_parts)
+    save_cached_llm_response(cache_dir, key, response)

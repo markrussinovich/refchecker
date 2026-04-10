@@ -37,7 +37,23 @@ def _is_openai_reasoning_model(model: str) -> bool:
 
 class LLMProviderMixin:
     """Common functionality for all LLM providers"""
-    
+
+    # Set by the checker when --cache is used; None means disabled.
+    cache_dir: str = None
+
+    def _call_llm_cached(self, prompt: str) -> str:
+        """Wrapper around _call_llm that checks/saves the LLM response cache."""
+        if self.cache_dir:
+            from refchecker.utils.cache_utils import cached_llm_response, cache_llm_response
+            system = self._get_system_prompt()
+            hit = cached_llm_response(self.cache_dir, self.model, system, prompt)
+            if hit is not None:
+                return hit['text']
+            result = self._call_llm(prompt)
+            cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
+            return result
+        return self._call_llm(prompt)
+
     def _clean_bibtex_for_llm(self, bibliography_text: str) -> str:
         """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
         if not bibliography_text:

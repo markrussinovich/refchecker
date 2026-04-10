@@ -190,7 +190,7 @@ class LLMProvider(ABC):
         else:
             # Process normally for short bibliographies
             prompt = self._create_extraction_prompt(bibliography_text)
-            response_text = self._call_llm(prompt)
+            response_text = self._call_llm_cached(prompt)
             return self._parse_llm_response(response_text)
     
     def _process_chunks_parallel(self, chunks: List[str]) -> List[str]:
@@ -230,7 +230,7 @@ class LLMProvider(ABC):
             try:
                 logger.debug(f"Processing chunk {chunk_index + 1}/{len(chunks)}")
                 prompt = self._create_extraction_prompt(chunk_text)
-                response_text = self._call_llm(prompt)
+                response_text = self._call_llm_cached(prompt)
                 chunk_references = self._parse_llm_response(response_text)
                 logger.debug(f"Chunk {chunk_index + 1} extracted {len(chunk_references)} references")
                 return chunk_index, chunk_references
@@ -297,7 +297,7 @@ class LLMProvider(ABC):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
             try:
                 prompt = self._create_extraction_prompt(chunk)
-                response_text = self._call_llm(prompt)
+                response_text = self._call_llm_cached(prompt)
                 chunk_references = self._parse_llm_response(response_text)
                 all_references.extend(chunk_references)
                 logger.debug(f"Chunk {i+1} extracted {len(chunk_references)} references")
