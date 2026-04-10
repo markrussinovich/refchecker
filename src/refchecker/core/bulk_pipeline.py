@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import pre_screen_hallucination, run_hallucination_check
+from refchecker.core.hallucination_policy import build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.biblatex_parser import detect_biblatex_format
 from refchecker.utils.bibtex_parser import detect_bibtex_format
@@ -697,6 +697,7 @@ class _BulkCheckerConfig:
     enable_parallel: bool
     max_workers: int
     report_format: str
+    cache_dir: Optional[str]
 
     @classmethod
     def from_checker(cls, checker: Any) -> '_BulkCheckerConfig':
@@ -709,6 +710,7 @@ class _BulkCheckerConfig:
             enable_parallel=getattr(checker, 'enable_parallel', True),
             max_workers=getattr(checker, 'max_workers', 4),
             report_format=getattr(checker, 'report_format', 'json'),
+            cache_dir=getattr(checker, 'cache_dir', None),
         )
 
     def create_worker_checker(self) -> Any:
@@ -722,6 +724,7 @@ class _BulkCheckerConfig:
             max_workers=self.max_workers,
             report_file=None,
             report_format=self.report_format,
+            cache_dir=self.cache_dir,
         )
 
 
@@ -893,14 +896,23 @@ def _process_bulk_paper_job(
         else:
             paper = checker._create_local_file_paper(local_path)
 
+        paper._input_spec = job.input_spec
         paper_id = paper.get_short_id()
         title = getattr(paper, 'title', '') or paper_id or job.input_spec
         source_url = checker._get_source_paper_url(paper) if hasattr(checker, '_get_source_paper_url') else job.input_spec
 
         phase_times: Dict[str, float] = {}
         _t = time.perf_counter()
-        bibliography = extract_bibliography_bulk(checker, paper, debug_mode=debug_mode, extraction_batcher=extraction_batcher)
-        phase_times['extract_bib'] = time.perf_counter() - _t
+
+        # Check bibliography cache
+        from refchecker.utils.cache_utils import cached_bibliography, cache_bibliography
+        bibliography = cached_bibliography(checker.cache_dir, job.input_spec)
+        if bibliography is not None:
+            phase_times['extract_bib'] = time.perf_counter() - _t
+        else:
+            bibliography = extract_bibliography_bulk(checker, paper, debug_mode=debug_mode, extraction_batcher=extraction_batcher)
+            cache_bibliography(checker.cache_dir, job.input_spec, bibliography)
+            phase_times['extract_bib'] = time.perf_counter() - _t
         if checker.fatal_error:
             return _build_bulk_result(checker, job, paper_id, title, start_time, source_url=source_url)
 
@@ -1467,7 +1479,16 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
     tasks: List[tuple[Dict[str, Any], _BatchTask]] = []
 
     for error_entry in checker.errors:
-        outcome, assessment = pre_screen_hallucination(error_entry)
+        # Rebuild the error entry via the shared function so suggestions/info
+        # are filtered out — identical to WebUI and CLI paths.
+        raw_errors = error_entry.get('_original_errors') or []
+        reference = error_entry.get('original_reference') or {}
+        verified_url = error_entry.get('ref_verified_url', '')
+        filtered = build_hallucination_error_entry(raw_errors, reference, verified_url=verified_url)
+        if filtered is None:
+            continue
+
+        outcome, assessment = pre_screen_hallucination(filtered)
         if outcome == 'resolved':
             error_entry['hallucination_assessment'] = assessment
             continue
@@ -1477,7 +1498,7 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
         # 'needs_llm' — submit to batch pool
         if not llm_verifier or not getattr(llm_verifier, 'available', False):
             continue
-        tasks.append((error_entry, hallucination_batcher.submit(error_entry, llm_verifier, web_searcher)))
+        tasks.append((error_entry, hallucination_batcher.submit(filtered, llm_verifier, web_searcher)))
 
     for error_entry, task in tasks:
         assessment = task.wait()

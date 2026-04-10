@@ -250,7 +250,6 @@ class ParallelReferenceProcessor:
                                     current_result.reference,
                                     current_result.errors,
                                     verified_data=current_result.verified_data,
-                                    reference_url=current_result.url,
                                 )
                                 if assessment:
                                     current_result.hallucination_assessment = assessment
@@ -308,73 +307,10 @@ class ParallelReferenceProcessor:
             result: The reference result to print
         """
         reference = result.reference
-        
-        # Print reference info in the same format as sequential mode
-        raw_title = reference.get('title', 'Untitled')
-        # Clean LaTeX commands from title for display
-        from refchecker.utils.text_utils import strip_latex_commands
-        title = strip_latex_commands(raw_title)
-        from refchecker.utils.text_utils import format_authors_for_display
-        authors = format_authors_for_display(reference.get('authors', []))
-        year = reference.get('year', '')
-        # Get venue from either 'venue' or 'journal' field and clean it up
-        venue = reference.get('venue', '') or reference.get('journal', '')
-        if venue:
-            from refchecker.utils.error_utils import clean_venue_for_comparison
-            venue = clean_venue_for_comparison(venue)
-        url = reference.get('url', '')
-        doi = reference.get('doi', '')
-        
-        # Extract actual reference number from raw text for accurate display
-        import re
-        raw_text = reference.get('raw_text', '')
-        match = re.match(r'\[(\d+)\]', raw_text)
-        ref_num = match.group(1) if match else str(result.index + 1)
-        print(f"[{ref_num}/{self.total_references}] {title}")
-        if authors:
-            print(f"       {authors}")
-        if venue:
-            print(f"       {venue}")
-        if year:
-            print(f"       {year}")
-        if doi:
-            print(f"       {doi}")
-        # Show cited URL if available
-        if url:
-            print(f"       {url}")
-        
-        # Get the appropriate verified URL using shared logic from base checker
-        verified_url_to_show = self.base_checker._get_verified_url(result.verified_data, result.url, result.errors)
-        
-        # Show the verified URL with appropriate label
-        print("")
-        if verified_url_to_show:
-            print(f"       Verified URL: {verified_url_to_show}")
-        
-        # Show correct ArXiv URL if available from verified data and different from cited
-        if result.verified_data:
-            external_ids = result.verified_data.get('externalIds', {})
-            if external_ids.get('ArXiv'):
-                correct_arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
-                # Only show if it's different from the cited URL
-                if correct_arxiv_url != url:
-                    print(f"       ArXiv URL: {correct_arxiv_url}")
-        
-        # Show additional external ID URLs if available and different
-        if result.verified_data:
-            external_ids = result.verified_data.get('externalIds', {})
-            
-            # Show DOI URL if available and different from what's already shown
-            if external_ids.get('DOI'):
-                from refchecker.utils.doi_utils import construct_doi_url
-                doi_url = construct_doi_url(external_ids['DOI'])
-                if doi_url != verified_url_to_show and doi_url != url:
-                    print(f"       DOI URL: {doi_url}")
-            
-            # Show any other URL from verified data if different
-            if result.verified_data.get('url') and result.verified_data['url'] != verified_url_to_show and result.verified_data['url'] != url:
-                print(f"       {result.verified_data['url']}")
-            
+
+        self.base_checker._print_reference_header(reference, result.index, self.total_references)
+        self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
+
         # Display errors and warnings
         if result.errors:
             # Check if there's an unverified error
@@ -428,26 +364,11 @@ class ParallelReferenceProcessor:
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)
             
             # Display all non-unverified errors and warnings
-            for error in result.errors:
-                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified' and error.get('info_type') != 'unverified':
-                    error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
-                    error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
-                    
-                    from refchecker.utils.error_utils import print_labeled_multiline
-
-                    if error_type == 'arxiv_id':
-                        # Keep existing style for arXiv ID errors
-                        print(f"      ❌ {error_details}")
-                    elif 'error_type' in error:
-                        print_labeled_multiline("❌ Error", error_details)
-                    elif 'warning_type' in error:
-                        print_labeled_multiline("⚠️  Warning", error_details)
-                    else:
-                        print_labeled_multiline("ℹ️  Information", error_details)
+            self.base_checker._display_non_unverified_errors(result.errors, debug_mode=False, print_output=True)
 
         # Show timing info for slow references
         if result.processing_time > 5.0:
-            logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {title}")
+            logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {reference.get('title', 'Untitled')}")
             logger.debug(f"Raw text: {reference.get('raw_text', '')}")
     
     def _update_stats(self, result: ReferenceResult) -> None:

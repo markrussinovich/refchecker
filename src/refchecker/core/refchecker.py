@@ -261,9 +261,9 @@ def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='acce
     return paper_specs, list_path, venue_info
 
 class ArxivReferenceChecker:
-    def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None, 
+    def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None,
                  llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4,
-                 report_file=None, report_format='json',
+                 report_file=None, report_format='json', cache_dir=None,
                  # Deprecated parameters kept for backward compatibility
                  scan_mode='standard', only_flagged=False):
         # Initialize the reference checker for non-arXiv references
@@ -271,7 +271,17 @@ class ArxivReferenceChecker:
         self.fatal_error_message = None
         self.last_download_error = None
         self.semantic_scholar_api_key = semantic_scholar_api_key
+        # If db_path is a directory, auto-detect the .db file inside it
+        if db_path and os.path.isdir(db_path):
+            db_files = sorted(
+                [f for f in os.listdir(db_path) if f.endswith('.db')],
+                key=lambda f: os.path.getmtime(os.path.join(db_path, f)),
+                reverse=True,
+            )
+            if db_files:
+                db_path = os.path.join(db_path, db_files[0])
         self.db_path = db_path
+        self.cache_dir = cache_dir
         self.verification_output_file = output_file
         self.report_file = report_file
         self.report_format = report_format
@@ -1166,34 +1176,44 @@ class ArxivReferenceChecker:
     def download_pdf(self, paper):
         """Download the PDF of a paper and return the content as bytes."""
         self.last_download_error = None
+
+        # Check PDF cache
+        from refchecker.utils.cache_utils import cached_pdf, cache_pdf
+        input_spec = getattr(paper, '_input_spec', None)
+        hit = cached_pdf(self.cache_dir, input_spec)
+        if hit is not None:
+            return hit
+
         # Check if this is a local file or URL
+        pdf_result = None
         if hasattr(paper, 'file_path') and paper.file_path:
             if hasattr(paper, 'is_url') and paper.is_url:
-                # This is a URL, download it
                 logger.info(f"Downloading PDF from URL: {paper.file_path}")
-                return self.download_pdf_from_url(paper.file_path)
+                pdf_result = self.download_pdf_from_url(paper.file_path)
             else:
-                # This is a local file
                 logger.info(f"Reading local file: {paper.file_path}")
                 try:
                     with open(paper.file_path, 'rb') as f:
-                        return io.BytesIO(f.read())
+                        pdf_result = io.BytesIO(f.read())
                 except Exception as e:
                     self.last_download_error = str(e)
                     logger.error(f"Failed to read local file {paper.file_path}: {e}")
                     return None
-        
-        # Check if paper.pdf_url is available
-        if paper.pdf_url:
-            pdf_url = paper.pdf_url
-            logger.debug(f"Using provided PDF URL: {pdf_url}")
         else:
-            # Construct the PDF URL manually from the paper ID
-            pdf_url = f"https://arxiv.org/pdf/{paper.get_short_id()}.pdf"
-            logger.debug(f"PDF URL was None, constructed manually: {pdf_url}")
-        
-        logger.info(f"Downloading PDF from {pdf_url}")
-        return self.download_pdf_from_url(pdf_url)
+            if paper.pdf_url:
+                pdf_url = paper.pdf_url
+                logger.debug(f"Using provided PDF URL: {pdf_url}")
+            else:
+                pdf_url = f"https://arxiv.org/pdf/{paper.get_short_id()}.pdf"
+                logger.debug(f"PDF URL was None, constructed manually: {pdf_url}")
+            logger.info(f"Downloading PDF from {pdf_url}")
+            pdf_result = self.download_pdf_from_url(pdf_url)
+
+        # Save to PDF cache
+        if pdf_result:
+            cache_pdf(self.cache_dir, input_spec, pdf_result)
+
+        return pdf_result
 
     def download_pdf_from_url(self, url):
         """Download a PDF from a URL with proper browser-like headers.
@@ -2691,7 +2711,7 @@ class ArxivReferenceChecker:
         if overlap is None or overlap > 0.1:
             return None, None, None
 
-        logger.info(
+        logger.debug(
             "DB match has catastrophic author mismatch (%.0f%% overlap) — "
             "attempting ArXiv re-verification for '%s'",
             overlap * 100,
@@ -2721,7 +2741,7 @@ class ArxivReferenceChecker:
         try:
             arxiv_data, arxiv_errors, arxiv_url = checker.verify_reference(reference)
             if arxiv_data is not None:
-                logger.info(
+                logger.debug(
                     "ArXiv re-verification succeeded for %s — "
                     "using ArXiv result instead of wrong DB match",
                     arxiv_id,
@@ -2939,8 +2959,14 @@ class ArxivReferenceChecker:
         
         logger.debug(f"Non-arXiv verification result: verified_data={verified_data is not None}, errors={len(errors) if errors else 0}, paper_url={paper_url}")
         
-        # ALWAYS check for ArXiv ID mismatch first, regardless of verification status
-        arxiv_errors = self.check_independent_arxiv_id_mismatch(reference, verified_data)
+        # Check for ArXiv ID mismatch, but skip if the checker already reported one
+        already_has_arxiv_error = any(
+            e.get('error_type') == 'arxiv_id' for e in (errors or [])
+        )
+        arxiv_errors = (
+            self.check_independent_arxiv_id_mismatch(reference, verified_data)
+            if not already_has_arxiv_error else []
+        )
         
         if not verified_data:
             logger.debug(f"Could not verify non-arXiv reference: {reference.get('title', 'Untitled')}")
@@ -3666,6 +3692,7 @@ class ArxivReferenceChecker:
                     logger.debug(f"Processing {file_type}: {resolved_local_path}")
                     paper = self._create_local_file_paper(resolved_local_path)
 
+                paper._input_spec = input_spec
                 papers.append(paper)
 
             if not papers:
@@ -3761,7 +3788,13 @@ class ArxivReferenceChecker:
                 
                 try:
                     # Extract bibliography
-                    bibliography = self.extract_bibliography(paper, debug_mode)
+                    bibliography = self.extract_bibliography(
+                        paper, debug_mode,
+                        input_spec=getattr(paper, '_input_spec', None),
+                    )
+                    # Save to cache if enabled
+                    from refchecker.utils.cache_utils import cache_bibliography
+                    cache_bibliography(self.cache_dir, getattr(paper, '_input_spec', None), bibliography)
                     
                     # Apply deduplication to all bibliography sources (not just LLM-extracted)
                     if len(bibliography) > 1:  # Only deduplicate if we have multiple references
@@ -5723,16 +5756,23 @@ class ArxivReferenceChecker:
 
 
 
-    def extract_bibliography(self, paper, debug_mode=False):
+    def extract_bibliography(self, paper, debug_mode=False, input_spec=None):
         """
         Extract bibliography from a paper (PDF, LaTeX, or text file)
-        
+
         Args:
             paper: Paper object to extract bibliography from
             debug_mode: If True, save debug files for troubleshooting
+            input_spec: Original input specification (for cache key derivation)
         """
         paper_id = paper.get_short_id()
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+
+        # Check bibliography cache
+        from refchecker.utils.cache_utils import cached_bibliography
+        hit = cached_bibliography(self.cache_dir, input_spec)
+        if hit is not None:
+            return hit
         
         # Check if we can get BibTeX content for this paper (ArXiv or other sources)
         from refchecker.utils.arxiv_utils import get_bibtex_content
@@ -6123,69 +6163,12 @@ class ArxivReferenceChecker:
         for i, reference in enumerate(bibliography):
             ref_id = self.extract_arxiv_id_from_url(reference['url'])
             
-            # Print reference info in non-debug mode (improved formatting)
-            raw_title = reference.get('title', 'Untitled')
-            # Clean LaTeX commands from title for display
-            from refchecker.utils.text_utils import strip_latex_commands
-            title = strip_latex_commands(raw_title)
-            from refchecker.utils.text_utils import format_authors_for_display
-            authors = format_authors_for_display(reference.get('authors', []))
-            year = reference.get('year', '')
-            venue = reference.get('venue', '') or reference.get('journal', '')
-            url = reference.get('url', '')
-            doi = reference.get('doi', '')
-            # Extract actual reference number from raw text for accurate display
-            raw_text = reference.get('raw_text', '')
-            match = re.match(r'\[(\d+)\]', raw_text)
-            ref_num = match.group(1) if match else str(i + 1)
-            print(f"[{ref_num}/{len(bibliography)}] {title}")
-            if authors:
-                print(f"       {authors}")
-            if venue:
-                print(f"       {venue}")
-            if year:
-                print(f"       {year}")
-            if doi:
-                print(f"       {doi}")
-            # --- DEBUG TIMER ---
+            self._print_reference_header(reference, i, len(bibliography))
+
             start_time = time.time()
             errors, reference_url, verified_data = self.verify_reference(paper, reference)
 
-            # Show cited URL if available
-            if url:
-                print(f"       {url}")
-            
-            # Get the appropriate verified URL using shared logic
-            verified_url_to_show = self._get_verified_url(verified_data, reference_url, errors)
-            
-            # Show the verified URL with appropriate label
-            print("")
-            if verified_url_to_show:
-                print(f"       Verified URL: {verified_url_to_show}")
-            
-            # Show correct ArXiv URL if available from verified data and different from cited
-            if verified_data:
-                external_ids = verified_data.get('externalIds', {})
-                if external_ids.get('ArXiv'):
-                    correct_arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
-                    # Only show if it's different from the cited URL
-                    if correct_arxiv_url != url:
-                        print(f"       Correct ArXiv URL: {correct_arxiv_url}")
-            
-            # Show additional external ID URLs if available and different
-            if verified_data:
-                external_ids = verified_data.get('externalIds', {})
-                
-                # Show DOI URL if available and different from what's already shown
-                if external_ids.get('DOI'):
-                    from refchecker.utils.doi_utils import construct_doi_url
-                    doi_url = construct_doi_url(external_ids['DOI'])
-                    if doi_url != verified_url_to_show and doi_url != url:
-                        print(f"       DOI URL: {doi_url}")
-                
-                # Show any other URL from verified data if different
-                if verified_data.get('url') and verified_data['url'] != verified_url_to_show and verified_data['url'] != url:
-                    print(f"       {verified_data['url']}")
+            self._print_verified_urls(reference, verified_data, reference_url, errors)
             elapsed = time.time() - start_time
             if elapsed > 5.0:
                 logger.debug(f"Reference {i+1} took {elapsed:.2f}s to verify: {reference.get('title', 'Untitled')}")
@@ -6302,7 +6285,7 @@ class ArxivReferenceChecker:
             # Display all non-unverified errors and warnings
             self._display_non_unverified_errors(errors, debug_mode, print_output)
 
-            # Run inline hallucination assessment and display if print_output
+            # Run hallucination assessment and display if print_output.
             # If the parallel printer already ran the assessment, just store it
             # on the error record instead of re-calling the LLM.
             if precomputed_hallucination:
@@ -6476,6 +6459,65 @@ class ArxivReferenceChecker:
         # Default fallback
         return "Paper not found by any checker"
     
+    def _print_reference_header(self, reference, index, total):
+        """Print reference metadata header (title, authors, venue, year, DOI, URL).
+
+        Shared by sequential and parallel CLI display paths.
+        """
+        from refchecker.utils.text_utils import strip_latex_commands, format_authors_for_display
+
+        raw_title = reference.get('title', 'Untitled')
+        title = strip_latex_commands(raw_title)
+        authors = format_authors_for_display(reference.get('authors', []))
+        year = reference.get('year', '')
+        venue = reference.get('venue', '') or reference.get('journal', '')
+        url = reference.get('url', '')
+        doi = reference.get('doi', '')
+
+        raw_text = reference.get('raw_text', '')
+        match = re.match(r'\[(\d+)\]', raw_text)
+        ref_num = match.group(1) if match else str(index + 1)
+
+        print(f"[{ref_num}/{total}] {title}")
+        if authors:
+            print(f"       {authors}")
+        if venue:
+            print(f"       {venue}")
+        if year:
+            print(f"       {year}")
+        if doi:
+            print(f"       {doi}")
+        if url:
+            print(f"       {url}")
+
+    def _print_verified_urls(self, reference, verified_data, url_from_verifier, errors):
+        """Print verified URL and additional external-ID URLs.
+
+        Shared by sequential and parallel CLI display paths.
+        """
+        url = reference.get('url', '')
+
+        print("")
+        verified_url_to_show = self._get_verified_url(verified_data, url_from_verifier, errors)
+        if verified_url_to_show:
+            print(f"       Verified URL: {verified_url_to_show}")
+
+        if verified_data:
+            external_ids = verified_data.get('externalIds', {})
+            if external_ids.get('ArXiv'):
+                correct_arxiv_url = f"https://arxiv.org/abs/{external_ids['ArXiv']}"
+                if correct_arxiv_url != url:
+                    print(f"       ArXiv URL: {correct_arxiv_url}")
+
+            if external_ids.get('DOI'):
+                from refchecker.utils.doi_utils import construct_doi_url
+                doi_url = construct_doi_url(external_ids['DOI'])
+                if doi_url != verified_url_to_show and doi_url != url:
+                    print(f"       DOI URL: {doi_url}")
+
+            if verified_data.get('url') and verified_data['url'] != verified_url_to_show and verified_data['url'] != url:
+                print(f"       {verified_data['url']}")
+
     def _display_non_unverified_errors(self, errors, debug_mode, print_output):
         """Display all non-unverified errors and warnings"""
         if not debug_mode and print_output:
@@ -6506,12 +6548,18 @@ class ArxivReferenceChecker:
         error_entry_index=None,
     ):
         """Run hallucination assessment and store result on the error entry.
-        
+
         Always runs the check (for both sequential and parallel modes) so the
         result is available in self.errors for report generation. Only prints
         to console when print_output is True.
+
+        Delegates to the shared ``build_hallucination_error_entry`` /
+        ``run_hallucination_check`` so CLI, bulk, and WebUI use identical
+        filtering and assessment logic.
         """
-        from refchecker.core.hallucination_policy import run_hallucination_check
+        from refchecker.core.hallucination_policy import (
+            build_hallucination_error_entry, run_hallucination_check,
+        )
 
         target_record = None
         if error_entry_index is not None and 0 <= error_entry_index < len(self.errors):
@@ -6519,48 +6567,10 @@ class ArxivReferenceChecker:
         elif error_entry_record is not None:
             target_record = error_entry_record
 
-        if target_record is not None:
-            error_entry = dict(target_record)
-            error_entry.setdefault('ref_title', reference.get('title', ''))
-            error_entry.setdefault('ref_authors_cited', ', '.join(reference.get('authors', [])))
-            error_entry.setdefault('ref_year_cited', reference.get('year'))
-            error_entry.setdefault('ref_venue_cited', reference.get('venue', ''))
-            error_entry.setdefault('ref_url_cited', reference.get('url', ''))
-            error_entry.setdefault('original_reference', reference)
-        else:
-            # Backward-compatible fallback for callers that don't pass the record handle.
-            error_types = []
-            error_details_parts = []
-            authors_correct = None
-            for e in errors:
-                etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
-                edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
-                if etype:
-                    error_types.append(etype)
-                if edetail:
-                    error_details_parts.append(edetail)
-                if e.get('ref_authors_correct'):
-                    authors_correct = e['ref_authors_correct']
-
-            if len(error_types) > 1:
-                consolidated_type = 'multiple'
-            elif error_types:
-                consolidated_type = error_types[0]
-            else:
-                return
-
-            error_entry = {
-                'error_type': consolidated_type,
-                'error_details': '\n'.join(error_details_parts),
-                'ref_title': reference.get('title', ''),
-                'ref_authors_cited': ', '.join(reference.get('authors', [])),
-                'ref_year_cited': reference.get('year'),
-                'ref_venue_cited': reference.get('venue', ''),
-                'ref_url_cited': reference.get('url', ''),
-                'original_reference': reference,
-            }
-            if authors_correct:
-                error_entry['ref_authors_correct'] = authors_correct
+        verified_url = self._extract_verified_url(verified_data)
+        error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
+        if error_entry is None:
+            return
 
         assessment = run_hallucination_check(
             error_entry,
@@ -6614,53 +6624,34 @@ class ArxivReferenceChecker:
             if has_unverified:
                 print(f"         Not flagged: {explanation}")
 
+    @staticmethod
+    def _extract_verified_url(verified_data):
+        """Extract the best verified URL from verification result data."""
+        if not verified_data:
+            return ''
+        return (
+            verified_data.get('url', '')
+            or verified_data.get('semantic_scholar_url', '')
+            or verified_data.get('arxiv_url', '')
+            or verified_data.get('doi_url', '')
+        )
+
     def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None):
         """Run hallucination assessment and return the result without printing or storing.
 
         Used by the parallel processor to get the assessment before
-        add_error_to_dataset has been called.
+        add_error_to_dataset has been called.  Delegates to the shared
+        ``build_hallucination_error_entry`` / ``run_hallucination_check``
+        so CLI, bulk, and WebUI use identical filtering and assessment logic.
         """
-        from refchecker.core.hallucination_policy import run_hallucination_check
+        from refchecker.core.hallucination_policy import (
+            build_hallucination_error_entry, run_hallucination_check,
+        )
 
-        error_types = []
-        error_details_parts = []
-        authors_correct = None
-        for e in errors:
-            etype = e.get('error_type') or e.get('warning_type') or e.get('info_type', '')
-            edetail = e.get('error_details') or e.get('warning_details') or e.get('info_details', '')
-            if etype:
-                error_types.append(etype)
-            if edetail:
-                error_details_parts.append(edetail)
-            if e.get('ref_authors_correct'):
-                authors_correct = e['ref_authors_correct']
-
-        if not error_types:
+        verified_url = self._extract_verified_url(verified_data)
+        error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
+        if error_entry is None:
             return None
-
-        consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
-        # Extract verified URL from verified_data if available
-        ref_verified_url = ''
-        if verified_data:
-            ref_verified_url = (
-                verified_data.get('url', '')
-                or verified_data.get('semantic_scholar_url', '')
-                or verified_data.get('arxiv_url', '')
-                or verified_data.get('doi_url', '')
-            )
-        error_entry = {
-            'error_type': consolidated_type,
-            'error_details': '\n'.join(error_details_parts),
-            'ref_title': reference.get('title', ''),
-            'ref_authors_cited': ', '.join(reference.get('authors', [])),
-            'ref_year_cited': reference.get('year'),
-            'ref_venue_cited': reference.get('venue', ''),
-            'ref_url_cited': reference.get('url', ''),
-            'ref_verified_url': ref_verified_url,
-            'original_reference': reference,
-        }
-        if authors_correct:
-            error_entry['ref_authors_correct'] = authors_correct
 
         return run_hallucination_check(
             error_entry,
@@ -6732,6 +6723,8 @@ def main():
                         help="Disable parallel processing of LLM chunks")
     parser.add_argument("--llm-max-chunk-workers", type=int,
                         help="Maximum number of workers for parallel LLM chunk processing (default: 4)")
+    parser.add_argument("--cache", type=str, metavar="DIR",
+                        help="Cache PDFs and extracted bibliographies in DIR to speed up repeated runs")
     parser.add_argument("--disable-parallel", action="store_true",
                         help="Disable parallel processing and run sequentially")
     parser.add_argument("--max-workers", type=int, default=6,
@@ -6822,6 +6815,7 @@ def main():
             max_workers=args.max_workers,
             report_file=args.report_file,
             report_format=report_format,
+            cache_dir=args.cache,
         )
         
         if checker.fatal_error:

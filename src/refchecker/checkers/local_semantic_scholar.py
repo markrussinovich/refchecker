@@ -79,6 +79,20 @@ class LocalNonArxivReferenceChecker:
         """
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"Local Semantic Scholar database not found: {db_path}")
+        # If db_path is a directory, auto-detect the .db file inside it
+        if os.path.isdir(db_path):
+            db_files = sorted(
+                [f for f in os.listdir(db_path) if f.endswith('.db')],
+                key=lambda f: os.path.getmtime(os.path.join(db_path, f)),
+                reverse=True,
+            )
+            if not db_files:
+                raise FileNotFoundError(
+                    f"No .db files found in directory {db_path}. "
+                    f"Provide the path to a specific .db file."
+                )
+            db_path = os.path.join(db_path, db_files[0])
+            logger.info(f"Auto-detected database file: {db_path}")
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
