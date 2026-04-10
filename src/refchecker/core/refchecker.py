@@ -262,7 +262,7 @@ def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='acce
 
 class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None,
-                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=4,
+                 llm_config=None, debug_mode=False, enable_parallel=True, max_workers=6,
                  report_file=None, report_format='json', cache_dir=None,
                  # Deprecated parameters kept for backward compatibility
                  scan_mode='standard', only_flagged=False):
@@ -3905,6 +3905,8 @@ class ArxivReferenceChecker:
                 # Build structured payload to get hallucination counts
                 structured_payload = self._build_structured_report_payload()
                 flagged_count = structured_payload['summary'].get('flagged_records', 0)
+                # Match WebUI: hallucinated refs also count as unverified
+                total_unverified = max(self.total_unverified_refs, flagged_count)
 
                 print(f"\n" + "="*60)
                 print(f"📋 SUMMARY")
@@ -3916,11 +3918,11 @@ class ArxivReferenceChecker:
                     print(f"⚠️  Total warnings: {self.total_warnings_found}")
                 if self.total_info_found > 0:
                     print(f"ℹ️  Total information: {self.total_info_found}")
-                if self.total_unverified_refs > 0:
-                    print(f"❓ Total unverified: {self.total_unverified_refs}")
+                if total_unverified > 0:
+                    print(f"❓ Total unverified: {total_unverified}")
                 if flagged_count > 0:
                     print(f"🚩 Total likely hallucinated: {flagged_count}")
-                if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and self.total_unverified_refs == 0:
+                if self.total_errors_found == 0 and self.total_warnings_found == 0 and self.total_info_found == 0 and total_unverified == 0:
                     print(f"✅ All references verified successfully!")
                 
                 # Show warning if unreliable extraction was used and there are many errors
@@ -3934,6 +3936,7 @@ class ArxivReferenceChecker:
                 # Build structured payload once and reuse for console + file report
                 structured_payload = self._build_structured_report_payload()
                 flagged_count = structured_payload['summary'].get('flagged_records', 0)
+                total_unverified = max(self.total_unverified_refs, flagged_count)
 
                 print(f"\n" + "="*60)
                 print(f"📋 FINAL SUMMARY")
@@ -3946,9 +3949,9 @@ class ArxivReferenceChecker:
                 print(f"         Total warnings: {self.total_warnings_found}")
                 print(f"ℹ️  Papers with information: {self.papers_with_info}")
                 print(f"         Total information: {self.total_info_found}")
-                print(f"❓ Total unverified: {self.total_unverified_refs}")
+                print(f"❓ Total unverified: {total_unverified}")
                 if flagged_count > 0:
-                    print(f"🚩 Total Likely hallucinated: {flagged_count}")
+                    print(f"🚩 Total likely hallucinated: {flagged_count}")
                     self._print_hallucination_console_summary(payload=structured_payload)
                 
                 # Show warning if unreliable extraction was used and there are many errors
