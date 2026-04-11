@@ -150,6 +150,7 @@ class ProgressRefChecker:
         self.check_id = check_id
         self.title_update_callback = title_update_callback
         self.bibliography_source_callback = bibliography_source_callback
+        self.cache_dir = cache_dir
 
         # Initialize LLM if requested
         self.llm = None
@@ -688,22 +689,33 @@ class ProgressRefChecker:
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
 
-            # Step 2: Extract references
-            await self.emit_progress("extracting", {
-                "message": "Extracting references from paper...",
-                "paper_title": paper_title,
-                "extraction_method": extraction_method
-            })
+            # Step 2: Extract references (check disk cache first)
+            from refchecker.utils.cache_utils import cached_bibliography, cache_bibliography
 
-            # Use ArXiv source references if available, otherwise extract from text
-            if arxiv_source_references:
-                references = arxiv_source_references
-                logger.info(f"Using {len(references)} references from ArXiv source files (method: {extraction_method})")
+            references = cached_bibliography(self.cache_dir, paper_source)
+            if references is not None:
+                extraction_method = 'cache'
+                logger.info(f"Cache hit: loaded {len(references)} references for {paper_source}")
             else:
-                references = await self._extract_references(paper_text)
-                # If we used PDF/file extraction and LLM was configured, mark as LLM-assisted
-                if self.llm and extraction_method in ('pdf', 'file', 'text'):
-                    extraction_method = 'llm'
+                await self.emit_progress("extracting", {
+                    "message": "Extracting references from paper...",
+                    "paper_title": paper_title,
+                    "extraction_method": extraction_method
+                })
+
+                # Use ArXiv source references if available, otherwise extract from text
+                if arxiv_source_references:
+                    references = arxiv_source_references
+                    logger.info(f"Using {len(references)} references from ArXiv source files (method: {extraction_method})")
+                else:
+                    references = await self._extract_references(paper_text)
+                    # If we used PDF/file extraction and LLM was configured, mark as LLM-assisted
+                    if self.llm and extraction_method in ('pdf', 'file', 'text'):
+                        extraction_method = 'llm'
+
+                # Save to disk cache
+                if references:
+                    cache_bibliography(self.cache_dir, paper_source, references)
 
             if not references:
                 await self.emit_progress("completed", {
