@@ -1,0 +1,1671 @@
+[
+  {
+    "url": "https://arxiv.org/abs/2312.02091",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Mohamad Ali-Dib",
+      "Kristen Menou"
+    ],
+    "venue": "arXiv preprint arXiv:2312.02091",
+    "title": "Physics simulation capabilities of llms",
+    "raw_text": "Mohamad Ali-Dib*Kristen Menou#Physics simulation capabilities of llms#arXiv preprint arXiv:2312.02091#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://www-cdn.anthropic.com/de8ba9b01c9ab7cbabf5c33b80b7bbc618857627/Model_Card_Claude_3.pdf",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Anthropic"
+    ],
+    "venue": "",
+    "title": "The claude 3 model family: Opus, sonnet, haiku",
+    "raw_text": "Anthropic#The claude 3 model family: Opus, sonnet, haiku##2024#https://www-cdn.anthropic.com/de8ba9b01c9ab7cbabf5c33b80b7bbc618857627/Model_Card_Claude_3.pdf",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://aclanthology.org/W05-0909/",
+    "doi": null,
+    "year": 2005,
+    "authors": [
+      "Satanjeev Banerjee",
+      "Alon Lavie"
+    ],
+    "venue": "Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization",
+    "title": "METEOR: An automatic metric for MT evaluation with improved correlation with human judgments",
+    "raw_text": "Satanjeev Banerjee*Alon Lavie#METEOR: An automatic metric for MT evaluation with improved correlation with human judgments#Proceedings of the ACL Workshop on Intrinsic and Extrinsic Evaluation Measures for Machine Translation and/or Summarization#2005#https://aclanthology.org/W05-0909/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Uri Barash",
+      "Malik Farhoud",
+      "Maali Odeh",
+      "Eliezer Huberman",
+      "Liang Wu",
+      "Israel Vlodavsky"
+    ],
+    "venue": "Cells",
+    "title": "Heparanase-neutralizing monoclonal antibody (mab a54) attenuates tumor growth and metastasis",
+    "raw_text": "Uri Barash*Malik Farhoud*Maali Odeh*Eliezer Huberman*Liang Wu*Israel Vlodavsky#Heparanase-neutralizing monoclonal antibody (mab a54) attenuates tumor growth and metastasis#Cells#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.biorxiv.org/content/10.1101/2023.12.12.569610v1",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "John Barton",
+      "Jacob D. Galson",
+      "Jinwoo Leem"
+    ],
+    "venue": "bioRxiv",
+    "title": "Enhancing antibody language models with structural information",
+    "raw_text": "John Barton*Jacob D. Galson*Jinwoo Leem#Enhancing antibody language models with structural information#bioRxiv#2024#https://www.biorxiv.org/content/10.1101/2023.12.12.569610v1",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Ezra T Bekkering",
+      "Randy Yoo",
+      "Sophia Hailemariam",
+      "Fabian Heide",
+      "Danton Ivanochko",
+      "Matthew Jackman",
+      "Nicholas I Proellochs",
+      "Rianne Stoter",
+      "Geert-Jan van Gemert",
+      "Ayana Maeda",
+      "et al"
+    ],
+    "venue": "bioRxiv",
+    "title": "Structure of endogenous pfs230: Pfs48/45 in complex with potent malaria transmission-blocking antibodies",
+    "raw_text": "Ezra T Bekkering*Randy Yoo*Sophia Hailemariam*Fabian Heide*Danton Ivanochko*Matthew Jackman*Nicholas I Proellochs*Rianne Stoter*Geert-Jan van Gemert*Ayana Maeda*et al#Structure of endogenous pfs230: Pfs48/45 in complex with potent malaria transmission-blocking antibodies#bioRxiv#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1093/nar/28.1.235",
+    "doi": "10.1093/nar/28.1.235",
+    "year": 2000,
+    "authors": [
+      "Helen M. Berman",
+      "John Westbrook",
+      "Zukang Feng",
+      "Gary Gilliland",
+      "T. N. Bhat",
+      "Helge Weissig",
+      "Ilya N. Shindyalov",
+      "Philip E. Bourne"
+    ],
+    "venue": "Nucleic Acids Research",
+    "title": "The protein data bank",
+    "raw_text": "Helen M. Berman*John Westbrook*Zukang Feng*Gary Gilliland*T. N. Bhat*Helge Weissig*Ilya N. Shindyalov*Philip E. Bourne#The protein data bank#Nucleic Acids Research#2000#https://doi.org/10.1093/nar/28.1.235",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Summa Bibby",
+      "James Jung",
+      "Yu Shang Low",
+      "Alberto A Amarilla",
+      "Natalee D Newton",
+      "Connor AP Scott",
+      "Jessica Balk",
+      "Yi Tian Ting",
+      "Morgan E Freney",
+      "Benjamin Liang",
+      "et al"
+    ],
+    "venue": "Nature communications",
+    "title": "A single residue in the yellow fever virus envelope protein modulates virion architecture and antigenicity",
+    "raw_text": "Summa Bibby*James Jung*Yu Shang Low*Alberto A Amarilla*Natalee D Newton*Connor AP Scott*Jessica Balk*Yi Tian Ting*Morgan E Freney*Benjamin Liang*et al#A single residue in the yellow fever virus envelope protein modulates virion architecture and antigenicity#Nature communications#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2508.03682",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Lili Chen",
+      "Mihir Prabhudesai",
+      "Katerina Fragkiadaki",
+      "Hao Liu",
+      "Deepak Pathak"
+    ],
+    "venue": "",
+    "title": "Self-questioning language models",
+    "raw_text": "Lili Chen*Mihir Prabhudesai*Katerina Fragkiadaki*Hao Liu*Deepak Pathak#Self-questioning language models##2025#https://arxiv.org/abs/2508.03682",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2411.08027",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Anoop Cherian",
+      "Radu Corcodel",
+      "Siddarth Jain",
+      "Diego Romeres"
+    ],
+    "venue": "arXiv preprint arXiv:2411.08027",
+    "title": "Llmphy: Complex physical reasoning using large language models and world models",
+    "raw_text": "Anoop Cherian*Radu Corcodel*Siddarth Jain*Diego Romeres#Llmphy: Complex physical reasoning using large language models and world models#arXiv preprint arXiv:2411.08027#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1987,
+    "authors": [
+      "Cyrus Chothia",
+      "Arthur M. Lesk"
+    ],
+    "venue": "Journal of Molecular Biology",
+    "title": "Canonical structures for the hypervariable regions of immunoglobulins",
+    "raw_text": "Cyrus Chothia*Arthur M. Lesk#Canonical structures for the hypervariable regions of immunoglobulins#Journal of Molecular Biology#1987#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2204.02311",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Aakanksha Chowdhery",
+      "Sharan Narang",
+      "Jacob Devlin",
+      "Maarten Bosma",
+      "Gaurav Mishra",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2204.02311",
+    "title": "Palm: Scaling language modeling with pathways",
+    "raw_text": "Aakanksha Chowdhery*Sharan Narang*Jacob Devlin*Maarten Bosma*Gaurav Mishra*et al#Palm: Scaling language modeling with pathways#arXiv preprint arXiv:2204.02311#2022#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2507.06261",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Gheorghe Comanici",
+      "Eric Bieber",
+      "Mike Schaekermann",
+      "Ice Pasupat",
+      "Noveen Sachdeva",
+      "Inderjit Dhillon",
+      "Marcel Blistein",
+      "Ori Ram",
+      "Dan Zhang",
+      "Evan Rosen",
+      "Luke Marris",
+      "Sam Petulla",
+      "Colin Gaffney",
+      "Asaf Aharoni",
+      "Nathan Lintz",
+      "Tiago Cardal Pais",
+      "et al"
+    ],
+    "venue": "",
+    "title": "Gemini 2.5: Pushing the frontier with advanced reasoning, multimodality, long context, and next generation agentic capabilities",
+    "raw_text": "Gheorghe Comanici*Eric Bieber*Mike Schaekermann*Ice Pasupat*Noveen Sachdeva*Inderjit Dhillon*Marcel Blistein*Ori Ram*Dan Zhang*Evan Rosen*Luke Marris*Sam Petulla*Colin Gaffney*Asaf Aharoni*Nathan Lintz*Tiago Cardal Pais*et al#Gemini 2.5: Pushing the frontier with advanced reasoning, multimodality, long context, and next generation agentic capabilities##2025#https://arxiv.org/abs/2507.06261",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Ana da Silva Almeida",
+      "Melissa L Geddie",
+      "Anil Bhate",
+      "Chao Quan",
+      "Joseph W Arndt",
+      "Yang Jiao",
+      "Joseph C Santoro",
+      "Liron Noiman",
+      "Ramya Vijayakumar",
+      "Jorge Sanchez-Salazar",
+      "et al"
+    ],
+    "venue": "Mabs",
+    "title": "Building a potent trem2 agonistic, biparatopic, common light chain antibody",
+    "raw_text": "Ana da Silva Almeida*Melissa L Geddie*Anil Bhate*Chao Quan*Joseph W Arndt*Yang Jiao*Joseph C Santoro*Liron Noiman*Ramya Vijayakumar*Jorge Sanchez-Salazar*et al#Building a potent trem2 agonistic, biparatopic, common light chain antibody#Mabs#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2401.06066",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Damai Dai",
+      "Chengqi Deng",
+      "Chenggang Zhao",
+      "R. X. Xu",
+      "Huazuo Gao",
+      "Deli Chen",
+      "Jiashi Li",
+      "Wangding Zeng",
+      "Xingkai Yu",
+      "Y. Wu",
+      "Zhenda Xie",
+      "Y. K. Li",
+      "Panpan Huang",
+      "Fuli Luo",
+      "Chong Ruan",
+      "Zhifang Sui",
+      "Wenfeng Liang"
+    ],
+    "venue": "",
+    "title": "Deepseekmoe: Towards ultimate expert specialization in mixture-of-experts language models",
+    "raw_text": "Damai Dai*Chengqi Deng*Chenggang Zhao*R. X. Xu*Huazuo Gao*Deli Chen*Jiashi Li*Wangding Zeng*Xingkai Yu*Y. Wu*Zhenda Xie*Y. K. Li*Panpan Huang*Fuli Luo*Chong Ruan*Zhifang Sui*Wenfeng Liang#Deepseekmoe: Towards ultimate expert specialization in mixture-of-experts language models##2024#https://arxiv.org/abs/2401.06066",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Behnaz Davoudinasab",
+      "Aleksey Raskovalov",
+      "Woojin Lee",
+      "Donggyun Kim",
+      "Heesoo Kim",
+      "Jordy Homing Lam",
+      "Gye Won Han",
+      "Vsevolod Katritch",
+      "Vadim Cherezov"
+    ],
+    "venue": "Nature Communications",
+    "title": "Structural insights into the mechanism of activation and inhibition of the prostaglandin d2 receptor 1",
+    "raw_text": "Behnaz Davoudinasab*Aleksey Raskovalov*Woojin Lee*Donggyun Kim*Heesoo Kim*Jordy Homing Lam*Gye Won Han*Vsevolod Katritch*Vadim Cherezov#Structural insights into the mechanism of activation and inhibition of the prostaglandin d2 receptor 1#Nature Communications#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.19437",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "DeepSeek-AI",
+      "Aixin Liu",
+      "Bei Feng",
+      "Bing Xue",
+      "Bingxuan Wang",
+      "Bochao Wu",
+      "Chengda Lu",
+      "Chenggang Zhao",
+      "Chengqi Deng",
+      "Chenyu Zhang",
+      "Chong Ruan",
+      "Damai Dai",
+      "Daya Guo",
+      "Dejian Yang",
+      "Deli Chen",
+      "Dongjie Ji",
+      "Erhang Li",
+      "Fangyun Lin",
+      "Fucong Dai",
+      "Fuli Luo",
+      "et al"
+    ],
+    "venue": "",
+    "title": "Deepseek-v3 technical report",
+    "raw_text": "DeepSeek-AI*Aixin Liu*Bei Feng*Bing Xue*Bingxuan Wang*Bochao Wu*Chengda Lu*Chenggang Zhao*Chengqi Deng*Chenyu Zhang*Chong Ruan*Damai Dai*Daya Guo*Dejian Yang*Deli Chen*Dongjie Ji*Erhang Li*Fangyun Lin*Fucong Dai*Fuli Luo*et al#Deepseek-v3 technical report##2025#https://arxiv.org/abs/2412.19437",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/1810.04805",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Jacob Devlin",
+      "Ming-Wei Chang",
+      "Kenton Lee",
+      "Kristina Toutanova"
+    ],
+    "venue": "arXiv preprint arXiv:1810.04805",
+    "title": "Bert: Pre-training of deep bidirectional transformers for language understanding",
+    "raw_text": "Jacob Devlin*Ming-Wei Chang*Kenton Lee*Kristina Toutanova#Bert: Pre-training of deep bidirectional transformers for language understanding#arXiv preprint arXiv:1810.04805#2018#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.48550/arXiv.2407.21783",
+    "doi": "10.48550/arXiv.2407.21783",
+    "year": 2024,
+    "authors": [
+      "Abhimanyu Dubey",
+      "Abhinav Jauhri",
+      "Abhinav Pandey",
+      "Abhishek Kadian",
+      "Ahmad Al-Dahle",
+      "Aiesha Letman",
+      "Akhil Mathur",
+      "Alan Schelten",
+      "et al"
+    ],
+    "venue": "CoRR",
+    "title": "The llama 3 herd of models",
+    "raw_text": "Abhimanyu Dubey*Abhinav Jauhri*Abhinav Pandey*Abhishek Kadian*Ahmad Al-Dahle*Aiesha Letman*Akhil Mathur*Alan Schelten*et al#The llama 3 herd of models#CoRR#2024#https://doi.org/10.48550/arXiv.2407.21783",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Richard Evans",
+      "Michael O'Neill",
+      "Alexander Pritzel",
+      "et al"
+    ],
+    "venue": "bioRxiv",
+    "title": "Protein complex prediction with alphafold-multimer",
+    "raw_text": "Richard Evans*Michael O'Neill*Alexander Pritzel*et al#Protein complex prediction with alphafold-multimer#bioRxiv#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://openreview.net/forum?id=Tlsdsb6l9n",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yin Fang",
+      "Xiaozhuan Liang",
+      "Ningyu Zhang",
+      "Kangwei Liu",
+      "Rui Huang",
+      "Zhuo Chen",
+      "Xiaohui Fan",
+      "Huajun Chen"
+    ],
+    "venue": "The Twelfth International Conference on Learning Representations, ICLR 2024",
+    "title": "Mol-instructions: A large-scale biomolecular instruction dataset for large language models",
+    "raw_text": "Yin Fang*Xiaozhuan Liang*Ningyu Zhang*Kangwei Liu*Rui Huang*Zhuo Chen*Xiaohui Fan*Huajun Chen#Mol-instructions: A large-scale biomolecular instruction dataset for large language models#The Twelfth International Conference on Learning Representations, ICLR 2024#2024#https://openreview.net/forum?id=Tlsdsb6l9n",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Raianna F Fantin",
+      "Meng Yuan",
+      "Seok-Chan Park",
+      "Bailey Bozarth",
+      "Hallie Cohn",
+      "Maxinne Ignacio",
+      "Patricia Earl",
+      "Alesandro Civljak",
+      "Gabriel Laghlali",
+      "Ding Zhang",
+      "et al"
+    ],
+    "venue": "Cell",
+    "title": "Human monoclonal antibodies targeting a35 protect from death caused by mpox",
+    "raw_text": "Raianna F Fantin*Meng Yuan*Seok-Chan Park*Bailey Bozarth*Hallie Cohn*Maxinne Ignacio*Patricia Earl*Alesandro Civljak*Gabriel Laghlali*Ding Zhang*et al#Human monoclonal antibodies targeting a35 protect from death caused by mpox#Cell#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2502.20933",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jingru Gan",
+      "Peichen Zhong",
+      "Yuanqi Du",
+      "Yanqiao Zhu",
+      "Chenru Duan",
+      "Haorui Wang",
+      "Carla P. Gomes",
+      "Kristin A. Persson",
+      "Daniel Schwalbe-Koda",
+      "Wei Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2502.20933",
+    "title": "Large language models are innate crystal structure generators",
+    "raw_text": "Jingru Gan*Peichen Zhong*Yuanqi Du*Yanqiao Zhu*Chenru Duan*Haorui Wang*Carla P. Gomes*Kristin A. Persson*Daniel Schwalbe-Koda*Wei Wang#Large language models are innate crystal structure generators#arXiv preprint arXiv:2502.20933#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.19786",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Gemma",
+      "Aishwarya Kamath",
+      "Johan Ferret",
+      "Shreya Pathak",
+      "Nino Vieillard",
+      "Ramona Merhej",
+      "Sarah Perrin",
+      "Tatiana Matejovicova",
+      "Alexandre Ramé",
+      "Morgane Rivière",
+      "Louis Rouillard",
+      "Thomas Mesnard",
+      "Geoffrey Cideron",
+      "Jean bastien Grill",
+      "et al"
+    ],
+    "venue": "",
+    "title": "Gemma 3 technical report",
+    "raw_text": "Gemma*Aishwarya Kamath*Johan Ferret*Shreya Pathak*Nino Vieillard*Ramona Merhej*Sarah Perrin*Tatiana Matejovicova*Alexandre Ramé*Morgane Rivière*Louis Rouillard*Thomas Mesnard*Geoffrey Cideron*Jean bastien Grill*et al.#Gemma 3 technical report##2025#https://arxiv.org/abs/2503.19786",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2311.08719",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Zhi Guo",
+      "Hao Lin",
+      "Jian Li",
+      "Yufei Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2311.08719",
+    "title": "Proteinchat: Aligning protein structures with natural language descriptions",
+    "raw_text": "Zhi Guo*Hao Lin*Jian Li*Yufei Wang#Proteinchat: Aligning protein structures with natural language descriptions#arXiv preprint arXiv:2311.08719#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Michishige Harada",
+      "Takehisa Matsumoto",
+      "Mizuki Yamamoto",
+      "Jin Goda",
+      "Akiko Idei",
+      "Kenichi Ohtaki",
+      "Natsuki Kojima",
+      "Natsumi Yoneda",
+      "Kosuke Miyauchi",
+      "Kazushige Katsura",
+      "et al"
+    ],
+    "venue": "iScience",
+    "title": "Monoclonal antibodies against human tmprss2 prevent infection by any sars-cov-2 variant",
+    "raw_text": "Michishige Harada*Takehisa Matsumoto*Mizuki Yamamoto*Jin Goda*Akiko Idei*Kenichi Ohtaki*Natsuki Kojima*Natsumi Yoneda*Kosuke Miyauchi*Kazushige Katsura*et al.#Monoclonal antibodies against human tmprss2 prevent infection by any sars-cov-2 variant#iScience#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Takamitsu Hattori",
+      "Michelle Wang",
+      "Alexis D Corrado",
+      "Suzanne Gross",
+      "Michelle Fang",
+      "Injin Bang",
+      "Nainita Roy",
+      "Iryna Berezniuk",
+      "Hayley Donaldson",
+      "Karenna Groff",
+      "et al"
+    ],
+    "venue": "Proceedings of the National Academy of Sciences",
+    "title": "Engineering antibody–drug conjugates targeting an adhesion gpcr, cd97",
+    "raw_text": "Takamitsu Hattori*Michelle Wang*Alexis D Corrado*Suzanne Gross*Michelle Fang*Injin Bang*Nainita Roy*Iryna Berezniuk*Hayley Donaldson*Karenna Groff*et al.#Engineering antibody–drug conjugates targeting an adhesion gpcr, cd97#Proceedings of the National Academy of Sciences#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1038/s41467-024-47163-6",
+    "doi": "10.1038/s41467-024-47163-6",
+    "year": 2024,
+    "authors": [
+      "Haohuai He",
+      "Bing He",
+      "Lei Guan",
+      "Yu Zhao",
+      "Feng Jiang",
+      "Guanxing Chen",
+      "Qingge Zhu",
+      "Calvin Yu-Chian Chen",
+      "Ting Li",
+      "Jianhua Yao"
+    ],
+    "venue": "Nature Communications",
+    "title": "De novo generation of SARS-CoV-2 antibody cdrh3 with a pre-trained generative large language model",
+    "raw_text": "Haohuai He*Bing He*Lei Guan*Yu Zhao*Feng Jiang*Guanxing Chen*Qingge Zhu*Calvin Yu-Chian Chen*Ting Li*Jianhua Yao#De novo generation of SARS-CoV-2 antibody cdrh3 with a pre-trained generative large language model#Nature Communications#2024#https://doi.org/10.1038/s41467-024-47163-6",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://www.nature.com/articles/s41587-023-01763-2",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Brian L. Hie",
+      "Varun R. Shanker",
+      "Duo Xu",
+      "Theodora U. J. Bruun",
+      "Payton A. Weidenbacher",
+      "Shaogeng Tang",
+      "Wesley Wu",
+      "John E. Pak",
+      "John Kuriyan",
+      "Peter S. Kim"
+    ],
+    "venue": "Nature Biotechnology",
+    "title": "Efficient evolution of human antibodies from general protein language models",
+    "raw_text": "Brian L. Hie*Varun R. Shanker*Duo Xu*Theodora U. J. Bruun*Payton A. Weidenbacher*Shaogeng Tang*Wesley Wu*John E. Pak*John Kuriyan*Peter S. Kim#Efficient evolution of human antibodies from general protein language models#Nature Biotechnology#2024#https://www.nature.com/articles/s41587-023-01763-2",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Satoshi Hiura",
+      "Yuto Kuwasaki",
+      "Yosuke Nishikawa",
+      "Takako Kimura",
+      "Sayaka Yoshida",
+      "Makiko Nakayama",
+      "Tomohiro Makino",
+      "Suguru Ueno"
+    ],
+    "venue": "Scientific Reports",
+    "title": "Selective agonists of kir and nkg2a to evade missing self response of natural killer cells",
+    "raw_text": "Satoshi Hiura*Yuto Kuwasaki*Yosuke Nishikawa*Takako Kimura*Sayaka Yoshida*Makiko Nakayama*Tomohiro Makino*Suguru Ueno#Selective agonists of kir and nkg2a to evade missing self response of natural killer cells#Scientific Reports#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2404.02285",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Andrew Hoarfrost",
+      "Daniel Smith",
+      "Ling Xu",
+      "Kai Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2404.02285",
+    "title": "Biotalk: Enzyme function prediction with natural language supervision",
+    "raw_text": "Andrew Hoarfrost*Daniel Smith*Ling Xu*Kai Wang#Biotalk: Enzyme function prediction with natural language supervision#arXiv preprint arXiv:2404.02285#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jeremy A Hollis",
+      "Matthew C Chan",
+      "Harmit S Malik",
+      "Melody G Campbell"
+    ],
+    "venue": "Science Advances",
+    "title": "Molecular exaptation by the integrin αi domain",
+    "raw_text": "Jeremy A Hollis*Matthew C Chan*Harmit S Malik*Melody G Campbell#Molecular exaptation by the integrin αi domain#Science Advances#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2303.05398",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Shima Imani",
+      "Anubrata Pal",
+      "François Yvon",
+      "Vincent Pradier",
+      "Sebastian Ruder"
+    ],
+    "venue": "arXiv preprint arXiv:2303.05398",
+    "title": "Mathprompter: Mathematical reasoning using large language models",
+    "raw_text": "Shima Imani*Anubrata Pal*François Yvon*Vincent Pradier*Sebastian Ruder#Mathprompter: Mathematical reasoning using large language models#arXiv preprint arXiv:2303.05398#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Adriana Irimia",
+      "Anita Sarkar",
+      "Robyn L. Stanfield",
+      "Ian A. Wilson"
+    ],
+    "venue": "Immunity",
+    "title": "Crystallographic identification of lipid as an integral component of the epitope of hiv broadly neutralizing antibody 4e10",
+    "raw_text": "Adriana Irimia*Anita Sarkar*Robyn L. Stanfield*Ian A. Wilson#Crystallographic identification of lipid as an integral component of the epitope of hiv broadly neutralizing antibody 4e10#Immunity#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Adriana Irimia",
+      "Andreia M. Serra",
+      "Anita Sarkar",
+      "Robert Jacak",
+      "Oleksandr Kalyuzhniy",
+      "Devin Sok",
+      "et al"
+    ],
+    "venue": "PLOS Pathogens",
+    "title": "Lipid interactions and angle of approach to the hiv-1 viral membrane of broadly neutralizing antibody 10e8: Insights for vaccine and therapeutic design",
+    "raw_text": "Adriana Irimia*Andreia M. Serra*Anita Sarkar*Robert Jacak*Oleksandr Kalyuzhniy*Devin Sok*et al.#Lipid interactions and angle of approach to the hiv-1 viral membrane of broadly neutralizing antibody 10e8: Insights for vaccine and therapeutic design#PLOS Pathogens#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2406.13163",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Shuyi Jia",
+      "Chao Zhang",
+      "Victor Fung"
+    ],
+    "venue": "arXiv preprint arXiv:2406.13163",
+    "title": "Llmatdesign: Autonomous materials discovery with large language models",
+    "raw_text": "Shuyi Jia*Chao Zhang*Victor Fung#Llmatdesign: Autonomous materials discovery with large language models#arXiv preprint arXiv:2406.13163#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://academic.oup.com/bib/article/25/4/bbae245/7682462",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Hongtai Jing",
+      "Zhangzhi Peng",
+      "Sheng Xu",
+      "Tao Shen",
+      "Shwai He",
+      "Tao You",
+      "Shuang Ye",
+      "Wei Lin",
+      "Siqi Sun"
+    ],
+    "venue": "Briefings in Bioinformatics",
+    "title": "Accurate prediction of antibody function and structure using a bio-inspired antibody language model (balm)",
+    "raw_text": "Hongtai Jing*Zhangzhi Peng*Sheng Xu*Tao Shen*Shwai He*Tao You*Shuang Ye*Wei Lin*Siqi Sun#Accurate prediction of antibody function and structure using a bio-inspired antibody language model (balm)#Briefings in Bioinformatics#2024#https://academic.oup.com/bib/article/25/4/bbae245/7682462",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "John Jumper",
+      "Richard Evans",
+      "Alexander Pritzel",
+      "et al"
+    ],
+    "venue": "Nature",
+    "title": "Highly accurate protein structure prediction with alphafold",
+    "raw_text": "John Jumper*Richard Evans*Alexander Pritzel*et al.#Highly accurate protein structure prediction with alphafold#Nature#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.nature.com/articles/s41598-024-80940-y",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Mahmood Kalemati",
+      "Alireza Noroozi",
+      "Aref Shahbakhsh",
+      "Somayyeh Koohi"
+    ],
+    "venue": "Scientific Reports",
+    "title": "Paraantiprot provides paratope prediction using antibody and protein language models",
+    "raw_text": "Mahmood Kalemati*Alireza Noroozi*Aref Shahbakhsh*Somayyeh Koohi#Paraantiprot provides paratope prediction using antibody and protein language models#Scientific Reports#2024#https://www.nature.com/articles/s41598-024-80940-y",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Shahzada Khan",
+      "Jeremy Lum",
+      "Heather Stephenson",
+      "Pawan Bir Kohli",
+      "David Mortenson",
+      "Dhivya Ramakrishnan",
+      "Magdeleine Hung",
+      "Sheng Ding",
+      "Elbert Seto",
+      "Sabrina Lu",
+      "et al"
+    ],
+    "venue": "Mabs",
+    "title": "A highly selective tcr-mimic antibody reveals unexpected mechanisms of hbv peptide-mhc recognition and previously unknown target biology",
+    "raw_text": "Shahzada Khan*Jeremy Lum*Heather Stephenson*Pawan Bir Kohli*David Mortenson*Dhivya Ramakrishnan*Magdeleine Hung*Sheng Ding*Elbert Seto*Sabrina Lu*et al.#A highly selective tcr-mimic antibody reveals unexpected mechanisms of hbv peptide-mhc recognition and previously unknown target biology#Mabs#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Julia Koehler Leman",
+      "Brian D. Weitzner",
+      "Steven M. Lewis",
+      "Jared Adolf-Bryfogle",
+      "Nawsad Alam",
+      "Rebecca F. Alford",
+      "Melanie Aprahamian",
+      "David Baker",
+      "Kyle A. Barlow",
+      "Patrick Barth",
+      "Benjamin Basanta",
+      "Brian J. Bender",
+      "Kristin Blacklock",
+      "Jaume Bonet",
+      "Scott E. Boyken",
+      "Phil Bradley",
+      "Chris Bystroff",
+      "Patrick Conway",
+      "Seth Cooper",
+      "Bruno E. Correia",
+      "Brian Coventry",
+      "Rhiju Das",
+      "René M. De Jong",
+      "Frank DiMaio",
+      "Richard Bonneau"
+    ],
+    "venue": "Nature Methods",
+    "title": "Macromolecular modeling and design in rosetta: recent methods and frameworks",
+    "raw_text": "Julia Koehler Leman*Brian D. Weitzner*Steven M. Lewis*Jared Adolf-Bryfogle*Nawsad Alam*Rebecca F. Alford*Melanie Aprahamian*David Baker*Kyle A. Barlow*Patrick Barth*Benjamin Basanta*Brian J. Bender*Kristin Blacklock*Jaume Bonet*Scott E. Boyken*Phil Bradley*Chris Bystroff*Patrick Conway*Seth Cooper*Bruno E. Correia*Brian Coventry*Rhiju Das*René M. De Jong*Frank DiMaio*Richard Bonneau#Macromolecular modeling and design in rosetta: recent methods and frameworks#Nature Methods#2020#",
+    "type": "other"
+  },
+  {
+    "url": "https://pubmed.ncbi.nlm.nih.gov/30217829/",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Aleksandr Kovaltsuk",
+      "Jinwoo Leem",
+      "Sebastian Kelm",
+      "James Snowden",
+      "Charlotte M. Deane",
+      "Konrad Krawczyk"
+    ],
+    "venue": "The Journal of Immunology",
+    "title": "Observed antibody space: A resource for data mining next-generation sequencing of antibody repertoires",
+    "raw_text": "Aleksandr Kovaltsuk*Jinwoo Leem*Sebastian Kelm*James Snowden*Charlotte M. Deane*Konrad Krawczyk#Observed antibody space: A resource for data mining next-generation sequencing of antibody repertoires#The Journal of Immunology#2018#https://pubmed.ncbi.nlm.nih.gov/30217829/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2304.02285",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Zhen Liang",
+      "Xu Yang",
+      "Qiang Liu",
+      "Bin He",
+      "Suyang Zheng",
+      "Bo Tang"
+    ],
+    "venue": "arXiv preprint arXiv:2304.02285",
+    "title": "Drugchat: Towards enabling chatgpt-like capabilities on drug molecule data",
+    "raw_text": "Zhen Liang*Xu Yang*Qiang Liu*Bin He*Suyang Zheng*Bo Tang#Drugchat: Towards enabling chatgpt-like capabilities on drug molecule data#arXiv preprint arXiv:2304.02285#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://aclanthology.org/W04-1013/",
+    "doi": null,
+    "year": 2004,
+    "authors": [
+      "Chin-Yew Lin"
+    ],
+    "venue": "Text Summarization Branches Out",
+    "title": "ROUGE: A package for automatic evaluation of summaries",
+    "raw_text": "Chin-Yew Lin#ROUGE: A package for automatic evaluation of summaries#Text Summarization Branches Out#2004#https://aclanthology.org/W04-1013/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Xuegong Liu",
+      "Qing Song",
+      "Yu Wei",
+      "Yun Xu"
+    ],
+    "venue": "Drug Discovery Today",
+    "title": "Generative ai for de novo drug design: recent advances, challenges, and future directions",
+    "raw_text": "Xuegong Liu*Qing Song*Yu Wei*Yun Xu#Generative ai for de novo drug design: recent advances, challenges, and future directions#Drug Discovery Today#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.12798",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Zhiyuan Liu",
+      "Sihang Li",
+      "Yanchen Luo",
+      "Hao Fei",
+      "Yixin Cao",
+      "Kenji Kawaguchi",
+      "Xiang Wang",
+      "Tat-Seng Chua"
+    ],
+    "venue": "arXiv preprint",
+    "title": "Molca: Molecular graph-language modeling with cross-modal projector and uni-modal adapter",
+    "raw_text": "Zhiyuan Liu*Sihang Li*Yanchen Luo*Hao Fei*Yixin Cao*Kenji Kawaguchi*Xiang Wang*Tat-Seng Chua#Molca: Molecular graph-language modeling with cross-modal projector and uni-modal adapter#arXiv preprint#2024#https://arxiv.org/abs/2310.12798",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/2024.acl-long.324",
+    "doi": "10.18653/v1/2024.acl-long.324",
+    "year": 2024,
+    "authors": [
+      "Zhiyuan Liu",
+      "An Zhang",
+      "Hao Fei",
+      "Enzhi Zhang",
+      "Xiang Wang",
+      "Kenji Kawaguchi",
+      "Tat-Seng Chua"
+    ],
+    "venue": "Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+    "title": "Prott3: Protein-to-text generation for text-based protein understanding",
+    "raw_text": "Zhiyuan Liu*An Zhang*Hao Fei*Enzhi Zhang*Xiang Wang*Kenji Kawaguchi*Tat-Seng Chua#Prott3: Protein-to-text generation for text-based protein understanding#Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)#2024#https://doi.org/10.18653/v1/2024.acl-long.324",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2301.13688",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Shayne Longpre",
+      "Le Hou",
+      "Tu Vu",
+      "Albert Webson",
+      "Hyung Won Chung",
+      "Yi Tay",
+      "Denny Zhou",
+      "Quoc V Le",
+      "Barret Zoph",
+      "Jason Wei",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2301.13688",
+    "title": "The flan collection: Designing data and methods for effective instruction tuning",
+    "raw_text": "Shayne Longpre*Le Hou*Tu Vu*Albert Webson*Hyung Won Chung*Yi Tay*Denny Zhou*Quoc V Le*Barret Zoph*Jason Wei*et al#The flan collection: Designing data and methods for effective instruction tuning#arXiv preprint arXiv:2301.13688#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://onlinelibrary.wiley.com/doi/10.1002/pro.4205",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Tobias H. Olsen",
+      "Fergus Boyles",
+      "Charlotte M. Deane"
+    ],
+    "venue": "Protein Science",
+    "title": "Observed antibody space: A diverse database of cleaned, annotated, and translated unpaired and paired antibody sequences",
+    "raw_text": "Tobias H. Olsen*Fergus Boyles*Charlotte M. Deane#Observed antibody space: A diverse database of cleaned, annotated, and translated unpaired and paired antibody sequences#Protein Science#2022#https://onlinelibrary.wiley.com/doi/10.1002/pro.4205",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2303.08774",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "arXiv preprint",
+    "title": "Gpt-4 technical report",
+    "raw_text": "OpenAI#Gpt-4 technical report#arXiv preprint#2023#https://arxiv.org/abs/2303.08774",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://cdn.openai.com/pdf/2221c875-02dc-4789-800b-e7758f3722c1/o3-and-o4-mini-system-card.pdf",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "",
+    "title": "Openai o3 and o4-mini system card",
+    "raw_text": "OpenAI#Openai o3 and o4-mini system card##2025#https://cdn.openai.com/pdf/2221c875-02dc-4789-800b-e7758f3722c1/o3-and-o4-mini-system-card.pdf",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.21276",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "OpenAI",
+      "Aaron Hurst",
+      "Adam Lerer",
+      "Adam P. Goucher",
+      "Adam Perelman",
+      "Aditya Ramesh",
+      "Aidan Clark",
+      "AJ Ostrow",
+      "Akila Welihinda",
+      "Alan Hayes",
+      "Alec Radford",
+      "Aleksander Mądry",
+      "Alex Baker-Whitcomb",
+      "Alex Beutel",
+      "Alex Borzunov",
+      "Alex Carney",
+      "Alex Chow",
+      "Alex Kirillov",
+      "Alex Nichol",
+      "Alex Paino",
+      "Alex Renzin",
+      "et al"
+    ],
+    "venue": "",
+    "title": "Gpt-4o system card",
+    "raw_text": "OpenAI*Aaron Hurst*Adam Lerer*Adam P. Goucher*Adam Perelman*Aditya Ramesh*Aidan Clark*AJ Ostrow*Akila Welihinda*Alan Hayes*Alec Radford*Aleksander Mądry*Alex Baker-Whitcomb*Alex Beutel*Alex Borzunov*Alex Carney*Alex Chow*Alex Kirillov*Alex Nichol*Alex Paino*Alex Renzin*et al#Gpt-4o system card##2024#https://arxiv.org/abs/2410.21276",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wenhao O Ouyang",
+      "Huibin Lv",
+      "Wenkan Liu",
+      "Ruipeng Lei",
+      "Zongjun Mou",
+      "Tossapol Pholcharee",
+      "Logan Talmage",
+      "Meixuan Tong",
+      "Wei Ji",
+      "Yiquan Wang",
+      "et al"
+    ],
+    "venue": "Science translational medicine",
+    "title": "High-throughput synthesis and specificity characterization of natively paired influenza hemagglutinin antibodies with opool+ display",
+    "raw_text": "Wenhao O Ouyang*Huibin Lv*Wenkan Liu*Ruipeng Lei*Zongjun Mou*Tossapol Pholcharee*Logan Talmage*Meixuan Tong*Wei Ji*Yiquan Wang*et al#High-throughput synthesis and specificity characterization of natively paired influenza hemagglutinin antibodies with opool+ display#Science translational medicine#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/P02-1040/",
+    "doi": null,
+    "year": 2002,
+    "authors": [
+      "Kishore Papineni",
+      "Salim Roukos",
+      "Todd Ward",
+      "Wei-Jing Zhu"
+    ],
+    "venue": "Proceedings of the 40th Annual Meeting of the Association for Computational Linguistics",
+    "title": "Bleu: a method for automatic evaluation of machine translation",
+    "raw_text": "Kishore Papineni*Salim Roukos*Todd Ward*Wei-Jing Zhu#Bleu: a method for automatic evaluation of machine translation#Proceedings of the 40th Annual Meeting of the Association for Computational Linguistics#2002#https://aclanthology.org/P02-1040/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/2023.emnlp-main.70",
+    "doi": "10.18653/v1/2023.emnlp-main.70",
+    "year": 2023,
+    "authors": [
+      "Qizhi Pei",
+      "Wei Zhang",
+      "Jinhua Zhu",
+      "Kehan Wu",
+      "Kaiyuan Gao",
+      "Lijun Wu",
+      "Yingce Xia",
+      "Rui Yan"
+    ],
+    "venue": "Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing",
+    "title": "Biot5: Enriching cross-modal integration in biology with chemical knowledge and natural language associations",
+    "raw_text": "Qizhi Pei*Wei Zhang*Jinhua Zhu*Kehan Wu*Kaiyuan Gao*Lijun Wu*Yingce Xia*Rui Yan#Biot5: Enriching cross-modal integration in biology with chemical knowledge and natural language associations#Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing#2023#https://doi.org/10.18653/v1/2023.emnlp-main.70",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2103.00020",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alec Radford",
+      "Jong Wook Kim",
+      "Chris Hallacy",
+      "Aditya Ramesh",
+      "Gabriel Goh",
+      "Sandhini Agarwal",
+      "Girish Sastry",
+      "Amanda Askell",
+      "Pamela Mishkin",
+      "Jack Clark",
+      "Gretchen Krueger",
+      "Ilya Sutskever"
+    ],
+    "venue": "",
+    "title": "Learning transferable visual models from natural language supervision",
+    "raw_text": "Alec Radford*Jong Wook Kim*Chris Hallacy*Aditya Ramesh*Gabriel Goh*Sandhini Agarwal*Girish Sastry*Amanda Askell*Pamela Mishkin*Jack Clark*Gretchen Krueger*Ilya Sutskever#Learning transferable visual models from natural language supervision##2021#https://arxiv.org/abs/2103.00020",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.1093/nar/gkz827",
+    "doi": "10.1093/nar/gkz827",
+    "year": 2020,
+    "authors": [
+      "Matthew I. J. Raybould",
+      "Claire Marks",
+      "Alan P. Lewis",
+      "Jiye Shi",
+      "Alexander Bujotzek",
+      "Bruck Taddese",
+      "Charlotte M. Deane"
+    ],
+    "venue": "Nucleic Acids Research",
+    "title": "Thera-sabdab: The therapeutic structural antibody database",
+    "raw_text": "Matthew I. J. Raybould*Claire Marks*Alan P. Lewis*Jiye Shi*Alexander Bujotzek*Bruck Taddese*Charlotte M. Deane#Thera-sabdab: The therapeutic structural antibody database#Nucleic Acids Research#2020#https://doi.org/10.1093/nar/gkz827",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Cristian Regep",
+      "Guy Georges",
+      "Jiye Shi",
+      "Bojana Popovic",
+      "Charlotte M. Deane"
+    ],
+    "venue": "Proteins: Structure, Function, and Bioinformatics",
+    "title": "The h3 loop of antibodies shows unique structural characteristics",
+    "raw_text": "Cristian Regep*Guy Georges*Jiye Shi*Bojana Popovic*Charlotte M. Deane#The h3 loop of antibodies shows unique structural characteristics#Proteins: Structure, Function, and Bioinformatics#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/D19-1410/",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Nils Reimers",
+      "Iryna Gurevych"
+    ],
+    "venue": "Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP)",
+    "title": "Sentence-BERT: Sentence embeddings using Siamese BERT-networks",
+    "raw_text": "Nils Reimers*Iryna Gurevych#Sentence-BERT: Sentence embeddings using Siamese BERT-networks#Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP)#2019#https://aclanthology.org/D19-1410/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.12948",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zehui Ren",
+      "Zhangli Sha",
+      "Zhe Fu",
+      "Zhean Xu",
+      "Zhenda Xie",
+      "et al"
+    ],
+    "venue": "",
+    "title": "Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning",
+    "raw_text": "Zehui Ren*Zhangli Sha*Zhe Fu*Zhean Xu*Zhenda Xie*et al#Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning##2025#https://arxiv.org/abs/2501.12948",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Ryan S Roark",
+      "Andrew J Schaub",
+      "Wei Shi",
+      "Maple Wang",
+      "Fabiana A Bahna",
+      "Jordan E Becker",
+      "Andrea Biju",
+      "Sue Chong",
+      "Haijuan Du",
+      "Yicheng Guo",
+      "et al"
+    ],
+    "venue": "Nature Microbiology",
+    "title": "Prefusion structure, evasion and neutralization of hsv-1 glycoprotein b",
+    "raw_text": "Ryan S Roark*Andrew J Schaub*Wei Shi*Maple Wang*Fabiana A Bahna*Jordan E Becker*Andrea Biju*Sue Chong*Haijuan Du*Yicheng Guo*et al#Prefusion structure, evasion and neutralization of hsv-1 glycoprotein b#Nature Microbiology#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/n18-1058",
+    "doi": "10.18653/v1/n18-1058",
+    "year": 2018,
+    "authors": [
+      "Mrinmaya Sachan",
+      "Eric P. Xing"
+    ],
+    "venue": "Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies",
+    "title": "Self-training for jointly learning to ask and answer questions",
+    "raw_text": "Mrinmaya Sachan*Eric P. Xing#Self-training for jointly learning to ask and answer questions#Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies#2018#https://doi.org/10.18653/v1/n18-1058",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://pubmed.ncbi.nlm.nih.gov/38963838/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Varun R. Shanker",
+      "Theodora U. J. Bruun",
+      "Brian L. Hie",
+      "Peter S. Kim"
+    ],
+    "venue": "Science",
+    "title": "Unsupervised evolution of protein and antibody complexes with a structure-informed language model",
+    "raw_text": "Varun R. Shanker*Theodora U. J. Bruun*Brian L. Hie*Peter S. Kim#Unsupervised evolution of protein and antibody complexes with a structure-informed language model#Science#2024#https://pubmed.ncbi.nlm.nih.gov/38963838/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://doi.org/10.1038/s41467-021-22732-w",
+    "doi": "10.1038/s41467-021-22732-w",
+    "year": 2021,
+    "authors": [
+      "Jung-Eun Shin",
+      "Adam J. Riesselman",
+      "Aaron W. Kollasch",
+      "Conor McMahon",
+      "Elana Simon",
+      "Chris Sander",
+      "Aashish Manglik",
+      "Andrew C. Kruse",
+      "Debora S. Marks"
+    ],
+    "venue": "Nature Communications",
+    "title": "Protein design and variant prediction using autoregressive generative models",
+    "raw_text": "Jung-Eun Shin*Adam J. Riesselman*Aaron W. Kollasch*Conor McMahon*Elana Simon*Chris Sander*Aashish Manglik*Andrew C. Kruse*Debora S. Marks#Protein design and variant prediction using autoregressive generative models#Nature Communications#2021#https://doi.org/10.1038/s41467-021-22732-w",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Keiko Shinoda",
+      "Hideaki Fujitani"
+    ],
+    "venue": "Scientific Reports",
+    "title": "Initiation of prolyl cis–trans isomerisation in the cdr-h3 loop of an antibody in response to antigen binding",
+    "raw_text": "Keiko Shinoda*Hideaki Fujitani#Initiation of prolyl cis–trans isomerisation in the cdr-h3 loop of an antibody in response to antigen binding#Scientific Reports#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/1404.1100",
+    "doi": null,
+    "year": 2014,
+    "authors": [
+      "Jonathon Shlens"
+    ],
+    "venue": "arXiv",
+    "title": "A tutorial on principal component analysis",
+    "raw_text": "Jonathon Shlens#A tutorial on principal component analysis#arXiv#2014#https://arxiv.org/abs/1404.1100",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Richard W Shuai",
+      "Jeffrey A Ruffolo",
+      "Jeffrey J Gray"
+    ],
+    "venue": "Cell Systems",
+    "title": "Iglm: Infilling language modeling for antibody sequence design",
+    "raw_text": "Richard W Shuai*Jeffrey A Ruffolo*Jeffrey J Gray#Iglm: Infilling language modeling for antibody sequence design#Cell Systems#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Martin Steinegger",
+      "Johannes Söding"
+    ],
+    "venue": "Nature Biotechnology",
+    "title": "Mmseqs2 enables sensitive protein sequence searching for the analysis of massive data sets",
+    "raw_text": "Martin Steinegger*Johannes Söding#Mmseqs2 enables sensitive protein sequence searching for the analysis of massive data sets#Nature Biotechnology#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Cong Sun",
+      "Chu Xie",
+      "Xin-Yan Fang",
+      "Dong-Chun Hong",
+      "Haoyu Zhang",
+      "Pei-Huang Wu",
+      "Yi-Na Liu",
+      "Guo-Long Bu",
+      "De-Hai Cao",
+      "Min-Yi Si-Tu",
+      "et al"
+    ],
+    "venue": "Advanced Materials",
+    "title": "Chimeric glycoprotein nanoparticles elicit robust neutralizing antibodies against epstein–barr virus",
+    "raw_text": "Cong Sun*Chu Xie*Xin-Yan Fang*Dong-Chun Hong*Haoyu Zhang*Pei-Huang Wu*Yi-Na Liu*Guo-Long Bu*De-Hai Cao*Min-Yi Si-Tu*et al#Chimeric glycoprotein nanoparticles elicit robust neutralizing antibodies against epstein–barr virus#Advanced Materials#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Weiyu Tao",
+      "Xiao He",
+      "Lei Chen"
+    ],
+    "venue": "Journal of Molecular Biology",
+    "title": "The symmetric structure of the antigenic loop in type b hbv surface antigen",
+    "raw_text": "Weiyu Tao*Xiao He*Lei Chen#The symmetric structure of the antigenic loop in type b hbv surface antigen#Journal of Molecular Biology#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://github.com/tatsu-lab/stanford_alpaca#2023#",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Rohan Taori",
+      "Ishaan Gulrajani",
+      "Tianyi Zhang",
+      "Yann Dubois",
+      "Xuechen Li",
+      "Carlos Guestrin",
+      "Percy Liang",
+      "Tatsunori B. Hashimoto"
+    ],
+    "venue": "https://github.com/tatsu-lab/stanford_alpaca",
+    "title": "Stanford alpaca: An instruction-following llama model",
+    "raw_text": "Rohan Taori*Ishaan Gulrajani*Tianyi Zhang*Yann Dubois*Xuechen Li*Carlos Guestrin*Percy Liang*Tatsunori B. Hashimoto#Stanford alpaca: An instruction-following llama model#https://github.com/tatsu-lab/stanford_alpaca#2023#",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://doi.org/10.48550/arXiv.2211.09085",
+    "doi": "10.48550/arXiv.2211.09085",
+    "year": 2022,
+    "authors": [
+      "Ross Taylor",
+      "Marcin Kardas",
+      "Guillem Cucurull",
+      "Thomas Scialom",
+      "Anthony Hartshorn",
+      "Elvis Saravia",
+      "Andrew Poulton",
+      "Viktor Kerkez",
+      "Robert Stojnic"
+    ],
+    "venue": "CoRR",
+    "title": "Galactica: A large language model for science",
+    "raw_text": "Ross Taylor*Marcin Kardas*Guillem Cucurull*Thomas Scialom*Anthony Hartshorn*Elvis Saravia*Andrew Poulton*Viktor Kerkez*Robert Stojnic#Galactica: A large language model for science#CoRR#2022#https://doi.org/10.48550/arXiv.2211.09085",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Dennis Ungan",
+      "Céline Be",
+      "Paulina Baczyk",
+      "Simon Mittermeier",
+      "Sylvie Lehmann",
+      "Christian Wiesmann",
+      "Thomas Huber",
+      "Frank Kolbinger",
+      "Jean-Michel Rondeau"
+    ],
+    "venue": "mAbs",
+    "title": "Il-17a complexes with therapeutic antibodies exhibit distinct size distributions, potentially contributing to clinically observed immunogenicity",
+    "raw_text": "Dennis Ungan*Céline Be*Paulina Baczyk*Simon Mittermeier*Sylvie Lehmann*Christian Wiesmann*Thomas Huber*Frank Kolbinger*Jean-Michel Rondeau#Il-17a complexes with therapeutic antibodies exhibit distinct size distributions, potentially contributing to clinically observed immunogenicity#mAbs#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Lulu Wang",
+      "Zihan Jia",
+      "Xiaohan Ye",
+      "Chunxiao Chen",
+      "Baofa Sun",
+      "Xiangshuai Zhao",
+      "Ruiqi Zhang",
+      "Ying Li",
+      "Wenya Wang",
+      "Zixian Sun",
+      "et al"
+    ],
+    "venue": "Protein & Cell",
+    "title": "Discovery and structural investigation of varicella-zoster virus ge-neutralizing antibodies isolated from a convalescent patient",
+    "raw_text": "Lulu Wang*Zihan Jia*Xiaohan Ye*Chunxiao Chen*Baofa Sun*Xiangshuai Zhao*Ruiqi Zhang*Ying Li*Wenya Wang*Zixian Sun*et al#Discovery and structural investigation of varicella-zoster virus ge-neutralizing antibodies isolated from a convalescent patient#Protein & Cell#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/2024.acl-long.62",
+    "doi": "10.18653/v1/2024.acl-long.62",
+    "year": 2024,
+    "authors": [
+      "Zeyuan Wang",
+      "Qiang Zhang",
+      "Keyan Ding",
+      "Ming Qin",
+      "Xiang Zhuang",
+      "Xiaotong Li",
+      "Huajun Chen"
+    ],
+    "venue": "Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+    "title": "Instructprotein: Aligning human and protein language via knowledge instruction",
+    "raw_text": "Zeyuan Wang*Qiang Zhang*Keyan Ding*Ming Qin*Xiang Zhuang*Xiaotong Li*Huajun Chen#Instructprotein: Aligning human and protein language via knowledge instruction#Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)#2024#https://doi.org/10.18653/v1/2024.acl-long.62",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Perry T Wasdin",
+      "Nicole V Johnson",
+      "Alexis K Janke",
+      "Sofia Held",
+      "Toma M Marinov",
+      "Gwen Jordaan",
+      "Rebecca A Gillespie",
+      "Léna Vandenabeele",
+      "Fani Pantouli",
+      "Olivia C Powers",
+      "et al"
+    ],
+    "venue": "Cell",
+    "title": "Generation of antigen-specific paired-chain antibodies using large language models",
+    "raw_text": "Perry T Wasdin*Nicole V Johnson*Alexis K Janke*Sofia Held*Toma M Marinov*Gwen Jordaan*Rebecca A Gillespie*Léna Vandenabeele*Fani Pantouli*Olivia C Powers*et al#Generation of antigen-specific paired-chain antibodies using large language models#Cell#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jason Wei",
+      "Xuezhi Wang",
+      "Dale Schuurmans",
+      "Maarten Bosma",
+      "Brian Ichter",
+      "Fei Xia",
+      "Ed Chi",
+      "Quoc Le",
+      "Denny Zhou"
+    ],
+    "venue": "Advances in Neural Information Processing Systems (NeurIPS)",
+    "title": "Chain-of-thought prompting elicits reasoning in large language models",
+    "raw_text": "Jason Wei*Xuezhi Wang*Dale Schuurmans*Maarten Bosma*Brian Ichter*Fei Xia*Ed Chi*Quoc Le*Denny Zhou#Chain-of-thought prompting elicits reasoning in large language models#Advances in Neural Information Processing Systems (NeurIPS)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Fandi Wu",
+      "Yu Zhao",
+      "Jiaxiang Wu",
+      "Biaobin Jiang",
+      "Bing He",
+      "Longkai Huang",
+      "Chenchen Qin",
+      "Fan Yang",
+      "Ningqiao Huang",
+      "Yang Xiao",
+      "et al"
+    ],
+    "venue": "bioRxiv",
+    "title": "Fast and accurate modeling and design of antibody-antigen complex using tfold",
+    "raw_text": "Fandi Wu*Yu Zhao*Jiaxiang Wu*Biaobin Jiang*Bing He*Longkai Huang*Chenchen Qin*Fan Yang*Ningqiao Huang*Yang Xiao*et al#Fast and accurate modeling and design of antibody-antigen complex using tfold#bioRxiv#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://proceedings.mlr.press/v202/xu23t.html",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Minghao Xu",
+      "Xinyu Yuan",
+      "Santiago Miret",
+      "Jian Tang"
+    ],
+    "venue": "International Conference on Machine Learning, ICML 2023",
+    "title": "Protst: Multi-modality learning of protein sequences and biomedical texts",
+    "raw_text": "Minghao Xu*Xinyu Yuan*Santiago Miret*Jian Tang#Protst: Multi-modality learning of protein sequences and biomedical texts#International Conference on Machine Learning, ICML 2023#2023#https://proceedings.mlr.press/v202/xu23t.html",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Shaojie Xue",
+      "Suhua He",
+      "Zhaoxia Huang",
+      "Mei Yang",
+      "Guowei Hu",
+      "Xiaoxue Chen",
+      "Qiuyue Chen",
+      "Wenying Zhou",
+      "Sixiao Lin",
+      "Shoudeng Chen"
+    ],
+    "venue": "Communications Biology",
+    "title": "Structural basis of a human antibody targeting sars-cov-2 nucleocapsid protein dimerization domain and interfering with rna-binding",
+    "raw_text": "Shaojie Xue*Suhua He*Zhaoxia Huang*Mei Yang*Guowei Hu*Xiaoxue Chen*Qiuyue Chen*Wenying Zhou*Sixiao Lin*Shoudeng Chen#Structural basis of a human antibody targeting sars-cov-2 nucleocapsid protein dimerization domain and interfering with rna-binding#Communications Biology#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.15115",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "An Yang",
+      "Qwen Team"
+    ],
+    "venue": "",
+    "title": "Qwen2.5 technical report",
+    "raw_text": "An Yang*Qwen Team#Qwen2.5 technical report##2025#https://arxiv.org/abs/2412.15115",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.48550/arXiv.2407.10671",
+    "doi": "10.48550/arXiv.2407.10671",
+    "year": 2024,
+    "authors": [
+      "An Yang",
+      "Baosong Yang",
+      "Binyuan Hui",
+      "Bo Zheng",
+      "Bowen Yu",
+      "Chang Zhou",
+      "Chengpeng Li",
+      "Chengyuan Li",
+      "et al"
+    ],
+    "venue": "CoRR",
+    "title": "Qwen2 technical report",
+    "raw_text": "An Yang*Baosong Yang*Binyuan Hui*Bo Zheng*Bowen Yu*Chang Zhou*Chengpeng Li*Chengyuan Li*et al#Qwen2 technical report#CoRR#2024#https://doi.org/10.48550/arXiv.2407.10671",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2406.13163",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Hao Yuan",
+      "Jing Chen",
+      "Ming Li",
+      "Yifan Xu",
+      "Yang Zhang"
+    ],
+    "venue": "arXiv preprint arXiv:2406.13163",
+    "title": "Swissprot-aug: Augmenting protein function descriptions for language model training",
+    "raw_text": "Hao Yuan*Jing Chen*Ming Li*Yifan Xu*Yang Zhang#Swissprot-aug: Augmenting protein function descriptions for language model training#arXiv preprint arXiv:2406.13163#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2003,
+    "authors": [
+      "Michael Zemlin",
+      "Martin Klinger",
+      "Jason Link",
+      "Cosima Zemlin",
+      "Karl Bauer",
+      "Jeffrey A. Engler",
+      "Harry W. Schroeder",
+      "Perry M. Kirkham"
+    ],
+    "venue": "Journal of Molecular Biology",
+    "title": "Expressed murine and human cdr-h3 intervals of equal length exhibit distinct repertoires that differ in their amino acid composition and predicted range of structures",
+    "raw_text": "Michael Zemlin*Martin Klinger*Jason Link*Cosima Zemlin*Karl Bauer*Jeffrey A. Engler*Harry W. Schroeder*Perry M. Kirkham#Expressed murine and human cdr-h3 intervals of equal length exhibit distinct repertoires that differ in their amino acid composition and predicted range of structures#Journal of Molecular Biology#2003#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Lei Zhang",
+      "Adriana Irimia",
+      "Lingling He",
+      "Elise Landais",
+      "Kimmo Rantalainen",
+      "Daniel P. Leaman",
+      "et al"
+    ],
+    "venue": "Nature Communications",
+    "title": "An mper antibody neutralizes hiv-1 using germline features shared among donors",
+    "raw_text": "Lei Zhang*Adriana Irimia*Lingling He*Elise Landais*Kimmo Rantalainen*Daniel P. Leaman*et al#An mper antibody neutralizes hiv-1 using germline features shared among donors#Nature Communications#2019#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2205.01068",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Susan Zhang",
+      "Stephen Roller",
+      "Naman Goyal",
+      "Mikel Artetxe",
+      "Moya Chen",
+      "Shuohui Chen",
+      "Christopher Dewan",
+      "Mona Diab",
+      "Xian Li",
+      "Xi Victoria Lin",
+      "Todor Mihaylov",
+      "Myle Ott",
+      "Sam Shleifer",
+      "Kurt Shuster",
+      "Daniel Simig",
+      "Punit Singh Koura",
+      "Anjali Sridhar",
+      "Tianlu Wang",
+      "Luke Zettlemoyer"
+    ],
+    "venue": "",
+    "title": "Opt: Open pre-trained transformer language models",
+    "raw_text": "Susan Zhang*Stephen Roller*Naman Goyal*Mikel Artetxe*Moya Chen*Shuohui Chen*Christopher Dewan*Mona Diab*Xian Li*Xi Victoria Lin*Todor Mihaylov*Myle Ott*Sam Shleifer*Kurt Shuster*Daniel Simig*Punit Singh Koura*Anjali Sridhar*Tianlu Wang*Luke Zettlemoyer#Opt: Open pre-trained transformer language models##2022#https://arxiv.org/abs/2205.01068",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Yue Zhang",
+      "Xiang Li",
+      "Yifan Zhao",
+      "Shuang Wang",
+      "Liang Gao"
+    ],
+    "venue": "Advances in Neural Information Processing Systems (NeurIPS)",
+    "title": "Ontoprotein: Protein pretraining with gene ontology embedding",
+    "raw_text": "Yue Zhang*Xiang Li*Yifan Zhao*Shuang Wang*Liang Gao#Ontoprotein: Protein pretraining with gene ontology embedding#Advances in Neural Information Processing Systems (NeurIPS)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Runchu Zhao",
+      "Lili Wu",
+      "Yi Zhang",
+      "Jianrong Ma",
+      "Dezhi Liu",
+      "Yuxuan Zheng",
+      "Tianxiang Kong",
+      "Renyi Ma",
+      "Zhengrong Gao",
+      "Yan Chai",
+      "et al"
+    ],
+    "venue": "EMBO Molecular Medicine",
+    "title": "Anti-m1r/b6r antibody characterization and bispecific design for enhanced orthopoxvirus protection",
+    "raw_text": "Runchu Zhao*Lili Wu*Yi Zhang*Jianrong Ma*Dezhi Liu*Yuxuan Zheng*Tianxiang Kong*Renyi Ma*Zhengrong Gao*Yan Chai*et al#Anti-m1r/b6r antibody characterization and bispecific design for enhanced orthopoxvirus protection#EMBO Molecular Medicine#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Xibin Zhou",
+      "Chenchen Han",
+      "Yingqi Zhang",
+      "Jin Su",
+      "Kai Zhuang",
+      "Shiyu Jiang",
+      "Zichen Yuan",
+      "Wei Zheng",
+      "Fengyuan Dai",
+      "Yuyang Zhou",
+      "et al"
+    ],
+    "venue": "biorxiv",
+    "title": "Decoding the molecular language of proteins with evolla",
+    "raw_text": "Xibin Zhou*Chenchen Han*Yingqi Zhang*Jin Su*Kai Zhuang*Shiyu Jiang*Zichen Yuan*Wei Zheng*Fengyuan Dai*Yuyang Zhou*et al#Decoding the molecular language of proteins with evolla#biorxiv#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/2024.acl-long.484",
+    "doi": "10.18653/v1/2024.acl-long.484",
+    "year": 2024,
+    "authors": [
+      "Le Zhuo",
+      "Zewen Chi",
+      "Minghao Xu",
+      "Heyan Huang",
+      "Jianan Zhao",
+      "Heqi Zheng",
+      "Conghui He",
+      "XianLing Mao",
+      "Wentao Zhang"
+    ],
+    "venue": "Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+    "title": "Protllm: An interleaved protein-language LLM with protein-as-word pre-training",
+    "raw_text": "Le Zhuo*Zewen Chi*Minghao Xu*Heyan Huang*Jianan Zhao*Heqi Zheng*Conghui He*XianLing Mao*Wentao Zhang#Protllm: An interleaved protein-language LLM with protein-as-word pre-training#Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)#2024#https://doi.org/10.18653/v1/2024.acl-long.484",
+    "type": "non-arxiv"
+  }
+]
