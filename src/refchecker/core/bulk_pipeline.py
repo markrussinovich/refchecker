@@ -555,10 +555,10 @@ class BulkHallucinationBatcher:
         return [grouped.get(index) for index in range(len(payloads))]
 
 
-def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, total_refs: int) -> None:
-    """Print a single hallucination-flagged reference in bulk mode, matching single-paper CLI format.
-    
-    flag_idx: 1-based index among flagged references for this paper (e.g. [1], [2]).
+def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total_refs: int) -> None:
+    """Print a single reference with errors in bulk mode, matching single-paper CLI format.
+
+    ref_idx: 1-based index among error references for this paper.
     total_refs: total references in the paper (for context).
     """
     ref_title = error_entry.get('ref_title', 'Untitled')
@@ -569,7 +569,7 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], flag_idx: int, tota
     ref_verified_url = error_entry.get('ref_verified_url', '')
 
     # Reference header with simple [n] index
-    _safe_print(f'   [{flag_idx}] {ref_title}')
+    _safe_print(f'   [{ref_idx}] {ref_title}')
     if ref_authors:
         _safe_print(f'       {ref_authors}')
     if ref_venue:
@@ -685,10 +685,10 @@ class BulkProgressReporter:
                 f'({elapsed})'
             )
 
-            # ── Show only hallucination-flagged references ──
-            for flag_idx, error_entry in enumerate(flagged_entries, 1):
+            # ── Show all references with errors/warnings ──
+            for ref_idx, error_entry in enumerate(result.errors, 1):
                 _safe_print('')
-                _print_bulk_reference_block(error_entry, flag_idx, result.references_processed)
+                _print_bulk_reference_block(error_entry, ref_idx, result.references_processed)
 
             # ── Running totals ──
             _safe_print(
