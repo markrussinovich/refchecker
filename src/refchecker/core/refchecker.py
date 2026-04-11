@@ -300,12 +300,12 @@ class ArxivReferenceChecker:
                     model=h_model,
                     endpoint=h_endpoint,
                 )
+                verifier.cache_dir = self.cache_dir
+                llm_verifier = verifier
                 if verifier.available:
-                    verifier.cache_dir = self.cache_dir
-                    llm_verifier = verifier
                     logger.debug('LLM hallucination verifier enabled (provider=%s)', verifier.provider)
                 else:
-                    logger.debug('LLM hallucination verifier not available (no API key)')
+                    logger.debug('LLM hallucination verifier: no API key, will use cache only')
             except Exception as exc:
                 logger.debug(f'LLM hallucination verifier init failed: {exc}')
 

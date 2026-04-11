@@ -483,24 +483,15 @@ class LLMHallucinationVerifier:
         -------
         dict with verdict, explanation, and optional web_search results.
         """
-        if not self.available:
-            return {
-                'verdict': 'UNCERTAIN',
-                'explanation': 'LLM not available.',
-                'web_search': None,
-            }
-
         title = error_entry.get('ref_title', '')
         authors = error_entry.get('ref_authors_cited', '')
         orig = error_entry.get('original_reference', {})
         venue = orig.get('venue', orig.get('journal', '')) or ''
         year = error_entry.get('ref_year_cited') or ''
-        # Never send "0" as year to the LLM — treat it as unknown
         if str(year).strip() in ('0', ''):
             year = '(unknown)'
         url = error_entry.get('ref_url_cited', '')
 
-        # Build a human-readable summary of validation errors
         validation_lines = self._build_validation_summary(error_entry)
 
         import datetime
@@ -515,6 +506,30 @@ class LLMHallucinationVerifier:
             today=today,
             validation_summary=validation_lines or 'No specific errors detected.',
         )
+
+        # Check LLM cache before requiring a live client — allows
+        # cached results to be used even when no API key is configured.
+        cache_dir = getattr(self, 'cache_dir', None)
+        if cache_dir and self.model:
+            from refchecker.utils.cache_utils import cached_llm_response
+            hit = cached_llm_response(cache_dir, self.model, _ASSESSMENT_SYSTEM_PROMPT, user_prompt)
+            if hit is not None:
+                verdict, explanation, paper_link = self._parse_verdict(hit['text'])
+                return {
+                    'verdict': verdict,
+                    'explanation': explanation,
+                    'link': paper_link,
+                    'web_search': {'found': bool(hit.get('web_urls')),
+                                   'academic_urls': hit.get('web_urls', []),
+                                   'provider': self.provider} if hit.get('web_urls') else None,
+                }
+
+        if not self.available:
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': 'LLM not available.',
+                'web_search': None,
+            }
 
         try:
             response, web_urls = self._call(_ASSESSMENT_SYSTEM_PROMPT, user_prompt)

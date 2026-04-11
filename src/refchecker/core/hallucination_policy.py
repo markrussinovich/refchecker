@@ -561,7 +561,7 @@ def assess_hallucination(
         explanation: str  (LLM's reasoning)
         web_search: dict | None  (web search results if performed)
     """
-    if not llm_client or not llm_client.available:
+    if not llm_client:
         return {
             'verdict': 'UNCERTAIN',
             'explanation': 'No LLM configured for hallucination assessment.',
@@ -569,6 +569,8 @@ def assess_hallucination(
         }
 
     try:
+        # The verifier's assess() checks its disk cache before requiring
+        # a live API key, so this works even without an API key in CI.
         result = llm_client.assess(error_entry, web_searcher=web_searcher)
         return result
     except Exception as exc:
@@ -726,8 +728,10 @@ def run_hallucination_check(
     if outcome == 'skip':
         return None
 
-    # 'needs_llm' — run LLM assessment if available
-    if llm_client and getattr(llm_client, 'available', False):
+    # 'needs_llm' — run LLM assessment.  The verifier checks its disk
+    # cache before requiring a live API key, so cached results work
+    # even when no API key is configured (e.g. CI).
+    if llm_client:
         llm_result = assess_hallucination(
             error_entry, llm_client=llm_client, web_searcher=web_searcher,
         )
