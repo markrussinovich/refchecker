@@ -743,7 +743,7 @@ class EnhancedHybridReferenceChecker:
         # 2. Independent ArXiv ID check — skip when the hybrid checker
         #    already verified the paper with no errors (avoids false
         #    positives from paraphrased titles in the S2 API)
-        if errors is not None:  # only when there are existing errors
+        if errors:  # only when there are existing errors
             already_has_arxiv = any(e.get('error_type') == 'arxiv_id' for e in errors)
             if not already_has_arxiv:
                 arxiv_errors = self._check_arxiv_id_mismatch(reference, verified_data)

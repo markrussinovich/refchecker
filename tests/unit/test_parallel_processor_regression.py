@@ -6,6 +6,9 @@ from refchecker.core.parallel_processor import ParallelReferenceProcessor, Refer
 def test_parallel_printer_does_not_rerun_hallucination_assessment(capsys):
     base_checker = SimpleNamespace(
         _get_verified_url=lambda verified_data, url, errors: url,
+        _print_reference_header=lambda ref, index, total: print(f"[{index+1}/{total}] {ref.get('title', '')}"),
+        _print_verified_urls=lambda ref, vd, url, errors: None,
+        _display_non_unverified_errors=lambda errors, debug_mode, print_output: None,
         _display_unverified_error_with_subreason=lambda *args, **kwargs: None,
         _run_and_display_hallucination_assessment=lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError('parallel printer should not rerun hallucination assessment')
