@@ -33,16 +33,17 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
 FIXTURE_CACHE = Path(__file__).resolve().parents[1] / 'fixtures' / 'cache_H8tismBT3Q'
+FIXTURE_DB = FIXTURE_CACHE / 'test_papers.db'
 PAPER_URL = 'https://openreview.net/forum?id=H8tismBT3Q'
-DB_PATH = '/datadrive2/semanticscholardb/'
 
 EXPECTED_HALLUCINATED_COUNT = 7  # 6 from WebUI + Mathprompter (deterministic author check)
 
 
-def _needs_local_db():
-    """Skip if local Semantic Scholar database is not available."""
-    if not os.path.isdir(DB_PATH):
-        pytest.skip(f'Local database not found at {DB_PATH}')
+def _get_db_path():
+    """Return the path to the test database (fixture or full)."""
+    if FIXTURE_DB.is_file():
+        return str(FIXTURE_DB)
+    pytest.skip(f'Test database not found at {FIXTURE_DB}')
 
 
 def _prepare_cache(tmp_path: Path) -> str:
@@ -57,12 +58,12 @@ def _prepare_cache(tmp_path: Path) -> str:
 class TestH8tismBT3QRegression:
     """Verify hallucination detection for H8tismBT3Q matches across all modes."""
 
-    def _run_single_paper(self, cache_dir: str):
+    def _run_single_paper(self, cache_dir: str, db_path: str):
         """Run single-paper CLI mode and return the structured payload."""
         from refchecker.core.refchecker import ArxivReferenceChecker
 
         checker = ArxivReferenceChecker(
-            db_path=DB_PATH,
+            db_path=db_path,
             llm_config={'provider': 'anthropic'},
             cache_dir=cache_dir,
             enable_parallel=True,
@@ -73,12 +74,12 @@ class TestH8tismBT3QRegression:
         )
         return checker._build_structured_report_payload()
 
-    def _run_bulk(self, cache_dir: str):
+    def _run_bulk(self, cache_dir: str, db_path: str):
         """Run bulk mode and return the structured payload."""
         from refchecker.core.refchecker import ArxivReferenceChecker
 
         checker = ArxivReferenceChecker(
-            db_path=DB_PATH,
+            db_path=db_path,
             llm_config={'provider': 'anthropic'},
             cache_dir=cache_dir,
             enable_parallel=True,
@@ -99,9 +100,9 @@ class TestH8tismBT3QRegression:
 
     def test_single_paper_minimum_hallucinations(self, tmp_path):
         """Single-paper mode should flag at least MINIMUM_HALLUCINATED_COUNT refs."""
-        _needs_local_db()
+        db_path = _get_db_path()
         cache_dir = _prepare_cache(tmp_path)
-        payload = self._run_single_paper(cache_dir)
+        payload = self._run_single_paper(cache_dir, db_path)
         flagged = self._extract_flagged_titles(payload)
         assert len(flagged) == EXPECTED_HALLUCINATED_COUNT, (
             f'Single-paper mode flagged {len(flagged)} refs, expected {EXPECTED_HALLUCINATED_COUNT}.\n'
@@ -110,9 +111,9 @@ class TestH8tismBT3QRegression:
 
     def test_single_paper_unverified_ge_hallucinated(self, tmp_path):
         """Display unverified count (max of raw unverified, flagged) should be >= hallucinated."""
-        _needs_local_db()
+        db_path = _get_db_path()
         cache_dir = _prepare_cache(tmp_path)
-        payload = self._run_single_paper(cache_dir)
+        payload = self._run_single_paper(cache_dir, db_path)
         flagged = payload['summary'].get('flagged_records', 0)
         raw_unverified = payload['summary'].get('total_unverified_refs', 0)
         display_unverified = max(raw_unverified, flagged)
@@ -122,9 +123,9 @@ class TestH8tismBT3QRegression:
 
     def test_bulk_minimum_hallucinations(self, tmp_path):
         """Bulk mode should flag at least MINIMUM_HALLUCINATED_COUNT refs."""
-        _needs_local_db()
+        db_path = _get_db_path()
         cache_dir = _prepare_cache(tmp_path)
-        payload = self._run_bulk(cache_dir)
+        payload = self._run_bulk(cache_dir, db_path)
         flagged = self._extract_flagged_titles(payload)
         assert len(flagged) == EXPECTED_HALLUCINATED_COUNT, (
             f'Bulk mode flagged {len(flagged)} refs, expected {EXPECTED_HALLUCINATED_COUNT}.\n'
@@ -133,12 +134,12 @@ class TestH8tismBT3QRegression:
 
     def test_single_and_bulk_match(self, tmp_path):
         """Single-paper and bulk modes must flag the same refs."""
-        _needs_local_db()
+        db_path = _get_db_path()
         cache_dir_single = _prepare_cache(tmp_path / 'single')
         cache_dir_bulk = _prepare_cache(tmp_path / 'bulk')
 
-        single_payload = self._run_single_paper(cache_dir_single)
-        bulk_payload = self._run_bulk(cache_dir_bulk)
+        single_payload = self._run_single_paper(cache_dir_single, db_path)
+        bulk_payload = self._run_bulk(cache_dir_bulk, db_path)
 
         single_flagged = self._extract_flagged_titles(single_payload)
         bulk_flagged = self._extract_flagged_titles(bulk_payload)

@@ -436,9 +436,20 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
 
     # Title-only errors on verified refs mean the paper was found but has
     # a slightly different title (e.g. paraphrase in Semantic Scholar).
-    # This is a metadata quality issue, not hallucination.
-    if error_type == 'title' and error_entry.get('ref_verified_url'):
-        return False
+    # This is a metadata quality issue, not hallucination.  Also skip
+    # 'multiple' where all sub-errors are title/venue/year (no author
+    # or ArXiv ID issues).
+    if error_entry.get('ref_verified_url') and error_type in {'title', 'multiple'}:
+        if error_type == 'title':
+            return False
+        # For 'multiple', check if it contains only title/venue/year issues
+        details = (error_entry.get('error_details') or '').lower()
+        has_suspicious = any(kw in details for kw in (
+            'author', 'doi', 'arxiv_id', 'arxiv id', 'unverified',
+            'could not be verified', 'could not verify',
+        ))
+        if not has_suspicious:
+            return False
 
     # "url references paper" cases are now passed to the LLM for validation.
     # The LLM can override the unverified status to verified if it confirms
