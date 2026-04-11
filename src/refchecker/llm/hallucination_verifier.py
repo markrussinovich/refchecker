@@ -188,6 +188,76 @@ Only answer YES for references that are unverified or have major conflicts. \
 Minor author-name or year differences do NOT warrant a search."""
 
 
+def build_assessment_prompt(error_entry: dict) -> tuple:
+    """Build the (system_prompt, user_prompt) for hallucination assessment.
+
+    This is the single source of truth for prompt construction so CLI,
+    bulk, and WebUI all produce identical cache keys for the same input.
+    """
+    title = error_entry.get('ref_title', '')
+    authors = error_entry.get('ref_authors_cited', '')
+    orig = error_entry.get('original_reference', {})
+    venue = orig.get('venue', orig.get('journal', '')) or ''
+    year = error_entry.get('ref_year_cited') or ''
+    if str(year).strip() in ('0', ''):
+        year = '(unknown)'
+    url = error_entry.get('ref_url_cited', '')
+
+    validation_lines = _build_validation_summary_static(error_entry)
+
+    import datetime
+    today = datetime.date.today().isoformat()
+
+    user_prompt = _ASSESSMENT_PROMPT.format(
+        title=title,
+        authors=authors,
+        venue=venue,
+        year=year,
+        url=url or '(none)',
+        today=today,
+        validation_summary=validation_lines or 'No specific errors detected.',
+    )
+    return _ASSESSMENT_SYSTEM_PROMPT, user_prompt
+
+
+def _build_validation_summary_static(error_entry: dict) -> str:
+    """Build a human-readable summary of validation errors for the prompt.
+
+    Standalone version of LLMHallucinationVerifier._build_validation_summary
+    so the prompt can be built without a verifier instance (for caching).
+    """
+    error_type = error_entry.get('error_type', '')
+    error_details = error_entry.get('error_details', '')
+
+    lines = []
+    if error_type == 'unverified':
+        url = error_entry.get('ref_url_cited', '')
+        if url and 'arxiv.org' in url:
+            lines.append(
+                '- Reference could NOT be found in any academic database '
+                '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv).\n'
+                '  NOTE: The cited ArXiv URL points to a COMPLETELY DIFFERENT '
+                'paper — the URL is likely fabricated along with the rest of '
+                'the reference. Search for the cited TITLE to determine if '
+                'the paper exists at all.'
+            )
+        else:
+            lines.append('- Reference could NOT be found in any academic database '
+                         '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)')
+    elif error_type == 'multiple':
+        lines.append('- Multiple issues detected:')
+        for detail in error_details.split('\n'):
+            detail = detail.strip()
+            if detail.startswith('- '):
+                lines.append(f'  {detail}')
+            elif detail:
+                lines.append(f'  - {detail}')
+    elif error_type and error_details:
+        lines.append(f'- {error_type}: {error_details}')
+
+    return '\n'.join(lines)
+
+
 class LLMHallucinationVerifier:
     """LLM-based hallucination verifier.
 
@@ -483,36 +553,14 @@ class LLMHallucinationVerifier:
         -------
         dict with verdict, explanation, and optional web_search results.
         """
-        title = error_entry.get('ref_title', '')
-        authors = error_entry.get('ref_authors_cited', '')
-        orig = error_entry.get('original_reference', {})
-        venue = orig.get('venue', orig.get('journal', '')) or ''
-        year = error_entry.get('ref_year_cited') or ''
-        if str(year).strip() in ('0', ''):
-            year = '(unknown)'
-        url = error_entry.get('ref_url_cited', '')
-
-        validation_lines = self._build_validation_summary(error_entry)
-
-        import datetime
-        today = datetime.date.today().isoformat()
-
-        user_prompt = _ASSESSMENT_PROMPT.format(
-            title=title,
-            authors=authors,
-            venue=venue,
-            year=year,
-            url=url or '(none)',
-            today=today,
-            validation_summary=validation_lines or 'No specific errors detected.',
-        )
+        system_prompt, user_prompt = build_assessment_prompt(error_entry)
 
         # Check LLM cache before requiring a live client — allows
         # cached results to be used even when no API key is configured.
         cache_dir = getattr(self, 'cache_dir', None)
         if cache_dir and self.model:
             from refchecker.utils.cache_utils import cached_llm_response
-            hit = cached_llm_response(cache_dir, self.model, _ASSESSMENT_SYSTEM_PROMPT, user_prompt)
+            hit = cached_llm_response(cache_dir, self.model, system_prompt, user_prompt)
             if hit is not None:
                 verdict, explanation, paper_link = self._parse_verdict(hit['text'])
                 return {
@@ -532,7 +580,7 @@ class LLMHallucinationVerifier:
             }
 
         try:
-            response, web_urls = self._call(_ASSESSMENT_SYSTEM_PROMPT, user_prompt)
+            response, web_urls = self._call(system_prompt, user_prompt)
             verdict, explanation, paper_link = self._parse_verdict(response)
         except Exception as exc:
             logger.warning(f'LLM hallucination assessment failed: {exc}')
@@ -602,38 +650,7 @@ class LLMHallucinationVerifier:
 
     def _build_validation_summary(self, error_entry: Dict[str, Any]) -> str:
         """Build a human-readable summary of validation errors for the prompt."""
-        error_type = error_entry.get('error_type', '')
-        error_details = error_entry.get('error_details', '')
-
-        lines = []
-        if error_type == 'unverified':
-            # Check if the reference has an ArXiv URL that was checked and
-            # pointed to a different paper (the URL is fabricated/wrong).
-            url = error_entry.get('ref_url_cited', '')
-            if url and 'arxiv.org' in url:
-                lines.append(
-                    '- Reference could NOT be found in any academic database '
-                    '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv).\n'
-                    '  NOTE: The cited ArXiv URL points to a COMPLETELY DIFFERENT '
-                    'paper — the URL is likely fabricated along with the rest of '
-                    'the reference. Search for the cited TITLE to determine if '
-                    'the paper exists at all.'
-                )
-            else:
-                lines.append('- Reference could NOT be found in any academic database '
-                             '(Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)')
-        elif error_type == 'multiple':
-            lines.append('- Multiple issues detected:')
-            for detail in error_details.split('\n'):
-                detail = detail.strip()
-                if detail.startswith('- '):
-                    lines.append(f'  {detail}')
-                elif detail:
-                    lines.append(f'  - {detail}')
-        elif error_type and error_details:
-            lines.append(f'- {error_type}: {error_details}')
-
-        return '\n'.join(lines)
+        return _build_validation_summary_static(error_entry)
 
     def _should_web_search(self, error_entry: Dict[str, Any]) -> bool:
         """Decide if a web search would provide useful signal.

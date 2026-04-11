@@ -418,7 +418,15 @@ class BulkHallucinationBatcher:
 
     def submit(self, error_entry: Dict[str, Any], llm_verifier: Any, web_searcher: Any) -> _BatchTask:
         payload = _HallucinationPayload(error_entry=error_entry, llm_verifier=llm_verifier, web_searcher=web_searcher)
-        if not self.enabled or self._batcher is None:
+        # Fall back to single (non-batched) processing when the batcher is
+        # disabled or the LLM is not live — single processing checks the
+        # disk cache and works even without an API key.
+        use_single = (
+            not self.enabled
+            or self._batcher is None
+            or not getattr(llm_verifier, 'available', False)
+        )
+        if use_single:
             task = _BatchTask(payload=payload)
             try:
                 task.result = self._process_single(payload)
@@ -446,7 +454,9 @@ class BulkHallucinationBatcher:
 
         verifier = payloads[0].llm_verifier
         if not verifier or not getattr(verifier, 'available', False):
-            raise RuntimeError('LLM verifier unavailable for batched hallucination checks')
+            # No live LLM — fall back to single processing which checks
+            # the disk cache and deterministic pre-screening.
+            return [self._process_single(p) for p in payloads]
 
         today = dt.date.today().isoformat()
         items: List[str] = []
@@ -1496,8 +1506,11 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
         if outcome == 'skip':
             continue
 
-        # 'needs_llm' — submit to batch pool
-        if not llm_verifier or not getattr(llm_verifier, 'available', False):
+        # 'needs_llm' — submit to batch pool (also when LLM has cache_dir
+        # for cache-only mode without an API key)
+        if not llm_verifier:
+            continue
+        if not getattr(llm_verifier, 'available', False) and not getattr(llm_verifier, 'cache_dir', None):
             continue
         tasks.append((error_entry, hallucination_batcher.submit(filtered, llm_verifier, web_searcher)))
 
