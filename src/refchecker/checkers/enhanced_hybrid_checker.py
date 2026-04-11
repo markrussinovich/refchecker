@@ -684,14 +684,32 @@ class EnhancedHybridReferenceChecker:
 
         from refchecker.core.hallucination_policy import _compute_author_overlap
         overlap = _compute_author_overlap(cited_authors, correct_authors)
-        if overlap is None or overlap > 0.1:
-            return None
 
-        logger.debug(
-            "DB match has catastrophic author mismatch (%.0f%% overlap) — "
-            "attempting ArXiv re-verification for '%s'",
-            overlap * 100, reference.get('title', '')[:60],
-        )
+        # Trigger re-verification when:
+        # 1. Catastrophic mismatch (≤10% overlap — wrong paper matched), OR
+        # 2. Cited has slightly MORE authors than the DB entry (1-2 extra)
+        #    AND high overlap — S2/DB may have incomplete author data while
+        #    ArXiv has the complete list.  Don't trigger for large differences
+        #    (≥3 extra) as those indicate fabricated author lists.
+        cited_count = len([a for a in cited_authors.split(',') if a.strip()])
+        correct_count = len([a for a in correct_authors.split(',') if a.strip()])
+        small_count_gap = 0 < (cited_count - correct_count) <= 2
+
+        if overlap is not None and overlap <= 0.1:
+            logger.debug(
+                "DB match has catastrophic author mismatch (%.0f%% overlap) — "
+                "attempting ArXiv re-verification for '%s'",
+                overlap * 100, reference.get('title', '')[:60],
+            )
+        elif small_count_gap and overlap is not None and overlap >= 0.5:
+            logger.debug(
+                "DB has fewer authors (%d) than cited (%d), overlap %.0f%% — "
+                "attempting ArXiv re-verification for '%s'",
+                correct_count, cited_count, overlap * 100,
+                reference.get('title', '')[:60],
+            )
+        else:
+            return None
 
         if not self.arxiv_citation:
             return None
@@ -709,7 +727,11 @@ class EnhancedHybridReferenceChecker:
             return None
 
         try:
-            arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(reference)
+            # Ensure the reference has an ArXiv URL for the citation checker
+            re_ref = dict(reference)
+            if not re_ref.get('url') or 'arxiv.org' not in re_ref.get('url', ''):
+                re_ref['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+            arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(re_ref)
             if arxiv_data is not None:
                 logger.debug("ArXiv re-verification succeeded for %s", arxiv_id)
                 return arxiv_errors or [], arxiv_url, arxiv_data

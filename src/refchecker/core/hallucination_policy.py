@@ -311,10 +311,10 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     # error when the checker found the paper but the cited authors don't match.
     # For verified refs, allow 'author' and 'multiple' (they have author errors)
     if is_verified:
-        if error_type not in ('author', 'multiple', ''):
+        if not (error_type.startswith('author') or error_type in ('multiple', '')):
             return None
     else:
-        if error_type not in ('unverified', 'author', 'multiple', ''):
+        if not (error_type.startswith('author') or error_type in ('unverified', 'multiple', '')):
             return None
 
     cited = error_entry.get('ref_authors_cited', '')
