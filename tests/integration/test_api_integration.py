@@ -209,7 +209,7 @@ class TestGitHubIntegration:
         """Create GitHubChecker instance."""
         return GitHubChecker()
     
-    @patch('requests.Session.get')
+    @patch('requests.get')
     def test_verify_repository_success(self, mock_get, github_checker, github_repository_response):
         """Test successful repository verification."""
         mock_response = Mock()
