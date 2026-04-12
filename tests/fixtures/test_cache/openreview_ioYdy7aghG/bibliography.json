@@ -1,0 +1,924 @@
+[
+  {
+    "url": "https://aclanthology.org/2025.findings-emnlp.283/",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Sagiv Antebi",
+      "Edan Habler",
+      "Asaf Shabtai",
+      "Yuval Elovici"
+    ],
+    "venue": "Findings of the Association for Computational Linguistics: EMNLP 2025",
+    "title": "Tag&tab: Pretraining data detection in large language models using keyword-based membership inference attack",
+    "raw_text": "Sagiv Antebi*Edan Habler*Asaf Shabtai*Yuval Elovici#Tag&tab: Pretraining data detection in large language models using keyword-based membership inference attack#Findings of the Association for Computational Linguistics: EMNLP 2025#2025#https://aclanthology.org/2025.findings-emnlp.283/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://doi.org/10.24432/C5XW20",
+    "doi": "10.24432/C5XW20",
+    "year": 1996,
+    "authors": [
+      "Barry Becker",
+      "Ronny Kohavi"
+    ],
+    "venue": "UCI Machine Learning Repository",
+    "title": "Adult",
+    "raw_text": "Barry Becker*Ronny Kohavi#Adult#UCI Machine Learning Repository#1996#https://doi.org/10.24432/C5XW20",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.05788",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Leonardo Berti",
+      "Flavio Giorgi",
+      "Gjergji Kasneci"
+    ],
+    "venue": "arXiv preprint",
+    "title": "Emergent abilities in large language models: A survey",
+    "raw_text": "Leonardo Berti*Flavio Giorgi*Gjergji Kasneci#Emergent abilities in large language models: A survey#arXiv preprint#2025#https://arxiv.org/abs/2503.05788",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Vadim Borisov",
+      "Tobias Leemann",
+      "Kathrin Seßler",
+      "Johannes Haug",
+      "Martin Pawelczyk",
+      "Gjergji Kasneci"
+    ],
+    "venue": "IEEE transactions on neural networks and learning systems",
+    "title": "Deep neural networks and tabular data: A survey",
+    "raw_text": "Vadim Borisov*Tobias Leemann*Kathrin Seßler*Johannes Haug*Martin Pawelczyk*Gjergji Kasneci#Deep neural networks and tabular data: A survey#IEEE transactions on neural networks and learning systems#2022##",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2210.06280",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Vadim Borisov",
+      "Kathrin Seßler",
+      "Tobias Leemann",
+      "Martin Pawelczyk",
+      "Gjergji Kasneci"
+    ],
+    "venue": "arXiv preprint arXiv:2210.06280",
+    "title": "Language models are realistic tabular data generators",
+    "raw_text": "Vadim Borisov*Kathrin Seßler*Tobias Leemann*Martin Pawelczyk*Gjergji Kasneci#Language models are realistic tabular data generators#arXiv preprint arXiv:2210.06280#2022##",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2303.04226",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Yihan Cao",
+      "Siyu Li",
+      "Yixin Liu",
+      "Zhiling Yan",
+      "Yutong Dai",
+      "Philip S Yu",
+      "Lichao Sun"
+    ],
+    "venue": "arXiv preprint arXiv:2303.04226",
+    "title": "A comprehensive survey of ai-generated content (aigc): A history of generative ai from gan to chatgpt",
+    "raw_text": "Yihan Cao*Siyu Li*Yixin Liu*Zhiling Yan*Yutong Dai*Philip S Yu*Lichao Sun#A comprehensive survey of ai-generated content (aigc): A history of generative ai from gan to chatgpt#arXiv preprint arXiv:2303.04226#2023##",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Nicholas Carlini",
+      "Florian Tramer",
+      "et al. Wallace, Eric"
+    ],
+    "venue": "USENIX Security Symposium",
+    "title": "Extracting training data from large language models",
+    "raw_text": "Nicholas Carlini*Florian Tramer*et al. Wallace, Eric#Extracting training data from large language models#USENIX Security Symposium#2021##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Nicholas Carlini",
+      "Steve Chien",
+      "Milad Nasr",
+      "Shuang Song",
+      "Andreas Terzis",
+      "Florian Tramer"
+    ],
+    "venue": "2022 IEEE symposium on security and privacy (SP)",
+    "title": "Membership inference attacks from first principles",
+    "raw_text": "Nicholas Carlini*Steve Chien*Milad Nasr*Shuang Song*Andreas Terzis*Florian Tramer#Membership inference attacks from first principles#2022 IEEE symposium on security and privacy (SP)#2022##",
+    "type": "other"
+  },
+  {
+    "url": "https://openreview.net/forum?id=TatRHT_1cK",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Nicholas Carlini",
+      "Daphne Ippolito",
+      "Matthew Jagielski",
+      "Katherine Lee",
+      "Florian Tramer",
+      "Chiyuan Zhang"
+    ],
+    "venue": "The Eleventh International Conference on Learning Representations",
+    "title": "Quantifying memorization across neural language models",
+    "raw_text": "Nicholas Carlini*Daphne Ippolito*Matthew Jagielski*Katherine Lee*Florian Tramer*Chiyuan Zhang#Quantifying memorization across neural language models#The Eleventh International Conference on Learning Representations#2023#https://openreview.net/forum?id=TatRHT_1cK",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Tianqi Chen",
+      "Carlos Guestrin"
+    ],
+    "venue": "Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining",
+    "title": "Xgboost: A scalable tree boosting system",
+    "raw_text": "Tianqi Chen*Carlos Guestrin#Xgboost: A scalable tree boosting system#Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining#2016##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Wenhu Chen"
+    ],
+    "venue": "Findings of the Association for Computational Linguistics: EACL",
+    "title": "Large language models are few(1)-shot table reasoners",
+    "raw_text": "Wenhu Chen#Large language models are few(1)-shot table reasoners#Findings of the Association for Computational Linguistics: EACL#2023##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Wenhu Chen",
+      "Hongmin Wang",
+      "Jianshu Chen",
+      "Yunkai Zhang",
+      "Hong Wang",
+      "Shiyang Li",
+      "Xiyou Zhou",
+      "William Yang Wang"
+    ],
+    "venue": "International Conference on Learning Representations (ICLR)",
+    "title": "Tabfact : A large-scale dataset for table-based fact verification",
+    "raw_text": "Wenhu Chen*Hongmin Wang*Jianshu Chen*Yunkai Zhang*Hong Wang*Shiyang Li*Xiyou Zhou*William Yang Wang#Tabfact : A large-scale dataset for table-based fact verification#International Conference on Learning Representations (ICLR)#2020##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Tim Dettmers",
+      "Artidoro Pagnoni",
+      "Ari Holtzman",
+      "Luke Zettlemoyer"
+    ],
+    "venue": "Proceedings of the 37th International Conference on Neural Information Processing Systems",
+    "title": "Qlora: efficient finetuning of quantized llms",
+    "raw_text": "Tim Dettmers*Artidoro Pagnoni*Ari Holtzman*Luke Zettlemoyer#Qlora: efficient finetuning of quantized llms#Proceedings of the 37th International Conference on Neural Information Processing Systems#2023##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Ning Ding",
+      "Yujia Qin",
+      "et al"
+    ],
+    "venue": "Nature Machine Intelligence",
+    "title": "Parameter-efficient fine-tuning of large-scale pre-trained language models",
+    "raw_text": "Ning Ding*Yujia Qin*et al#Parameter-efficient fine-tuning of large-scale pre-trained language models#Nature Machine Intelligence#2023##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Tuan Dinh",
+      "Yuchen Zeng",
+      "Kangwook Lee"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Language-interfaced fine-tuning for non-language machine learning tasks",
+    "raw_text": "Tuan Dinh*Yuchen Zeng*Kangwook Lee#Language-interfaced fine-tuning for non-language machine learning tasks#Advances in Neural Information Processing Systems#2022##",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/2024.emnlp-main.1154/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Haoyu Dong",
+      "Jianbo Zhao",
+      "Yuzhang Tian",
+      "Junyu Xiong",
+      "Mengyu Zhou",
+      "Yun Lin",
+      "José Cambronero",
+      "Yeye He",
+      "Shi Han",
+      "Dongmei Zhang"
+    ],
+    "venue": "Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing",
+    "title": "Encoding spreadsheets for large language models",
+    "raw_text": "Haoyu Dong*Jianbo Zhao*Yuzhang Tian*Junyu Xiong*Mengyu Zhou*Yun Lin*José Cambronero*Yeye He*Shi Han*Dongmei Zhang#Encoding spreadsheets for large language models#Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing#2024#https://aclanthology.org/2024.emnlp-main.1154/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.07841",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Michael Duan",
+      "Anshuman Suri",
+      "Niloofar Mireshghallah",
+      "Sewon Min",
+      "Weijia Shi",
+      "Luke Zettlemoyer",
+      "Yulia Tsvetkov",
+      "Yejin Choi",
+      "David Evans",
+      "Hannaneh Hajishirzi"
+    ],
+    "venue": "",
+    "title": "Do membership inference attacks work on large language models?",
+    "raw_text": "Michael Duan*Anshuman Suri*Niloofar Mireshghallah*Sewon Min*Weijia Shi*Luke Zettlemoyer*Yulia Tsvetkov*Yejin Choi*David Evans*Hannaneh Hajishirzi#Do membership inference attacks work on large language models?##2024#https://arxiv.org/abs/2402.07841",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://openreview.net/forum?id=IZnrCGF9WI",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Xi Fang",
+      "Weijie Xu",
+      "Fiona Anting Tan",
+      "Ziqing Hu",
+      "Jiani Zhang",
+      "Yanjun Qi",
+      "Srinivasan H. Sengamedu",
+      "Christos Faloutsos"
+    ],
+    "venue": "Transactions on Machine Learning Research",
+    "title": "Large language models (LLMs) on tabular data: Prediction, generation, and understanding - a survey",
+    "raw_text": "Xi Fang*Weijie Xu*Fiona Anting Tan*Ziqing Hu*Jiani Zhang*Yanjun Qi*Srinivasan H. Sengamedu*Christos Faloutsos#Large language models (LLMs) on tabular data: Prediction, generation, and understanding - a survey#Transactions on Machine Learning Research#2024#https://openreview.net/forum?id=IZnrCGF9WI",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.19786",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Gemma Team"
+    ],
+    "venue": "",
+    "title": "Gemma 3 technical report",
+    "raw_text": "Gemma Team#Gemma 3 technical report##2025#https://arxiv.org/abs/2503.19786",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Vadim Gorishniy",
+      "Ivan Rubachev",
+      "Valentin Khrulkov",
+      "Artem Babenko"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Revisiting deep learning models for tabular data",
+    "raw_text": "Vadim Gorishniy*Ivan Rubachev*Valentin Khrulkov*Artem Babenko#Revisiting deep learning models for tabular data#Advances in Neural Information Processing Systems#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Stefan Hegselmann",
+      "Alejandro Buendia",
+      "Hunter Lang",
+      "Monica Agrawal",
+      "Xiaoyi Jiang",
+      "David Sontag"
+    ],
+    "venue": "Proceedings of the International Conference on Artificial Intelligence and Statistics",
+    "title": "Tabllm: Few-shot classification of tabular data with large language models",
+    "raw_text": "Stefan Hegselmann*Alejandro Buendia*Hunter Lang*Monica Agrawal*Xiaoyi Jiang*David Sontag#Tabllm: Few-shot classification of tabular data with large language models#Proceedings of the International Conference on Artificial Intelligence and Statistics#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Jonathan Herzig",
+      "Pawel Nowak",
+      "Thomas Muller",
+      "Francesco Piccinno",
+      "Julian Eisenschlos"
+    ],
+    "venue": "Annual Meeting of the Association for Computational Linguistics (ACL)",
+    "title": "TAPAS: Weakly supervised table parsing via pre-training",
+    "raw_text": "Jonathan Herzig*Pawel Nowak*Thomas Muller*Francesco Piccinno*Julian Eisenschlos#TAPAS: Weakly supervised table parsing via pre-training#Annual Meeting of the Association for Computational Linguistics (ACL)#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Hongsheng Hu",
+      "Zoran Salcic",
+      "Lichao Sun",
+      "Gillian Dobbie",
+      "Philip S Yu",
+      "Xuyun Zhang"
+    ],
+    "venue": "ACM Computing Surveys (CSUR)",
+    "title": "Membership inference attacks on machine learning: A survey",
+    "raw_text": "Hongsheng Hu*Zoran Salcic*Lichao Sun*Gillian Dobbie*Philip S Yu*Xuyun Zhang#Membership inference attacks on machine learning: A survey#ACM Computing Surveys (CSUR)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2309.00722",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Sukriti Jaitly",
+      "Tanay Shah",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2309.00722",
+    "title": "Towards better serialization of tabular data for few-shot classification with large language models",
+    "raw_text": "Sukriti Jaitly*Tanay Shah*et al#Towards better serialization of tabular data for few-shot classification with large language models#arXiv preprint arXiv:2309.00722#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.06825",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Albert Q. Jiang",
+      "Alexandre Sablayrolles",
+      "Arthur Mensch",
+      "Chris Bamford",
+      "Devendra Singh Chaplot",
+      "Diego de las Casas",
+      "Florian Bressand",
+      "Gianna Lengyel",
+      "Guillaume Lample",
+      "Lucile Saulnier",
+      "Lélio Renard Lavaud",
+      "Marie-Anne Lachaux",
+      "Pierre Stock",
+      "Teven Le Scao",
+      "Thibaut Lavril",
+      "Thomas Wang",
+      "Timothée Lacroix",
+      "William El Sayed"
+    ],
+    "venue": "",
+    "title": "Mistral 7b",
+    "raw_text": "Albert Q. Jiang*Alexandre Sablayrolles*Arthur Mensch*Chris Bamford*Devendra Singh Chaplot*Diego de las Casas*Florian Bressand*Gianna Lengyel*Guillaume Lample*Lucile Saulnier*Lélio Renard Lavaud*Marie-Anne Lachaux*Pierre Stock*Teven Le Scao*Thibaut Lavril*Thomas Wang*Timothée Lacroix*William El Sayed#Mistral 7b##2023#https://arxiv.org/abs/2310.06825",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2202.06539",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Nikhil Kandpal",
+      "Eric Wallace",
+      "Colin Raffel"
+    ],
+    "venue": "",
+    "title": "Deduplicating training data mitigates privacy risks in language models",
+    "raw_text": "Nikhil Kandpal*Eric Wallace*Colin Raffel#Deduplicating training data mitigates privacy risks in language models##2022#https://arxiv.org/abs/2202.06539",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Guolin Ke",
+      "Qi Meng",
+      "Thomas Finley",
+      "Taifeng Wang",
+      "Wei Chen",
+      "Weidong Ma",
+      "Qiwei Ye",
+      "Tie-Yan Liu"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Lightgbm: A highly efficient gradient boosting decision tree",
+    "raw_text": "Guolin Ke*Qi Meng*Thomas Finley*Taifeng Wang*Wei Chen*Weidong Ma*Qiwei Ye*Tie-Yan Liu#Lightgbm: A highly efficient gradient boosting decision tree#Advances in Neural Information Processing Systems#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Shangching Liu",
+      "Shengkun Wang",
+      "Tsungyao Chang",
+      "et al"
+    ],
+    "venue": "Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP) - Industry Track",
+    "title": "Jarvix: A llm no-code platform for tabular data analysis and optimization",
+    "raw_text": "Shangching Liu*Shengkun Wang*Tsungyao Chang*et al#Jarvix: A llm no-code platform for tabular data analysis and optimization#Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP) - Industry Track#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Nils Lukas",
+      "Ahmed Salem",
+      "Robert Sim",
+      "Shruti Tople",
+      "Lukas Wutschitz",
+      "Santiago Zanella-Béguelin"
+    ],
+    "venue": "2023 IEEE Symposium on Security and Privacy (SP)",
+    "title": "Analyzing leakage of personally identifiable information in language models",
+    "raw_text": "Nils Lukas*Ahmed Salem*Robert Sim*Shruti Tople*Lukas Wutschitz*Santiago Zanella-Béguelin#Analyzing leakage of personally identifiable information in language models#2023 IEEE Symposium on Security and Privacy (SP)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/2023.findings-acl.719/",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Justus Mattern",
+      "Fatemehsadat Mireshghallah",
+      "Zhijing Jin",
+      "Bernhard Schoelkopf",
+      "Mrinmaya Sachan",
+      "Taylor Berg-Kirkpatrick"
+    ],
+    "venue": "Findings of the Association for Computational Linguistics: ACL 2023",
+    "title": "Membership inference attacks against language models via neighbourhood comparison",
+    "raw_text": "Justus Mattern*Fatemehsadat Mireshghallah*Zhijing Jin*Bernhard Schoelkopf*Mrinmaya Sachan*Taylor Berg-Kirkpatrick#Membership inference attacks against language models via neighbourhood comparison#Findings of the Association for Computational Linguistics: ACL 2023#2023#https://aclanthology.org/2023.findings-acl.719/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.21783",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Meta Team"
+    ],
+    "venue": "",
+    "title": "The llama 3 herd of models",
+    "raw_text": "Meta Team#The llama 3 herd of models##2024#https://arxiv.org/abs/2407.21783",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://aclanthology.org/2022.findings-emnlp.203",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Shashi Narayan",
+      "Binh Tang",
+      "Yixin Nie",
+      "Xingxing Zhang",
+      "Yichong Xu",
+      "Yichao Lu",
+      "Aakanksha Chowdhery",
+      "William Cohen",
+      "Slav Petrov",
+      "Sebastian Riedel"
+    ],
+    "venue": "Findings of the Association for Computational Linguistics: EMNLP 2022",
+    "title": "Normtab: Improving symbolic reasoning in LLMs through tabular data",
+    "raw_text": "Shashi Narayan*Binh Tang*Yixin Nie*Xingxing Zhang*Yichong Xu*Yichao Lu*Aakanksha Chowdhery*William Cohen*Slav Petrov*Sebastian Riedel#Normtab: Improving symbolic reasoning in LLMs through tabular data#Findings of the Association for Computational Linguistics: EMNLP 2022#2022#https://aclanthology.org/2022.findings-emnlp.203",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://platform.openai.com",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "",
+    "title": "Gpt-4o mini (gpt-4o-mini-2024-07-18)",
+    "raw_text": "OpenAI#Gpt-4o mini (gpt-4o-mini-2024-07-18)##2024#https://platform.openai.com",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2303.08774",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "",
+    "title": "Gpt-4 technical report",
+    "raw_text": "OpenAI#Gpt-4 technical report##2024#https://arxiv.org/abs/2303.08774",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://github.com/VectorInstitute/MIDST-Challenge",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "MIDST Challenge Organizers"
+    ],
+    "venue": "",
+    "title": "Membership inference over diffusion-models-based synthetic tabular data (midst) challenge",
+    "raw_text": "MIDST Challenge Organizers#Membership inference over diffusion-models-based synthetic tabular data (midst) challenge##2025#https://github.com/VectorInstitute/MIDST-Challenge",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1997,
+    "authors": [
+      "R Kelley Pace",
+      "Ronald Barry"
+    ],
+    "venue": "Statistics & Probability Letters",
+    "title": "Sparse spatial autoregressions",
+    "raw_text": "R Kelley Pace*Ronald Barry#Sparse spatial autoregressions#Statistics & Probability Letters#1997#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/2023.emnlp-main.74",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Bhargavi Paranjape",
+      "Chunting Zhou",
+      "Adam Roberts",
+      "Sebastian Gehrmann",
+      "Xuezhi Wang",
+      "Jason Wei",
+      "Vincent Zhao",
+      "William Fedus",
+      "Denny Zhou",
+      "Colin Raffel",
+      "Mohit Bansal"
+    ],
+    "venue": "Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)",
+    "title": "Optimizing pretraining data mixtures with LLM-estimated utility",
+    "raw_text": "Bhargavi Paranjape*Chunting Zhou*Adam Roberts*Sebastian Gehrmann*Xuezhi Wang*Jason Wei*Vincent Zhao*William Fedus*Denny Zhou*Colin Raffel*Mohit Bansal#Optimizing pretraining data mixtures with LLM-estimated utility#Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP)#2023#https://aclanthology.org/2023.emnlp-main.74",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/1508.00305",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Panupong Pasupat",
+      "Percy Liang"
+    ],
+    "venue": "",
+    "title": "Compositional semantic parsing on semi-structured tables",
+    "raw_text": "Panupong Pasupat*Percy Liang#Compositional semantic parsing on semi-structured tables##2015#https://arxiv.org/abs/1508.00305",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://openreview.net/forum?id=zWqr3MQuNs",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Weijia Shi",
+      "Anirudh Ajith",
+      "Mengzhou Xia",
+      "Yangsibo Huang",
+      "Daogao Liu",
+      "Terra Blevins",
+      "Danqi Chen",
+      "Luke Zettlemoyer"
+    ],
+    "venue": "The Twelfth International Conference on Learning Representations",
+    "title": "Detecting pretraining data from large language models",
+    "raw_text": "Weijia Shi*Anirudh Ajith*Mengzhou Xia*Yangsibo Huang*Daogao Liu*Terra Blevins*Danqi Chen*Luke Zettlemoyer#Detecting pretraining data from large language models#The Twelfth International Conference on Learning Representations#2024#https://openreview.net/forum?id=zWqr3MQuNs",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Reza Shokri",
+      "Marco Stronati",
+      "Congzheng Song",
+      "Vitaly Shmatikov"
+    ],
+    "venue": "2017 IEEE symposium on security and privacy (SP)",
+    "title": "Membership inference attacks against machine learning models",
+    "raw_text": "Reza Shokri*Marco Stronati*Congzheng Song*Vitaly Shmatikov#Membership inference attacks against machine learning models#2017 IEEE symposium on security and privacy (SP)#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.10358",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Ananya Singha",
+      "José Cambronero",
+      "Sumit Gulwani",
+      "Vu Le",
+      "Chris Parnin"
+    ],
+    "venue": "arXiv preprint arXiv:2310.10358",
+    "title": "Tabular representation, noisy operators, and impacts on table structure understanding tasks in llms",
+    "raw_text": "Ananya Singha*José Cambronero*Sumit Gulwani*Vu Le*Chris Parnin#Tabular representation, noisy operators, and impacts on table structure understanding tasks in llms#arXiv preprint arXiv:2310.10358#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2305.00029",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Dylan Slack",
+      "Sameer Singh"
+    ],
+    "venue": "arXiv preprint arXiv:2305.00029",
+    "title": "TABLET: Learning from instructions for tabular data",
+    "raw_text": "Dylan Slack*Sameer Singh#TABLET: Learning from instructions for tabular data#arXiv preprint arXiv:2305.00029#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zichen Song",
+      "Sitan Huang",
+      "Zhongfeng Kang"
+    ],
+    "venue": "ICASSP 2025 - 2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)",
+    "title": "Em-mias: Enhancing membership inference attacks in large language models through ensemble modeling",
+    "raw_text": "Zichen Song*Sitan Huang*Zhongfeng Kang#Em-mias: Enhancing membership inference attacks in large language models through ensemble modeling#ICASSP 2025 - 2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2305.13062",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Yuan Sui",
+      "Mengyu Zhou",
+      "Mingjie Zhou",
+      "Shi Han",
+      "Dongmei Zhang"
+    ],
+    "venue": "arXiv preprint arXiv:2305.13062",
+    "title": "Evaluating and enhancing structural understanding capabilities of large language models on tables via input designs",
+    "raw_text": "Yuan Sui*Mengyu Zhou*Mingjie Zhou*Shi Han*Dongmei Zhang#Evaluating and enhancing structural understanding capabilities of large language models on tables via input designs#arXiv preprint arXiv:2305.13062#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.1145/3616855.3635752",
+    "doi": "10.1145/3616855.3635752",
+    "year": 2024,
+    "authors": [
+      "Yuan Sui",
+      "Mengyu Zhou",
+      "Mingjie Zhou",
+      "Shi Han",
+      "Dongmei Zhang"
+    ],
+    "venue": "Proceedings of the 17th ACM International Conference on Web Search and Data Mining, WSDM '24",
+    "title": "Table meets llm: Can large language models understand structured table data? a benchmark and empirical study",
+    "raw_text": "Yuan Sui*Mengyu Zhou*Mingjie Zhou*Shi Han*Dongmei Zhang#Table meets llm: Can large language models understand structured table data? a benchmark and empirical study#Proceedings of the 17th ACM International Conference on Web Search and Data Mining, WSDM '24#2024#https://doi.org/10.1145/3616855.3635752",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://aclanthology.org/2024.findings-emnlp.603/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yuan Sui",
+      "Jiaru Zou",
+      "Mengyu Zhou",
+      "Xinyi He",
+      "Lun Du",
+      "Shi Han",
+      "Dongmei Zhang"
+    ],
+    "venue": "Findings of the Association for Computational Linguistics: EMNLP 2024",
+    "title": "TAP4LLM: Table provider on sampling, augmenting, and packing semi-structured data for large language model reasoning",
+    "raw_text": "Yuan Sui*Jiaru Zou*Mengyu Zhou*Xinyi He*Lun Du*Shi Han*Dongmei Zhang#TAP4LLM: Table provider on sampling, augmenting, and packing semi-structured data for large language model reasoning#Findings of the Association for Computational Linguistics: EMNLP 2024#2024#https://aclanthology.org/2024.findings-emnlp.603/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jason Wei",
+      "Xuezhi Wang",
+      "Dale Schuurmans",
+      "Maarten Bosma",
+      "Fei Xia",
+      "Ed Chi",
+      "Quoc V Le",
+      "Denny Zhou",
+      "et al"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Chain-of-thought prompting elicits reasoning in large language models",
+    "raw_text": "Jason Wei*Xuezhi Wang*Dale Schuurmans*Maarten Bosma*Fei Xia*Ed Chi*Quoc V Le*Denny Zhou*et al#Chain-of-thought prompting elicits reasoning in large language models#Advances in neural information processing systems#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/2024.emnlp-main.493/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Roy Xie",
+      "Junlin Wang",
+      "Ruomin Huang",
+      "Minxing Zhang",
+      "Rong Ge",
+      "Jian Pei",
+      "Neil Zhenqiang Gong",
+      "Bhuwan Dhingra"
+    ],
+    "venue": "Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing",
+    "title": "ReCaLL: Membership inference via relative conditional log-likelihoods",
+    "raw_text": "Roy Xie*Junlin Wang*Ruomin Huang*Minxing Zhang*Rong Ge*Jian Pei*Neil Zhenqiang Gong*Bhuwan Dhingra#ReCaLL: Membership inference via relative conditional log-likelihoods#Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing#2024#https://aclanthology.org/2024.emnlp-main.493/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Yunhu Ye",
+      "Binyuan Hui",
+      "et al"
+    ],
+    "venue": "Proceedings of the 46th International ACM SIGIR Conference",
+    "title": "DATER: Decomposing evidence and questions for table-based reasoning",
+    "raw_text": "Yunhu Ye*Binyuan Hui*et al#DATER: Decomposing evidence and questions for table-based reasoning#Proceedings of the 46th International ACM SIGIR Conference#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.ieeecomputersociety.org/10.1109/CSF.2018.00027",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Samuel Yeom",
+      "Irene Giacomelli",
+      "Matt Fredrikson",
+      "Somesh Jha"
+    ],
+    "venue": "2018 IEEE 31st Computer Security Foundations Symposium (CSF)",
+    "title": "Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting",
+    "raw_text": "Samuel Yeom*Irene Giacomelli*Matt Fredrikson*Somesh Jha#Privacy Risk in Machine Learning: Analyzing the Connection to Overfitting#2018 IEEE 31st Computer Security Foundations Symposium (CSF)#2018#https://doi.ieeecomputersociety.org/10.1109/CSF.2018.00027",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Pengcheng Yin",
+      "Graham Neubig",
+      "Wen-tau Yih",
+      "Sebastian Riedel"
+    ],
+    "venue": "Annual Meeting of the Association for Computational Linguistics (ACL)",
+    "title": "TaBERT: Pretraining for joint understanding of textual and tabular data",
+    "raw_text": "Pengcheng Yin*Graham Neubig*Wen-tau Yih*Sebastian Riedel#TaBERT: Pretraining for joint understanding of textual and tabular data#Annual Meeting of the Association for Computational Linguistics (ACL)#2020#",
+    "type": "other"
+  },
+  {
+    "url": "https://aclanthology.org/2024.acl-long.216/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Shenglai Zeng",
+      "Yaxin Li",
+      "Jie Ren",
+      "Yiding Liu",
+      "Han Xu",
+      "Pengfei He",
+      "Yue Xing",
+      "Shuaiqiang Wang",
+      "Jiliang Tang",
+      "Dawei Yin"
+    ],
+    "venue": "Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)",
+    "title": "Exploring memorization in fine-tuned language models",
+    "raw_text": "Shenglai Zeng*Yaxin Li*Jie Ren*Yiding Liu*Han Xu*Pengfei He*Yue Xing*Shuaiqiang Wang*Jiliang Tang*Dawei Yin#Exploring memorization in fine-tuned language models#Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)#2024#https://aclanthology.org/2024.acl-long.216/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2307.08674",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Liangyu Zha",
+      "Junlin Zhou",
+      "Liyao Li",
+      "Rui Wang",
+      "Qingyi Huang",
+      "Saisai Yang",
+      "Jing Yuan",
+      "Changbao Su",
+      "Xiang Li",
+      "Aofeng Su",
+      "Tao Zhang",
+      "Chen Zhou",
+      "Kaizhe Shou",
+      "Miao Wang",
+      "Wufang Zhu",
+      "Guoshan Lu",
+      "Chao Ye",
+      "Yali Ye",
+      "Wentao Ye",
+      "Yiming Zhang",
+      "Xinglong Deng",
+      "Jie Xu",
+      "Haobo Wang",
+      "Gang Chen",
+      "Junbo Zhao"
+    ],
+    "venue": "arXiv",
+    "title": "Tablegpt: Towards unifying tables, nature language and commands into one gpt",
+    "raw_text": "Liangyu Zha*Junlin Zhou*Liyao Li*Rui Wang*Qingyi Huang*Saisai Yang*Jing Yuan*Changbao Su*Xiang Li*Aofeng Su*Tao Zhang*Chen Zhou*Kaizhe Shou*Miao Wang*Wufang Zhu*Guoshan Lu*Chao Ye*Yali Ye*Wentao Ye*Yiming Zhang*Xinglong Deng*Jie Xu*Haobo Wang*Gang Chen*Junbo Zhao#Tablegpt: Towards unifying tables, nature language and commands into one gpt#arXiv#2023#https://arxiv.org/abs/2307.08674",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://openreview.net/forum?id=ZGkfoufDaU",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jingyang Zhang",
+      "Jingwei Sun",
+      "Eric Yeats",
+      "Yang Ouyang",
+      "Martin Kuo",
+      "Jianyi Zhang",
+      "Hao Frank Yang",
+      "Hai Li"
+    ],
+    "venue": "The Thirteenth International Conference on Learning Representations",
+    "title": "Min-k%++: Improved baseline for pre-training data detection from large language models",
+    "raw_text": "Jingyang Zhang*Jingwei Sun*Eric Yeats*Yang Ouyang*Martin Kuo*Jianyi Zhang*Hao Frank Yang*Hai Li#Min-k%++: Improved baseline for pre-training data detection from large language models#The Thirteenth International Conference on Learning Representations#2025#https://openreview.net/forum?id=ZGkfoufDaU",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.01234",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Wei Zhang",
+      "Jiawei Li",
+      "Li et al. Chen"
+    ],
+    "venue": "arXiv preprint arXiv:2402.01234",
+    "title": "Pretraining data detection for large language models: A calibrated probability approach",
+    "raw_text": "Wei Zhang*Jiawei Li*Li et al. Chen#Pretraining data detection for large language models: A calibrated probability approach#arXiv preprint arXiv:2402.01234#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/1709.00103",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Victor Zhong",
+      "Caiming Xiong",
+      "Richard Socher"
+    ],
+    "venue": "arXiv",
+    "title": "Seq2sql: Generating structured queries from natural language using reinforcement learning",
+    "raw_text": "Victor Zhong*Caiming Xiong*Richard Socher#Seq2sql: Generating structured queries from natural language using reinforcement learning#arXiv#2017#https://arxiv.org/abs/1709.00103",
+    "type": "arxiv"
+  }
+]

@@ -1,0 +1,1061 @@
+[
+  {
+    "url": "https://arxiv.org/abs/2401.12168",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Anthropic"
+    ],
+    "venue": "System Card",
+    "title": "Claude 4 sonnet system card",
+    "raw_text": "Anthropic#Claude 4 sonnet system card#System Card#2025#https://www-cdn.anthropic.com/6be99a52cb68eb70eb9572b4cafad13df32ed995.pdf\nShuai Bai*Keqin Chen*Xuejing Liu*Jialin Wang*Wenbin Ge*Sibo Song*Kai Dang*Peng Wang*Shijie Wang*Jun Tang*Humen Zhong*Yuanzhi Zhu*Mingkun Yang*Zhaohai Li*Jianqiang Wan*Pengfei Wang*Wei Ding*Zheren Fu*Yiheng Xu*Jiabo Ye*Xi Zhang*Tianbao Xie*Zesen Cheng*Hang Zhang*Zhibo Yang*Haiyang Xu*Junyang Lin#Qwen2.5-vl technical report#arXiv preprint arXiv:2502.13923#2025#\nGilad Baruch*Zhuoyuan Chen*Afshin Dehghan*Yuri Feigin*Peter Fu*Thomas Gebauer*Daniel Kurz*Tal Dimry*Brandon Joffe*Arik Schwartz*et al#Arkitscenes: A diverse real-world dataset for 3d indoor scene understanding using mobile rgb-d data#Thirty-fifth Conference on Neural Information Processing Systems Datasets and Benchmarks Track (Round 1)#2021#\nWenxiao Cai*Yaroslav Ponomarenko*Jianhao Yuan*Xiaoqi Li*Wankou Yang*Hao Dong*Bo Zhao#Spatialbot: Precise spatial understanding with vision language models#arXiv preprint arXiv:2406.13642#2024#\nBoyuan Chen*Zhuo Xu*Sean Kirmani*Brian Ichter*Danny Driess*Pete Florence*Dorsa Sadigh*Leonidas Guibas*Fei Xia#Spatialvlm: Endowing vision-language models with spatial reasoning capabilities#arXiv preprint arXiv:2401.12168#2024#https://arxiv.org/abs/2401.12168\nShiqi Chen*Tongyao Zhu*Ruochen Zhou*Jinghan Zhang*Siyang Gao*Juan Carlos Niebles*Mor Geva*Junxian He*Jiajun Wu*Manling Li#Why is spatial reasoning hard for vlms? an attention mechanism perspective on focus areas#arXiv#2025#https://arxiv.org/abs/2503.01773\nZhe Chen*Jiannan Wu*Wenhai Wang*Weijie Su*Guo Chen*Sen Xing*Muyan Zhong*Qinglong Zhang*Xizhou Zhu*Lewei Lu*et al#Internvl: Scaling up vision foundation models and aligning for generic visual-linguistic tasks#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#\nAn-Chieh Cheng*Hongxu Yin*Yang Fu*Qiushan Guo*Ruihan Yang*Jan Kautz*Xiaolong Wang*Sifei Liu#Spatialrgpt: Grounded spatial reasoning in vision language models#arXiv#2024#https://arxiv.org/abs/2406.01584\nErik Daxberger*Nina Wenzel*David Griffiths*Haiming Gang*Justin Lazarow*Gefen Kohavi*Kai Kang*Marcin Eichner*Yinfei Yang*Afshin Dehghan*Peter Grasch#Mm-spatial: Exploring 3d spatial understanding in multimodal llms#arXiv#2025#https://arxiv.org/abs/2503.13111\nDanny Driess*Fei Xia*Mehdi SM Sajjadi*Corey Lynch*Aakanksha Chowdhery*Brian Ichter*Ayzaan Wahid*Jonathan Tompson*Quan Vuong*Tianhe Yu*et al#Palm-e: an embodied multimodal language model#Proceedings of the 40th International Conference on Machine Learning#2023#\nZhiwen Fan*Jian Zhang*Renjie Li*Junge Zhang*Runjin Chen*Hezhen Hu*Kevin Wang*Huaizhi Qu*Dilin Wang*Zhicheng Yan*Hongyu Xu*Justin Theiss*Tianlong Chen*Jiachen Li*Zhengzhong Tu*Zhangyang Wang*Rakesh Ranjan#Vlm-3r: Vision-language models augmented with instruction-aligned 3d reconstruction#arXiv#2025#https://arxiv.org/abs/2505.20279\nChuanyu Fu*Guanying Chen*et al#Maskgaussian: Differentiable mask pruning for efficient 3d gaussian rendering#CVPR#2025#https://arxiv.org/abs/2506.02751\nXingyu Fu*Yushi Hu*Bangzheng Li*Yu Feng*Haoyu Wang*Xudong Lin*Dan Roth*Noah A Smith*Wei-Chiu Ma*Ranjay Krishna#Blink: Multimodal large language models can see but not perceive#arXiv preprint arXiv:2404.12390#2024#\nDaya Guo*Dejian Yang*Haowei Zhang*Junxiao Song*Ruoyu Zhang*Runxin Xu*Qihao Zhu*Shirong Ma*Peiyi Wang*Xiao Bi*et al#Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning#arXiv preprint arXiv:2501.12948#2025#\nMary Hegarty#Mental animation: Inferring motion from static displays of mechanical systems#Journal of experimental psychology: learning, memory, and cognition#1992#\nYining Hong*Chunru Lin*Yilun Du*Zhenfang Chen*Joshua B. Tenenbaum*Chuang Gan#3d concept learning and reasoning from multi-view images#arXiv#2023#https://arxiv.org/abs/2303.11327\nWenlong Huang*Chen Wang*Ruohan Zhang*Yunzhu Li*Jiajun Wu*Li Fei-Fei#Voxposer: Composable 3d value maps for robotic manipulation with language models#arXiv preprint arXiv:2307.05973#2023#\nWenlong Huang*Chen Wang*Yunzhu Li*Ruohan Zhang*Li Fei-Fei#Rekep: Spatio-temporal reasoning of relational keypoint constraints for robotic manipulation#arXiv preprint arXiv:2409.01652#2024#\nYuheng Ji*Huajie Tan*Jiayu Shi*Xiaoshuai Hao*Yuan Zhang*Hengyuan Zhang*Pengwei Wang*Mengdi Zhao*Yao Mu*Pengju An*et al#Robobrain: A unified brain model for robotic manipulation from abstract to concrete#arXiv preprint arXiv:2502.21257#2025#\nDongfu Jiang*Xuan He*Huaye Zeng*Cong Wei*Max W.F. Ku*Qian Liu*Wenhu Chen#Mantis: Interleaved multi-image instruction tuning#Transactions on Machine Learning Research#2024#https://openreview.net/forum?id=skLtdUVaJa\nPhilip N Johnson-Laird#Mental models in cognitive science#Cognitive science#1980#\nPhilip Nicholas Johnson-Laird#Mental models: Towards a cognitive science of language, inference, and consciousness#Harvard University Press#1983#\nPhillip Y. Lee*Jihyeon Je*Chanho Park*Mikaela Angelina Uy*Leonidas Guibas*Minhyuk Sung#Perspective-aware reasoning in vision-language models via mental imagery simulation#arXiv#2025#https://arxiv.org/abs/2504.17207\nBo Li*Yuanhan Zhang*Dong Guo*Renrui Zhang*Feng Li*Hao Zhang*Kaichen Zhang*Peiyuan Zhang*Yanwei Li*Ziwei Liu*et al#Llava-onevision: Easy visual task transfer#arXiv preprint arXiv:2408.03326#2024#\nJunnan Li*Dongxu Li*Silvio Savarese*Steven Hoi#Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models#arXiv#2023#https://arxiv.org/abs/2301.12597",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.17207",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Phillip Y. Lee",
+      "Jihyeon Je",
+      "Chanho Park",
+      "Mikaela Angelina Uy",
+      "Leonidas Guibas",
+      "Minhyuk Sung"
+    ],
+    "venue": "",
+    "title": "Perspective-aware reasoning in vision-language models via mental imagery simulation",
+    "raw_text": "Phillip Y. Lee*Jihyeon Je*Chanho Park*Mikaela Angelina Uy*Leonidas Guibas*Minhyuk Sung#Perspective-aware reasoning in vision-language models via mental imagery simulation##2025#https://arxiv.org/abs/2504.17207",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2408.03326",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Bo Li",
+      "Yuanhan Zhang",
+      "Dong Guo",
+      "Renrui Zhang",
+      "Feng Li",
+      "Hao Zhang",
+      "Kaichen Zhang",
+      "Peiyuan Zhang",
+      "Yanwei Li",
+      "Ziwei Liu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2408.03326",
+    "title": "Llava-onevision: Easy visual task transfer",
+    "raw_text": "Bo Li*Yuanhan Zhang*Dong Guo*Renrui Zhang*Feng Li*Hao Zhang*Kaichen Zhang*Peiyuan Zhang*Yanwei Li*Ziwei Liu*et al#Llava-onevision: Easy visual task transfer#arXiv preprint arXiv:2408.03326#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2301.12597",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Junnan Li",
+      "Dongxu Li",
+      "Silvio Savarese",
+      "Steven Hoi"
+    ],
+    "venue": "",
+    "title": "Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models",
+    "raw_text": "Junnan Li*Dongxu Li*Silvio Savarese*Steven Hoi#Blip-2: Bootstrapping language-image pre-training with frozen image encoders and large language models##2023#https://arxiv.org/abs/2301.12597",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Manling Li",
+      "Shiyu Zhao",
+      "Qineng Wang",
+      "Kangrui Wang",
+      "Yu Zhou",
+      "Sanjana Srivastava",
+      "Cem Gokmen",
+      "Tony Lee",
+      "Erran Li Li",
+      "Ruohan Zhang",
+      "et al"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Embodied agent interface: Benchmarking llms for embodied decision making",
+    "raw_text": "Manling Li*Shiyu Zhao*Qineng Wang*Kangrui Wang*Yu Zhou*Sanjana Srivastava*Cem Gokmen*Tony Lee*Erran Li Li*Ruohan Zhang*et al#Embodied agent interface: Benchmarking llms for embodied decision making#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Jacky Liang",
+      "Wenlong Huang",
+      "Fei Xia",
+      "Peng Xu",
+      "Karol Hausman",
+      "Brian Ichter",
+      "Pete Florence",
+      "Andy Zeng"
+    ],
+    "venue": "2023 IEEE International Conference on Robotics and Automation (ICRA)",
+    "title": "Code as policies: Language model programs for embodied control",
+    "raw_text": "Jacky Liang*Wenlong Huang*Fei Xia*Peng Xu*Karol Hausman*Brian Ichter*Pete Florence*Andy Zeng#Code as policies: Language model programs for embodied control#2023 IEEE International Conference on Robotics and Automation (ICRA)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2312.16256",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Lu Ling",
+      "Yichen Sheng",
+      "Zhi Tu",
+      "Wentian Zhao",
+      "Cheng Xin",
+      "Kun Wan",
+      "Lantao Yu",
+      "Qianyu Guo",
+      "Zixun Yu",
+      "Yawen Lu",
+      "Xuanmao Li",
+      "Xingpeng Sun",
+      "Rohan Ashok",
+      "Aniruddha Mukherjee",
+      "Hao Kang",
+      "Xiangrui Kong",
+      "Gang Hua",
+      "Tianyi Zhang",
+      "Bedrich Benes",
+      "Aniket Bera"
+    ],
+    "venue": "",
+    "title": "Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision",
+    "raw_text": "Lu Ling*Yichen Sheng*Zhi Tu*Wentian Zhao*Cheng Xin*Kun Wan*Lantao Yu*Qianyu Guo*Zixun Yu*Yawen Lu*Xuanmao Li*Xingpeng Sun*Rohan Ashok*Aniruddha Mukherjee*Hao Kang*Xiangrui Kong*Gang Hua*Tianyi Zhang*Bedrich Benes*Aniket Bera#Dl3dv-10k: A large-scale scene dataset for deep learning-based 3d vision##2023#https://arxiv.org/abs/2312.16256",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/pdf/2411.00771",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Deku Liu",
+      "Yihan Zhang",
+      "Zhe Chen",
+      "et al"
+    ],
+    "venue": "ICLR",
+    "title": "Citygaussianv2: Efficient and geometrically accurate reconstruction for large-scale scenes",
+    "raw_text": "Deku Liu*Yihan Zhang*Zhe Chen*et al#Citygaussianv2: Efficient and geometrically accurate reconstruction for large-scale scenes#ICLR#2025#https://arxiv.org/pdf/2411.00771",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.10074",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yuecheng Liu",
+      "Dafeng Chi",
+      "Shiguang Wu",
+      "Zhanguang Zhang",
+      "Yaochen Hu",
+      "Lingfeng Zhang",
+      "Yingxue Zhang",
+      "Shuang Wu",
+      "Tongtong Cao",
+      "Guowei Huang",
+      "Helong Huang",
+      "Guangjian Tian",
+      "Weichao Qiu",
+      "Xingyue Quan",
+      "Jianye Hao",
+      "Yuzheng Zhuang"
+    ],
+    "venue": "",
+    "title": "Spatialcot: Advancing spatial reasoning through coordinate alignment and chain-of-thought for embodied task planning",
+    "raw_text": "Yuecheng Liu*Dafeng Chi*Shiguang Wu*Zhanguang Zhang*Yaochen Hu*Lingfeng Zhang*Yingxue Zhang*Shuang Wu*Tongtong Cao*Guowei Huang*Helong Huang*Guangjian Tian*Weichao Qiu*Xingyue Quan*Jianye Hao*Yuzheng Zhuang#Spatialcot: Advancing spatial reasoning through coordinate alignment and chain-of-thought for embodied task planning##2025#https://arxiv.org/abs/2501.10074",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2403.05525",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Haoyu Lu",
+      "Wen Liu",
+      "Bo Zhang",
+      "Bingxuan Wang",
+      "Kai Dong",
+      "Bo Liu",
+      "Jingxiang Sun",
+      "Tongzheng Ren",
+      "Zhuoshu Li",
+      "Hao Yang",
+      "Yaofeng Sun",
+      "Chengqi Deng",
+      "Hanwei Xu",
+      "Zhenda Xie",
+      "Chong Ruan"
+    ],
+    "venue": "",
+    "title": "Deepseek-vl: Towards real-world vision-language understanding",
+    "raw_text": "Haoyu Lu*Wen Liu*Bo Zhang*Bingxuan Wang*Kai Dong*Bo Liu*Jingxiang Sun*Tongzheng Ren*Zhuoshu Li*Hao Yang*Yaofeng Sun*Chengqi Deng*Hanwei Xu*Zhenda Xie*Chong Ruan#Deepseek-vl: Towards real-world vision-language understanding##2024#https://arxiv.org/abs/2403.05525",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.07825",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wufei Ma",
+      "Haoyu Chen",
+      "Guofeng Zhang",
+      "Yu-Cheng Chou",
+      "Celso M de Melo",
+      "Alan Yuille"
+    ],
+    "venue": "",
+    "title": "3dsrbench: A comprehensive 3d spatial reasoning benchmark",
+    "raw_text": "Wufei Ma*Haoyu Chen*Guofeng Zhang*Yu-Cheng Chou*Celso M de Melo*Alan Yuille#3dsrbench: A comprehensive 3d spatial reasoning benchmark##2025#https://arxiv.org/abs/2412.07825",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.20024",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wufei Ma",
+      "Yu-Cheng Chou",
+      "Qihao Liu",
+      "Xingrui Wang",
+      "Celso de Melo",
+      "Jieneng Chen",
+      "Jianwen Xie",
+      "Alan Yuille"
+    ],
+    "venue": "",
+    "title": "Spatialreasoner: Towards explicit and generalizable 3d spatial reasoning",
+    "raw_text": "Wufei Ma*Yu-Cheng Chou*Qihao Liu*Xingrui Wang*Celso de Melo*Jieneng Chen*Jianwen Xie*Alan Yuille#Spatialreasoner: Towards explicit and generalizable 3d spatial reasoning##2025#https://arxiv.org/abs/2504.20024",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://openai.com/index/hello-gpt-4o/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "Blog",
+    "title": "Hello gpt-4o",
+    "raw_text": "OpenAI#Hello gpt-4o#Blog#2024#https://openai.com/index/hello-gpt-4o/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://cdn.openai.com/gpt-5-system-card.pdf",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "",
+    "title": "GPT-5 System Card",
+    "raw_text": "OpenAI#GPT-5 System Card##2025#https://cdn.openai.com/gpt-5-system-card.pdf",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.18470",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zhenyu Pan",
+      "Han Liu"
+    ],
+    "venue": "arXiv preprint arXiv:2503.18470",
+    "title": "Metaspatial: Reinforcing 3d spatial reasoning in vlms for the metaverse",
+    "raw_text": "Zhenyu Pan*Han Liu#Metaspatial: Reinforcing 3d spatial reasoning in vlms for the metaverse#arXiv preprint arXiv:2503.18470#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.17349",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jianing Qi",
+      "Jiawei Liu",
+      "Hao Tang",
+      "Zhigang Zhu"
+    ],
+    "venue": "",
+    "title": "Beyond semantics: Rediscovering spatial awareness in vision-language models",
+    "raw_text": "Jianing Qi*Jiawei Liu*Hao Tang*Zhigang Zhu#Beyond semantics: Rediscovering spatial awareness in vision-language models##2025#https://arxiv.org/abs/2503.17349",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/pdf/2501.18672",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yansong Qu",
+      "Jie Wang",
+      "et al"
+    ],
+    "venue": "SIGGRAPH Asia",
+    "title": "Drag your gaussian: Effective drag-based editing with score distillation for 3d gaussian splatting",
+    "raw_text": "Yansong Qu*Jie Wang*et al#Drag your gaussian: Effective drag-based editing with score distillation for 3d gaussian splatting#SIGGRAPH Asia#2025#https://arxiv.org/pdf/2501.18672",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.06468",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Santhosh Kumar Ramakrishnan",
+      "Erik Wijmans",
+      "Philipp Kraehenbuehl",
+      "Vladlen Koltun"
+    ],
+    "venue": "",
+    "title": "Does spatial cognition emerge in frontier models?",
+    "raw_text": "Santhosh Kumar Ramakrishnan*Erik Wijmans*Philipp Kraehenbuehl*Vladlen Koltun#Does spatial cognition emerge in frontier models?##2025#https://arxiv.org/abs/2410.06468",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.17994",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Kyle Sargent",
+      "Zizhang Li",
+      "Tanmay Shah",
+      "Charles Herrmann",
+      "Hong-Xing Yu",
+      "Yunzhi Zhang",
+      "Eric Ryan Chan",
+      "Dmitry Lagun",
+      "Li Fei-Fei",
+      "Deqing Sun",
+      "Jiajun Wu"
+    ],
+    "venue": "arXiv:2310.17994",
+    "title": "Zeronvs: Zero-shot novel view synthesis from a single real image",
+    "raw_text": "Kyle Sargent*Zizhang Li*Tanmay Shah*Charles Herrmann*Hong-Xing Yu*Yunzhi Zhang*Eric Ryan Chan*Dmitry Lagun*Li Fei-Fei*Deqing Sun*Jiajun Wu#Zeronvs: Zero-shot novel view synthesis from a single real image#arXiv:2310.17994#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.03300",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Zhihong Shao",
+      "Peiyi Wang",
+      "Qihao Zhu",
+      "Runxin Xu",
+      "Junxiao Song",
+      "Xiao Bi",
+      "Haowei Zhang",
+      "Mingchuan Zhang",
+      "YK Li",
+      "Y Wu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2402.03300",
+    "title": "Deepseekmath: Pushing the limits of mathematical reasoning in open language models",
+    "raw_text": "Zhihong Shao*Peiyi Wang*Qihao Zhu*Runxin Xu*Junxiao Song*Xiao Bi*Haowei Zhang*Mingchuan Zhang*YK Li*Y Wu*et al#Deepseekmath: Pushing the limits of mathematical reasoning in open language models#arXiv preprint arXiv:2402.03300#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Shao-Hua Sun",
+      "Minyoung Huh",
+      "Yuan-Hong Liao",
+      "Ning Zhang",
+      "Joseph J Lim"
+    ],
+    "venue": "ECCV",
+    "title": "Multi-view to novel view: Synthesizing novel views with self-learned confidence",
+    "raw_text": "Shao-Hua Sun*Minyoung Huh*Yuan-Hong Liao*Ning Zhang*Joseph J Lim#Multi-view to novel view: Synthesizing novel views with self-learned confidence#ECCV#2018#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.09284",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yihe Tang",
+      "Wenlong Huang",
+      "Yingke Wang",
+      "Chengshu Li",
+      "Roy Yuan",
+      "Ruohan Zhang",
+      "Jiajun Wu",
+      "Li Fei-Fei"
+    ],
+    "venue": "arXiv preprint arXiv:2506.09284",
+    "title": "Uad: Unsupervised affordance distillation for generalization in robotic manipulation",
+    "raw_text": "Yihe Tang*Wenlong Huang*Yingke Wang*Chengshu Li*Roy Yuan*Ruohan Zhang*Jiajun Wu*Li Fei-Fei#Uad: Unsupervised affordance distillation for generalization in robotic manipulation#arXiv preprint arXiv:2506.09284#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.16162",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yihong Tang",
+      "Ao Qu",
+      "Zhaokai Wang",
+      "Dingyi Zhuang",
+      "Zhaofeng Wu",
+      "Wei Ma",
+      "Shenhao Wang",
+      "Yunhan Zheng",
+      "Zhan Zhao",
+      "Jinhua Zhao"
+    ],
+    "venue": "",
+    "title": "Sparkle: Mastering basic spatial capabilities in vision language models elicits generalization to spatial reasoning",
+    "raw_text": "Yihong Tang*Ao Qu*Zhaokai Wang*Dingyi Zhuang*Zhaofeng Wu*Wei Ma*Shenhao Wang*Yunhan Zheng*Zhan Zhao*Jinhua Zhao#Sparkle: Mastering basic spatial capabilities in vision language models elicits generalization to spatial reasoning##2025#https://arxiv.org/abs/2410.16162",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2312.11805",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Gemini Team"
+    ],
+    "venue": "",
+    "title": "Gemini: A family of highly capable multimodal models",
+    "raw_text": "Gemini Team#Gemini: A family of highly capable multimodal models##2025#https://arxiv.org/abs/2312.11805",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.19786",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Gemma Team",
+      "Aishwarya Kamath",
+      "Johan Ferret",
+      "Shreya Pathak",
+      "Nino Vieillard",
+      "Ramona Merhej",
+      "Sarah Perrin",
+      "Tatiana Matejovicova",
+      "Alexandre Ramé",
+      "Morgane Rivière",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2503.19786",
+    "title": "Gemma 3 technical report",
+    "raw_text": "Gemma Team*Aishwarya Kamath*Johan Ferret*Shreya Pathak*Nino Vieillard*Ramona Merhej*Sarah Perrin*Tatiana Matejovicova*Alexandre Ramé*Morgane Rivière*et al#Gemma 3 technical report#arXiv preprint arXiv:2503.19786#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1993,
+    "authors": [
+      "Barbara Tversky"
+    ],
+    "venue": "European conference on spatial information theory",
+    "title": "Cognitive maps, cognitive collages, and spatial mental models",
+    "raw_text": "Barbara Tversky#Cognitive maps, cognitive collages, and spatial mental models#European conference on spatial information theory#1993#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2003,
+    "authors": [
+      "Barbara Tversky"
+    ],
+    "venue": "Environment and behavior",
+    "title": "Structures of mental spaces: How people think about space",
+    "raw_text": "Barbara Tversky#Structures of mental spaces: How people think about space#Environment and behavior#2003#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1994,
+    "authors": [
+      "Barbara Tversky",
+      "Nancy Franklin",
+      "Holly A Taylor",
+      "David J Bryant"
+    ],
+    "venue": "Journal of the American society for information science",
+    "title": "Spatial mental models from descriptions",
+    "raw_text": "Barbara Tversky*Nancy Franklin*Holly A Taylor*David J Bryant#Spatial mental models from descriptions#Journal of the American society for information science#1994#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jianyuan Wang",
+      "et al"
+    ],
+    "venue": "CVPR",
+    "title": "Vggt: Visual geometry grounded transformer for universal 3d reconstruction",
+    "raw_text": "Jianyuan Wang*et al#Vggt: Visual geometry grounded transformer for universal 3d reconstruction#CVPR#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://github.com/RAGEN-AI/VAGEN",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Kangrui Wang",
+      "Pingyue Zhang",
+      "Zihan Wang",
+      "Yaning Gao",
+      "Linjie Li",
+      "Qineng Wang",
+      "Hanyang Chen",
+      "Chi Wan",
+      "Yiping Lu",
+      "Zhengyuan Yang",
+      "Lijuan Wang",
+      "Ranjay Krishna",
+      "Jiajun Wu",
+      "Li Fei-Fei",
+      "Yejin Choi",
+      "Manling Li"
+    ],
+    "venue": "",
+    "title": "Reinforcing visual state reasoning for multi-turn vlm agents",
+    "raw_text": "Kangrui Wang*Pingyue Zhang*Zihan Wang*Yaning Gao*Linjie Li*Qineng Wang*Hanyang Chen*Chi Wan*Yiping Lu*Zhengyuan Yang*Lijuan Wang*Ranjay Krishna*Jiajun Wu*Li Fei-Fei*Yejin Choi*Manling Li#Reinforcing visual state reasoning for multi-turn vlm agents#2025#https://github.com/RAGEN-AI/VAGEN",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.18272",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Qineng Wang",
+      "Zihao Wang",
+      "Ying Su",
+      "Hanghang Tong",
+      "Yangqiu Song"
+    ],
+    "venue": "arXiv preprint arXiv:2402.18272",
+    "title": "Rethinking the bounds of llm reasoning: Are multi-agent discussions the key?",
+    "raw_text": "Qineng Wang*Zihao Wang*Ying Su*Hanghang Tong*Yangqiu Song#Rethinking the bounds of llm reasoning: Are multi-agent discussions the key?#arXiv preprint arXiv:2402.18272#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.05456",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wenqi Wang",
+      "Reuben Tan",
+      "Pengyue Zhu",
+      "Jianwei Yang",
+      "Zhengyuan Yang",
+      "Lijuan Wang",
+      "Andrey Kolobov",
+      "Jianfeng Gao",
+      "Boqing Gong"
+    ],
+    "venue": "",
+    "title": "Site: towards spatial intelligence thorough evaluation",
+    "raw_text": "Wenqi Wang*Reuben Tan*Pengyue Zhu*Jianwei Yang*Zhengyuan Yang*Lijuan Wang*Andrey Kolobov*Jianfeng Gao*Boqing Gong#Site: towards spatial intelligence thorough evaluation#2025#https://arxiv.org/abs/2505.05456",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jason Wei",
+      "Xuezhi Wang",
+      "Dale Schuurmans",
+      "Maarten Bosma",
+      "Fei Xia",
+      "Ed Chi",
+      "Quoc V Le",
+      "Denny Zhou",
+      "et al"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Chain-of-thought prompting elicits reasoning in large language models",
+    "raw_text": "Jason Wei*Xuezhi Wang*Dale Schuurmans*Maarten Bosma*Fei Xia*Ed Chi*Quoc V Le*Denny Zhou et al.#Chain-of-thought prompting elicits reasoning in large language models#Advances in neural information processing systems#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.23747",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Diankun Wu",
+      "Fangfu Liu",
+      "Yi-Hsin Hung",
+      "Yueqi Duan"
+    ],
+    "venue": "arXiv preprint arXiv:2505.23747",
+    "title": "Spatial-mllm: Boosting mllm capabilities in visual-based spatial intelligence",
+    "raw_text": "Diankun Wu*Fangfu Liu*Yi-Hsin Hung*Yueqi Duan#Spatial-mllm: Boosting mllm capabilities in visual-based spatial intelligence#arXiv preprint arXiv:2505.23747#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.09965",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Junfei Wu",
+      "Jian Guan",
+      "Kaituo Feng",
+      "Qiang Liu",
+      "Shu Wu",
+      "Liang Wang",
+      "Wei Wu",
+      "Tieniu Tan"
+    ],
+    "venue": "",
+    "title": "Reinforcing spatial reasoning in vision-language models with interwoven thinking and visual drawing",
+    "raw_text": "Junfei Wu*Jian Guan*Kaituo Feng*Qiang Liu*Shu Wu*Liang Wang*Wei Wu*Tieniu Tan#Reinforcing spatial reasoning in vision-language models with interwoven thinking and visual drawing#2025#https://arxiv.org/abs/2506.09965",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Hongchi Xia",
+      "Yang Fu",
+      "Sifei Liu",
+      "Xiaolong Wang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Rgbd objects in the wild: scaling real-world 3d object learning from rgb-d videos",
+    "raw_text": "Hongchi Xia*Yang Fu*Sifei Liu*Xiaolong Wang#Rgbd objects in the wild: scaling real-world 3d object learning from rgb-d videos#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.17015",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Runsen Xu",
+      "Weiyao Wang",
+      "Hao Tang",
+      "Xingyu Chen",
+      "Xiaodong Wang",
+      "Fu-Jen Chu",
+      "Dahua Lin",
+      "Matt Feiszli",
+      "Kevin J. Liang"
+    ],
+    "venue": "",
+    "title": "Multi-spatialmllm: Multi-frame spatial understanding with multi-modal large language models",
+    "raw_text": "Runsen Xu*Weiyao Wang*Hao Tang*Xingyu Chen*Xiaodong Wang*Fu-Jen Chu*Dahua Lin*Matt Feiszli*Kevin J. Liang#Multi-spatialmllm: Multi-frame spatial understanding with multi-modal large language models#2025#https://arxiv.org/abs/2505.17015",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2502.11859",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wenrui Xu",
+      "Dalin Lyu",
+      "Weihang Wang",
+      "Jie Feng",
+      "Chen Gao",
+      "Yong Li"
+    ],
+    "venue": "",
+    "title": "Defining and evaluating visual language models' basic spatial abilities: A perspective from psychometrics",
+    "raw_text": "Wenrui Xu*Dalin Lyu*Weihang Wang*Jie Feng*Chen Gao*Yong Li#Defining and evaluating visual language models' basic spatial abilities: A perspective from psychometrics#2025#https://arxiv.org/abs/2502.11859",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.14171",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jihan Yang",
+      "Shusheng Yang",
+      "Anjali W. Gupta",
+      "Rilyn Han",
+      "Li Fei-Fei",
+      "Saining Xie"
+    ],
+    "venue": "",
+    "title": "Thinking in space: How multimodal large language models see, remember, and recall spaces",
+    "raw_text": "Jihan Yang*Shusheng Yang*Anjali W. Gupta*Rilyn Han*Li Fei-Fei*Saining Xie#Thinking in space: How multimodal large language models see, remember, and recall spaces#2024#https://arxiv.org/abs/2412.14171",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2502.09560",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Rui Yang",
+      "Hanyang Chen",
+      "Junyu Zhang",
+      "Mark Zhao",
+      "Cheng Qian",
+      "Kangrui Wang",
+      "Qineng Wang",
+      "Teja Venkat Koripella",
+      "Marziyeh Movahedi",
+      "Manling Li",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2502.09560",
+    "title": "Embodiedbench: Comprehensive benchmarking multi-modal large language models for vision-driven embodied agents",
+    "raw_text": "Rui Yang*Hanyang Chen*Junyu Zhang*Mark Zhao*Cheng Qian*Kangrui Wang*Qineng Wang*Teja Venkat Koripella*Marziyeh Movahedi*Manling Li et al.#Embodiedbench: Comprehensive benchmarking multi-modal large language models for vision-driven embodied agents#arXiv preprint arXiv:2502.09560#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Shunyu Yao",
+      "Jeffrey Zhao",
+      "Dian Yu",
+      "Nan Du",
+      "Izhak Shafran",
+      "Karthik Narasimhan",
+      "Yuan Cao"
+    ],
+    "venue": "International Conference on Learning Representations (ICLR)",
+    "title": "React: Synergizing reasoning and acting in language models",
+    "raw_text": "Shunyu Yao*Jeffrey Zhao*Dian Yu*Nan Du*Izhak Shafran*Karthik Narasimhan*Yuan Cao#React: Synergizing reasoning and acting in language models#International Conference on Learning Representations (ICLR)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2408.04840",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jiabo Ye",
+      "Haiyang Xu",
+      "Haowei Liu",
+      "Anwen Hu",
+      "Ming Yan",
+      "Qi Qian",
+      "Ji Zhang",
+      "Fei Huang",
+      "Jingren Zhou"
+    ],
+    "venue": "arXiv preprint arXiv:2408.04840",
+    "title": "mplug-owl3: Towards long image-sequence understanding in multi-modal large language models",
+    "raw_text": "Jiabo Ye*Haiyang Xu*Haowei Liu*Anwen Hu*Ming Yan*Qi Qian*Ji Zhang*Fei Huang*Jingren Zhou#mplug-owl3: Towards long image-sequence understanding in multi-modal large language models#arXiv preprint arXiv:2408.04840#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.15280",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Chun-Hsiao Yeh",
+      "Chenyu Wang",
+      "Shengbang Tong",
+      "Ta-Ying Cheng",
+      "Rouyu Wang",
+      "Tianzhe Chu",
+      "Yuexiang Zhai",
+      "Yubei Chen",
+      "Shenghua Gao",
+      "Yi Ma"
+    ],
+    "venue": "arXiv preprint arXiv:2504.15280",
+    "title": "Seeing from another perspective: Evaluating multi-view understanding in mllms",
+    "raw_text": "Chun-Hsiao Yeh*Chenyu Wang*Shengbang Tong*Ta-Ying Cheng*Rouyu Wang*Tianzhe Chu*Yuexiang Zhai*Yubei Chen*Shenghua Gao*Yi Ma#Seeing from another perspective: Evaluating multi-view understanding in mllms#arXiv preprint arXiv:2504.15280#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2411.19458",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yang You",
+      "Yixin Li",
+      "Congyue Deng",
+      "Yue Wang",
+      "Leonidas Guibas"
+    ],
+    "venue": "",
+    "title": "Multiview equivariance improves 3d correspondence understanding with minimal feature finetuning",
+    "raw_text": "Yang You*Yixin Li*Congyue Deng*Yue Wang*Leonidas Guibas#Multiview equivariance improves 3d correspondence understanding with minimal feature finetuning#2024#https://arxiv.org/abs/2411.19458",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.05786",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jirong Zha",
+      "Yuxuan Fan",
+      "Xiao Yang",
+      "Chen Gao",
+      "Xinlei Chen"
+    ],
+    "venue": "",
+    "title": "How to enable llm with 3d capacity? a survey of spatial reasoning in llm",
+    "raw_text": "Jirong Zha*Yuxuan Fan*Xiao Yang*Chen Gao*Xinlei Chen#How to enable llm with 3d capacity? a survey of spatial reasoning in llm#2025#https://arxiv.org/abs/2504.05786",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.11094",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Weichen Zhan",
+      "Zile Zhou",
+      "Zhiheng Zheng",
+      "Chen Gao",
+      "Jinqiang Cui",
+      "Yong Li",
+      "Xinlei Chen",
+      "Xiao-Ping Zhang"
+    ],
+    "venue": "",
+    "title": "Open3dvqa: A benchmark for comprehensive spatial reasoning with multi-modal large language model in open space",
+    "raw_text": "Weichen Zhan*Zile Zhou*Zhiheng Zheng*Chen Gao*Jinqiang Cui*Yong Li*Xinlei Chen*Xiao-Ping Zhang#Open3dvqa: A benchmark for comprehensive spatial reasoning with multi-modal large language model in open space#2025#https://arxiv.org/abs/2503.11094",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jieyu Zhang",
+      "Weikai Huang",
+      "Zixian Ma",
+      "Oscar Michel",
+      "Dong He",
+      "Tanmay Gupta",
+      "Wei-Chiu Ma",
+      "Ali Farhadi",
+      "Aniruddha Kembhavi",
+      "Ranjay Krishna"
+    ],
+    "venue": "Thirty-Eighth Annual Conference on Neural Information Processing Systems Datasets and Benchmarks Track",
+    "title": "Task me anything",
+    "raw_text": "Jieyu Zhang*Weikai Huang*Zixian Ma*Oscar Michel*Dong He*Tanmay Gupta*Wei-Chiu Ma*Ali Farhadi*Aniruddha Kembhavi*Ranjay Krishna#Task me anything#Thirty-Eighth Annual Conference on Neural Information Processing Systems Datasets and Benchmarks Track#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.11187",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Juexiao Zhang",
+      "Gao Zhu",
+      "Sihang Li",
+      "Xinhao Liu",
+      "Haorui Song",
+      "Xinran Tang",
+      "Chen Feng"
+    ],
+    "venue": "",
+    "title": "Multiview scene graph",
+    "raw_text": "Juexiao Zhang*Gao Zhu*Sihang Li*Xinhao Liu*Haorui Song*Xinran Tang*Chen Feng#Multiview scene graph#2024#https://arxiv.org/abs/2410.11187",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2406.16852",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Peiyuan Zhang",
+      "Kaichen Zhang",
+      "Bo Li",
+      "Guangtao Zeng",
+      "Jingkang Yang",
+      "Yuanhan Zhang",
+      "Ziyue Wang",
+      "Haoran Tan",
+      "Chunyuan Li",
+      "Ziwei Liu"
+    ],
+    "venue": "arXiv preprint arXiv:2406.16852",
+    "title": "Long context transfer from language to vision",
+    "raw_text": "Peiyuan Zhang*Kaichen Zhang*Bo Li*Guangtao Zeng*Jingkang Yang*Yuanhan Zhang*Ziyue Wang*Haoran Tan*Chunyuan Li*Ziwei Liu#Long context transfer from language to vision#arXiv preprint arXiv:2406.16852#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.12693",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wenyu Zhang",
+      "Wei En Ng",
+      "Lixin Ma",
+      "Yuwen Wang",
+      "Jungqi Zhao",
+      "Allison Koenecke",
+      "Boyang Li",
+      "Lu Wang"
+    ],
+    "venue": "",
+    "title": "Sphere: Unveiling spatial blind spots in vision-language models through hierarchical evaluation",
+    "raw_text": "Wenyu Zhang*Wei En Ng*Lixin Ma*Yuwen Wang*Jungqi Zhao*Allison Koenecke*Boyang Li*Lu Wang#Sphere: Unveiling spatial blind spots in vision-language models through hierarchical evaluation#2025#https://arxiv.org/abs/2412.12693",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.02713",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yuanhan Zhang",
+      "Jinming Wu",
+      "Wei Li",
+      "Bo Li",
+      "Zejun Ma",
+      "Ziwei Liu",
+      "Chunyuan Li"
+    ],
+    "venue": "arXiv preprint arXiv:2410.02713",
+    "title": "Video instruction tuning with synthetic data",
+    "raw_text": "Yuanhan Zhang*Jinming Wu*Wei Li*Bo Li*Zejun Ma*Ziwei Liu*Chunyuan Li#Video instruction tuning with synthetic data#arXiv preprint arXiv:2410.02713#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yuxuan Zhang",
+      "Yifan Yang",
+      "Jing Zhang",
+      "Yifang Wang",
+      "Yijun Zhang",
+      "Ming-Hsuan Yang"
+    ],
+    "venue": "ECCV",
+    "title": "Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis",
+    "raw_text": "Yuxuan Zhang*Yifan Yang*Jing Zhang*Yifang Wang*Yijun Zhang*Ming-Hsuan Yang#Viewcrafter: Taming video diffusion models for high-fidelity novel view synthesis#ECCV#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.12680",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Baining Zhao",
+      "Ziyou Wang",
+      "Jianjie Fang",
+      "Chen Gao",
+      "Fanhang Man",
+      "Jinqiang Cui",
+      "Xin Wang",
+      "Xinlei Chen",
+      "Yong Li",
+      "Wenwu Zhu"
+    ],
+    "venue": "",
+    "title": "Embodied-r: Collaborative framework for activating embodied spatial reasoning in foundation models via reinforcement learning",
+    "raw_text": "Baining Zhao*Ziyou Wang*Jianjie Fang*Chen Gao*Fanhang Man*Jinqiang Cui*Xin Wang*Xinlei Chen*Yong Li*Wenwu Zhu#Embodied-r: Collaborative framework for activating embodied spatial reasoning in foundation models via reinforcement learning#2025#https://arxiv.org/abs/2504.12680",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.24625",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Duo Zheng",
+      "Shijia Huang",
+      "Yanyang Li",
+      "Liwei Wang"
+    ],
+    "venue": "",
+    "title": "Learning from videos for 3d world: Enhancing mllms with 3d vision geometry priors",
+    "raw_text": "Duo Zheng*Shijia Huang*Yanyang Li*Liwei Wang#Learning from videos for 3d world: Enhancing mllms with 3d vision geometry priors#2025#https://arxiv.org/abs/2505.24625",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.14489",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jensen Jinghao Zhou",
+      "Hang Gao",
+      "Vikram Voleti",
+      "Aaryaman Vasishta",
+      "Chun-Han Yao",
+      "Mark Boss",
+      "Philip Torr",
+      "Christian Rupprecht",
+      "Varun Jampani"
+    ],
+    "venue": "arXiv preprint arXiv:2503.14489",
+    "title": "Stable virtual camera: Generative view synthesis with diffusion models",
+    "raw_text": "Jensen Jinghao Zhou*Hang Gao*Vikram Voleti*Aaryaman Vasishta*Chun-Han Yao*Mark Boss*Philip Torr*Christian Rupprecht*Varun Jampani#Stable virtual camera: Generative view synthesis with diffusion models#arXiv preprint arXiv:2503.14489#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.10479",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jinguo Zhu",
+      "Weiyun Wang",
+      "Zhe Chen",
+      "Zhaoyang Liu",
+      "Shenglong Ye",
+      "Lixin Gu",
+      "Hao Tian",
+      "Yuchen Duan",
+      "Weijie Su",
+      "Jie Shao",
+      "Zhangwei Gao",
+      "Erfei Cui",
+      "Xuehui Wang",
+      "Yue Cao",
+      "Yangzhou Liu",
+      "Xingguang Wei",
+      "Hongjie Zhang",
+      "Haomin Wang",
+      "Weiye Xu",
+      "Hao Li",
+      "Jiahao Wang",
+      "Nianchen Deng",
+      "Songze Li",
+      "Yinan He",
+      "Tan Jiang",
+      "Jiapeng Luo",
+      "Yi Wang",
+      "Conghui He",
+      "Botian Shi",
+      "Xingcheng Zhang",
+      "Wenqi Shao",
+      "Junjun He",
+      "Yingtong Xiong",
+      "Wenwen Qu",
+      "Peng Sun",
+      "Penglong Jiao",
+      "Han Lv",
+      "Lijun Wu",
+      "Kaipeng Zhang",
+      "Huipeng Deng",
+      "Jiaye Ge",
+      "Kai Chen",
+      "Limin Wang",
+      "Min Dou",
+      "Lewei Lu",
+      "Xizhou Zhu",
+      "Tong Lu",
+      "Dahua Lin",
+      "Yu Qiao",
+      "Jifeng Dai",
+      "Wenhai Wang"
+    ],
+    "venue": "",
+    "title": "Internvl3: Exploring advanced training and test-time recipes for open-source multimodal models",
+    "raw_text": "Jinguo Zhu*Weiyun Wang*Zhe Chen*Zhaoyang Liu*Shenglong Ye*Lixin Gu*Hao Tian*Yuchen Duan*Weijie Su*Jie Shao*Zhangwei Gao*Erfei Cui*Xuehui Wang*Yue Cao*Yangzhou Liu*Xingguang Wei*Hongjie Zhang*Haomin Wang*Weiye Xu*Hao Li*Jiahao Wang*Nianchen Deng*Songze Li*Yinan He*Tan Jiang*Jiapeng Luo*Yi Wang*Conghui He*Botian Shi*Xingcheng Zhang*Wenqi Shao*Junjun He*Yingtong Xiong*Wenwen Qu*Peng Sun*Penglong Jiao*Han Lv*Lijun Wu*Kaipeng Zhang*Huipeng Deng*Jiaye Ge*Kai Chen*Limin Wang*Min Dou*Lewei Lu*Xizhou Zhu*Tong Lu*Dahua Lin*Yu Qiao*Jifeng Dai*Wenhai Wang#Internvl3: Exploring advanced training and test-time recipes for open-source multimodal models#2025#https://arxiv.org/abs/2504.10479",
+    "type": "arxiv"
+  }
+]

@@ -1,0 +1,646 @@
+[
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "C. Chen",
+      "A. Srivastava"
+    ],
+    "venue": "2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)",
+    "title": "Srvfregnet: Elastic function registration using deep neural networks",
+    "raw_text": "C. Chen*A. Srivastava#Srvfregnet: Elastic function registration using deep neural networks#2021 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2010,
+    "authors": [
+      "G. Claeskens",
+      "B. W. Silverman",
+      "L. Slaets"
+    ],
+    "venue": "Journal of the Royal Statistical Society: Series B",
+    "title": "A multiresolution approach to time warping achieved by a bayesian prior-posterior transfer fitting strategy",
+    "raw_text": "G. Claeskens*B. W. Silverman*L. Slaets#A multiresolution approach to time warping achieved by a bayesian prior-posterior transfer fitting strategy#Journal of the Royal Statistical Society: Series B#2010#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1007/bf02551274",
+    "doi": "10.1007/BF02551274",
+    "year": 1989,
+    "authors": [
+      "G. Cybenko"
+    ],
+    "venue": "Mathematics of Control, Signals and Systems",
+    "title": "Approximation by superpositions of a sigmoidal function",
+    "raw_text": "G. Cybenko#Approximation by superpositions of a sigmoidal function#Mathematics of Control, Signals and Systems#1989#doi: 10.1007/BF02551274",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "P. K. Diederik",
+      "B. Lei"
+    ],
+    "venue": "International Conference on Learning Representations",
+    "title": "Adam: a method for stochastic optimization",
+    "raw_text": "P. K. Diederik*B. Lei#Adam: a method for stochastic optimization#International Conference on Learning Representations#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Emadeldeen Eldele",
+      "Mohamed Ragab",
+      "Zhenghua Chen",
+      "Min Wu",
+      "Xiaoli Li"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Tslanet: Rethinking transformers for time series representation learning",
+    "raw_text": "Emadeldeen Eldele*Mohamed Ragab*Zhenghua Chen*Min Wu*Xiaoli Li#Tslanet: Rethinking transformers for time series representation learning#International Conference on Machine Learning#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2006,
+    "authors": [
+      "F. Ferraty",
+      "P. Vieu"
+    ],
+    "venue": "Springer Science & Business Media",
+    "title": "Nonparametric Functional Data Analysis: Theory and Practice",
+    "raw_text": "F. Ferraty*P. Vieu#Nonparametric Functional Data Analysis: Theory and Practice#Springer Science & Business Media#2006#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1016/0893-6080(89)90003-8",
+    "doi": "10.1016/0893-6080(89)90003-8",
+    "year": 1989,
+    "authors": [
+      "Ken-Ichi Funahashi"
+    ],
+    "venue": "Neural Networks",
+    "title": "On the approximate realization of continuous mappings by neural networks",
+    "raw_text": "Ken-Ichi Funahashi#On the approximate realization of continuous mappings by neural networks#Neural Networks#1989#https://doi.org/10.1016/0893-6080(89)90003-8",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2000,
+    "authors": [
+      "P. Hall",
+      "D. S. Poskitt",
+      "B. Presnell"
+    ],
+    "venue": "Technometrics",
+    "title": "A functional data analytic approach to signal discrimination",
+    "raw_text": "P. Hall*D. S. Poskitt*B. Presnell#A functional data analytic approach to signal discrimination#Technometrics#2000#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "M. Hardt",
+      "B. Recht",
+      "Y. Singer"
+    ],
+    "venue": "Proceedings of the 33rd International Conference on Machine Learing",
+    "title": "Train faster, generalize better: Stability of stochastic gradient decent",
+    "raw_text": "M. Hardt*B. Recht*Y. Singer#Train faster, generalize better: Stability of stochastic gradient decent#Proceedings of the 33rd International Conference on Machine Learing#2016#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1016/0893-6080(91)90009-T",
+    "doi": "10.1016/0893-6080(91)90009-T",
+    "year": 1991,
+    "authors": [
+      "Kurt Hornik"
+    ],
+    "venue": "Neural Networks",
+    "title": "Approximation capabilities of multilayer feedforward networks",
+    "raw_text": "Kurt Hornik#Approximation capabilities of multilayer feedforward networks#Neural Networks#1991#https://doi.org/10.1016/0893-6080(91)90009-T",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "L. Ilya",
+      "H. Frank"
+    ],
+    "venue": "International Conference on Learning Representations",
+    "title": "Decoded weight decay regularization",
+    "raw_text": "L. Ilya*H. Frank#Decoded weight decay regularization#International Conference on Learning Representations#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "T. Ince",
+      "S. Kiranyaz",
+      "L. Eren",
+      "M. Askar",
+      "M. Gabbouj"
+    ],
+    "venue": "IEEE Transactions on Industrial Electronics",
+    "title": "Real-time motor fault detection by 1-d convolutional neural networks",
+    "raw_text": "T. Ince*S. Kiranyaz*L. Eren*M. Askar*M. Gabbouj#Real-time motor fault detection by 1-d convolutional neural networks#IEEE Transactions on Industrial Electronics#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "S. Ioffe",
+      "C. Szegedy"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Batch normalization: Accelerating deep network training by reducing internal covariate shift",
+    "raw_text": "S. Ioffe*C. Szegedy#Batch normalization: Accelerating deep network training by reducing internal covariate shift#International Conference on Machine Learning#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2002,
+    "authors": [
+      "G. M. James"
+    ],
+    "venue": "Journal of the Royal Statistical Society: Series B",
+    "title": "Generalized linear models with functional predictors",
+    "raw_text": "G. M. James#Generalized linear models with functional predictors#Journal of the Royal Statistical Society: Series B#2002#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "S. Kiranyaz",
+      "T. Ince",
+      "M. Gabbouj"
+    ],
+    "venue": "IEEE Trans. Biomed. Eng.",
+    "title": "Real-time patient-sepcific ecg classification by 1-d convolutional neural networks",
+    "raw_text": "S. Kiranyaz*T. Ince*M. Gabbouj#Real-time patient-sepcific ecg classification by 1-d convolutional neural networks#IEEE Trans. Biomed. Eng.#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "S. Kiranyaz",
+      "O. Avci",
+      "O. Abdeljaber",
+      "T. Ince",
+      "M. Gabbouj",
+      "D. J. Inman"
+    ],
+    "venue": "Mechanical Systems and Signal Processing",
+    "title": "1d convolutional neural networks and applications: A survey",
+    "raw_text": "S. Kiranyaz*O. Avci*O. Abdeljaber*T. Ince*M. Gabbouj*D. J. Inman#1d convolutional neural networks and applications: A survey#Mechanical Systems and Signal Processing#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1992,
+    "authors": [
+      "A. Kneip",
+      "T. Gasser"
+    ],
+    "venue": "Annals of Statistics",
+    "title": "Statistical tools to analyze data representing a sample of curves",
+    "raw_text": "A. Kneip*T. Gasser#Statistical tools to analyze data representing a sample of curves#Annals of Statistics#1992#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2008,
+    "authors": [
+      "A. Kneip",
+      "J. O. Ramsay"
+    ],
+    "venue": "Journal of the American Statistical Association",
+    "title": "Combining registration and fitting for functional models",
+    "raw_text": "A. Kneip*J. O. Ramsay#Combining registration and fitting for functional models#Journal of the American Statistical Association#2008#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "A. Krizhevsky",
+      "I. Sutskever",
+      "G. E. Hinton"
+    ],
+    "venue": "Communications of the ACM",
+    "title": "Imagenet classification with deep convolutional neural networks",
+    "raw_text": "A. Krizhevsky*I. Sutskever*G. E. Hinton#Imagenet classification with deep convolutional neural networks#Communications of the ACM#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Y. LeCun",
+      "Y. Bengio",
+      "G. Hinton"
+    ],
+    "venue": "Nature",
+    "title": "Deep learning",
+    "raw_text": "Y. LeCun*Y. Bengio*G. Hinton#Deep learning#Nature#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2006,
+    "authors": [
+      "X. Leng",
+      "H.-G. Müller"
+    ],
+    "venue": "Biostatistics",
+    "title": "Time ordering of gene co-expression",
+    "raw_text": "X. Leng*H.-G. Müller#Time ordering of gene co-expression#Biostatistics#2006#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2009,
+    "authors": [
+      "X. Liu",
+      "M. C. K. Yang"
+    ],
+    "venue": "Computational Statistics & Data Analysis",
+    "title": "Simultaneous curve registration and clustering for functional data",
+    "raw_text": "X. Liu*M. C. K. Yang#Simultaneous curve registration and clustering for functional data#Computational Statistics & Data Analysis#2009#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "S. Lohit",
+      "Q. Wang",
+      "P. Turaga"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Temporal transformer networks: Joint learning of invariant and discriminative time warping",
+    "raw_text": "S. Lohit*Q. Wang*P. Turaga#Temporal transformer networks: Joint learning of invariant and discriminative time warping#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": null,
+    "authors": [
+      "Y. Lu",
+      "R. Herbei",
+      "S. Kurtek"
+    ],
+    "venue": "",
+    "title": "Bayesian registration of functions with a gaussian process prior",
+    "raw_text": "Y. Lu*R. Herbei*S. Kurtek#Bayesian registration of functions with a gaussian process prior##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Mohammad Malekzadeh",
+      "Richard G. Clegg",
+      "Andrea Cavallaro",
+      "Hamed Haddadi"
+    ],
+    "venue": "Proceedings of the International Conference on Internet of Things Design and Implementation",
+    "title": "Mobile sensor data anonymization",
+    "raw_text": "Mohammad Malekzadeh*Richard G. Clegg*Andrea Cavallaro*Hamed Haddadi#Mobile sensor data anonymization#Proceedings of the International Conference on Internet of Things Design and Implementation#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "J. S. Marron",
+      "J. O. Ramsay",
+      "L. M. Sangalli",
+      "A. Srivastava"
+    ],
+    "venue": "Statistical Science",
+    "title": "Functional data analysis of amplitude and phase variation",
+    "raw_text": "J. S. Marron*J. O. Ramsay*L. M. Sangalli*A. Srivastava#Functional data analysis of amplitude and phase variation#Statistical Science#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "J. Matuk",
+      "K. Bharath",
+      "O. Chkrebtii",
+      "S. Kurtek"
+    ],
+    "venue": "Journal of American Statistics and Association",
+    "title": "Bayesian framework for simultaneous registration and estimation of noisy, sparse and fragmented functional data",
+    "raw_text": "J. Matuk*K. Bharath*O. Chkrebtii*S. Kurtek#Bayesian framework for simultaneous registration and estimation of noisy, sparse and fragmented functional data#Journal of American Statistics and Association#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2005,
+    "authors": [
+      "H.-G. Müller"
+    ],
+    "venue": "Scandinavian Journal of Statistics",
+    "title": "Functional modelling and classification of longitudinal data",
+    "raw_text": "H.-G. Müller#Functional modelling and classification of longitudinal data#Scandinavian Journal of Statistics#2005#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2011,
+    "authors": [
+      "J. Nagi",
+      "F. Ducatelle",
+      "G. A. D. Caro",
+      "D. Ciresan",
+      "U. Meier",
+      "A. Giusti",
+      "F. Nagi",
+      "J. Schmidhuber",
+      "L. M. Gambardella"
+    ],
+    "venue": "IEEE International Conference on Signal and Image Processing Applications",
+    "title": "Maxpooling convolutional neural networks for vision-based hand gesture recognition",
+    "raw_text": "J. Nagi*F. Ducatelle*G. A. D. Caro*D. Ciresan*U. Meier*A. Giusti*F. Nagi*J. Schmidhuber*L. M. Gambardella#Maxpooling convolutional neural networks for vision-based hand gesture recognition#IEEE International Conference on Signal and Image Processing Applications#2011#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2002,
+    "authors": [
+      "J. Ramsay",
+      "B. Silverman"
+    ],
+    "venue": "Springer",
+    "title": "Applied Functional data analysis: Methods and Case Studies",
+    "raw_text": "J. Ramsay*B. Silverman#Applied Functional data analysis: Methods and Case Studies#Springer#2002#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1998,
+    "authors": [
+      "J. O. Ramsay",
+      "X. Li"
+    ],
+    "venue": "Journal of the Royal Statistical Society: Series B",
+    "title": "Curve registration",
+    "raw_text": "J. O. Ramsay*X. Li#Curve registration#Journal of the Royal Statistical Society: Series B#1998#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1978,
+    "authors": [
+      "Hiroaki Sakoe",
+      "Seibi Chiba"
+    ],
+    "venue": "IEEE Transactions on Acoustics, Speech, and Signal Processing",
+    "title": "Dynamic programming algorithm optimization for spoken word recognition",
+    "raw_text": "Hiroaki Sakoe*Seibi Chiba#Dynamic programming algorithm optimization for spoken word recognition#IEEE Transactions on Acoustics, Speech, and Signal Processing#1978#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2009,
+    "authors": [
+      "M. Sokolova",
+      "G. Lapalme"
+    ],
+    "venue": "Information Processing & Management",
+    "title": "A systematic analysis of performance measures for classification tasks",
+    "raw_text": "M. Sokolova*G. Lapalme#A systematic analysis of performance measures for classification tasks#Information Processing & Management#2009#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "A. Srivastava",
+      "E. P. Klassen"
+    ],
+    "venue": "Springer",
+    "title": "Functional and shape data analysis",
+    "raw_text": "A. Srivastava*E. P. Klassen#Functional and shape data analysis#Springer#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2011,
+    "authors": [
+      "A. Srivastava",
+      "W. Wu",
+      "S. Kurtek",
+      "E. Klassen",
+      "J. S. Marron"
+    ],
+    "venue": "arXiv 1103.3817",
+    "title": "Registration of functional data using fisher-rao metric",
+    "raw_text": "A. Srivastava*W. Wu*S. Kurtek*E. Klassen*J. S. Marron#Registration of functional data using fisher-rao metric#arXiv 1103.3817#2011#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.1016/S0893-6080(98)00108-7",
+    "doi": "10.1016/S0893-6080(98)00108-7",
+    "year": 1999,
+    "authors": [
+      "M.B. Stinchcombe"
+    ],
+    "venue": "Neural Networks",
+    "title": "Neural network approximation of continuous functionals and continuous functions on compactifications",
+    "raw_text": "M.B. Stinchcombe#Neural network approximation of continuous functionals and continuous functions on compactifications#Neural Networks#1999#https://doi.org/10.1016/S0893-6080(98)00108-7",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://doi.org/10.1080/02664763.2021.2023118",
+    "doi": "10.1080/02664763.2021.2023118",
+    "year": 2022,
+    "authors": [
+      "L. Tang",
+      "P. Zeng",
+      "J. Q. Shi",
+      "W.-S. Kim"
+    ],
+    "venue": "Journal of Applied Statistics",
+    "title": "Model-based joint curve registration and classification",
+    "raw_text": "L. Tang*P. Zeng*J. Q. Shi*W.-S. Kim#Model-based joint curve registration and classification#Journal of Applied Statistics#2022#https://doi.org/10.1080/02664763.2021.2023118",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2008,
+    "authors": [
+      "R. Tang",
+      "H.-G. Müller"
+    ],
+    "venue": "Biometrika",
+    "title": "Pairwise curve synchronization for functional data",
+    "raw_text": "R. Tang*H.-G. Müller#Pairwise curve synchronization for functional data#Biometrika#2008#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2010.04305",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "B. Thind",
+      "Kevin K. S. Mutani",
+      "J. Cao"
+    ],
+    "venue": "arXiv:2010.04305",
+    "title": "Neural networks as functional classifiers",
+    "raw_text": "B. Thind*Kevin K. S. Mutani*J. Cao#Neural networks as functional classifiers#arXiv:2010.04305#2020#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "J. D. Tucker",
+      "W. Wu",
+      "A. Srivastava"
+    ],
+    "venue": "Computational Statistics & Data Analysis",
+    "title": "Generative models for functional data using phase and amplitude separation",
+    "raw_text": "J. D. Tucker*W. Wu*A. Srivastava#Generative models for functional data using phase and amplitude separation#Computational Statistics & Data Analysis#2013#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1990,
+    "authors": [
+      "G. Wahba"
+    ],
+    "venue": "CBMS-NSF Regional Conference Series in Applied Mathematics",
+    "title": "Splines Models for Observational Data",
+    "raw_text": "G. Wahba#Splines Models for Observational Data#CBMS-NSF Regional Conference Series in Applied Mathematics#1990#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "J.-L. Wang",
+      "J.-M. Chiou",
+      "H.-G. Müller"
+    ],
+    "venue": "Annual Review of Statistics and Its application",
+    "title": "Review of functional data analysis",
+    "raw_text": "J.-L. Wang*J.-M. Chiou*H.-G. Müller#Review of functional data analysis#Annual Review of Statistics and Its application#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1997,
+    "authors": [
+      "K. Wang",
+      "T. Gasser"
+    ],
+    "venue": "Annals of Statistics",
+    "title": "Alignment of curves by dynamic time warping",
+    "raw_text": "K. Wang*T. Gasser#Alignment of curves by dynamic time warping#Annals of Statistics#1997#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "S. Wang",
+      "G. Cao"
+    ],
+    "venue": "Electronic Journal of Statistics",
+    "title": "Multiclass classification for multidimensional functional data through deep neural networks",
+    "raw_text": "S. Wang*G. Cao#Multiclass classification for multidimensional functional data through deep neural networks#Electronic Journal of Statistics#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "S. Wang",
+      "G. Cao",
+      "Z. Shang"
+    ],
+    "venue": "Scandinavian Journal of Statistics",
+    "title": "Deep neural network classifier for multidimensional functional data",
+    "raw_text": "S. Wang*G. Cao*Z. Shang#Deep neural network classifier for multidimensional functional data#Scandinavian Journal of Statistics#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "J. Yao",
+      "J. Mueller",
+      "J. L. Wang"
+    ],
+    "venue": "Proceedings of the 38th International Conference on Machine Learing",
+    "title": "Deep learning for functional data analysis with adaptive basis layers",
+    "raw_text": "J. Yao*J. Mueller*J. L. Wang#Deep learning for functional data analysis with adaptive basis layers#Proceedings of the 38th International Conference on Machine Learing#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Dmitry Yarotsky"
+    ],
+    "venue": "",
+    "title": "Universal approximations of invariant maps by neural networks",
+    "raw_text": "Dmitry Yarotsky#Universal approximations of invariant maps by neural networks##2018#",
+    "type": "other"
+  }
+]

@@ -1,0 +1,1468 @@
+[
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Marek Adamczyk",
+      "Maxim Sviridenko",
+      "Justin Ward"
+    ],
+    "venue": "Mathematics of Operations Research",
+    "title": "Submodular stochastic probing on matroids",
+    "raw_text": "Marek Adamczyk*Maxim Sviridenko*Justin Ward#Submodular stochastic probing on matroids#Mathematics of Operations Research#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Neil Agarwal",
+      "Ravi Netravali"
+    ],
+    "venue": "20th USENIX Symposium on Networked Systems Design and Implementation (NSDI 23)",
+    "title": "Boggart: Towards General-Purpose acceleration of retrospective video analytics",
+    "raw_text": "Neil Agarwal*Ravi Netravali#Boggart: Towards General-Purpose acceleration of retrospective video analytics#20th USENIX Symposium on Networked Systems Design and Implementation (NSDI 23)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2011,
+    "authors": [
+      "Nir Ailon",
+      "Bernard Chazelle",
+      "Kenneth L Clarkson",
+      "Ding Liu",
+      "Wolfgang Mulzer",
+      "C Seshadhri"
+    ],
+    "venue": "SIAM Journal on Computing",
+    "title": "Self-improving algorithms",
+    "raw_text": "Nir Ailon*Bernard Chazelle*Kenneth L Clarkson*Ding Liu*Wolfgang Mulzer*C Seshadhri#Self-improving algorithms#SIAM Journal on Computing#2011#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Daniel Alabi",
+      "Adam Tauman Kalai",
+      "Katrina Liggett",
+      "Cameron Musco",
+      "Christos Tzamos",
+      "Ellen Vitercik"
+    ],
+    "venue": "Conference on Learning Theory",
+    "title": "Learning to prune: Speeding up repeated computations",
+    "raw_text": "Daniel Alabi*Adam Tauman Kalai*Katrina Liggett*Cameron Musco*Christos Tzamos*Ellen Vitercik#Learning to prune: Speeding up repeated computations#Conference on Learning Theory#2019#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.15261",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Georgios Amanatidis",
+      "Federico Fusco",
+      "Rebecca Reiffenhäuser",
+      "Artem Tsikiridis"
+    ],
+    "venue": "arXiv preprint arXiv:2407.15261",
+    "title": "Pandora's box problem over time",
+    "raw_text": "Georgios Amanatidis*Federico Fusco*Rebecca Reiffenhäuser*Artem Tsikiridis#Pandora's box problem over time#arXiv preprint arXiv:2407.15261#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Ali Aouad",
+      "Jingwei Ji",
+      "Yaron Shaposhnik"
+    ],
+    "venue": "Available at SSRN 3726167",
+    "title": "The pandora's box problem with sequential inspections",
+    "raw_text": "Ali Aouad*Jingwei Ji*Yaron Shaposhnik#The pandora's box problem with sequential inspections#Available at SSRN 3726167#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2001,
+    "authors": [
+      "Mário César Ugulino Araújo",
+      "Teresa Cristina Bezerra Saldanha",
+      "Roberto Kawakami Harrop Galvao",
+      "Takashi Yoneyama",
+      "Henrique Caldas Chame",
+      "Valeria Visani"
+    ],
+    "venue": "Chemometrics and intelligent laboratory systems",
+    "title": "The successive projections algorithm for variable selection in spectroscopic multicomponent analysis",
+    "raw_text": "Mário César Ugulino Araújo*Teresa Cristina Bezerra Saldanha*Roberto Kawakami Harrop Galvao*Takashi Yoneyama*Henrique Caldas Chame*Valeria Visani#The successive projections algorithm for variable selection in spectroscopic multicomponent analysis#Chemometrics and intelligent laboratory systems#2001#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Mark Armstrong"
+    ],
+    "venue": "Journal of the European Economic Association",
+    "title": "Ordered consumer search",
+    "raw_text": "Mark Armstrong#Ordered consumer search#Journal of the European Economic Association#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Maria-Florina Balcan",
+      "Vaishnavh Nagarajan",
+      "Ellen Vitercik",
+      "Colin White"
+    ],
+    "venue": "Conference on Learning Theory",
+    "title": "Learning-theoretic foundations of algorithm configuration for combinatorial partitioning problems",
+    "raw_text": "Maria-Florina Balcan*Vaishnavh Nagarajan*Ellen Vitercik*Colin White#Learning-theoretic foundations of algorithm configuration for combinatorial partitioning problems#Conference on Learning Theory#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Maria-Florina Balcan",
+      "Travis Dick",
+      "Tuomas Sandholm",
+      "Ellen Vitercik"
+    ],
+    "venue": "International conference on machine learning",
+    "title": "Learning to branch",
+    "raw_text": "Maria-Florina Balcan*Travis Dick*Tuomas Sandholm*Ellen Vitercik#Learning to branch#International conference on machine learning#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Maria-Florina Balcan",
+      "Dan DeBlasio",
+      "Travis Dick",
+      "Carl Kingsford",
+      "Tuomas Sandholm",
+      "Ellen Vitercik"
+    ],
+    "venue": "Proceedings of the 53rd Annual ACM SIGACT Symposium on Theory of Computing (STOC) 2021",
+    "title": "How much data is sufficient to learn high-performing algorithms?",
+    "raw_text": "Maria-Florina Balcan*Dan DeBlasio*Travis Dick*Carl Kingsford*Tuomas Sandholm*Ellen Vitercik#How much data is sufficient to learn high-performing algorithms?#Proceedings of the 53rd Annual ACM SIGACT Symposium on Theory of Computing (STOC) 2021#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Dirk Bergemann",
+      "Alessandro Bonatti",
+      "Alex Smolin"
+    ],
+    "venue": "American economic review",
+    "title": "The design and price of information",
+    "raw_text": "Dirk Bergemann*Alessandro Bonatti*Alex Smolin#The design and price of information#American economic review#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Ben Berger",
+      "Tomer Ezra",
+      "Michal Feldman",
+      "Federico Fusco"
+    ],
+    "venue": "Proceedings of the AAAI Conference on Artificial Intelligence",
+    "title": "Pandora's problem with deadlines",
+    "raw_text": "Ben Berger*Tomer Ezra*Michal Feldman*Federico Fusco#Pandora's problem with deadlines#Proceedings of the AAAI Conference on Artificial Intelligence#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2012,
+    "authors": [
+      "James Bergstra",
+      "Yoshua Bengio"
+    ],
+    "venue": "Journal of machine learning research",
+    "title": "Random search for hyper-parameter optimization",
+    "raw_text": "James Bergstra*Yoshua Bengio#Random search for hyper-parameter optimization#Journal of machine learning research#2012#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Hedyeh Beyhaghi",
+      "Linda Cai"
+    ],
+    "venue": "Proceedings of the 55th Annual ACM Symposium on Theory of Computing",
+    "title": "Pandora's problem with nonobligatory inspection: Optimal structure and a ptas",
+    "raw_text": "Hedyeh Beyhaghi*Linda Cai#Pandora's problem with nonobligatory inspection: Optimal structure and a ptas#Proceedings of the 55th Annual ACM Symposium on Theory of Computing#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Hedyeh Beyhaghi",
+      "Robert Kleinberg"
+    ],
+    "venue": "Proceedings of the 2019 ACM Conference on Economics and Computation",
+    "title": "Pandora's problem with nonobligatory inspection",
+    "raw_text": "Hedyeh Beyhaghi*Robert Kleinberg#Pandora's problem with nonobligatory inspection#Proceedings of the 2019 ACM Conference on Economics and Computation#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2012,
+    "authors": [
+      "Sayan Bhattacharya",
+      "Sanjeev Khanna"
+    ],
+    "venue": "Proceedings of the 23rd Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Prophet inequalities with limited information",
+    "raw_text": "Sayan Bhattacharya*Sanjeev Khanna#Prophet inequalities with limited information#Proceedings of the 23rd Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2012#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Shant Boodaghians",
+      "Federico Fusco",
+      "Philip Lazos",
+      "Stefano Leonardi"
+    ],
+    "venue": "Proceedings of the 21st ACM Conference on Economics and Computation",
+    "title": "Pandora's box problem with order constraints",
+    "raw_text": "Shant Boodaghians*Federico Fusco*Philip Lazos*Stefano Leonardi#Pandora's box problem with order constraints#Proceedings of the 21st ACM Conference on Economics and Computation#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2000,
+    "authors": [
+      "Moses Charikar",
+      "Ronald Fagin",
+      "Venkatesan Guruswami",
+      "Jon Kleinberg",
+      "Prabhakar Raghavan",
+      "Amit Sahai"
+    ],
+    "venue": "Proceedings of the thirty-second annual ACM symposium on Theory of computing",
+    "title": "Query strategies for priced information",
+    "raw_text": "Moses Charikar*Ronald Fagin*Venkatesan Guruswami*Jon Kleinberg*Prabhakar Raghavan*Amit Sahai#Query strategies for priced information#Proceedings of the thirty-second annual ACM symposium on Theory of computing#2000#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2010,
+    "authors": [
+      "Shuchi Chawla",
+      "Jason D. Hartline",
+      "David L. Malec",
+      "Balasubramanian Sivan"
+    ],
+    "venue": "Proceedings of the 42nd ACM Symposium on Theory of Computing (STOC)",
+    "title": "Multi-parameter mechanism design and sequential posted pricing",
+    "raw_text": "Shuchi Chawla*Jason D. Hartline*David L. Malec*Balasubramanian Sivan#Multi-parameter mechanism design and sequential posted pricing#Proceedings of the 42nd ACM Symposium on Theory of Computing (STOC)#2010#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Shuchi Chawla",
+      "Shaleen Deep",
+      "Paraschos Koutrisw",
+      "Yifeng Teng"
+    ],
+    "venue": "Proceedings of the VLDB Endowment",
+    "title": "Revenue maximization for query pricing",
+    "raw_text": "Shuchi Chawla*Shaleen Deep*Paraschos Koutrisw*Yifeng Teng#Revenue maximization for query pricing#Proceedings of the VLDB Endowment#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Shuchi Chawla",
+      "Evangelia Gergatsouli",
+      "Yifeng Teng",
+      "Christos Tzamos",
+      "Ruimin Zhang"
+    ],
+    "venue": "2020 IEEE 61st Annual Symposium on Foundations of Computer Science (FOCS)",
+    "title": "Pandora's box with correlations: Learning and approximation",
+    "raw_text": "Shuchi Chawla*Evangelia Gergatsouli*Yifeng Teng*Christos Tzamos*Ruimin Zhang#Pandora's box with correlations: Learning and approximation#2020 IEEE 61st Annual Symposium on Foundations of Computer Science (FOCS)#2020#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2108.12976",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Shuchi Chawla",
+      "Evangelia Gergatsouli",
+      "Jeremy McMahan",
+      "Christos Tzamos"
+    ],
+    "venue": "arXiv preprint arXiv:2108.12976",
+    "title": "Approximating pandora's box with correlations",
+    "raw_text": "Shuchi Chawla*Evangelia Gergatsouli*Jeremy McMahan*Christos Tzamos#Approximating pandora's box with correlations#arXiv preprint arXiv:2108.12976#2021#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.03860",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Shuchi Chawla",
+      "Dimitris Christou",
+      "Amit Harlev",
+      "Ziv Scully"
+    ],
+    "venue": "arXiv preprint arXiv:2412.03860",
+    "title": "Combinatorial selection with costly information",
+    "raw_text": "Shuchi Chawla*Dimitris Christou*Amit Harlev*Ziv Scully#Combinatorial selection with costly information#arXiv preprint arXiv:2412.03860#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Yuxin Chen",
+      "S Hamed Hassani",
+      "Amin Karbasi",
+      "Andreas Krause"
+    ],
+    "venue": "Conference on Learning Theory",
+    "title": "Sequential information maximization: When is greedy near-optimal?",
+    "raw_text": "Yuxin Chen*S Hamed Hassani*Amin Karbasi*Andreas Krause#Sequential information maximization: When is greedy near-optimal?#Conference on Learning Theory#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Yuxin Chen",
+      "Shervin Javdani",
+      "Amin Karbasi",
+      "J Bagnell",
+      "Siddhartha Srinivasa",
+      "Andreas Krause"
+    ],
+    "venue": "Proceedings of the AAAI Conference on Artificial Intelligence",
+    "title": "Submodular surrogates for value of information",
+    "raw_text": "Yuxin Chen*Shervin Javdani*Amin Karbasi*J Bagnell*Siddhartha Srinivasa*Andreas Krause#Submodular surrogates for value of information#Proceedings of the AAAI Conference on Artificial Intelligence#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2010,
+    "authors": [
+      "Kenneth L Clarkson",
+      "Wolfgang Mulzer",
+      "C Seshadhri"
+    ],
+    "venue": "Proceedings of the Twenty-First Annual ACM-SIAM Symposium on Discrete Algorithms",
+    "title": "Self-improving algorithms for convex hulls",
+    "raw_text": "Kenneth L Clarkson*Wolfgang Mulzer*C Seshadhri#Self-improving algorithms for convex hulls#Proceedings of the Twenty-First Annual ACM-SIAM Symposium on Discrete Algorithms#2010#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "José Correa",
+      "Pablo D. A. Foncea",
+      "Ruben Hoeksma",
+      "Tim Roughgarden"
+    ],
+    "venue": "Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Prophet inequalities for independent random variables from an unknown distribution",
+    "raw_text": "José Correa*Pablo D. A. Foncea*Ruben Hoeksma*Tim Roughgarden#Prophet inequalities for independent random variables from an unknown distribution#Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "José Correa",
+      "Anja Korol",
+      "Ruben Hoeksma"
+    ],
+    "venue": "Mathematics of Operations Research",
+    "title": "Prophet inequalities and posted pricing mechanisms",
+    "raw_text": "José Correa*Anja Korol*Ruben Hoeksma#Prophet inequalities and posted pricing mechanisms#Mathematics of Operations Research#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yinwei Dai",
+      "Rui Pan",
+      "Anand Iyer",
+      "Kai Li",
+      "Ravi Netravali"
+    ],
+    "venue": "Proceedings of the ACM SIGOPS 30th Symposium on Operating Systems Principles",
+    "title": "Apparate: Rethinking early exits to tame latency-throughput tensions in ml serving",
+    "raw_text": "Yinwei Dai*Rui Pan*Anand Iyer*Kai Li*Ravi Netravali#Apparate: Rethinking early exits to tame latency-throughput tensions in ml serving#Proceedings of the ACM SIGOPS 30th Symposium on Operating Systems Principles#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.10347",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jasper Dekoninck",
+      "Maximilian Baader",
+      "Martin Vechev"
+    ],
+    "venue": "arXiv preprint arXiv:2410.10347",
+    "title": "A unified approach to routing and cascading for llms",
+    "raw_text": "Jasper Dekoninck*Maximilian Baader*Martin Vechev#A unified approach to routing and cascading for llms#arXiv preprint arXiv:2410.10347#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Mahsa Derakhshan",
+      "Negin Golrezaei",
+      "Vahideh Manshadi",
+      "Vahab Mirrokni"
+    ],
+    "venue": "Management Science",
+    "title": "Product ranking on online platforms",
+    "raw_text": "Mahsa Derakhshan*Negin Golrezaei*Vahideh Manshadi*Vahab Mirrokni#Product ranking on online platforms#Management Science#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Jacob Devlin",
+      "Ming-Wei Chang",
+      "Kenton Lee",
+      "Kristina Toutanova"
+    ],
+    "venue": "Proceedings of the 2019 conference of the North American chapter of the association for computational linguistics: human language technologies",
+    "title": "Bert: Pre-training of deep bidirectional transformers for language understanding",
+    "raw_text": "Jacob Devlin*Ming-Wei Chang*Kenton Lee*Kristina Toutanova#Bert: Pre-training of deep bidirectional transformers for language understanding#Proceedings of the 2019 conference of the North American chapter of the association for computational linguistics: human language technologies#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Bolin Ding",
+      "Yiding Feng",
+      "Chien-Ju Ho",
+      "Wei Tang",
+      "Haifeng Xu"
+    ],
+    "venue": "Proceedings of the 2023 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Competitive information design for pandora's box",
+    "raw_text": "Bolin Ding*Yiding Feng*Chien-Ju Ho*Wei Tang*Haifeng Xu#Competitive information design for pandora's box#Proceedings of the 2023 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Laura Doval"
+    ],
+    "venue": "Journal of Economic Theory",
+    "title": "Whether or not to open pandora's box",
+    "raw_text": "Laura Doval#Whether or not to open pandora's box#Journal of Economic Theory#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Yaqi Duan",
+      "Tracy Ke",
+      "Mengdi Wang"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "State aggregation learning from markov transition data",
+    "raw_text": "Yaqi Duan*Tracy Ke*Mengdi Wang#State aggregation learning from markov transition data#Advances in Neural Information Processing Systems#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Hossein Esfandiari",
+      "Mohammad Taghi Hajiaghayi",
+      "Brendan Lucier",
+      "Morteza Zadimoghaddam"
+    ],
+    "venue": "Proceedings of the 49th Annual ACM SIGACT Symposium on Theory of Computing (STOC)",
+    "title": "Prophet inequalities with unknown distributions",
+    "raw_text": "Hossein Esfandiari*Mohammad Taghi Hajiaghayi*Brendan Lucier*Morteza Zadimoghaddam#Prophet inequalities with unknown distributions#Proceedings of the 49th Annual ACM SIGACT Symposium on Theory of Computing (STOC)#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2009,
+    "authors": [
+      "Stewart N Ethier",
+      "Thomas G Kurtz"
+    ],
+    "venue": "John Wiley & Sons",
+    "title": "Markov processes: characterization and convergence",
+    "raw_text": "Stewart N Ethier*Thomas G Kurtz#Markov processes: characterization and convergence#John Wiley & Sons#2009#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Michal Feldman",
+      "Thomas Kesselheim",
+      "Brendan Lucier"
+    ],
+    "venue": "Proceedings of the 48th Annual ACM Symposium on Theory of Computing (STOC)",
+    "title": "Online stochastic matching: Beating 1 - 1/e",
+    "raw_text": "Michal Feldman*Thomas Kesselheim*Brendan Lucier#Online stochastic matching: Beating 1 - 1/e#Proceedings of the 48th Annual ACM Symposium on Theory of Computing (STOC)#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Hu Fu",
+      "Jiawei Li",
+      "Daogao Liu"
+    ],
+    "venue": "Proceedings of the 55th Annual ACM Symposium on Theory of Computing",
+    "title": "Pandora box problem with nonobligatory inspection: Hardness and approximation scheme",
+    "raw_text": "Hu Fu*Jiawei Li*Daogao Liu#Pandora box problem with nonobligatory inspection: Hardness and approximation scheme#Proceedings of the 55th Annual ACM Symposium on Theory of Computing#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Khashayar Gatmiry",
+      "Thomas Kesselheim",
+      "Sahil Singla",
+      "Yifan Wang"
+    ],
+    "venue": "Proceedings of the 2024 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Bandit algorithms for prophet inequality and pandora's box",
+    "raw_text": "Khashayar Gatmiry*Thomas Kesselheim*Sahil Singla*Yifan Wang#Bandit algorithms for prophet inequality and pandora's box#Proceedings of the 2024 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Evangelia Gergatsouli",
+      "Christos Tzamos"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Online learning for min sum set cover and pandora's box",
+    "raw_text": "Evangelia Gergatsouli*Christos Tzamos#Online learning for min sum set cover and pandora's box#International Conference on Machine Learning#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2301.13534",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Evangelia Gergatsouli",
+      "Christos Tzamos"
+    ],
+    "venue": "arXiv preprint arXiv:2301.13534",
+    "title": "Weitzman's rule for pandora's box with correlations",
+    "raw_text": "Evangelia Gergatsouli*Christos Tzamos#Weitzman's rule for pandora's box with correlations#arXiv preprint arXiv:2301.13534#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1979,
+    "authors": [
+      "John C. Gittins"
+    ],
+    "venue": "Journal of the Royal Statistical Society: Series B (Methodological)",
+    "title": "Bandit processes and dynamic allocation indices",
+    "raw_text": "John C. Gittins#Bandit processes and dynamic allocation indices#Journal of the Royal Statistical Society: Series B (Methodological)#1979#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1989,
+    "authors": [
+      "John C. Gittins"
+    ],
+    "venue": "John Wiley & Sons",
+    "title": "Multi-armed Bandit Allocation Indices",
+    "raw_text": "John C. Gittins#Multi-armed Bandit Allocation Indices#John Wiley & Sons#1989#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2006,
+    "authors": [
+      "Ashish Goel",
+      "Sudipto Guha",
+      "Kamesh Munagala"
+    ],
+    "venue": "Proceedings of the twenty-fifth ACM SIGMOD-SIGACT-SIGART symposium on Principles of database systems",
+    "title": "Asking the right questions: Model-driven optimization using probes",
+    "raw_text": "Ashish Goel*Sudipto Guha*Kamesh Munagala#Asking the right questions: Model-driven optimization using probes#Proceedings of the twenty-fifth ACM SIGMOD-SIGACT-SIGART symposium on Principles of database systems#2006#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Ian Goodfellow",
+      "Yoshua Bengio",
+      "Aaron Courville",
+      "Yoshua Bengio"
+    ],
+    "venue": "MIT press Cambridge",
+    "title": "Deep learning",
+    "raw_text": "Ian Goodfellow*Yoshua Bengio*Aaron Courville*Yoshua Bengio#Deep learning#MIT press Cambridge#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Qiushan Guo",
+      "Zhipeng Yu",
+      "Yichao Wu",
+      "Ding Liang",
+      "Haoyu Qin",
+      "Junjie Yan"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Dynamic recursive neural network",
+    "raw_text": "Qiushan Guo*Zhipeng Yu*Yichao Wu*Ding Liang*Haoyu Qin*Junjie Yan#Dynamic recursive neural network#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2001,
+    "authors": [
+      "Anupam Gupta",
+      "Amit Kumar"
+    ],
+    "venue": "Proceedings 42nd IEEE Symposium on Foundations of Computer Science",
+    "title": "Sorting and selection with structured costs",
+    "raw_text": "Anupam Gupta*Amit Kumar#Sorting and selection with structured costs#Proceedings 42nd IEEE Symposium on Foundations of Computer Science#2001#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "Anupam Gupta",
+      "Viswanath Nagarajan"
+    ],
+    "venue": "Integer Programming and Combinatorial Optimization: 16th International Conference, IPCO 2013",
+    "title": "A stochastic probing problem with applications",
+    "raw_text": "Anupam Gupta*Viswanath Nagarajan#A stochastic probing problem with applications#Integer Programming and Combinatorial Optimization: 16th International Conference, IPCO 2013#2013#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Anupam Gupta",
+      "Viswanath Nagarajan",
+      "Sahil Singla"
+    ],
+    "venue": "Proceedings of the twenty-seventh annual ACM-SIAM symposium on Discrete algorithms",
+    "title": "Algorithms and adaptivity gaps for stochastic probing",
+    "raw_text": "Anupam Gupta*Viswanath Nagarajan*Sahil Singla#Algorithms and adaptivity gaps for stochastic probing#Proceedings of the twenty-seventh annual ACM-SIAM symposium on Discrete algorithms#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Anupam Gupta",
+      "Viswanath Nagarajan",
+      "Sahil Singla"
+    ],
+    "venue": "Proceedings of the Twenty-Eighth Annual ACM-SIAM Symposium on Discrete Algorithms",
+    "title": "Adaptivity gaps for stochastic probing: Submodular and xos functions",
+    "raw_text": "Anupam Gupta*Viswanath Nagarajan*Sahil Singla#Adaptivity gaps for stochastic probing: Submodular and xos functions#Proceedings of the Twenty-Eighth Annual ACM-SIAM Symposium on Discrete Algorithms#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Anupam Gupta",
+      "Haotian Jiang",
+      "Ziv Scully",
+      "Sahil Singla"
+    ],
+    "venue": "Integer Programming and Combinatorial Optimization: 20th International Conference, IPCO 2019",
+    "title": "The markovian price of information",
+    "raw_text": "Anupam Gupta*Haotian Jiang*Ziv Scully*Sahil Singla#The markovian price of information#Integer Programming and Combinatorial Optimization: 20th International Conference, IPCO 2019#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Rishi Gupta",
+      "Tim Roughgarden"
+    ],
+    "venue": "Proceedings of the 2016 ACM Conference on Innovations in Theoretical Computer Science",
+    "title": "A pac approach to application-specific algorithm selection",
+    "raw_text": "Rishi Gupta*Tim Roughgarden#A pac approach to application-specific algorithm selection#Proceedings of the 2016 ACM Conference on Innovations in Theoretical Computer Science#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Yizeng Han",
+      "Gao Huang",
+      "Shiji Song",
+      "Le Yang",
+      "Honghui Wang",
+      "Yulin Wang"
+    ],
+    "venue": "IEEE transactions on pattern analysis and machine intelligence",
+    "title": "Dynamic neural networks: A survey",
+    "raw_text": "Yizeng Han*Gao Huang*Shiji Song*Le Yang*Honghui Wang*Yulin Wang#Dynamic neural networks: A survey#IEEE transactions on pattern analysis and machine intelligence#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Elad Hazan",
+      "Adam Klivans",
+      "Yang Yuan"
+    ],
+    "venue": "International Conference on Learning Representations",
+    "title": "Hyperparameter optimization: a spectral approach",
+    "raw_text": "Elad Hazan*Adam Klivans*Yang Yuan#Hyperparameter optimization: a spectral approach#International Conference on Learning Representations#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Kaiming He",
+      "Xiangyu Zhang",
+      "Shaoqing Ren",
+      "Jian Sun"
+    ],
+    "venue": "Proceedings of the IEEE conference on computer vision and pattern recognition",
+    "title": "Deep residual learning for image recognition",
+    "raw_text": "Kaiming He*Xiangyu Zhang*Shaoqing Ren*Jian Sun#Deep residual learning for image recognition#Proceedings of the IEEE conference on computer vision and pattern recognition#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Kevin Hsieh",
+      "Ganesh Ananthanarayanan",
+      "Peter Bodik",
+      "Shivaram Venkataraman",
+      "Paramvir Bahl",
+      "Matthai Philipose",
+      "Phillip B Gibbons",
+      "Onur Mutlu"
+    ],
+    "venue": "13th USENIX Symposium on Operating Systems Design and Implementation (OSDI 18)",
+    "title": "Focus: Querying large video datasets with low latency and low cost",
+    "raw_text": "Kevin Hsieh*Ganesh Ananthanarayanan*Peter Bodik*Shivaram Venkataraman*Paramvir Bahl*Matthai Philipose*Phillip B Gibbons*Onur Mutlu#Focus: Querying large video datasets with low latency and low cost#13th USENIX Symposium on Operating Systems Design and Implementation (OSDI 18)#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Kevin Jamieson",
+      "Ameet Talwalkar"
+    ],
+    "venue": "Artificial intelligence and statistics",
+    "title": "Non-stochastic best arm identification and hyperparameter optimization",
+    "raw_text": "Kevin Jamieson*Ameet Talwalkar#Non-stochastic best arm identification and hyperparameter optimization#Artificial intelligence and statistics#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Yigitcan Kaya",
+      "Sanghyun Hong",
+      "Tudor Dumitras"
+    ],
+    "venue": "International conference on machine learning",
+    "title": "Shallow-deep networks: Understanding and mitigating network overthinking",
+    "raw_text": "Yigitcan Kaya*Sanghyun Hong*Tudor Dumitras#Shallow-deep networks: Understanding and mitigating network overthinking#International conference on machine learning#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Jon Kleinberg",
+      "Robert Kleinberg"
+    ],
+    "venue": "Proceedings of the 2018 ACM Conference on Economics and Computation",
+    "title": "Delegated search approximates efficient search",
+    "raw_text": "Jon Kleinberg*Robert Kleinberg#Delegated search approximates efficient search#Proceedings of the 2018 ACM Conference on Economics and Computation#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2005,
+    "authors": [
+      "Robert Kleinberg",
+      "Sergei M. Krakovski"
+    ],
+    "venue": "Proceedings of the 16th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Multiple-choice prophet inequalities",
+    "raw_text": "Robert Kleinberg*Sergei M. Krakovski#Multiple-choice prophet inequalities#Proceedings of the 16th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2005#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Robert Kleinberg",
+      "Bo Waggoner",
+      "E Glen Weyl"
+    ],
+    "venue": "Proceedings of the 2016 ACM Conference on Economics and Computation",
+    "title": "Descending price optimally coordinates search",
+    "raw_text": "Robert Kleinberg*Bo Waggoner*E Glen Weyl#Descending price optimally coordinates search#Proceedings of the 2016 ACM Conference on Economics and Computation#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Robert Kleinberg",
+      "Kevin Leyton-Brown",
+      "Brendan Lucier"
+    ],
+    "venue": "IJCAI",
+    "title": "Efficiency through procrastination: Approximately optimal algorithm configuration with runtime guarantees",
+    "raw_text": "Robert Kleinberg*Kevin Leyton-Brown*Brendan Lucier#Efficiency through procrastination: Approximately optimal algorithm configuration with runtime guarantees#IJCAI#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Lars Kotthoff",
+      "Chris Thornton",
+      "Holger H Hoos",
+      "Frank Hutter",
+      "Kevin Leyton-Brown"
+    ],
+    "venue": "Automated machine learning: methods, systems, challenges",
+    "title": "Auto-weka: Automatic model selection and hyperparameter optimization in weka",
+    "raw_text": "Lars Kotthoff*Chris Thornton*Holger H Hoos*Frank Hutter*Kevin Leyton-Brown#Auto-weka: Automatic model selection and hyperparameter optimization in weka#Automated machine learning: methods, systems, challenges#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1977,
+    "authors": [
+      "Ulrich Krengel",
+      "Louis Sucheston"
+    ],
+    "venue": "",
+    "title": "Semiamarts and finite values",
+    "raw_text": "Ulrich Krengel*Louis Sucheston#Semiamarts and finite values##1977#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1978,
+    "authors": [
+      "Ulrich Krengel",
+      "Louis Sucheston"
+    ],
+    "venue": "Probability on Banach spaces",
+    "title": "On semiamarts, amarts, and processes with finite value",
+    "raw_text": "Ulrich Krengel*Louis Sucheston#On semiamarts, amarts, and processes with finite value#Probability on Banach spaces#1978#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Stefanos Laskaridis",
+      "Alexandros Kouris",
+      "Nicholas D Lane"
+    ],
+    "venue": "Proceedings of the 5th International Workshop on Embedded and Mobile Deep Learning",
+    "title": "Adaptive inference through early-exit networks: Design, challenges and directions",
+    "raw_text": "Stefanos Laskaridis*Alexandros Kouris*Nicholas D Lane#Adaptive inference through early-exit networks: Design, challenges and directions#Proceedings of the 5th International Workshop on Embedded and Mobile Deep Learning#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Luzian Lebovitz",
+      "Lukas Cavigelli",
+      "Michele Magno",
+      "Lorenz K Muller"
+    ],
+    "venue": "Transactions on Machine Learning Research",
+    "title": "Efficient inference with model cascades",
+    "raw_text": "Luzian Lebovitz*Lukas Cavigelli*Michele Magno*Lorenz K Muller#Efficient inference with model cascades#Transactions on Machine Learning Research#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Hao Li",
+      "Xianwen Shi"
+    ],
+    "venue": "American Economic Review",
+    "title": "Discriminatory information disclosure",
+    "raw_text": "Hao Li*Xianwen Shi#Discriminatory information disclosure#American Economic Review#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jian Li",
+      "Daogao Liu"
+    ],
+    "venue": "Proceedings of the 2022 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Multi-token markov game with switching costs",
+    "raw_text": "Jian Li*Daogao Liu#Multi-token markov game with switching costs#Proceedings of the 2022 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Lisha Li",
+      "Kevin Jamieson",
+      "Giulia DeSalvo",
+      "Afshin Rostamizadeh",
+      "Ameet Talwalkar"
+    ],
+    "venue": "The Journal of Machine Learning Research",
+    "title": "Hyperband: A novel bandit-based approach to hyperparameter optimization",
+    "raw_text": "Lisha Li*Kevin Jamieson*Giulia DeSalvo*Afshin Rostamizadeh*Ameet Talwalkar#Hyperband: A novel bandit-based approach to hyperparameter optimization#The Journal of Machine Learning Research#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Vasilis Livanos",
+      "Ruta Mehta"
+    ],
+    "venue": "Proceedings of the 2024 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+    "title": "Minimization is harder in the prophet world",
+    "raw_text": "Vasilis Livanos*Ruta Mehta#Minimization is harder in the prophet world#Proceedings of the 2024 Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Yoshitomo Matsubara",
+      "Marco Levorato",
+      "Francesco Restuccia"
+    ],
+    "venue": "ACM Computing Surveys",
+    "title": "Split computing and early exiting for deep learning applications: Survey and research challenges",
+    "raw_text": "Yoshitomo Matsubara*Marco Levorato*Francesco Restuccia#Split computing and early exiting for deep learning applications: Survey and research challenges#ACM Computing Surveys#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "Julian McAuley",
+      "Jure Leskovec"
+    ],
+    "venue": "Proceedings of the 7th ACM conference on Recommender systems",
+    "title": "Hidden factors and hidden topics: understanding rating dimensions with review text",
+    "raw_text": "Julian McAuley*Jure Leskovec#Hidden factors and hidden topics: understanding rating dimensions with review text#Proceedings of the 7th ACM conference on Recommender systems#2013#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.07451",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Fabio Montello",
+      "Ronja Güldenring",
+      "Simone Scardapane",
+      "Lazaros Nalpantidis"
+    ],
+    "venue": "arXiv preprint arXiv:2501.07451",
+    "title": "A survey on dynamic neural networks: from computer vision to multi-modal sensor fusion",
+    "raw_text": "Fabio Montello*Ronja Güldenring*Simone Scardapane*Lazaros Nalpantidis#A survey on dynamic neural networks: from computer vision to multi-modal sensor fusion#arXiv preprint arXiv:2501.07451#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Lunyiu Nie",
+      "Zhimin Ding",
+      "Erdong Hu",
+      "Christopher Jermaine",
+      "Swarat Chaudhuri"
+    ],
+    "venue": "Proceedings of the 41st International Conference on Machine Learning",
+    "title": "Online cascade learning for efficient inference over streams",
+    "raw_text": "Lunyiu Nie*Zhimin Ding*Erdong Hu*Christopher Jermaine*Swarat Chaudhuri#Online cascade learning for efficient inference over streams#Proceedings of the 41st International Conference on Machine Learning#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Wojciech Olszewski",
+      "Richard Weber"
+    ],
+    "venue": "Journal of Economic Theory",
+    "title": "A more general pandora rule?",
+    "raw_text": "Wojciech Olszewski*Richard Weber#A more general pandora rule?#Journal of Economic Theory#2015#",
+    "type": "other"
+  },
+  {
+    "url": "https://dx.doi.org/10.21227/zm1y-b270",
+    "doi": "10.21227/zm1y-b270",
+    "year": 2020,
+    "authors": [
+      "Aditya Pal",
+      "Abhilash Barigidad",
+      "Abhijit Mustafi"
+    ],
+    "venue": "",
+    "title": "Imdb movie reviews dataset",
+    "raw_text": "Aditya Pal*Abhilash Barigidad*Abhijit Mustafi#Imdb movie reviews dataset#2020#https://dx.doi.org/10.21227/zm1y-b270",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Alec Radford",
+      "Jeffrey Wu",
+      "Rewon Child",
+      "David Luan",
+      "Dario Amodei",
+      "Ilya Sutskever",
+      "et al"
+    ],
+    "venue": "OpenAI blog",
+    "title": "Language models are unsupervised multitask learners",
+    "raw_text": "Alec Radford*Jeffrey Wu*Rewon Child*David Luan*Dario Amodei*Ilya Sutskever*et al#Language models are unsupervised multitask learners#OpenAI blog#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Haseena Rahmath P",
+      "Vishal Srivastava",
+      "Kuldeep Chaurasia",
+      "Roberto G Pacheco",
+      "Rodrigo S Couto"
+    ],
+    "venue": "ACM Computing Surveys",
+    "title": "Early-exit deep neural network-a comprehensive survey",
+    "raw_text": "Haseena Rahmath P*Vishal Srivastava*Kuldeep Chaurasia*Roberto G Pacheco*Rodrigo S Couto#Early-exit deep neural network-a comprehensive survey#ACM Computing Surveys#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2000,
+    "authors": [
+      "Horst D Simon",
+      "Hongyuan Zha"
+    ],
+    "venue": "SIAM Journal on Scientific Computing",
+    "title": "Low-rank matrix approximation using the lanczos bidiagonalization process with applications",
+    "raw_text": "Horst D Simon*Hongyuan Zha#Low-rank matrix approximation using the lanczos bidiagonalization process with applications#SIAM Journal on Scientific Computing#2000#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "K Simonyan",
+      "A Zisserman"
+    ],
+    "venue": "3rd International Conference on Learning Representations (ICLR 2015)",
+    "title": "Very deep convolutional networks for large-scale image recognition",
+    "raw_text": "K Simonyan*A Zisserman#Very deep convolutional networks for large-scale image recognition#3rd International Conference on Learning Representations (ICLR 2015)#2015#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Sahil Singla"
+    ],
+    "venue": "Proceedings of the twenty-ninth annual ACM-SIAM symposium on discrete algorithms",
+    "title": "The price of information in combinatorial optimization",
+    "raw_text": "Sahil Singla#The price of information in combinatorial optimization#Proceedings of the twenty-ninth annual ACM-SIAM symposium on discrete algorithms#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Prabhu Teja Sivaprasad",
+      "Florian Mai",
+      "Thijs Vogels",
+      "Martin Jaggi",
+      "François Fleuret"
+    ],
+    "venue": "International conference on machine learning",
+    "title": "Optimizer benchmarking needs to account for hyperparameter tuning",
+    "raw_text": "Prabhu Teja Sivaprasad*Florian Mai*Thijs Vogels*Martin Jaggi*François Fleuret#Optimizer benchmarking needs to account for hyperparameter tuning#International conference on machine learning#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2012,
+    "authors": [
+      "Jasper Snoek",
+      "Hugo Larochelle",
+      "Ryan P Adams"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Practical bayesian optimization of machine learning algorithms",
+    "raw_text": "Jasper Snoek*Hugo Larochelle*Ryan P Adams#Practical bayesian optimization of machine learning algorithms#Advances in neural information processing systems#2012#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.16419",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yang Sui",
+      "Yu-Neng Chuang",
+      "Guanchu Wang",
+      "Jiamu Zhang",
+      "Tianyi Zhang",
+      "Jiayi Yuan",
+      "Hongyi Liu",
+      "Andrew Wen",
+      "Shaochen Zhong",
+      "Na Zou",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2503.16419",
+    "title": "Stop overthinking: A survey on efficient reasoning for large language models",
+    "raw_text": "Yang Sui*Yu-Neng Chuang*Guanchu Wang*Jiamu Zhang*Tianyi Zhang*Jiayi Yuan*Hongyi Liu*Andrew Wen*Shaochen Zhong*Na Zou*et al#Stop overthinking: A survey on efficient reasoning for large language models#arXiv preprint arXiv:2503.16419#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Surat Teerapittayanon",
+      "Bradley McDanel",
+      "Hsiang-Tsung Kung"
+    ],
+    "venue": "2016 23rd international conference on pattern recognition (ICPR)",
+    "title": "Branchynet: Fast inference via early exiting from deep neural networks",
+    "raw_text": "Surat Teerapittayanon*Bradley McDanel*Hsiang-Tsung Kung#Branchynet: Fast inference via early exiting from deep neural networks#2016 23rd international conference on pattern recognition (ICPR)#2016#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2210.05528",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Neeraj Varshney",
+      "Chitta Baral"
+    ],
+    "venue": "arXiv preprint arXiv:2210.05528",
+    "title": "Model cascading: Towards jointly improving efficiency and accuracy of nlp systems",
+    "raw_text": "Neeraj Varshney*Chitta Baral#Model cascading: Towards jointly improving efficiency and accuracy of nlp systems#arXiv preprint arXiv:2210.05528#2022#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Xin Wang",
+      "Fisher Yu",
+      "Zi-Yi Dou",
+      "Trevor Darrell",
+      "Joseph E Gonzalez"
+    ],
+    "venue": "Proceedings of the European conference on computer vision (ECCV)",
+    "title": "Skipnet: Learning dynamic routing in convolutional networks",
+    "raw_text": "Xin Wang*Fisher Yu*Zi-Yi Dou*Trevor Darrell*Joseph E Gonzalez#Skipnet: Learning dynamic routing in convolutional networks#Proceedings of the European conference on computer vision (ECCV)#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1992,
+    "authors": [
+      "Richard R. Weber"
+    ],
+    "venue": "The Annals of Applied Probability",
+    "title": "On the gittins index for multiarmed bandits",
+    "raw_text": "Richard R. Weber#On the gittins index for multiarmed bandits#The Annals of Applied Probability#1992#10.1214/aoap/1177005775",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Gellért Weisz",
+      "Andras Gyorgy",
+      "Csaba Szepesvári"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Leapsandbounds: A method for approximately optimal algorithm configuration",
+    "raw_text": "Gellért Weisz*Andras Gyorgy*Csaba Szepesvári#Leapsandbounds: A method for approximately optimal algorithm configuration#International Conference on Machine Learning#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1979,
+    "authors": [
+      "Martin L Weitzman"
+    ],
+    "venue": "Econometrica: Journal of the Econometric Society",
+    "title": "Optimal search for the best alternative",
+    "raw_text": "Martin L Weitzman#Optimal search for the best alternative#Econometrica: Journal of the Econometric Society#1979#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2012,
+    "authors": [
+      "Virginia Vassilevska Williams"
+    ],
+    "venue": "Proceedings of the forty-fourth annual ACM symposium on Theory of computing",
+    "title": "Multiplying matrices faster than coppersmith-winograd",
+    "raw_text": "Virginia Vassilevska Williams#Multiplying matrices faster than coppersmith-winograd#Proceedings of the forty-fourth annual ACM symposium on Theory of computing#2012#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Qian Xie",
+      "Raul Astudillo",
+      "Peter Frazier",
+      "Ziv Scully",
+      "Alexander Terenin"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Cost-aware bayesian optimization via the pandora's box gittins index",
+    "raw_text": "Qian Xie*Raul Astudillo*Peter Frazier*Ziv Scully*Alexander Terenin#Cost-aware bayesian optimization via the pandora's box gittins index#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2507.12453",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Qian Xie",
+      "Linda Cai",
+      "Alexander Terenin",
+      "Peter I Frazier",
+      "Ziv Scully"
+    ],
+    "venue": "arXiv preprint arXiv:2507.12453",
+    "title": "Cost-aware stopping for bayesian optimization",
+    "raw_text": "Qian Xie*Linda Cai*Alexander Terenin*Peter I Frazier*Ziv Scully#Cost-aware stopping for bayesian optimization#arXiv preprint arXiv:2507.12453#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2004.12993",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Ji Xin",
+      "Raphael Tang",
+      "Jaejun Lee",
+      "Yaoliang Yu",
+      "Jimmy Lin"
+    ],
+    "venue": "arXiv preprint arXiv:2004.12993",
+    "title": "Deebert: Dynamic early exiting for accelerating bert inference",
+    "raw_text": "Ji Xin*Raphael Tang*Jaejun Lee*Yaoliang Yu*Jimmy Lin#Deebert: Dynamic early exiting for accelerating bert inference#arXiv preprint arXiv:2004.12993#2020#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Ji Xin",
+      "Raphael Tang",
+      "Yaoliang Yu",
+      "Jimmy Lin"
+    ],
+    "venue": "Proceedings of the 16th conference of the European chapter of the association for computational linguistics: Main Volume",
+    "title": "Berxit: Early exiting for bert with better fine-tuning and extension to regression",
+    "raw_text": "Ji Xin*Raphael Tang*Yaoliang Yu*Jimmy Lin#Berxit: Early exiting for bert with better fine-tuning and extension to regression#Proceedings of the 16th conference of the European chapter of the association for computational linguistics: Main Volume#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2312.11456",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Wei Xiong",
+      "Hanze Dong",
+      "Chenlu Ye",
+      "Ziqi Wang",
+      "Han Zhong",
+      "Heng Ji",
+      "Nan Jiang",
+      "Tong Zhang"
+    ],
+    "venue": "arXiv preprint arXiv:2312.11456",
+    "title": "Iterative preference learning from human feedback: Bridging theory and practice for rlhf under kl-constraint",
+    "raw_text": "Wei Xiong*Hanze Dong*Chenlu Ye*Ziqi Wang*Han Zhong*Heng Ji*Nan Jiang*Tong Zhang#Iterative preference learning from human feedback: Bridging theory and practice for rlhf under kl-constraint#arXiv preprint arXiv:2312.11456#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2011,
+    "authors": [
+      "Qiqi Yan"
+    ],
+    "venue": "ACM Transactions on Economics and Computation",
+    "title": "Mechanism design via correlation gap",
+    "raw_text": "Qiqi Yan#Mechanism design via correlation gap#ACM Transactions on Economics and Computation#2011#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Wangchunshu Zhou",
+      "Canwen Xu",
+      "Tao Ge",
+      "Julian McAuley",
+      "Ke Xu",
+      "Furu Wei"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Bert loses patience: Fast and robust inference with early exit",
+    "raw_text": "Wangchunshu Zhou*Canwen Xu*Tao Ge*Julian McAuley*Ke Xu*Furu Wei#Bert loses patience: Fast and robust inference with early exit#Advances in Neural Information Processing Systems#2020#",
+    "type": "other"
+  }
+]

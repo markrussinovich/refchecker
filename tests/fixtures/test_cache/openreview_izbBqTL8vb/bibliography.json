@@ -1,0 +1,1132 @@
+[
+  {
+    "url": "https://github.com/Deep-Agent/R1-V",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Liang Chen",
+      "Lei Li",
+      "Haozhe Zhao",
+      "Yifan Song",
+      "Vinci"
+    ],
+    "venue": "GitHub",
+    "title": "R1-v: Reinforcing super generalization ability in vision-language models with less than $3",
+    "raw_text": "Liang Chen*Lei Li*Haozhe Zhao*Yifan Song*Vinci#R1-v: Reinforcing super generalization ability in vision-language models with less than $3#GitHub#2025#https://github.com/Deep-Agent/R1-V",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yue Fan",
+      "Xuehai He",
+      "Diji Yang",
+      "Kaizhi Zheng",
+      "Ching-Chen Kuo",
+      "Yuting Zheng",
+      "Narayanaraju Jyothi",
+      "Sravana Guan",
+      "Xinze Guan",
+      "Xin Eric Wang"
+    ],
+    "venue": "",
+    "title": "Grit: Teaching mllms to think with images",
+    "raw_text": "Yue Fan*Xuehai He*Diji Yang*Kaizhi Zheng*Ching-Chen Kuo*Yuting Zheng*Narayanaraju Jyothi*Sravana Guan*Xinze Guan*Xin Eric Wang#Grit: Teaching mllms to think with images##2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.00321",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Ling Fu",
+      "Zhebin Kuang",
+      "Jiajun Song",
+      "Mingxin Huang",
+      "Biao Yang",
+      "Yuzhe Li",
+      "Linghao Zhu",
+      "Qidi Luo",
+      "Xinyu Wang",
+      "Hao Lu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2501.00321",
+    "title": "Ocrbench v2: An improved benchmark for evaluating large multimodal models on visual text localization and reasoning",
+    "raw_text": "Ling Fu*Zhebin Kuang*Jiajun Song*Mingxin Huang*Biao Yang*Yuzhe Li*Linghao Zhu*Qidi Luo*Xinyu Wang*Hao Lu*et al#Ocrbench v2: An improved benchmark for evaluating large multimodal models on visual text localization and reasoning#arXiv preprint arXiv:2501.00321#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Tsu-Jui Fu",
+      "Linjie Li",
+      "Zhe Gan",
+      "Kevin Lin",
+      "William Yang Wang",
+      "Lijuan Wang",
+      "Zicheng Liu"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "An empirical study of end-to-end video-language transformers with masked visual modeling",
+    "raw_text": "Tsu-Jui Fu*Linjie Li*Zhe Gan*Kevin Lin*William Yang Wang*Lijuan Wang*Zicheng Liu#An empirical study of end-to-end video-language transformers with masked visual modeling#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.12948",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Daya Guo",
+      "Dejian Yang",
+      "Haowei Zhang",
+      "Junxiao Song",
+      "Ruoyu Zhang",
+      "Runxin Xu",
+      "Qihao Zhu",
+      "Shirong Ma",
+      "Peiyi Wang",
+      "Xiao Bi",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2501.12948",
+    "title": "Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning",
+    "raw_text": "Daya Guo*Dejian Yang*Haowei Zhang*Junxiao Song*Ruoyu Zhang*Runxin Xu*Qihao Zhu*Shirong Ma*Peiyi Wang*Xiao Bi*et al#Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning#arXiv preprint arXiv:2501.12948#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Kaiming He",
+      "Xinlei Chen",
+      "Saining Xie",
+      "Yanghao Li",
+      "Piotr Dollár",
+      "Ross Girshick"
+    ],
+    "venue": "Proceedings of the IEEE/CVF conference on computer vision and pattern recognition",
+    "title": "Masked autoencoders are scalable vision learners",
+    "raw_text": "Kaiming He*Xinlei Chen*Saining Xie*Yanghao Li*Piotr Dollár*Ross Girshick#Masked autoencoders are scalable vision learners#Proceedings of the IEEE/CVF conference on computer vision and pattern recognition#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://github.com/hiyouga/MathRuler",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "hiyouga"
+    ],
+    "venue": "GitHub",
+    "title": "Mathruler",
+    "raw_text": "hiyouga#Mathruler#GitHub#2025#https://github.com/hiyouga/MathRuler",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.06749",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wenxuan Huang",
+      "Bohan Jia",
+      "Zijie Zhai",
+      "Shaosheng Cao",
+      "Zheyu Ye",
+      "Fei Zhao",
+      "Zhe Xu",
+      "Yao Hu",
+      "Shaohui Lin"
+    ],
+    "venue": "arXiv preprint arXiv:2503.06749",
+    "title": "Vision-r1: Incentivizing reasoning capability in multimodal large language models",
+    "raw_text": "Wenxuan Huang*Bohan Jia*Zijie Zhai*Shaosheng Cao*Zheyu Ye*Fei Zhao*Zhe Xu*Yao Hu*Shaohui Lin#Vision-r1: Incentivizing reasoning capability in multimodal large language models#arXiv preprint arXiv:2503.06749#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2509.07969",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Xin Lai",
+      "Junyi Li",
+      "Wei Li",
+      "Tao Liu",
+      "Tianjian Li",
+      "Hengshuang Zhao"
+    ],
+    "venue": "arXiv preprint arXiv:2509.07969",
+    "title": "Mini-o3: Scaling up reasoning patterns and interaction turns for visual search",
+    "raw_text": "Xin Lai*Junyi Li*Wei Li*Tao Liu*Tianjian Li*Hengshuang Zhao#Mini-o3: Scaling up reasoning patterns and interaction turns for visual search#arXiv preprint arXiv:2509.07969#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.04755",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Shenshen Li",
+      "Kaiyuan Deng",
+      "Lei Wang",
+      "Hao Yang",
+      "Chong Peng",
+      "Peng Yan",
+      "Fumin Shen",
+      "Heng Tao Shen",
+      "Xing Xu"
+    ],
+    "venue": "arXiv preprint arXiv:2506.04755",
+    "title": "Truth in the few: High-value data selection for efficient multi-modal reasoning",
+    "raw_text": "Shenshen Li*Kaiyuan Deng*Lei Wang*Hao Yang*Chong Peng*Peng Yan*Fumin Shen*Heng Tao Shen*Xing Xu#Truth in the few: High-value data selection for efficient multi-modal reasoning#arXiv preprint arXiv:2506.04755#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.09736",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yuting Li",
+      "Lai Wei",
+      "Kaipeng Zheng",
+      "Jingyuan Huang",
+      "Linghe Kong",
+      "Lichao Sun",
+      "Weiran Huang"
+    ],
+    "venue": "arXiv preprint arXiv:2506.09736",
+    "title": "Vision matters: Simple visual perturbations can boost multimodal math reasoning",
+    "raw_text": "Yuting Li*Lai Wei*Kaipeng Zheng*Jingyuan Huang*Linghe Kong*Lichao Sun*Weiran Huang#Vision matters: Simple visual perturbations can boost multimodal math reasoning#arXiv preprint arXiv:2506.09736#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Zhuowan Li",
+      "Xingrui Wang",
+      "Elias Stengel-Eskin",
+      "Adam Kortylewski",
+      "Wufei Ma",
+      "Benjamin Van Durme",
+      "Alan L. Yuille"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Super-clevr: A virtual benchmark to diagnose domain robustness in visual reasoning",
+    "raw_text": "Zhuowan Li*Xingrui Wang*Elias Stengel-Eskin*Adam Kortylewski*Wufei Ma*Benjamin Van Durme*Alan L. Yuille#Super-clevr: A virtual benchmark to diagnose domain robustness in visual reasoning#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)#2023#10.1109/CVPR52729.2023.01437",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2508.19652",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zongxia Li",
+      "Wenhao Yu",
+      "Chengsong Huang",
+      "Rui Liu",
+      "Zhenwen Liang",
+      "Fuxiao Liu",
+      "Jingxi Che",
+      "Dian Yu",
+      "Jordan Boyd-Graber",
+      "Haitao Mi",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2508.19652",
+    "title": "Self-rewarding vision-language model via reasoning decomposition",
+    "raw_text": "Zongxia Li*Wenhao Yu*Chengsong Huang*Rui Liu*Zhenwen Liang*Fuxiao Liu*Jingxi Che*Dian Yu*Jordan Boyd-Graber*Haitao Mi*et al#Self-rewarding vision-language model via reasoning decomposition#arXiv preprint arXiv:2508.19652#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.24871",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Tian Liang",
+      "Xiaoyuan Liu",
+      "Pinjia He",
+      "Haitao Mi",
+      "Zhaopeng Tu",
+      "Dong Yu"
+    ],
+    "venue": "arXiv preprint arXiv:2505.24871",
+    "title": "Modomodo: Learning mixture-of-datasets with reinforcement learning for multimodal reasoning",
+    "raw_text": "Tian Liang*Xiaoyuan Liu*Pinjia He*Haitao Mi*Zhaopeng Tu*Dong Yu#Modomodo: Learning mixture-of-datasets with reinforcement learning for multimodal reasoning#arXiv preprint arXiv:2505.24871#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.13055",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Xiangyan Liu",
+      "Jinjie Ni",
+      "Zijian Wu",
+      "Chao Du",
+      "Longxu Dou",
+      "Haonan Wang",
+      "Tianyu Pang",
+      "Michael Qizhe Shieh"
+    ],
+    "venue": "arXiv preprint arXiv:2504.13055",
+    "title": "Noisyrollout: Reinforcing visual reasoning with data augmentation",
+    "raw_text": "Xiangyan Liu*Jinjie Ni*Zijian Wu*Chao Du*Longxu Dou*Haonan Wang*Tianyu Pang*Michael Qizhe Shieh#Noisyrollout: Reinforcing visual reasoning with data augmentation#arXiv preprint arXiv:2504.13055#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.12081",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yuqi Liu",
+      "Tianyuan Qu",
+      "Zhisheng Zhong",
+      "Bohao Peng",
+      "Shu Liu",
+      "Bei Yu",
+      "Jiaya Jia"
+    ],
+    "venue": "arXiv preprint arXiv:2505.12081",
+    "title": "Vision-reasoner: Unified visual perception and reasoning via reinforcement learning",
+    "raw_text": "Yuqi Liu*Tianyuan Qu*Zhisheng Zhong*Bohao Peng*Shu Liu*Bei Yu*Jiaya Jia#Vision-reasoner: Unified visual perception and reasoning via reinforcement learning#arXiv preprint arXiv:2505.12081#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.01785",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Ziyu Liu",
+      "Zeyi Sun",
+      "Yuhang Zang",
+      "Xiaoyi Dong",
+      "Yuhang Cao",
+      "Haodong Duan",
+      "Dahua Lin",
+      "Jiaqi Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2503.01785",
+    "title": "Visual-rft: Visual reinforcement fine-tuning",
+    "raw_text": "Ziyu Liu*Zeyi Sun*Yuhang Zang*Xiaoyi Dong*Yuhang Cao*Haodong Duan*Dahua Lin*Jiaqi Wang#Visual-rft: Visual reinforcement fine-tuning#arXiv preprint arXiv:2503.01785#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://doi.org/10.18653/v1/2021.acl-long.528",
+    "doi": "10.18653/v1/2021.acl-long.528",
+    "year": 2021,
+    "authors": [
+      "Pan Lu",
+      "Ran Gong",
+      "Shibiao Jiang",
+      "Liang Qiu",
+      "Siyuan Huang",
+      "Xiaodan Liang",
+      "Song-Chun Zhu"
+    ],
+    "venue": "Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing",
+    "title": "Inter-gps: Interpretable geometry problem solving with formal language and symbolic reasoning",
+    "raw_text": "Pan Lu*Ran Gong*Shibiao Jiang*Liang Qiu*Siyuan Huang*Xiaodan Liang*Song-Chun Zhu#Inter-gps: Interpretable geometry problem solving with formal language and symbolic reasoning#Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing#2021#https://doi.org/10.18653/v1/2021.acl-long.528",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.02255",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Pan Lu",
+      "Hritik Bansal",
+      "Tony Xia",
+      "Jiacheng Liu",
+      "Chunyuan Li",
+      "Hannaneh Hajishirzi",
+      "Hao Cheng",
+      "Kai-Wei Chang",
+      "Michel Galley",
+      "Jianfeng Gao"
+    ],
+    "venue": "arXiv preprint arXiv:2310.02255",
+    "title": "MathVista: Evaluating Math Reasoning in Visual Contexts with GPT-4V, Bard, and Other Large Multimodal Models",
+    "raw_text": "Pan Lu*Hritik Bansal*Tony Xia*Jiacheng Liu*Chunyuan Li*Hannaneh Hajishirzi*Hao Cheng*Kai-Wei Chang*Michel Galley*Jianfeng Gao#MathVista: Evaluating Math Reasoning in Visual Contexts with GPT-4V, Bard, and Other Large Multimodal Models#arXiv preprint arXiv:2310.02255#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.18129",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yan Ma",
+      "Linge Du",
+      "Xuyang Shen",
+      "Shaoxiang Chen",
+      "Pengfei Li",
+      "Qibing Ren",
+      "Lizhuang Ma",
+      "Yuchao Dai",
+      "Pengfei Liu",
+      "Junjie Yan"
+    ],
+    "venue": "arXiv preprint arXiv:2505.18129",
+    "title": "One rl to see them all: Visual triple unified reinforcement learning",
+    "raw_text": "Yan Ma*Linge Du*Xuyang Shen*Shaoxiang Chen*Pengfei Li*Qibing Ren*Lizhuang Ma*Yuchao Dai*Pengfei Liu*Junjie Yan#One rl to see them all: Visual triple unified reinforcement learning#arXiv preprint arXiv:2505.18129#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.07365",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Fanqing Meng",
+      "Lingxiao Du",
+      "Zongkai Liu",
+      "Zhixiang Zhou",
+      "Quanfeng Lu",
+      "Daocheng Fu",
+      "Tiancheng Han",
+      "Botian Shi",
+      "Wenhai Wang",
+      "Junjun He",
+      "Kaipeng Zhang",
+      "Ping Luo",
+      "Yu Qiao",
+      "Qiaosheng Zhang",
+      "Wenqi Shao"
+    ],
+    "venue": "arXiv preprint arXiv:2503.07365",
+    "title": "Mm-eureka: Exploring the frontiers of multimodal reasoning with rule-based reinforcement learning",
+    "raw_text": "Fanqing Meng*Lingxiao Du*Zongkai Liu*Zhixiang Zhou*Quanfeng Lu*Daocheng Fu*Tiancheng Han*Botian Shi*Wenhai Wang*Junjun He*Kaipeng Zhang*Ping Luo*Yu Qiao*Qiaosheng Zhang*Wenqi Shao#Mm-eureka: Exploring the frontiers of multimodal reasoning with rule-based reinforcement learning#arXiv preprint arXiv:2503.07365#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.07365",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Fanqing Meng",
+      "Lingxiao Du",
+      "Zongkai Liu",
+      "Zhixiang Zhou",
+      "Quanfeng Lu",
+      "Daocheng Fu",
+      "Botian Shi",
+      "Wenhai Wang",
+      "Junjun He",
+      "Kaipeng Zhang",
+      "Ping Luo",
+      "Yu Qiao",
+      "Qiaosheng Zhang",
+      "Wenqi Shao"
+    ],
+    "venue": "arXiv preprint arXiv:2503.07365",
+    "title": "Mm-eureka: Exploring visual aha moment with rule-based large-scale reinforcement learning",
+    "raw_text": "Fanqing Meng*Lingxiao Du*Zongkai Liu*Zhixiang Zhou*Quanfeng Lu*Daocheng Fu*Botian Shi*Wenhai Wang*Junjun He*Kaipeng Zhang*Ping Luo*Yu Qiao*Qiaosheng Zhang*Wenqi Shao#Mm-eureka: Exploring visual aha moment with rule-based large-scale reinforcement learning#arXiv preprint arXiv:2503.07365#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://openai.com/index/gpt-4-1/",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "OpenAI"
+    ],
+    "venue": "",
+    "title": "Introducing gpt-4.1 in the api",
+    "raw_text": "OpenAI#Introducing gpt-4.1 in the api##2025#https://openai.com/index/gpt-4-1/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2304.07193",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Maxime Oquab",
+      "Timothée Darcet",
+      "Théo Moutakanni",
+      "Huy V. Vo",
+      "Marc Szafraniec",
+      "Vasil Khalidov",
+      "Pierre Fernandez",
+      "Daniel Haziza",
+      "Francisco Massa",
+      "Alaaeldin El-Nouby",
+      "Mahmoud Assran",
+      "Nicolas Ballas",
+      "Wojciech Galuba",
+      "Russell Howes",
+      "Po-Yao Huang",
+      "Shang-Wen Li",
+      "Ishan Misra",
+      "Michael Rabbat",
+      "Vasu Sharma",
+      "Gabriel Synnaeve",
+      "Hu Xu",
+      "Hervé Jégou",
+      "Julien Mairal",
+      "Patrick Labatut",
+      "Armand Joulin",
+      "Piotr Bojanowski"
+    ],
+    "venue": "CoRR, abs/2304.07193",
+    "title": "Dinov2: Learning robust visual features without supervision",
+    "raw_text": "Maxime Oquab*Timothée Darcet*Théo Moutakanni*Huy V. Vo*Marc Szafraniec*Vasil Khalidov*Pierre Fernandez*Daniel Haziza*Francisco Massa*Alaaeldin El-Nouby*Mahmoud Assran*Nicolas Ballas*Wojciech Galuba*Russell Howes*Po-Yao Huang*Shang-Wen Li*Ishan Misra*Michael Rabbat*Vasu Sharma*Gabriel Synnaeve*Hu Xu*Hervé Jégou*Julien Mairal*Patrick Labatut*Armand Joulin*Piotr Bojanowski#Dinov2: Learning robust visual features without supervision#CoRR, abs/2304.07193#2023#https://arxiv.org/abs/2304.07193",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.07536",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yingzhe Peng",
+      "Gongrui Zhang",
+      "Miaosen Zhang",
+      "Zhiyuan You",
+      "Jie Liu",
+      "Qipeng Zhu",
+      "Kai Yang",
+      "Xingzhong Xu",
+      "Xin Geng",
+      "Xu Yang"
+    ],
+    "venue": "arXiv preprint arXiv:2503.07536",
+    "title": "Lmm-r1: Empowering 3b lmms with strong reasoning abilities through two-stage rule-based rl",
+    "raw_text": "Yingzhe Peng*Gongrui Zhang*Miaosen Zhang*Zhiyuan You*Jie Liu*Qipeng Zhu*Kai Yang*Xingzhong Xu*Xin Geng*Xu Yang#Lmm-r1: Empowering 3b lmms with strong reasoning abilities through two-stage rule-based rl#arXiv preprint arXiv:2503.07536#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.01284",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Runqi Qiao",
+      "Qiuna Tan",
+      "Guanting Dong",
+      "Minhui Wu",
+      "Chong Sun",
+      "Xiaoshuai Song",
+      "Zhuoma GongQue",
+      "Shanglin Lei",
+      "Zhe Wei",
+      "Miaoxuan Zhang",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2407.01284",
+    "title": "We-math: Does your large multimodal model achieve human-like mathematical reasoning?",
+    "raw_text": "Runqi Qiao*Qiuna Tan*Guanting Dong*Minhui Wu*Chong Sun*Xiaoshuai Song*Zhuoma GongQue*Shanglin Lei*Zhe Wei*Miaoxuan Zhang*et al#We-math: Does your large multimodal model achieve human-like mathematical reasoning?#arXiv preprint arXiv:2407.01284#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Alibaba Group Qwen Team"
+    ],
+    "venue": "",
+    "title": "Qwen2.5-vl-3b-instruct",
+    "raw_text": "Alibaba Group Qwen Team#Qwen2.5-vl-3b-instruct##2024#https://huggingface.co/Qwen/Qwen2.5-VL-3B-Instruct",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Alibaba Group Qwen Team"
+    ],
+    "venue": "",
+    "title": "Qwen2.5-vl-7b-instruct",
+    "raw_text": "Alibaba Group Qwen Team#Qwen2.5-vl-7b-instruct##2024#https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://huggingface.co/Qwen/Qwen3-VL-2B-Thinking",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Alibaba Group Qwen Team"
+    ],
+    "venue": "",
+    "title": "Qwen3-vl-2b-thinking",
+    "raw_text": "Alibaba Group Qwen Team#Qwen3-vl-2b-thinking##2024#https://huggingface.co/Qwen/Qwen3-VL-2B-Thinking",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "http://joschu.net/blog/kl-approx.html",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "John Schulman"
+    ],
+    "venue": "",
+    "title": "Approximating kl divergence",
+    "raw_text": "John Schulman#Approximating kl divergence##2020#http://joschu.net/blog/kl-approx.html",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/1707.06347",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "John Schulman",
+      "Filip Wolski",
+      "Prafulla Dhariwal",
+      "Alec Radford",
+      "Oleg Klimov"
+    ],
+    "venue": "arXiv preprint arXiv:1707.06347",
+    "title": "Proximal policy optimization algorithms",
+    "raw_text": "John Schulman*Filip Wolski*Prafulla Dhariwal*Alec Radford*Oleg Klimov#Proximal policy optimization algorithms#arXiv preprint arXiv:1707.06347#2017#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1948,
+    "authors": [
+      "Claude E Shannon"
+    ],
+    "venue": "The Bell system technical journal",
+    "title": "A mathematical theory of communication",
+    "raw_text": "Claude E Shannon#A mathematical theory of communication#The Bell system technical journal#1948#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.03300",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Zhihong Shao",
+      "Peiyi Wang",
+      "Qihao Zhu",
+      "Runxin Xu",
+      "Junxiao Song",
+      "Xiao Bi",
+      "Haowei Zhang",
+      "Mingchuan Zhang",
+      "YK Li",
+      "Y Wu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2402.03300",
+    "title": "Deepseekmath: Pushing the limits of mathematical reasoning in open language models",
+    "raw_text": "Zhihong Shao*Peiyi Wang*Qihao Zhu*Runxin Xu*Junxiao Song*Xiao Bi*Haowei Zhang*Mingchuan Zhang*YK Li*Y Wu*et al#Deepseekmath: Pushing the limits of mathematical reasoning in open language models#arXiv preprint arXiv:2402.03300#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.07615",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Haozhan Shen",
+      "Peng Liu",
+      "Jingcheng Li",
+      "Chunxin Fang",
+      "Yibo Ma",
+      "Jiajia Liao",
+      "Qiaoli Shen",
+      "Zilun Zhang",
+      "Kangjia Zhao",
+      "Qianqian Zhang",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2504.07615",
+    "title": "Vlm-r1: A stable and generalizable r1-style large vision-language model",
+    "raw_text": "Haozhan Shen*Peng Liu*Jingcheng Li*Chunxin Fang*Yibo Ma*Jiajia Liao*Qiaoli Shen*Zilun Zhang*Kangjia Zhao*Qianqian Zhang*et al#Vlm-r1: A stable and generalizable r1-style large vision-language model#arXiv preprint arXiv:2504.07615#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2507.16814",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Junhao Shen",
+      "Haiteng Zhao",
+      "Yuzhe Gu",
+      "Songyang Gao",
+      "Kuikun Liu",
+      "Haian Huang",
+      "Jianfei Gao",
+      "Dahua Lin",
+      "Wenwei Zhang",
+      "Kai Chen"
+    ],
+    "venue": "arXiv preprint arXiv:2507.16814",
+    "title": "Semi-off-policy reinforcement learning for vision-language slow-thinking reasoning",
+    "raw_text": "Junhao Shen*Haiteng Zhao*Yuzhe Gu*Songyang Gao*Kuikun Liu*Haian Huang*Jianfei Gao*Dahua Lin*Wenwei Zhang*Kai Chen#Semi-off-policy reinforcement learning for vision-language slow-thinking reasoning#arXiv preprint arXiv:2507.16814#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.19094",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Liangcheng Shen",
+      "Yulin Li",
+      "Haitao Mi",
+      "Wenxuan Wang",
+      "Zhaopeng Tu",
+      "Dong Yu"
+    ],
+    "venue": "arXiv preprint arXiv:2505.19094",
+    "title": "Satori-r1: Spatially anchored training with verifiable rewards for vision-language reasoning",
+    "raw_text": "Liangcheng Shen*Yulin Li*Haitao Mi*Wenxuan Wang*Zhaopeng Tu*Dong Yu#Satori-r1: Spatially anchored training with verifiable rewards for vision-language reasoning#arXiv preprint arXiv:2505.19094#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.15966",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Alex Su",
+      "Haozhe Wang",
+      "Weiming Ren",
+      "Fangzhen Lin",
+      "Wenhu Chen"
+    ],
+    "venue": "arXiv preprint arXiv:2505.15966",
+    "title": "Pixel reasoner: Incentivizing pixel-space reasoning with curiosity-driven reinforcement learning",
+    "raw_text": "Alex Su*Haozhe Wang*Weiming Ren*Fangzhen Lin*Wenhu Chen#Pixel reasoner: Incentivizing pixel-space reasoning with curiosity-driven reinforcement learning#arXiv preprint arXiv:2505.15966#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.20752",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Huajie Tan",
+      "Yuheng Ji",
+      "Xiaoshuai Hao",
+      "Minglan Lin",
+      "Pengwei Wang",
+      "Zhongyuan Wang",
+      "Shanghang Zhang"
+    ],
+    "venue": "arXiv preprint arXiv:2503.20752",
+    "title": "Reason-rft: Reinforcement fine-tuning for visual reasoning",
+    "raw_text": "Huajie Tan*Yuheng Ji*Xiaoshuai Hao*Minglan Lin*Pengwei Wang*Zhongyuan Wang*Shanghang Zhang#Reason-rft: Reinforcement fine-tuning for visual reasoning#arXiv preprint arXiv:2503.20752#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.01713",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zhongwei Wan",
+      "Zhihao Dou",
+      "Che Liu",
+      "Yu Zhang",
+      "Dongfei Cui",
+      "Qinjian Zhao",
+      "Hui Shen",
+      "Jing Xiong",
+      "Yi Xin",
+      "Yifan Jiang",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2506.01713",
+    "title": "Srpo: Enhancing multimodal llm reasoning via reflection-aware reinforcement learning",
+    "raw_text": "Zhongwei Wan*Zhihao Dou*Che Liu*Yu Zhang*Dongfei Cui*Qinjian Zhao*Hui Shen*Jing Xiong*Yi Xin*Yifan Jiang*et al#Srpo: Enhancing multimodal llm reasoning via reflection-aware reinforcement learning#arXiv preprint arXiv:2506.01713#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2507.07999",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Haochen Wang",
+      "Xiangtai Li",
+      "Zilong Huang",
+      "Anran Wang",
+      "Jiacong Wang",
+      "Tao Zhang",
+      "Jiani Zheng",
+      "Sule Bai",
+      "Zijian Kang",
+      "Jiashi Feng",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2507.07999",
+    "title": "Traceable evidence enhanced visual grounded reasoning: Evaluation and methodology",
+    "raw_text": "Haochen Wang*Xiangtai Li*Zilong Huang*Anran Wang*Jiacong Wang*Tao Zhang*Jiani Zheng*Sule Bai*Zijian Kang*Jiashi Feng*et al#Traceable evidence enhanced visual grounded reasoning: Evaluation and methodology#arXiv preprint arXiv:2507.07999#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.08837",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Haozhe Wang",
+      "Chao Qu",
+      "Zuming Huang",
+      "Wei Chu",
+      "Fangzhen Lin",
+      "Wenhu Chen"
+    ],
+    "venue": "arXiv preprint arXiv:2504.08837",
+    "title": "Vl-rethinker: Incentivizing self-reflection of vision-language models with reinforcement learning",
+    "raw_text": "Haozhe Wang*Chao Qu*Zuming Huang*Wei Chu*Fangzhen Lin*Wenhu Chen#Vl-rethinker: Incentivizing self-reflection of vision-language models with reinforcement learning#arXiv preprint arXiv:2504.08837#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.16854",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jiaqi Wang",
+      "Kevin Qinghong Lin",
+      "James Cheng",
+      "Mike Zheng Shou"
+    ],
+    "venue": "arXiv preprint arXiv:2505.16854",
+    "title": "Think or not? selective reasoning via reinforcement learning for vision-language models",
+    "raw_text": "Jiaqi Wang*Kevin Qinghong Lin*James Cheng*Mike Zheng Shou#Think or not? selective reasoning via reinforcement learning for vision-language models#arXiv preprint arXiv:2505.16854#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.16656",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Peiyu Wang",
+      "Yichen Wei",
+      "Yi Peng",
+      "Xiaokun Wang",
+      "Weijie Qiu",
+      "Wei Shen",
+      "Tianyidan Xie",
+      "Jiangbo Pei",
+      "Jianhao Zhang",
+      "Yunzhuo Hao",
+      "Xuchen Song",
+      "Yang Liu",
+      "Yahui Zhou"
+    ],
+    "venue": "arXiv preprint arXiv:2504.16656",
+    "title": "Skywork r1v2: Multimodal hybrid reinforcement learning for reasoning",
+    "raw_text": "Peiyu Wang*Yichen Wei*Yi Peng*Xiaokun Wang*Weijie Qiu*Wei Shen*Tianyidan Xie*Jiangbo Pei*Jianhao Zhang*Yunzhuo Hao*Xuchen Song*Yang Liu*Yahui Zhou#Skywork r1v2: Multimodal hybrid reinforcement learning for reasoning#arXiv preprint arXiv:2504.16656#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yubo Wang",
+      "Xueguang Ma",
+      "Ge Zhang",
+      "Yuansheng Ni",
+      "Abhranil Chandra",
+      "Shiguang Guo",
+      "Weiming Ren",
+      "Aaran Arulraj",
+      "Xuan He",
+      "Ziyan Jiang",
+      "et al"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Mmlu-pro: A more robust and challenging multi-task language understanding benchmark",
+    "raw_text": "Yubo Wang*Xueguang Ma*Ge Zhang*Yuansheng Ni*Abhranil Chandra*Shiguang Guo*Weiming Ren*Aaran Arulraj*Xuan He*Ziyan Jiang*et al#Mmlu-pro: A more robust and challenging multi-task language understanding benchmark#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Zhenhailong Wang",
+      "Joy Hsu",
+      "Xingyao Wang",
+      "Kuan-Hao Huang",
+      "Manling Li",
+      "Jiajun Wu",
+      "Heng Ji"
+    ],
+    "venue": "Transactions on Machine Learning Research",
+    "title": "Visually descriptive language model for vector graphics reasoning",
+    "raw_text": "Zhenhailong Wang*Joy Hsu*Xingyao Wang*Kuan-Hao Huang*Manling Li*Jiajun Wu*Heng Ji#Visually descriptive language model for vector graphics reasoning#Transactions on Machine Learning Research#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2507.05255",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yana Wei",
+      "Liang Zhao",
+      "Jianjian Sun",
+      "Kangheng Lin",
+      "Jisheng Yin",
+      "Jingcheng Hu",
+      "Yinmin Zhang",
+      "En Yu",
+      "Haoran Lv",
+      "Zejia Weng",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2507.05255",
+    "title": "Open vision reasoner: Transferring linguistic cognitive behavior for visual reasoning",
+    "raw_text": "Yana Wei*Liang Zhao*Jianjian Sun*Kangheng Lin*Jisheng Yin*Jingcheng Hu*Yinmin Zhang*En Yu*Haoran Lv*Zejia Weng*et al#Open vision reasoner: Transferring linguistic cognitive behavior for visual reasoning#arXiv preprint arXiv:2507.05255#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.14677",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jiaer Xia",
+      "Yuhang Zang",
+      "Peng Gao",
+      "Yixuan Li",
+      "Kaiyang Zhou"
+    ],
+    "venue": "arXiv preprint arXiv:2505.14677",
+    "title": "Visionary-r1: Mitigating shortcuts in visual reasoning with reinforcement learning",
+    "raw_text": "Jiaer Xia*Yuhang Zang*Peng Gao*Yixuan Li*Kaiyang Zhou#Visionary-r1: Mitigating shortcuts in visual reasoning with reinforcement learning#arXiv preprint arXiv:2505.14677#2025#https://arxiv.org/abs/2505.14677",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.07218",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Tong Xiao",
+      "Xin Xu",
+      "Zhenya Huang",
+      "Hongyu Gao",
+      "Quan Liu",
+      "Qi Liu",
+      "Enhong Chen"
+    ],
+    "venue": "arXiv preprint arXiv:2506.07218",
+    "title": "Advancing multimodal reasoning capabilities of multimodal large language models via visual perception reward",
+    "raw_text": "Tong Xiao*Xin Xu*Zhenya Huang*Hongyu Gao*Quan Liu*Qi Liu*Enhong Chen#Advancing multimodal reasoning capabilities of multimodal large language models via visual perception reward#arXiv preprint arXiv:2506.07218#2025#https://arxiv.org/abs/2506.07218",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2506.07218",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Wen Xiao",
+      "Weijie Zhang",
+      "Jie Hu",
+      "Rui Chen",
+      "Jie Yang"
+    ],
+    "venue": "arXiv preprint arXiv:2506.07218",
+    "title": "Perception-r1: A reinforcement learning framework for multimodal perception with verifiable rewards",
+    "raw_text": "Wen Xiao*Weijie Zhang*Jie Hu*Rui Chen*Jie Yang#Perception-r1: A reinforcement learning framework for multimodal perception with verifiable rewards#arXiv preprint arXiv:2506.07218#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.04973",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yijia Xiao",
+      "Edward Sun",
+      "Tianyu Liu",
+      "Wei Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2407.04973",
+    "title": "Logicvista: Multimodal llm logical reasoning benchmark in visual contexts",
+    "raw_text": "Yijia Xiao*Edward Sun*Tianyu Liu*Wei Wang#Logicvista: Multimodal llm logical reasoning benchmark in visual contexts#arXiv preprint arXiv:2407.04973#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Zhenda Xie",
+      "Zheng Zhang",
+      "Yue Cao",
+      "Yutong Lin",
+      "Jianmin Bao",
+      "Zhuliang Yao",
+      "Qi Dai",
+      "Han Hu"
+    ],
+    "venue": "Proceedings of the IEEE/CVF conference on computer vision and pattern recognition",
+    "title": "Simmim: A simple framework for masked image modeling",
+    "raw_text": "Zhenda Xie*Zheng Zhang*Yue Cao*Yutong Lin*Jianmin Bao*Zhuliang Yao*Qi Dai*Han Hu#Simmim: A simple framework for masked image modeling#Proceedings of the IEEE/CVF conference on computer vision and pattern recognition#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.10615",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yi Yang",
+      "Xiaoxuan He",
+      "Hongkun Pan",
+      "Xiyan Jiang",
+      "Yan Deng",
+      "Xingtao Yang",
+      "Haoyu Lu",
+      "Dacheng Yin",
+      "Fengyun Rao",
+      "Minfeng Zhu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2503.10615",
+    "title": "R1-onevision: Advancing generalized multimodal reasoning through cross-modal formalization",
+    "raw_text": "Yi Yang*Xiaoxuan He*Hongkun Pan*Xiyan Jiang*Yan Deng*Xingtao Yang*Haoyu Lu*Dacheng Yin*Fengyun Rao*Minfeng Zhu*et al#R1-onevision: Advancing generalized multimodal reasoning through cross-modal formalization#arXiv preprint arXiv:2503.10615#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Huanjin Yao",
+      "Qixiang Yin",
+      "Jingyi Zhang",
+      "Min Yang",
+      "Yibo Wang",
+      "Wenhao Wu",
+      "Fei Su",
+      "Li Shen",
+      "Minghui Qiu",
+      "Dacheng Tao",
+      "Jiaxing Huang"
+    ],
+    "venue": "",
+    "title": "R1-sharevl: Incentivizing reasoning capability of multimodal large language models via share-grpo",
+    "raw_text": "Huanjin Yao*Qixiang Yin*Jingyi Zhang*Min Yang*Yibo Wang*Wenhao Wu*Fei Su*Li Shen*Minghui Qiu*Dacheng Tao*Jiaxing Huang#R1-sharevl: Incentivizing reasoning capability of multimodal large language models via share-grpo#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2503.14476",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Qiying Yu",
+      "Zheng Zhang",
+      "Ruofei Zhu",
+      "Yufeng Yuan",
+      "Xiaochen Zuo",
+      "Yu Yue",
+      "Weinan Dai",
+      "Tiantian Fan",
+      "Gaohong Liu",
+      "Lingjun Liu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2503.14476",
+    "title": "Dapo: An open-source llm reinforcement learning system at scale",
+    "raw_text": "Qiying Yu*Zheng Zhang*Ruofei Zhu*Yufeng Yuan*Xiaochen Zuo*Yu Yue*Weinan Dai*Tiantian Fan*Gaohong Liu*Lingjun Liu*et al#Dapo: An open-source llm reinforcement learning system at scale#arXiv preprint arXiv:2503.14476#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2409.02813",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Xiang Yue",
+      "Tianyu Zheng",
+      "Yuansheng Ni",
+      "Yubo Wang",
+      "Kai Zhang",
+      "Shengbang Tong",
+      "Yuxuan Sun",
+      "Botao Yu",
+      "Ge Zhang",
+      "Huan Sun",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2409.02813",
+    "title": "Mmmu-pro: A more robust multi-discipline multimodal understanding benchmark",
+    "raw_text": "Xiang Yue*Tianyu Zheng*Yuansheng Ni*Yubo Wang*Kai Zhang*Shengbang Tong*Yuxuan Sun*Botao Yu*Ge Zhang*Huan Sun*et al#Mmmu-pro: A more robust multi-discipline multimodal understanding benchmark#arXiv preprint arXiv:2409.02813#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2403.14624",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Renrui Zhang",
+      "Dongzhi Jiang",
+      "Yichi Zhang",
+      "Haokun Lin",
+      "Ziyu Guo",
+      "Pengshuo Qiu",
+      "Aojun Zhou",
+      "Pan Lu",
+      "Kai-Wei Chang",
+      "Peng Gao",
+      "Hongsheng Li"
+    ],
+    "venue": "CoRR",
+    "title": "Mathverse: Does your multi-modal llm truly see the diagrams in visual math problems?",
+    "raw_text": "Renrui Zhang*Dongzhi Jiang*Yichi Zhang*Haokun Lin*Ziyu Guo*Pengshuo Qiu*Aojun Zhou*Pan Lu*Kai-Wei Chang*Peng Gao*Hongsheng Li#Mathverse: Does your multi-modal llm truly see the diagrams in visual math problems?#CoRR#2024#https://arxiv.org/abs/2403.14624",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.14362",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Ziwei Zheng",
+      "Michael Yang",
+      "Jack Hong",
+      "Chenxiao Zhao",
+      "Guohai Xu",
+      "Le Yang",
+      "Chao Shen",
+      "Xing Yu"
+    ],
+    "venue": "arXiv preprint arXiv:2505.14362",
+    "title": "Deepeyes: Incentivizing \"thinking with images\" via reinforcement learning",
+    "raw_text": "Ziwei Zheng*Michael Yang*Jack Hong*Chenxiao Zhao*Guohai Xu*Le Yang*Chao Shen*Xing Yu#Deepeyes: Incentivizing \"thinking with images\" via reinforcement learning#arXiv preprint arXiv:2505.14362#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.10479",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Jinguo Zhu",
+      "Weiyun Wang",
+      "Zhe Chen",
+      "Zhaoyang Liu",
+      "Shenglong Ye",
+      "Lixin Gu",
+      "Hao Tian",
+      "Yuchen Duan",
+      "Weijie Su",
+      "Jie Shao",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2504.10479",
+    "title": "Internvl3: Exploring advanced training and test-time recipes for open-source multimodal models",
+    "raw_text": "Jinguo Zhu*Weiyun Wang*Zhe Chen*Zhaoyang Liu*Shenglong Ye*Lixin Gu*Hao Tian*Yuchen Duan*Weijie Su*Jie Shao*et al#Internvl3: Exploring advanced training and test-time recipes for open-source multimodal models#arXiv preprint arXiv:2504.10479#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.21457",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Muzhi Zhu",
+      "Hao Zhong",
+      "Canyu Zhao",
+      "Zongze Du",
+      "Zheng Huang",
+      "Mingyu Liu",
+      "Hao Chen",
+      "Cheng Zou",
+      "Jingdong Chen",
+      "Ming Yang",
+      "Chunhua Shen"
+    ],
+    "venue": "arXiv preprint arXiv:2505.21457",
+    "title": "Active-o3: Empowering multimodal large language models with active perception via grpo",
+    "raw_text": "Muzhi Zhu*Hao Zhong*Canyu Zhao*Zongze Du*Zheng Huang*Mingyu Liu*Hao Chen*Cheng Zou*Jingdong Chen*Ming Yang*Chunhua Shen#Active-o3: Empowering multimodal large language models with active perception via grpo#arXiv preprint arXiv:2505.21457#2025#https://arxiv.org/abs/2505.21457",
+    "type": "arxiv"
+  }
+]

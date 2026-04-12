@@ -1,0 +1,955 @@
+[
+  {
+    "url": "https://arxiv.org/abs/1606.06565",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Dario Amodei",
+      "Chris Olah",
+      "Jacob Steinhardt",
+      "Paul Christiano",
+      "John Schulman",
+      "Dan Mané"
+    ],
+    "venue": "arXiv preprint arXiv:1606.06565",
+    "title": "Concrete problems in ai safety",
+    "raw_text": "Dario Amodei*Chris Olah*Jacob Steinhardt*Paul Christiano*John Schulman*Dan Mané#Concrete problems in ai safety#arXiv preprint arXiv:1606.06565#2016#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Raul Astudillo",
+      "Peter Frazier"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Bayesian optimization of composite functions",
+    "raw_text": "Raul Astudillo*Peter Frazier#Bayesian optimization of composite functions#International Conference on Machine Learning#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Maximilian Balandat",
+      "Brian Karrer",
+      "Daniel Jiang",
+      "Samuel Daulton",
+      "Ben Letham",
+      "Andrew G Wilson",
+      "Eytan Bakshy"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Botorch: A framework for efficient monte-carlo bayesian optimization",
+    "raw_text": "Maximilian Balandat*Brian Karrer*Daniel Jiang*Samuel Daulton*Ben Letham*Andrew G Wilson*Eytan Bakshy#Botorch: A framework for efficient monte-carlo bayesian optimization#Advances in neural information processing systems#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Linda Battistuzzi",
+      "Carmine Tommaso Recchiuto",
+      "Antonio Sgorbissa"
+    ],
+    "venue": "Ethics and Information Technology",
+    "title": "Ethical concerns in rescue robotics: a scoping review",
+    "raw_text": "Linda Battistuzzi*Carmine Tommaso Recchiuto*Antonio Sgorbissa#Ethical concerns in rescue robotics: a scoping review#Ethics and Information Technology#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Sanjukta Bhattacharya",
+      "Anastasios Oulis Rousis",
+      "Aikaterini Bourazeri"
+    ],
+    "venue": "IEEE Access",
+    "title": "Trust & fair resource allocation in community energy systems",
+    "raw_text": "Sanjukta Bhattacharya*Anastasios Oulis Rousis*Aikaterini Bourazeri#Trust & fair resource allocation in community energy systems#IEEE Access#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://connectedcommunities.lbl.gov/sites/default/files/2024-07/NARUC_ADER_Fundamentals_Interactive.pdf",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Stephanie Bieler",
+      "Cara Goldenberg",
+      "Avery McEvoy",
+      "Katerina Stephan",
+      "Alex Walmsley"
+    ],
+    "venue": "Technical report, RMI, under contract with NARUC",
+    "title": "Aggregated distributed energy resources in 2024: The fundamentals",
+    "raw_text": "Stephanie Bieler*Cara Goldenberg*Avery McEvoy*Katerina Stephan*Alex Walmsley#Aggregated distributed energy resources in 2024: The fundamentals#Technical report, RMI, under contract with NARUC#2024#https://connectedcommunities.lbl.gov/sites/default/files/2024-07/NARUC_ADER_Fundamentals_Interactive.pdf",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Abeba Birhane",
+      "Sepehr Dehdashtian",
+      "Vinay Prabhu",
+      "Vishnu Boddeti"
+    ],
+    "venue": "Proceedings of the 2024 ACM Conference on Fairness, Accountability, and Transparency",
+    "title": "The dark side of dataset scaling: Evaluating racial classification in multimodal models",
+    "raw_text": "Abeba Birhane*Sepehr Dehdashtian*Vinay Prabhu*Vishnu Boddeti#The dark side of dataset scaling: Evaluating racial classification in multimodal models#Proceedings of the 2024 ACM Conference on Fairness, Accountability, and Transparency#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Renske Bouwer",
+      "Marije Lesterhuis",
+      "Fien De Smedt",
+      "Hilde Van Keer",
+      "Sven De Maeyer"
+    ],
+    "venue": "Journal of Writing Research",
+    "title": "Comparative approaches to the assessment of writing: Reliability and validity of benchmark rating and comparative judgement",
+    "raw_text": "Renske Bouwer*Marije Lesterhuis*Fien De Smedt*Hilde Van Keer*Sven De Maeyer#Comparative approaches to the assessment of writing: Reliability and validity of benchmark rating and comparative judgement#Journal of Writing Research#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1995,
+    "authors": [
+      "Kathryn Chaloner",
+      "Isabella Verdinelli"
+    ],
+    "venue": "Statistical science",
+    "title": "Bayesian experimental design: A review",
+    "raw_text": "Kathryn Chaloner*Isabella Verdinelli#Bayesian experimental design: A review#Statistical science#1995#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2305.03411",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Gregory Chance",
+      "Dhaminda B Abeywickrama",
+      "Beckett LeClair",
+      "Owen Kerr",
+      "Kerstin Eder"
+    ],
+    "venue": "arXiv preprint arXiv:2305.03411",
+    "title": "Assessing trustworthiness of autonomous systems",
+    "raw_text": "Gregory Chance*Dhaminda B Abeywickrama*Beckett LeClair*Owen Kerr*Kerstin Eder#Assessing trustworthiness of autonomous systems#arXiv preprint arXiv:2305.03411#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Hareesh Chitikena",
+      "Filippo Sanfilippo",
+      "Shugen Ma"
+    ],
+    "venue": "Applied Sciences",
+    "title": "Robotics in search and rescue (sar) operations: An ethical and design perspective framework for response phase",
+    "raw_text": "Hareesh Chitikena*Filippo Sanfilippo*Shugen Ma#Robotics in search and rescue (sar) operations: An ethical and design perspective framework for response phase#Applied Sciences#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://api.semanticscholar.org/CorpusID:4787508",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Paul Francis Christiano",
+      "Jan Leike",
+      "Tom B. Brown",
+      "Miljan Martic",
+      "Shane Legg",
+      "Dario Amodei"
+    ],
+    "venue": "ArXiv",
+    "title": "Deep reinforcement learning from human preferences",
+    "raw_text": "Paul Francis Christiano*Jan Leike*Tom B. Brown*Miljan Martic*Shane Legg*Dario Amodei#Deep reinforcement learning from human preferences#ArXiv#2017#https://api.semanticscholar.org/CorpusID:4787508",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2005,
+    "authors": [
+      "Wei Chu",
+      "Zoubin Ghahramani"
+    ],
+    "venue": "Proceedings of the 22nd international conference on Machine learning",
+    "title": "Preference learning with Gaussian processes",
+    "raw_text": "Wei Chu*Zoubin Ghahramani#Preference learning with Gaussian processes#Proceedings of the 22nd international conference on Machine learning#2005#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Shiyang Cong",
+      "Destenie Nock",
+      "Yuchen L. Qiu",
+      "Bo Xing"
+    ],
+    "venue": "Nature Communications",
+    "title": "Unveiling hidden energy poverty using the energy equity gap",
+    "raw_text": "Shiyang Cong*Destenie Nock*Yuchen L. Qiu*Bo Xing#Unveiling hidden energy poverty using the energy equity gap#Nature Communications#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Louise Dennis",
+      "Michael Fisher",
+      "Marija Slavkovik",
+      "Matt Webster"
+    ],
+    "venue": "Robotics and Autonomous Systems",
+    "title": "Formal verification of ethical choices in autonomous systems",
+    "raw_text": "Louise Dennis*Michael Fisher*Marija Slavkovik*Matt Webster#Formal verification of ethical choices in autonomous systems#Robotics and Autonomous Systems#2016#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2303.01930",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Andrés Domínguez Hernández",
+      "Vassilis Galanos"
+    ],
+    "venue": "arXiv preprint arXiv:2303.01930",
+    "title": "A toolkit of dilemmas: Beyond debiasing and fairness formulas for responsible ai/ml",
+    "raw_text": "Andrés Domínguez Hernández*Vassilis Galanos#A toolkit of dilemmas: Beyond debiasing and fairness formulas for responsible ai/ml#arXiv preprint arXiv:2303.01930#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Ahmed Fahmin",
+      "Muhammad Aamir Cheema",
+      "Mohammed Eunus Ali",
+      "Adel Nadjaran Toosi",
+      "Hua Lu",
+      "Huan Li",
+      "David Taniar",
+      "Hesham A. Rakha",
+      "Bojie Shen"
+    ],
+    "venue": "ACM Computing Surveys",
+    "title": "Eco-friendly route planning algorithms: Taxonomies, literature review and future directions",
+    "raw_text": "Ahmed Fahmin*Muhammad Aamir Cheema*Mohammed Eunus Ali*Adel Nadjaran Toosi*Hua Lu*Huan Li*David Taniar*Hesham A. Rakha*Bojie Shen#Eco-friendly route planning algorithms: Taxonomies, literature review and future directions#ACM Computing Surveys#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Xin Gao",
+      "Tian Luan",
+      "Xueyuan Li",
+      "Qi Liu",
+      "Zhaoyang Ma",
+      "Xiaoqiang Meng",
+      "Zirui Li"
+    ],
+    "venue": "IEEE Internet of Things Journal",
+    "title": "Ethical alignment decision-making for connected autonomous vehicle in traffic dilemmas via reinforcement learning from human feedback",
+    "raw_text": "Xin Gao*Tian Luan*Xueyuan Li*Qi Liu*Zhaoyang Ma*Xiaoqiang Meng*Zirui Li#Ethical alignment decision-making for connected autonomous vehicle in traffic dilemmas via reinforcement learning from human feedback#IEEE Internet of Things Journal#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Jacob Gardner",
+      "Geoff Pleiss",
+      "Kilian Q Weinberger",
+      "David Bindel",
+      "Andrew G Wilson"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Gpytorch: Blackbox matrix-matrix gaussian process inference with gpu acceleration",
+    "raw_text": "Jacob Gardner*Geoff Pleiss*Kilian Q Weinberger*David Bindel*Andrew G Wilson#Gpytorch: Blackbox matrix-matrix gaussian process inference with gpu acceleration#Advances in neural information processing systems#2018#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2406.11852",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Declan Grabb",
+      "Max Lamparth",
+      "Nina Vasan"
+    ],
+    "venue": "arXiv preprint arXiv:2406.11852",
+    "title": "Risks from language models for automated mental healthcare: Ethics and structure for implementation",
+    "raw_text": "Declan Grabb*Max Lamparth*Nina Vasan#Risks from language models for automated mental healthcare: Ethics and structure for implementation#arXiv preprint arXiv:2406.11852#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2003,
+    "authors": [
+      "William H. Greene"
+    ],
+    "venue": "Prentice Hall",
+    "title": "Econometric Analysis",
+    "raw_text": "William H. Greene#Econometric Analysis#Prentice Hall#2003#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Thilo Hagendorff"
+    ],
+    "venue": "Minds and machines",
+    "title": "The ethics of ai ethics: An evaluation of guidelines",
+    "raw_text": "Thilo Hagendorff#The ethics of ai ethics: An evaluation of guidelines#Minds and machines#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2006,
+    "authors": [
+      "Ralf Herbrich",
+      "Tom Minka",
+      "Thore Graepel"
+    ],
+    "venue": "Proceedings of the 20th International Conference on Neural Information Processing Systems",
+    "title": "Trueskill™: a bayesian skill rating system",
+    "raw_text": "Ralf Herbrich*Tom Minka*Thore Graepel#Trueskill™: a bayesian skill rating system#Proceedings of the 20th International Conference on Neural Information Processing Systems#2006#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Eva JI Hoeijmakers",
+      "Bibi Martens",
+      "Babs MF Hendriks",
+      "Casper Mihl",
+      "Razvan L Miclea",
+      "Walter H Backes",
+      "Joachim E Wildberger",
+      "Frank M Zijta",
+      "Hester A Gietema",
+      "Patricia J Nelemans",
+      "et al"
+    ],
+    "venue": "European Radiology",
+    "title": "How subjective ct image quality assessment becomes surprisingly reliable: pairwise comparisons instead of likert scale",
+    "raw_text": "Eva JI Hoeijmakers*Bibi Martens*Babs MF Hendriks*Casper Mihl*Razvan L Miclea*Walter H Backes*Joachim E Wildberger*Frank M Zijta*Hester A Gietema*Patricia J Nelemans*et al#How subjective ct image quality assessment becomes surprisingly reliable: pairwise comparisons instead of likert scale#European Radiology#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2501.14625",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "David Huang",
+      "Francisco Marmolejo-Cossío",
+      "Edwin Lock",
+      "David Parkes"
+    ],
+    "venue": "arXiv",
+    "title": "Accelerated preference elicitation with llm-based proxies",
+    "raw_text": "David Huang*Francisco Marmolejo-Cossío*Edwin Lock*David Parkes#Accelerated preference elicitation with llm-based proxies#arXiv#2025#https://arxiv.org/abs/2501.14625",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2110.07574",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Liwei Jiang",
+      "Jena D. Hwang",
+      "Chandra Bhagavatula",
+      "Ronan Le Bras",
+      "Jenny Liang",
+      "Jesse Dodge",
+      "Keisuke Sakaguchi",
+      "Maxwell Forbes",
+      "Jon Borchardt",
+      "Saadia Gabriel",
+      "Yulia Tsvetkov",
+      "Oren Etzioni",
+      "Maarten Sap",
+      "Regina Rini",
+      "Yejin Choi"
+    ],
+    "venue": "arXiv preprint arXiv:2110.07574",
+    "title": "Can machines learn morality? the delphi experiment",
+    "raw_text": "Liwei Jiang*Jena D. Hwang*Chandra Bhagavatula*Ronan Le Bras*Jenny Liang*Jesse Dodge*Keisuke Sakaguchi*Maxwell Forbes*Jon Borchardt*Saadia Gabriel*Yulia Tsvetkov*Oren Etzioni*Maarten Sap*Regina Rini*Yejin Choi#Can machines learn morality? the delphi experiment#arXiv preprint arXiv:2110.07574#2021#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Anna Jobin",
+      "Marcello Ienca",
+      "Effy Vayena"
+    ],
+    "venue": "Nature machine intelligence",
+    "title": "The global landscape of ai ethics guidelines",
+    "raw_text": "Anna Jobin*Marcello Ienca*Effy Vayena#The global landscape of ai ethics guidelines#Nature machine intelligence#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Vijay Keswani",
+      "Vincent Conitzer",
+      "Hoda Heidari",
+      "Jana Schaich Borg",
+      "Walter Sinnott-Armstrong"
+    ],
+    "venue": "Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society",
+    "title": "On the pros and cons of active learning for moral preference elicitation",
+    "raw_text": "Vijay Keswani*Vincent Conitzer*Hoda Heidari*Jana Schaich Borg*Walter Sinnott-Armstrong#On the pros and cons of active learning for moral preference elicitation#Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Zhiyuan Jerry Lin",
+      "Raul Astudillo",
+      "Peter Frazier",
+      "Eytan Bakshy"
+    ],
+    "venue": "International Conference on Artificial Intelligence and Statistics",
+    "title": "Preference exploration for efficient bayesian optimization with multiple outcomes",
+    "raw_text": "Zhiyuan Jerry Lin*Raul Astudillo*Peter Frazier*Eytan Bakshy#Preference exploration for efficient bayesian optimization with multiple outcomes#International Conference on Artificial Intelligence and Statistics#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2403.16950",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yinhong Liu",
+      "Han Zhou",
+      "Zhijiang Guo",
+      "Ehsan Shareghi",
+      "Ivan Vulić",
+      "Anna Korhonen",
+      "Nigel Collier"
+    ],
+    "venue": "arXiv preprint arXiv:2403.16950",
+    "title": "Aligning with human judgement: The role of pairwise preference in large language model evaluators",
+    "raw_text": "Yinhong Liu*Han Zhou*Zhijiang Guo*Ehsan Shareghi*Ivan Vulić*Anna Korhonen*Nigel Collier#Aligning with human judgement: The role of pairwise preference in large language model evaluators#arXiv preprint arXiv:2403.16950#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Dongwen Luo",
+      "Jiachen Zhong",
+      "Yiting Wang",
+      "Weihao Pan"
+    ],
+    "venue": "",
+    "title": "Ethical considerations in smart grid optimization promoting energy equity and fairness",
+    "raw_text": "Dongwen Luo*Jiachen Zhong*Yiting Wang*Weihao Pan#Ethical considerations in smart grid optimization promoting energy equity and fairness##2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Karel Martens"
+    ],
+    "venue": "Routledge",
+    "title": "Transport justice: Designing fair transportation systems",
+    "raw_text": "Karel Martens#Transport justice: Designing fair transportation systems#Routledge#2016#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2504.07139",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Nestor Maslej",
+      "Loredana Fattorini",
+      "Raymond Perrault",
+      "Yolanda Gil",
+      "Vanessa Parli",
+      "Njenga Kariuki",
+      "Emily Capstick",
+      "Anka Reuel",
+      "Erik Brynjolfsson",
+      "John Etchemendy",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2504.07139",
+    "title": "Artificial intelligence index report",
+    "raw_text": "Nestor Maslej*Loredana Fattorini*Raymond Perrault*Yolanda Gil*Vanessa Parli*Njenga Kariuki*Emily Capstick*Anka Reuel*Erik Brynjolfsson*John Etchemendy*et al#Artificial intelligence index report 2025#arXiv preprint arXiv:2504.07139#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/1908.09635",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Ninareh Mehrabi",
+      "Fred Morstatter",
+      "Nripsuta Saxena",
+      "Kristina Lerman",
+      "Aram Galstyan"
+    ],
+    "venue": "arXiv preprint arXiv:1908.09635",
+    "title": "A survey on bias and fairness in machine learning",
+    "raw_text": "Ninareh Mehrabi*Fred Morstatter*Nripsuta Saxena*Kristina Lerman*Aram Galstyan#A survey on bias and fairness in machine learning#arXiv preprint arXiv:1908.09635#2021#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2004,
+    "authors": [
+      "Olivier Michel"
+    ],
+    "venue": "International Journal of Advanced Robotic Systems",
+    "title": "Cyberbotics ltd. webots ™ : professional mobile robot simulation",
+    "raw_text": "Olivier Michel#Cyberbotics ltd. webots ™ : professional mobile robot simulation#International Journal of Advanced Robotic Systems#2004#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Brent Daniel Mittelstadt",
+      "Patrick Allo",
+      "Mariarosaria Taddeo",
+      "Sandra Wachter",
+      "Luciano Floridi"
+    ],
+    "venue": "Big Data & Society",
+    "title": "The ethics of algorithms: Mapping the debate",
+    "raw_text": "Brent Daniel Mittelstadt*Patrick Allo*Mariarosaria Taddeo*Sandra Wachter*Luciano Floridi#The ethics of algorithms: Mapping the debate#Big Data & Society#2016#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Ritesh Noothigattu",
+      "Djallel Bouneffouf",
+      "Nicholas Mattei",
+      "Rachita Chandra",
+      "Piyush Madan",
+      "Kush R Varshney",
+      "Murray Campbell",
+      "Moninder Singh",
+      "Francesca Rossi"
+    ],
+    "venue": "IBM Journal of Research and Development",
+    "title": "Teaching ai agents ethical values using reinforcement learning and policy orchestration",
+    "raw_text": "Ritesh Noothigattu*Djallel Bouneffouf*Nicholas Mattei*Rachita Chandra*Piyush Madan*Kush R Varshney*Murray Campbell*Moninder Singh*Francesca Rossi#Teaching ai agents ethical values using reinforcement learning and policy orchestration#IBM Journal of Research and Development#2019#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.oecd.org/en/topics/sub-issues/ai-principles.html",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Organisation for Economic Co-operation"
+    ],
+    "venue": "",
+    "title": "Oecd principles on artificial intelligence",
+    "raw_text": "Organisation for Economic Co-operation and Development#Oecd principles on artificial intelligence##2019#https://www.oecd.org/en/topics/sub-issues/ai-principles.html",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Przemysław Pałka"
+    ],
+    "venue": "AI and Consumers",
+    "title": "Ai, consumers & psychological harm",
+    "raw_text": "Przemysław Pałka#Ai, consumers & psychological harm#AI and Consumers#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Rafael HM Pereira",
+      "Tim Schwanen",
+      "David Banister"
+    ],
+    "venue": "Transport reviews",
+    "title": "Distributive justice and equity in transportation",
+    "raw_text": "Rafael HM Pereira*Tim Schwanen*David Banister#Distributive justice and equity in transportation#Transport reviews#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Tom Rainforth",
+      "Adam Foster",
+      "Desi R Ivanova",
+      "Freddie Bickford Smith"
+    ],
+    "venue": "Statistical Science",
+    "title": "Modern bayesian experimental design",
+    "raw_text": "Tom Rainforth*Adam Foster*Desi R Ivanova*Freddie Bickford Smith#Modern bayesian experimental design#Statistical Science#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.14981",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Anka Reuel",
+      "Ben Bucknall",
+      "Stephen Casper",
+      "Tim Fist",
+      "Lisa Soder",
+      "Onni Aarne",
+      "Lewis Hammond",
+      "Lujain Ibrahim",
+      "Alan Chan",
+      "Peter Wills",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2407.14981",
+    "title": "Open problems in technical ai governance",
+    "raw_text": "Anka Reuel*Ben Bucknall*Stephen Casper*Tim Fist*Lisa Soder*Onni Aarne*Lewis Hammond*Lujain Ibrahim*Alan Chan*Peter Wills*et al#Open problems in technical ai governance#arXiv preprint arXiv:2407.14981#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Ann-Katrin Reuel",
+      "Mark Koren",
+      "Anthony Corso",
+      "Mykel J Kochenderfer"
+    ],
+    "venue": "SafeAI@ AAAI",
+    "title": "Using adaptive stress testing to identify paths to ethical dilemmas in autonomous systems",
+    "raw_text": "Ann-Katrin Reuel*Mark Koren*Anthony Corso*Mykel J Kochenderfer#Using adaptive stress testing to identify paths to ethical dilemmas in autonomous systems#SafeAI@ AAAI#2022#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2505.10573",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Olawale Salaudeen",
+      "Anka Reuel",
+      "Ahmed Ahmed",
+      "Suhana Bedi",
+      "Zachary Robertson",
+      "Sudharsan Sundar",
+      "Ben Domingue",
+      "Angelina Wang",
+      "Sanmi Koyejo"
+    ],
+    "venue": "arXiv preprint arXiv:2505.10573",
+    "title": "Measurement to meaning: A validity-centered framework for ai evaluation",
+    "raw_text": "Olawale Salaudeen*Anka Reuel*Ahmed Ahmed*Suhana Bedi*Zachary Robertson*Sudharsan Sundar*Ben Domingue*Angelina Wang*Sanmi Koyejo#Measurement to meaning: A validity-centered framework for ai evaluation#arXiv preprint arXiv:2505.10573#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2412.03391",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Murat Sensoy",
+      "Lance M. Kaplan",
+      "Simon Julier",
+      "Maryam Saleki",
+      "Federico Cerutti"
+    ],
+    "venue": "arXiv preprint arXiv:2412.03391",
+    "title": "Risk-aware classification via uncertainty quantification",
+    "raw_text": "Murat Sensoy*Lance M. Kaplan*Simon Julier*Maryam Saleki*Federico Cerutti#Risk-aware classification via uncertainty quantification#arXiv preprint arXiv:2412.03391#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Han Shao",
+      "Lee Cohen",
+      "Avrim Blum",
+      "Yishay Mansour",
+      "Aadirupa Saha",
+      "Matthew Walter"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Eliciting user preferences for personalized multi-objective decision making through comparative feedback",
+    "raw_text": "Han Shao*Lee Cohen*Avrim Blum*Yishay Mansour*Aadirupa Saha*Matthew Walter#Eliciting user preferences for personalized multi-objective decision making through comparative feedback#Advances in Neural Information Processing Systems#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Benjamin K Sovacool",
+      "Raphael J Heffron",
+      "Darren McCauley",
+      "Andreas Goldthau"
+    ],
+    "venue": "Nature Energy",
+    "title": "Energy decisions reframed as justice and ethical concerns",
+    "raw_text": "Benjamin K Sovacool*Raphael J Heffron*Darren McCauley*Andreas Goldthau#Energy decisions reframed as justice and ethical concerns#Nature Energy#2016#",
+    "type": "other"
+  },
+  {
+    "url": "https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=936225",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Elham Tabassi"
+    ],
+    "venue": "",
+    "title": "Artificial intelligence risk management framework (ai rmf 1.0)",
+    "raw_text": "Elham Tabassi#Artificial intelligence risk management framework (ai rmf 1.0)##2023#https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=936225",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Christian Tarsney",
+      "Teruji Thomas",
+      "William MacAskill"
+    ],
+    "venue": "",
+    "title": "Moral decision-making under uncertainty",
+    "raw_text": "Christian Tarsney*Teruji Thomas*William MacAskill#Moral decision-making under uncertainty##2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2009,
+    "authors": [
+      "Michalis Titsias"
+    ],
+    "venue": "Artificial intelligence and statistics",
+    "title": "Variational learning of inducing variables in sparse Gaussian processes",
+    "raw_text": "Michalis Titsias#Variational learning of inducing variables in sparse Gaussian processes#Artificial intelligence and statistics#2009#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/1511.06499",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Dustin Tran",
+      "Rajesh Ranganath",
+      "David M Blei"
+    ],
+    "venue": "arXiv preprint arXiv:1511.06499",
+    "title": "The variational gaussian process",
+    "raw_text": "Dustin Tran*Rajesh Ranganath*David M Blei#The variational gaussian process#arXiv preprint arXiv:1511.06499#2015#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2502.00561",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Hanna Wallach",
+      "Meera Desai",
+      "A Feder Cooper",
+      "Angelina Wang",
+      "Chad Atalla",
+      "Solon Barocas",
+      "Su Lin Blodgett",
+      "Alexandra Chouldechova",
+      "Emily Corvi",
+      "P Alex Dow",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2502.00561",
+    "title": "Position: Evaluating generative ai systems is a social science measurement challenge",
+    "raw_text": "Hanna Wallach*Meera Desai*A Feder Cooper*Angelina Wang*Chad Atalla*Solon Barocas*Su Lin Blodgett*Alexandra Chouldechova*Emily Corvi*P Alex Dow*et al#Position: Evaluating generative ai systems is a social science measurement challenge#arXiv preprint arXiv:2502.00561#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Angelina Wang",
+      "Xuechunzi Bai",
+      "Solon Barocas",
+      "Su Lin Blodgett"
+    ],
+    "venue": "Proceedings of the 2025 ACM Conference on Fairness, Accountability, and Transparency",
+    "title": "Measuring machine learning harms from stereotypes requires understanding who is harmed by which errors in what ways",
+    "raw_text": "Angelina Wang*Xuechunzi Bai*Solon Barocas*Su Lin Blodgett#Measuring machine learning harms from stereotypes requires understanding who is harmed by which errors in what ways#Proceedings of the 2025 ACM Conference on Fairness, Accountability, and Transparency#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2112.04359",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Laura Weidinger",
+      "John Mellor",
+      "Maribeth Rauh",
+      "Conor Griffin",
+      "Jonathan Uesato",
+      "Po-Sen Huang",
+      "Myra Cheng",
+      "Mia Glaese",
+      "Borja Balle",
+      "Atoosa Kasirzadeh",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2112.04359",
+    "title": "Ethical and social risks of harm from language models",
+    "raw_text": "Laura Weidinger*John Mellor*Maribeth Rauh*Conor Griffin*Jonathan Uesato*Po-Sen Huang*Myra Cheng*Mia Glaese*Borja Balle*Atoosa Kasirzadeh*et al#Ethical and social risks of harm from language models#arXiv preprint arXiv:2112.04359#2021#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2310.06682",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Laura Weidinger",
+      "Maribeth Rauh",
+      "Nahema Marchal",
+      "Arianna Manzini",
+      "Lisa Anne Hendricks",
+      "Juan Mateos-Garcia",
+      "Stevie Bergman",
+      "Jackie Kay",
+      "Conor Griffin",
+      "Ben Bariach",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2310.06682",
+    "title": "Sociotechnical safety evaluation of generative ai systems",
+    "raw_text": "Laura Weidinger*Maribeth Rauh*Nahema Marchal*Arianna Manzini*Lisa Anne Hendricks*Juan Mateos-Garcia*Stevie Bergman*Jackie Kay*Conor Griffin*Ben Bariach*et al#Sociotechnical safety evaluation of generative ai systems#arXiv preprint arXiv:2310.06682#2023#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [],
+    "venue": "Ieee p7001: A proposed standard on transparency",
+    "title": "A. F. T. Winfield S. Booth L. A. Dennis T. Egawa H. Hastie N. Jacobs R. I. Muttram J. I. Olszewska F. Rajabiyazdi A. Theodorou M. A. Underwood R. H. Wortham E. Watson",
+    "raw_text": "A. F. T. Winfield*S. Booth*L. A. Dennis*T. Egawa*H. Hastie*N. Jacobs*R. I. Muttram*J. I. Olszewska*F. Rajabiyazdi*A. Theodorou*M. A. Underwood*R. H. Wortham*E. Watson#Ieee p7001: A proposed standard on transparency#Frontiers in robotics and AI#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2009.06114",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Peipei Xu",
+      "Wenjie Ruan",
+      "Xiaowei Huang"
+    ],
+    "venue": "arXiv preprint arXiv:2009.06114",
+    "title": "Towards the quantification of safety risks in deep neural networks",
+    "raw_text": "Peipei Xu*Wenjie Ruan*Xiaowei Huang#Towards the quantification of safety risks in deep neural networks#arXiv preprint arXiv:2009.06114#2020#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Muhammad Shahrul Zaim bin Ahmad",
+      "Kazuhiro Takemoto"
+    ],
+    "venue": "PloS one",
+    "title": "Large-scale moral machine experiment on large language models",
+    "raw_text": "Muhammad Shahrul Zaim bin Ahmad*Kazuhiro Takemoto#Large-scale moral machine experiment on large language models#PloS one#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2407.17436",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yi Zeng",
+      "Yu Yang",
+      "Andy Zhou",
+      "Jeffrey Ziwei Tan",
+      "Yuheng Tu",
+      "Yifan Mai",
+      "Kevin Klyman",
+      "Minzhou Pan",
+      "Ruoxi Jia",
+      "Dawn Song",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2407.17436",
+    "title": "Air-bench 2024: A safety benchmark based on risk categories from regulations and policies",
+    "raw_text": "Yi Zeng*Yu Yang*Andy Zhou*Jeffrey Ziwei Tan*Yuheng Tu*Yifan Mai*Kevin Klyman*Minzhou Pan*Ruoxi Jia*Dawn Song*et al#Air-bench 2024: A safety benchmark based on risk categories from regulations and policies#arXiv preprint arXiv:2407.17436#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2210.01152",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Daniel Ziegler",
+      "Long Ouyang",
+      "Jeffrey Wu",
+      "Ryan Lowe",
+      "Nisan Stiennon",
+      "John Gray",
+      "John Schulman",
+      "Paul Christiano"
+    ],
+    "venue": "arXiv preprint arXiv:2210.01152",
+    "title": "Self-rewarding language models",
+    "raw_text": "Daniel Ziegler*Long Ouyang*Jeffrey Wu*Ryan Lowe*Nisan Stiennon*John Gray*John Schulman*Paul Christiano#Self-rewarding language models#arXiv preprint arXiv:2210.01152#2022#",
+    "type": "arxiv"
+  }
+]

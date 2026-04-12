@@ -1,0 +1,739 @@
+[
+  {
+    "url": "https://www.protocols.io/view/lightweight-brain-tumor-segmentation-on-low-resour-gz4sbx8wf",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Fatima Adebayo",
+      "et al"
+    ],
+    "venue": "protocols.io",
+    "title": "Lightweight brain tumor segmentation on low-resource systems",
+    "raw_text": "Fatima Adebayo*et al.#Lightweight brain tumor segmentation on low-resource systems#protocols.io#2025#https://www.protocols.io/view/lightweight-brain-tumor-segmentation-on-low-resour-gz4sbx8wf",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "M. C. Amato",
+      "V. Guarnotta",
+      "C. Giordano"
+    ],
+    "venue": "Journal of Endocrinological Investigation",
+    "title": "Body composition assessment for the definition of cardiometabolic risk",
+    "raw_text": "M. C. Amato*V. Guarnotta*C. Giordano#Body composition assessment for the definition of cardiometabolic risk#Journal of Endocrinological Investigation#2013#10.3275/8943",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Dawid Boczar",
+      "Magdalena Kitala",
+      "Klaudia Nowak",
+      "Bartlomiej Nowak",
+      "Rafal Slojewski"
+    ],
+    "venue": "Aesthetic Surgery Journal",
+    "title": "3d breast scanning in plastic surgery utilizing free iphone lidar applications and standard consumer devices: A comparative analysis",
+    "raw_text": "Dawid Boczar*Magdalena Kitala*Klaudia Nowak*Bartlomiej Nowak*Rafal Slojewski#3d breast scanning in plastic surgery utilizing free iphone lidar applications and standard consumer devices: A comparative analysis#Aesthetic Surgery Journal#2024#10.1093/asj/sjae251",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Zhe Cao",
+      "Gines Hidalgo",
+      "Tomas Simon",
+      "Shih-En Wei",
+      "Yaser Sheikh"
+    ],
+    "venue": "IEEE TPAMI",
+    "title": "Openpose: Realtime multi-person 2d pose estimation using part affinity fields",
+    "raw_text": "Zhe Cao*Gines Hidalgo*Tomas Simon*Shih-En Wei*Yaser Sheikh#Openpose: Realtime multi-person 2d pose estimation using part affinity fields#IEEE TPAMI#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Chia-Yu et al. Chang"
+    ],
+    "venue": "Nature Computational Science",
+    "title": "Overcoming data scarcity in biomedical imaging with a foundational multi-task model",
+    "raw_text": "Chia-Yu et al. Chang#Overcoming data scarcity in biomedical imaging with a foundational multi-task model#Nature Computational Science#2024#10.1038/s43588-024-00662-z",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Jieneng Chen",
+      "Yongyi Lu",
+      "Qihang Yu",
+      "Xiangde Luo",
+      "Ehsan Adeli",
+      "Yan Wang",
+      "Le Lu",
+      "Alan L. Yuille",
+      "Yuyin Zhou"
+    ],
+    "venue": "MICCAI",
+    "title": "Transunet: Transformers make strong encoders for medical image segmentation",
+    "raw_text": "Jieneng Chen*Yongyi Lu*Qihang Yu*Xiangde Luo*Ehsan Adeli*Yan Wang*Le Lu*Alan L. Yuille*Yuyin Zhou#Transunet: Transformers make strong encoders for medical image segmentation#MICCAI#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://proceedings.mlr.press/v80/chen18a.html",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Zhao Chen",
+      "Vijay Badrinarayanan",
+      "Chen-Yu Lee",
+      "Andrew Rabinovich"
+    ],
+    "venue": "Proceedings of the 35th International Conference on Machine Learning",
+    "title": "Gradnorm: Gradient normalization for adaptive loss balancing in deep multitask networks",
+    "raw_text": "Zhao Chen*Vijay Badrinarayanan*Chen-Yu Lee*Andrew Rabinovich#Gradnorm: Gradient normalization for adaptive loss balancing in deep multitask networks#Proceedings of the 35th International Conference on Machine Learning#2018#https://proceedings.mlr.press/v80/chen18a.html",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alexey Dosovitskiy",
+      "Lucas Beyer",
+      "Alexander Kolesnikov",
+      "Dirk Weissenborn",
+      "Xiaohua Zhai",
+      "Thomas Unterthiner",
+      "Mostafa Dehghani",
+      "Matthias Minderer",
+      "Georg Heigold",
+      "Sylvain Gelly",
+      "Jakob Uszkoreit",
+      "Neil Houlsby"
+    ],
+    "venue": "ICLR",
+    "title": "An image is worth 16x16 words: Transformers for image recognition at scale",
+    "raw_text": "Alexey Dosovitskiy*Lucas Beyer*Alexander Kolesnikov*Dirk Weissenborn*Xiaohua Zhai*Thomas Unterthiner*Mostafa Dehghani*Matthias Minderer*Georg Heigold*Sylvain Gelly*Jakob Uszkoreit*Neil Houlsby#An image is worth 16x16 words: Transformers for image recognition at scale#ICLR#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Salma Galaaoui",
+      "Eduardo Valle",
+      "David Picard",
+      "Nermin Samet"
+    ],
+    "venue": "arXiv preprint",
+    "title": "3d human pose and shape estimation from lidar point clouds: A review",
+    "raw_text": "Salma Galaaoui*Eduardo Valle*David Picard*Nermin Samet#3d human pose and shape estimation from lidar point clouds: A review#arXiv preprint#2025#",
+    "type": "other"
+  },
+  {
+    "url": "http://ieeexplore.ieee.org/document/7780459/",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Kaiming He",
+      "Xiangyu Zhang",
+      "Shaoqing Ren",
+      "Jian Sun"
+    ],
+    "venue": "2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Deep Residual Learning for Image Recognition",
+    "raw_text": "Kaiming He*Xiangyu Zhang*Shaoqing Ren*Jian Sun#Deep Residual Learning for Image Recognition#2016 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)#2016#http://ieeexplore.ieee.org/document/7780459/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://ieeexplore.ieee.org/document/8099726/",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Gao Huang",
+      "Zhuang Liu",
+      "Laurens Van Der Maaten",
+      "Kilian Q. Weinberger"
+    ],
+    "venue": "2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Densely Connected Convolutional Networks",
+    "raw_text": "Gao Huang*Zhuang Liu*Laurens Van Der Maaten*Kilian Q. Weinberger#Densely Connected Convolutional Networks#2017 IEEE Conference on Computer Vision and Pattern Recognition (CVPR)#2017#https://ieeexplore.ieee.org/document/8099726/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Jeremy Irvin",
+      "Pranav Rajpurkar",
+      "Michael Ko",
+      "Yifan Yu",
+      "Silviana Ciurea-Ilcus",
+      "Chris Chute",
+      "Henrik Marklund",
+      "Behzad Haghgoo",
+      "Robyn Ball",
+      "Katie Shpanskaya",
+      "Jacob Seekins",
+      "Daniel Mong",
+      "Safwan Halabi",
+      "John Sandberg",
+      "Ross Jones",
+      "David Larson",
+      "Curtis Langlotz",
+      "Bhavik Patel",
+      "Matthew Lungren",
+      "Andrew Ng"
+    ],
+    "venue": "AAAI",
+    "title": "Chexpert: A large chest radiograph dataset with uncertainty labels and expert comparison",
+    "raw_text": "Jeremy Irvin*Pranav Rajpurkar*Michael Ko*Yifan Yu*Silviana Ciurea-Ilcus*Chris Chute*Henrik Marklund*Behzad Haghgoo*Robyn Ball*Katie Shpanskaya*Jacob Seekins*Daniel Mong*Safwan Halabi*John Sandberg*Ross Jones*David Larson*Curtis Langlotz*Bhavik Patel*Matthew Lungren*Andrew Ng#Chexpert: A large chest radiograph dataset with uncertainty labels and expert comparison#AAAI#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Sumbal A. Janjua",
+      "Joseph M. Massaro",
+      "Michael L. Chuang",
+      "Agostino Ralph B. D",
+      "Udo Hoffmann",
+      "Donnell Christopher J. O"
+    ],
+    "venue": "JACC: Cardiovascular Imaging",
+    "title": "Thresholds for Abdominal Aortic Calcium That Predict Cardiovascular Disease Events in the Framingham Heart Study",
+    "raw_text": "Sumbal A. Janjua*Joseph M. Massaro*Michael L. Chuang*Agostino Ralph B. D*Udo Hoffmann*Donnell Christopher J. O#Thresholds for Abdominal Aortic Calcium That Predict Cardiovascular Disease Events in the Framingham Heart Study#JACC: Cardiovascular Imaging#2021#10.1016/j.jcmg.2020.09.019",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": null,
+    "authors": [
+      "Maxime Oquab",
+      "Timothe Darcet",
+      "Tho Moutakanni",
+      "Huy Vo",
+      "Marc Szafraniec",
+      "Vasil Khalidov",
+      "Pierre Fernandez",
+      "Daniel Haziza",
+      "Francisco Massa",
+      "Alaaeldin El-Nouby",
+      "Mahmoud Assran",
+      "Nicolas Ballas",
+      "Wojciech Galuba",
+      "Russell Howes",
+      "Po-Yao Huang",
+      "Shang-Wen Li",
+      "Ishan Misra",
+      "Michael Rabbat",
+      "Vasu Sharma",
+      "Gabriel Synnaeve",
+      "Hu Xu",
+      "Herv Jegou",
+      "Julien Mairal",
+      "Patrick Labatut",
+      "Armand Joulin",
+      "Piotr Bojanowski"
+    ],
+    "venue": "",
+    "title": "DINOv2: Learning Robust Visual Features without Supervision",
+    "raw_text": "Maxime Oquab*Timothe Darcet*Tho Moutakanni*Huy Vo*Marc Szafraniec*Vasil Khalidov*Pierre Fernandez*Daniel Haziza*Francisco Massa*Alaaeldin El-Nouby*Mahmoud Assran*Nicolas Ballas*Wojciech Galuba*Russell Howes*Po-Yao Huang*Shang-Wen Li*Ishan Misra*Michael Rabbat*Vasu Sharma*Gabriel Synnaeve*Hu Xu*Herv Jegou*Julien Mairal*Patrick Labatut*Armand Joulin*Piotr Bojanowski#DINOv2: Learning Robust Visual Features without Supervision###",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/1901.07042",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Alistair E. W. Johnson",
+      "Tom J. Pollard",
+      "Seth J. Berkowitz",
+      "Nathan R. Greenbaum",
+      "Matthew P. Lungren",
+      "Chih-ying Deng",
+      "Yifan Peng",
+      "Zhenglong Lu",
+      "Roger G. Mark",
+      "Steven Horng"
+    ],
+    "venue": "arXiv preprint arXiv:1901.07042",
+    "title": "Mimic-cxr: A large publicly available database of labeled chest radiographs",
+    "raw_text": "Alistair E. W. Johnson*Tom J. Pollard*Seth J. Berkowitz*Nathan R. Greenbaum*Matthew P. Lungren*Chih-ying Deng*Yifan Peng*Zhenglong Lu*Roger G. Mark*Steven Horng#Mimic-cxr: A large publicly available database of labeled chest radiographs#arXiv preprint arXiv:1901.07042#2019#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Pieter-Jan Kindermans",
+      "Sara Hooker",
+      "Julius Adebayo",
+      "Maximilian Alber",
+      "Kristof T. Schüttl",
+      "Sven Dähne",
+      "Dumitru Erhan",
+      "Been Kim"
+    ],
+    "venue": "Explainable AI: Interpreting, Explaining and Visualizing Deep Learning",
+    "title": "The (un)reliability of saliency methods",
+    "raw_text": "Pieter-Jan Kindermans*Sara Hooker*Julius Adebayo*Maximilian Alber*Kristof T. Schüttl*Sven Dähne*Dumitru Erhan*Been Kim#The (un)reliability of saliency methods#Explainable AI: Interpreting, Explaining and Visualizing Deep Learning#2019#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5964004/",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Jane J. Lee",
+      "Alison Pedley",
+      "Udo Hoffmann",
+      "Joseph M. Massaro",
+      "Daniel Levy",
+      "Michelle T. Long"
+    ],
+    "venue": "The American journal of medicine",
+    "title": "Visceral and intrahepatic fat are associated with cardiometabolic risk factors above other ectopic fat depots: The Framingham Heart Study",
+    "raw_text": "Jane J. Lee*Alison Pedley*Udo Hoffmann*Joseph M. Massaro*Daniel Levy*Michelle T. Long#Visceral and intrahepatic fat are associated with cardiometabolic risk factors above other ectopic fat depots: The Framingham Heart Study#The American journal of medicine#2018#https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5964004/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "Mi-Jeong Lee",
+      "Yuanyuan Wu",
+      "Susan K. Fried"
+    ],
+    "venue": "Molecular Aspects of Medicine",
+    "title": "Adipose tissue heterogeneity: Implication of depot differences in adipose tissue for obesity complications",
+    "raw_text": "Mi-Jeong Lee*Yuanyuan Wu*Susan K. Fried#Adipose tissue heterogeneity: Implication of depot differences in adipose tissue for obesity complications#Molecular Aspects of Medicine#2013#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Ze Liu",
+      "Yutong Lin",
+      "Yue Cao",
+      "Han Hu",
+      "Yixuan Wei",
+      "Zheng Zhang",
+      "Stephen Lin",
+      "Baining Guo"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)",
+    "title": "Swin transformer: Hierarchical vision transformer using shifted windows",
+    "raw_text": "Ze Liu*Yutong Lin*Yue Cao*Han Hu*Yixuan Wei*Zheng Zhang*Stephen Lin*Baining Guo#Swin transformer: Hierarchical vision transformer using shifted windows#Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/1711.05101",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Ilya Loshchilov",
+      "Frank Hutter"
+    ],
+    "venue": "International Conference on Learning Representations (ICLR)",
+    "title": "Decoupled weight decay regularization",
+    "raw_text": "Ilya Loshchilov*Frank Hutter#Decoupled weight decay regularization#International Conference on Learning Representations (ICLR)#2019#https://arxiv.org/abs/1711.05101",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2008,
+    "authors": [
+      "J. C. Lovejoy",
+      "C. M. Champagne",
+      "L. de Jonge",
+      "H. Xie",
+      "S. R. Smith"
+    ],
+    "venue": "International Journal of Obesity",
+    "title": "Increased visceral fat and decreased energy expenditure during the menopausal transition",
+    "raw_text": "J. C. Lovejoy*C. M. Champagne*L. de Jonge*H. Xie*S. R. Smith#Increased visceral fat and decreased energy expenditure during the menopausal transition#International Journal of Obesity#2008#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.frontiersin.org/articles/10.3389/fninf.2022.911679/full",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Haoran Lu",
+      "Yifei She",
+      "Jun Tie",
+      "Shengzhou Xu"
+    ],
+    "venue": "Frontiers in Neuroinformatics",
+    "title": "Half-unet: A simplified u-net architecture for medical image segmentation",
+    "raw_text": "Haoran Lu*Yifei She*Jun Tie*Shengzhou Xu#Half-unet: A simplified u-net architecture for medical image segmentation#Frontiers in Neuroinformatics#2022#https://www.frontiersin.org/articles/10.3389/fninf.2022.911679/full",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Tomoko Maruyama",
+      "Norio Hayashi",
+      "Yusuke Sato",
+      "Toshihiro Ogura",
+      "Masumi Uehara",
+      "Haruyuki Watanabe",
+      "Yoshihiro Kitoh"
+    ],
+    "venue": "BMC Medical Imaging",
+    "title": "Artifact estimation network for mr images: effectiveness of batch normalization and dropout layers",
+    "raw_text": "Tomoko Maruyama*Norio Hayashi*Yusuke Sato*Toshihiro Ogura*Masumi Uehara*Haruyuki Watanabe*Yoshihiro Kitoh#Artifact estimation network for mr images: effectiveness of batch normalization and dropout layers#BMC Medical Imaging#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Xuefeng Mei",
+      "Zhongyi Liu",
+      "Paul M. Robson",
+      "Benjamin Marinelli",
+      "Michael Huang",
+      "Ankit Doshi",
+      "Adam Jacobi",
+      "Chang Cao",
+      "Daniel Link",
+      "Tao Yang",
+      "Zahi A. Fayad",
+      "Yiyu Yang"
+    ],
+    "venue": "Radiology: Artificial Intelligence",
+    "title": "Radimagenet: An open radiologic deep learning research dataset for effective transfer learning",
+    "raw_text": "Xuefeng Mei*Zhongyi Liu*Paul M. Robson*Benjamin Marinelli*Michael Huang*Ankit Doshi*Adam Jacobi*Chang Cao*Daniel Link*Tao Yang*Zahi A. Fayad*Yiyu Yang#Radimagenet: An open radiologic deep learning research dataset for effective transfer learning#Radiology: Artificial Intelligence#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Aliasghar Mortazi",
+      "Vedat Cicek",
+      "Elif Keles",
+      "Ulas Bagci"
+    ],
+    "venue": "Frontiers in Radiology",
+    "title": "Selecting the best optimizers for deep learning based medical image segmentation",
+    "raw_text": "Aliasghar Mortazi*Vedat Cicek*Elif Keles*Ulas Bagci#Selecting the best optimizers for deep learning based medical image segmentation#Frontiers in Radiology#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11054930/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Katja Oberhofer",
+      "Cline Knopfli",
+      "Basil Achermann",
+      "Silvio R Lorenzetti"
+    ],
+    "venue": "Sports",
+    "title": "Feasibility of using laser imaging detection and ranging technology for contactless 3d body scanning and anthropometric assessment of athletes",
+    "raw_text": "Katja Oberhofer*Cline Knopfli*Basil Achermann*Silvio R Lorenzetti#Feasibility of using laser imaging detection and ranging technology for contactless 3d body scanning and anthropometric assessment of athletes#Sports#2024#https://pmc.ncbi.nlm.nih.gov/articles/PMC11054930/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Perry J. Pickhardt",
+      "Ronald M. Summers",
+      "John W. Garrett",
+      "et al"
+    ],
+    "venue": "Radiology",
+    "title": "Automated ct-based body composition analysis: Opportunistic prediction of future major osteoporotic fractures in asymptomatic adults",
+    "raw_text": "Perry J. Pickhardt*Ronald M. Summers*John W. Garrett*et al#Automated ct-based body composition analysis: Opportunistic prediction of future major osteoporotic fractures in asymptomatic adults#Radiology#2020#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.nature.com/articles/s41467-023-39631-x",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Ayis Pyrros",
+      "Stephen M. Borstelmann",
+      "Ramana Mantravadi",
+      "Zachary Zaiman",
+      "Kaesha Thomas",
+      "Brandon Price",
+      "Eugene Greenstein",
+      "Nasir Siddiqui",
+      "Melinda Willis",
+      "Ihar Shulhan",
+      "John Hines-Shah",
+      "Jeanne M. Horowitz",
+      "Paul Nikolaidis",
+      "Matthew P. Lungren",
+      "Jorge Mario Rodrguez-Fernndez",
+      "Judy Wawira Gichoya",
+      "Sanmi Koyejo",
+      "Adam E. Flanders",
+      "Nishith Khandwala",
+      "Amit Gupta",
+      "John W. Garrett",
+      "Joseph Paul Cohen",
+      "Brian T. Layden",
+      "Perry J. Pickhardt",
+      "William Galanter"
+    ],
+    "venue": "Nature Communications",
+    "title": "Opportunistic detection of type 2 diabetes using deep learning from frontal chest radiographs",
+    "raw_text": "Ayis Pyrros*Stephen M. Borstelmann*Ramana Mantravadi*Zachary Zaiman*Kaesha Thomas*Brandon Price*Eugene Greenstein*Nasir Siddiqui*Melinda Willis*Ihar Shulhan*John Hines-Shah*Jeanne M. Horowitz*Paul Nikolaidis*Matthew P. Lungren*Jorge Mario Rodrguez-Fernndez*Judy Wawira Gichoya*Sanmi Koyejo*Adam E. Flanders*Nishith Khandwala*Amit Gupta*John W. Garrett*Joseph Paul Cohen*Brian T. Layden*Perry J. Pickhardt*William Galanter#Opportunistic detection of type 2 diabetes using deep learning from frontal chest radiographs#Nature Communications#2023#https://www.nature.com/articles/s41467-023-39631-x",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2012,
+    "authors": [
+      "Vera Regitz-Zagrosek"
+    ],
+    "venue": "Springer",
+    "title": "Sex and Gender Differences in Pharmacology",
+    "raw_text": "Vera Regitz-Zagrosek#Sex and Gender Differences in Pharmacology#Springer#2012#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2015,
+    "authors": [
+      "Olaf Ronneberger",
+      "Philipp Fischer",
+      "Thomas Brox"
+    ],
+    "venue": "MICCAI",
+    "title": "U-net: Convolutional networks for biomedical image segmentation",
+    "raw_text": "Olaf Ronneberger*Philipp Fischer*Thomas Brox#U-net: Convolutional networks for biomedical image segmentation#MICCAI#2015#",
+    "type": "other"
+  },
+  {
+    "url": "https://www.jacc.org/doi/10.1016/j.jcmg.2012.11.021",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "Klara J. Rosenquist",
+      "Alison Pedley",
+      "Joseph M. Massaro",
+      "Kate E. Therkelsen",
+      "Joanne M. Murabito",
+      "Udo Hoffmann",
+      "Caroline S. Fox"
+    ],
+    "venue": "JACC: Cardiovascular Imaging",
+    "title": "Visceral and Subcutaneous Fat Quality and Cardiometabolic Risk",
+    "raw_text": "Klara J. Rosenquist*Alison Pedley*Joseph M. Massaro*Kate E. Therkelsen*Joanne M. Murabito*Udo Hoffmann*Caroline S. Fox#Visceral and Subcutaneous Fat Quality and Cardiometabolic Risk#JACC: Cardiovascular Imaging#2013#https://www.jacc.org/doi/10.1016/j.jcmg.2012.11.021",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Ramprasaath R Selvaraju",
+      "Michael Cogswell",
+      "Abhishek Das",
+      "Ramakrishna Vedantam",
+      "Devi Parikh",
+      "Dhruv Batra"
+    ],
+    "venue": "Proceedings of the IEEE international conference on computer vision",
+    "title": "Grad-cam: Visual explanations from deep networks via gradient-based localization",
+    "raw_text": "Ramprasaath R Selvaraju*Michael Cogswell*Abhishek Das*Ramakrishna Vedantam*Devi Parikh*Dhruv Batra#Grad-cam: Visual explanations from deep networks via gradient-based localization#Proceedings of the IEEE international conference on computer vision#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.21105/joss.01450",
+    "doi": "10.21105/joss.01450",
+    "year": 2019,
+    "authors": [
+      "Bane Sullivan",
+      "Alexander Kaszynski"
+    ],
+    "venue": "Journal of Open Source Software",
+    "title": "PyVista: 3D plotting and mesh analysis through a streamlined interface for the Visualization Toolkit (VTK)",
+    "raw_text": "Bane Sullivan*Alexander Kaszynski#PyVista: 3D plotting and mesh analysis through a streamlined interface for the Visualization Toolkit (VTK)#Journal of Open Source Software#2019#https://doi.org/10.21105/joss.01450",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11306271/",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Katherine Sweatt",
+      "W. Timothy Garvey",
+      "Catia Martins"
+    ],
+    "venue": "Current Obesity Reports",
+    "title": "Strengths and Limitations of BMI in the Diagnosis of Obesity: What is the Path Forward?",
+    "raw_text": "Katherine Sweatt*W. Timothy Garvey*Catia Martins#Strengths and Limitations of BMI in the Diagnosis of Obesity: What is the Path Forward?#Current Obesity Reports#2024#https://www.ncbi.nlm.nih.gov/pmc/articles/PMC11306271/",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://proceedings.mlr.press/v97/tan19a.html",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Mingxing Tan",
+      "Quoc Le"
+    ],
+    "venue": "Proceedings of the 36th International Conference on Machine Learning",
+    "title": "EfficientNet: Rethinking model scaling for convolutional neural networks",
+    "raw_text": "Mingxing Tan*Quoc Le#EfficientNet: Rethinking model scaling for convolutional neural networks#Proceedings of the 36th International Conference on Machine Learning#2019#https://proceedings.mlr.press/v97/tan19a.html",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://www.ahajournals.org/doi/10.1161/atvbaha.112.301009",
+    "doi": null,
+    "year": 2013,
+    "authors": [
+      "Kate E. Therkelsen",
+      "Alison Pedley",
+      "Elizabeth K. Speliotes",
+      "Joseph M. Massaro",
+      "Joanne Murabito",
+      "Udo Hoffmann",
+      "Caroline S. Fox"
+    ],
+    "venue": "Arteriosclerosis, Thrombosis, and Vascular Biology",
+    "title": "Intramuscular Fat and Associations With Metabolic Risk Factors in the Framingham Heart Study",
+    "raw_text": "Kate E. Therkelsen*Alison Pedley*Elizabeth K. Speliotes*Joseph M. Massaro*Joanne Murabito*Udo Hoffmann*Caroline S. Fox#Intramuscular Fat and Associations With Metabolic Risk Factors in the Framingham Heart Study#Arteriosclerosis, Thrombosis, and Vascular Biology#2013#https://www.ahajournals.org/doi/10.1161/atvbaha.112.301009",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Diana M. Thomas",
+      "Ira Crofford",
+      "John Scudder",
+      "Brittany Oletti",
+      "Ashok Deb",
+      "Steven B. Heymsfield"
+    ],
+    "venue": "Current Obesity Reports",
+    "title": "Updates on methods for body composition analysis: Implications for clinical practice",
+    "raw_text": "Diana M. Thomas*Ira Crofford*John Scudder*Brittany Oletti*Ashok Deb*Steven B. Heymsfield#Updates on methods for body composition analysis: Implications for clinical practice#Current Obesity Reports#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.11578",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Vamsi Krishna Vasa",
+      "Wenhui Zhu",
+      "Xiwen Chen",
+      "Peijie Qiu",
+      "Xuanzhao Dong",
+      "Yalin Wang"
+    ],
+    "venue": "arXiv preprint arXiv:2410.11578",
+    "title": "Sta-unet: Rethink the semantic redundant for medical imaging segmentation",
+    "raw_text": "Vamsi Krishna Vasa*Wenhui Zhu*Xiwen Chen*Peijie Qiu*Xuanzhao Dong*Yalin Wang#Sta-unet: Rethink the semantic redundant for medical imaging segmentation#arXiv preprint arXiv:2410.11578#2024#https://arxiv.org/abs/2410.11578",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://www.sciencedirect.com/science/article/pii/S0021929024005189",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Zoran Vasic",
+      "et al"
+    ],
+    "venue": "Journal of Biomechanics",
+    "title": "Lidar-based scaling of opensim musculoskeletal human models is accurate and efficient—a validation study using 3d body scanning",
+    "raw_text": "Zoran Vasic*et al#Lidar-based scaling of opensim musculoskeletal human models is accurate and efficient—a validation study using 3d body scanning#Journal of Biomechanics#2024#https://www.sciencedirect.com/science/article/pii/S0021929024005189",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2402.02491",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Fan Wang",
+      "Jian Huang"
+    ],
+    "venue": "arXiv preprint arXiv:2402.02491",
+    "title": "Vm-unet: Vision mamba unet for medical image segmentation",
+    "raw_text": "Fan Wang*Jian Huang#Vm-unet: Vision mamba unet for medical image segmentation#arXiv preprint arXiv:2402.02491#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2007,
+    "authors": [
+      "Jonathan C. K. Wells"
+    ],
+    "venue": "Best Practice & Research Clinical Endocrinology & Metabolism",
+    "title": "Sexual dimorphism of body composition",
+    "raw_text": "Jonathan C. K. Wells#Sexual dimorphism of body composition#Best Practice & Research Clinical Endocrinology & Metabolism#2007#",
+    "type": "other"
+  },
+  {
+    "url": "http://ui.adsabs.harvard.edu/abs/2022AIPC.2430i0009M/abstract",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Mikalai Zamotsin",
+      "Andrey Dyagilev",
+      "Hawas S. Hawaz",
+      "Ttiana olovenko",
+      "Oleksandr Shovkomud"
+    ],
+    "venue": "American Institute of Physics Conference Series",
+    "title": "Human body measurement with the iphone 12 pro lidar scanner",
+    "raw_text": "Mikalai Zamotsin*Andrey Dyagilev*Hawas S. Hawaz*Ttiana olovenko*Oleksandr Shovkomud#Human body measurement with the iphone 12 pro lidar scanner#American Institute of Physics Conference Series#2022#http://ui.adsabs.harvard.edu/abs/2022AIPC.2430i0009M/abstract",
+    "type": "non-arxiv"
+  },
+  {
+    "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7329239/",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Zongwei Zhou",
+      "Md Mahfuzur Rahman Siddiquee",
+      "Nima Tajbakhsh",
+      "Jianming Liang"
+    ],
+    "venue": "Deep Learning in Medical Image Analysis and Multimodal Learning for Clinical Decision Support (MICCAI)",
+    "title": "Unet++: A nested u-net architecture for medical image segmentation",
+    "raw_text": "Zongwei Zhou*Md Mahfuzur Rahman Siddiquee*Nima Tajbakhsh*Jianming Liang#Unet++: A nested u-net architecture for medical image segmentation#Deep Learning in Medical Image Analysis and Multimodal Learning for Clinical Decision Support (MICCAI)#2018#https://pmc.ncbi.nlm.nih.gov/articles/PMC7329239/",
+    "type": "non-arxiv"
+  }
+]

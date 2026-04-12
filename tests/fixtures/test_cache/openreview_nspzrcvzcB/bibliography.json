@@ -1,0 +1,1600 @@
+[
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Sungsoo Ahn",
+      "Shell Xu Hu",
+      "Andreas Damianou",
+      "Neil D Lawrence",
+      "Zhenwen Dai"
+    ],
+    "venue": "Proceedings of the IEEE/CVF conference on computer vision and pattern recognition",
+    "title": "Variational information distillation for knowledge transfer",
+    "raw_text": "Sungsoo Ahn*Shell Xu Hu*Andreas Damianou*Neil D Lawrence*Zhenwen Dai#Variational information distillation for knowledge transfer#Proceedings of the IEEE/CVF conference on computer vision and pattern recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2006,
+    "authors": [
+      "Petar S Aleksic",
+      "Aggelos K Katsaggelos"
+    ],
+    "venue": "Proceedings of the IEEE",
+    "title": "Audio-visual biometrics",
+    "raw_text": "Petar S Aleksic*Aggelos K Katsaggelos#Audio-visual biometrics#Proceedings of the IEEE#2006#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Lucas Beyer",
+      "Xiaohua Zhai",
+      "Amélie Royer",
+      "Larisa Markeeva",
+      "Rohan Anil",
+      "Alexander Kolesnikov"
+    ],
+    "venue": "CVPR",
+    "title": "Knowledge distillation: A good teacher is patient and consistent",
+    "raw_text": "Lucas Beyer*Xiaohua Zhai*Amélie Royer*Larisa Markeeva*Rohan Anil*Alexander Kolesnikov#Knowledge distillation: A good teacher is patient and consistent#CVPR#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Mathilde Caron",
+      "Hugo Touvron",
+      "Ishan Misra",
+      "Hervé Jégou",
+      "Julien Mairal",
+      "Piotr Bojanowski",
+      "Armand Joulin"
+    ],
+    "venue": "ICCV",
+    "title": "Emerging properties in self-supervised vision transformers",
+    "raw_text": "Mathilde Caron*Hugo Touvron*Ishan Misra*Hervé Jégou*Julien Mairal*Piotr Bojanowski*Armand Joulin#Emerging properties in self-supervised vision transformers#ICCV#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Marvin Chancán",
+      "Alex Wong",
+      "Ian Abraham"
+    ],
+    "venue": "2025 International Conference on Advanced Robotics and Mechatronics (ICARM)",
+    "title": "3d reprojection-driven robot navigation improves depth sensing",
+    "raw_text": "Marvin Chancán*Alex Wong*Ian Abraham#3d reprojection-driven robot navigation improves depth sensing#2025 International Conference on Advanced Robotics and Mechatronics (ICARM)#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Honglie Chen",
+      "Weidi Xie",
+      "Andrea Vedaldi",
+      "Andrew Zisserman"
+    ],
+    "venue": "ICASSP",
+    "title": "VGGSound: A large-scale audio-visual dataset",
+    "raw_text": "Honglie Chen*Weidi Xie*Andrea Vedaldi*Andrew Zisserman#VGGSound: A large-scale audio-visual dataset#ICASSP#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Runjian Chen",
+      "Hyoungseob Park",
+      "Bo Zhang",
+      "Wenqi Shao",
+      "Ping Luo",
+      "Alex Wong"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Trend: Unsupervised 3d representation learning via temporal forecasting for lidar perception",
+    "raw_text": "Runjian Chen*Hyoungseob Park*Bo Zhang*Wenqi Shao*Ping Luo*Alex Wong#Trend: Unsupervised 3d representation learning via temporal forecasting for lidar perception#Advances in neural information processing systems#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2026,
+    "authors": [
+      "Runjian Chen",
+      "Hang Zhang",
+      "Avinash Ravichandran",
+      "Hyoungseob Park",
+      "Wenqi Shao",
+      "Alex Wong",
+      "Ping Luo"
+    ],
+    "venue": "The Fourteenth International Conference on Learning Representations",
+    "title": "Clap: Unsupervised 3d representation learning for fusion 3d perception via curvature sampling and prototype learning",
+    "raw_text": "Runjian Chen*Hang Zhang*Avinash Ravichandran*Hyoungseob Park*Wenqi Shao*Alex Wong*Ping Luo#Clap: Unsupervised 3d representation learning for fusion 3d perception via curvature sampling and prototype learning#The Fourteenth International Conference on Learning Representations#2026#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1998,
+    "authors": [
+      "Tsuhan Chen",
+      "Ram R Rao"
+    ],
+    "venue": "Proceedings of the IEEE",
+    "title": "Audio-visual integration in multimodal communication",
+    "raw_text": "Tsuhan Chen*Ram R Rao#Audio-visual integration in multimodal communication#Proceedings of the IEEE#1998#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2410.18074",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Xien Chen",
+      "Suchisrit Gangopadhyay",
+      "Michael Chu",
+      "Patrick Rim",
+      "Hyoungseob Park",
+      "Alex Wong"
+    ],
+    "venue": "arXiv preprint arXiv:2410.18074",
+    "title": "Uncle: Benchmarking unsupervised continual learning for depth completion",
+    "raw_text": "Xien Chen*Suchisrit Gangopadhyay*Michael Chu*Patrick Rim*Hyoungseob Park*Alex Wong#Uncle: Benchmarking unsupervised continual learning for depth completion#arXiv preprint arXiv:2410.18074#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Euntae Choi",
+      "Youshin Lim",
+      "Byeong-Yeol Kim",
+      "Hyung Yong Kim",
+      "Hanbin Lee",
+      "Yunkyu Lim",
+      "Seung Woo Yu",
+      "Sungjoo Yoo"
+    ],
+    "venue": "ICASSP 2023-2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)",
+    "title": "Masked token similarity transfer for compressing transformer-based asr models",
+    "raw_text": "Euntae Choi*Youshin Lim*Byeong-Yeol Kim*Hyung Yong Kim*Hanbin Lee*Yunkyu Lim*Seung Woo Yu*Sungjoo Yoo#Masked token similarity transfer for compressing transformer-based asr models#ICASSP 2023-2023 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Younjoon Chung",
+      "Hyoungseob Park",
+      "Patrick Rim",
+      "Xiaoran Zhang",
+      "Jihe He",
+      "Ziyao Zeng",
+      "Safa Cicek",
+      "Byung-Woo Hong",
+      "James S. Duncan",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Eta: Energy-based test-time adaptation for depth completion",
+    "raw_text": "Younjoon Chung*Hyoungseob Park*Patrick Rim*Xiaoran Zhang*Jihe He*Ziyao Zeng*Safa Cicek*Byung-Woo Hong*James S. Duncan*Alex Wong#Eta: Energy-based test-time adaptation for depth completion#Proceedings of the IEEE/CVF International Conference on Computer Vision#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Y. Deng",
+      "X. Chen",
+      "J. Zhao",
+      "Z. Wu"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Cross-architecture knowledge distillation",
+    "raw_text": "Y. Deng*X. Chen*J. Zhao*Z. Wu#Cross-architecture knowledge distillation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2026,
+    "authors": [
+      "Ruxiao Duan",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the Computer Vision and Pattern Recognition Conference",
+    "title": "Evidential neural radiance fields",
+    "raw_text": "Ruxiao Duan*Alex Wong#Evidential neural radiance fields#Proceedings of the Computer Vision and Pattern Recognition Conference#2026#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Ariel Ephrat",
+      "Inbar Mosseri",
+      "Oran Lang",
+      "Tali Dekel",
+      "Kevin Wilson",
+      "Avinatan Hassidim",
+      "William T Freeman",
+      "Michael Rubinstein"
+    ],
+    "venue": "ACM Transactions on Graphics (TOG)",
+    "title": "Looking to listen at the cocktail party: a speaker-independent audio-visual model for speech separation",
+    "raw_text": "Ariel Ephrat*Inbar Mosseri*Oran Lang*Tali Dekel*Kevin Wilson*Avinatan Hassidim*William T Freeman*Michael Rubinstein#Looking to listen at the cocktail party: a speaker-independent audio-visual model for speech separation#ACM Transactions on Graphics (TOG)#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Vadim Ezhov",
+      "Hyoungseob Park",
+      "Zhaoyang Zhang",
+      "Rishi Upadhyay",
+      "Howard Zhang",
+      "Chethan Chinder Chandrappa",
+      "Achuta Kadambi",
+      "Yunhao Ba",
+      "Julie Dorsey",
+      "Alex Wong"
+    ],
+    "venue": "2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)",
+    "title": "All-day depth completion",
+    "raw_text": "Vadim Ezhov*Hyoungseob Park*Zhaoyang Zhang*Rishi Upadhyay*Howard Zhang*Chethan Chinder Chandrappa*Achuta Kadambi*Yunhao Ba*Julie Dorsey*Alex Wong#All-day depth completion#2024 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Xiaohan Fei",
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "IEEE Robotics and Automation Letters",
+    "title": "Geo-supervised visual depth prediction",
+    "raw_text": "Xiaohan Fei*Alex Wong*Stefano Soatto#Geo-supervised visual depth prediction#IEEE Robotics and Automation Letters#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Suchisrit Gangopadhyay",
+      "Jung-Hee Kim",
+      "Xien Chen",
+      "Patrick Rim",
+      "Hyoungseob Park",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Extending foundational monocular depth estimators to fisheye cameras with calibration tokens",
+    "raw_text": "Suchisrit Gangopadhyay*Jung-Hee Kim*Xien Chen*Patrick Rim*Hyoungseob Park*Alex Wong#Extending foundational monocular depth estimators to fisheye cameras with calibration tokens#Proceedings of the IEEE/CVF International Conference on Computer Vision#2025#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.48550/arXiv.2307.01146",
+    "doi": "10.48550/arXiv.2307.01146",
+    "year": 2023,
+    "authors": [
+      "Shengyi Gao",
+      "Zhe Chen",
+      "Guo Chen",
+      "Wenhai Wang",
+      "Tong Lu"
+    ],
+    "venue": "CoRR",
+    "title": "Avsegformer: Audio-visual segmentation with transformer",
+    "raw_text": "Shengyi Gao*Zhe Chen*Guo Chen*Wenhai Wang*Tong Lu#Avsegformer: Audio-visual segmentation with transformer#CoRR#2023#https://doi.org/10.48550/arXiv.2307.01146",
+    "type": "arxiv"
+  },
+  {
+    "url": "https://arxiv.org/abs/2210.07839",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Yuan Gong",
+      "Andrew Rouditchenko",
+      "Alexander H Liu",
+      "David Harwath",
+      "Leonid Karlinsky",
+      "Hilde Kuehne",
+      "James Glass"
+    ],
+    "venue": "arXiv preprint arXiv:2210.07839",
+    "title": "Contrastive audio-visual masked autoencoder",
+    "raw_text": "Yuan Gong*Andrew Rouditchenko*Alexander H Liu*David Harwath*Leonid Karlinsky*Hilde Kuehne*James Glass#Contrastive audio-visual masked autoencoder#arXiv preprint arXiv:2210.07839#2022#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Ziyao Guo",
+      "Haonan Yan",
+      "Hui Li",
+      "Xiaodong Lin"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Class attention transfer based knowledge distillation",
+    "raw_text": "Ziyao Guo*Haonan Yan*Hui Li*Xiaodong Lin#Class attention transfer based knowledge distillation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "A. Gupta",
+      "M. Brown",
+      "R. Clark"
+    ],
+    "venue": "Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing (EMNLP)",
+    "title": "Distilled dual-encoder model for vision-language understanding",
+    "raw_text": "A. Gupta*M. Brown*R. Clark#Distilled dual-encoder model for vision-language understanding#Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing (EMNLP)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Kaiming He",
+      "Xinlei Chen",
+      "Saining Xie",
+      "Yanghao Li",
+      "Piotr Dollár",
+      "Ross Girshick"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Masked autoencoders are scalable vision learners",
+    "raw_text": "Kaiming He*Xinlei Chen*Saining Xie*Yanghao Li*Piotr Dollár*Ross Girshick#Masked autoencoders are scalable vision learners#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Byeongho Heo",
+      "Minsik Lee",
+      "Sangdoo Yun",
+      "Jin Young Choi"
+    ],
+    "venue": "Proceedings of the AAAI conference on artificial intelligence",
+    "title": "Knowledge transfer via distillation of activation boundaries formed by hidden neurons",
+    "raw_text": "Byeongho Heo*Minsik Lee*Sangdoo Yun*Jin Young Choi#Knowledge transfer via distillation of activation boundaries formed by hidden neurons#Proceedings of the AAAI conference on artificial intelligence#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": null,
+    "authors": [
+      "Geoffrey Hinton",
+      "Oriol Vinyals",
+      "Jeff Dean"
+    ],
+    "venue": "",
+    "title": "Distilling the knowledge in a neural network",
+    "raw_text": "Geoffrey Hinton*Oriol Vinyals*Jeff Dean#Distilling the knowledge in a neural network#NeurIPS Deep Learning and Representation##",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Mu Hu",
+      "Shuling Wang",
+      "Bin Li",
+      "Shiyu Ning",
+      "Li Fan",
+      "Xiaojin Gong"
+    ],
+    "venue": "2021 IEEE International Conference on Robotics and Automation (ICRA)",
+    "title": "Penet: Towards precise and efficient image guided depth completion",
+    "raw_text": "Mu Hu*Shuling Wang*Bin Li*Shiyu Ning*Li Fan*Xiaojin Gong#Penet: Towards precise and efficient image guided depth completion#2021 IEEE International Conference on Robotics and Automation (ICRA)#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Di Huang",
+      "Sida Peng",
+      "Tong He",
+      "Honghui Yang",
+      "Xiaowei Zhou",
+      "Wanli Ouyang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Ponder: Point cloud pre-training via neural rendering",
+    "raw_text": "Di Huang*Sida Peng*Tong He*Honghui Yang*Xiaowei Zhou*Wanli Ouyang#Ponder: Point cloud pre-training via neural rendering#Proceedings of the IEEE/CVF International Conference on Computer Vision#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Po-Yao Huang",
+      "Vasu Sharma",
+      "Hu Xu",
+      "Chaitanya Ryali",
+      "Yanghao Li",
+      "Shang-Wen Li",
+      "Gargi Ghosh",
+      "Jitendra Malik",
+      "Christoph Feichtenhofer",
+      "et al"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Mavil: Masked audio-video learners",
+    "raw_text": "Po-Yao Huang*Vasu Sharma*Hu Xu*Chaitanya Ryali*Yanghao Li*Shang-Wen Li*Gargi Ghosh*Jitendra Malik*Christoph Feichtenhofer*et al#Mavil: Masked audio-video learners#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Y. Huang",
+      "J. Zhou",
+      "X. Wang",
+      "H. Zhang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Crkd: Enhanced camera-radar object detection with cross-modality knowledge distillation",
+    "raw_text": "Y. Huang*J. Zhou*X. Wang*H. Zhang#Crkd: Enhanced camera-radar object detection with cross-modality knowledge distillation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Chanhwi Jeong",
+      "Inhwan Bae",
+      "Jin-Hwi Park",
+      "Hae-Gon Jeon"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Test-time prompt tuning for zero-shot depth completion",
+    "raw_text": "Chanhwi Jeong*Inhwan Bae*Jin-Hwi Park*Hae-Gon Jeon#Test-time prompt tuning for zero-shot depth completion#Proceedings of the IEEE/CVF International Conference on Computer Vision#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Evangelos Kazakos",
+      "Arsha Nagrani",
+      "Andrew Zisserman",
+      "Dima Damen"
+    ],
+    "venue": "ICCV",
+    "title": "Epic-fusion: Audio-visual temporal binding for egocentric action recognition",
+    "raw_text": "Evangelos Kazakos*Arsha Nagrani*Andrew Zisserman*Dima Damen#Epic-fusion: Audio-visual temporal binding for egocentric action recognition#ICCV#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Evangelos Kazakos",
+      "Arsha Nagrani",
+      "Andrew Zisserman",
+      "Dima Damen"
+    ],
+    "venue": "ICASSP 2021-2021 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)",
+    "title": "Slow-fast auditory streams for audio recognition",
+    "raw_text": "Evangelos Kazakos*Arsha Nagrani*Andrew Zisserman*Dima Damen#Slow-fast auditory streams for audio recognition#ICASSP 2021-2021 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Jangho Kim",
+      "SeongUk Park",
+      "Nojun Kwak"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Paraphrasing complex network: Network compression via factor transfer",
+    "raw_text": "Jangho Kim*SeongUk Park*Nojun Kwak#Paraphrasing complex network: Network compression via factor transfer#Advances in neural information processing systems#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Dong Lao",
+      "Yangchao Wu",
+      "Tian Yu Liu",
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "International Conference on Machine Learning",
+    "title": "Sub-token vit embedding via stochastic resonance transformers",
+    "raw_text": "Dong Lao*Yangchao Wu*Tian Yu Liu*Alex Wong*Stefano Soatto#Sub-token vit embedding via stochastic resonance transformers#International Conference on Machine Learning#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Dong Lao",
+      "Fengyu Yang",
+      "Daniel Wang",
+      "Hyoungseob Park",
+      "Samuel Lu",
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "European Conference on Computer Vision",
+    "title": "On the viability of monocular depth pre-training for semantic segmentation",
+    "raw_text": "Dong Lao*Fengyu Yang*Daniel Wang*Hyoungseob Park*Samuel Lu*Alex Wong*Stefano Soatto#On the viability of monocular depth pre-training for semantic segmentation#European Conference on Computer Vision#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2408.03326",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Bo Li",
+      "Yuanhan Zhang",
+      "Dong Guo",
+      "Renrui Zhang",
+      "Feng Li",
+      "Hao Zhang",
+      "Kaichen Zhang",
+      "Peiyuan Zhang",
+      "Yanwei Li",
+      "Ziwei Liu",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2408.03326",
+    "title": "Llava-onevision: Easy visual task transfer",
+    "raw_text": "Bo Li*Yuanhan Zhang*Dong Guo*Renrui Zhang*Feng Li*Hao Zhang*Kaichen Zhang*Peiyuan Zhang*Yanwei Li*Ziwei Liu*et al#Llava-onevision: Easy visual task transfer#arXiv preprint arXiv:2408.03326#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Kexin Li",
+      "Zongxin Yang",
+      "Lei Chen",
+      "Yi Yang",
+      "Jun Xiao"
+    ],
+    "venue": "Proceedings of the 31st ACM International Conference on Multimedia",
+    "title": "Catr: Combinatorial-dependence audio-queried transformer for audio-visual video segmentation",
+    "raw_text": "Kexin Li*Zongxin Yang*Lei Chen*Yi Yang*Jun Xiao#Catr: Combinatorial-dependence audio-queried transformer for audio-visual video segmentation#Proceedings of the 31st ACM International Conference on Multimedia#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Yong Li",
+      "Yuanzhi Wang",
+      "Zhen Cui"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Decoupled multimodal distilling for emotion recognition",
+    "raw_text": "Yong Li*Yuanzhi Wang*Zhen Cui#Decoupled multimodal distilling for emotion recognition#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2403.19638",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yan-Bo Lin",
+      "Gedas Bertasius"
+    ],
+    "venue": "arXiv preprint arXiv:2403.19638",
+    "title": "Siamese vision transformers are scalable audio-visual learners",
+    "raw_text": "Yan-Bo Lin*Gedas Bertasius#Siamese vision transformers are scalable audio-visual learners#arXiv preprint arXiv:2403.19638#2024#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Yuankai Lin",
+      "Tao Cheng",
+      "Qi Zhong",
+      "Wending Zhou",
+      "Hua Yang"
+    ],
+    "venue": "Proceedings of the AAAI Conference on Artificial Intelligence",
+    "title": "Dynamic spatial propagation network for depth completion",
+    "raw_text": "Yuankai Lin*Tao Cheng*Qi Zhong*Wending Zhou*Hua Yang#Dynamic spatial propagation network for depth completion#Proceedings of the AAAI Conference on Artificial Intelligence#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Chen Liu",
+      "Peike Patrick Li",
+      "Xingqun Qi",
+      "Hu Zhang",
+      "Lincheng Li",
+      "Dadong Wang",
+      "Xin Yu"
+    ],
+    "venue": "Proceedings of the 31st ACM International Conference on Multimedia",
+    "title": "Audio-visual segmentation by exploring cross-modal mutual semantics",
+    "raw_text": "Chen Liu*Peike Patrick Li*Xingqun Qi*Hu Zhang*Lincheng Li*Dadong Wang*Xin Yu#Audio-visual segmentation by exploring cross-modal mutual semantics#Proceedings of the 31st ACM International Conference on Multimedia#2023#",
+    "type": "other"
+  },
+  {
+    "url": "https://doi.org/10.48550/arXiv.2307.13236",
+    "doi": "10.48550/arXiv.2307.13236",
+    "year": 2023,
+    "authors": [
+      "Jinxiang Liu",
+      "Chen Ju",
+      "Chaofan Ma",
+      "Yanfeng Wang",
+      "Yu Wang",
+      "Ya Zhang"
+    ],
+    "venue": "CoRR",
+    "title": "Audio-aware query-enhanced transformer for audio-visual segmentation",
+    "raw_text": "Jinxiang Liu*Chen Ju*Chaofan Ma*Yanfeng Wang*Yu Wang*Ya Zhang#Audio-aware query-enhanced transformer for audio-visual segmentation#CoRR#2023#https://doi.org/10.48550/arXiv.2307.13236",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jinxiang Liu",
+      "Yikun Liu",
+      "Fei Zhang",
+      "Chen Ju",
+      "Ya Zhang",
+      "Yanfeng Wang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Audio-visual segmentation via unlabeled frame exploitation",
+    "raw_text": "Jinxiang Liu*Yikun Liu*Fei Zhang*Chen Ju*Ya Zhang*Yanfeng Wang#Audio-visual segmentation via unlabeled frame exploitation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jinxiang Liu",
+      "Yu Wang",
+      "Chen Ju",
+      "Chaofan Ma",
+      "Ya Zhang",
+      "Weidi Xie"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision",
+    "title": "Annotation-free audio-visual segmentation",
+    "raw_text": "Jinxiang Liu*Yu Wang*Chen Ju*Chaofan Ma*Ya Zhang*Weidi Xie#Annotation-free audio-visual segmentation#Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Tian Yu Liu",
+      "Parth Agrawal",
+      "Allison Chen",
+      "Byung-Woo Hong",
+      "Alex Wong"
+    ],
+    "venue": "Computer Vision–ECCV 2022: 17th European Conference",
+    "title": "Monitored distillation for positive congruent depth completion",
+    "raw_text": "Tian Yu Liu*Parth Agrawal*Allison Chen*Byung-Woo Hong*Alex Wong#Monitored distillation for positive congruent depth completion#Computer Vision–ECCV 2022: 17th European Conference#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Ze Liu",
+      "Yutong Lin",
+      "Yue Cao",
+      "Han Hu",
+      "Yixuan Wei",
+      "Zheng Zhang",
+      "Stephen Lin",
+      "Baining Guo"
+    ],
+    "venue": "Proceedings of the IEEE/CVF international conference on computer vision",
+    "title": "Swin transformer: Hierarchical vision transformer using shifted windows",
+    "raw_text": "Ze Liu*Yutong Lin*Yue Cao*Han Hu*Yixuan Wei*Zheng Zhang*Stephen Lin*Baining Guo#Swin transformer: Hierarchical vision transformer using shifted windows#Proceedings of the IEEE/CVF international conference on computer vision#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Chaofan Ma",
+      "Yang Yuhuan",
+      "Chen Ju",
+      "Fei Zhang",
+      "Ya Zhang",
+      "Yanfeng Wang"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "Open-vocabulary semantic segmentation via attribute decomposition-aggregation",
+    "raw_text": "Chaofan Ma*Yang Yuhuan*Chen Ju*Fei Zhang*Ya Zhang*Yanfeng Wang#Open-vocabulary semantic segmentation via attribute decomposition-aggregation#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Yuxin Mao",
+      "Jing Zhang",
+      "Mochu Xiang",
+      "Yiran Zhong",
+      "Yuchao Dai"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Multimodal variational auto-encoder based audio-visual segmentation",
+    "raw_text": "Yuxin Mao*Jing Zhang*Mochu Xiang*Yiran Zhong*Yuchao Dai#Multimodal variational auto-encoder based audio-visual segmentation#Proceedings of the IEEE/CVF International Conference on Computer Vision#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Roy Miles",
+      "Ismail Elezi",
+      "Jiankang Deng"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Vkd: Improving knowledge distillation using orthogonal projections",
+    "raw_text": "Roy Miles*Ismail Elezi*Jiankang Deng#Vkd: Improving knowledge distillation using orthogonal projections#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Arsha Nagrani",
+      "Shan Yang",
+      "Anurag Arnab",
+      "Aren Jansen",
+      "Cordelia Schmid",
+      "Chen Sun"
+    ],
+    "venue": "NeurIPS",
+    "title": "Attention bottlenecks for multimodal fusion",
+    "raw_text": "Arsha Nagrani*Shan Yang*Anurag Arnab*Aren Jansen*Cordelia Schmid*Chen Sun#Attention bottlenecks for multimodal fusion#NeurIPS#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2011,
+    "authors": [
+      "Jiquan Ngiam",
+      "Aditya Khosla",
+      "Mingyu Kim",
+      "Juhan Nam",
+      "Honglak Lee",
+      "Andrew Y Ng"
+    ],
+    "venue": "ICML",
+    "title": "Multi-modal deep learning",
+    "raw_text": "Jiquan Ngiam*Aditya Khosla*Mingyu Kim*Juhan Nam*Honglak Lee*Andrew Y Ng#Multi-modal deep learning#ICML#2011#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Hyoungseob Park",
+      "Anjali Gupta",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Test-time adaptation for depth completion",
+    "raw_text": "Hyoungseob Park*Anjali Gupta*Alex Wong#Test-time adaptation for depth completion#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2026,
+    "authors": [
+      "Hyoungseob Park",
+      "Runjian Chen",
+      "Patrick Rim",
+      "Dong Lao",
+      "Alex Wong"
+    ],
+    "venue": "The Fourteenth International Conference on Learning Representations",
+    "title": "Orcas: Unsupervised depth completion via occluded region completion as supervision",
+    "raw_text": "Hyoungseob Park*Runjian Chen*Patrick Rim*Dong Lao*Alex Wong#Orcas: Unsupervised depth completion via occluded region completion as supervision#The Fourteenth International Conference on Learning Representations#2026#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Jin-Hwi Park",
+      "Hae-Gon Jeon"
+    ],
+    "venue": "Advances in Neural Information Processing Systems",
+    "title": "A simple yet universal framework for depth completion",
+    "raw_text": "Jin-Hwi Park*Hae-Gon Jeon#A simple yet universal framework for depth completion#Advances in Neural Information Processing Systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Jinsun Park",
+      "Kyungdon Joo",
+      "Zhe Hu",
+      "Chi-Kuei Liu",
+      "In So Kweon"
+    ],
+    "venue": "Computer Vision–ECCV 2020: 16th European Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part XIII 16",
+    "title": "Non-local spatial propagation network for depth completion",
+    "raw_text": "Jinsun Park*Kyungdon Joo*Zhe Hu*Chi-Kuei Liu*In So Kweon#Non-local spatial propagation network for depth completion#Computer Vision–ECCV 2020: 16th European Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part XIII 16#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Wonpyo Park",
+      "Dongju Kim",
+      "Yan Lu",
+      "Minsu Cho"
+    ],
+    "venue": "Proceedings of the IEEE/CVF conference on computer vision and pattern recognition",
+    "title": "Relational knowledge distillation",
+    "raw_text": "Wonpyo Park*Dongju Kim*Yan Lu*Minsu Cho#Relational knowledge distillation#Proceedings of the IEEE/CVF conference on computer vision and pattern recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2018,
+    "authors": [
+      "Nikolaos Passalis",
+      "Anastasios Tefas"
+    ],
+    "venue": "Proceedings of the European Conference on Computer Vision (ECCV)",
+    "title": "Learning deep representations with probabilistic knowledge transfer",
+    "raw_text": "Nikolaos Passalis*Anastasios Tefas#Learning deep representations with probabilistic knowledge transfer#Proceedings of the European Conference on Computer Vision (ECCV)#2018#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Baoyun Peng",
+      "Xiao Jin",
+      "Jiaheng Liu",
+      "Dongsheng Li",
+      "Yichao Wu",
+      "Yu Liu",
+      "Shunfeng Zhou",
+      "Zhaoning Zhang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Correlation congruence for knowledge distillation",
+    "raw_text": "Baoyun Peng*Xiao Jin*Jiaheng Liu*Dongsheng Li*Yichao Wu*Yu Liu*Shunfeng Zhou*Zhaoning Zhang#Correlation congruence for knowledge distillation#Proceedings of the IEEE/CVF International Conference on Computer Vision#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2003,
+    "authors": [
+      "Gerasimos Potamianos",
+      "Chalapathy Neti",
+      "Guillaume Gravier",
+      "Ashutosh Garg",
+      "Andrew W Senior"
+    ],
+    "venue": "Proceedings of the IEEE",
+    "title": "Recent advances in the automatic recognition of audiovisual speech",
+    "raw_text": "Gerasimos Potamianos*Chalapathy Neti*Guillaume Gravier*Ashutosh Garg*Andrew W Senior#Recent advances in the automatic recognition of audiovisual speech#Proceedings of the IEEE#2003#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alec Radford",
+      "Jong Wook Kim",
+      "Chris Hallacy",
+      "Aditya Ramesh",
+      "Gabriel Goh",
+      "Sandhini Agarwal",
+      "Girish Sastry",
+      "Amanda Askell",
+      "Pamela Mishkin",
+      "Jack Clark",
+      "Gretchen Krueger",
+      "Ilya Sutskever"
+    ],
+    "venue": "ICML",
+    "title": "Learning transferable visual models from natural language supervision",
+    "raw_text": "Alec Radford*Jong Wook Kim*Chris Hallacy*Aditya Ramesh*Gabriel Goh*Sandhini Agarwal*Girish Sastry*Amanda Askell*Pamela Mishkin*Jack Clark*Gretchen Krueger*Ilya Sutskever#Learning transferable visual models from natural language supervision#ICML#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Patrick Rim",
+      "Hyoungseob Park",
+      "Ziyao Zeng",
+      "Younjoon Chung",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the Computer Vision and Pattern Recognition Conference",
+    "title": "Protodepth: Unsupervised continual depth completion with prototypes",
+    "raw_text": "Patrick Rim*Hyoungseob Park*Ziyao Zeng*Younjoon Chung*Alex Wong#Protodepth: Unsupervised continual depth completion with prototypes#Proceedings of the Computer Vision and Pattern Recognition Conference#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2026,
+    "authors": [
+      "Patrick Rim",
+      "Hyoungseob Park",
+      "Vadim Ezhov",
+      "Jeffrey Moon",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the Computer Vision and Pattern Recognition Conference",
+    "title": "Radar-guided polynomial fitting for metric depth estimation",
+    "raw_text": "Patrick Rim*Hyoungseob Park*Vadim Ezhov*Jeffrey Moon*Alex Wong#Radar-guided polynomial fitting for metric depth estimation#Proceedings of the Computer Vision and Pattern Recognition Conference#2026#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "Akash Deep Singh",
+      "Yunhao Ba",
+      "Ankur Sarker",
+      "Howard Zhang",
+      "Achuta Kadambi",
+      "Stefano Soatto",
+      "Mani Srivastava",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Depth estimation from camera image and mmwave radar point cloud",
+    "raw_text": "Akash Deep Singh*Yunhao Ba*Ankur Sarker*Howard Zhang*Achuta Kadambi*Stefano Soatto*Mani Srivastava*Alex Wong#Depth estimation from camera image and mmwave radar point cloud#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Yonglong Tian",
+      "Dilip Krishnan",
+      "Phillip Isola"
+    ],
+    "venue": "ICLR",
+    "title": "Contrastive representation distillation",
+    "raw_text": "Yonglong Tian*Dilip Krishnan*Phillip Isola#Contrastive representation distillation#ICLR#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Frederick Tung",
+      "Greg Mori"
+    ],
+    "venue": "Proceedings of the IEEE/CVF international conference on computer vision",
+    "title": "Similarity-preserving knowledge distillation",
+    "raw_text": "Frederick Tung*Greg Mori#Similarity-preserving knowledge distillation#Proceedings of the IEEE/CVF international conference on computer vision#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 1997,
+    "authors": [
+      "Vladimir N Vapnik"
+    ],
+    "venue": "International conference on artificial neural networks",
+    "title": "The support vector method",
+    "raw_text": "Vladimir N Vapnik#The support vector method#International conference on artificial neural networks#1997#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Ashish Vaswani",
+      "Noam Shazeer",
+      "Niki Parmar",
+      "Jakob Uszkoreit",
+      "Llion Jones",
+      "Aidan N Gomez",
+      "Łukasz Kaiser",
+      "Illia Polosukhin"
+    ],
+    "venue": "NeurIPS",
+    "title": "Attention is all you need",
+    "raw_text": "Ashish Vaswani*Noam Shazeer*Niki Parmar*Jakob Uszkoreit*Llion Jones*Aidan N Gomez*Łukasz Kaiser*Illia Polosukhin#Attention is all you need#NeurIPS#2017#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2026,
+    "authors": [
+      "Daniel Wang",
+      "Patrick Rim",
+      "Tian Tian",
+      "Dong Lao",
+      "Alex Wong",
+      "Ganesh Sundaramoorthi"
+    ],
+    "venue": "The Fourteenth International Conference on Learning Representations",
+    "title": "Ode-gs: Latent odes for dynamic scene extrapolation with 3d gaussian splatting",
+    "raw_text": "Daniel Wang*Patrick Rim*Tian Tian*Dong Lao*Alex Wong*Ganesh Sundaramoorthi#Ode-gs: Latent odes for dynamic scene extrapolation with 3d gaussian splatting#The Fourteenth International Conference on Learning Representations#2026#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2023,
+    "authors": [
+      "H. Wang",
+      "X. Li",
+      "Q. Zhang"
+    ],
+    "venue": "Advances in Neural Information Processing Systems (NeurIPS)",
+    "title": "Learnable cross-modal knowledge distillation for multi-modal learning with missing modality",
+    "raw_text": "H. Wang*X. Li*Q. Zhang#Learnable cross-modal knowledge distillation for multi-modal learning with missing modality#Advances in Neural Information Processing Systems (NeurIPS)#2023#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Kai Wang",
+      "Dimitrios Hatzinakos"
+    ],
+    "venue": "ICASSP 2024-2024 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)",
+    "title": "Moma: Mixture-of-modality-adaptations for transferring knowledge from image models towards efficient audio-visual action recognition",
+    "raw_text": "Kai Wang*Dimitrios Hatzinakos#Moma: Mixture-of-modality-adaptations for transferring knowledge from image models towards efficient audio-visual action recognition#ICASSP 2024-2024 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Wenhai Wang",
+      "Enze Xie",
+      "Xiang Li",
+      "Deng-Ping Fan",
+      "Kaitao Song",
+      "Ding Liang",
+      "Tong Lu",
+      "Ping Luo",
+      "Ling Shao"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Pyramid vision transformer: A versatile backbone for dense prediction without convolutions",
+    "raw_text": "Wenhai Wang*Enze Xie*Xiang Li*Deng-Ping Fan*Kaitao Song*Ding Liang*Tong Lu*Ping Luo*Ling Shao#Pyramid vision transformer: A versatile backbone for dense prediction without convolutions#Proceedings of the IEEE/CVF International Conference on Computer Vision#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2212.03191",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Yi Wang",
+      "Kunchang Li",
+      "Yizhuo Li",
+      "Yinan He",
+      "Bingkun Huang",
+      "Zhiyu Zhao",
+      "Hongjie Zhang",
+      "Jilan Xu",
+      "Yi Liu",
+      "Zun Wang",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2212.03191",
+    "title": "Internvideo: General video foundation models via generative and discriminative learning",
+    "raw_text": "Yi Wang*Kunchang Li*Yizhuo Li*Yinan He*Bingkun Huang*Zhiyu Zhao*Hongjie Zhang*Jilan Xu*Yi Liu*Zun Wang*et al#Internvideo: General video foundation models via generative and discriminative learning#arXiv preprint arXiv:2212.03191#2022#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yi Wang",
+      "Kunchang Li",
+      "Xinhao Li",
+      "Jiashuo Yu",
+      "Yinan He",
+      "Guo Chen",
+      "Baoqi Pei",
+      "Rongkun Zheng",
+      "Zun Wang",
+      "Yansong Shi",
+      "et al"
+    ],
+    "venue": "European Conference on Computer Vision",
+    "title": "Internvideo2: Scaling foundation models for multimodal video understanding",
+    "raw_text": "Yi Wang*Kunchang Li*Xinhao Li*Jiashuo Yu*Yinan He*Guo Chen*Baoqi Pei*Rongkun Zheng*Zun Wang*Yansong Shi*et al#Internvideo2: Scaling foundation models for multimodal video understanding#European Conference on Computer Vision#2025#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Bilateral cyclic constraint and adaptive regularization for unsupervised monocular depth prediction",
+    "raw_text": "Alex Wong*Stefano Soatto#Bilateral cyclic constraint and adaptive regularization for unsupervised monocular depth prediction#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Unsupervised depth completion with calibrated backprojection layers",
+    "raw_text": "Alex Wong*Stefano Soatto#Unsupervised depth completion with calibrated backprojection layers#Proceedings of the IEEE/CVF International Conference on Computer Vision#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Alex Wong",
+      "Xiaohan Fei",
+      "Stephanie Tsuei",
+      "Stefano Soatto"
+    ],
+    "venue": "IEEE Robotics and Automation Letters",
+    "title": "Unsupervised depth completion from visual inertial odometry",
+    "raw_text": "Alex Wong*Xiaohan Fei*Stephanie Tsuei*Stefano Soatto#Unsupervised depth completion from visual inertial odometry#IEEE Robotics and Automation Letters#2020#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alex Wong",
+      "Safa Cicek",
+      "Stefano Soatto"
+    ],
+    "venue": "IEEE Robotics and Automation Letters",
+    "title": "Learning topology from synthetic data for unsupervised depth completion",
+    "raw_text": "Alex Wong*Safa Cicek*Stefano Soatto#Learning topology from synthetic data for unsupervised depth completion#IEEE Robotics and Automation Letters#2021#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Alex Wong",
+      "Xiaohan Fei",
+      "Byung-Woo Hong",
+      "Stefano Soatto"
+    ],
+    "venue": "IEEE Robotics and Automation Letters",
+    "title": "An adaptive framework for learning unsupervised depth completion",
+    "raw_text": "Alex Wong*Xiaohan Fei*Byung-Woo Hong*Stefano Soatto#An adaptive framework for learning unsupervised depth completion#IEEE Robotics and Automation Letters#2021#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2508.02324",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Chenfei Wu",
+      "Jiahao Li",
+      "Jingren Zhou",
+      "Junyang Lin",
+      "Kaiyuan Gao",
+      "Kun Yan",
+      "Sheng-ming Yin",
+      "Shuai Bai",
+      "Xiao Xu",
+      "Yilei Chen",
+      "et al"
+    ],
+    "venue": "arXiv preprint arXiv:2508.02324",
+    "title": "Qwen-image technical report",
+    "raw_text": "Chenfei Wu*Jiahao Li*Jingren Zhou*Junyang Lin*Kaiyuan Gao*Kun Yan*Sheng-ming Yin*Shuai Bai*Xiao Xu*Yilei Chen*et al#Qwen-image technical report#arXiv preprint arXiv:2508.02324#2025#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Yangchao Wu",
+      "Tian Yu Liu",
+      "Hyoungseob Park",
+      "Stefano Soatto",
+      "Dong Lao",
+      "Alex Wong"
+    ],
+    "venue": "European Conference on Computer Vision",
+    "title": "Augundo: Scaling up augmentations for monocular depth completion and estimation",
+    "raw_text": "Yangchao Wu*Tian Yu Liu*Hyoungseob Park*Stefano Soatto*Dong Lao*Alex Wong#Augundo: Scaling up augmentations for monocular depth completion and estimation#European Conference on Computer Vision#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2001.08740",
+    "doi": null,
+    "year": 2020,
+    "authors": [
+      "Fanyi Xiao",
+      "Yong Jae Lee",
+      "Kristen Grauman",
+      "Jitendra Malik",
+      "Christoph Feichtenhofer"
+    ],
+    "venue": "arXiv preprint arXiv:2001.08740",
+    "title": "Audiovisual slowfast networks for video recognition",
+    "raw_text": "Fanyi Xiao*Yong Jae Lee*Kristen Grauman*Jitendra Malik*Christoph Feichtenhofer#Audiovisual slowfast networks for video recognition#arXiv preprint arXiv:2001.08740#2020#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Fengyu Yang",
+      "Chenyang Ma",
+      "Jiacheng Zhang",
+      "Jing Zhu",
+      "Wenzhen Yuan",
+      "Andrew Owens"
+    ],
+    "venue": "Proceedings of the 36th International Conference on Neural Information Processing Systems",
+    "title": "Touch and go: learning from human-collected vision and touch",
+    "raw_text": "Fengyu Yang*Chenyang Ma*Jiacheng Zhang*Jing Zhu*Wenzhen Yuan*Andrew Owens#Touch and go: learning from human-collected vision and touch#Proceedings of the 36th International Conference on Neural Information Processing Systems#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Fengyu Yang",
+      "Chao Feng",
+      "Ziyang Chen",
+      "Hyoungseob Park",
+      "Daniel Wang",
+      "Yiming Dou",
+      "Ziyao Zeng",
+      "Xien Chen",
+      "Rit Gangopadhyay",
+      "Andrew Owens",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Binding touch to everything: Learning unified multimodal tactile representations",
+    "raw_text": "Fengyu Yang*Chao Feng*Ziyang Chen*Hyoungseob Park*Daniel Wang*Yiming Dou*Ziyao Zeng*Xien Chen*Rit Gangopadhyay*Andrew Owens*Alex Wong#Binding touch to everything: Learning unified multimodal tactile representations#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Honghui Yang",
+      "Sha Zhang",
+      "Di Huang",
+      "Xiaoyang Wu",
+      "Haoyi Zhu",
+      "Tong He",
+      "Shixiang Tang",
+      "Hengshuang Zhao",
+      "Qibo Qiu",
+      "Binbin Lin",
+      "et al"
+    ],
+    "venue": "Proceedings of the IEEE/CVF conference on computer vision and pattern recognition",
+    "title": "Unipad: A universal pre-training paradigm for autonomous driving",
+    "raw_text": "Honghui Yang*Sha Zhang*Di Huang*Xiaoyang Wu*Haoyi Zhu*Tong He*Shixiang Tang*Hengshuang Zhao*Qibo Qiu*Binbin Lin*et al#Unipad: A universal pre-training paradigm for autonomous driving#Proceedings of the IEEE/CVF conference on computer vision and pattern recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Qi Yang",
+      "Xing Nie",
+      "Tong Li",
+      "Pengfei Gao",
+      "Ying Guo",
+      "Cheng Zhen",
+      "Pengfei Yan",
+      "Shiming Xiang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Cooperation does matter: Exploring multi-order bilateral relations for audio-visual segmentation",
+    "raw_text": "Qi Yang*Xing Nie*Tong Li*Pengfei Gao*Ying Guo*Cheng Zhen*Pengfei Yan*Shiming Xiang#Cooperation does matter: Exploring multi-order bilateral relations for audio-visual segmentation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2019,
+    "authors": [
+      "Yanchao Yang",
+      "Alex Wong",
+      "Stefano Soatto"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Dense depth posterior (ddp) from single image and sparse range",
+    "raw_text": "Yanchao Yang*Alex Wong*Stefano Soatto#Dense depth posterior (ddp) from single image and sparse range#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2019#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2017,
+    "authors": [
+      "Junho Yim",
+      "Donggyu Joo",
+      "Jihoon Bae",
+      "Junmo Kim"
+    ],
+    "venue": "Proceedings of the IEEE conference on computer vision and pattern recognition",
+    "title": "A gift from knowledge distillation: Fast optimization, network minimization and transfer learning",
+    "raw_text": "Junho Yim*Donggyu Joo*Jihoon Bae*Junmo Kim#A gift from knowledge distillation: Fast optimization, network minimization and transfer learning#Proceedings of the IEEE conference on computer vision and pattern recognition#2017#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/1612.03928",
+    "doi": null,
+    "year": 2016,
+    "authors": [
+      "Sergey Zagoruyko",
+      "Nikos Komodakis"
+    ],
+    "venue": "arXiv preprint arXiv:1612.03928",
+    "title": "Paying more attention to attention: Improving the performance of convolutional neural networks via attention transfer",
+    "raw_text": "Sergey Zagoruyko*Nikos Komodakis#Paying more attention to attention: Improving the performance of convolutional neural networks via attention transfer#arXiv preprint arXiv:1612.03928#2016#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Ziyao Zeng",
+      "Daniel Wang",
+      "Fengyu Yang",
+      "Hyoungseob Park",
+      "Stefano Soatto",
+      "Dong Lao",
+      "Alex Wong"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition",
+    "title": "Wordepth: Variational language prior for monocular depth estimation",
+    "raw_text": "Ziyao Zeng*Daniel Wang*Fengyu Yang*Hyoungseob Park*Stefano Soatto*Dong Lao*Alex Wong#Wordepth: Variational language prior for monocular depth estimation#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "Ziyao Zeng",
+      "Yangchao Wu",
+      "Hyoungseob Park",
+      "Daniel Wang",
+      "Fengyu Yang",
+      "Stefano Soatto",
+      "Dong Lao",
+      "Byung-Woo Hong",
+      "Alex Wong"
+    ],
+    "venue": "Advances in neural information processing systems",
+    "title": "Rsa: Resolving scale ambiguities in monocular depth estimators through language descriptions",
+    "raw_text": "Ziyao Zeng*Yangchao Wu*Hyoungseob Park*Daniel Wang*Fengyu Yang*Stefano Soatto*Dong Lao*Byung-Woo Hong*Alex Wong#Rsa: Resolving scale ambiguities in monocular depth estimators through language descriptions#Advances in neural information processing systems#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "F. Zheng",
+      "R. Li",
+      "W. Xu"
+    ],
+    "venue": "Proceedings of the European Conference on Computer Vision (ECCV)",
+    "title": "Mmanet: Margin-aware distillation and modality-aware regularization for incomplete multimodal learning",
+    "raw_text": "F. Zheng*R. Li*W. Xu#Mmanet: Margin-aware distillation and modality-aware regularization for incomplete multimodal learning#Proceedings of the European Conference on Computer Vision (ECCV)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jinxing Zhou",
+      "Jianyuan Wang",
+      "Jiayi Zhang",
+      "Weixuan Sun",
+      "Jing Zhang",
+      "Stan Birchfield",
+      "Dan Guo",
+      "Lingpeng Kong",
+      "Meng Wang",
+      "Yiran Zhong"
+    ],
+    "venue": "European Conference on Computer Vision",
+    "title": "Audio–visual segmentation",
+    "raw_text": "Jinxing Zhou*Jianyuan Wang*Jiayi Zhang*Weixuan Sun*Jing Zhang*Stan Birchfield*Dan Guo*Lingpeng Kong*Meng Wang*Yiran Zhong#Audio–visual segmentation#European Conference on Computer Vision#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jinxing Zhou",
+      "Jianyuan Wang",
+      "Jiayi Zhang",
+      "Weixuan Sun",
+      "Jing Zhang",
+      "Stan Birchfield",
+      "Dan Guo",
+      "Lingpeng Kong",
+      "Meng Wang",
+      "Yiran Zhong"
+    ],
+    "venue": "Proceedings of the European Conference on Computer Vision",
+    "title": "Audio-visual segmentation",
+    "raw_text": "Jinxing Zhou*Jianyuan Wang*Jiayi Zhang*Weixuan Sun*Jing Zhang*Stan Birchfield*Dan Guo*Lingpeng Kong*Meng Wang*Yiran Zhong#Audio-visual segmentation#Proceedings of the European Conference on Computer Vision#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2022,
+    "authors": [
+      "Jinxing Zhou",
+      "et al"
+    ],
+    "venue": "European Conference on Computer Vision (ECCV)",
+    "title": "Avsbench: Audio-visual segmentation dataset",
+    "raw_text": "Jinxing Zhou et al#Avsbench: Audio-visual segmentation dataset#European Conference on Computer Vision (ECCV)#2022#",
+    "type": "other"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2024,
+    "authors": [
+      "L. Zhou",
+      "Y. Zheng",
+      "T. Li",
+      "Y. Wang"
+    ],
+    "venue": "Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)",
+    "title": "Positive-congruent training: Towards regression-free model updates",
+    "raw_text": "L. Zhou*Y. Zheng*T. Li*Y. Wang#Positive-congruent training: Towards regression-free model updates#Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)#2024#",
+    "type": "other"
+  },
+  {
+    "url": "https://arxiv.org/abs/2112.07895",
+    "doi": null,
+    "year": 2021,
+    "authors": [
+      "Yufan Zhu",
+      "Weisheng Dong",
+      "Leida Li",
+      "Jinjian Wu",
+      "Xin Li",
+      "Guangming Shi"
+    ],
+    "venue": "arXiv preprint arXiv:2112.07895",
+    "title": "Robust depth completion with uncertainty-driven loss functions",
+    "raw_text": "Yufan Zhu*Weisheng Dong*Leida Li*Jinjian Wu*Xin Li*Guangming Shi#Robust depth completion with uncertainty-driven loss functions#arXiv preprint arXiv:2112.07895#2021#",
+    "type": "arxiv"
+  },
+  {
+    "url": "",
+    "doi": null,
+    "year": 2025,
+    "authors": [
+      "Yiming Zuo",
+      "Willow Yang",
+      "Zeyu Ma",
+      "Jia Deng"
+    ],
+    "venue": "Proceedings of the IEEE/CVF International Conference on Computer Vision",
+    "title": "Omni-dc: Highly robust depth completion with multiresolution depth integration",
+    "raw_text": "Yiming Zuo*Willow Yang*Zeyu Ma*Jia Deng#Omni-dc: Highly robust depth completion with multiresolution depth integration#Proceedings of the IEEE/CVF International Conference on Computer Vision#2025#",
+    "type": "other"
+  }
+]
