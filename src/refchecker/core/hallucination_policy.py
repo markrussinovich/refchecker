@@ -876,7 +876,6 @@ def apply_hallucination_verdict(
 
     elif verdict == 'UNLIKELY' and is_upgradeable:
         if ha_link and ha_link.startswith('http'):
-            result['status'] = 'verified'
             result['authoritative_urls'] = list(
                 result.get('authoritative_urls', [])
             )
@@ -884,13 +883,25 @@ def apply_hallucination_verdict(
                 {"type": "llm_verified", "url": ha_link}
             )
             # Strip resolved errors so downstream counters are correct.
-            # Remove 'unverified' errors and URL errors that are now
-            # obsolete (the LLM found the paper at a different URL).
+            # Remove 'unverified' errors and informational URL-references-paper
+            # entries that are now obsolete (the LLM found the paper).
+            # Keep substantive URL errors (e.g. "Cited URL does not reference
+            # this paper") since those are real metadata issues.
             result['errors'] = [
                 e for e in result.get('errors', [])
                 if e.get('error_type') != 'unverified'
-                and e.get('error_type') != 'url'
+                and not (
+                    e.get('error_type') == 'url'
+                    and 'url references paper' in (e.get('error_details') or '').lower()
+                )
             ]
+            # Only set status to 'verified' if no real errors remain.
+            remaining_errors = [
+                e for e in result['errors']
+                if e.get('error_type') not in ('unverified', 'info', None)
+                and not e.get('is_suggestion')
+            ]
+            result['status'] = 'error' if remaining_errors else 'verified'
         elif ha_explanation:
             # Enrich the unverified error message with the LLM explanation.
             result['errors'] = [

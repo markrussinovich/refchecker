@@ -1487,6 +1487,19 @@ class ProgressRefChecker:
         if not assessment:
             return result
 
+        # Match single-paper CLI behaviour: when a ref has the
+        # "url references paper" pattern and the LLM says UNLIKELY,
+        # the CLI returns early without recording the ref as an error.
+        # Here we drop the assessment so the ref stays verified with
+        # no hallucination verdict — identical to the CLI path.
+        raw_errors = result.get('_raw_errors') or []
+        has_url_refs_paper = any(
+            'url references paper' in (e.get('error_details') or '').lower()
+            for e in raw_errors
+        )
+        if has_url_refs_paper and assessment.get('verdict') == 'UNLIKELY':
+            return result
+
         result = apply_hallucination_verdict(result, assessment)
         return result
 

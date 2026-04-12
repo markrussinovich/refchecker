@@ -449,110 +449,10 @@ class BulkHallucinationBatcher:
         )
 
     def _process_batch(self, payloads: Sequence[_HallucinationPayload]) -> Sequence[Optional[Dict[str, Any]]]:
-        if len(payloads) == 1:
-            return [self._process_single(payloads[0])]
-
-        verifier = payloads[0].llm_verifier
-        if not verifier or not getattr(verifier, 'available', False):
-            # No live LLM — fall back to single processing which checks
-            # the disk cache and deterministic pre-screening.
-            return [self._process_single(p) for p in payloads]
-
-        today = dt.date.today().isoformat()
-        items: List[str] = []
-        for index, payload in enumerate(payloads):
-            entry = payload.error_entry
-            items.append(
-                '\n'.join([
-                    f'ITEM {index}',
-                    f"Title: {entry.get('ref_title', '')}",
-                    f"Authors: {entry.get('ref_authors_cited', '')}",
-                    f"Venue: {entry.get('ref_venue_cited', '')}",
-                    f"Year: {entry.get('ref_year_cited', '')}",
-                    f"URL: {entry.get('ref_url_cited', '')}",
-                    f"Error type: {entry.get('error_type', '')}",
-                    f"Error details: {entry.get('error_details', '')}",
-                ])
-            )
-
-        system_prompt = (
-            'You are an academic-integrity assistant that determines whether '
-            'cited references are **hallucinated** (fabricated by an AI).\n\n'
-            'IMPORTANT: Before rendering each verdict, search the web for the '
-            'exact paper title in quotes to check whether the paper actually '
-            'exists. Grounded evidence from web search always overrides your '
-            'prior beliefs.\n\n'
-            'Verdict definitions:\n'
-            '  LIKELY    — the reference is probably FABRICATED (does not exist)\n'
-            '  UNLIKELY  — the reference is probably REAL despite the errors\n'
-            '  UNCERTAIN — cannot determine with confidence\n\n'
-            'After searching and reasoning, return ONLY a JSON array.'
-        )
-        user_prompt = (
-            f"Today's date is {today}.\n\n"
-            'For each item below, search for the exact title, then decide '
-            'whether it is a hallucinated (fabricated) citation.\n\n'
-            'Key signals of hallucination (verdict should be LIKELY):\n'
-            '- Paper not found in ANY academic database AND web search returns no results\n'
-            '- Authors are obviously fake or don\'t work in the cited field\n'
-            '- ArXiv ID or DOI points to a completely different paper\n'
-            '- Title is generic/buzzwordy with no specific contribution\n\n'
-            'Key signals it is NOT hallucinated (verdict should be UNLIKELY):\n'
-            '- Paper found via web search or in a database, even with metadata errors\n'
-            '- Year off-by-one, venue abbreviation differences, or author name formatting '
-            'variations are common in real citations and NOT hallucination\n'
-            '- A broken URL does NOT mean the paper is fabricated if the title/authors are real\n\n'
-            'CRITICAL: If your web search finds the paper exists, the verdict MUST be UNLIKELY '
-            'regardless of citation errors. A real paper with wrong metadata is NOT a hallucination.\n\n'
-            'Return a JSON array where each object has keys: index, verdict, explanation.\n'
-            'Do not omit items.\n\n'
-            + '\n\n'.join(items)
-        )
-
-        response_text, _ = verifier._call(system_prompt, user_prompt)
-        parsed = _extract_json_payload(response_text)
-        if not isinstance(parsed, list):
-            raise ValueError('Batched hallucination response was not a JSON array')
-
-        grouped: Dict[int, Optional[Dict[str, Any]]] = {}
-        for item in parsed:
-            if not isinstance(item, dict):
-                continue
-            try:
-                index = int(item.get('index'))
-            except (TypeError, ValueError):
-                continue
-            verdict = str(item.get('verdict') or 'UNCERTAIN').upper()
-            explanation = str(item.get('explanation') or '').strip()
-            if verdict not in {'LIKELY', 'UNLIKELY', 'UNCERTAIN'}:
-                verdict = 'UNCERTAIN'
-
-            # Post-hoc consistency check: if the explanation says the paper
-            # exists/is real/was found, override a contradictory LIKELY verdict.
-            if verdict == 'LIKELY':
-                explanation_lower = explanation.lower()
-                real_signals = (
-                    'exists on arxiv', 'exists on arXiv',
-                    'is a well-known', 'is well-known',
-                    'is a real', 'paper exists', 'paper is real',
-                    'reference is valid', 'reference is real',
-                    'available on arxiv', 'available on arXiv',
-                    'found on arxiv', 'found on arXiv',
-                    'found the paper', 'found via web',
-                    'found in google scholar', 'found in semantic scholar',
-                    'published in', 'appeared in',
-                )
-                if any(signal in explanation_lower for signal in real_signals):
-                    verdict = 'UNLIKELY'
-                    explanation += ' (Verdict corrected: explanation indicates paper is real.)'
-
-            grouped[index] = {
-                'verdict': verdict,
-                'explanation': explanation,
-                'web_search': None,
-            }
-
-        return [grouped.get(index) for index in range(len(payloads))]
+        # Always use individual processing so batch and single-paper modes
+        # use the same prompt, cache keys, and post-hoc logic — guaranteeing
+        # identical verdicts regardless of the calling code path.
+        return [self._process_single(p) for p in payloads]
 
 
 def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total_refs: int) -> None:
@@ -953,6 +853,10 @@ def _process_bulk_paper_job(
         # Adjust unverified count: refs that the LLM confirmed as UNLIKELY
         # should not be counted as unverified (matches CLI single-paper logic).
         _adjust_unverified_after_hallucination(checker)
+        # Remove URL-verified UNLIKELY entries from checker.errors to match
+        # the CLI single-paper code path which returns early and never adds
+        # these refs to checker.errors in the first place.
+        _remove_url_verified_unlikely(checker)
         phase_times['hallucination'] = time.perf_counter() - _t
 
         # Print phase timing and API stats for this paper
@@ -1555,6 +1459,35 @@ def _adjust_unverified_after_hallucination(checker: Any) -> None:
         )
         if has_unverified and checker.total_unverified_refs > 0:
             checker.total_unverified_refs -= 1
+
+
+def _remove_url_verified_unlikely(checker: Any) -> None:
+    """Remove entries where a URL references the paper and the LLM confirmed UNLIKELY.
+
+    In single-paper CLI mode, these refs never get added to checker.errors
+    (the code returns early in _process_reference_result).  Bulk mode adds
+    them first and runs hallucination assessment later, so we must prune
+    them here to match.
+    """
+    to_remove = []
+    for i, entry in enumerate(checker.errors):
+        assessment = entry.get('hallucination_assessment') or {}
+        if assessment.get('verdict') != 'UNLIKELY':
+            continue
+        raw_errors = entry.get('_original_errors') or []
+        has_unverified = any(
+            (e.get('error_type') or '') == 'unverified'
+            for e in raw_errors
+        )
+        has_url_references = any(
+            'url references paper' in (e.get('error_details') or '').lower()
+            for e in raw_errors
+        )
+        if has_unverified and has_url_references:
+            to_remove.append(i)
+
+    for i in reversed(to_remove):
+        checker.errors.pop(i)
 
 
 def _apply_bulk_results(root_checker: Any, results: Sequence[BulkPaperResult]) -> None:

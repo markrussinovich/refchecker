@@ -696,9 +696,11 @@ class OpenReviewReferenceChecker:
             # Use the existing author comparison function
             match, error_msg = compare_authors(cited_authors, paper_authors)
             if not match and error_msg:
+                correct_names = [a if isinstance(a, str) else a.get('name', str(a)) for a in paper_authors]
                 errors.append({
                     "warning_type": "author",
-                    "warning_details": error_msg
+                    "warning_details": error_msg,
+                    "ref_authors_correct": ', '.join(correct_names)
                 })
         
         # Check year
@@ -822,9 +824,11 @@ class OpenReviewReferenceChecker:
             # Use the existing author comparison function
             match, error_msg = compare_authors(cited_authors, paper_authors)
             if not match and error_msg:
+                correct_names = [a if isinstance(a, str) else a.get('name', str(a)) for a in paper_authors]
                 errors.append({
                     "warning_type": "author", 
-                    "warning_details": error_msg
+                    "warning_details": error_msg,
+                    "ref_authors_correct": ', '.join(correct_names)
                 })
         
         # Check year

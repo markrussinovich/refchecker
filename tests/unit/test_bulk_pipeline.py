@@ -54,6 +54,12 @@ def test_bulk_llm_extraction_batcher_processes_multiple_items():
 
 
 def test_bulk_hallucination_batcher_processes_multiple_items():
+    """_process_batch delegates to _process_single per item for mode consistency.
+
+    Each item goes through run_hallucination_check → pre_screen_hallucination.
+    With minimal error entries (no real errors), pre_screen returns 'skip'
+    and run_hallucination_check returns None for each item.
+    """
     batcher = BulkHallucinationBatcher(enabled=False)
 
     results = batcher._process_batch([
@@ -69,10 +75,9 @@ def test_bulk_hallucination_batcher_processes_multiple_items():
         ),
     ])
 
-    assert results == [
-        {'verdict': 'LIKELY', 'explanation': 'No evidence found.', 'web_search': None},
-        {'verdict': 'UNLIKELY', 'explanation': 'Paper exists.', 'web_search': None},
-    ]
+    # Individual processing: pre_screen returns 'skip' (no real errors beyond
+    # 'unverified'), so run_hallucination_check returns None for each item.
+    assert results == [None, None]
 
 
 def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
