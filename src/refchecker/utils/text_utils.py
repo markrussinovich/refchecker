@@ -1977,10 +1977,21 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     if not name1 or not name2:
         return False
-    
+
     # First try the existing matching logic
     if is_name_match(name1, name2):
         return True
+
+    # Handle "X Team" matching: when one name is "X Team" and the other
+    # starts with "X Team ..." (S2 sometimes concatenates team name with
+    # individual authors, e.g. "Gemma Team Aishwarya Kamath, ...").
+    n1_lower = name1.strip().lower()
+    n2_lower = name2.strip().lower()
+    if n1_lower.endswith(' team') or n2_lower.endswith(' team'):
+        team_name = n1_lower if n1_lower.endswith(' team') else n2_lower
+        other_name = n2_lower if n1_lower.endswith(' team') else n1_lower
+        if other_name.startswith(team_name):
+            return True
     
     # Convert both names to consistent "First Middle Last" format for comparisonF
     name1_formatted = format_author_for_display(name1)

@@ -638,7 +638,7 @@ class LLMHallucinationVerifier:
 
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
-            title[:60], verdict, explanation[:100],
+            error_entry.get('ref_title', '')[:60], verdict, explanation[:100],
         )
 
         return {

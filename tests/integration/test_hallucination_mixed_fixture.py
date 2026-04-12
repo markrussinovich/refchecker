@@ -43,7 +43,14 @@ class TestHallucinationMixedFixture:
         # With Anthropic LLM, the fabricated ref should be flagged
         assert summary['flagged_records'] >= 1
 
-        # The fabricated ref should be unverified
-        unverified = [r for r in records if r.get('error_type') == 'unverified']
+        # The fabricated ref should be unverified (error_type may be
+        # 'unverified' or 'multiple' when both unverified + URL errors exist)
+        unverified = [
+            r for r in records
+            if r.get('error_type') == 'unverified'
+            or (r.get('error_type') == 'multiple'
+                and any(e.get('error_type') == 'unverified'
+                        for e in r.get('_original_errors', [])))
+        ]
         unverified_titles = {r['ref_title'] for r in unverified}
         assert 'Hallucinated Coconut Reasoning for Quantum Citation Alignment' in unverified_titles

@@ -250,6 +250,7 @@ class ParallelReferenceProcessor:
                                     current_result.reference,
                                     current_result.errors,
                                     verified_data=current_result.verified_data,
+                                    reference_url=current_result.url,
                                 )
                                 if assessment:
                                     current_result.hallucination_assessment = assessment

@@ -35,7 +35,9 @@ from refchecker.llm.base import create_llm_provider, ReferenceExtractor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.refchecker import ArxivReferenceChecker
 from refchecker.core.hallucination_policy import (
+    apply_hallucination_verdict,
     build_hallucination_error_entry,
+    count_raw_errors,
     has_real_raw_errors,
     pre_screen_hallucination,
     run_hallucination_check,
@@ -228,7 +230,7 @@ class ProgressRefChecker:
         # Normalize errors to align with CLI behavior
         logger.info(f"_format_verification_result: raw errors={errors}")
         sanitized = []
-        for err in errors:
+        for err in (errors or []):
             e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
             details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
             if not e_type and not details:
@@ -276,7 +278,7 @@ class ProgressRefChecker:
         # Check if the URL was confirmed to reference the paper (webpage checker verified it)
         url_references_paper = any(
             'url references paper' in (e.get('error_details') or '').lower()
-            for e in errors
+            for e in (errors or [])
         )
 
         if has_errors:
@@ -492,60 +494,82 @@ class ProgressRefChecker:
                 )
                 
                 if is_direct_pdf_url:
+                    # Check bibliography cache first — avoids PDF download
+                    # entirely when references are already cached.
+                    from refchecker.utils.cache_utils import cached_bibliography
+                    cached_bib = cached_bibliography(self.cache_dir, paper_source)
+                    if cached_bib is not None:
+                        logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
+                        extraction_method = 'cache'
+                        # Try to get paper title from OpenReview metadata cache
+                        if 'openreview.net/pdf' in paper_source.lower():
+                            try:
+                                from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+                                or_checker = OpenReviewReferenceChecker(request_delay=0.0)
+                                or_checker.cache_dir = self.cache_dir
+                                or_id = or_checker.extract_paper_id(paper_source)
+                                if or_id:
+                                    or_meta = or_checker.get_paper_metadata(or_id)
+                                    if or_meta and or_meta.get('title'):
+                                        paper_title = or_meta['title']
+                                        await update_title_if_needed(paper_title)
+                            except Exception:
+                                pass
+
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
                     # PDF extraction requires LLM for reliable reference extraction
-                    if not self.llm:
+                    elif not self.llm:
                         raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys.")
-                    
-                    await self.emit_progress("extracting", {
-                        "message": "Downloading PDF from URL..."
-                    })
-                    
-                    # Download PDF from URL
-                    import hashlib
-                    pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
-                    pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
-                    
-                    await asyncio.to_thread(download_pdf, paper_source, pdf_path)
-                    
-                    # For OpenReview PDFs, try to get metadata from the API
-                    if 'openreview.net' in paper_source.lower():
-                        try:
-                            from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
-                            or_checker = OpenReviewReferenceChecker(request_delay=0.0)
-                            or_id = or_checker.extract_paper_id(paper_source)
-                            if or_id:
-                                or_meta = or_checker.get_paper_metadata(or_id)
-                                if or_meta and or_meta.get('title'):
-                                    paper_title = or_meta['title']
-                                    await update_title_if_needed(paper_title)
-                                    logger.info(f"Got title from OpenReview API: {paper_title}")
-                        except Exception as e:
-                            logger.debug(f"Could not get OpenReview metadata: {e}")
+                    else:
+                        await self.emit_progress("extracting", {
+                            "message": "Downloading PDF from URL..."
+                        })
 
-                    extraction_method = 'pdf'
-                    pdf_processor = PDFProcessor()
-                    paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
-                    
-                    # Try to extract the paper title from the PDF content
-                    # (only if we don't already have a title from the API)
-                    if paper_title == "Unknown Paper":
-                        try:
-                            extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, pdf_path)
-                            if extracted_title:
-                                paper_title = extracted_title
-                                await update_title_if_needed(paper_title)
-                                logger.info(f"Extracted title from PDF URL: {paper_title}")
-                            else:
-                                # Fallback to URL filename
-                                from urllib.parse import urlparse, unquote
-                                url_path = urlparse(paper_source).path
-                                pdf_filename = unquote(url_path.split('/')[-1])
-                                if pdf_filename and pdf_filename.lower() not in ('pdf', 'download', 'content'):
-                                    paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                        # Download PDF from URL
+                        import hashlib
+                        pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
+                        pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+
+                        await asyncio.to_thread(download_pdf, paper_source, pdf_path)
+
+                        # For OpenReview PDFs, try to get metadata from the API
+                        if 'openreview.net' in paper_source.lower():
+                            try:
+                                from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+                                or_checker = OpenReviewReferenceChecker(request_delay=0.0)
+                                or_id = or_checker.extract_paper_id(paper_source)
+                                if or_id:
+                                    or_meta = or_checker.get_paper_metadata(or_id)
+                                    if or_meta and or_meta.get('title'):
+                                        paper_title = or_meta['title']
+                                        await update_title_if_needed(paper_title)
+                                        logger.info(f"Got title from OpenReview API: {paper_title}")
+                            except Exception as e:
+                                logger.debug(f"Could not get OpenReview metadata: {e}")
+
+                        extraction_method = 'pdf'
+                        pdf_processor = PDFProcessor()
+                        paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
+
+                        # Try to extract the paper title from the PDF content
+                        # (only if we don't already have a title from the API)
+                        if paper_title == "Unknown Paper":
+                            try:
+                                extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, pdf_path)
+                                if extracted_title:
+                                    paper_title = extracted_title
                                     await update_title_if_needed(paper_title)
-                        except Exception as e:
-                            logger.warning(f"Could not extract title from PDF: {e}")
+                                    logger.info(f"Extracted title from PDF URL: {paper_title}")
+                                else:
+                                    # Fallback to URL filename
+                                    from urllib.parse import urlparse, unquote
+                                    url_path = urlparse(paper_source).path
+                                    pdf_filename = unquote(url_path.split('/')[-1])
+                                    if pdf_filename and pdf_filename.lower() not in ('pdf', 'download', 'content'):
+                                        paper_title = pdf_filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                                        await update_title_if_needed(paper_title)
+                            except Exception as e:
+                                logger.warning(f"Could not extract title from PDF: {e}")
                 else:
                     # Handle ArXiv URLs/IDs
                     arxiv_id = extract_arxiv_id_from_url(paper_source)
@@ -1123,7 +1147,7 @@ class ProgressRefChecker:
             # Run verification in a thread with timeout
             try:
                 verified_data, errors, url = await asyncio.wait_for(
-                    loop.run_in_executor(None, self.checker.verify_reference, reference),
+                    loop.run_in_executor(None, self._verify_reference, reference),
                     timeout=90.0  # 90 second timeout per reference
                 )
             except asyncio.TimeoutError:
@@ -1138,11 +1162,56 @@ class ProgressRefChecker:
             logger.error(f"Error checking reference {index}: {e}")
             return self._format_error_result(reference, index, e)
 
+    def _verify_reference(self, reference: Dict[str, Any]):
+        """Verify a reference, checking GitHub repos first (matches CLI path).
+
+        Returns (verified_data, errors, url) — same contract as
+        ``EnhancedHybridReferenceChecker.verify_reference``.
+        """
+        # GitHub references bypass the hybrid checker (same as CLI's
+        # verify_reference_standard → verify_github_reference).
+        github_url = None
+        if reference.get('url') and 'github.com' in reference['url']:
+            github_url = reference['url']
+        elif reference.get('venue') and 'github.com' in (reference.get('venue') or ''):
+            for part in reference['venue'].split():
+                if 'github.com' in part:
+                    github_url = part
+                    break
+
+        if github_url:
+            from refchecker.checkers.github_checker import GitHubChecker
+            github_checker = GitHubChecker()
+            verified_data, errors, paper_url = github_checker.verify_reference(reference)
+            if verified_data:
+                # Re-format to preserve warning_type / info_type keys
+                formatted = []
+                for error in (errors or []):
+                    fe = {}
+                    for key in ('error_type', 'error_details', 'warning_type',
+                                'warning_details', 'info_type', 'info_details',
+                                'ref_year_correct', 'ref_url_correct'):
+                        if key in error:
+                            fe[key] = error[key]
+                    formatted.append(fe)
+                return verified_data, formatted or None, paper_url
+            else:
+                formatted = []
+                for error in errors:
+                    fe = {}
+                    if 'error_type' in error:
+                        fe['error_type'] = error['error_type']
+                        fe['error_details'] = error['error_details']
+                    formatted.append(fe)
+                return None, formatted or [{"error_type": "unverified", "error_details": "GitHub repository could not be verified"}], paper_url
+
+        return self.checker.verify_reference(reference)
+
     def _check_reference_sync(self, reference: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Synchronous version of reference checking for thread pool"""
         try:
             # Run verification with timeout (handled by caller)
-            verified_data, errors, url = self.checker.verify_reference(reference)
+            verified_data, errors, url = self._verify_reference(reference)
             return self._format_verification_result(reference, index, verified_data, errors, url)
         except UnicodeEncodeError as e:
             # Handle Windows encoding issues with special characters (e.g., Greek letters in titles)
@@ -1197,10 +1266,7 @@ class ProgressRefChecker:
 
         outcome, assessment = pre_screen_hallucination(error_entry)
         if outcome == 'resolved':
-            updated = dict(result)
-            updated['hallucination_assessment'] = assessment
-            if assessment.get('verdict') == 'LIKELY':
-                updated['status'] = 'hallucination'
+            updated = apply_hallucination_verdict(result, assessment)
             return ('resolved', updated)
         elif outcome == 'skip':
             return ('skip', None)
@@ -1214,15 +1280,12 @@ class ProgressRefChecker:
         Returns a dict of stat counters (all non-negative) representing
         what this ref contributes to the aggregate totals.
         """
-        real_errors = [
-            e for e in result.get('errors', [])
-            if e.get('error_type') != 'unverified'
-            and not (
-                e.get('error_type') == 'url'
-                and 'url references paper' in (e.get('error_details') or '').lower()
-            )
-        ]
-        num_errors = len(real_errors)
+        # Use the shared count_raw_errors for the error count so all
+        # modes (CLI, Bulk, WebUI) apply the same filtering rules.
+        # The sanitized errors list only contains error_type entries
+        # (warnings/suggestions are in separate lists), so we only
+        # take the error_count from count_raw_errors.
+        num_errors, _, _ = count_raw_errors(result.get('errors', []))
         num_warnings = len(result.get('warnings', []))
         num_suggestions = len(result.get('suggestions', []))
 
@@ -1424,53 +1487,7 @@ class ProgressRefChecker:
         if not assessment:
             return result
 
-        result = dict(result)  # shallow copy
-        result['hallucination_assessment'] = assessment
-        is_unverified = result.get('status') == 'unverified'
-        # Also treat status='error' as upgradeable when the only real error
-        # is a "url references paper" (webpage checker confirmed the URL)
-        url_references_paper = any(
-            'url references paper' in (e.get('error_details') or '').lower()
-            for e in result.get('errors', []) + result.get('_raw_errors', [])
-        )
-        is_upgradeable = is_unverified or (
-            result.get('status') == 'error' and url_references_paper
-        )
-
-        if assessment.get('verdict') == 'LIKELY':
-            result['status'] = 'hallucination'
-        elif assessment.get('verdict') == 'UNLIKELY' and is_upgradeable:
-            ha_link = assessment.get('link')
-            ha_explanation = assessment.get('explanation', '')
-            if ha_link and ha_link.startswith('http'):
-                result['status'] = 'verified'
-                result['authoritative_urls'] = list(result.get('authoritative_urls', []))
-                result['authoritative_urls'].append({"type": "llm_verified", "url": ha_link})
-                # Remove unverified and url-references-paper errors so frontend
-                # filters no longer treat this reference as unverified/error
-                result['errors'] = [
-                    e for e in result.get('errors', [])
-                    if e.get('error_type') != 'unverified'
-                    and not (
-                        e.get('error_type') == 'url'
-                        and 'url references paper' in (e.get('error_details') or '').lower()
-                    )
-                ]
-            elif ha_explanation:
-                result['errors'] = [
-                    {**e, 'error_details': f"Reference could not be verified — {ha_explanation}"}
-                    if e.get('error_type') == 'unverified' else e
-                    for e in result.get('errors', [])
-                ]
-        elif assessment.get('verdict') != 'LIKELY' and is_unverified:
-            ha_explanation = assessment.get('explanation', '')
-            if ha_explanation:
-                result['errors'] = [
-                    {**e, 'error_details': f"Reference could not be verified — {ha_explanation}"}
-                    if e.get('error_type') == 'unverified' else e
-                    for e in result.get('errors', [])
-                ]
-
+        result = apply_hallucination_verdict(result, assessment)
         return result
 
     async def _check_single_reference_with_limit(
@@ -1488,25 +1505,6 @@ class ProgressRefChecker:
         Acquires a slot from the session limiter before starting the check,
         and releases it when done. Stores result in cache on success.
         """
-        from .database import db
-        
-        # Check cache first
-        cache_start = time.time()
-        cached_result = await db.get_cached_verification(reference)
-        cache_time = time.time() - cache_start
-        if cache_time > 0.1:
-            debug_log(f"[TIMING] Cache lookup for ref {idx + 1} took {cache_time:.3f}s")
-        if cached_result:
-            # Update the index to match current position
-            cached_result['index'] = idx + 1
-            debug_log(f"Cache hit for reference {idx + 1} in {cache_time:.3f}s")
-            return cached_result
-        
-        # Log cache miss with details
-        title = reference.get('title', 'Unknown')[:60]
-        authors = reference.get('authors', [])[:2]
-        debug_log(f"CACHE MISS for ref {idx + 1}: title='{title}' authors={authors}")
-        
         if limiter is None:
             limiter = create_limiter()
         
@@ -1571,12 +1569,6 @@ class ProgressRefChecker:
                     "authoritative_urls": [],
                     "corrected_reference": None
                 }
-        
-        # Store successful results in cache (db.store_cached_verification filters out errors)
-        try:
-            await db.store_cached_verification(reference, result)
-        except Exception as cache_error:
-            logger.warning(f"Failed to cache verification result: {cache_error}")
         
         return result
 
@@ -1700,26 +1692,6 @@ class ProgressRefChecker:
                     result['year'] = None
 
                 # Count individual issues (not just references)
-                # Exclude 'unverified' from error count since it has its own category
-                # Also exclude 'url' errors where the URL references the paper (informational)
-                real_errors = [
-                    e for e in result.get('errors', [])
-                    if e.get('error_type') != 'unverified'
-                    and not (
-                        e.get('error_type') == 'url'
-                        and 'url references paper' in (e.get('error_details') or '').lower()
-                    )
-                ]
-                num_errors = len(real_errors)
-                num_warnings = len(result.get('warnings', []))
-                num_suggestions = len(result.get('suggestions', []))
-
-                # Check if this ref has any 'unverified' error, regardless of overall status
-                has_unverified_error = any(
-                    e.get('error_type') == 'unverified'
-                    for e in result.get('errors', [])
-                )
-
                 # If hallucination verifier is enabled, refs with real errors
                 # (not just suggestions/info) are deferred — they'll get a
                 # deterministic or LLM check after all refs are processed.
@@ -1732,30 +1704,19 @@ class ProgressRefChecker:
                 )
 
                 # Always count stats for all refs so the UI updates progressively.
+                # Use the shared _compute_ref_stats to avoid duplicated logic.
                 checked_count += 1
                 processed_count += 1
-                errors_count += num_errors
-                warnings_count += num_warnings
-                suggestions_count += num_suggestions
-
-                if result['status'] == 'hallucination':
-                    hallucination_count += 1
-
-                if result['status'] in ('unverified', 'hallucination') or has_unverified_error:
-                    unverified_count += 1
-
-                if result['status'] == 'verified':
-                    verified_count += 1
-                    refs_verified += 1
-                elif result['status'] == 'suggestion':
-                    verified_count += 1
-                    refs_verified += 1
-
-                # Track references by issue type (excluding unverified from error check)
-                if result['status'] == 'error' or num_errors > 0:
-                    refs_with_errors += 1
-                elif result['status'] == 'warning' or num_warnings > 0:
-                    refs_with_warnings_only += 1
+                d = self._compute_ref_stats(result)
+                errors_count += d['errors_count']
+                warnings_count += d['warnings_count']
+                suggestions_count += d['suggestions_count']
+                hallucination_count += d['hallucination_count']
+                unverified_count += d['unverified_count']
+                verified_count += d['verified_count']
+                refs_verified += d['refs_verified']
+                refs_with_errors += d['refs_with_errors']
+                refs_with_warnings_only += d['refs_with_warnings_only']
 
                 # Emit result immediately.
                 # Use checked_count for progress so the UI shows verification

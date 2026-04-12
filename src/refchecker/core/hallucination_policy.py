@@ -77,6 +77,40 @@ def has_real_errors(error_entry: Dict[str, Any]) -> bool:
     return True
 
 
+def count_raw_errors(raw_errors: list) -> tuple:
+    """Count errors, warnings, and info items in a raw verifier error list.
+
+    This is the **single source of truth** for tallying error / warning /
+    info totals.  All code paths (CLI, Batch, WebUI) must use this so
+    reported counts are consistent.
+
+    Returns (error_count, warning_count, info_count).
+
+    An ``error_type`` entry is only counted as an error if it is NOT:
+    - ``'unverified'`` (has its own category)
+    - a ``'url'`` entry whose details say "url references paper"
+      (informational, not a real error)
+    """
+    error_count = 0
+    warning_count = 0
+    info_count = 0
+    for e in (raw_errors or []):
+        if 'warning_type' in e:
+            warning_count += 1
+        elif 'info_type' in e:
+            info_count += 1
+        elif 'error_type' in e:
+            etype = e['error_type']
+            if etype == 'unverified':
+                continue
+            if (etype == 'url'
+                    and 'url references paper'
+                    in (e.get('error_details') or '').lower()):
+                continue
+            error_count += 1
+    return error_count, warning_count, info_count
+
+
 def has_real_raw_errors(raw_errors: list) -> bool:
     """Return True if *raw_errors* contains actual errors (not just suggestions/info).
 
@@ -156,6 +190,10 @@ def build_hallucination_error_entry(
         'error_details': '\n'.join(error_details_parts),
         'ref_title': reference.get('title', ''),
         'ref_authors_cited': ', '.join(reference.get('authors', [])),
+        # Keep the original list so overlap checks don't need to
+        # round-trip through a comma-joined string (which breaks when
+        # an individual author name contains a comma).
+        '_ref_authors_cited_list': list(reference.get('authors', [])),
         'ref_year_cited': reference.get('year'),
         'ref_venue_cited': reference.get('venue', ''),
         'ref_url_cited': reference.get('cited_url') or reference.get('url', ''),
@@ -165,6 +203,9 @@ def build_hallucination_error_entry(
     if authors_correct:
         error_entry['ref_authors_correct'] = authors_correct
 
+    logger.debug(f"build_hallucination_error_entry: ref={reference.get('title','')[:60]!r} "
+                 f"type={consolidated_type} authors_correct={'yes' if authors_correct else 'no'} "
+                 f"verified_url={bool(verified_url)}")
     return error_entry
 
 
@@ -214,7 +255,11 @@ def _split_author_string(author_str: str) -> List[str]:
     return result
 
 
-def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optional[float]:
+def _compute_author_overlap(
+    cited_authors: str,
+    correct_authors: str,
+    cited_list: Optional[List[str]] = None,
+) -> Optional[float]:
     """Compute fraction of cited authors that appear in the correct author list.
 
     Returns None if either list is empty or has fewer than 2 real authors.
@@ -227,11 +272,27 @@ def _compute_author_overlap(cited_authors: str, correct_authors: str) -> Optiona
     For long author lists (>10 authors), compares only the first 10 from each
     list.  Database records often truncate differently, so comparing the full
     30+-author list produces false-low overlap.
+
+    Parameters
+    ----------
+    cited_list : optional
+        Pre-split cited author names.  When supplied, avoids re-splitting
+        the comma-joined ``cited_authors`` string (which can break when an
+        individual author name contains a comma, e.g. "et al. Wallace, Eric").
     """
     if not cited_authors or not correct_authors:
         return None
 
-    cited = _split_author_string(cited_authors)
+    if cited_list is not None:
+        # Filter out "et al." markers from the pre-split list,
+        # matching the behaviour of _split_author_string.
+        cited = [
+            n for n in cited_list
+            if n.strip().lower().rstrip('.') not in
+            ('et al', 'et al.', 'others', 'and others', '')
+        ]
+    else:
+        cited = _split_author_string(cited_authors)
     correct = _split_author_string(correct_authors)
 
     # Strip team-name prefixes from both lists
@@ -320,10 +381,15 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     cited = error_entry.get('ref_authors_cited', '')
     correct = error_entry.get('ref_authors_correct', '')
 
+    logger.debug(f"check_author_hallucination: ref={error_entry.get('ref_title','')[:60]!r} "
+                 f"type={error_type} is_verified={is_verified} cited={cited[:50]!r} correct={correct[:50]!r}")
+
     if not cited or not correct:
+        logger.debug(f"check_author_hallucination: skip (no cited/correct) ref={error_entry.get('ref_title','')[:60]!r}")
         return None
 
-    overlap = _compute_author_overlap(cited, correct)
+    cited_list = error_entry.get('_ref_authors_cited_list')
+    overlap = _compute_author_overlap(cited, correct, cited_list=cited_list)
     if overlap is None:
         return None
 
@@ -488,7 +554,8 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
                 cited = error_entry.get('ref_authors_cited', '')
                 correct = error_entry.get('ref_authors_correct', '')
                 if cited and correct:
-                    overlap = _compute_author_overlap(cited, correct)
+                    cited_list = error_entry.get('_ref_authors_cited_list')
+                    overlap = _compute_author_overlap(cited, correct, cited_list=cited_list)
                     if overlap is not None and overlap < _AUTHOR_VERIFIED_THRESHOLD:
                         pass  # Don't skip — authors critically mismatched
                     else:
@@ -531,7 +598,8 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
             cited = error_entry.get('ref_authors_cited', '')
             correct = error_entry.get('ref_authors_correct', '')
             if cited and correct:
-                overlap = _compute_author_overlap(cited, correct)
+                cited_list = error_entry.get('_ref_authors_cited_list')
+                overlap = _compute_author_overlap(cited, correct, cited_list=cited_list)
                 if overlap is not None and overlap >= _AUTHOR_MATCH_THRESHOLD:
                     return False
 
@@ -676,24 +744,32 @@ def pre_screen_hallucination(
     ('needs_llm', None)
         Deterministic checks were inconclusive — run LLM assessment.
     """
+    ref_title = error_entry.get('ref_title', '')[:80]
+
     if not has_real_errors(error_entry):
+        logger.debug(f"pre_screen: skip (no real errors) ref={ref_title!r}")
         return ('skip', None)
 
     name_order = detect_name_order_warning(error_entry)
     if name_order:
+        logger.debug(f"pre_screen: resolved (name_order) ref={ref_title!r} verdict={name_order.get('verdict')}")
         return ('resolved', name_order)
 
     garbled = _detect_garbled_metadata(error_entry)
     if garbled:
+        logger.debug(f"pre_screen: resolved (garbled) ref={ref_title!r} verdict={garbled.get('verdict')}")
         return ('resolved', garbled)
 
     author_result = check_author_hallucination(error_entry)
     if author_result:
+        logger.debug(f"pre_screen: resolved (author) ref={ref_title!r} verdict={author_result.get('verdict')}")
         return ('resolved', author_result)
 
     if not should_check_hallucination(error_entry):
+        logger.debug(f"pre_screen: skip (should_check=False) ref={ref_title!r}")
         return ('skip', None)
 
+    logger.debug(f"pre_screen: needs_llm ref={ref_title!r}")
     return ('needs_llm', None)
 
 
@@ -722,7 +798,9 @@ def run_hallucination_check(
     -------
     dict with verdict/explanation/web_search, or None if no assessment needed.
     """
+    ref_title = error_entry.get('ref_title', '')[:80]
     outcome, assessment = pre_screen_hallucination(error_entry)
+    logger.debug(f"run_hallucination_check: pre_screen outcome={outcome} ref={ref_title!r}")
     if outcome == 'resolved':
         return assessment
     if outcome == 'skip':
@@ -732,10 +810,105 @@ def run_hallucination_check(
     # cache before requiring a live API key, so cached results work
     # even when no API key is configured (e.g. CI).
     if llm_client:
+        logger.debug(f"run_hallucination_check: calling LLM for ref={ref_title!r}")
         llm_result = assess_hallucination(
             error_entry, llm_client=llm_client, web_searcher=web_searcher,
         )
         if llm_result:
+            logger.debug(f"run_hallucination_check: LLM verdict={llm_result.get('verdict')} ref={ref_title!r}")
             return llm_result
+    else:
+        logger.debug(f"run_hallucination_check: no llm_client for ref={ref_title!r}")
 
     return None
+
+
+def apply_hallucination_verdict(
+    result: Dict[str, Any],
+    assessment: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply a hallucination assessment verdict to a reference result.
+
+    This is the **single source of truth** for mapping verdict →
+    status/errors.  All code paths (CLI, Batch, WebUI) must call this
+    function so classification logic stays consistent.
+
+    Parameters
+    ----------
+    result : dict
+        The reference result dict.  Must contain at least ``status`` and
+        ``errors``.  May also contain ``_raw_errors`` and
+        ``authoritative_urls``.  A shallow copy is made internally —
+        the caller's dict is not mutated.
+    assessment : dict
+        The hallucination assessment with ``verdict``, ``explanation``,
+        and optionally ``link``.
+
+    Returns
+    -------
+    dict — updated copy of *result* with status and errors adjusted.
+    """
+    result = dict(result)
+    result['hallucination_assessment'] = assessment
+
+    verdict = assessment.get('verdict', 'UNCERTAIN')
+    ha_link = assessment.get('link')
+    ha_explanation = assessment.get('explanation', '')
+
+    # Determine whether this ref can be upgraded to verified / hallucination.
+    is_unverified = result.get('status') == 'unverified'
+    has_unverified_error = any(
+        e.get('error_type') == 'unverified'
+        for e in result.get('errors', []) + (result.get('_raw_errors') or [])
+    )
+    url_references_paper = any(
+        'url references paper' in (e.get('error_details') or '').lower()
+        for e in result.get('errors', []) + (result.get('_raw_errors') or [])
+    )
+    is_upgradeable = (
+        is_unverified
+        or has_unverified_error
+        or (result.get('status') == 'error' and url_references_paper)
+    )
+
+    if verdict == 'LIKELY':
+        result['status'] = 'hallucination'
+
+    elif verdict == 'UNLIKELY' and is_upgradeable:
+        if ha_link and ha_link.startswith('http'):
+            result['status'] = 'verified'
+            result['authoritative_urls'] = list(
+                result.get('authoritative_urls', [])
+            )
+            result['authoritative_urls'].append(
+                {"type": "llm_verified", "url": ha_link}
+            )
+            # Strip resolved errors so downstream counters are correct.
+            # Remove 'unverified' errors and URL errors that are now
+            # obsolete (the LLM found the paper at a different URL).
+            result['errors'] = [
+                e for e in result.get('errors', [])
+                if e.get('error_type') != 'unverified'
+                and e.get('error_type') != 'url'
+            ]
+        elif ha_explanation:
+            # Enrich the unverified error message with the LLM explanation.
+            result['errors'] = [
+                {**e, 'error_details':
+                 f"Reference could not be verified — {ha_explanation}"}
+                if e.get('error_type') == 'unverified' else e
+                for e in result.get('errors', [])
+            ]
+
+    elif verdict != 'LIKELY' and (is_unverified or has_unverified_error):
+        # UNCERTAIN or UNLIKELY-but-not-upgradeable: annotate the
+        # unverified error with the explanation if available.
+        if ha_explanation:
+            result['errors'] = [
+                {**e, 'error_details':
+                 f"Reference could not be verified — {ha_explanation}"}
+                if e.get('error_type') == 'unverified' else e
+                for e in result.get('errors', [])
+            ]
+
+    return result

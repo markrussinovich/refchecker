@@ -950,6 +950,9 @@ def _process_bulk_paper_job(
 
         _t = time.perf_counter()
         _apply_batched_hallucination_assessments(checker, hallucination_batcher)
+        # Adjust unverified count: refs that the LLM confirmed as UNLIKELY
+        # should not be counted as unverified (matches CLI single-paper logic).
+        _adjust_unverified_after_hallucination(checker)
         phase_times['hallucination'] = time.perf_counter() - _t
 
         # Print phase timing and API stats for this paper
@@ -1223,9 +1226,19 @@ def _batch_prefetch_ss_metadata(
     Results are injected into the verification_cache so the normal
     verification loop skips these references entirely.
 
+    When a local Semantic Scholar database is configured, the batch API is
+    skipped — the local DB is faster, offline, and produces results
+    consistent with the single-paper CLI and WebUI paths.
+
     Returns the number of references successfully pre-resolved.
     """
     if verification_cache is None:
+        return 0
+
+    # Skip batch API when a local DB is available — let verify_reference
+    # use the local DB so results are consistent across all modes.
+    if getattr(checker, 'db_path', None):
+        logger.debug('Skipping SS batch prefetch — local DB is configured')
         return 0
 
     # Collect batch-eligible references
@@ -1479,9 +1492,11 @@ def _record_reference_result_silent(
 
     checker.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
     paper_errors.extend(errors)
-    checker.total_errors_found += sum(1 for error in errors if 'error_type' in error and error['error_type'] != 'unverified')
-    checker.total_warnings_found += sum(1 for error in errors if 'warning_type' in error)
-    checker.total_info_found += sum(1 for error in errors if 'info_type' in error)
+    from refchecker.core.hallucination_policy import count_raw_errors
+    ec, wc, ic = count_raw_errors(errors)
+    checker.total_errors_found += ec
+    checker.total_warnings_found += wc
+    checker.total_info_found += ic
 
 
 def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher: BulkHallucinationBatcher) -> None:
@@ -1518,6 +1533,28 @@ def _apply_batched_hallucination_assessments(checker: Any, hallucination_batcher
         assessment = task.wait()
         if assessment:
             error_entry['hallucination_assessment'] = assessment
+
+
+def _adjust_unverified_after_hallucination(checker: Any) -> None:
+    """Decrement unverified count for refs the LLM confirmed as real (UNLIKELY).
+
+    In bulk mode, unverified refs are counted before hallucination assessments
+    are applied.  Once the LLM has confirmed a ref is real, it should no longer
+    count as unverified — matching the CLI single-paper behaviour.
+    """
+    for entry in checker.errors:
+        assessment = entry.get('hallucination_assessment') or {}
+        if assessment.get('verdict') != 'UNLIKELY':
+            continue
+        raw_errors = entry.get('_original_errors') or []
+        has_unverified = any(
+            e.get('error_type') == 'unverified'
+            or e.get('warning_type') == 'unverified'
+            or e.get('info_type') == 'unverified'
+            for e in raw_errors
+        )
+        if has_unverified and checker.total_unverified_refs > 0:
+            checker.total_unverified_refs -= 1
 
 
 def _apply_bulk_results(root_checker: Any, results: Sequence[BulkPaperResult]) -> None:

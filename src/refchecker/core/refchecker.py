@@ -463,6 +463,7 @@ class ArxivReferenceChecker:
             from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
 
             checker = OpenReviewReferenceChecker(request_delay=0.0)
+            checker.cache_dir = self.cache_dir
             paper_id = checker.extract_paper_id(url)
             if not paper_id:
                 return None
@@ -6119,7 +6120,7 @@ class ArxivReferenceChecker:
                     url_assessment = precomputed_hallucination
                     if not url_assessment:
                         url_assessment = self._run_and_return_hallucination_assessment(
-                            reference, errors, verified_data=verified_data
+                            reference, errors, verified_data=verified_data, reference_url=reference_url
                         )
                     
                     if url_assessment and url_assessment.get('verdict') == 'UNLIKELY':
@@ -6144,7 +6145,12 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(
                             reference, reference_url, errors, debug_mode, print_output)
                 else:
-                    self.total_unverified_refs += 1
+                    # If the LLM already confirmed the reference is real
+                    # (e.g. parallel mode pre-computed the assessment), don't
+                    # count it as unverified — but still record the error so
+                    # the report includes the UNLIKELY verdict (matching bulk).
+                    if not (precomputed_hallucination and precomputed_hallucination.get('verdict') == 'UNLIKELY'):
+                        self.total_unverified_refs += 1
                     self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors
@@ -6152,10 +6158,10 @@ class ArxivReferenceChecker:
             error_entry_index = len(self.errors) - 1 if error_entry_record is not None else None
             paper_errors.extend(errors)
             
-            # Count errors vs warnings vs info
-            error_count = sum(1 for e in errors if 'error_type' in e and e['error_type'] != 'unverified')
-            warning_count = sum(1 for e in errors if 'warning_type' in e)
-            info_count = sum(1 for e in errors if 'info_type' in e)
+            # Count errors vs warnings vs info — shared function ensures
+            # all modes (CLI, Bulk, WebUI) report identical totals.
+            from refchecker.core.hallucination_policy import count_raw_errors
+            error_count, warning_count, info_count = count_raw_errors(errors)
             self.total_errors_found += error_count
             self.total_warnings_found += warning_count
             self.total_info_found += info_count
@@ -6180,6 +6186,7 @@ class ArxivReferenceChecker:
                     verified_data=verified_data,
                     error_entry_record=error_entry_record,
                     error_entry_index=error_entry_index,
+                    reference_url=reference_url,
                 )
     
     def _has_arxiv_id_error(self, errors):
@@ -6424,6 +6431,7 @@ class ArxivReferenceChecker:
         verified_data=None,
         error_entry_record=None,
         error_entry_index=None,
+        reference_url=None,
     ):
         """Run hallucination assessment and store result on the error entry.
 
@@ -6445,7 +6453,7 @@ class ArxivReferenceChecker:
         elif error_entry_record is not None:
             target_record = error_entry_record
 
-        verified_url = self._extract_verified_url(verified_data)
+        verified_url = reference_url or self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             return
@@ -6514,7 +6522,7 @@ class ArxivReferenceChecker:
             or verified_data.get('doi_url', '')
         )
 
-    def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None):
+    def _run_and_return_hallucination_assessment(self, reference, errors, verified_data=None, reference_url=None):
         """Run hallucination assessment and return the result without printing or storing.
 
         Used by the parallel processor to get the assessment before
@@ -6526,7 +6534,7 @@ class ArxivReferenceChecker:
             build_hallucination_error_entry, run_hallucination_check,
         )
 
-        verified_url = self._extract_verified_url(verified_data)
+        verified_url = reference_url or self._extract_verified_url(verified_data)
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             logger.debug("Hallucination skip (no real errors): %s", reference.get('title', '')[:60])
