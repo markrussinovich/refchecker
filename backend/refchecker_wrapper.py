@@ -820,7 +820,7 @@ class ProgressRefChecker:
                 }
             }
 
-            await self.emit_progress("completed", {**final_result["summary"], "check_id": self.check_id})
+            await self.emit_progress("completed", {**final_result["summary"], "check_id": self.check_id, "paper_title": paper_title})
 
             return final_result
 

@@ -369,6 +369,11 @@ export const useCheckStore = create((set, get) => ({
             historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
           }
           break
+        case 'title_updated':
+          if (data.paper_title) {
+            historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
+          }
+          break
         case 'references_extracted':
           // Store the extracted references so they can be displayed
           const extractedRefs = data.references 
@@ -422,6 +427,9 @@ export const useCheckStore = create((set, get) => ({
           break
         case 'completed':
           logger.info('CheckStore', `Check ${checkIdForMessage} completed (concurrent session ${messageSessionId?.slice(0,8)})`)
+          if (data.paper_title) {
+            historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
+          }
           historyStore.updateHistoryProgress(checkIdForMessage, {
             status: 'completed',
             total_refs: data.total_refs,

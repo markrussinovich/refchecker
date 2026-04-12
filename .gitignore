@@ -156,4 +156,5 @@ admin_users.conf
 ehthumbs.db
 Thumbs.db
 CLAUDE.md
+.codex
 output/
