@@ -195,10 +195,10 @@ class ProgressRefChecker:
                 endpoint=endpoint,
                 model=llm_model,
             )
-            if verifier.available:
-                verifier.cache_dir = cache_dir
+            verifier.cache_dir = cache_dir
+            if verifier.available or cache_dir:
                 self.hallucination_verifier = verifier
-                logger.debug('Hallucination verifier initialized for web UI (provider=%s)', llm_provider)
+                logger.debug('Hallucination verifier initialized for web UI (provider=%s, available=%s, cache=%s)', llm_provider, verifier.available, bool(cache_dir))
         except Exception as e:
             logger.debug(f'Hallucination verifier init failed: {e}')
         # Web UI Semantic Scholar keys are supplied per request from the browser.
