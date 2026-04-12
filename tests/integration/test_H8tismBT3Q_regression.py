@@ -26,24 +26,9 @@ _FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures'
 CACHE_DIR = str(_FIXTURES / 'test_cache')
 DB_PATH = CACHE_DIR
 
-# Block all HTTP at the Session class level (propagates to worker threads).
-# API/LLM caches are checked before requests are made, so cached data still works.
-_real_session_get = requests.Session.get
-_real_session_post = requests.Session.post
-
 def _blocked_request(self, url, **kw):
     r = MagicMock(); r.status_code = 404; r.text = ''; r.content = b''
     r.json.return_value = {}; r.headers = {}; r.ok = False; return r
-
-requests.Session.get = _blocked_request
-requests.Session.post = _blocked_request
-
-try:
-    import httpx
-    httpx.Client.send = lambda self, *a, **k: (_ for _ in ()).throw(
-        ConnectionError('Network blocked'))
-except ImportError:
-    pass
 PAPER_URL = 'https://openreview.net/forum?id=H8tismBT3Q'
 
 EXPECTED_HALLUCINATED_COUNT = 7
@@ -69,33 +54,54 @@ def _get_results():
 
     _skip_if_missing()
 
-    from refchecker.core.refchecker import ArxivReferenceChecker
+    # Block network for the duration of the run, restore after
+    _orig_get = requests.Session.get
+    _orig_post = requests.Session.post
+    requests.Session.get = _blocked_request
+    requests.Session.post = _blocked_request
+    _orig_httpx = None
+    try:
+        import httpx
+        _orig_httpx = httpx.Client.send
+        httpx.Client.send = lambda self, *a, **k: (_ for _ in ()).throw(
+            ConnectionError('blocked'))
+    except ImportError:
+        pass
 
-    # Single
-    checker = ArxivReferenceChecker(
-        db_path=DB_PATH, llm_config={'provider': 'anthropic'},
-        cache_dir=CACHE_DIR, enable_parallel=True,
-    )
-    checker.run(debug_mode=True, input_specs=[PAPER_URL])
-    _results['single'] = checker._build_structured_report_payload()
+    try:
+        from refchecker.core.refchecker import ArxivReferenceChecker
 
-    # Bulk
-    checker = ArxivReferenceChecker(
-        db_path=DB_PATH, llm_config={'provider': 'anthropic'},
-        cache_dir=CACHE_DIR, enable_parallel=True,
-    )
-    checker.run(debug_mode=True, input_specs=[PAPER_URL, PAPER_URL])
-    _results['bulk'] = checker._build_structured_report_payload()
+        # Single
+        checker = ArxivReferenceChecker(
+            db_path=DB_PATH, llm_config={'provider': 'anthropic'},
+            cache_dir=CACHE_DIR, enable_parallel=True,
+        )
+        checker.run(debug_mode=True, input_specs=[PAPER_URL])
+        _results['single'] = checker._build_structured_report_payload()
 
-    # WebUI
-    from backend.refchecker_wrapper import ProgressRefChecker
-    wchecker = ProgressRefChecker(
-        llm_provider='anthropic', use_llm=True,
-        db_path=DB_PATH, cache_dir=CACHE_DIR,
-    )
-    _results['webui'] = asyncio.get_event_loop().run_until_complete(
-        wchecker.check_paper(PAPER_URL, 'url')
-    )
+        # Bulk
+        checker = ArxivReferenceChecker(
+            db_path=DB_PATH, llm_config={'provider': 'anthropic'},
+            cache_dir=CACHE_DIR, enable_parallel=True,
+        )
+        checker.run(debug_mode=True, input_specs=[PAPER_URL, PAPER_URL])
+        _results['bulk'] = checker._build_structured_report_payload()
+
+        # WebUI
+        from backend.refchecker_wrapper import ProgressRefChecker
+        wchecker = ProgressRefChecker(
+            llm_provider='anthropic', use_llm=True,
+            db_path=DB_PATH, cache_dir=CACHE_DIR,
+        )
+        _results['webui'] = asyncio.get_event_loop().run_until_complete(
+            wchecker.check_paper(PAPER_URL, 'url')
+        )
+    finally:
+        requests.Session.get = _orig_get
+        requests.Session.post = _orig_post
+        if _orig_httpx:
+            import httpx
+            httpx.Client.send = _orig_httpx
 
     return _results
 
