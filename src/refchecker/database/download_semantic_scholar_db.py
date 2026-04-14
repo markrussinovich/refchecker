@@ -6,10 +6,11 @@ This script downloads paper metadata from the Semantic Scholar API and stores it
 The database can then be used by the local_semantic_scholar.py module to verify references offline.
 
 Usage:
-    python download_semantic_scholar_db.py [--output-dir DIR] [--batch-size N] [--api-key KEY] [--fields FIELDS]
+    python download_semantic_scholar_db.py [--output-dir DIR] [--db-path PATH] [--batch-size N] [--api-key KEY] [--fields FIELDS]
     
 Options:
-    --output-dir DIR       Directory to store the database (default: semantic_scholar_db)
+    --output-dir DIR       Directory to store the database and dataset files (default: semantic_scholar_db)
+    --db-path PATH         Explicit SQLite database file to update (default: OUTPUT_DIR/semantic_scholar.db)
     --batch-size N         Number of papers to download in each batch (default: 100)
     --api-key KEY          Semantic Scholar API key (optional, increases rate limits)
     --fields FIELDS        Comma-separated list of fields to include (default: id,title,authors,year,externalIds,url,abstract)
@@ -55,24 +56,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+LATEST_SNAPSHOT_FILENAME = "latest_snapshot.txt"
+
 class SemanticScholarDownloader:
     """
     Class to download paper metadata from Semantic Scholar and store it in a SQLite database
     """
     
-    def __init__(self, output_dir="semantic_scholar_db", batch_size=100, api_key=None, fields=None):
+    def __init__(self, output_dir="semantic_scholar_db", batch_size=100, api_key=None, fields=None, db_path=None):
         """
         Initialize the downloader
         
         Args:
-            output_dir: Directory to store the database
+            output_dir: Directory to store the database and dataset files
             batch_size: Number of papers to download in each batch
             api_key: Semantic Scholar API key (optional)
             fields: List of fields to include in the API response
+            db_path: Explicit path to the SQLite database file
         """
-        self.output_dir = output_dir
+        self.output_dir = os.path.abspath(output_dir)
         self.batch_size = batch_size
         self.api_key = api_key
+        self.current_snapshot_id = None
         
         # Default fields to include
         if fields is None:
@@ -81,10 +86,13 @@ class SemanticScholarDownloader:
             self.fields = fields
         
         # Create output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(self.output_dir, exist_ok=True)
         
         # Initialize database
-        self.db_path = os.path.join(output_dir, "semantic_scholar.db")
+        self.db_path = os.path.abspath(db_path) if db_path else os.path.join(self.output_dir, "semantic_scholar.db")
+        db_parent = os.path.dirname(self.db_path)
+        if db_parent:
+            os.makedirs(db_parent, exist_ok=True)
         self.conn = self._get_db_connection()
         self.create_tables()
         
@@ -167,6 +175,25 @@ class SemanticScholarDownloader:
     def set_last_release_id(self, release_id: str):
         """Set the last processed release ID"""
         self.set_metadata('last_release_id', release_id)
+        self._write_latest_snapshot_marker(release_id)
+
+    def _get_latest_snapshot_marker_path(self):
+        """Return the operator-visible snapshot marker path next to the database."""
+        return os.path.join(os.path.dirname(self.db_path), LATEST_SNAPSHOT_FILENAME)
+
+    def _write_latest_snapshot_marker(self, release_id: str):
+        """Write the most recently pulled snapshot ID for human inspection."""
+        if not release_id:
+            return
+        marker_path = self._get_latest_snapshot_marker_path()
+        with open(marker_path, "w", encoding="utf-8") as marker_file:
+            marker_file.write(f"{release_id}\n")
+
+    def sync_latest_snapshot_marker(self):
+        """Ensure the human-readable snapshot marker matches the DB metadata."""
+        snapshot_id = self.get_last_release_id() or self.current_snapshot_id
+        if snapshot_id:
+            self._write_latest_snapshot_marker(snapshot_id)
     
     def check_for_updates(self):
         """
@@ -1074,21 +1101,73 @@ class SemanticScholarDownloader:
                 continue
         
         # Update metadata after successful processing
-        if incremental and total_records > 0:
+        if total_records > 0:
             current_time = datetime.now(timezone.utc).isoformat()
             self.set_last_update_time(current_time)
             
-            # Get and set the latest release ID
+            # Prefer the known downloaded snapshot, but fall back to current DB metadata.
             try:
-                latest_release = self.get_latest_release_id()
-                self.set_last_release_id(latest_release)
-                logger.info(f"Updated metadata - last update: {current_time}, release: {latest_release}")
+                release_id = self.current_snapshot_id or self.get_last_release_id() or self.get_latest_release_id()
+                self.current_snapshot_id = release_id
+                self.set_last_release_id(release_id)
+                logger.info(f"Updated metadata - last update: {current_time}, release: {release_id}")
             except Exception as e:
                 logger.warning(f"Could not update release ID: {e}")
         
         logger.info(f"Total records processed: {total_records:,}")
         if skipped_files > 0:
             logger.info(f"Files skipped (already processed): {skipped_files}")
+
+    def _find_local_dataset_files(self):
+        """Return all local Semantic Scholar dataset archives under the output directory."""
+        gz_files = []
+        for root, dirs, files in os.walk(self.output_dir):
+            for file in files:
+                if file.endswith('.gz'):
+                    gz_files.append(os.path.join(root, file))
+        return gz_files
+
+    def refresh_database(self, force_reprocess=False):
+        """Refresh an existing database incrementally, or bootstrap a new one if needed."""
+        db_exists = os.path.exists(self.db_path)
+
+        if not db_exists:
+            logger.info("No database found - performing full download")
+            success = self.download_dataset_files()
+            if not success:
+                logger.error("Failed to download dataset files")
+                return False
+            self.process_local_files(incremental=False)
+            return True
+
+        logger.info("Database exists - checking for new or updated data (incremental update)")
+        self.process_local_files(
+            force_reprocess=force_reprocess,
+            incremental=True,
+        )
+
+        current_release = self.get_last_release_id()
+        latest_release = self.get_latest_release_id()
+        if current_release != latest_release:
+            logger.info(f"Still behind (current: {current_release}, latest: {latest_release})")
+            gz_files = self._find_local_dataset_files()
+            if not gz_files:
+                logger.info("No .gz files found - downloading latest dataset")
+                success = self.download_dataset_files()
+                if not success:
+                    logger.error("Failed to download dataset files")
+                    return False
+                self.process_local_files(incremental=True)
+
+        effective_snapshot = self.get_last_release_id() or self.current_snapshot_id
+        if effective_snapshot:
+            self.current_snapshot_id = effective_snapshot
+            if self.get_last_release_id() != effective_snapshot:
+                self.set_last_release_id(effective_snapshot)
+            else:
+                self.sync_latest_snapshot_marker()
+
+        return True
     
     def _should_process_file(self, file_path):
         """
@@ -1299,6 +1378,7 @@ class SemanticScholarDownloader:
             
             # Get the latest release ID
             latest_release = self.get_latest_release_id()
+            self.current_snapshot_id = latest_release
             logger.info(f"Latest release: {latest_release}")
             
             # List files for the latest release
@@ -1532,6 +1612,8 @@ def main():
     parser = argparse.ArgumentParser(description="Download and process Semantic Scholar paper metadata")
     parser.add_argument("--output-dir", type=str, default="semantic_scholar_db",
                         help="Directory to store the database (default: semantic_scholar_db)")
+    parser.add_argument("--db-path", type=str,
+                        help="Explicit SQLite database file to update (default: OUTPUT_DIR/semantic_scholar.db)")
     parser.add_argument("--batch-size", type=int, default=10,
                         help="Number of papers to download in each batch (default: 10 for unauthenticated requests, can increase with API key)")
     parser.add_argument("--api-key", type=str,
@@ -1570,6 +1652,7 @@ def main():
         batch_size=args.batch_size,
         api_key=args.api_key,
         fields=args.fields.split(",") if args.fields else None,
+        db_path=args.db_path,
     )
     
     try:
@@ -1607,41 +1690,9 @@ def main():
             
         else:
             # Default behavior: automatic full or incremental based on DB state
-            if not db_exists:
-                logger.info("No database found - performing full download")
-                success = downloader.download_dataset_files()
-                if not success:
-                    logger.error("Failed to download dataset files")
-                    return 1
-                downloader.process_local_files(incremental=False)
-            else:
-                logger.info("Database exists - checking for new or updated data (incremental update)")
-                # First try incremental updates (diffs API), then fall back to .gz files or full download
-                downloader.process_local_files(
-                    force_reprocess=args.force_reprocess,
-                    incremental=True
-                )
-                
-                # If process_local_files didn't find diffs or .gz files, download dataset
-                # Check if we actually updated anything by comparing timestamps
-                current_release = downloader.get_last_release_id()
-                latest_release = downloader.get_latest_release_id()
-                if current_release != latest_release:
-                    logger.info(f"Still behind (current: {current_release}, latest: {latest_release})")
-                    # Check if there are any .gz files to process now
-                    gz_files = []
-                    for root, dirs, files in os.walk(args.output_dir):
-                        for file in files:
-                            if file.endswith('.gz'):
-                                gz_files.append(os.path.join(root, file))
-                    
-                    if not gz_files:
-                        logger.info("No .gz files found - downloading latest dataset")
-                        success = downloader.download_dataset_files()
-                        if not success:
-                            logger.error("Failed to download dataset files")
-                            return 1
-                        downloader.process_local_files(incremental=True)
+            success = downloader.refresh_database(force_reprocess=args.force_reprocess)
+            if not success:
+                return 1
         
         logger.info(f"Completed processing in {args.output_dir}")
         
@@ -1652,7 +1703,7 @@ def main():
         logger.info(f"Total papers in database: {count:,}")
         
         # Show metadata if available
-        if db_exists:
+        if os.path.exists(downloader.db_path):
             last_update = downloader.get_last_update_time()
             last_release = downloader.get_last_release_id()
             if last_update:

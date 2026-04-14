@@ -619,6 +619,9 @@ python scripts/download_db.py \
 academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
 ```
 
+When the Web UI has a local Semantic Scholar database configured, it now launches the downloader asynchronously at startup to refresh that database in the background.
+The downloader also writes a `latest_snapshot.txt` file next to the SQLite database for operator visibility, while the Web UI shows the current snapshot from the database metadata in the settings panel.
+
 ---
 
 ## Testing

@@ -98,6 +98,107 @@ def _private_artifact_headers(extra_headers: Optional[Dict[str, str]] = None) ->
     return headers
 
 
+def _resolve_semantic_scholar_db_path(path_value: Optional[str]) -> Optional[Path]:
+    """Resolve a configured local Semantic Scholar DB path to a concrete SQLite file."""
+    if not path_value:
+        return None
+
+    resolved_path = Path(path_value).expanduser()
+    if resolved_path.is_dir():
+        default_db = resolved_path / "semantic_scholar.db"
+        if default_db.is_file():
+            return default_db
+
+        db_files = sorted(
+            resolved_path.glob("*.db"),
+            key=lambda candidate: candidate.stat().st_mtime,
+            reverse=True,
+        )
+        if db_files:
+            return db_files[0]
+
+        logger.warning(f"Configured Semantic Scholar DB directory contains no .db files: {resolved_path}")
+        return None
+
+    return resolved_path
+
+
+def _read_semantic_scholar_db_snapshot(db_path: Optional[Path]) -> Optional[str]:
+    """Read the stored Semantic Scholar snapshot release ID from local DB metadata."""
+    if not db_path or not db_path.is_file():
+        return None
+
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute(
+                "SELECT value FROM metadata WHERE key = 'last_release_id'"
+            ).fetchone()
+            return row[0] if row and row[0] else None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to read Semantic Scholar snapshot metadata from {db_path}: {e}")
+        return None
+
+
+async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
+    """Return the configured local Semantic Scholar DB path, if any."""
+    configured_path = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or None
+    db_path = _resolve_semantic_scholar_db_path(configured_path)
+    if not db_path:
+        return None
+    if not db_path.is_file():
+        logger.warning(f"Skipping Semantic Scholar refresh because the configured DB was not found: {db_path}")
+        return None
+    return db_path
+
+
+async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
+    """Refresh the configured local Semantic Scholar DB in a background subprocess."""
+    repo_root = Path(__file__).resolve().parent.parent
+    script_path = repo_root / "scripts" / "download_db.py"
+    if not script_path.is_file():
+        logger.error(f"Semantic Scholar refresh script not found: {script_path}")
+        return
+
+    command = [
+        sys.executable,
+        str(script_path),
+        "--output-dir",
+        str(db_path.parent),
+        "--db-path",
+        str(db_path),
+    ]
+    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+    if api_key:
+        command.extend(["--api-key", api_key])
+
+    logger.info(f"Launching background Semantic Scholar refresh for {db_path}")
+    process = await asyncio.create_subprocess_exec(*command, cwd=str(repo_root))
+    return_code = await process.wait()
+    if return_code == 0:
+        logger.info(f"Background Semantic Scholar refresh completed successfully for {db_path}")
+        return
+    logger.error(f"Background Semantic Scholar refresh failed for {db_path} with exit code {return_code}")
+
+
+async def _schedule_semantic_scholar_refresh() -> Optional[asyncio.Task]:
+    """Schedule a non-blocking local Semantic Scholar DB refresh when configured."""
+    db_path = await _get_configured_semantic_scholar_db_path()
+    if not db_path:
+        return None
+
+    task = asyncio.create_task(
+        _run_semantic_scholar_refresh_subprocess(db_path),
+        name="semantic-scholar-db-refresh",
+    )
+    logger.info(f"Scheduled background Semantic Scholar refresh for {db_path}")
+    return task
+
+
 def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
     """Reject web-only providers that are unsafe in multi-user deployments."""
     normalized = (provider_name or "").strip().lower()
@@ -290,6 +391,8 @@ async def _run_startup_tasks() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _run_startup_tasks()
+    refresh_task = await _schedule_semantic_scholar_refresh()
+    app.state.semantic_scholar_refresh_task = refresh_task
     yield
 
 
@@ -685,7 +788,9 @@ async def run_check(
     """
     try:
         # Resolve local Semantic Scholar database path from environment or settings
-        db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
+        configured_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
+        resolved_db_path = _resolve_semantic_scholar_db_path(configured_db_path)
+        db_path = str(resolved_db_path) if resolved_db_path else None
 
         # Resolve cache directory from environment or settings
         cache_dir = os.environ.get('REFCHECKER_CACHE_DIR') or await db.get_setting("cache_dir") or None
@@ -2202,7 +2307,12 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
         # Get current values from database
         settings = {}
         for key, config in settings_config.items():
-            value = await db.get_setting(key)
+            if key == "db_path":
+                value = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting(key)
+            elif key == "cache_dir":
+                value = os.environ.get("REFCHECKER_CACHE_DIR") or await db.get_setting(key)
+            else:
+                value = await db.get_setting(key)
             settings[key] = {
                 "value": value if value is not None else config["default"],
                 "default": config["default"],
@@ -2215,6 +2325,9 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
             if config["type"] == "number":
                 settings[key]["min"] = config.get("min")
                 settings[key]["max"] = config.get("max")
+            if key == "db_path":
+                resolved_db_path = _resolve_semantic_scholar_db_path(settings[key]["value"])
+                settings[key]["current_snapshot"] = _read_semantic_scholar_db_snapshot(resolved_db_path)
         
         return settings
     except Exception as e:
@@ -2261,7 +2374,7 @@ async def update_setting(
             if not path:
                 await db.set_setting(setting_key, "")
                 logger.info("Cleared db_path setting")
-                return {"key": setting_key, "value": "", "message": "Local database disabled"}
+                return {"key": setting_key, "value": "", "message": "Local database disabled", "current_snapshot": None}
             if not os.path.isfile(path):
                 raise HTTPException(status_code=400, detail=f"File not found: {path}")
             # Validate SQLite schema
@@ -2292,7 +2405,13 @@ async def update_setting(
             msg = f"Database validated: {row_count:,} papers, {len(cols)} columns"
             if warnings:
                 msg += f" (⚠ {'; '.join(warnings)})"
-            return {"key": setting_key, "value": path, "message": msg, "papers": row_count}
+            return {
+                "key": setting_key,
+                "value": path,
+                "message": msg,
+                "papers": row_count,
+                "current_snapshot": _read_semantic_scholar_db_snapshot(Path(path)),
+            }
         
         if setting_key == "cache_dir":
             path = update.value.strip()

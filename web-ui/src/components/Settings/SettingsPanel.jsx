@@ -16,7 +16,8 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     version,
     isSettingsOpen, 
     closeSettings, 
-    updateSetting 
+    updateSetting,
+    fetchSettings
   } = useSettingsStore()
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
@@ -90,7 +91,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         setDbPathError(result.detail || 'Failed to save')
       } else {
         setDbPathSuccess(result.message || 'Saved')
-        updateSetting('db_path', dbPathLocal)
+        fetchSettings()
       }
     } catch (err) {
       setDbPathError(err.message || 'Failed to save')
@@ -348,6 +349,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
           {dbPathSuccess && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-success, #22c55e)' }}>{dbPathSuccess}</div>
+          )}
+          {settings.db_path?.value && settings.db_path?.current_snapshot && (
+            <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+              Current snapshot: {settings.db_path.current_snapshot}
+            </div>
           )}
         </div>
       )}
