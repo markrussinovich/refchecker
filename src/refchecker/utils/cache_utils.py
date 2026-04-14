@@ -1,4 +1,4 @@
-"""Filesystem cache for downloaded PDFs and extracted bibliographies.
+"""Filesystem cache for downloaded PDFs and derived artifacts.
 
 When ``--cache <dir>`` is passed on the CLI, the checker stores PDF bytes
 and the final parsed reference list under deterministic keys so repeated
@@ -11,6 +11,8 @@ Directory layout::
       arxiv_2312.02091/
         paper.pdf
         bibliography.json
+                thumbnail.png
+                preview.png
       openreview_H8tismBT3Q/
         paper.pdf
         bibliography.json
@@ -87,6 +89,22 @@ def cache_key_for_spec(input_spec: str) -> str:
 
     # Fallback: hash the spec itself
     return f"spec_{hashlib.sha256(spec.encode()).hexdigest()[:16]}"
+
+
+def get_cached_artifact_path(
+    cache_dir: Optional[str],
+    input_spec: Optional[str],
+    filename: str,
+    create_dir: bool = False,
+) -> Optional[str]:
+    """Return the path for a cached artifact under the paper-specific cache entry."""
+    if not cache_dir or not input_spec or not filename:
+        return None
+
+    entry_dir = os.path.join(cache_dir, cache_key_for_spec(input_spec))
+    if create_dir:
+        os.makedirs(entry_dir, exist_ok=True)
+    return os.path.join(entry_dir, filename)
 
 
 # ---------------------------------------------------------------------------

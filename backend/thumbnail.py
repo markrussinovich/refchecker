@@ -5,17 +5,14 @@ Uses PyMuPDF (fitz) to extract the first page of PDFs as thumbnails.
 Thumbnails are cached on disk to avoid regeneration.
 """
 import os
-import hashlib
 import logging
-import tempfile
 from pathlib import Path
 from typing import Optional
 import asyncio
 
-logger = logging.getLogger(__name__)
+from refchecker.utils.cache_utils import get_cached_artifact_path
 
-# Default thumbnail cache directory
-THUMBNAIL_CACHE_DIR = Path(tempfile.gettempdir()) / "refchecker_thumbnails"
+logger = logging.getLogger(__name__)
 
 # Thumbnail settings
 THUMBNAIL_WIDTH = 200  # Target width in pixels for small thumbnails
@@ -25,7 +22,11 @@ THUMBNAIL_DPI = 150  # Higher DPI for sharper text rendering
 PREVIEW_WIDTH = 1600  # Target width in pixels for preview/overlay
 
 
-def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
+def get_thumbnail_cache_path(
+    source_identifier: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> str:
     """
     Get the cache path for a thumbnail.
     
@@ -36,21 +37,18 @@ def get_thumbnail_cache_path(source_identifier: str, check_id: Optional[int] = N
     Returns:
         Path to the thumbnail file (may not exist yet)
     """
-    # Create cache directory if it doesn't exist
-    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Create a hash of the source for the filename
-    source_hash = hashlib.md5(source_identifier.encode()).hexdigest()[:12]
-    
-    if check_id:
-        filename = f"thumb_{check_id}_{source_hash}.png"
-    else:
-        filename = f"thumb_{source_hash}.png"
-    
-    return THUMBNAIL_CACHE_DIR / filename
+    cached_path = get_cached_artifact_path(cache_dir, source_identifier, "thumbnail.png", create_dir=True)
+    if cached_path:
+        return cached_path
+
+    raise ValueError("cache_dir is required for thumbnail storage")
 
 
-def get_preview_cache_path(source_identifier: str, check_id: Optional[int] = None) -> Path:
+def get_preview_cache_path(
+    source_identifier: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> str:
     """
     Get the cache path for a preview (larger image for overlay).
     
@@ -61,21 +59,28 @@ def get_preview_cache_path(source_identifier: str, check_id: Optional[int] = Non
     Returns:
         Path to the preview file (may not exist yet)
     """
-    # Create cache directory if it doesn't exist
-    THUMBNAIL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Create a hash of the source for the filename
-    source_hash = hashlib.md5(source_identifier.encode()).hexdigest()[:12]
-    
-    if check_id:
-        filename = f"preview_{check_id}_{source_hash}.png"
-    else:
-        filename = f"preview_{source_hash}.png"
-    
-    return THUMBNAIL_CACHE_DIR / filename
+    cached_path = get_cached_artifact_path(cache_dir, source_identifier, "preview.png", create_dir=True)
+    if cached_path:
+        return cached_path
+
+    raise ValueError("cache_dir is required for preview storage")
 
 
-def generate_pdf_thumbnail(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+def get_pdf_storage_path(source_identifier: str, cache_dir: Optional[str] = None) -> str:
+    """Return the cached PDF path for a source."""
+    cached_path = get_cached_artifact_path(cache_dir, source_identifier, "paper.pdf", create_dir=True)
+    if cached_path:
+        return cached_path
+
+    raise ValueError("cache_dir is required for PDF storage")
+
+
+def generate_pdf_thumbnail(
+    pdf_path: str,
+    output_path: Optional[str] = None,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a thumbnail from the first page of a PDF.
     
@@ -96,7 +101,7 @@ def generate_pdf_thumbnail(pdf_path: str, output_path: Optional[str] = None) -> 
         
         # Determine output path
         if output_path is None:
-            output_path = str(get_thumbnail_cache_path(pdf_path))
+            output_path = get_thumbnail_cache_path(source_identifier or pdf_path, cache_dir=cache_dir)
         
         # Check if thumbnail already exists
         if os.path.exists(output_path):
@@ -160,7 +165,12 @@ def generate_pdf_thumbnail(pdf_path: str, output_path: Optional[str] = None) -> 
         return None
 
 
-async def generate_pdf_thumbnail_async(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+async def generate_pdf_thumbnail_async(
+    pdf_path: str,
+    output_path: Optional[str] = None,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Async wrapper for PDF thumbnail generation.
     
@@ -171,10 +181,21 @@ async def generate_pdf_thumbnail_async(pdf_path: str, output_path: Optional[str]
     Returns:
         Path to the generated thumbnail, or None if generation failed
     """
-    return await asyncio.to_thread(generate_pdf_thumbnail, pdf_path, output_path)
+    return await asyncio.to_thread(
+        generate_pdf_thumbnail,
+        pdf_path,
+        output_path,
+        source_identifier,
+        cache_dir,
+    )
 
 
-def generate_pdf_preview(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+def generate_pdf_preview(
+    pdf_path: str,
+    output_path: Optional[str] = None,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a high-resolution preview from the first page of a PDF.
     
@@ -195,7 +216,7 @@ def generate_pdf_preview(pdf_path: str, output_path: Optional[str] = None) -> Op
         
         # Determine output path
         if output_path is None:
-            output_path = str(get_preview_cache_path(pdf_path))
+            output_path = get_preview_cache_path(source_identifier or pdf_path, cache_dir=cache_dir)
         
         # Check if preview already exists
         if os.path.exists(output_path):
@@ -259,7 +280,12 @@ def generate_pdf_preview(pdf_path: str, output_path: Optional[str] = None) -> Op
         return None
 
 
-async def generate_pdf_preview_async(pdf_path: str, output_path: Optional[str] = None) -> Optional[str]:
+async def generate_pdf_preview_async(
+    pdf_path: str,
+    output_path: Optional[str] = None,
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Async wrapper for PDF preview generation.
     
@@ -270,7 +296,13 @@ async def generate_pdf_preview_async(pdf_path: str, output_path: Optional[str] =
     Returns:
         Path to the generated preview, or None if generation failed
     """
-    return await asyncio.to_thread(generate_pdf_preview, pdf_path, output_path)
+    return await asyncio.to_thread(
+        generate_pdf_preview,
+        pdf_path,
+        output_path,
+        source_identifier,
+        cache_dir,
+    )
 
 
 def _download_arxiv_pdf(arxiv_id: str, pdf_path: Path) -> bool:
@@ -301,7 +333,11 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: Path) -> bool:
     return False
 
 
-def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+def generate_arxiv_thumbnail(
+    arxiv_id: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a thumbnail for an ArXiv paper.
     
@@ -316,28 +352,30 @@ def generate_arxiv_thumbnail(arxiv_id: str, check_id: Optional[int] = None) -> O
     """
     try:
         # Check if thumbnail already exists
-        output_path = get_thumbnail_cache_path(f"arxiv_{arxiv_id}", check_id)
-        if output_path.exists():
+        source_identifier = f"arxiv_{arxiv_id}"
+        output_path = get_thumbnail_cache_path(source_identifier, check_id, cache_dir=cache_dir)
+        if os.path.exists(output_path):
             logger.debug(f"ArXiv thumbnail already exists: {output_path}")
-            return str(output_path)
-        
-        # Download the PDF to a temporary location
-        pdf_dir = Path(tempfile.gettempdir()) / "refchecker_pdfs"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
+            return output_path
+
+        pdf_path = get_pdf_storage_path(source_identifier, cache_dir=cache_dir)
         
         if not _download_arxiv_pdf(arxiv_id, pdf_path):
             return None
         
         # Generate thumbnail from the PDF
-        return generate_pdf_thumbnail(str(pdf_path), str(output_path))
+        return generate_pdf_thumbnail(pdf_path, output_path)
         
     except Exception as e:
         logger.error(f"Error generating ArXiv thumbnail: {e}")
         return None
 
 
-async def generate_arxiv_thumbnail_async(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+async def generate_arxiv_thumbnail_async(
+    arxiv_id: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Async wrapper for ArXiv thumbnail generation.
     
@@ -348,10 +386,14 @@ async def generate_arxiv_thumbnail_async(arxiv_id: str, check_id: Optional[int] 
     Returns:
         Path to the generated thumbnail, or None if generation failed
     """
-    return await asyncio.to_thread(generate_arxiv_thumbnail, arxiv_id, check_id)
+    return await asyncio.to_thread(generate_arxiv_thumbnail, arxiv_id, check_id, cache_dir)
 
 
-def generate_arxiv_preview(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+def generate_arxiv_preview(
+    arxiv_id: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a high-resolution preview for an ArXiv paper.
     
@@ -366,28 +408,30 @@ def generate_arxiv_preview(arxiv_id: str, check_id: Optional[int] = None) -> Opt
     """
     try:
         # Check if preview already exists
-        output_path = get_preview_cache_path(f"arxiv_{arxiv_id}", check_id)
-        if output_path.exists():
+        source_identifier = f"arxiv_{arxiv_id}"
+        output_path = get_preview_cache_path(source_identifier, check_id, cache_dir=cache_dir)
+        if os.path.exists(output_path):
             logger.debug(f"ArXiv preview already exists: {output_path}")
-            return str(output_path)
-        
-        # Download the PDF to a temporary location
-        pdf_dir = Path(tempfile.gettempdir()) / "refchecker_pdfs"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = pdf_dir / f"arxiv_{arxiv_id}.pdf"
+            return output_path
+
+        pdf_path = get_pdf_storage_path(source_identifier, cache_dir=cache_dir)
         
         if not _download_arxiv_pdf(arxiv_id, pdf_path):
             return None
         
         # Generate preview from the PDF
-        return generate_pdf_preview(str(pdf_path), str(output_path))
+        return generate_pdf_preview(pdf_path, output_path)
         
     except Exception as e:
         logger.error(f"Error generating ArXiv preview: {e}")
         return None
 
 
-async def generate_arxiv_preview_async(arxiv_id: str, check_id: Optional[int] = None) -> Optional[str]:
+async def generate_arxiv_preview_async(
+    arxiv_id: str,
+    check_id: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Async wrapper for ArXiv preview generation.
     
@@ -398,10 +442,16 @@ async def generate_arxiv_preview_async(arxiv_id: str, check_id: Optional[int] = 
     Returns:
         Path to the generated preview, or None if generation failed
     """
-    return await asyncio.to_thread(generate_arxiv_preview, arxiv_id, check_id)
+    return await asyncio.to_thread(generate_arxiv_preview, arxiv_id, check_id, cache_dir)
 
 
-def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+def get_text_thumbnail(
+    check_id: int,
+    text_preview: str = "",
+    text_file_path: str = "",
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a thumbnail for pasted text showing actual content.
     
@@ -418,10 +468,10 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
     try:
         import fitz
         
-        output_path = get_thumbnail_cache_path(f"text_{check_id}", check_id)
-        
-        if output_path.exists():
-            return str(output_path)
+        output_path = get_thumbnail_cache_path(source_identifier or f"text_{check_id}", check_id, cache_dir=cache_dir)
+
+        if os.path.exists(output_path):
+            return output_path
         
         # Try to read text content from file
         text_content = text_preview
@@ -492,11 +542,11 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
         
         # Render to pixmap and save
         pix = page.get_pixmap(alpha=False)
-        pix.save(str(output_path))
+        pix.save(output_path)
         doc.close()
         
         logger.info(f"Generated text thumbnail: {output_path}")
-        return str(output_path)
+        return output_path
         
     except ImportError:
         logger.error("PyMuPDF (fitz) is not installed")
@@ -506,7 +556,13 @@ def get_text_thumbnail(check_id: int, text_preview: str = "", text_file_path: st
         return None
 
 
-def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+def get_text_preview(
+    check_id: int,
+    text_preview: str = "",
+    text_file_path: str = "",
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """
     Generate a high-resolution preview for pasted text showing actual content.
     
@@ -523,10 +579,10 @@ def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str 
     try:
         import fitz
         
-        output_path = get_preview_cache_path(f"text_{check_id}", check_id)
-        
-        if output_path.exists():
-            return str(output_path)
+        output_path = get_preview_cache_path(source_identifier or f"text_{check_id}", check_id, cache_dir=cache_dir)
+
+        if os.path.exists(output_path):
+            return output_path
         
         # Try to read text content from file
         text_content = text_preview
@@ -597,11 +653,11 @@ def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str 
         
         # Render to pixmap and save
         pix = page.get_pixmap(alpha=False)
-        pix.save(str(output_path))
+        pix.save(output_path)
         doc.close()
         
         logger.info(f"Generated text preview: {output_path}")
-        return str(output_path)
+        return output_path
         
     except ImportError:
         logger.error("PyMuPDF (fitz) is not installed")
@@ -611,17 +667,43 @@ def get_text_preview(check_id: int, text_preview: str = "", text_file_path: str 
         return None
 
 
-async def get_text_preview_async(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+async def get_text_preview_async(
+    check_id: int,
+    text_preview: str = "",
+    text_file_path: str = "",
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """Async wrapper for text preview generation."""
-    return await asyncio.to_thread(get_text_preview, check_id, text_preview, text_file_path)
+    return await asyncio.to_thread(
+        get_text_preview,
+        check_id,
+        text_preview,
+        text_file_path,
+        source_identifier,
+        cache_dir,
+    )
 
 
-async def get_text_thumbnail_async(check_id: int, text_preview: str = "", text_file_path: str = "") -> Optional[str]:
+async def get_text_thumbnail_async(
+    check_id: int,
+    text_preview: str = "",
+    text_file_path: str = "",
+    source_identifier: Optional[str] = None,
+    cache_dir: Optional[str] = None,
+) -> Optional[str]:
     """Async wrapper for text thumbnail generation."""
-    return await asyncio.to_thread(get_text_thumbnail, check_id, text_preview, text_file_path)
+    return await asyncio.to_thread(
+        get_text_thumbnail,
+        check_id,
+        text_preview,
+        text_file_path,
+        source_identifier,
+        cache_dir,
+    )
 
 
-def cleanup_old_thumbnails(max_age_days: int = 30):
+def cleanup_old_thumbnails(cache_dir: str, max_age_days: int = 30):
     """
     Clean up old thumbnails from the cache.
     
@@ -631,20 +713,22 @@ def cleanup_old_thumbnails(max_age_days: int = 30):
     try:
         import time
         
-        if not THUMBNAIL_CACHE_DIR.exists():
+        cache_root = Path(cache_dir)
+        if not cache_root.exists():
             return
         
         max_age_seconds = max_age_days * 24 * 60 * 60
         current_time = time.time()
         
-        for thumb_path in THUMBNAIL_CACHE_DIR.glob("thumb_*.png"):
-            try:
-                file_age = current_time - thumb_path.stat().st_mtime
-                if file_age > max_age_seconds:
-                    thumb_path.unlink()
-                    logger.debug(f"Deleted old thumbnail: {thumb_path}")
-            except Exception as e:
-                logger.warning(f"Error deleting thumbnail {thumb_path}: {e}")
+        for artifact_name in ("thumbnail.png", "preview.png"):
+            for thumb_path in cache_root.glob(f"**/{artifact_name}"):
+                try:
+                    file_age = current_time - thumb_path.stat().st_mtime
+                    if file_age > max_age_seconds:
+                        thumb_path.unlink()
+                        logger.debug(f"Deleted old thumbnail artifact: {thumb_path}")
+                except Exception as e:
+                    logger.warning(f"Error deleting thumbnail artifact {thumb_path}: {e}")
                 
     except Exception as e:
         logger.error(f"Error cleaning up thumbnails: {e}")

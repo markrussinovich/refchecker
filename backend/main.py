@@ -59,6 +59,7 @@ from .thumbnail import (
     generate_arxiv_preview_async,
     generate_pdf_thumbnail_async,
     generate_pdf_preview_async,
+    get_pdf_storage_path,
     get_text_thumbnail_async,
     get_text_preview_async,
     get_thumbnail_cache_path,
@@ -154,6 +155,14 @@ async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
         logger.warning(f"Skipping Semantic Scholar refresh because the configured DB was not found: {db_path}")
         return None
     return db_path
+
+
+async def _get_configured_cache_dir() -> Optional[str]:
+    """Return the configured shared cache directory, if any."""
+    configured_dir = os.environ.get('REFCHECKER_CACHE_DIR') or await db.get_setting("cache_dir")
+    cache_dir = Path(configured_dir).expanduser() if configured_dir else get_data_dir() / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return str(cache_dir)
 
 
 async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
@@ -793,7 +802,7 @@ async def run_check(
         db_path = str(resolved_db_path) if resolved_db_path else None
 
         # Resolve cache directory from environment or settings
-        cache_dir = os.environ.get('REFCHECKER_CACHE_DIR') or await db.get_setting("cache_dir") or None
+        cache_dir = await _get_configured_cache_dir()
 
         # Wait for WebSocket to connect (give client time to establish connection)
         logger.info(f"Waiting for WebSocket connection for session {session_id}...")
@@ -912,9 +921,19 @@ async def run_check(
             try:
                 # Generate and cache thumbnail
                 if paper_source.lower().endswith('.pdf'):
-                    thumbnail_path = await generate_pdf_thumbnail_async(paper_source)
+                    thumbnail_path = await generate_pdf_thumbnail_async(
+                        paper_source,
+                        source_identifier=paper_source,
+                        cache_dir=cache_dir,
+                    )
                 else:
-                    thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
+                    thumbnail_path = await get_text_thumbnail_async(
+                        check_id,
+                        "",
+                        paper_source,
+                        source_identifier=paper_source,
+                        cache_dir=cache_dir,
+                    )
                 if thumbnail_path:
                     await db.update_check_thumbnail(check_id, thumbnail_path)
                     logger.info(f"Generated thumbnail for check {check_id}: {thumbnail_path}")
@@ -1010,6 +1029,8 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                 headers=_private_artifact_headers(),
             )
         
+        cache_dir = await _get_configured_cache_dir()
+
         # Generate thumbnail based on source type
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
@@ -1038,12 +1059,9 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
         if is_direct_pdf_url:
             # Generate thumbnail from direct PDF URL
             logger.info(f"Generating thumbnail from PDF URL: {paper_source}")
-            import hashlib
-            import tempfile
             from backend.refchecker_wrapper import download_pdf
-            
-            pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
-            pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+
+            pdf_path = get_pdf_storage_path(paper_source, cache_dir=cache_dir)
             
             # Download PDF if not already cached (or if cached file is empty/corrupt)
             if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
@@ -1051,43 +1069,93 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     await asyncio.to_thread(download_pdf, paper_source, pdf_path)
                 except Exception as e:
                     logger.error(f"Failed to download PDF for thumbnail: {e}")
-                    thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+                    thumbnail_path = await get_text_thumbnail_async(
+                        check_id,
+                        "PDF",
+                        source_identifier=paper_source,
+                        cache_dir=cache_dir,
+                    )
                     pdf_path = None
             
             if pdf_path and os.path.exists(pdf_path):
-                thumbnail_path = await generate_pdf_thumbnail_async(pdf_path)
+                thumbnail_path = await generate_pdf_thumbnail_async(
+                    pdf_path,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
             else:
-                thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+                thumbnail_path = await get_text_thumbnail_async(
+                    check_id,
+                    "PDF",
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
         elif arxiv_match:
             # Generate thumbnail from ArXiv paper
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating thumbnail for ArXiv paper: {arxiv_id}")
-            thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id)
+            thumbnail_path = await generate_arxiv_thumbnail_async(arxiv_id, check_id, cache_dir=cache_dir)
             if not thumbnail_path:
-                thumbnail_path = await get_text_thumbnail_async(check_id, f"ArXiv: {arxiv_id}")
+                thumbnail_path = await get_text_thumbnail_async(
+                    check_id,
+                    f"ArXiv: {arxiv_id}",
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
         elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
             # Generate thumbnail from uploaded PDF
             if os.path.exists(paper_source):
                 logger.info(f"Generating thumbnail from PDF: {paper_source}")
-                thumbnail_path = await generate_pdf_thumbnail_async(paper_source)
+                thumbnail_path = await generate_pdf_thumbnail_async(
+                    paper_source,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
             else:
                 # PDF file no longer exists, use placeholder
-                thumbnail_path = await get_text_thumbnail_async(check_id, "PDF")
+                thumbnail_path = await get_text_thumbnail_async(
+                    check_id,
+                    "PDF",
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
         elif source_type == 'file':
             # For non-PDF file uploads, generate thumbnail with file content
             logger.info(f"Generating text content thumbnail for uploaded file check {check_id}")
             if os.path.exists(paper_source):
-                thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
+                thumbnail_path = await get_text_thumbnail_async(
+                    check_id,
+                    "",
+                    paper_source,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
             else:
-                thumbnail_path = await get_text_thumbnail_async(check_id, "Uploaded file")
+                thumbnail_path = await get_text_thumbnail_async(
+                    check_id,
+                    "Uploaded file",
+                    source_identifier=f"check_{check_id}_file",
+                    cache_dir=cache_dir,
+                )
         elif source_type == 'text':
             # Generate thumbnail with actual text content for pasted text
             logger.info(f"Generating text content thumbnail for check {check_id}")
             # paper_source is now a file path for text sources
-            thumbnail_path = await get_text_thumbnail_async(check_id, "", paper_source)
+            thumbnail_path = await get_text_thumbnail_async(
+                check_id,
+                "",
+                paper_source,
+                source_identifier=paper_source,
+                cache_dir=cache_dir,
+            )
         else:
             # Default placeholder for other sources
-            thumbnail_path = await get_text_thumbnail_async(check_id, source_type)
+            thumbnail_path = await get_text_thumbnail_async(
+                check_id,
+                source_type,
+                source_identifier=f"check_{check_id}_{source_type}",
+                cache_dir=cache_dir,
+            )
         
         if thumbnail_path and os.path.exists(thumbnail_path):
             # Cache the thumbnail path in the database
@@ -1120,6 +1188,8 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
         
+        cache_dir = await _get_configured_cache_dir()
+
         # Generate preview based on source type
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
@@ -1150,12 +1220,9 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
         if is_direct_pdf_url:
             # Generate preview from direct PDF URL
             logger.info(f"Generating preview from PDF URL: {paper_source}")
-            import hashlib
-            import tempfile
             from backend.refchecker_wrapper import download_pdf
-            
-            pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
-            pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+
+            pdf_path = get_pdf_storage_path(paper_source, cache_dir=cache_dir)
             
             # Download PDF if not already cached (or if cached file is empty/corrupt)
             if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
@@ -1166,17 +1233,25 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                     pdf_path = None
             
             if pdf_path and os.path.exists(pdf_path):
-                preview_path = await generate_pdf_preview_async(pdf_path)
+                preview_path = await generate_pdf_preview_async(
+                    pdf_path,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
         elif arxiv_match:
             # Generate preview from ArXiv paper
             arxiv_id = arxiv_match.group(1)
             logger.info(f"Generating preview for ArXiv paper: {arxiv_id}")
-            preview_path = await generate_arxiv_preview_async(arxiv_id, check_id)
+            preview_path = await generate_arxiv_preview_async(arxiv_id, check_id, cache_dir=cache_dir)
         elif source_type == 'file' and paper_source.lower().endswith('.pdf'):
             # Generate preview from uploaded PDF
             if os.path.exists(paper_source):
                 logger.info(f"Generating preview from PDF: {paper_source}")
-                preview_path = await generate_pdf_preview_async(paper_source)
+                preview_path = await generate_pdf_preview_async(
+                    paper_source,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
         
         if preview_path and os.path.exists(preview_path):
             return FileResponse(
@@ -1188,7 +1263,13 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
         # For text sources, generate a high-resolution text preview for overlay display
         if source_type == 'text':
             logger.info(f"Generating text preview for check {check_id}")
-            preview_path = await get_text_preview_async(check_id, "", paper_source)
+            preview_path = await get_text_preview_async(
+                check_id,
+                "",
+                paper_source,
+                source_identifier=paper_source,
+                cache_dir=cache_dir,
+            )
             if preview_path and os.path.exists(preview_path):
                 return FileResponse(
                     preview_path,
@@ -1200,9 +1281,20 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
         if source_type == 'file' and not paper_source.lower().endswith('.pdf'):
             logger.info(f"Generating text preview for uploaded file check {check_id}")
             if os.path.exists(paper_source):
-                preview_path = await get_text_preview_async(check_id, "", paper_source)
+                preview_path = await get_text_preview_async(
+                    check_id,
+                    "",
+                    paper_source,
+                    source_identifier=paper_source,
+                    cache_dir=cache_dir,
+                )
             else:
-                preview_path = await get_text_preview_async(check_id, "Uploaded file")
+                preview_path = await get_text_preview_async(
+                    check_id,
+                    "Uploaded file",
+                    source_identifier=f"check_{check_id}_file",
+                    cache_dir=cache_dir,
+                )
             if preview_path and os.path.exists(preview_path):
                 return FileResponse(
                     preview_path,

@@ -27,6 +27,7 @@ if _src_path not in sys.path and os.path.exists(_src_path):
 
 from backend.concurrency import create_limiter, get_default_max_concurrent
 from backend.auth import is_multiuser_mode
+from backend.database import get_data_dir
 
 from refchecker.utils.text_utils import extract_latex_references
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
@@ -152,7 +153,8 @@ class ProgressRefChecker:
         self.check_id = check_id
         self.title_update_callback = title_update_callback
         self.bibliography_source_callback = bibliography_source_callback
-        self.cache_dir = cache_dir
+        self.cache_dir = cache_dir or str(get_data_dir() / "cache")
+        Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
 
         # Initialize LLM if requested
         self.llm = None
@@ -497,6 +499,8 @@ class ProgressRefChecker:
                     # Check bibliography cache first — avoids PDF download
                     # entirely when references are already cached.
                     from refchecker.utils.cache_utils import cached_bibliography
+                    from refchecker.utils.cache_utils import get_cached_artifact_path
+
                     cached_bib = cached_bibliography(self.cache_dir, paper_source)
                     if cached_bib is not None:
                         logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
@@ -526,11 +530,10 @@ class ProgressRefChecker:
                         })
 
                         # Download PDF from URL
-                        import hashlib
-                        pdf_hash = hashlib.md5(paper_source.encode()).hexdigest()[:12]
-                        pdf_path = os.path.join(tempfile.gettempdir(), f"refchecker_pdf_{pdf_hash}.pdf")
+                        pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
 
-                        await asyncio.to_thread(download_pdf, paper_source, pdf_path)
+                        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                            await asyncio.to_thread(download_pdf, paper_source, pdf_path)
 
                         # For OpenReview PDFs, try to get metadata from the API
                         if 'openreview.net' in paper_source.lower():
@@ -617,8 +620,9 @@ class ProgressRefChecker:
                             raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys. (This paper's ArXiv source did not contain parseable bibliography files.)")
                         extraction_method = 'pdf'
                         # Download PDF - run in thread (use cross-platform temp directory)
-                        pdf_path = os.path.join(tempfile.gettempdir(), f"arxiv_{arxiv_id}.pdf")
-                        await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
+                        pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
+                        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                            await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
 
                         # Extract text from PDF - run in thread
                         pdf_processor = PDFProcessor()

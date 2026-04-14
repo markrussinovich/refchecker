@@ -72,7 +72,7 @@ class TestThumbnailFallback:
         """After generate_arxiv_thumbnail_async, there must be a fallback."""
         src = _read_backend_main()
         # Find the arxiv thumbnail block — expect a fallback within ~5 lines
-        pattern = r'generate_arxiv_thumbnail_async\(arxiv_id, check_id\).*?(?:get_text_thumbnail_async|generate_pdf_thumbnail)'
+        pattern = r'generate_arxiv_thumbnail_async\(arxiv_id, check_id(?:,\s*cache_dir=cache_dir)?\).*?(?:get_text_thumbnail_async|generate_pdf_thumbnail)'
         match = re.search(pattern, src, re.DOTALL)
         assert match, (
             "No text-thumbnail fallback after generate_arxiv_thumbnail_async — "
