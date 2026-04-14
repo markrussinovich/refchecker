@@ -1,6 +1,6 @@
 ﻿import { test, expect } from '@playwright/test';
 
-test('sonnet 4.5 arxiv check - setup and run', async ({ page }) => {
+test('sonnet 4.5 arxiv check - setup and run @backend', async ({ page }) => {
   const apiKey = process.env.ANTHROPIC_API_KEY || '';
   test.skip(!apiKey, 'Skip Sonnet UX test when ANTHROPIC_API_KEY is not set');
 

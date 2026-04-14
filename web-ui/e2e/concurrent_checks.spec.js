@@ -8,7 +8,7 @@ import { test, expect } from '@playwright/test';
  * 3. Switching between checks in the sidebar works correctly
  * 4. Each check maintains its own state and results
  */
-test.describe('Concurrent Paper Checks', () => {
+test.describe('Concurrent Paper Checks @backend', () => {
   
   test.beforeEach(async ({ page }) => {
     // Enable console logging for debugging

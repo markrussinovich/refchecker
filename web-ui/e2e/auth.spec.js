@@ -19,7 +19,7 @@ function getTestUserToken() {
 // ---------------------------------------------------------------------------
 // Unauthenticated UX tests
 // ---------------------------------------------------------------------------
-test.describe('Login page UX (unauthenticated)', () => {
+test.describe('Login page UX (unauthenticated) @backend', () => {
 
   test('shows a centered login card with logo, title, and subtitle', async ({ page }) => {
     await page.goto(BASE);
@@ -98,7 +98,7 @@ test.describe('Login page UX (unauthenticated)', () => {
 // ---------------------------------------------------------------------------
 // Authenticated UX tests — inject a valid JWT cookie
 // ---------------------------------------------------------------------------
-test.describe('Authenticated UX', () => {
+test.describe('Authenticated UX @backend', () => {
   let token;
 
   test.beforeAll(() => {
@@ -178,7 +178,7 @@ test.describe('Authenticated UX', () => {
 // ---------------------------------------------------------------------------
 // API auth enforcement tests
 // ---------------------------------------------------------------------------
-test.describe('API auth enforcement', () => {
+test.describe('API auth enforcement @backend', () => {
 
   test('/api/auth/providers returns github', async ({ request }) => {
     const res = await request.get(`${BASE}/api/auth/providers`);

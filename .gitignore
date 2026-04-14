@@ -159,3 +159,5 @@ Thumbs.db
 CLAUDE.md
 .codex
 output/
+*.db-shm
+*.db-wal
