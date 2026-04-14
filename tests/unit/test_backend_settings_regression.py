@@ -26,6 +26,26 @@ def _read_backend_main() -> str:
         return f.read()
 
 
+_REFCHECKER_WRAPPER = os.path.join(
+    os.path.dirname(__file__), os.pardir, os.pardir, "backend", "refchecker_wrapper.py"
+)
+
+
+def _read_refchecker_wrapper() -> str:
+    with open(_REFCHECKER_WRAPPER, encoding="utf-8") as f:
+        return f.read()
+
+
+def _get_progress_refchecker_check_paper() -> ast.AsyncFunctionDef:
+    tree = ast.parse(_read_refchecker_wrapper())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "ProgressRefChecker":
+            for item in node.body:
+                if isinstance(item, ast.AsyncFunctionDef) and item.name == "check_paper":
+                    return item
+    raise AssertionError("ProgressRefChecker.check_paper not found in backend/refchecker_wrapper.py")
+
+
 # ---------------------------------------------------------------------------
 # 1. db_path must be in the settings config
 # ---------------------------------------------------------------------------
@@ -81,7 +101,33 @@ class TestThumbnailFallback:
 
 
 # ---------------------------------------------------------------------------
-# 3. Zero-byte PDF cache protection
+# 3. Cache helper scoping in the wrapper
+# ---------------------------------------------------------------------------
+
+class TestCacheHelperScoping:
+    """Cache helpers must not be locally imported inside check_paper branches."""
+
+    def test_check_paper_does_not_shadow_cache_helpers(self):
+        """Local cache helper imports cause branch-specific UnboundLocalError."""
+        check_paper = _get_progress_refchecker_check_paper()
+        helper_names = {"cache_bibliography", "cached_bibliography", "get_cached_artifact_path"}
+        local_import_lines = [
+            node.lineno
+            for node in ast.walk(check_paper)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "refchecker.utils.cache_utils"
+            and any(alias.name in helper_names for alias in node.names)
+        ]
+
+        assert not local_import_lines, (
+            "ProgressRefChecker.check_paper locally imports cache helpers, "
+            "which shadows later branches and can raise UnboundLocalError. "
+            f"Offending lines: {local_import_lines}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 4. Zero-byte PDF cache protection
 # ---------------------------------------------------------------------------
 
 class TestPdfCacheSizeCheck:
@@ -112,7 +158,7 @@ class TestPdfCacheSizeCheck:
 
 
 # ---------------------------------------------------------------------------
-# 4. DOI validation in bulk pipeline
+# 5. DOI validation in bulk pipeline
 # ---------------------------------------------------------------------------
 
 class TestBulkPipelineDOIValidation:
@@ -148,7 +194,7 @@ class TestBulkPipelineDOIValidation:
 
 
 # ---------------------------------------------------------------------------
-# 5. Semantic Scholar URL construction in bulk pipeline
+# 6. Semantic Scholar URL construction in bulk pipeline
 # ---------------------------------------------------------------------------
 
 class TestSemanticScholarURLConstruction:

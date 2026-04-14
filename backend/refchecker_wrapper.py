@@ -44,6 +44,7 @@ from refchecker.core.hallucination_policy import (
     run_hallucination_check,
 )
 from refchecker.utils.arxiv_utils import get_bibtex_content
+from refchecker.utils.cache_utils import cache_bibliography, cached_bibliography, get_cached_artifact_path
 import arxiv
 
 logger = logging.getLogger(__name__)
@@ -498,9 +499,6 @@ class ProgressRefChecker:
                 if is_direct_pdf_url:
                     # Check bibliography cache first — avoids PDF download
                     # entirely when references are already cached.
-                    from refchecker.utils.cache_utils import cached_bibliography
-                    from refchecker.utils.cache_utils import get_cached_artifact_path
-
                     cached_bib = cached_bibliography(self.cache_dir, paper_source)
                     if cached_bib is not None:
                         logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
@@ -718,8 +716,6 @@ class ProgressRefChecker:
                 raise ValueError(f"Unsupported source type: {source_type}")
 
             # Step 2: Extract references (check disk cache first)
-            from refchecker.utils.cache_utils import cached_bibliography, cache_bibliography
-
             references = cached_bibliography(self.cache_dir, paper_source)
             if references is not None:
                 extraction_method = 'cache'
