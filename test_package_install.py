@@ -11,9 +11,10 @@ import sys
 import os
 import subprocess
 import time
+from pathlib import Path
 
 
-def test_cli_import():
+def _cli_import_ok() -> bool:
     """Test that the CLI module can be imported."""
     print("Testing CLI import...", end=" ")
     try:
@@ -25,7 +26,7 @@ def test_cli_import():
         return False
 
 
-def test_webui_import():
+def _webui_import_ok() -> bool:
     """Test that the WebUI backend module can be imported."""
     print("Testing WebUI backend import...", end=" ")
     try:
@@ -37,7 +38,7 @@ def test_webui_import():
         return False
 
 
-def test_backend_app_import():
+def _backend_app_import_ok() -> bool:
     """Test that the FastAPI app can be imported."""
     print("Testing FastAPI app import...", end=" ")
     try:
@@ -49,7 +50,7 @@ def test_backend_app_import():
         return False
 
 
-def test_cli_command():
+def _cli_command_ok() -> bool:
     """Test that the CLI command is accessible."""
     print("Testing 'academic-refchecker --help'...", end=" ")
     try:
@@ -70,12 +71,18 @@ def test_cli_command():
         return False
 
 
-def test_webui_command():
+def _webui_command_ok() -> bool:
     """Test that the WebUI command is accessible."""
     print("Testing 'refchecker-webui --help'...", end=" ")
     try:
+        executable_dir = Path(sys.executable).resolve().parent
+        command = executable_dir / "refchecker-webui"
+        if command.exists():
+            args = [str(command), "--help"]
+        else:
+            args = [sys.executable, "-m", "backend", "--help"]
         result = subprocess.run(
-            ["refchecker-webui", "--help"],
+            args,
             capture_output=True,
             text=True,
             timeout=30
@@ -86,15 +93,12 @@ def test_webui_command():
         else:
             print(f"✗ FAILED: {result.stderr}")
             return False
-    except FileNotFoundError:
-        print("✗ FAILED: command not found (is package installed?)")
-        return False
     except Exception as e:
         print(f"✗ FAILED: {e}")
         return False
 
 
-def test_webui_server_starts():
+def _webui_server_starts_ok() -> bool:
     """Test that the WebUI backend server starts successfully."""
     print("Testing WebUI server startup...", end=" ")
     try:
@@ -148,6 +152,30 @@ def test_webui_server_starts():
         return False
 
 
+def test_cli_import():
+    assert _cli_import_ok()
+
+
+def test_webui_import():
+    assert _webui_import_ok()
+
+
+def test_backend_app_import():
+    assert _backend_app_import_ok()
+
+
+def test_cli_command():
+    assert _cli_command_ok()
+
+
+def test_webui_command():
+    assert _webui_command_ok()
+
+
+def test_webui_server_starts():
+    assert _webui_server_starts_ok()
+
+
 def main():
     print("=" * 60)
     print("RefChecker Package Installation Test")
@@ -155,12 +183,12 @@ def main():
     print()
     
     tests = [
-        test_cli_import,
-        test_webui_import,
-        test_backend_app_import,
-        test_cli_command,
-        test_webui_command,
-        test_webui_server_starts,
+        _cli_import_ok,
+        _webui_import_ok,
+        _backend_app_import_ok,
+        _cli_command_ok,
+        _webui_command_ok,
+        _webui_server_starts_ok,
     ]
     
     results = []

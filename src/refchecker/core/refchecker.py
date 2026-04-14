@@ -463,7 +463,6 @@ class ArxivReferenceChecker:
             from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
 
             checker = OpenReviewReferenceChecker(request_delay=0.0)
-            checker.cache_dir = self.cache_dir
             paper_id = checker.extract_paper_id(url)
             if not paper_id:
                 return None
@@ -6145,12 +6144,7 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(
                             reference, reference_url, errors, debug_mode, print_output)
                 else:
-                    # If the LLM already confirmed the reference is real
-                    # (e.g. parallel mode pre-computed the assessment), don't
-                    # count it as unverified — but still record the error so
-                    # the report includes the UNLIKELY verdict (matching bulk).
-                    if not (precomputed_hallucination and precomputed_hallucination.get('verdict') == 'UNLIKELY'):
-                        self.total_unverified_refs += 1
+                    self.total_unverified_refs += 1
                     self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors

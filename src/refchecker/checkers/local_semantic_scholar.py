@@ -41,6 +41,7 @@ from refchecker.utils.text_utils import normalize_author_name, normalize_paper_t
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url, construct_semantic_scholar_url
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
+from refchecker.checkers.arxiv_citation import ArXivCitationChecker
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ logger = logging.getLogger(__name__)
 # Get configuration
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
+_ARXIV_VERSION_SENSITIVE_TYPES = frozenset({"title", "author", "year"})
 
 def log_query_debug(query: str, params: list, execution_time: float, result_count: int, strategy: str):
     """Log database query details in debug mode"""
@@ -111,6 +113,110 @@ class LocalNonArxivReferenceChecker:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA cache_size=-64000")   # 64 MB page cache
         self.conn.execute("PRAGMA temp_store=MEMORY")
+        self._arxiv_citation_checker: Optional[ArXivCitationChecker] = None
+
+    def _get_arxiv_citation_checker(self) -> ArXivCitationChecker:
+        if self._arxiv_citation_checker is None:
+            self._arxiv_citation_checker = ArXivCitationChecker()
+        return self._arxiv_citation_checker
+
+    def _has_exact_author_reorder(
+        self,
+        reference: Dict[str, Any],
+        verified_authors: List[Dict[str, Any]],
+    ) -> bool:
+        cited_authors = [author.strip() for author in reference.get('authors', []) if isinstance(author, str) and author.strip()]
+        verified_author_names = []
+        for author in verified_authors:
+            if isinstance(author, dict):
+                author_name = author.get('name', '')
+            else:
+                author_name = str(author)
+            author_name = author_name.strip()
+            if author_name:
+                verified_author_names.append(author_name)
+
+        return bool(
+            cited_authors
+            and verified_author_names
+            and cited_authors != verified_author_names
+            and sorted(cited_authors) == sorted(verified_author_names)
+        )
+
+    def _downgrade_inferred_arxiv_version_mismatches(
+        self,
+        reference: Dict[str, Any],
+        inferred_arxiv_id: Optional[str],
+        verified_authors: List[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not inferred_arxiv_id or not errors:
+            return errors
+
+        has_version_sensitive_issue = any(
+            error.get('error_type') in _ARXIV_VERSION_SENSITIVE_TYPES
+            or error.get('warning_type') in _ARXIV_VERSION_SENSITIVE_TYPES
+            for error in errors
+        )
+        if not has_version_sensitive_issue:
+            return errors
+
+        logger.debug(
+            "Local DB: Running inferred arXiv version check for matched paper %s",
+            inferred_arxiv_id,
+        )
+
+        arxiv_reference = dict(reference)
+        arxiv_reference['url'] = f"https://arxiv.org/abs/{inferred_arxiv_id}"
+
+        try:
+            _, arxiv_issues, matched_url = self._get_arxiv_citation_checker().verify_reference(arxiv_reference)
+        except Exception as exc:
+            logger.debug("Local DB: Inferred arXiv check failed for %s: %s", inferred_arxiv_id, exc)
+            return errors
+        if not matched_url or f"/abs/{inferred_arxiv_id}" not in matched_url:
+            return errors
+
+        exact_author_reorder = self._has_exact_author_reorder(reference, verified_authors)
+        version_warnings = {}
+        for issue in arxiv_issues:
+            warning_type = issue.get('warning_type')
+            if not warning_type or ' update)' not in warning_type:
+                continue
+            base_warning_type = warning_type.split(' (', 1)[0]
+            if base_warning_type in _ARXIV_VERSION_SENSITIVE_TYPES:
+                version_warnings[base_warning_type] = issue
+
+        clean_authoritative_match = not arxiv_issues
+        if not version_warnings and not (clean_authoritative_match and exact_author_reorder):
+            return errors
+
+        downgraded_errors = []
+        downgraded_any = False
+        for error in errors:
+            issue_type = error.get('error_type') or error.get('warning_type')
+            if issue_type not in _ARXIV_VERSION_SENSITIVE_TYPES:
+                downgraded_errors.append(error)
+                continue
+
+            replacement = version_warnings.get(issue_type)
+            if replacement:
+                downgraded_errors.append(replacement)
+                downgraded_any = True
+            elif clean_authoritative_match and exact_author_reorder and issue_type == 'author':
+                downgraded_any = True
+            else:
+                downgraded_errors.append(error)
+
+        if downgraded_any:
+            logger.debug(
+                "Local DB: Reconciled inferred arXiv metadata mismatches for %s using %s",
+                inferred_arxiv_id,
+                matched_url,
+            )
+            return downgraded_errors
+
+        return errors
     
     # DOI extraction now handled by utility function
     
@@ -557,6 +663,13 @@ class LocalNonArxivReferenceChecker:
                     'info_details': f"Reference could include arXiv URL: {arxiv_url}",
                     'ref_url_correct': arxiv_url
                 })
+
+            errors = self._downgrade_inferred_arxiv_version_mismatches(
+                reference,
+                paper_arxiv_id,
+                paper_data.get('authors', []),
+                errors,
+            )
         
         if errors:
             logger.debug(f"Local DB: Found {len(errors)} errors in reference verification")

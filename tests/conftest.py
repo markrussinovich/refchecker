@@ -12,6 +12,53 @@ from unittest.mock import Mock, MagicMock
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+
+def pytest_addoption(parser):
+    """Register opt-in flags for live network and LLM test paths."""
+    parser.addoption(
+        "--run-network",
+        action="store_true",
+        default=False,
+        help="run tests that make live network calls",
+    )
+    parser.addoption(
+        "--run-llm",
+        action="store_true",
+        default=False,
+        help="run tests that require a live LLM provider",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip live-path tests by default so the standard suite stays deterministic."""
+    run_llm = config.getoption("--run-llm")
+    run_network = config.getoption("--run-network") or run_llm
+    has_llm_key = any(
+        os.environ.get(name)
+        for name in (
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GOOGLE_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+        )
+    )
+
+    skip_network = pytest.mark.skip(reason="need --run-network to run live network tests")
+    skip_llm = pytest.mark.skip(reason="need --run-llm to run live LLM tests")
+    missing_llm_key = pytest.mark.skip(reason="live LLM test requested, but no LLM API key is configured")
+
+    for item in items:
+        if "llm" in item.keywords:
+            if not run_llm:
+                item.add_marker(skip_llm)
+                continue
+            if not has_llm_key:
+                item.add_marker(missing_llm_key)
+                continue
+
+        if "network" in item.keywords and not run_network:
+            item.add_marker(skip_network)
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for test files."""

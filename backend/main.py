@@ -1,6 +1,7 @@
 """
 FastAPI application for RefChecker Web UI
 """
+from contextlib import asynccontextmanager
 import asyncio
 import uuid
 import os
@@ -251,7 +252,48 @@ class BatchUrlsRequest(BaseModel):
 
 
 # Create FastAPI app
-app = FastAPI(title="RefChecker Web UI API", version="1.0.0")
+async def _run_startup_tasks() -> None:
+    """Initialize persistent services used by the API."""
+    await db.init_db()
+
+    try:
+        if await db.has_setting("semantic_scholar_api_key"):
+            await db.delete_setting("semantic_scholar_api_key")
+            logger.info("Removed deprecated server-side Semantic Scholar API key")
+    except Exception as e:
+        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
+
+    try:
+        concurrency_setting = await db.get_setting("max_concurrent_checks")
+        if concurrency_setting and concurrency_setting.isdigit():
+            max_concurrent = int(concurrency_setting)
+        else:
+            max_concurrent = DEFAULT_MAX_CONCURRENT
+            if concurrency_setting:
+                logger.warning(f"Resetting corrupt concurrency setting to default ({DEFAULT_MAX_CONCURRENT})")
+                await db.set_setting("max_concurrent_checks", str(DEFAULT_MAX_CONCURRENT))
+        await init_limiter(max_concurrent)
+        logger.info(f"Initialized global concurrency limiter with max={max_concurrent}")
+    except Exception as e:
+        logger.warning(f"Failed to load concurrency setting, using default: {e}")
+        await init_limiter(DEFAULT_MAX_CONCURRENT)
+
+    try:
+        stale = await db.cancel_stale_in_progress()
+        if stale:
+            logger.info(f"Cancelled {stale} stale in-progress checks on startup")
+    except Exception as e:
+        logger.error(f"Failed to cancel stale checks: {e}")
+    logger.info("Database initialized")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _run_startup_tasks()
+    yield
+
+
+app = FastAPI(title="RefChecker Web UI API", version="1.0.0", lifespan=lifespan)
 
 # Static files directory for bundled frontend
 STATIC_DIR = Path(__file__).parent / "static"
@@ -328,47 +370,6 @@ async def _get_owned_batch_or_404(batch_id: str, current_user: UserInfo) -> tupl
         raise HTTPException(status_code=404, detail="Batch not found")
     checks = await db.get_batch_checks(batch_id, user_id=user_id)
     return summary, checks
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and settings on startup"""
-    await db.init_db()
-
-    # Semantic Scholar keys are browser-managed for the web UI and should not
-    # remain persisted on the server after upgrade.
-    try:
-        if await db.has_setting("semantic_scholar_api_key"):
-            await db.delete_setting("semantic_scholar_api_key")
-            logger.info("Removed deprecated server-side Semantic Scholar API key")
-    except Exception as e:
-        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
-    
-    # Initialize global concurrency limiter with saved setting
-    try:
-        concurrency_setting = await db.get_setting("max_concurrent_checks")
-        if concurrency_setting and concurrency_setting.isdigit():
-            max_concurrent = int(concurrency_setting)
-        else:
-            max_concurrent = DEFAULT_MAX_CONCURRENT
-            # Clean up corrupt/undecryptable value
-            if concurrency_setting:
-                logger.warning(f"Resetting corrupt concurrency setting to default ({DEFAULT_MAX_CONCURRENT})")
-                await db.set_setting("max_concurrent_checks", str(DEFAULT_MAX_CONCURRENT))
-        await init_limiter(max_concurrent)
-        logger.info(f"Initialized global concurrency limiter with max={max_concurrent}")
-    except Exception as e:
-        logger.warning(f"Failed to load concurrency setting, using default: {e}")
-        await init_limiter(DEFAULT_MAX_CONCURRENT)
-    
-    # Mark any previously in-progress checks as cancelled (e.g., after restart)
-    try:
-        stale = await db.cancel_stale_in_progress()
-        if stale:
-            logger.info(f"Cancelled {stale} stale in-progress checks on startup")
-    except Exception as e:
-        logger.error(f"Failed to cancel stale checks: {e}")
-    logger.info("Database initialized")
 
 
 @app.get("/")

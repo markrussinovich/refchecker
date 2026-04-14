@@ -231,7 +231,7 @@ class OpenReviewReferenceChecker:
                 self.last_request_time = time.time()
                 logger.debug(f"Request successful: {response.status_code}")
 
-                if response.status_code != 429:
+                if response.status_code not in (429, 403):
                     return response
 
                 if attempt == max_attempts - 1:

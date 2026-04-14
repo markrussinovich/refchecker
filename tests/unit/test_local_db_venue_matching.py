@@ -10,6 +10,7 @@ import sqlite3
 import tempfile
 import os
 import pytest
+from unittest.mock import patch
 
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
 
@@ -312,6 +313,157 @@ def test_arxiv_url_suggestion_not_when_present(_make_checker):
     assert verified_data is not None
     url_infos = [e for e in errors if e.get("info_type") == "url"]
     assert len(url_infos) == 0, f"Should not suggest arXiv URL when already present: {url_infos}"
+
+
+def test_inferred_arxiv_version_downgrades_author_error(_make_checker):
+    """A matched DB arXiv ID should trigger version-aware warning downgrade for metadata mismatches."""
+    checker = _make_checker([{
+        "paperId": "701",
+        "title": "Tokenskip: Controllable chain-of-thought compression in llms",
+        "year": 2025,
+        "authors": [
+            {"authorId": "1", "name": "Heming Xia"},
+            {"authorId": "2", "name": "Yongqi Li"},
+        ],
+        "venue": "EMNLP",
+        "externalIds_ArXiv": "2502.12067",
+    }])
+
+    reference = {
+        "title": "Tokenskip: Controllable chain-of-thought compression in llms",
+        "authors": ["Heming Xia", "Chak Tou Leong"],
+        "year": 2025,
+        "venue": "Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing",
+        "url": "",
+    }
+
+    inferred_warning = {
+        "warning_type": "author (v1 vs v2 update)",
+        "warning_details": "Author 2 mismatch",
+        "ref_authors_correct": "Heming Xia, Yongqi Li",
+    }
+
+    with patch.object(
+        checker,
+        "_get_arxiv_citation_checker",
+        return_value=type(
+            "StubArxivChecker",
+            (),
+            {
+                "verify_reference": lambda self, reference: (
+                    {"title": reference["title"]},
+                    [inferred_warning],
+                    "https://arxiv.org/abs/2502.12067v1",
+                )
+            },
+        )(),
+    ):
+        verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data is not None
+    author_errors = [e for e in errors if e.get("error_type") == "author"]
+    assert len(author_errors) == 0, f"Author error should be downgraded, got: {errors}"
+
+    author_warnings = [e for e in errors if e.get("warning_type") == "author (v1 vs v2 update)"]
+    assert len(author_warnings) == 1, f"Expected inferred arXiv version warning, got: {errors}"
+
+    url_infos = [e for e in errors if e.get("info_type") == "url"]
+    assert len(url_infos) == 1, f"Expected arXiv URL suggestion to remain, got: {errors}"
+    assert "2502.12067" in url_infos[0]["info_details"]
+
+
+def test_inferred_arxiv_clean_match_clears_local_author_error(_make_checker):
+    """A clean inferred arXiv verification should clear S2-only metadata mismatches while keeping URL suggestions."""
+    checker = _make_checker([{
+        "paperId": "702",
+        "title": "Tokenskip: Controllable chain-of-thought compression in llms",
+        "year": 2025,
+        "authors": [
+            {"authorId": "1", "name": "Heming Xia"},
+            {"authorId": "2", "name": "Yongqi Li"},
+            {"authorId": "3", "name": "Chak Tou Leong"},
+        ],
+        "venue": "EMNLP",
+        "externalIds_ArXiv": "2502.12067",
+    }])
+
+    reference = {
+        "title": "Tokenskip: Controllable chain-of-thought compression in llms",
+        "authors": ["Heming Xia", "Chak Tou Leong", "Yongqi Li"],
+        "year": 2025,
+        "venue": "Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing",
+        "url": "",
+    }
+
+    with patch.object(
+        checker,
+        "_get_arxiv_citation_checker",
+        return_value=type(
+            "StubArxivChecker",
+            (),
+            {
+                "verify_reference": lambda self, reference: (
+                    {"title": reference["title"]},
+                    [],
+                    "https://arxiv.org/abs/2502.12067",
+                )
+            },
+        )(),
+    ):
+        verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data is not None
+    author_errors = [e for e in errors if e.get("error_type") == "author"]
+    assert len(author_errors) == 0, f"Author error should be cleared by clean arXiv match, got: {errors}"
+
+    url_infos = [e for e in errors if e.get("info_type") == "url"]
+    assert len(url_infos) == 1, f"Expected arXiv URL suggestion to remain, got: {errors}"
+    assert "2502.12067" in url_infos[0]["info_details"]
+
+
+def test_inferred_arxiv_clean_match_keeps_non_reorder_author_error(_make_checker):
+    """A clean inferred arXiv match should not clear spelling/normalization mismatches that are not pure reorder cases."""
+    checker = _make_checker([{
+        "paperId": "703",
+        "title": "MathArena: Evaluating LLMs on uncontaminated math competitions",
+        "year": 2025,
+        "authors": [
+            {"authorId": "1", "name": "Mislav Balunovi'c"},
+            {"authorId": "2", "name": "Jasper Dekoninck"},
+            {"authorId": "3", "name": "Ivo Petrov"},
+        ],
+        "venue": "arXiv.org",
+        "externalIds_ArXiv": "2505.23281",
+    }])
+
+    reference = {
+        "title": "MathArena: Evaluating LLMs on uncontaminated math competitions",
+        "authors": ["Mislav Balunović", "Jasper Dekoninck", "Ivo Petrov"],
+        "year": 2025,
+        "venue": "Advances in Neural Information Processing Systems, Datasets and Benchmarks Track",
+        "url": "",
+    }
+
+    with patch.object(
+        checker,
+        "_get_arxiv_citation_checker",
+        return_value=type(
+            "StubArxivChecker",
+            (),
+            {
+                "verify_reference": lambda self, reference: (
+                    {"title": reference["title"]},
+                    [],
+                    "https://arxiv.org/abs/2505.23281",
+                )
+            },
+        )(),
+    ):
+        verified_data, errors, url = checker.verify_reference(reference)
+
+    assert verified_data is not None
+    author_errors = [e for e in errors if e.get("error_type") == "author"]
+    assert len(author_errors) == 1, f"Non-reorder author mismatch should remain, got: {errors}"
 
 
 # ── ArXiv URL mismatch (wrong arXiv URL, real paper) ──────────────

@@ -52,8 +52,6 @@ only in the LINK field.
 this exact title exists." or "The exact paper was found in Nature 2024.")."""
 
 _ASSESSMENT_PROMPT = """\
-Today's date is {today}.
-
 ## Reference metadata
 Title:   {title}
 Authors: {authors}
@@ -205,16 +203,12 @@ def build_assessment_prompt(error_entry: dict) -> tuple:
 
     validation_lines = _build_validation_summary_static(error_entry)
 
-    import datetime
-    today = datetime.date.today().isoformat()
-
     user_prompt = _ASSESSMENT_PROMPT.format(
         title=title,
         authors=authors,
         venue=venue,
         year=year,
         url=url or '(none)',
-        today=today,
         validation_summary=validation_lines or 'No specific errors detected.',
     )
     return _ASSESSMENT_SYSTEM_PROMPT, user_prompt

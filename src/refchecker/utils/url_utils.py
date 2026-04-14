@@ -99,51 +99,88 @@ def _build_pdf_candidate_urls(url: str) -> List[str]:
     return candidates
 
 
-def download_pdf_bytes(url: str, timeout: int = 60) -> bytes:
+def download_pdf_bytes(url: str, timeout: int = 60, max_retries: int = 4) -> bytes:
     """Download a PDF from *url* with browser-like headers.
 
     Tries candidate URLs (e.g. OpenReview forum → pdf) in order and returns
-    the raw PDF bytes on the first success.  Raises on failure.
+    the raw PDF bytes on the first success.  Retries with exponential backoff
+    on 403/429 responses (common with OpenReview rate limiting) and on
+    connection/timeout errors.  Raises on failure.
     """
+    import time as _time
+
     headers = dict(_PDF_HEADERS)
     if 'openreview.net' in url.lower():
         headers['Referer'] = 'https://openreview.net/'
 
     candidates = _build_pdf_candidate_urls(url)
+    # Use shorter connect timeout per attempt so retries don't take forever
+    connect_timeout = min(timeout, 15)
 
     last_exc: Optional[Exception] = None
     for candidate_url in dict.fromkeys(candidates):
-        try:
-            current_url = candidate_url
-            with requests.Session() as session:
-                for _ in range(_MAX_REDIRECTS + 1):
-                    validate_remote_fetch_url(current_url)
-                    response = session.get(
-                        current_url,
-                        timeout=timeout,
-                        headers=headers,
-                        allow_redirects=False,
+        for attempt in range(max_retries):
+            try:
+                current_url = candidate_url
+                with requests.Session() as session:
+                    for _ in range(_MAX_REDIRECTS + 1):
+                        validate_remote_fetch_url(current_url)
+                        response = session.get(
+                            current_url,
+                            timeout=(connect_timeout, timeout),
+                            headers=headers,
+                            allow_redirects=False,
+                        )
+                        if _is_redirect_response(response.status_code):
+                            location = response.headers.get('location')
+                            if not location:
+                                response.raise_for_status()
+                            current_url = urljoin(current_url, location)
+                            continue
+                        break
+                    else:
+                        raise requests.exceptions.TooManyRedirects(f"Too many redirects for URL: {candidate_url}")
+
+                # Retry on 403/429 with exponential backoff
+                if response.status_code in (403, 429) and attempt < max_retries - 1:
+                    retry_after = response.headers.get('Retry-After')
+                    try:
+                        backoff = float(retry_after) if retry_after else 0.0
+                    except (ValueError, TypeError):
+                        backoff = 0.0
+                    backoff = max(backoff, 3.0 * (2 ** attempt))  # 3s, 6s, 12s
+                    logger.error(
+                        "PDF download got HTTP %d for %s; retrying in %.0fs (attempt %d/%d)",
+                        response.status_code, candidate_url, backoff, attempt + 1, max_retries,
                     )
-                    if _is_redirect_response(response.status_code):
-                        location = response.headers.get('location')
-                        if not location:
-                            response.raise_for_status()
-                        current_url = urljoin(current_url, location)
-                        continue
-                    break
+                    _time.sleep(backoff)
+                    continue
+
+                response.raise_for_status()
+
+                content_type = response.headers.get('content-type', '').lower()
+                if 'application/pdf' not in content_type and not current_url.lower().endswith('.pdf'):
+                    logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
+
+                return response.content
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                # Connection-level failures: retry with backoff but don't wait
+                # as long — the host may be unreachable.
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    backoff = 3.0 * (2 ** attempt)
+                    logger.error(
+                        "PDF download connection error for %s: %s; retrying in %.0fs (attempt %d/%d)",
+                        candidate_url, type(exc).__name__, backoff, attempt + 1, max_retries,
+                    )
+                    _time.sleep(backoff)
                 else:
-                    raise requests.exceptions.TooManyRedirects(f"Too many redirects for URL: {candidate_url}")
-
-            response.raise_for_status()
-
-            content_type = response.headers.get('content-type', '').lower()
-            if 'application/pdf' not in content_type and not current_url.lower().endswith('.pdf'):
-                logger.warning(f"URL might not be a PDF. Content-Type: {content_type}")
-
-            return response.content
-        except (requests.exceptions.RequestException, ValueError) as exc:
-            last_exc = exc
-            logger.error(f"Failed to download PDF from URL {candidate_url}: {exc}")
+                    logger.error(f"Failed to download PDF from URL {candidate_url} after {max_retries} attempts: {exc}")
+            except (requests.exceptions.RequestException, ValueError) as exc:
+                # Non-retryable request errors (e.g. invalid URL)
+                last_exc = exc
+                logger.error(f"Failed to download PDF from URL {candidate_url}: {exc}")
+                break  # Don't retry non-transient errors
 
     raise last_exc  # type: ignore[misc]
 

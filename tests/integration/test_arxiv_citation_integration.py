@@ -14,8 +14,8 @@ import time
 from refchecker.checkers.arxiv_citation import ArXivCitationChecker
 
 
-# Skip all tests in this module if running quick tests
-pytestmark = pytest.mark.integration
+# These tests make real ArXiv requests and should only run when explicitly enabled.
+pytestmark = [pytest.mark.integration, pytest.mark.network]
 
 
 class TestArXivCitationIntegration:

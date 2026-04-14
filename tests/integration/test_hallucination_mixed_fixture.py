@@ -14,6 +14,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 from refchecker.core.refchecker import ArxivReferenceChecker
 
 
+pytestmark = [pytest.mark.integration, pytest.mark.network, pytest.mark.llm]
+
+
 class TestHallucinationMixedFixture:
     """Verify reference checking on a mixed fixture (real + fabricated)."""
 
