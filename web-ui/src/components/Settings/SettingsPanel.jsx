@@ -273,7 +273,8 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         </div>
       </div>
 
-      {/* Concurrency Setting */}
+      {/* Concurrency Setting (single-user only) */}
+      {!multiuser && (
       <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>
           <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
@@ -282,11 +283,6 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
             {settings.max_concurrent_checks?.description || 'Maximum number of references to check simultaneously'}
           </div>
-          {!canManageSettings && (
-            <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              Admin only
-            </div>
-          )}
         </div>
         <input
           type="number"
@@ -294,17 +290,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           min={settings.max_concurrent_checks?.min ?? 1}
           max={settings.max_concurrent_checks?.max ?? 20}
           onChange={(e) => handleSettingChange('max_concurrent_checks', e.target.value)}
-          disabled={!canManageSettings}
           className="px-3 py-2 rounded-lg border text-sm text-center"
           style={{
             backgroundColor: 'var(--color-bg-primary)',
             borderColor: 'var(--color-border)',
             color: 'var(--color-text-primary)',
             width: '80px',
-            opacity: canManageSettings ? 1 : 0.6,
           }}
         />
       </div>
+      )}
 
       {/* Local Database Path (single-user only, rendered when setting exists in API response) */}
       {settings.db_path && !multiuser && (

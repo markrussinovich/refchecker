@@ -560,6 +560,11 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
                         pass  # Don't skip — authors critically mismatched
                     else:
                         return False
+                elif error_entry.get('ref_verified_url'):
+                    # A verifier confirmed the resource exists but could not
+                    # supply real author data (e.g. GitHub repos return only
+                    # the org name).  Fall through to LLM assessment.
+                    pass
                 else:
                     return False
             else:

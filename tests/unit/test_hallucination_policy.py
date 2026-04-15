@@ -184,6 +184,27 @@ def test_huggingface_dataset_should_not_be_checked():
     assert should_check_hallucination(entry) is False
 
 
+def test_github_verified_author_mismatch_should_be_checked():
+    """GitHub-verified refs with author mismatch (org name vs real authors) need LLM check.
+
+    When a GitHub checker verifies the repo exists but returns the org owner
+    as "author" (e.g. 'mll-lab-nu'), and the cited reference lists 16 real
+    authors, the mismatch cannot be resolved without LLM assessment.
+    Regression test for commit c28a010.
+    """
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author mismatch:\n'
+                         'cited:  Kangrui Wang, Pingyue Zhang, Zihan Wang\n'
+                         'actual: mll-lab-nu (mll-lab-nu)',
+        'ref_title': 'Reinforcing visual state reasoning for multi-turn vlm agents',
+        'ref_authors_cited': 'Kangrui Wang, Pingyue Zhang, Zihan Wang',
+        'ref_url_cited': 'https://github.com/RAGEN-AI/VAGEN',
+        'ref_verified_url': 'https://github.com/RAGEN-AI/VAGEN',
+    }
+    assert should_check_hallucination(entry) is True
+
+
 def test_unverified_with_url_should_be_checked():
     """Unverified references WITH a URL should be checked — the URL didn't help verify it."""
     entry = {
