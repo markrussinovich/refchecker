@@ -305,11 +305,12 @@ async def generate_pdf_preview_async(
     )
 
 
-def _download_arxiv_pdf(arxiv_id: str, pdf_path: Path) -> bool:
+def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     """Download an ArXiv PDF with retry logic for rate limits.
 
     Returns True if the PDF was successfully downloaded (or already cached).
     """
+    pdf_path = Path(pdf_path)
     if pdf_path.exists() and pdf_path.stat().st_size > 0:
         return True
 
