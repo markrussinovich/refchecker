@@ -3,6 +3,7 @@ FastAPI application for RefChecker Web UI
 """
 from contextlib import asynccontextmanager
 import asyncio
+import time
 import uuid
 import os
 import sys
@@ -64,6 +65,20 @@ from .thumbnail import (
     get_text_preview_async,
     get_thumbnail_cache_path,
     get_preview_cache_path
+)
+from .usage_tracking import (
+    append_usage_event,
+    build_issue_type_counts,
+    clear_usage_log,
+    extract_email_domain,
+    get_usage_events,
+    get_usage_log_path,
+    get_request_metadata,
+    get_usage_summary,
+    infer_bibliography_source_kind,
+    infer_paper_identity,
+    infer_source_host,
+    utcnow_sqlite,
 )
 from refchecker.utils.url_utils import validate_remote_fetch_url
 
@@ -365,6 +380,7 @@ class BatchUrlsRequest(BaseModel):
 async def _run_startup_tasks() -> None:
     """Initialize persistent services used by the API."""
     await db.init_db()
+    logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
 
     try:
         if await db.has_setting("semantic_scholar_api_key"):
@@ -465,6 +481,68 @@ def _session_id_for_check(check_id: int) -> Optional[str]:
     return None
 
 
+async def _log_usage_event_safe(
+    event_type: str,
+    *,
+    current_user: Optional[UserInfo] = None,
+    user_id: Optional[int] = None,
+    provider: Optional[str] = None,
+    email_domain: Optional[str] = None,
+    connection=None,
+    check_id: Optional[int] = None,
+    session_id: Optional[str] = None,
+    batch_id: Optional[str] = None,
+    source_type: Optional[str] = None,
+    source_value: Optional[str] = None,
+    paper_title: Optional[str] = None,
+    paper_key: Optional[str] = None,
+    source_host: Optional[str] = None,
+    status_code: Optional[int] = None,
+    reason_code: Optional[str] = None,
+    payload: Optional[dict] = None,
+) -> None:
+    """Best-effort wrapper around the structured usage event logger."""
+    try:
+        request_metadata = get_request_metadata(connection)
+        identity = infer_paper_identity(source_value, paper_title=paper_title, source_type=source_type)
+        resolved_user_id = user_id
+        resolved_provider = provider
+        resolved_email_domain = email_domain
+
+        if current_user is not None:
+            if resolved_user_id is None:
+                resolved_user_id = get_user_id_filter(current_user)
+            if resolved_provider is None:
+                resolved_provider = current_user.provider
+            if resolved_email_domain is None:
+                resolved_email_domain = extract_email_domain(current_user.email)
+
+        await append_usage_event({
+            "event_type": event_type,
+            "occurred_at": utcnow_sqlite(),
+            "user_id": resolved_user_id,
+            "check_id": check_id,
+            "session_id": session_id,
+            "batch_id": batch_id,
+            "provider": resolved_provider,
+            "source_type": source_type,
+            "source_host": source_host or identity.get("source_host"),
+            "paper_title": paper_title,
+            "paper_identifier_type": identity.get("paper_identifier_type"),
+            "paper_identifier_value": identity.get("paper_identifier_value"),
+            "paper_key": paper_key or identity.get("paper_key"),
+            "request_id": request_metadata.get("request_id"),
+            "email_domain": resolved_email_domain,
+            "client_ip_hash": request_metadata.get("client_ip_hash"),
+            "user_agent_hash": request_metadata.get("user_agent_hash"),
+            "status_code": status_code,
+            "reason_code": reason_code,
+            "payload": payload or {},
+        })
+    except Exception as exc:
+        logger.warning("Failed to write usage event %s: %s", event_type, exc)
+
+
 async def _get_owned_check_or_404(check_id: int, current_user: UserInfo) -> dict:
     """Return a check only if it belongs to the current user in multi-user mode."""
     user_id = get_user_id_filter(current_user)
@@ -533,8 +611,21 @@ async def auth_login(provider: str, request: Request):
     """Redirect to the OAuth authorization URL for the given provider."""
     entry = _EXCHANGE_FNS.get(provider)
     if not entry:
+        await _log_usage_event_safe(
+            "auth.login_failed",
+            connection=request,
+            provider=provider,
+            status_code=404,
+            reason_code="unknown_provider",
+        )
         raise HTTPException(status_code=404, detail=f"Unknown provider: {provider}")
     url_fn, _ = entry
+    await _log_usage_event_safe(
+        "auth.login_started",
+        connection=request,
+        provider=provider,
+        payload={"multiuser": is_multiuser_mode()},
+    )
     return RedirectResponse(url=url_fn(request))
 
 
@@ -550,19 +641,56 @@ async def auth_callback(
     site = SITE_URL or "/"
     entry = _EXCHANGE_FNS.get(provider)
     if not entry:
+        await _log_usage_event_safe(
+            "auth.login_failed",
+            connection=request,
+            provider=provider,
+            status_code=404,
+            reason_code="unknown_provider",
+        )
         return RedirectResponse(url=f"{site}?auth_error=unknown_provider")
 
     if error or not code or not state:
+        await _log_usage_event_safe(
+            "auth.login_failed",
+            connection=request,
+            provider=provider,
+            status_code=400,
+            reason_code=error or "missing_code",
+        )
         return RedirectResponse(url=f"{site}?auth_error={error or 'missing_code'}")
     if not _validate_oauth_state(state, provider):
+        await _log_usage_event_safe(
+            "auth.login_failed",
+            connection=request,
+            provider=provider,
+            status_code=400,
+            reason_code="invalid_state",
+        )
         return RedirectResponse(url=f"{site}?auth_error=invalid_state")
 
     _, exchange_fn = entry
     user_data = await exchange_fn(code, request)
     if not user_data:
+        await _log_usage_event_safe(
+            "auth.login_failed",
+            connection=request,
+            provider=provider,
+            status_code=502,
+            reason_code="exchange_failed",
+        )
         return RedirectResponse(url=f"{site}?auth_error=exchange_failed")
 
     user_id = await db.create_or_update_user(**user_data)
+    await _log_usage_event_safe(
+        "auth.login_succeeded",
+        connection=request,
+        user_id=user_id,
+        provider=user_data.get("provider") or provider,
+        email_domain=extract_email_domain(user_data.get("email")),
+        status_code=200,
+        payload={"is_admin": bool((await db.get_user_by_id(user_id) or {}).get("is_admin"))},
+    )
     token = create_access_token(user_id, user_data.get("email"), user_data.get("name"))
     response = RedirectResponse(url=site)
     set_auth_cookie(response, token)
@@ -585,9 +713,18 @@ async def auth_me(current_user: UserInfo = Depends(require_user)):
 
 
 @app.post("/api/auth/logout")
-async def auth_logout():
+async def auth_logout(
+    request: Request = None,
+    current_user: UserInfo = Depends(require_user),
+):
     """Clear the auth cookie and log out."""
     from fastapi.responses import JSONResponse
+    await _log_usage_event_safe(
+        "auth.logout",
+        current_user=current_user,
+        connection=request,
+        status_code=200,
+    )
     response = JSONResponse(content={"ok": True})
     clear_auth_cookie(response)
     return response
@@ -600,14 +737,36 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if get_available_providers():
         token = websocket.cookies.get("rc_auth")
         if not token:
+            await _log_usage_event_safe(
+                "auth.websocket_denied",
+                connection=websocket,
+                session_id=session_id,
+                status_code=4001,
+                reason_code="missing_token",
+            )
             await websocket.close(code=4001, reason="Unauthorized")
             return
         token_data = decode_access_token(token)
         if not token_data:
+            await _log_usage_event_safe(
+                "auth.websocket_denied",
+                connection=websocket,
+                session_id=session_id,
+                status_code=4001,
+                reason_code="invalid_token",
+            )
             await websocket.close(code=4001, reason="Invalid token")
             return
         active = active_checks.get(session_id)
         if not active or active.get("user_id") != token_data.user_id:
+            await _log_usage_event_safe(
+                "auth.websocket_denied",
+                connection=websocket,
+                user_id=token_data.user_id,
+                session_id=session_id,
+                status_code=4001,
+                reason_code="wrong_user",
+            )
             await websocket.close(code=4001, reason="Unauthorized")
             return
     await manager.connect(websocket, session_id)
@@ -635,6 +794,7 @@ async def start_check(
     api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
 ):
     """
     Start a new reference check
@@ -657,6 +817,7 @@ async def start_check(
     try:
         # Generate session ID
         session_id = str(uuid.uuid4())
+        check_started_at = utcnow_sqlite()
 
         user_id = get_user_id_filter(current_user)
 
@@ -684,6 +845,7 @@ async def start_check(
         paper_source = source_value
         paper_title = "Processing..."  # Placeholder title until we parse the paper
         original_filename = None  # Only set for file uploads
+        input_bytes = None
         if source_type == "file" and file:
             # Save uploaded file to user-isolated uploads directory
             uploads_dir = get_uploads_dir() / str(user_id)
@@ -691,7 +853,7 @@ async def start_check(
             # Use check-specific naming to avoid conflicts
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
             file_path = uploads_dir / f"{session_id}_{safe_filename}"
-            await _save_upload_file(file, file_path, MAX_UPLOAD_FILE_BYTES)
+            input_bytes = await _save_upload_file(file, file_path, MAX_UPLOAD_FILE_BYTES)
             paper_source = str(file_path)
             paper_title = file.filename
             original_filename = file.filename  # Store original filename
@@ -709,6 +871,7 @@ async def start_check(
                 f.write(normalized_text)
             paper_source = str(text_file_path)
             paper_title = "Pasted Text"
+            input_bytes = len(normalized_text.encode("utf-8"))
         elif source_type == "url":
             parsed_source = urlparse(source_value or "")
             if parsed_source.scheme or parsed_source.netloc:
@@ -717,12 +880,34 @@ async def start_check(
                 except ValueError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
             paper_title = source_value
+            input_bytes = len((source_value or "").encode("utf-8"))
 
         if not paper_source:
             raise HTTPException(status_code=400, detail="No source provided")
 
+        source_identity = infer_paper_identity(
+            source_value if source_type == "url" else None,
+            paper_title=paper_title,
+            source_type=source_type,
+        )
+
         # Rate limiting: enforce per-user concurrent check limit
         if not await _acquire_user_check_slot(user_id):
+            await _log_usage_event_safe(
+                "check.rate_limited",
+                current_user=current_user,
+                connection=http_request,
+                session_id=session_id,
+                source_type=source_type,
+                source_value=source_value if source_type == "url" else None,
+                source_host=source_identity.get("source_host"),
+                status_code=429,
+                reason_code="max_concurrent_checks_reached",
+                payload={
+                    "max_checks_per_user": MAX_CHECKS_PER_USER,
+                    "use_llm": use_llm,
+                },
+            )
             raise HTTPException(
                 status_code=429,
                 detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
@@ -738,8 +923,37 @@ async def start_check(
             llm_model=llm_model if use_llm else None,
             original_filename=original_filename,
             user_id=user_id,
+            started_at=check_started_at,
+            input_bytes=input_bytes,
+            source_host=source_identity.get("source_host"),
+            paper_identifier_type=source_identity.get("paper_identifier_type"),
+            paper_identifier_value=source_identity.get("paper_identifier_value"),
+            paper_key=source_identity.get("paper_key"),
+            batch_size=1,
         )
         logger.info(f"Created pending check with ID {check_id}")
+
+        await _log_usage_event_safe(
+            "check.started",
+            current_user=current_user,
+            connection=http_request,
+            check_id=check_id,
+            session_id=session_id,
+            source_type=source_type,
+            source_value=source_value if source_type == "url" else None,
+            paper_title=paper_title,
+            source_host=source_identity.get("source_host"),
+            paper_key=source_identity.get("paper_key"),
+            status_code=202,
+            payload={
+                "use_llm": use_llm,
+                "llm_provider": llm_provider if use_llm else None,
+                "llm_model": llm_model if use_llm else None,
+                "input_bytes": input_bytes,
+                "semantic_scholar_key_present": bool(semantic_scholar_api_key),
+                "original_filename_ext": Path(original_filename).suffix.lower() if original_filename else None,
+            },
+        )
 
         # Start check in background
         cancel_event = asyncio.Event()
@@ -795,6 +1009,10 @@ async def run_check(
         use_llm: Whether to use LLM
         semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
     """
+    user_row = await db.get_user_by_id(user_id) if user_id else None
+    provider = user_row.get("provider") if user_row else None
+    email_domain = extract_email_domain(user_row.get("email")) if user_row else None
+    start_monotonic = time.perf_counter()
     try:
         # Resolve local Semantic Scholar database path from environment or settings
         configured_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
@@ -899,6 +1117,16 @@ async def run_check(
             result_title = None  # Don't update title
         
         # Update the existing check entry with results
+        completed_at = utcnow_sqlite()
+        duration_ms = int((time.perf_counter() - start_monotonic) * 1000)
+        issue_type_counts = build_issue_type_counts(result["references"])
+        paper_identity = infer_paper_identity(
+            result.get("paper_source") or paper_source,
+            paper_title=result.get("paper_title"),
+            source_type=source_type,
+        )
+        cache_hit = result.get("extraction_method") == "cache"
+        bibliography_source_kind = infer_bibliography_source_kind(result.get("extraction_method"))
         await db.update_check_results(
             check_id=check_id,
             paper_title=result_title,
@@ -913,7 +1141,46 @@ async def run_check(
             refs_verified=result["summary"].get("refs_verified", 0),
             results=result["references"],
             status='completed',
-            extraction_method=result.get("extraction_method")
+            extraction_method=result.get("extraction_method"),
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+            paper_identifier_type=paper_identity.get("paper_identifier_type"),
+            paper_identifier_value=paper_identity.get("paper_identifier_value"),
+            paper_key=paper_identity.get("paper_key"),
+            issue_type_counts=issue_type_counts,
+            cache_hit=cache_hit,
+            bibliography_source_kind=bibliography_source_kind,
+        )
+
+        await _log_usage_event_safe(
+            "check.completed",
+            user_id=user_id,
+            provider=provider,
+            email_domain=email_domain,
+            check_id=check_id,
+            session_id=session_id,
+            source_type=source_type,
+            source_value=paper_source if source_type == "url" else None,
+            paper_title=result.get("paper_title"),
+            paper_key=paper_identity.get("paper_key"),
+            source_host=paper_identity.get("source_host"),
+            status_code=200,
+            payload={
+                "duration_ms": duration_ms,
+                "total_refs": result["summary"]["total_refs"],
+                "errors_count": result["summary"]["errors_count"],
+                "warnings_count": result["summary"]["warnings_count"],
+                "suggestions_count": result["summary"].get("suggestions_count", 0),
+                "unverified_count": result["summary"]["unverified_count"],
+                "hallucination_count": result["summary"].get("hallucination_count", 0),
+                "refs_with_errors": result["summary"].get("refs_with_errors", 0),
+                "refs_with_warnings_only": result["summary"].get("refs_with_warnings_only", 0),
+                "refs_verified": result["summary"].get("refs_verified", 0),
+                "extraction_method": result.get("extraction_method"),
+                "bibliography_source_kind": bibliography_source_kind,
+                "cache_hit": cache_hit,
+                "issue_type_counts": issue_type_counts,
+            },
         )
 
         # Generate thumbnail for file uploads
@@ -944,11 +1211,56 @@ async def run_check(
 
     except asyncio.CancelledError:
         logger.info(f"Check cancelled: {session_id}")
-        await db.update_check_status(check_id, 'cancelled')
+        completed_at = utcnow_sqlite()
+        duration_ms = int((time.perf_counter() - start_monotonic) * 1000)
+        await db.update_check_status(
+            check_id,
+            'cancelled',
+            cancel_reason='user_requested',
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+        )
+        await _log_usage_event_safe(
+            "check.cancelled",
+            user_id=user_id,
+            provider=provider,
+            email_domain=email_domain,
+            check_id=check_id,
+            session_id=session_id,
+            source_type=source_type,
+            source_value=paper_source if source_type == "url" else None,
+            status_code=499,
+            reason_code="user_requested",
+            payload={"duration_ms": duration_ms},
+        )
         await manager.send_message(session_id, "cancelled", {"message": "Check cancelled", "check_id": check_id})
     except Exception as e:
         logger.error(f"Error in run_check: {e}", exc_info=True)
-        await db.update_check_status(check_id, 'error')
+        completed_at = utcnow_sqlite()
+        duration_ms = int((time.perf_counter() - start_monotonic) * 1000)
+        await db.update_check_status(
+            check_id,
+            'error',
+            failure_class=type(e).__name__,
+            completed_at=completed_at,
+            duration_ms=duration_ms,
+        )
+        await _log_usage_event_safe(
+            "check.failed",
+            user_id=user_id,
+            provider=provider,
+            email_domain=email_domain,
+            check_id=check_id,
+            session_id=session_id,
+            source_type=source_type,
+            source_value=paper_source if source_type == "url" else None,
+            status_code=500,
+            reason_code=type(e).__name__.lower(),
+            payload={
+                "duration_ms": duration_ms,
+                "failure_class": type(e).__name__,
+            },
+        )
         await manager.send_message(session_id, "error", {
             "message": f"Check failed: {str(e)}",
             "details": type(e).__name__,
@@ -1445,8 +1757,13 @@ async def get_bibliography_source(check_id: int, current_user: UserInfo = Depend
 
 
 @app.post("/api/recheck/{check_id}")
-async def recheck(check_id: int, current_user: UserInfo = Depends(require_user)):
+async def recheck(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
+):
     """Re-run a previous check"""
+    slot_acquired = False
     try:
         # Get original check
         original = await _get_owned_check_or_404(check_id, current_user)
@@ -1463,6 +1780,29 @@ async def recheck(check_id: int, current_user: UserInfo = Depends(require_user))
         
         llm_provider = original.get("llm_provider", "anthropic")
         llm_model = original.get("llm_model")
+
+        if not await _acquire_user_check_slot(user_id):
+            await _log_usage_event_safe(
+                "check.rate_limited",
+                current_user=current_user,
+                connection=http_request,
+                source_type=source_type,
+                source_value=source if source_type == "url" else None,
+                paper_title=original.get("paper_title"),
+                paper_key=original.get("paper_key"),
+                source_host=original.get("source_host"),
+                status_code=429,
+                reason_code="max_concurrent_checks_reached",
+                payload={
+                    "recheck_of": check_id,
+                    "max_checks_per_user": MAX_CHECKS_PER_USER,
+                },
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
+            )
+        slot_acquired = True
         
         # Create history entry immediately
         new_check_id = await db.create_pending_check(
@@ -1473,6 +1813,33 @@ async def recheck(check_id: int, current_user: UserInfo = Depends(require_user))
             llm_model=llm_model,
             original_filename=original.get("original_filename"),
             user_id=user_id,
+            started_at=utcnow_sqlite(),
+            input_bytes=original.get("input_bytes"),
+            source_host=original.get("source_host"),
+            paper_identifier_type=original.get("paper_identifier_type"),
+            paper_identifier_value=original.get("paper_identifier_value"),
+            paper_key=original.get("paper_key"),
+            batch_size=1,
+        )
+
+        await _log_usage_event_safe(
+            "check.started",
+            current_user=current_user,
+            connection=http_request,
+            check_id=new_check_id,
+            session_id=session_id,
+            source_type=source_type,
+            source_value=source if source_type == "url" else None,
+            paper_title=original.get("paper_title"),
+            paper_key=original.get("paper_key"),
+            source_host=original.get("source_host"),
+            status_code=202,
+            payload={
+                "recheck_of": check_id,
+                "use_llm": True,
+                "llm_provider": llm_provider,
+                "llm_model": llm_model,
+            },
         )
 
         # Start check in background
@@ -1492,6 +1859,7 @@ async def recheck(check_id: int, current_user: UserInfo = Depends(require_user))
                 user_id,
             )
         )
+        slot_acquired = False
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": new_check_id, "user_id": user_id}
 
         return {
@@ -1502,14 +1870,22 @@ async def recheck(check_id: int, current_user: UserInfo = Depends(require_user))
         }
 
     except HTTPException:
+        if slot_acquired:
+            await _release_user_check_slot(user_id)
         raise
     except Exception as e:
+        if slot_acquired:
+            await _release_user_check_slot(user_id)
         logger.error(f"Error rechecking: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/cancel/{session_id}")
-async def cancel_check(session_id: str, current_user: UserInfo = Depends(require_user)):
+async def cancel_check(
+    session_id: str,
+    current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
+):
     """Cancel an active check"""
     active = active_checks.get(session_id)
     if not active:
@@ -1519,6 +1895,16 @@ async def cancel_check(session_id: str, current_user: UserInfo = Depends(require
         raise HTTPException(status_code=404, detail="Active check not found")
     active["cancel_event"].set()
     active["task"].cancel()
+    await _log_usage_event_safe(
+        "check.cancel_requested",
+        current_user=current_user,
+        connection=http_request,
+        check_id=active.get("check_id"),
+        session_id=session_id,
+        batch_id=active.get("batch_id"),
+        status_code=202,
+        reason_code="user_requested",
+    )
     return {"message": "Cancellation requested"}
 
 
@@ -1528,6 +1914,7 @@ async def cancel_check(session_id: str, current_user: UserInfo = Depends(require
 async def start_batch_check(
     request: BatchUrlsRequest,
     current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
 ):
     """
     Start a batch of reference checks from a list of URLs/ArXiv IDs.
@@ -1549,6 +1936,7 @@ async def start_batch_check(
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
         batch_label = request.batch_label or f"Batch of {len(request.urls)} papers"
+        started_at = utcnow_sqlite()
         
         user_id = get_user_id_filter(current_user)
 
@@ -1579,16 +1967,46 @@ async def start_batch_check(
                 # Release slots already acquired
                 for _ in range(slots_acquired):
                     await _release_user_check_slot(user_id)
+                await _log_usage_event_safe(
+                    "batch.rate_limited",
+                    current_user=current_user,
+                    connection=http_request,
+                    batch_id=batch_id,
+                    source_type="url",
+                    status_code=429,
+                    reason_code="max_concurrent_checks_reached",
+                    payload={
+                        "requested_batch_size": slots_needed,
+                        "max_checks_per_user": MAX_CHECKS_PER_USER,
+                    },
+                )
                 raise HTTPException(
                     status_code=429,
                     detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
                 )
             slots_acquired += 1
 
+        await _log_usage_event_safe(
+            "batch.started",
+            current_user=current_user,
+            connection=http_request,
+            batch_id=batch_id,
+            source_type="url",
+            status_code=202,
+            payload={
+                "batch_size": len(valid_urls),
+                "use_llm": request.use_llm,
+                "llm_provider": llm_provider if request.use_llm else None,
+                "llm_model": llm_model if request.use_llm else None,
+                "semantic_scholar_key_present": bool(request.semantic_scholar_api_key),
+            },
+        )
+
         checks = []
         
         for url in valid_urls:
             session_id = str(uuid.uuid4())
+            source_identity = infer_paper_identity(url, source_type='url')
             
             # Create pending check entry with batch info
             check_id = await db.create_pending_check(
@@ -1600,6 +2018,34 @@ async def start_batch_check(
                 batch_id=batch_id,
                 batch_label=batch_label,
                 user_id=user_id,
+                started_at=started_at,
+                input_bytes=len(url.encode("utf-8")),
+                source_host=source_identity.get("source_host"),
+                paper_identifier_type=source_identity.get("paper_identifier_type"),
+                paper_identifier_value=source_identity.get("paper_identifier_value"),
+                paper_key=source_identity.get("paper_key"),
+                batch_size=len(valid_urls),
+            )
+
+            await _log_usage_event_safe(
+                "check.started",
+                current_user=current_user,
+                connection=http_request,
+                check_id=check_id,
+                session_id=session_id,
+                batch_id=batch_id,
+                source_type="url",
+                source_value=url,
+                paper_title=url,
+                paper_key=source_identity.get("paper_key"),
+                source_host=source_identity.get("source_host"),
+                status_code=202,
+                payload={
+                    "batch_size": len(valid_urls),
+                    "use_llm": request.use_llm,
+                    "llm_provider": llm_provider if request.use_llm else None,
+                    "llm_model": llm_model if request.use_llm else None,
+                },
             )
             
             # Start check in background (run_check's finally will release the slot)
@@ -1652,6 +2098,7 @@ async def start_batch_check_files(
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
 ):
     """
     Start a batch of reference checks from uploaded files.
@@ -1666,6 +2113,7 @@ async def start_batch_check_files(
         
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
+        started_at = utcnow_sqlite()
 
         user_id = get_user_id_filter(current_user)
         uploads_dir = get_uploads_dir() / str(user_id)
@@ -1733,15 +2181,45 @@ async def start_batch_check_files(
             if not await _acquire_user_check_slot(user_id):
                 for _ in range(slots_acquired):
                     await _release_user_check_slot(user_id)
+                await _log_usage_event_safe(
+                    "batch.rate_limited",
+                    current_user=current_user,
+                    connection=http_request,
+                    batch_id=batch_id,
+                    source_type="file",
+                    status_code=429,
+                    reason_code="max_concurrent_checks_reached",
+                    payload={
+                        "requested_batch_size": slots_needed,
+                        "max_checks_per_user": MAX_CHECKS_PER_USER,
+                    },
+                )
                 raise HTTPException(
                     status_code=429,
                     detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
                 )
             slots_acquired += 1
+
+        await _log_usage_event_safe(
+            "batch.started",
+            current_user=current_user,
+            connection=http_request,
+            batch_id=batch_id,
+            source_type="file",
+            status_code=202,
+            payload={
+                "batch_size": len(files_to_process),
+                "use_llm": use_llm,
+                "llm_provider": llm_provider if use_llm else None,
+                "llm_model": llm_model if use_llm else None,
+                "uploaded_bytes": sum(Path(item['path']).stat().st_size for item in files_to_process if Path(item['path']).exists()),
+            },
+        )
         
         checks = []
         for file_info in files_to_process:
             session_id = str(uuid.uuid4())
+            file_size = Path(file_info['path']).stat().st_size if Path(file_info['path']).exists() else None
             
             check_id = await db.create_pending_check(
                 paper_title=file_info['filename'],
@@ -1753,6 +2231,29 @@ async def start_batch_check_files(
                 batch_label=label,
                 original_filename=file_info['filename'],
                 user_id=user_id,
+                started_at=started_at,
+                input_bytes=file_size,
+                batch_size=len(files_to_process),
+            )
+
+            await _log_usage_event_safe(
+                "check.started",
+                current_user=current_user,
+                connection=http_request,
+                check_id=check_id,
+                session_id=session_id,
+                batch_id=batch_id,
+                source_type="file",
+                paper_title=file_info['filename'],
+                status_code=202,
+                payload={
+                    "batch_size": len(files_to_process),
+                    "use_llm": use_llm,
+                    "llm_provider": llm_provider if use_llm else None,
+                    "llm_model": llm_model if use_llm else None,
+                    "input_bytes": file_size,
+                    "original_filename_ext": Path(file_info['filename']).suffix.lower(),
+                },
             )
             
             cancel_event = asyncio.Event()
@@ -1830,7 +2331,11 @@ async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user
 
 
 @app.post("/api/cancel/batch/{batch_id}")
-async def cancel_batch(batch_id: str, current_user: UserInfo = Depends(require_user)):
+async def cancel_batch(
+    batch_id: str,
+    current_user: UserInfo = Depends(require_user),
+    http_request: Request = None,
+):
     """Cancel all active checks in a batch"""
     try:
         user_id = get_user_id_filter(current_user)
@@ -1847,6 +2352,18 @@ async def cancel_batch(batch_id: str, current_user: UserInfo = Depends(require_u
         db_cancelled = await db.cancel_batch(batch_id, user_id=user_id)
         
         logger.info(f"Cancelled batch {batch_id}: {cancelled_sessions} active, {db_cancelled} in DB")
+        await _log_usage_event_safe(
+            "batch.cancel_requested",
+            current_user=current_user,
+            connection=http_request,
+            batch_id=batch_id,
+            status_code=202,
+            reason_code="user_requested",
+            payload={
+                "cancelled_active": cancelled_sessions,
+                "cancelled_pending": db_cancelled,
+            },
+        )
         
         return {
             "message": "Batch cancellation requested",
@@ -2535,6 +3052,34 @@ async def update_setting(
 
 # Debug/Admin endpoints
 
+@app.get("/api/admin/analytics/summary")
+async def get_admin_analytics_summary(
+    days: int = 30,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return an admin-only analytics summary for recent usage."""
+    _require_admin(current_user)
+    try:
+        return await get_usage_summary(days=days)
+    except Exception as e:
+        logger.error(f"Error getting analytics summary: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/analytics/events")
+async def get_admin_usage_events(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return recent raw usage events for admin inspection."""
+    _require_admin(current_user)
+    try:
+        return await get_usage_events(limit=limit, event_type=event_type)
+    except Exception as e:
+        logger.error(f"Error getting analytics events: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/admin/cache")
 async def clear_verification_cache(current_user: UserInfo = Depends(require_user)):
     """Clear the verification cache"""
@@ -2550,25 +3095,25 @@ async def clear_verification_cache(current_user: UserInfo = Depends(require_user
 
 @app.delete("/api/admin/database")
 async def clear_database(current_user: UserInfo = Depends(require_user)):
-    """Clear all data (cache + history) but keep settings and LLM configs"""
+    """Clear all data (cache + history + usage log file) but keep settings and LLM configs"""
     _require_admin(current_user)
     try:
         # Clear verification cache
         cache_count = await db.clear_verification_cache()
+        usage_event_count = await clear_usage_log()
         
         # Clear check history
         async with aiosqlite.connect(db.db_path) as conn:
-            await conn.execute("DELETE FROM check_history")
+            history_cursor = await conn.execute("DELETE FROM check_history")
             await conn.commit()
-            cursor = await conn.execute("SELECT changes()")
-            row = await cursor.fetchone()
-            history_count = row[0] if row else 0
+            history_count = history_cursor.rowcount if history_cursor.rowcount != -1 else 0
         
-        logger.info(f"Cleared database: {cache_count} cache entries, {history_count} history entries")
+        logger.info(f"Cleared database: {cache_count} cache entries, {history_count} history entries, {usage_event_count} usage events")
         return {
-            "message": f"Cleared {cache_count} cache entries and {history_count} history entries",
+            "message": f"Cleared {cache_count} cache entries, {history_count} history entries, and {usage_event_count} usage events",
             "cache_count": cache_count,
-            "history_count": history_count
+            "history_count": history_count,
+            "usage_event_count": usage_event_count,
         }
     except Exception as e:
         logger.error(f"Error clearing database: {e}", exc_info=True)

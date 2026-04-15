@@ -162,6 +162,20 @@ class Database:
                     source_type TEXT DEFAULT 'url',
                     custom_label TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    completed_at DATETIME,
+                    duration_ms INTEGER,
+                    input_bytes INTEGER,
+                    source_host TEXT,
+                    paper_identifier_type TEXT,
+                    paper_identifier_value TEXT,
+                    paper_key TEXT,
+                    issue_type_counts_json TEXT,
+                    cache_hit BOOLEAN DEFAULT 0,
+                    bibliography_source_kind TEXT,
+                    failure_class TEXT,
+                    cancel_reason TEXT,
+                    batch_size INTEGER,
                     total_refs INTEGER,
                     errors_count INTEGER,
                     warnings_count INTEGER,
@@ -286,6 +300,38 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN user_id INTEGER REFERENCES users(id)")
         if "hallucination_count" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN hallucination_count INTEGER DEFAULT 0")
+        if "started_at" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN started_at DATETIME")
+        if "completed_at" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN completed_at DATETIME")
+        if "duration_ms" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN duration_ms INTEGER")
+        if "input_bytes" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN input_bytes INTEGER")
+        if "source_host" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN source_host TEXT")
+        if "paper_identifier_type" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN paper_identifier_type TEXT")
+        if "paper_identifier_value" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN paper_identifier_value TEXT")
+        if "paper_key" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN paper_key TEXT")
+        if "issue_type_counts_json" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN issue_type_counts_json TEXT")
+        if "cache_hit" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN cache_hit BOOLEAN DEFAULT 0")
+        if "bibliography_source_kind" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN bibliography_source_kind TEXT")
+        if "failure_class" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN failure_class TEXT")
+        if "cancel_reason" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN cancel_reason TEXT")
+        if "batch_size" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN batch_size INTEGER")
+
+        await db.execute(
+            "UPDATE check_history SET started_at = COALESCE(started_at, timestamp) WHERE started_at IS NULL"
+        )
 
         # Ensure user_id column in llm_configs
         async with db.execute("PRAGMA table_info(llm_configs)") as cursor:
@@ -427,6 +473,8 @@ class Database:
                     # Parse JSON results
                     if result['results_json']:
                         result['results'] = json.loads(result['results_json'])
+                    if result.get('issue_type_counts_json'):
+                        result['issue_type_counts'] = json.loads(result['issue_type_counts_json'])
                     return result
                 return None
 
@@ -478,15 +526,23 @@ class Database:
                                     batch_id: Optional[str] = None,
                                     batch_label: Optional[str] = None,
                                     original_filename: Optional[str] = None,
-                                    user_id: Optional[int] = None) -> int:
+                                    user_id: Optional[int] = None,
+                                    started_at: Optional[str] = None,
+                                    input_bytes: Optional[int] = None,
+                                    source_host: Optional[str] = None,
+                                    paper_identifier_type: Optional[str] = None,
+                                    paper_identifier_value: Optional[str] = None,
+                                    paper_key: Optional[str] = None,
+                                    batch_size: Optional[int] = None) -> int:
         """Create a pending check entry before verification starts"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, results_json, llm_provider, llm_model, status,
-                 batch_id, batch_label, original_filename, user_id)
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?, ?)
+                 batch_id, batch_label, original_filename, user_id, started_at, input_bytes,
+                 source_host, paper_identifier_type, paper_identifier_value, paper_key, batch_size)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -496,7 +552,14 @@ class Database:
                 batch_id,
                 batch_label,
                 original_filename,
-                user_id
+                user_id,
+                started_at,
+                input_bytes,
+                source_host,
+                paper_identifier_type,
+                paper_identifier_value,
+                paper_key,
+                batch_size,
             ))
             await db.commit()
             return cursor.lastrowid
@@ -515,57 +578,87 @@ class Database:
                                     results: List[Dict[str, Any]],
                                     status: str = 'completed',
                                     extraction_method: Optional[str] = None,
-                                    hallucination_count: int = 0) -> bool:
+                                    hallucination_count: int = 0,
+                                    completed_at: Optional[str] = None,
+                                    duration_ms: Optional[int] = None,
+                                    paper_identifier_type: Optional[str] = None,
+                                    paper_identifier_value: Optional[str] = None,
+                                    paper_key: Optional[str] = None,
+                                    issue_type_counts: Optional[Dict[str, int]] = None,
+                                    cache_hit: Optional[bool] = None,
+                                    bibliography_source_kind: Optional[str] = None,
+                                    failure_class: Optional[str] = None) -> bool:
         """Update a check with its results. If paper_title is None, don't update it."""
         async with aiosqlite.connect(self.db_path) as db:
+            updates = []
+            params: List[Any] = []
+
             if paper_title is not None:
-                await db.execute("""
-                    UPDATE check_history
-                    SET paper_title = ?, total_refs = ?, errors_count = ?, warnings_count = ?,
-                        suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
-                        refs_with_errors = ?, refs_with_warnings_only = ?, refs_verified = ?,
-                        results_json = ?, status = ?, extraction_method = ?
-                    WHERE id = ?
-                """, (
-                    paper_title,
-                    total_refs,
-                    errors_count,
-                    warnings_count,
-                    suggestions_count,
-                    unverified_count,
-                    hallucination_count,
-                    refs_with_errors,
-                    refs_with_warnings_only,
-                    refs_verified,
-                    json.dumps(results),
-                    status,
-                    extraction_method,
-                    check_id
-                ))
-            else:
-                # Don't update paper_title if None
-                await db.execute("""
-                    UPDATE check_history
-                    SET total_refs = ?, errors_count = ?, warnings_count = ?,
-                        suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
-                        refs_with_errors = ?, refs_with_warnings_only = ?, refs_verified = ?,
-                        results_json = ?, status = ?, extraction_method = ?
-                    WHERE id = ?
-                """, (
-                    total_refs,
-                    errors_count,
-                    warnings_count,
-                    suggestions_count,
-                    unverified_count,
-                    hallucination_count,
-                    refs_with_errors,
-                    refs_with_warnings_only,
-                    refs_verified,
-                    json.dumps(results),
-                    status,
-                    extraction_method,
-                    check_id
-                ))
+                updates.append("paper_title = ?")
+                params.append(paper_title)
+
+            updates.extend([
+                "total_refs = ?",
+                "errors_count = ?",
+                "warnings_count = ?",
+                "suggestions_count = ?",
+                "unverified_count = ?",
+                "hallucination_count = ?",
+                "refs_with_errors = ?",
+                "refs_with_warnings_only = ?",
+                "refs_verified = ?",
+                "results_json = ?",
+                "status = ?",
+                "extraction_method = ?",
+            ])
+            params.extend([
+                total_refs,
+                errors_count,
+                warnings_count,
+                suggestions_count,
+                unverified_count,
+                hallucination_count,
+                refs_with_errors,
+                refs_with_warnings_only,
+                refs_verified,
+                json.dumps(results),
+                status,
+                extraction_method,
+            ])
+
+            if completed_at is not None:
+                updates.append("completed_at = ?")
+                params.append(completed_at)
+            if duration_ms is not None:
+                updates.append("duration_ms = ?")
+                params.append(duration_ms)
+            if paper_identifier_type is not None:
+                updates.append("paper_identifier_type = ?")
+                params.append(paper_identifier_type)
+            if paper_identifier_value is not None:
+                updates.append("paper_identifier_value = ?")
+                params.append(paper_identifier_value)
+            if paper_key is not None:
+                updates.append("paper_key = ?")
+                params.append(paper_key)
+            if issue_type_counts is not None:
+                updates.append("issue_type_counts_json = ?")
+                params.append(json.dumps(issue_type_counts, sort_keys=True))
+            if cache_hit is not None:
+                updates.append("cache_hit = ?")
+                params.append(1 if cache_hit else 0)
+            if bibliography_source_kind is not None:
+                updates.append("bibliography_source_kind = ?")
+                params.append(bibliography_source_kind)
+            if failure_class is not None:
+                updates.append("failure_class = ?")
+                params.append(failure_class)
+
+            params.append(check_id)
+            await db.execute(
+                f"UPDATE check_history SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
             await db.commit()
             return True
 
@@ -611,12 +704,33 @@ class Database:
             await db.commit()
             return True
 
-    async def update_check_status(self, check_id: int, status: str) -> bool:
+    async def update_check_status(self,
+                                  check_id: int,
+                                  status: str,
+                                  failure_class: Optional[str] = None,
+                                  cancel_reason: Optional[str] = None,
+                                  completed_at: Optional[str] = None,
+                                  duration_ms: Optional[int] = None) -> bool:
         """Update just the status of a check"""
         async with aiosqlite.connect(self.db_path) as db:
+            updates = ["status = ?"]
+            params: List[Any] = [status]
+            if failure_class is not None:
+                updates.append("failure_class = ?")
+                params.append(failure_class)
+            if cancel_reason is not None:
+                updates.append("cancel_reason = ?")
+                params.append(cancel_reason)
+            if completed_at is not None:
+                updates.append("completed_at = ?")
+                params.append(completed_at)
+            if duration_ms is not None:
+                updates.append("duration_ms = ?")
+                params.append(duration_ms)
+            params.append(check_id)
             await db.execute(
-                "UPDATE check_history SET status = ? WHERE id = ?",
-                (status, check_id)
+                f"UPDATE check_history SET {', '.join(updates)} WHERE id = ?",
+                params,
             )
             await db.commit()
             return True
