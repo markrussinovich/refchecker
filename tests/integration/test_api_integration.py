@@ -102,7 +102,8 @@ class TestSemanticScholarIntegration:
         """Test handling of API errors."""
         mock_get.side_effect = requests.RequestException("Network error")
         
-        result = ss_checker.search_paper("Test Paper")
+        with patch('time.sleep'):
+            result = ss_checker.search_paper("Test Paper")
         
         assert result is None or isinstance(result, (dict, list))
 
@@ -297,7 +298,9 @@ class TestWebPageIntegration:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.text = sample_web_page_html
+        mock_response.content = sample_web_page_html.encode('utf-8')
         mock_response.headers = {'content-type': 'text/html'}
+        mock_response.url = 'https://example.com/docs'
         mock_get.return_value = mock_response
         
         reference = {
@@ -307,12 +310,13 @@ class TestWebPageIntegration:
         
         result = webpage_checker.verify_reference(reference)
         
-        # WebPage checker returns tuple: (verified, [], status)
-        if isinstance(result, tuple) and len(result) >= 1:
-            verified = result[0]
-            assert isinstance(verified, (bool, type(None)))
-        else:
-            assert result is not None
+        # WebPage checker returns tuple: (verified_data, errors, url)
+        assert isinstance(result, tuple) and len(result) == 3
+        verified_data, errors, url = result
+        assert isinstance(verified_data, (dict, type(None)))
+        assert isinstance(errors, list)
+        if verified_data is not None:
+            assert 'title' in verified_data
     
     @patch('requests.Session.get')
     def test_verify_webpage_not_found(self, mock_get, webpage_checker):
