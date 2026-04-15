@@ -447,6 +447,7 @@ export const useCheckStore = create((set, get) => ({
             // Clear in-memory results so selectCheck fetches authoritative data from API
             results: undefined,
           })
+          store.unregisterSession(messageSessionId)
           break
         case 'error':
           logger.error('CheckStore', `Check ${checkIdForMessage} failed (concurrent session ${messageSessionId?.slice(0,8)})`, data)
@@ -454,6 +455,7 @@ export const useCheckStore = create((set, get) => ({
             status: 'error',
             results: undefined,
           })
+          store.unregisterSession(messageSessionId)
           break
         case 'cancelled':
           logger.info('CheckStore', `Check ${checkIdForMessage} cancelled (concurrent session ${messageSessionId?.slice(0,8)})`)
@@ -461,6 +463,7 @@ export const useCheckStore = create((set, get) => ({
             status: 'cancelled',
             results: undefined,
           })
+          store.unregisterSession(messageSessionId)
           break
         default:
           // Other message types for concurrent sessions - ignore
@@ -605,10 +608,13 @@ export const useCheckStore = create((set, get) => ({
           refs_verified: data.refs_verified,
           extraction_method: data.extraction_method,
         })
+        // Session is done — remove from activeSessions so the WS isn't reconnected
+        if (messageSessionId) store.unregisterSession(messageSessionId)
         break
         
       case 'cancelled':
         store.cancelCheck()
+        if (messageSessionId) store.unregisterSession(messageSessionId)
         break
         
       case 'error':
@@ -623,6 +629,7 @@ export const useCheckStore = create((set, get) => ({
         } else {
           logger.warn('CheckStore', 'No checkIdForMessage available to update history')
         }
+        if (messageSessionId) store.unregisterSession(messageSessionId)
         break
         
       default:

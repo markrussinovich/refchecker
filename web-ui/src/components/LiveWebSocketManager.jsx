@@ -96,6 +96,15 @@ export default function LiveWebSocketManager() {
         onClose: (event) => {
           logger.info('WebSocket', `Session ${sessionId} closed with code ${event?.code || 'unknown'}`)
           wsMapRef.current.delete(sessionId)
+          // If the server explicitly rejected (auth denied or session gone),
+          // unregister the session instead of retrying.  Codes:
+          //   4001 = unauthorized / wrong user
+          //   4003 = session not found (check already completed)
+          if (event?.code === 4001 || event?.code === 4003) {
+            logger.info('LiveWebSocketManager', `Server rejected session ${sessionId} (code ${event.code}), unregistering`)
+            useCheckStore.getState().unregisterSession(sessionId)
+            return
+          }
           // Schedule a reconnection attempt if the session is still active.
           // The useEffect won't re-run on its own because activeSessions hasn't
           // changed, so we bump a counter to force it.

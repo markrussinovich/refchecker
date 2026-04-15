@@ -758,7 +758,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.close(code=4001, reason="Invalid token")
             return
         active = active_checks.get(session_id)
-        if not active or active.get("user_id") != token_data.user_id:
+        if not active:
+            # Session no longer exists (already completed/cancelled) — close
+            # silently without logging a usage event to avoid log spam from
+            # stale frontend reconnection attempts.
+            await websocket.close(code=4003, reason="Session not found")
+            return
+        if active.get("user_id") != token_data.user_id:
             await _log_usage_event_safe(
                 "auth.websocket_denied",
                 connection=websocket,
@@ -3092,6 +3098,62 @@ async def download_usage_events(current_user: UserInfo = Depends(require_user)):
         media_type="application/x-ndjson",
         filename=log_path.name,
     )
+
+
+@app.get("/api/admin/activity")
+async def get_admin_activity(
+    limit: int = 200,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Return anonymised user + check activity for admin inspection.
+
+    Each row contains:
+    - user_id, provider, email_domain, is_admin, created_at
+    - check id, paper_title, paper_source, source_type, status,
+      started_at, completed_at, duration_ms, total_refs, errors_count,
+      warnings_count, suggestions_count, unverified_count, hallucination_count,
+      llm_provider, llm_model, extraction_method, cache_hit
+    """
+    _require_admin(current_user)
+    try:
+        async with aiosqlite.connect(db.db_path) as conn:
+            await conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = aiosqlite.Row
+
+            # Users summary (anonymised: no name/email/avatar, only domain)
+            users = []
+            async with conn.execute(
+                "SELECT id, provider, email, is_admin, created_at FROM users ORDER BY id"
+            ) as cursor:
+                async for row in cursor:
+                    r = dict(row)
+                    email = r.pop("email", None)
+                    r["email_domain"] = email.split("@", 1)[1] if email and "@" in email else None
+                    users.append(r)
+
+            # Recent checks (no results_json to keep response small)
+            checks = []
+            async with conn.execute(
+                """SELECT id, user_id, paper_title, paper_source, source_type,
+                          status, started_at, completed_at, duration_ms,
+                          total_refs, errors_count, warnings_count,
+                          suggestions_count, unverified_count,
+                          hallucination_count, refs_with_errors,
+                          refs_with_warnings_only, refs_verified,
+                          llm_provider, llm_model, extraction_method,
+                          cache_hit, original_filename
+                   FROM check_history
+                   ORDER BY id DESC
+                   LIMIT ?""",
+                (limit,),
+            ) as cursor:
+                async for row in cursor:
+                    checks.append(dict(row))
+
+        return {"users": users, "checks": checks}
+    except Exception as e:
+        logger.error(f"Error getting admin activity: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/admin/cache")
