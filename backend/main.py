@@ -3080,6 +3080,20 @@ async def get_admin_usage_events(
         logger.error(f"Error getting analytics events: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/admin/analytics/events/download")
+async def download_usage_events(current_user: UserInfo = Depends(require_user)):
+    """Download the raw usage-events JSONL file."""
+    _require_admin(current_user)
+    log_path = get_usage_log_path()
+    if not log_path.is_file():
+        raise HTTPException(status_code=404, detail="Usage log file not found")
+    return FileResponse(
+        str(log_path),
+        media_type="application/x-ndjson",
+        filename=log_path.name,
+    )
+
+
 @app.delete("/api/admin/cache")
 async def clear_verification_cache(current_user: UserInfo = Depends(require_user)):
     """Clear the verification cache"""
