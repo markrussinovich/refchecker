@@ -49,6 +49,107 @@ import arxiv
 
 logger = logging.getLogger(__name__)
 
+# GROBID server URL (local Docker or remote)
+GROBID_URL = os.environ.get("GROBID_URL", "http://localhost:8070")
+
+
+def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
+    """Extract references from a PDF using a GROBID server.
+
+    Falls back gracefully to an empty list when GROBID is not reachable.
+    Requires a running GROBID instance (e.g. ``docker run -p 8070:8070 lfoppiano/grobid:0.8.2``).
+    """
+    import xml.etree.ElementTree as ET
+    import requests as _requests
+
+    try:
+        with open(pdf_path, 'rb') as f:
+            resp = _requests.post(
+                f"{GROBID_URL}/api/processReferences",
+                files={"input": f},
+                data={"consolidateCitations": "0", "includeRawCitations": "1"},
+                timeout=120,
+            )
+        if resp.status_code != 200:
+            logger.warning("GROBID returned status %d", resp.status_code)
+            return []
+    except Exception as exc:
+        logger.info("GROBID not available at %s: %s", GROBID_URL, exc)
+        return []
+
+    ns = '{http://www.tei-c.org/ns/1.0}'
+    refs: List[Dict[str, Any]] = []
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError:
+        return []
+
+    for bib in root.iter(f'{ns}biblStruct'):
+        ref: Dict[str, Any] = {"authors": [], "title": "", "venue": "", "year": None, "url": "", "doi": None, "type": "other"}
+        # Authors
+        for pers in bib.iter(f'{ns}persName'):
+            forenames = [fn.text for fn in pers.iter(f'{ns}forename') if fn.text]
+            surname = ""
+            for sn in pers.iter(f'{ns}surname'):
+                if sn.text:
+                    surname = sn.text
+            parts = forenames + ([surname] if surname else [])
+            if parts:
+                ref["authors"].append(" ".join(parts))
+        # Title
+        analytic = bib.find(f'{ns}analytic')
+        monogr = bib.find(f'{ns}monogr')
+        if analytic is not None:
+            t = analytic.find(f'{ns}title')
+            if t is not None and t.text:
+                ref["title"] = t.text.strip()
+        if not ref["title"] and monogr is not None:
+            t = monogr.find(f'{ns}title')
+            if t is not None and t.text:
+                ref["title"] = t.text.strip()
+        # Venue (only when analytic exists — otherwise monogr title IS the paper title)
+        if monogr is not None and analytic is not None:
+            for t in monogr.findall(f'{ns}title'):
+                if t.text:
+                    ref["venue"] = t.text.strip()
+                    break
+        # Year
+        for d in bib.iter(f'{ns}date'):
+            when = d.get('when', '')
+            m = re.match(r'(\d{4})', when)
+            if m:
+                ref["year"] = int(m.group(1))
+                break
+        # DOI / URL
+        for idno in bib.iter(f'{ns}idno'):
+            id_type = (idno.get('type') or '').lower()
+            if id_type == 'doi' and idno.text:
+                ref["doi"] = idno.text.strip()
+                if not ref["url"]:
+                    ref["url"] = f"https://doi.org/{ref['doi']}"
+            elif id_type == 'arxiv' and idno.text:
+                ref["url"] = f"https://arxiv.org/abs/{idno.text.strip()}"
+                ref["type"] = "arxiv"
+        if not ref["url"]:
+            for ptr in bib.iter(f'{ns}ptr'):
+                target = ptr.get('target', '')
+                if target:
+                    ref["url"] = target
+        if ref["title"] or ref["authors"]:
+            refs.append(ref)
+    logger.info("GROBID extracted %d references from %s", len(refs), pdf_path)
+    return refs
+
+
+def _is_grobid_available() -> bool:
+    """Quick health check for GROBID."""
+    import requests as _requests
+    try:
+        resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
+        return resp.status_code == 200 and resp.text.strip().lower() == 'true'
+    except Exception:
+        return False
+
 
 def download_pdf(url: str, dest_path: str) -> None:
     """Download a PDF with browser-like headers (avoids 403 from OpenReview etc.)."""
@@ -543,9 +644,18 @@ class ProgressRefChecker:
                                 pass
 
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
-                    # PDF extraction requires LLM for reliable reference extraction
                     elif not self.llm:
-                        raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys.")
+                        # No LLM configured — try GROBID for reference extraction
+                        pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
+                        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                            await asyncio.to_thread(download_pdf, paper_source, pdf_path)
+                        grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, pdf_path)
+                        if grobid_refs:
+                            arxiv_source_references = grobid_refs
+                            extraction_method = 'grobid'
+                            logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM configured)")
+                        else:
+                            raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
                     else:
                         await self.emit_progress("extracting", {
                             "message": "Downloading PDF from URL..."
@@ -637,10 +747,21 @@ class ProgressRefChecker:
                     
                     # Fall back to PDF extraction if no references from source files
                     if not arxiv_source_references:
-                        # PDF extraction requires LLM for reliable reference extraction
                         if not self.llm:
-                            raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys. (This paper's ArXiv source did not contain parseable bibliography files.)")
-                        extraction_method = 'pdf'
+                            # No LLM configured — try GROBID for reference extraction
+                            pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
+                            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                                await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
+                            grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, pdf_path)
+                            if grobid_refs:
+                                arxiv_source_references = grobid_refs
+                                extraction_method = 'grobid'
+                                logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, ArXiv source failed)")
+                            else:
+                                raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
+
+                    if not arxiv_source_references:
+                        extraction_method = extraction_method or 'pdf'
                         # Download PDF - run in thread (use cross-platform temp directory)
                         pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
                         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
@@ -660,9 +781,15 @@ class ProgressRefChecker:
 
                 # Handle uploaded file - run PDF processing in thread
                 if paper_source.lower().endswith('.pdf'):
-                    # PDF extraction requires LLM for reliable reference extraction
                     if not self.llm:
-                        raise ValueError("PDF extraction requires a working LLM. Please enter your API key in Settings → API Keys.")
+                        # No LLM configured — try GROBID for reference extraction
+                        grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, paper_source)
+                        if grobid_refs:
+                            arxiv_source_references = grobid_refs
+                            extraction_method = 'grobid'
+                            logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, uploaded PDF)")
+                        else:
+                            raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                     
