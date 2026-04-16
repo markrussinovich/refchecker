@@ -130,7 +130,11 @@ class ProgressRefChecker:
                  bibliography_source_callback: Optional[Callable] = None,
                  semantic_scholar_api_key: Optional[str] = None,
                  db_path: Optional[str] = None,
-                 cache_dir: Optional[str] = None):
+                 cache_dir: Optional[str] = None,
+                 hallucination_provider: Optional[str] = None,
+                 hallucination_model: Optional[str] = None,
+                 hallucination_api_key: Optional[str] = None,
+                 hallucination_endpoint: Optional[str] = None):
         """
         Initialize the progress-aware refchecker
 
@@ -191,17 +195,37 @@ class ProgressRefChecker:
         # Initialize reference checker
         self.hallucination_verifier = None
         try:
+            from refchecker.config.settings import HALLUCINATION_CAPABLE_PROVIDERS
             from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
-            verifier = LLMHallucinationVerifier(
-                provider=llm_provider,
-                api_key=api_key,
-                endpoint=endpoint,
-                model=llm_model,
-            )
-            verifier.cache_dir = cache_dir
-            if verifier.available or cache_dir:
-                self.hallucination_verifier = verifier
-                logger.debug('Hallucination verifier initialized for web UI (provider=%s, available=%s, cache=%s)', llm_provider, verifier.available, bool(cache_dir))
+
+            # Determine which provider to use for hallucination checking
+            if hallucination_provider:
+                h_provider = hallucination_provider
+                h_model = hallucination_model
+                h_api_key = hallucination_api_key
+                h_endpoint = hallucination_endpoint
+            elif llm_provider and llm_provider in HALLUCINATION_CAPABLE_PROVIDERS:
+                h_provider = llm_provider
+                h_model = llm_model
+                h_api_key = api_key
+                h_endpoint = endpoint
+            else:
+                h_provider = None
+                h_model = None
+                h_api_key = None
+                h_endpoint = None
+
+            if h_provider or cache_dir:
+                verifier = LLMHallucinationVerifier(
+                    provider=h_provider,
+                    api_key=h_api_key,
+                    endpoint=h_endpoint,
+                    model=h_model,
+                )
+                verifier.cache_dir = cache_dir
+                if verifier.available or cache_dir:
+                    self.hallucination_verifier = verifier
+                    logger.debug('Hallucination verifier initialized for web UI (provider=%s, available=%s, cache=%s)', h_provider, verifier.available, bool(cache_dir))
         except Exception as e:
             logger.debug(f'Hallucination verifier init failed: {e}')
         # Web UI Semantic Scholar keys are supplied per request from the browser.

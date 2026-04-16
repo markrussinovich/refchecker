@@ -489,8 +489,14 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.model_name = config.get("model") or "microsoft/DialoGPT-medium"
-        self.server_url = config.get("server_url") or os.getenv("REFCHECKER_VLLM_SERVER_URL") or "http://localhost:8000"
-        self.auto_start_server = config.get("auto_start_server", os.getenv("REFCHECKER_VLLM_AUTO_START", "true").lower() == "true")
+        # endpoint (from CLI --llm-endpoint) takes priority over server_url (from config)
+        self.server_url = config.get("endpoint") or config.get("server_url") or os.getenv("REFCHECKER_VLLM_SERVER_URL") or "http://localhost:8000"
+        # If user explicitly provided an endpoint via CLI or env var, don't
+        # auto-start a server — assume the user manages it themselves.
+        explicit_endpoint = bool(config.get("endpoint") or os.getenv("REFCHECKER_VLLM_SERVER_URL"))
+        self.auto_start_server = config.get("auto_start_server",
+            False if explicit_endpoint else os.getenv("REFCHECKER_VLLM_AUTO_START", "true").lower() == "true"
+        )
         self.server_timeout = config.get("server_timeout", int(os.getenv("REFCHECKER_VLLM_TIMEOUT", "300")))
         
         # Allow skipping initialization for testing
@@ -983,6 +989,11 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
     
     def cleanup(self):
         """Cleanup vLLM server resources"""
+        # Only kill the server if we auto-started it; if the user manages
+        # their own server (via --llm-endpoint / REFCHECKER_VLLM_SERVER_URL),
+        # leave it alone.
+        if not self.auto_start_server:
+            return
         logger.info("Shutting down vLLM server...")
         try:
             self._kill_existing_server()
