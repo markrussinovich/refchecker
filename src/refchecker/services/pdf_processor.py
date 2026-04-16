@@ -174,93 +174,113 @@ class PDFProcessor:
         if not text:
             return ""
         
-        # Common bibliography section headers
-        bib_headers = [
-            r'\n\s*REFERENCES\s*\n',
-            r'\n\s*References\s*\n',
-            r'\n\s*BIBLIOGRAPHY\s*\n',
-            r'\n\s*Bibliography\s*\n',
-            r'\n\s*WORKS CITED\s*\n',
-            r'\n\s*Works Cited\s*\n'
-        ]
-        
         import re
         
-        # Find bibliography section
-        for header in bib_headers:
-            match = re.search(header, text, re.IGNORECASE)
-            if match:
-                # Extract from bibliography header
-                bib_start = match.end()
-                full_bib_text = text[bib_start:].strip()
-                
-                # Find the end of the bibliography section by looking for common section headers
-                # that typically follow references
-                end_markers = [
-                    r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
-                    r'\n\s*Appendix\s*[A-Z]?\s*\n',
-                    r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',  # Pattern like "A LRE Dataset", "B ADDITIONAL RESULTS", "A Theoretical Arguments for Section 3"
-                    r'\n\s*[A-Z]\.\d+\s+.*\n',  # Pattern like "A.1 Dataset Details"
-                    r'\nTable\s+\d+:.*\n[A-Z]\s+[A-Z]',  # Table followed by appendix section like "Table 7: ...\nA LRE"
-                    r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
-                    r'\n\s*Supplementary\s+Material\s*\n',  
-                    r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
-                    r'\n\s*Supplemental\s+Material\s*\n',
-                    r'\n\s*ACKNOWLEDGMENTS?\s*\n',
-                    r'\n\s*Acknowledgments?\s*\n',
-                    r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
-                    r'\n\s*Author\s+Contributions?\s*\n',
-                    r'\n\s*FUNDING\s*\n',
-                    r'\n\s*Funding\s*\n',
-                    r'\n\s*ETHICS\s+STATEMENT\s*\n',
-                    r'\n\s*Ethics\s+Statement\s*\n',
-                    r'\n\s*CONFLICT\s+OF\s+INTEREST\s*\n',
-                    r'\n\s*Conflict\s+of\s+Interest\s*\n',
-                    r'\n\s*DATA\s+AVAILABILITY\s*\n',
-                    r'\n\s*Data\s+Availability\s*\n'
-                ]
-                
-                bib_text = full_bib_text
-                bib_end = len(full_bib_text)
-                
-                # Look for section markers that indicate end of bibliography
-                for end_marker in end_markers:
-                    end_match = re.search(end_marker, full_bib_text, re.IGNORECASE)
-                    if end_match and end_match.start() < bib_end:
-                        bib_end = end_match.start()
-                
-                # If we found an end marker, truncate there
-                if bib_end < len(full_bib_text):
-                    bib_text = full_bib_text[:bib_end].strip()
-                    logger.debug(f"Bibliography section truncated at position {bib_end}")
-                
-                # Also try to detect bibliography end by finding the last numbered reference
-                # Look for the highest numbered reference in the text
-                ref_numbers = re.findall(r'\[(\d+)\]', bib_text)
-                if ref_numbers:
-                    max_ref_num = max(int(num) for num in ref_numbers)
-                    logger.debug(f"Found references up to [{max_ref_num}]")
-                    
-                    # Look for the end of the last numbered reference
-                    last_ref_pattern = rf'\[{max_ref_num}\][^[]*?(?=\n\s*[A-Z]{{2,}}|\n\s*\w+\s*\n\s*[A-Z]|\Z)'
-                    last_ref_match = re.search(last_ref_pattern, bib_text, re.DOTALL)
-                    if last_ref_match:
-                        potential_end = last_ref_match.end()
-                        # Only use this if it's before our section marker end
-                        if potential_end < bib_end:
-                            bib_text = bib_text[:potential_end].strip()
-                            logger.debug(f"Bibliography truncated after reference [{max_ref_num}]")
-                
-                # Final fallback: limit to reasonable length
-                if len(bib_text) > 50000:  # Limit to ~50KB
-                    bib_text = bib_text[:50000]
-                    logger.debug("Bibliography section truncated to 50KB limit")
-                
-                logger.debug(f"Found bibliography section: {len(bib_text)} characters")
-                return bib_text
+        # Bibliography header patterns, ordered from most specific to most general.
+        # PDF extraction often inserts page numbers, tabs, non-breaking spaces,
+        # line-number artifacts, or colons around the header, so the patterns
+        # must be tolerant of surrounding noise while still requiring a word
+        # boundary to avoid matching "cross-references" or "refer to".
+        bib_headers = [
+            # Numbered section headers: "7. References", "12 References"
+            r'\n[\s\d\t\r\xa0]*\d+\.?\s+(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography)\s*:?\s*\n',
+            # Standard headers with possible PDF artifacts (tabs, page nums, \xa0)
+            # between newline and the keyword
+            r'\n[\s\t\r\xa0\d]*(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography|WORKS\s+CITED|Works\s+Cited)\s*:?\s*(?:\d*\s*)\n',
+            # Header where the first reference starts on the same line (no trailing \n)
+            r'\n[\s\t\r\xa0\d]*(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography)\s*:?\s+(?=[A-Z\d\[\(])',
+            # Header with inline line numbers: "559\tReferences 560\t"
+            r'\d+\s*\t\s*(?:References|REFERENCES)\s*\d*\s*\t',
+            # Header preceded by spaces/line-nums without a newline (e.g., "477 REFERENCES 478")
+            r'\s(?:REFERENCES|References|BIBLIOGRAPHY|Bibliography)\s*:?\s+(?=\d|[A-Z])',
+        ]
         
-        logger.warning("No bibliography section found in text")
-        return ""
+        # Find bibliography section — try each pattern, keep the LAST match
+        # (bibliography is typically near the end of the document)
+        best_match = None
+        for header in bib_headers:
+            for m in re.finditer(header, text):
+                # Skip matches in the first 20% of text (likely "cross-references" etc.)
+                if m.start() < len(text) * 0.2:
+                    continue
+                if best_match is None or m.start() > best_match.start():
+                    best_match = m
+        
+        if best_match is None:
+            # Fallback: case-insensitive search for the word on its own line
+            for m in re.finditer(r'\n[^\n]{0,20}?\b(?:References|REFERENCES|Bibliography|BIBLIOGRAPHY)\b\s*:?\s*\n', text):
+                if m.start() > len(text) * 0.4:
+                    best_match = m
+                    break
+        
+        if best_match is None:
+            logger.warning("No bibliography section found in text")
+            return ""
+        
+        bib_start = best_match.end()
+        full_bib_text = text[bib_start:].strip()
+        
+        # Find the end of the bibliography section by looking for common section headers
+        # that typically follow references
+        end_markers = [
+            r'\n\s*APPENDIX\s*[A-Z]?\s*\n',
+            r'\n\s*Appendix\s*[A-Z]?\s*\n',
+            r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',  # Pattern like "A LRE Dataset", "B ADDITIONAL RESULTS"
+            r'\n\s*[A-Z]\.\d+\s+.*\n',  # Pattern like "A.1 Dataset Details"
+            r'\nTable\s+\d+:.*\n[A-Z]\s+[A-Z]',  # Table followed by appendix section
+            r'\n\s*SUPPLEMENTARY\s+MATERIAL\s*\n',
+            r'\n\s*Supplementary\s+Material\s*\n',
+            r'\n\s*SUPPLEMENTAL\s+MATERIAL\s*\n',
+            r'\n\s*Supplemental\s+Material\s*\n',
+            r'\n\s*ACKNOWLEDGMENTS?\s*\n',
+            r'\n\s*Acknowledgments?\s*\n',
+            r'\n\s*AUTHOR\s+CONTRIBUTIONS?\s*\n',
+            r'\n\s*Author\s+Contributions?\s*\n',
+            r'\n\s*FUNDING\s*\n',
+            r'\n\s*Funding\s*\n',
+            r'\n\s*ETHICS\s+STATEMENT\s*\n',
+            r'\n\s*Ethics\s+Statement\s*\n',
+            r'\n\s*CONFLICT\s+OF\s+INTEREST\s*\n',
+            r'\n\s*Conflict\s+of\s+Interest\s*\n',
+            r'\n\s*DATA\s+AVAILABILITY\s*\n',
+            r'\n\s*Data\s+Availability\s*\n'
+        ]
+        
+        bib_text = full_bib_text
+        bib_end = len(full_bib_text)
+        
+        # Look for section markers that indicate end of bibliography
+        for end_marker in end_markers:
+            end_match = re.search(end_marker, full_bib_text, re.IGNORECASE)
+            if end_match and end_match.start() < bib_end:
+                bib_end = end_match.start()
+        
+        # If we found an end marker, truncate there
+        if bib_end < len(full_bib_text):
+            bib_text = full_bib_text[:bib_end].strip()
+            logger.debug(f"Bibliography section truncated at position {bib_end}")
+        
+        # Also try to detect bibliography end by finding the last numbered reference
+        ref_numbers = re.findall(r'\[(\d+)\]', bib_text)
+        if ref_numbers:
+            max_ref_num = max(int(num) for num in ref_numbers)
+            logger.debug(f"Found references up to [{max_ref_num}]")
+            
+            last_ref_pattern = rf'\[{max_ref_num}\][^[]*?(?=\n\s*[A-Z]{{2,}}|\n\s*\w+\s*\n\s*[A-Z]|\Z)'
+            last_ref_match = re.search(last_ref_pattern, bib_text, re.DOTALL)
+            if last_ref_match:
+                potential_end = last_ref_match.end()
+                if potential_end < bib_end:
+                    bib_text = bib_text[:potential_end].strip()
+                    logger.debug(f"Bibliography truncated after reference [{max_ref_num}]")
+        
+        # Final fallback: limit to reasonable length
+        if len(bib_text) > 50000:
+            bib_text = bib_text[:50000]
+            logger.debug("Bibliography section truncated to 50KB limit")
+        
+        logger.debug(f"Found bibliography section: {len(bib_text)} characters")
+        return bib_text
     
     def clear_cache(self):
         """Clear the text extraction cache"""
