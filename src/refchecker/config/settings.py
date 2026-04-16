@@ -73,6 +73,11 @@ DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
     'google':    'gemini-2.5-flash',
 }
 
+# Providers that can perform hallucination checking (i.e. have web-search
+# capability so the LLM can verify references against the live web).
+# vLLM is excluded because local models cannot perform web searches.
+HALLUCINATION_CAPABLE_PROVIDERS = frozenset({'openai', 'anthropic', 'google', 'azure'})
+
 
 # Default configuration
 DEFAULT_CONFIG = {

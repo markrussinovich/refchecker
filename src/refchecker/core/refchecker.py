@@ -287,32 +287,68 @@ class ArxivReferenceChecker:
         self.report_format = report_format
 
         # Initialize optional LLM hallucination verifier
+        # If a separate hallucination provider is specified, use it; otherwise
+        # fall back to the main LLM provider (if it supports hallucination).
         llm_verifier = None
         llm_disabled = (llm_config or {}).get('disabled', False)
         if not llm_disabled:
+            from refchecker.config.settings import HALLUCINATION_CAPABLE_PROVIDERS
             try:
                 from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
-                h_provider = (llm_config or {}).get('provider')
-                h_model = (llm_config or {}).get('model')
-                h_endpoint = (llm_config or {}).get('endpoint')
-                verifier = LLMHallucinationVerifier(
-                    provider=h_provider,
-                    model=h_model,
-                    endpoint=h_endpoint,
-                )
-                verifier.cache_dir = self.cache_dir
-                llm_verifier = verifier
-                if verifier.available:
-                    logger.debug('LLM hallucination verifier enabled (provider=%s)', verifier.provider)
+
+                # Determine hallucination provider/model/api_key/endpoint
+                explicit_h_provider = (llm_config or {}).get('hallucination_provider')
+                main_provider = (llm_config or {}).get('provider')
+
+                if explicit_h_provider:
+                    # User explicitly set --hallucination-provider
+                    h_provider = explicit_h_provider
+                    h_model = (llm_config or {}).get('hallucination_model')
+                    h_api_key = (llm_config or {}).get('hallucination_api_key')
+                    h_endpoint = (llm_config or {}).get('hallucination_endpoint')
+                elif main_provider and main_provider in HALLUCINATION_CAPABLE_PROVIDERS:
+                    # Main provider supports hallucination checking — use it
+                    h_provider = main_provider
+                    h_model = (llm_config or {}).get('model')
+                    h_api_key = None   # let verifier resolve from env
+                    h_endpoint = (llm_config or {}).get('endpoint')
                 else:
-                    logger.debug('LLM hallucination verifier: no API key, will use cache only')
+                    # Main provider (e.g. vllm) does not support hallucination;
+                    # skip unless cache is available.
+                    h_provider = None
+                    h_model = None
+                    h_api_key = None
+                    h_endpoint = None
+                    if main_provider:
+                        logger.info(
+                            'Provider %s does not support hallucination checking. '
+                            'Use --hallucination-provider to enable it with a capable provider.',
+                            main_provider,
+                        )
+
+                if h_provider or self.cache_dir:
+                    verifier = LLMHallucinationVerifier(
+                        provider=h_provider,
+                        api_key=h_api_key,
+                        model=h_model,
+                        endpoint=h_endpoint,
+                    )
+                    verifier.cache_dir = self.cache_dir
+                    llm_verifier = verifier
+                    if verifier.available:
+                        logger.debug('LLM hallucination verifier enabled (provider=%s)', verifier.provider)
+                    else:
+                        logger.debug('LLM hallucination verifier: no API key, will use cache only')
             except Exception as exc:
                 logger.debug(f'LLM hallucination verifier init failed: {exc}')
 
-        # Initialize optional web search — prefer the same provider used
-        # for bib extraction so only one API key is required.
+        # Initialize optional web search — prefer the hallucination provider
+        # (which is a full API provider) over the main extraction provider.
         web_searcher = None
-        web_search_provider = (llm_config or {}).get('provider')
+        web_search_provider = (
+            (llm_config or {}).get('hallucination_provider')
+            or (llm_config or {}).get('provider')
+        )
         try:
             from refchecker.checkers.web_search import create_web_search_checker
             searcher = create_web_search_checker(preferred_provider=web_search_provider)
@@ -6612,6 +6648,13 @@ def main():
                         help="Disable parallel processing of LLM chunks")
     parser.add_argument("--llm-max-chunk-workers", type=int,
                         help="Maximum number of workers for parallel LLM chunk processing (default: 4)")
+    parser.add_argument("--hallucination-provider", type=str,
+                        choices=["openai", "anthropic", "google", "azure"],
+                        help="Separate LLM provider for hallucination checking (defaults to --llm-provider if it supports hallucination)")
+    parser.add_argument("--hallucination-model", type=str,
+                        help="Model to use for hallucination checking (defaults to provider's default)")
+    parser.add_argument("--hallucination-endpoint", type=str,
+                        help="Endpoint for the hallucination LLM provider")
     parser.add_argument("--cache", type=str, metavar="DIR",
                         help="Cache PDFs and extracted bibliographies in DIR to speed up repeated runs")
     parser.add_argument("--disable-parallel", action="store_true",
@@ -6688,6 +6731,17 @@ def main():
             
         if args.llm_max_chunk_workers is not None:
             llm_config['max_chunk_workers'] = args.llm_max_chunk_workers
+
+        # Handle separate hallucination provider
+        if args.hallucination_provider:
+            h_api_key = get_llm_api_key_interactive(args.hallucination_provider)
+            if h_api_key is None:
+                print(f"Error: API key is required for hallucination provider {args.hallucination_provider}.")
+                return 1
+            llm_config['hallucination_provider'] = args.hallucination_provider
+            llm_config['hallucination_model'] = args.hallucination_model
+            llm_config['hallucination_api_key'] = h_api_key
+            llm_config['hallucination_endpoint'] = args.hallucination_endpoint
     
     # Get Semantic Scholar API key from command line or environment variable
     semantic_scholar_api_key = args.semantic_scholar_api_key or os.getenv('SEMANTIC_SCHOLAR_API_KEY')
