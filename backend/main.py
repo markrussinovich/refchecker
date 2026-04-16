@@ -1347,6 +1347,11 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                 headers=_private_artifact_headers(),
             )
         
+        # Stale thumbnail path — clear it from DB so we regenerate cleanly
+        if thumbnail_path:
+            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
+            await db.update_check_thumbnail(check_id, "")
+        
         cache_dir = await _get_configured_cache_dir()
 
         # Generate thumbnail based on source type
