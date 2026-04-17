@@ -82,29 +82,29 @@ def get_llm_api_key_interactive(provider: str) -> str:
     # vLLM doesn't need an API key
     if provider == 'vllm':
         return None
-    
+
     # Check environment variables via shared resolver
     api_key = resolve_api_key(provider)
     if api_key:
         logging.debug(f"Using {provider} API key from environment")
         return api_key
-    
+
     # If not found in environment, prompt interactively
     import getpass
-    
+
     provider_names = {
         'openai': 'OpenAI',
         'anthropic': 'Anthropic',
         'google': 'Google',
         'azure': 'Azure OpenAI'
     }
-    
+
     provider_display = provider_names.get(provider, provider.capitalize())
-    
+
     print(f"\n{provider_display} API key not found in environment variables.")
     print(f"Checked environment variables: {', '.join(_PROVIDER_ENV_VARS.get(provider, []))}")
     print(f"Please enter your {provider_display} API key (input will be hidden):")
-    
+
     try:
         api_key = getpass.getpass("API key: ").strip()
         if api_key:
@@ -116,6 +116,7 @@ def get_llm_api_key_interactive(provider: str) -> str:
         print("\nOperation cancelled by user.")
         return None
 
+
 def setup_logging(debug_mode=False, level=None):
     """Set up logging configuration"""
     # Configure root logger to control all child loggers
@@ -124,14 +125,14 @@ def setup_logging(debug_mode=False, level=None):
     if level is None:
         level = logging.DEBUG if debug_mode else logging.INFO
     root_logger.setLevel(level)
-    
+
     # Remove any existing handlers from root logger
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-    
+
     # Create formatters
     console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    
+
     # Only add file handler if debug mode is enabled
     if debug_mode:
         log_dir = "logs"
@@ -6360,60 +6361,51 @@ class ArxivReferenceChecker:
                 return
 
             print(f"      ❓ Could not verify: {reference.get('title', 'Untitled')}")
-            
-            # Extract and display the subreason from unverified errors
-            unverified_errors = [e for e in errors if e.get('error_type') == 'unverified']
-            if unverified_errors:
-                error_details = unverified_errors[0].get('error_details', '')
-                if error_details:
-                    subreason = self._categorize_unverified_reason(error_details)
-                    print(f"         Subreason: {subreason}")
+
+            subreason = ''
+
+            # Prefer URL-specific explanations when they exist because they are
+            # more actionable than the generic unverified container error.
+            url_errors = [e for e in errors if e.get('error_type') == 'url']
+            if url_errors:
+                subreason = url_errors[0].get('error_details', '')
+
+            if not subreason:
+                unverified_errors = [e for e in errors if e.get('error_type') == 'unverified']
+                if unverified_errors:
+                    error_details = unverified_errors[0].get('error_details', '')
+                    if error_details:
+                        subreason = self._categorize_unverified_reason(error_details)
+
+            if subreason:
+                lines = subreason.splitlines()
+                print(f"         Subreason: {lines[0]}")
+                for line in lines[1:]:
+                    print(f"                    {line}")
 
     def _categorize_unverified_reason(self, error_details):
-        """Categorize the unverified error into checker error or not found"""
-        error_details_lower = error_details.lower()
-        
-        # New specific URL-based unverified reasons
-        if error_details_lower == "non-existent web page":
-            return "Non-existent web page"
-        elif error_details_lower == "paper not found and url doesn't reference it":
-            return "Paper not found and URL doesn't reference it"
-        elif error_details_lower == "paper not verified but url references paper":
-            return "Paper not verified but URL references paper"
-        
-        # Checker/API errors
-        api_error_patterns = [
-            'api error', 'rate limit', 'http error', 'network error', 
-            'could not fetch', 'connection', 'timeout', 'server error',
-            'could not verify reference using any available api',
-            'database connection not available'
-        ]
-        
-        # Not found patterns  
-        not_found_patterns = [
-            'not found', 'could not be found', 'repository not found',
-            'web page not found', '404', 'invalid', 'too short or empty'
-        ]
-        
-        # Processing errors
-        processing_error_patterns = [
-            'error processing', 'error parsing', 'unexpected error'
-        ]
-        
-        for pattern in api_error_patterns:
-            if pattern in error_details_lower:
-                return "Checker had an error"
-                
-        for pattern in not_found_patterns:
-            if pattern in error_details_lower:
-                return "Paper not found by any checker"
-                
-        for pattern in processing_error_patterns:
-            if pattern in error_details_lower:
-                return "Checker had an error"
-        
-        # Default fallback
-        return "Paper not found by any checker"
+        """Normalize unverified reasons without discarding specific failure details."""
+        if not error_details:
+            return "Paper not found by any checker"
+
+        normalized = error_details.strip()
+        error_details_lower = normalized.lower()
+
+        exact_reasons = {
+            'non-existent web page': 'Non-existent web page',
+            "paper not found and url doesn't reference it": "Paper not found and URL doesn't reference it",
+            'paper not verified but url references paper': 'Paper not verified but URL references paper',
+        }
+        if error_details_lower in exact_reasons:
+            return exact_reasons[error_details_lower]
+
+        if error_details_lower.startswith('paper not found by any checker'):
+            return normalized
+
+        if error_details_lower.startswith('all available checkers failed'):
+            return normalized
+
+        return normalized
     
     def _print_reference_header(self, reference, index, total):
         """Print reference metadata header (title, authors, venue, year, DOI, URL).

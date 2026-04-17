@@ -2,7 +2,7 @@
 # This is a subset of requirements.txt optimized for smaller image size
 
 # Core dependencies - required for basic functionality
-numpy>=2.4.3  # NumPy 2.x
+numpy>=1.26.0
 requests>=2.32.5
 beautifulsoup4>=4.14.3
 pypdf>=6.9.1
@@ -16,7 +16,7 @@ cryptography>=46.0.5  # For API key encryption in web UI
 pybtex>=0.25.1  # For parsing ArXiv BibTeX citations
 
 # Additional core dependencies found in codebase
-pandas>=3.0.1
+pandas>=2.0.0
 pdfplumber>=0.11.9
 pymupdf>=1.27.2  # For PDF thumbnail generation
 

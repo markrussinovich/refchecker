@@ -1963,6 +1963,58 @@ def surname_similarity(surname1: str, surname2: str) -> bool:
     return False
 
 
+def _tokenize_author_name_for_fallback(name: str) -> List[str]:
+    """
+    Build a conservative token sequence for fallback author matching.
+
+    This is used after the stricter name matchers have failed. It normalizes
+    diacritics and apostrophe-encoded accents, then splits hyphenated compound
+    names into separate tokens so that variants like "Buades-Rubio" and
+    "Buades Rubio" can still align positionally.
+    """
+    normalized_name = normalize_diacritics(normalize_apostrophes(name))
+    normalized_name = normalized_name.replace("'", "")
+    normalized_name = re.sub(r'[-‐‑–—−]+', ' ', normalized_name)
+
+    return [
+        token.rstrip('.')
+        for token in normalized_name.split()
+        if token.rstrip('.')
+    ]
+
+
+def _fallback_author_token_match(name1: str, name2: str) -> bool:
+    """
+    Compare author names token-by-token after conservative normalization.
+
+    This handles cases where one source uses a hyphenated compound surname and
+    another uses spaced surname parts, or where apostrophes are used as accent
+    placeholders inside tokens.
+    """
+    tokens1 = _tokenize_author_name_for_fallback(name1)
+    tokens2 = _tokenize_author_name_for_fallback(name2)
+
+    if len(tokens1) < 2 or len(tokens2) < 2:
+        return False
+
+    if len(tokens1) != len(tokens2):
+        return False
+
+    for token1, token2 in zip(tokens1, tokens2):
+        if token1 == token2:
+            continue
+
+        if len(token1) == 1 and token1 == token2[0]:
+            continue
+
+        if len(token2) == 1 and token2 == token1[0]:
+            continue
+
+        return False
+
+    return True
+
+
 def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     Enhanced name matching that handles initial-to-full-name and surname variations.
@@ -2072,6 +2124,9 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
         # "Kenneth L. McMillan" or "Kenneth Lauchlin McMillan" vs "Kenneth McMillan"
         if (first1 == first2 and surname_similarity(last1, last2)):
             return True
+
+    if _fallback_author_token_match(cleaned1, cleaned2):
+        return True
     
     # Handle FirstName LastName ↔ LastName FirstName swaps
     # e.g. "Deng Ailin" vs "Ailin Deng", "Liu Zhuang" vs "Zhuang Liu"
