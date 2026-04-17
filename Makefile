@@ -42,12 +42,14 @@ clean:
 	rm -rf build/
 	rm -rf dist/
 	rm -rf *.egg-info/
+	rm -rf cache/
 	rm -rf logs/
 	rm -rf debug/
 	rm -rf output/
 	rm -rf validation_output/
 	rm -rf .pytest_cache/
 	rm -rf .mypy_cache/
+	rm -f refchecker.db refchecker_debug.log uvicorn.log
 
 # Lint code
 lint:
@@ -72,7 +74,7 @@ download-db:
 
 # Generate docs
 docs:
-	cd docs && make html
+	@echo "Documentation lives in docs/README.md"
 
 # =============================================================================
 # Docker targets

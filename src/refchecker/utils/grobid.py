@@ -11,10 +11,16 @@ import logging
 import os
 import re
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_GROBID_FALLBACK_ERROR = (
+    "No LLM or GROBID available for PDF reference extraction. "
+    "Please configure an API key or ensure Docker is installed so GROBID can auto-start."
+)
 
 GROBID_URL = os.environ.get("GROBID_URL", "http://localhost:8070")
 GROBID_DOCKER_IMAGE = "lfoppiano/grobid:0.8.2"
@@ -180,3 +186,54 @@ def extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
 
     logger.info("GROBID extracted %d references from %s", len(refs), pdf_path)
     return refs
+
+
+def extract_pdf_references_with_grobid_fallback(
+    *,
+    pdf_path: Optional[str] = None,
+    pdf_content: Any = None,
+    llm_available: bool,
+    failure_message: Optional[str] = None,
+) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
+    """Use GROBID for PDF reference extraction when no LLM is available.
+
+    Returns ``(None, None)`` when an LLM is available and the caller should
+    continue with its normal text/LLM extraction flow. When no LLM is
+    available, this helper attempts GROBID extraction and returns
+    ``(references, 'grobid')`` on success.
+    """
+    if llm_available:
+        return None, None
+
+    temp_pdf_path = None
+    grobid_pdf_path = pdf_path if pdf_path and os.path.exists(pdf_path) else None
+
+    if grobid_pdf_path is None and pdf_content is not None:
+        if hasattr(pdf_content, 'seek'):
+            pdf_content.seek(0)
+        if hasattr(pdf_content, 'read'):
+            raw_pdf = pdf_content.read()
+        else:
+            raw_pdf = bytes(pdf_content)
+
+        file_handle, temp_pdf_path = tempfile.mkstemp(suffix='.pdf')
+        with os.fdopen(file_handle, 'wb') as temp_file:
+            temp_file.write(raw_pdf)
+        grobid_pdf_path = temp_pdf_path
+
+    if grobid_pdf_path is None:
+        raise ValueError(failure_message or DEFAULT_GROBID_FALLBACK_ERROR)
+
+    try:
+        references = extract_refs_via_grobid(grobid_pdf_path)
+    finally:
+        if temp_pdf_path:
+            try:
+                os.unlink(temp_pdf_path)
+            except OSError:
+                pass
+
+    if references:
+        return references, 'grobid'
+
+    raise ValueError(failure_message or DEFAULT_GROBID_FALLBACK_ERROR)

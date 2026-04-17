@@ -45,133 +45,10 @@ from refchecker.core.hallucination_policy import (
 )
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.cache_utils import cache_bibliography, cached_bibliography, get_cached_artifact_path
+from refchecker.utils.grobid import extract_pdf_references_with_grobid_fallback
 import arxiv
 
 logger = logging.getLogger(__name__)
-
-# GROBID server URL (local Docker or remote)
-GROBID_URL = os.environ.get("GROBID_URL", "http://localhost:8070")
-GROBID_DOCKER_IMAGE = "lfoppiano/grobid:0.8.2"
-GROBID_CONTAINER_NAME = "refchecker-grobid"
-
-# Track whether we already tried to auto-start GROBID this process
-_grobid_auto_started = False
-
-
-def _ensure_grobid_running() -> bool:
-    """Auto-start GROBID Docker container if not already running.
-
-    Returns True if GROBID is available after this call.
-    Only attempts auto-start once per process to avoid repeated slow failures.
-    """
-    from refchecker.utils.grobid import ensure_grobid_running
-    return ensure_grobid_running()
-
-
-def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
-    """Extract references from a PDF using a GROBID server.
-
-    Will auto-start a GROBID Docker container if Docker is available.
-    """
-    from refchecker.utils.grobid import extract_refs_via_grobid
-    return extract_refs_via_grobid(pdf_path)
-
-
-def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
-    """Extract references from a PDF using a GROBID server.
-
-    Falls back gracefully to an empty list when GROBID is not reachable.
-    Will auto-start a GROBID Docker container if Docker is available.
-    """
-    import xml.etree.ElementTree as ET
-    import requests as _requests
-
-    # Ensure GROBID is running (auto-start if needed)
-    if not _ensure_grobid_running():
-        return []
-
-    try:
-        with open(pdf_path, 'rb') as f:
-            resp = _requests.post(
-                f"{GROBID_URL}/api/processReferences",
-                files={"input": f},
-                data={"consolidateCitations": "0", "includeRawCitations": "1"},
-                timeout=120,
-            )
-        if resp.status_code != 200:
-            logger.warning("GROBID returned status %d", resp.status_code)
-            return []
-    except Exception as exc:
-        logger.info("GROBID not available at %s: %s", GROBID_URL, exc)
-        return []
-
-    ns = '{http://www.tei-c.org/ns/1.0}'
-    refs: List[Dict[str, Any]] = []
-    try:
-        root = ET.fromstring(resp.text)
-    except ET.ParseError:
-        return []
-
-    for bib in root.iter(f'{ns}biblStruct'):
-        ref: Dict[str, Any] = {"authors": [], "title": "", "venue": "", "year": None, "url": "", "doi": None, "type": "other"}
-        # Authors
-        for pers in bib.iter(f'{ns}persName'):
-            forenames = [fn.text for fn in pers.iter(f'{ns}forename') if fn.text]
-            surname = ""
-            for sn in pers.iter(f'{ns}surname'):
-                if sn.text:
-                    surname = sn.text
-            parts = forenames + ([surname] if surname else [])
-            if parts:
-                ref["authors"].append(" ".join(parts))
-        # Title
-        analytic = bib.find(f'{ns}analytic')
-        monogr = bib.find(f'{ns}monogr')
-        if analytic is not None:
-            t = analytic.find(f'{ns}title')
-            if t is not None and t.text:
-                ref["title"] = t.text.strip()
-        if not ref["title"] and monogr is not None:
-            t = monogr.find(f'{ns}title')
-            if t is not None and t.text:
-                ref["title"] = t.text.strip()
-        # Venue (only when analytic exists — otherwise monogr title IS the paper title)
-        if monogr is not None and analytic is not None:
-            for t in monogr.findall(f'{ns}title'):
-                if t.text:
-                    ref["venue"] = t.text.strip()
-                    break
-        # Year
-        for d in bib.iter(f'{ns}date'):
-            when = d.get('when', '')
-            m = re.match(r'(\d{4})', when)
-            if m:
-                ref["year"] = int(m.group(1))
-                break
-        # DOI / URL
-        for idno in bib.iter(f'{ns}idno'):
-            id_type = (idno.get('type') or '').lower()
-            if id_type == 'doi' and idno.text:
-                ref["doi"] = idno.text.strip()
-                if not ref["url"]:
-                    ref["url"] = f"https://doi.org/{ref['doi']}"
-            elif id_type == 'arxiv' and idno.text:
-                ref["url"] = f"https://arxiv.org/abs/{idno.text.strip()}"
-                ref["type"] = "arxiv"
-        if not ref["url"]:
-            for ptr in bib.iter(f'{ns}ptr'):
-                target = ptr.get('target', '')
-                if target:
-                    ref["url"] = target
-        if ref["title"] or ref["authors"]:
-            refs.append(ref)
-    logger.info("GROBID extracted %d references from %s", len(refs), pdf_path)
-    return refs
-
-
-def _is_grobid_available() -> bool:
-    """Quick health check for GROBID (with auto-start)."""
-    return _ensure_grobid_running()
 
 
 def download_pdf(url: str, dest_path: str) -> None:
@@ -611,6 +488,7 @@ class ProgressRefChecker:
             paper_title = "Unknown Paper"
             paper_text = ""
             title_updated = False
+            pdf_path_for_fallback = None
 
             async def update_title_if_needed(title: str):
                 nonlocal title_updated
@@ -625,6 +503,17 @@ class ProgressRefChecker:
             # Track if we got references from ArXiv source files and the extraction method
             arxiv_source_references = None
             extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', or None
+
+            async def maybe_extract_grobid_references(pdf_path: str, failure_message: str):
+                refs, method = await asyncio.to_thread(
+                    extract_pdf_references_with_grobid_fallback,
+                    pdf_path=pdf_path,
+                    llm_available=bool(self.llm),
+                    failure_message=failure_message,
+                )
+                if refs:
+                    logger.info(f"Extracted {len(refs)} references via GROBID")
+                return refs, method
             
             if source_type == "url":
                 # Check if this is an OpenReview URL — convert to PDF download
@@ -667,18 +556,6 @@ class ProgressRefChecker:
                                 pass
 
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
-                    elif not self.llm:
-                        # No LLM configured — try GROBID for reference extraction
-                        pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
-                        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
-                            await asyncio.to_thread(download_pdf, paper_source, pdf_path)
-                        grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, pdf_path)
-                        if grobid_refs:
-                            arxiv_source_references = grobid_refs
-                            extraction_method = 'grobid'
-                            logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM configured)")
-                        else:
-                            raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
                     else:
                         await self.emit_progress("extracting", {
                             "message": "Downloading PDF from URL..."
@@ -705,6 +582,7 @@ class ProgressRefChecker:
                             except Exception as e:
                                 logger.debug(f"Could not get OpenReview metadata: {e}")
 
+                        pdf_path_for_fallback = pdf_path
                         extraction_method = 'pdf'
                         pdf_processor = PDFProcessor()
                         paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
@@ -770,26 +648,13 @@ class ProgressRefChecker:
                     
                     # Fall back to PDF extraction if no references from source files
                     if not arxiv_source_references:
-                        if not self.llm:
-                            # No LLM configured — try GROBID for reference extraction
-                            pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
-                            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
-                                await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
-                            grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, pdf_path)
-                            if grobid_refs:
-                                arxiv_source_references = grobid_refs
-                                extraction_method = 'grobid'
-                                logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, ArXiv source failed)")
-                            else:
-                                raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
-
-                    if not arxiv_source_references:
-                        extraction_method = extraction_method or 'pdf'
                         # Download PDF - run in thread (use cross-platform temp directory)
                         pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
                         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                             await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
 
+                        pdf_path_for_fallback = pdf_path
+                        extraction_method = 'pdf'
                         # Extract text from PDF - run in thread
                         pdf_processor = PDFProcessor()
                         paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
@@ -804,16 +669,8 @@ class ProgressRefChecker:
 
                 # Handle uploaded file - run PDF processing in thread
                 if paper_source.lower().endswith('.pdf'):
-                    if not self.llm:
-                        # No LLM configured — try GROBID for reference extraction
-                        grobid_refs = await asyncio.to_thread(_extract_refs_via_grobid, paper_source)
-                        if grobid_refs:
-                            arxiv_source_references = grobid_refs
-                            extraction_method = 'grobid'
-                            logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, uploaded PDF)")
-                        else:
-                            raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
                     pdf_processor = PDFProcessor()
+                    pdf_path_for_fallback = paper_source
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                     
                     # Try to extract the paper title from the PDF
@@ -907,6 +764,14 @@ class ProgressRefChecker:
                     logger.info(f"Using {len(references)} references from ArXiv source files (method: {extraction_method})")
                 else:
                     references = await self._extract_references(paper_text)
+                    if not references and pdf_path_for_fallback:
+                        fallback_refs, fallback_method = await maybe_extract_grobid_references(
+                            pdf_path_for_fallback,
+                            "No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.",
+                        )
+                        if fallback_refs:
+                            references = fallback_refs
+                            extraction_method = fallback_method
                     # If we used PDF/file extraction and LLM was configured, mark as LLM-assisted
                     if self.llm and extraction_method in ('pdf', 'file', 'text'):
                         extraction_method = 'llm'

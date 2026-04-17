@@ -4197,6 +4197,9 @@ class ArxivReferenceChecker:
         if not self.llm_extractor:
             logger.error("Cannot parse non-standard bibliography format without an LLM. "
                          "Use --llm-provider to enable LLM-based extraction.")
+            if not self.debug_mode:
+                print("\n  ❌  Cannot parse this bibliography format without an LLM.")
+                print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
             self.fatal_error = True
         else:
             logger.warning("LLM extraction failed for non-standard bibliography format; skipping this paper's references")
@@ -5678,6 +5681,27 @@ class ArxivReferenceChecker:
         """
         paper_id = paper.get_short_id()
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+        pdf_content = None
+        from refchecker.utils.grobid import extract_pdf_references_with_grobid_fallback
+
+        def _maybe_use_grobid_fallback(failure_message):
+            try:
+                pdf_path = getattr(paper, 'file_path', None)
+                if not pdf_path or not os.path.exists(pdf_path):
+                    pdf_path = None
+                references, _ = extract_pdf_references_with_grobid_fallback(
+                    pdf_path=pdf_path,
+                    pdf_content=pdf_content,
+                    llm_available=bool(self.llm_extractor),
+                    failure_message=failure_message,
+                )
+                if references:
+                    logger.info("Extracted %d references via GROBID for %s", len(references), paper_id)
+                    self.fatal_error = False
+                    return references
+            except ValueError as e:
+                logger.warning(str(e))
+            return None
 
         # Check bibliography cache
         from refchecker.utils.cache_utils import cached_bibliography
@@ -5853,6 +5877,12 @@ class ArxivReferenceChecker:
             text = self.extract_text_from_pdf(pdf_content)
         
         if not text:
+            grobid_references = _maybe_use_grobid_fallback(
+                "No LLM or GROBID available for PDF reference extraction. "
+                "Please configure an API key or ensure Docker is installed so GROBID can auto-start."
+            )
+            if grobid_references:
+                return grobid_references
             logger.warning(f"Could not extract text from {'LaTeX' if hasattr(paper, 'is_latex') and paper.is_latex else 'PDF'} for {paper_id}")
             self._set_fatal_source_error(
                 paper,
@@ -5906,6 +5936,12 @@ class ArxivReferenceChecker:
                 logger.debug(f"pdftotext fallback failed for {paper_id}: {e}")
         
         if not bibliography_text:
+            grobid_references = _maybe_use_grobid_fallback(
+                "No LLM or GROBID available for PDF reference extraction. "
+                "Please configure an API key or ensure Docker is installed so GROBID can auto-start."
+            )
+            if grobid_references:
+                return grobid_references
             logger.warning(f"Could not find bibliography section for {paper_id}")
             return []
         
@@ -5920,38 +5956,14 @@ class ArxivReferenceChecker:
         
         # Parse references
         references = self.parse_references(bibliography_text)
-        
-        # If parse_references returned nothing and no LLM is available,
-        # try GROBID as a fallback for PDF extraction
-        if not references and not self.llm_extractor:
-            try:
-                import tempfile
-                from refchecker.utils.grobid import extract_refs_via_grobid
-                # Get PDF file path for GROBID
-                pdf_file_path = None
-                if hasattr(paper, 'file_path') and paper.file_path and os.path.exists(paper.file_path):
-                    pdf_file_path = paper.file_path
-                elif pdf_content:
-                    pdf_content.seek(0)
-                    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                        tmp.write(pdf_content.read())
-                        pdf_file_path = tmp.name
-                if pdf_file_path:
-                    grobid_refs = extract_refs_via_grobid(pdf_file_path)
-                    # Clean up temp file if we created one
-                    if pdf_file_path != getattr(paper, 'file_path', None):
-                        try:
-                            os.unlink(pdf_file_path)
-                        except OSError:
-                            pass
-                    if grobid_refs:
-                        logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM available)")
-                        self.fatal_error = False
-                        references = grobid_refs
-            except ImportError:
-                logger.debug("GROBID module not available")
-            except Exception as e:
-                logger.debug(f"GROBID fallback failed: {e}")
+
+        if not references:
+            grobid_references = _maybe_use_grobid_fallback(
+                "No LLM or GROBID available for PDF reference extraction. "
+                "Please configure an API key or ensure Docker is installed so GROBID can auto-start."
+            )
+            if grobid_references:
+                references = grobid_references
         
         # Save the extracted references for debugging
         if debug_mode:
