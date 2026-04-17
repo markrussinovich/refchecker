@@ -538,6 +538,20 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {reference.matched_database && (
+            <div className="flex mb-1">
+              <span
+                className="flex-shrink-0"
+                style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+              >
+                Matched DB:
+              </span>
+              <span style={{ color: 'var(--color-text)' }}>
+                {reference.matched_database}
+              </span>
+            </div>
+          )}
+
           {/* Authoritative URLs - deduplicate arxiv URLs (prefer abs over pdf) */}
           {(() => {
             const urls = reference.authoritative_urls || []
@@ -794,6 +808,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.errors === next.errors &&
     prev.warnings === next.warnings &&
     prev.suggestions === next.suggestions &&
+    prev.matched_database === next.matched_database &&
     prev.authoritative_urls === next.authoritative_urls
   )
 })

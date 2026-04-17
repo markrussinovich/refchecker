@@ -45,8 +45,28 @@ def main():
         default=int(os.environ.get("UVICORN_LIMIT_MAX_REQUESTS", "0")),
         help="Recycle worker after this many requests (0 = no limit, default: UVICORN_LIMIT_MAX_REQUESTS env var or 0)"
     )
+    parser.add_argument(
+        "--database-dir",
+        type=str,
+        help="Directory containing local DB files (semantic_scholar.db, openalex.db, crossref.db, dblp.db)"
+    )
+    parser.add_argument("--s2-db", type=str, help="Path to local Semantic Scholar DB file")
+    parser.add_argument("--openalex-db", type=str, help="Path to local OpenAlex DB file")
+    parser.add_argument("--crossref-db", type=str, help="Path to local CrossRef DB file")
+    parser.add_argument("--dblp-db", type=str, help="Path to local DBLP DB file")
     
     args = parser.parse_args()
+
+    if args.database_dir:
+        os.environ["REFCHECKER_DATABASE_DIRECTORY"] = args.database_dir
+    if args.s2_db:
+        os.environ["REFCHECKER_DB_PATH"] = args.s2_db
+    if args.openalex_db:
+        os.environ["REFCHECKER_OPENALEX_DB_PATH"] = args.openalex_db
+    if args.crossref_db:
+        os.environ["REFCHECKER_CROSSREF_DB_PATH"] = args.crossref_db
+    if args.dblp_db:
+        os.environ["REFCHECKER_DBLP_DB_PATH"] = args.dblp_db
     
     try:
         import uvicorn

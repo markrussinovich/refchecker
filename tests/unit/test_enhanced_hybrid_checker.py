@@ -14,6 +14,21 @@ class TimeoutChecker:
         raise requests.exceptions.Timeout('simulated timeout')
 
 
+class LocalMatchChecker:
+    database_label = "S2"
+    database_key = "local_s2"
+
+    def verify_reference(self, reference):
+        return (
+            {
+                "title": reference.get("title", ""),
+                "paperId": "s2-match-id",
+            },
+            [],
+            "https://www.semanticscholar.org/paper/s2-match-id",
+        )
+
+
 def _build_checker():
     with patch.object(EnhancedHybridReferenceChecker, '_initialize_checker', return_value=None):
         checker = EnhancedHybridReferenceChecker(
@@ -53,3 +68,17 @@ def test_unverified_reason_includes_negative_and_failed_checkers(_mock_sleep):
     )
     assert errors[0]['sources_checked'] == 2
     assert errors[0]['sources_negative'] == 1
+
+
+def test_verify_reference_records_matched_database_from_local_checker():
+    checker = _build_checker()
+    checker.local_db = LocalMatchChecker()
+    checker.semantic_scholar = None
+    checker.crossref = None
+
+    verified_data, errors, url = checker.verify_reference({"title": "Test title", "authors": []})
+
+    assert errors == []
+    assert url == "https://www.semanticscholar.org/paper/s2-match-id"
+    assert verified_data["_matched_database"] == "S2"
+    assert verified_data["_matched_checker"] == "local_s2"
