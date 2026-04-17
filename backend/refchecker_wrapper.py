@@ -51,16 +51,96 @@ logger = logging.getLogger(__name__)
 
 # GROBID server URL (local Docker or remote)
 GROBID_URL = os.environ.get("GROBID_URL", "http://localhost:8070")
+GROBID_DOCKER_IMAGE = "lfoppiano/grobid:0.8.2"
+GROBID_CONTAINER_NAME = "refchecker-grobid"
+
+# Track whether we already tried to auto-start GROBID this process
+_grobid_auto_started = False
+
+
+def _ensure_grobid_running() -> bool:
+    """Auto-start GROBID Docker container if not already running.
+
+    Returns True if GROBID is available after this call.
+    Only attempts auto-start once per process to avoid repeated slow failures.
+    """
+    global _grobid_auto_started
+    import requests as _requests
+
+    # Quick health check first
+    try:
+        resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
+        if resp.status_code == 200:
+            return True
+    except Exception:
+        pass
+
+    # Already tried auto-start this process — don't retry
+    if _grobid_auto_started:
+        return False
+    _grobid_auto_started = True
+
+    # Try to start via Docker
+    import subprocess
+    try:
+        # Check if Docker is available
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
+        if result.returncode != 0:
+            logger.info("Docker not available, cannot auto-start GROBID")
+            return False
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        logger.info("Docker not found, cannot auto-start GROBID")
+        return False
+
+    logger.info("Starting GROBID Docker container (%s)...", GROBID_DOCKER_IMAGE)
+    try:
+        # Remove any stopped container with the same name
+        subprocess.run(
+            ["docker", "rm", "-f", GROBID_CONTAINER_NAME],
+            capture_output=True, timeout=10
+        )
+        # Start the container
+        result = subprocess.run(
+            ["docker", "run", "-d", "--name", GROBID_CONTAINER_NAME,
+             "-p", "8070:8070", "--rm", GROBID_DOCKER_IMAGE],
+            capture_output=True, text=True, timeout=120
+        )
+        if result.returncode != 0:
+            logger.warning("Failed to start GROBID container: %s", result.stderr.strip())
+            return False
+
+        # Wait for GROBID to be ready (up to 90 seconds)
+        import time
+        for i in range(90):
+            try:
+                resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
+                if resp.status_code == 200:
+                    logger.info("GROBID is ready (took ~%ds)", i)
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+
+        logger.warning("GROBID started but not ready after 90s")
+        return False
+
+    except Exception as exc:
+        logger.warning("Failed to auto-start GROBID: %s", exc)
+        return False
 
 
 def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
     """Extract references from a PDF using a GROBID server.
 
     Falls back gracefully to an empty list when GROBID is not reachable.
-    Requires a running GROBID instance (e.g. ``docker run -p 8070:8070 lfoppiano/grobid:0.8.2``).
+    Will auto-start a GROBID Docker container if Docker is available.
     """
     import xml.etree.ElementTree as ET
     import requests as _requests
+
+    # Ensure GROBID is running (auto-start if needed)
+    if not _ensure_grobid_running():
+        return []
 
     try:
         with open(pdf_path, 'rb') as f:
@@ -142,13 +222,8 @@ def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
 
 
 def _is_grobid_available() -> bool:
-    """Quick health check for GROBID."""
-    import requests as _requests
-    try:
-        resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
-        return resp.status_code == 200 and resp.text.strip().lower() == 'true'
-    except Exception:
-        return False
+    """Quick health check for GROBID (with auto-start)."""
+    return _ensure_grobid_running()
 
 
 def download_pdf(url: str, dest_path: str) -> None:
@@ -655,7 +730,7 @@ class ProgressRefChecker:
                             extraction_method = 'grobid'
                             logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM configured)")
                         else:
-                            raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
+                            raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
                     else:
                         await self.emit_progress("extracting", {
                             "message": "Downloading PDF from URL..."
@@ -758,7 +833,7 @@ class ProgressRefChecker:
                                 extraction_method = 'grobid'
                                 logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, ArXiv source failed)")
                             else:
-                                raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
+                                raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
 
                     if not arxiv_source_references:
                         extraction_method = extraction_method or 'pdf'
@@ -789,7 +864,7 @@ class ProgressRefChecker:
                             extraction_method = 'grobid'
                             logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM, uploaded PDF)")
                         else:
-                            raise ValueError("No LLM or GROBID server available. Please configure an API key in Settings, or start a GROBID server (docker run -p 8070:8070 lfoppiano/grobid:0.8.2).")
+                            raise ValueError("No LLM or GROBID available for PDF reference extraction. Please configure an API key in Settings, or ensure Docker is installed so GROBID can auto-start.")
                     pdf_processor = PDFProcessor()
                     paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
                     

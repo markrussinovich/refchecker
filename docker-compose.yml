@@ -27,6 +27,8 @@ services:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       # Data directory (inside container)
       - REFCHECKER_DATA_DIR=/app/data
+      # GROBID server (uses the grobid service below)
+      - GROBID_URL=http://grobid:8070
       # Multi-user auth
       - REFCHECKER_MULTIUSER=${REFCHECKER_MULTIUSER:-false}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
@@ -47,12 +49,29 @@ services:
       - MS_CLIENT_SECRET=${MS_CLIENT_SECRET:-}
       - MS_REDIRECT_URI=${MS_REDIRECT_URI:-}
     restart: unless-stopped
+    depends_on:
+      grobid:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # GROBID - PDF reference extraction engine (used as fallback when no LLM key)
+  grobid:
+    image: lfoppiano/grobid:0.8.2
+    container_name: refchecker-grobid
+    ports:
+      - "8070:8070"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8070/api/isalive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   refchecker-data:
