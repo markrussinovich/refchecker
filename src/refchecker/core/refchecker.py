@@ -4197,9 +4197,6 @@ class ArxivReferenceChecker:
         if not self.llm_extractor:
             logger.error("Cannot parse non-standard bibliography format without an LLM. "
                          "Use --llm-provider to enable LLM-based extraction.")
-            if not self.debug_mode:
-                print("\n  ❌  Cannot parse this bibliography format without an LLM.")
-                print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
             self.fatal_error = True
         else:
             logger.warning("LLM extraction failed for non-standard bibliography format; skipping this paper's references")
@@ -5923,6 +5920,38 @@ class ArxivReferenceChecker:
         
         # Parse references
         references = self.parse_references(bibliography_text)
+        
+        # If parse_references returned nothing and no LLM is available,
+        # try GROBID as a fallback for PDF extraction
+        if not references and not self.llm_extractor:
+            try:
+                import tempfile
+                from refchecker.utils.grobid import extract_refs_via_grobid
+                # Get PDF file path for GROBID
+                pdf_file_path = None
+                if hasattr(paper, 'file_path') and paper.file_path and os.path.exists(paper.file_path):
+                    pdf_file_path = paper.file_path
+                elif pdf_content:
+                    pdf_content.seek(0)
+                    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                        tmp.write(pdf_content.read())
+                        pdf_file_path = tmp.name
+                if pdf_file_path:
+                    grobid_refs = extract_refs_via_grobid(pdf_file_path)
+                    # Clean up temp file if we created one
+                    if pdf_file_path != getattr(paper, 'file_path', None):
+                        try:
+                            os.unlink(pdf_file_path)
+                        except OSError:
+                            pass
+                    if grobid_refs:
+                        logger.info(f"Extracted {len(grobid_refs)} references via GROBID (no LLM available)")
+                        self.fatal_error = False
+                        references = grobid_refs
+            except ImportError:
+                logger.debug("GROBID module not available")
+            except Exception as e:
+                logger.debug(f"GROBID fallback failed: {e}")
         
         # Save the extracted references for debugging
         if debug_mode:

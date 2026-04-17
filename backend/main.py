@@ -416,6 +416,19 @@ async def _run_startup_tasks() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await _run_startup_tasks()
+
+    # In multiuser mode, pre-start GROBID so users without LLM keys can extract refs
+    if is_multiuser_mode():
+        try:
+            from refchecker.utils.grobid import ensure_grobid_running
+            grobid_ok = await asyncio.to_thread(ensure_grobid_running)
+            if grobid_ok:
+                logger.info("GROBID is available for users without LLM keys")
+            else:
+                logger.warning("GROBID not available — users without LLM keys will not be able to extract PDF references")
+        except Exception as e:
+            logger.warning(f"Failed to start GROBID: {e}")
+
     refresh_task = await _schedule_semantic_scholar_refresh()
     app.state.semantic_scholar_refresh_task = refresh_task
     yield
