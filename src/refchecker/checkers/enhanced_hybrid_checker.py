@@ -67,6 +67,7 @@ class EnhancedHybridReferenceChecker:
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
+                 enable_acl_anthology: bool = True,
                  debug_mode: bool = False,
                  cache_dir: Optional[str] = None):
         """
@@ -79,6 +80,7 @@ class EnhancedHybridReferenceChecker:
             enable_openalex: Whether to use OpenAlex API
             enable_crossref: Whether to use CrossRef API
             enable_arxiv_citation: Whether to use ArXiv Citation checker as authoritative source
+            enable_acl_anthology: Whether to use ACL Anthology API
             debug_mode: Whether to enable debug logging
         """
         self.contact_email = contact_email
@@ -154,13 +156,22 @@ class EnhancedHybridReferenceChecker:
             'dblp', 'DBLPReferenceChecker', 'DBLP checker', email=contact_email
         )
         
+        # Initialize ACL Anthology checker (NLP/CL bibliography)
+        self.acl_anthology = None
+        if enable_acl_anthology:
+            self.acl_anthology = self._initialize_checker(
+                'acl_anthology', 'ACLAnthologyReferenceChecker', 'ACL Anthology checker',
+                email=contact_email
+            )
+        
         # Google Scholar removed - using more reliable APIs only
 
         # Propagate cache_dir to all sub-checkers for API response caching
         self.cache_dir = cache_dir
         all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
         for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
-                        self.openalex, self.crossref, self.openreview, self.dblp):
+                        self.openalex, self.crossref, self.openreview, self.dblp,
+                        self.acl_anthology):
             if checker is not None:
                 checker.cache_dir = cache_dir
 
@@ -172,6 +183,7 @@ class EnhancedHybridReferenceChecker:
             'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'dblp': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'acl_anthology': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
         }
         for checker_key, _, _ in self.local_db_checkers:
             self.api_stats.setdefault(
@@ -196,6 +208,7 @@ class EnhancedHybridReferenceChecker:
             'openalex': threading.Semaphore(3),
             'dblp': threading.Semaphore(2),
             'openreview': threading.Semaphore(2),
+            'acl_anthology': threading.Semaphore(2),
         }
         for checker_key, _, _ in self.local_db_checkers:
             self._api_semaphores.setdefault(checker_key, threading.Semaphore(100))
@@ -239,6 +252,7 @@ class EnhancedHybridReferenceChecker:
             'crossref': 'CrossRef',
             'dblp': 'DBLP',
             'openreview': 'OpenReview',
+            'acl_anthology': 'ACL Anthology',
         }.get(api_name, api_name.replace('_', ' '))
 
     def _annotate_match_source(
@@ -695,6 +709,8 @@ class EnhancedHybridReferenceChecker:
             fallback_apis.append(('openalex', self.openalex))
         if self.dblp:
             fallback_apis.append(('dblp', self.dblp))
+        if self.acl_anthology:
+            fallback_apis.append(('acl_anthology', self.acl_anthology))
         
         if fallback_apis:
             logger.debug(f"Enhanced Hybrid: SS failed, launching {len(fallback_apis)} fallback APIs in parallel")
@@ -705,7 +721,7 @@ class EnhancedHybridReferenceChecker:
                     futures[api_name] = pool.submit(
                         self._try_api, api_name, api_instance, reference)
             
-            priority = ['crossref', 'openalex', 'dblp']
+            priority = ['crossref', 'openalex', 'dblp', 'acl_anthology']
             for api_name in priority:
                 if api_name not in futures:
                     continue
