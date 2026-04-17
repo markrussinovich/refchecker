@@ -64,69 +64,17 @@ def _ensure_grobid_running() -> bool:
     Returns True if GROBID is available after this call.
     Only attempts auto-start once per process to avoid repeated slow failures.
     """
-    global _grobid_auto_started
-    import requests as _requests
+    from refchecker.utils.grobid import ensure_grobid_running
+    return ensure_grobid_running()
 
-    # Quick health check first
-    try:
-        resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
-        if resp.status_code == 200:
-            return True
-    except Exception:
-        pass
 
-    # Already tried auto-start this process — don't retry
-    if _grobid_auto_started:
-        return False
-    _grobid_auto_started = True
+def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
+    """Extract references from a PDF using a GROBID server.
 
-    # Try to start via Docker
-    import subprocess
-    try:
-        # Check if Docker is available
-        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
-        if result.returncode != 0:
-            logger.info("Docker not available, cannot auto-start GROBID")
-            return False
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        logger.info("Docker not found, cannot auto-start GROBID")
-        return False
-
-    logger.info("Starting GROBID Docker container (%s)...", GROBID_DOCKER_IMAGE)
-    try:
-        # Remove any stopped container with the same name
-        subprocess.run(
-            ["docker", "rm", "-f", GROBID_CONTAINER_NAME],
-            capture_output=True, timeout=10
-        )
-        # Start the container
-        result = subprocess.run(
-            ["docker", "run", "-d", "--name", GROBID_CONTAINER_NAME,
-             "-p", "8070:8070", "--rm", GROBID_DOCKER_IMAGE],
-            capture_output=True, text=True, timeout=120
-        )
-        if result.returncode != 0:
-            logger.warning("Failed to start GROBID container: %s", result.stderr.strip())
-            return False
-
-        # Wait for GROBID to be ready (up to 90 seconds)
-        import time
-        for i in range(90):
-            try:
-                resp = _requests.get(f"{GROBID_URL}/api/isalive", timeout=3)
-                if resp.status_code == 200:
-                    logger.info("GROBID is ready (took ~%ds)", i)
-                    return True
-            except Exception:
-                pass
-            time.sleep(1)
-
-        logger.warning("GROBID started but not ready after 90s")
-        return False
-
-    except Exception as exc:
-        logger.warning("Failed to auto-start GROBID: %s", exc)
-        return False
+    Will auto-start a GROBID Docker container if Docker is available.
+    """
+    from refchecker.utils.grobid import extract_refs_via_grobid
+    return extract_refs_via_grobid(pdf_path)
 
 
 def _extract_refs_via_grobid(pdf_path: str) -> List[Dict[str, Any]]:
