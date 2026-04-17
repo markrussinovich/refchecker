@@ -68,7 +68,12 @@ class LocalNonArxivReferenceChecker:
     A class to verify non-arXiv references using a local Semantic Scholar database
     """
     
-    def __init__(self, db_path: str = "semantic_scholar_db/semantic_scholar.db"):
+    def __init__(
+        self,
+        db_path: str = "semantic_scholar_db/semantic_scholar.db",
+        database_label: str = "S2",
+        database_key: str = "local_s2",
+    ):
         """
         Initialize the local Semantic Scholar database client
         
@@ -96,6 +101,8 @@ class LocalNonArxivReferenceChecker:
             db_path = os.path.join(db_path, db_files[0])
             logger.info(f"Auto-detected database file: {db_path}")
         self.db_path = db_path
+        self.database_label = database_label
+        self.database_key = database_key
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row  # Return rows as dictionaries
         # Validate that the required 'papers' table exists
@@ -691,6 +698,9 @@ class LocalNonArxivReferenceChecker:
             if paper_url:
                 logger.debug(f"Using fallback URL: {paper_url}")
         
+        if isinstance(paper_data, dict):
+            paper_data.setdefault('_matched_database', self.database_label)
+            paper_data.setdefault('_matched_checker', self.database_key)
         return paper_data, errors, paper_url
     
     def close(self):

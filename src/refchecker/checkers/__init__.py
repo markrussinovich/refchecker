@@ -8,6 +8,7 @@ from .enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from .openalex import OpenAlexReferenceChecker
 from .crossref import CrossRefReferenceChecker
 from .arxiv_citation import ArXivCitationChecker
+from .acl_anthology import ACLAnthologyReferenceChecker
 
 __all__ = [
     "NonArxivReferenceChecker",
@@ -16,4 +17,5 @@ __all__ = [
     "OpenAlexReferenceChecker", 
     "CrossRefReferenceChecker",
     "ArXivCitationChecker",
+    "ACLAnthologyReferenceChecker",
 ]

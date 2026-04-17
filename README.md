@@ -253,7 +253,13 @@ LLM:
   --llm-max-chunk-workers N  Max workers for parallel LLM chunks (default: 4)
 
 Verification:
-  --db-path PATH             Path to local Semantic Scholar database
+  --database-dir PATH        Directory containing local DBs: semantic_scholar.db, openalex.db, crossref.db, dblp.db
+  --s2-db PATH               Path to local Semantic Scholar database
+  --openalex-db PATH         Path to local OpenAlex database
+  --crossref-db PATH         Path to local CrossRef database
+  --dblp-db PATH             Path to local DBLP database
+  --update-databases         Install/update configured local databases
+  --db-path PATH             (Deprecated) alias for --s2-db
   --semantic-scholar-api-key KEY   Override SEMANTIC_SCHOLAR_API_KEY env var
   --disable-parallel         Run verification sequentially
   --max-workers N            Max parallel verification threads (default: 6)
@@ -620,10 +626,12 @@ python scripts/download_db.py \
   --field "computer science" \
   --start-year 2020 --end-year 2024
 
-academic-refchecker --paper paper.pdf --db-path semantic_scholar_db/semantic_scholar.db
+academic-refchecker --paper paper.pdf --s2-db semantic_scholar_db/semantic_scholar.db
+academic-refchecker --paper paper.pdf --database-dir /path/to/local-db-folder
 ```
 
-When the Web UI has a local Semantic Scholar database configured, it now launches the downloader asynchronously at startup to refresh that database in the background.
+When the Web UI has local databases configured, it scans `REFCHECKER_DATABASE_DIRECTORY` for well-formed DB names (`semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`) and schedules asynchronous background refresh tasks for discovered DBs.
+Semantic Scholar refresh uses the bundled downloader.
 The downloader also writes a `latest_snapshot.txt` file next to the SQLite database for operator visibility, while the Web UI shows the current snapshot from the database metadata in the settings panel.
 
 ---

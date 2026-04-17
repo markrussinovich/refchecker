@@ -131,6 +131,7 @@ class ProgressRefChecker:
                  bibliography_source_callback: Optional[Callable] = None,
                  semantic_scholar_api_key: Optional[str] = None,
                  db_path: Optional[str] = None,
+                 db_paths: Optional[Dict[str, str]] = None,
                  cache_dir: Optional[str] = None,
                  hallucination_provider: Optional[str] = None,
                  hallucination_model: Optional[str] = None,
@@ -236,6 +237,7 @@ class ProgressRefChecker:
         self.checker = EnhancedHybridReferenceChecker(
             semantic_scholar_api_key=ss_api_key,
             db_path=db_path,
+            db_paths=db_paths,
             debug_mode=False,
             cache_dir=cache_dir,
         )
@@ -425,6 +427,7 @@ class ProgressRefChecker:
             "warnings": formatted_warnings,
             "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
+            "matched_database": (verified_data or {}).get('_matched_database'),
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
             "_raw_errors": errors,  # Stashed for deferred hallucination check
