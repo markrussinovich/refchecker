@@ -190,8 +190,72 @@ class EnhancedHybridReferenceChecker:
             # Update average time (simple moving average)
             total_calls = stats['success'] + stats['failure']
             stats['avg_time'] = ((stats['avg_time'] * (total_calls - 1)) + duration) / total_calls
+
+    @staticmethod
+    def _append_attempted_api(attempted_apis: List[str], api_name: str) -> None:
+        """Track unique checker attempts in first-seen order."""
+        if api_name and api_name not in attempted_apis:
+            attempted_apis.append(api_name)
+
+    def _format_api_name(self, api_name: str) -> str:
+        """Convert internal checker names into user-facing labels."""
+        return {
+            'arxiv_citation': 'ArXiv',
+            'local_db': 'local Semantic Scholar DB',
+            'semantic_scholar': 'Semantic Scholar',
+            'openalex': 'OpenAlex',
+            'crossref': 'CrossRef',
+            'dblp': 'DBLP',
+            'openreview': 'OpenReview',
+        }.get(api_name, api_name.replace('_', ' '))
+
+    def _format_failure_detail(self, api_name: str, failure_type: str,
+                               detail: Optional[str] = None) -> str:
+        """Create a short, specific checker failure description."""
+        api_label = self._format_api_name(api_name)
+        cleaned_detail = ' '.join(str(detail).split()) if detail else ''
+        if cleaned_detail:
+            if cleaned_detail.lower().startswith(api_label.lower()):
+                return cleaned_detail
+            return f'{api_label}: {cleaned_detail}'
+
+        fallback_details = {
+            'timeout': f'{api_label}: request timed out',
+            'throttled': f'{api_label}: rate limited or temporarily unavailable',
+            'server_error': f'{api_label}: server error',
+            'other': f'{api_label}: unexpected checker error',
+        }
+        return fallback_details.get(failure_type, f'{api_label}: verification failed')
+
+    def _build_unverified_error_details(self, attempted_apis: List[str],
+                                        failed_apis: List[Dict[str, Any]]) -> str:
+        """Summarize which checkers returned no match versus which failed."""
+        failed_api_names = {failed_api['name'] for failed_api in failed_apis}
+        negative_attempts = [
+            self._format_api_name(api_name)
+            for api_name in attempted_apis
+            if api_name not in failed_api_names
+        ]
+        failure_details = [
+            failed_api.get('failure_detail') or self._format_failure_detail(
+                failed_api['name'],
+                failed_api.get('failure_type', 'other'),
+            )
+            for failed_api in failed_apis
+        ]
+
+        if negative_attempts and failure_details:
+            return (
+                f"Paper not found by any checker; no match in {', '.join(negative_attempts)}; "
+                f"checker failures: {'; '.join(failure_details)}"
+            )
+        if negative_attempts:
+            return f"Paper not found by any checker; no match in {', '.join(negative_attempts)}"
+        if failure_details:
+            return f"All available checkers failed: {'; '.join(failure_details)}"
+        return 'Paper not found by any checker'
     
-    def _try_api(self, api_name: str, api_instance: Any, reference: Dict[str, Any], is_retry: bool = False) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
+    def _try_api(self, api_name: str, api_instance: Any, reference: Dict[str, Any], is_retry: bool = False) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str, str]:
         """
         Try to verify reference with a specific API and track performance.
         
@@ -199,11 +263,11 @@ class EnhancedHybridReferenceChecker:
         A 429 backoff on Semantic Scholar won't prevent ArXiv or DB lookups.
         
         Returns:
-            Tuple of (verified_data, errors, url, success, failure_type)
+            Tuple of (verified_data, errors, url, success, failure_type, failure_detail)
             failure_type can be: 'none', 'not_found', 'throttled', 'timeout', 'other'
         """
         if not api_instance:
-            return None, [], None, False, 'none'
+            return None, [], None, False, 'none', ''
         
         # Acquire per-API semaphore (limits concurrent calls to this specific API)
         sem = self._api_semaphores.get(api_name)
@@ -224,8 +288,13 @@ class EnhancedHybridReferenceChecker:
             if api_failure_errors:
                 # This is a retryable API failure, not a verification result
                 self._update_api_stats(api_name, False, duration)
-                logger.debug(f"Enhanced Hybrid: {api_name} API failed in {duration:.2f}s: {api_failure_errors[0].get('error_details', 'unknown')}")
-                return None, [], None, False, 'throttled'  # Treat API failures as throttling for retry logic
+                api_failure_detail = api_failure_errors[0].get('error_details', 'temporary API failure')
+                logger.debug(f"Enhanced Hybrid: {api_name} API failed in {duration:.2f}s: {api_failure_detail}")
+                return None, [], None, False, 'throttled', self._format_failure_detail(
+                    api_name,
+                    'throttled',
+                    api_failure_detail,
+                )  # Treat API failures as throttling for retry logic
             
             # Consider it successful if we found data or verification errors (i.e., we could verify something)
             success = verified_data is not None or len(errors) > 0
@@ -234,17 +303,21 @@ class EnhancedHybridReferenceChecker:
             if success:
                 retry_info = " (retry)" if is_retry else ""
                 logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s{retry_info}, URL: {url}")
-                return verified_data, errors, url, True, 'none'
+                return verified_data, errors, url, True, 'none', ''
             else:
                 logger.debug(f"Enhanced Hybrid: {api_name} found no results in {duration:.2f}s")
-                return None, [], None, False, 'not_found'
+                return None, [], None, False, 'not_found', ''
                 
         except requests.exceptions.Timeout as e:
             duration = time.time() - start_time
             self._update_api_stats(api_name, False, duration)
             failure_type = 'timeout'
             logger.debug(f"Enhanced Hybrid: {api_name} timed out in {duration:.2f}s: {e}")
-            return None, [], None, False, failure_type
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                api_name,
+                failure_type,
+                str(e) or None,
+            )
             
         except requests.exceptions.RequestException as e:
             duration = time.time() - start_time
@@ -264,14 +337,26 @@ class EnhancedHybridReferenceChecker:
             else:
                 failure_type = 'other'
                 logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
-            return None, [], None, False, failure_type
+
+            failure_detail = str(e).strip()
+            if status_code and str(status_code) not in failure_detail:
+                failure_detail = f'HTTP {status_code}: {failure_detail}' if failure_detail else f'HTTP {status_code}'
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                api_name,
+                failure_type,
+                failure_detail or None,
+            )
             
         except Exception as e:
             duration = time.time() - start_time
             self._update_api_stats(api_name, False, duration)
             failure_type = 'other'
             logger.debug(f"Enhanced Hybrid: {api_name} failed in {duration:.2f}s: {e}")
-            return None, [], None, False, failure_type
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                api_name,
+                failure_type,
+                str(e) or None,
+            )
         finally:
             # Accumulate timing stats
             call_duration = time.time() - start_time
@@ -442,7 +527,7 @@ class EnhancedHybridReferenceChecker:
                 return True
         return False
 
-    def _verify_arxiv_parallel(self, reference, failed_apis):
+    def _verify_arxiv_parallel(self, reference, failed_apis, attempted_apis):
         """Run ArXiv citation + Semantic Scholar API in parallel for ArXiv refs.
         
         Called after local DB was tried and either failed or had discrepancies.
@@ -456,9 +541,11 @@ class EnhancedHybridReferenceChecker:
         futures = {}
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="HybridAPI") as pool:
             if self.arxiv_citation:
+                self._append_attempted_api(attempted_apis, 'arxiv_citation')
                 futures['arxiv_citation'] = pool.submit(
                     self._try_api, 'arxiv_citation', self.arxiv_citation, reference)
             if self.semantic_scholar:
+                self._append_attempted_api(attempted_apis, 'semantic_scholar')
                 futures['semantic_scholar'] = pool.submit(
                     self._try_api, 'semantic_scholar', self.semantic_scholar, reference)
         
@@ -466,17 +553,29 @@ class EnhancedHybridReferenceChecker:
         ss_result = None
         
         for name, future in futures.items():
-            verified_data, errors, url, success, failure_type = future.result()
+            verified_data, errors, url, success, failure_type, failure_detail = future.result()
             if name == 'arxiv_citation':
                 if success:
                     arxiv_result = (verified_data, errors, url)
-                elif failure_type in ('throttled', 'timeout', 'server_error'):
-                    failed_apis.append(('arxiv_citation', self.arxiv_citation, failure_type))
+                elif failure_type not in ('none', 'not_found'):
+                    failed_apis.append({
+                        'name': 'arxiv_citation',
+                        'instance': self.arxiv_citation,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
             elif name == 'semantic_scholar':
                 if success:
                     ss_result = (verified_data, errors, url)
-                elif failure_type in ('throttled', 'timeout', 'server_error'):
-                    failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
+                elif failure_type not in ('none', 'not_found'):
+                    failed_apis.append({
+                        'name': 'semantic_scholar',
+                        'instance': self.semantic_scholar,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
         
         # Merge results
         if arxiv_result and ss_result:
@@ -499,7 +598,7 @@ class EnhancedHybridReferenceChecker:
             return ss_result
         return None
 
-    def _verify_non_arxiv_parallel(self, reference, failed_apis, skip_ss: bool = False):
+    def _verify_non_arxiv_parallel(self, reference, failed_apis, attempted_apis, skip_ss: bool = False):
         """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
         
         Returns (result, incomplete_results) where result is a complete
@@ -516,12 +615,19 @@ class EnhancedHybridReferenceChecker:
         # if it's not in the DB, it's almost certainly not on the SS API either,
         # and the API call just wastes time and rate-limit budget.
         if self.semantic_scholar and not skip_ss:
-            verified_data, errors, url, success, failure_type = self._try_api('semantic_scholar', self.semantic_scholar, reference)
+            self._append_attempted_api(attempted_apis, 'semantic_scholar')
+            verified_data, errors, url, success, failure_type, failure_detail = self._try_api('semantic_scholar', self.semantic_scholar, reference)
             if success:
                 if self._is_data_complete(verified_data, reference):
                     return (verified_data, errors, url), {}
-            elif failure_type in ('throttled', 'timeout', 'server_error'):
-                failed_apis.append(('semantic_scholar', self.semantic_scholar, failure_type))
+            elif failure_type not in ('none', 'not_found'):
+                failed_apis.append({
+                    'name': 'semantic_scholar',
+                    'instance': self.semantic_scholar,
+                    'failure_type': failure_type,
+                    'failure_detail': failure_detail,
+                    'active': True,
+                })
         
         # SS failed or incomplete — fire remaining APIs in parallel
         fallback_apis = []
@@ -537,6 +643,7 @@ class EnhancedHybridReferenceChecker:
             futures = {}
             with ThreadPoolExecutor(max_workers=len(fallback_apis), thread_name_prefix="HybridAPI") as pool:
                 for api_name, api_instance in fallback_apis:
+                    self._append_attempted_api(attempted_apis, api_name)
                     futures[api_name] = pool.submit(
                         self._try_api, api_name, api_instance, reference)
             
@@ -544,10 +651,16 @@ class EnhancedHybridReferenceChecker:
             for api_name in priority:
                 if api_name not in futures:
                     continue
-                verified_data, errors, url, success, failure_type = futures[api_name].result()
-                if not success and failure_type in ('throttled', 'timeout', 'server_error'):
+                verified_data, errors, url, success, failure_type, failure_detail = futures[api_name].result()
+                if not success and failure_type not in ('none', 'not_found'):
                     api_inst = dict(fallback_apis)[api_name]
-                    failed_apis.append((api_name, api_inst, failure_type))
+                    failed_apis.append({
+                        'name': api_name,
+                        'instance': api_inst,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
                 if success:
                     if self._is_data_complete(verified_data, reference):
                         return (verified_data, errors, url), {}
@@ -559,9 +672,18 @@ class EnhancedHybridReferenceChecker:
         # Try OpenReview as a secondary step (not parallelized — rare path)
         if self.openreview:
             if hasattr(self.openreview, 'is_openreview_reference') and self.openreview.is_openreview_reference(reference):
-                verified_data, errors, url, success, failure_type = self._try_api('openreview', self.openreview, reference)
+                self._append_attempted_api(attempted_apis, 'openreview')
+                verified_data, errors, url, success, failure_type, failure_detail = self._try_api('openreview', self.openreview, reference)
                 if success:
                     return (verified_data, errors, url), {}
+                if failure_type not in ('none', 'not_found'):
+                    failed_apis.append({
+                        'name': 'openreview',
+                        'instance': self.openreview,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
             elif hasattr(self.openreview, 'verify_reference_by_search'):
                 venue = reference.get('venue', reference.get('journal', '')).lower()
                 openreview_venues = ['iclr', 'icml', 'neurips', 'nips', 'aaai', 'ijcai',
@@ -569,9 +691,18 @@ class EnhancedHybridReferenceChecker:
                     'international conference on machine learning',
                     'neural information processing systems']
                 if any(v in venue for v in openreview_venues):
-                    verified_data, errors, url, success, failure_type = self._try_openreview_search(reference)
+                    self._append_attempted_api(attempted_apis, 'openreview')
+                    verified_data, errors, url, success, failure_type, failure_detail = self._try_openreview_search(reference)
                     if success:
                         return (verified_data, errors, url), {}
+                    if failure_type not in ('none', 'not_found'):
+                        failed_apis.append({
+                            'name': 'openreview',
+                            'instance': self.openreview,
+                            'failure_type': failure_type,
+                            'failure_detail': failure_detail,
+                            'active': True,
+                        })
         
         # Return None with any incomplete results for Phase 3 fallback
         incomplete = {}
@@ -803,6 +934,7 @@ class EnhancedHybridReferenceChecker:
             return None, [], cited_url
         
         failed_apis = []
+        attempted_apis = []
         db_not_found = False
         incomplete_data = None
         is_arxiv = self.arxiv_citation and self.arxiv_citation.is_arxiv_reference(reference)
@@ -814,7 +946,8 @@ class EnhancedHybridReferenceChecker:
             # clean, use it. If there's a major discrepancy (e.g., wrong
             # authors from a corrupt S2 entry), fall back to ArXiv BibTeX.
             if self.local_db:
-                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
+                self._append_attempted_api(attempted_apis, 'local_db')
+                verified_data, errors, url, success, failure_type, failure_detail = self._try_api('local_db', self.local_db, reference)
                 if success:
                     if not self._has_major_author_discrepancy(errors):
                         return verified_data, errors, url
@@ -822,11 +955,17 @@ class EnhancedHybridReferenceChecker:
                         logger.debug("Enhanced Hybrid: Local DB has major author discrepancy for ArXiv ref, falling back to ArXiv citation")
                 elif failure_type == 'not_found':
                     db_not_found = True
-                elif failure_type in ('throttled', 'timeout', 'server_error'):
-                    failed_apis.append(('local_db', self.local_db, failure_type))
+                elif failure_type not in ('none', 'not_found'):
+                    failed_apis.append({
+                        'name': 'local_db',
+                        'instance': self.local_db,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
             
             # Local DB failed or had discrepancy — use ArXiv citation checker
-            result = self._verify_arxiv_parallel(reference, failed_apis)
+            result = self._verify_arxiv_parallel(reference, failed_apis, attempted_apis)
             if result is not None:
                 verified_data, errors, url = result
                 # Check if the ArXiv URL points to a completely different paper.
@@ -884,17 +1023,24 @@ class EnhancedHybridReferenceChecker:
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
             if self.local_db:
-                verified_data, errors, url, success, failure_type = self._try_api('local_db', self.local_db, reference)
+                self._append_attempted_api(attempted_apis, 'local_db')
+                verified_data, errors, url, success, failure_type, failure_detail = self._try_api('local_db', self.local_db, reference)
                 if success:
                     return verified_data, errors, url
-                if failure_type in ['throttled', 'timeout', 'server_error']:
-                    failed_apis.append(('local_db', self.local_db, failure_type))
+                if failure_type not in ('none', 'not_found'):
+                    failed_apis.append({
+                        'name': 'local_db',
+                        'instance': self.local_db,
+                        'failure_type': failure_type,
+                        'failure_detail': failure_detail,
+                        'active': True,
+                    })
                 elif failure_type == 'not_found':
                     db_not_found = True
             
             # Skip SS API when the 233M-paper local DB returned not_found —
             # if it's not in the DB, it's almost certainly not on SS either.
-            result, incomplete_data = self._verify_non_arxiv_parallel(reference, failed_apis, skip_ss=db_not_found)
+            result, incomplete_data = self._verify_non_arxiv_parallel(reference, failed_apis, attempted_apis, skip_ss=db_not_found)
             if result is not None:
                 return result
         
@@ -914,13 +1060,21 @@ class EnhancedHybridReferenceChecker:
             logger.debug(f"Enhanced Hybrid: Phase 1 complete, no success. Retrying {len(failed_apis)} failed APIs")
             
             # Sort failed APIs to prioritize Semantic Scholar retries
-            semantic_scholar_retries = [api for api in failed_apis if api[0] == 'semantic_scholar']
-            other_retries = [api for api in failed_apis if api[0] != 'semantic_scholar']
+            retryable_failures = [
+                api for api in failed_apis
+                if api.get('failure_type') in ('throttled', 'timeout', 'server_error') and api.get('active', True)
+            ]
+            semantic_scholar_retries = [api for api in retryable_failures if api['name'] == 'semantic_scholar']
+            other_retries = [api for api in retryable_failures if api['name'] != 'semantic_scholar']
             
             # Try other APIs first, then Semantic Scholar with more aggressive retries
             retry_order = other_retries + semantic_scholar_retries
             
-            for api_name, api_instance, failure_type in retry_order:
+            for failed_api in retry_order:
+                api_name = failed_api['name']
+                api_instance = failed_api['instance']
+                failure_type = failed_api['failure_type']
+
                 # Use base delay for first retry of each API
                 delay = min(self.retry_base_delay, self.max_retry_delay)
                 
@@ -934,10 +1088,15 @@ class EnhancedHybridReferenceChecker:
                     self._api_retry_sleep_time += final_delay
                 
                 logger.debug(f"Enhanced Hybrid: Retrying {api_name}")
-                verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
+                self._append_attempted_api(attempted_apis, api_name)
+                verified_data, errors, url, success, retry_failure_type, retry_failure_detail = self._try_api(api_name, api_instance, reference, is_retry=True)
                 if success:
                     logger.debug(f"Enhanced Hybrid: {api_name} succeeded on retry after {failure_type} (delay: {final_delay:.1f}s)")
                     return verified_data, errors, url
+
+                failed_api['failure_type'] = retry_failure_type
+                failed_api['failure_detail'] = retry_failure_detail
+                failed_api['active'] = retry_failure_type not in ('none', 'not_found')
                 
                 # For Semantic Scholar, try additional retries with increasing delays
                 if api_name == 'semantic_scholar' and not success:
@@ -952,10 +1111,15 @@ class EnhancedHybridReferenceChecker:
                         with self._api_time_lock:
                             self._api_retry_sleep_time += final_retry_delay
                         
-                        verified_data, errors, url, success, _ = self._try_api(api_name, api_instance, reference, is_retry=True)
+                        self._append_attempted_api(attempted_apis, api_name)
+                        verified_data, errors, url, success, retry_failure_type, retry_failure_detail = self._try_api(api_name, api_instance, reference, is_retry=True)
                         if success:
                             logger.debug(f"Enhanced Hybrid: {api_name} succeeded on retry {retry_attempt + 2} (delay: {final_retry_delay:.1f}s)")
                             return verified_data, errors, url
+
+                        failed_api['failure_type'] = retry_failure_type
+                        failed_api['failure_detail'] = retry_failure_detail
+                        failed_api['active'] = retry_failure_type not in ('none', 'not_found')
         
         # PHASE 3: If all APIs failed or returned incomplete data, use best available incomplete data as fallback
         incomplete_results = [r for r in [crossref_result, openalex_result] if r is not None]
@@ -966,11 +1130,15 @@ class EnhancedHybridReferenceChecker:
             return best_incomplete
         
         # If all APIs failed, return unverified with source tracking metadata
-        failed_count = len(failed_apis)
-        total_attempted = (1 if self.local_db else 0) + (1 if self.semantic_scholar else 0) + (1 if self.openalex else 0) + (1 if self.crossref else 0) + (1 if self.dblp else 0)
+        active_failures = [api for api in failed_apis if api.get('active', True)]
+        failed_count = len(active_failures)
+        failed_api_names = {api['name'] for api in active_failures}
+        failure_reason = self._build_unverified_error_details(attempted_apis, active_failures)
+        sources_checked = len(attempted_apis)
+        sources_negative = len([api_name for api_name in attempted_apis if api_name not in failed_api_names])
         
         if failed_count > 0:
-            logger.debug(f"Enhanced Hybrid: All {total_attempted} APIs failed to verify reference ({failed_count} retried)")
+            logger.debug(f"Enhanced Hybrid: Verification ended with {failed_count} active checker failures after {sources_checked} attempts")
         else:
             logger.debug("Enhanced Hybrid: All available APIs failed to verify reference")
         
@@ -995,7 +1163,9 @@ class EnhancedHybridReferenceChecker:
                         subreason = wp_errors[0].get('error_details', '')
                         errors_out.append({
                             'error_type': 'unverified',
-                            'error_details': f'Could not verify: {reference.get("title", "unknown")}',
+                            'error_details': failure_reason,
+                            'sources_checked': sources_checked,
+                            'sources_negative': sources_negative,
                         })
                         # Use specific message based on what went wrong
                         if 'non-existent' in subreason:
@@ -1011,33 +1181,30 @@ class EnhancedHybridReferenceChecker:
                     else:
                         errors_out.append({
                             'error_type': 'unverified',
-                            'error_details': 'Could not verify reference using any available API',
+                            'error_details': failure_reason,
+                            'sources_checked': sources_checked,
+                            'sources_negative': sources_negative,
                         })
                     return None, errors_out, wp_url
             except Exception as exc:
                 logger.debug(f"Enhanced Hybrid: Web page verification failed: {exc}")
 
-        # Track how many independent sources were checked and returned negative
-        # (used by hallucination_policy for multi-source negative consensus)
-        sources_checked = total_attempted
-        sources_negative = total_attempted - failed_count
-            
         return None, [{
             'error_type': 'unverified',
-            'error_details': 'Could not verify reference using any available API',
+            'error_details': failure_reason,
             'sources_checked': sources_checked,
             'sources_negative': sources_negative,
         }], None
     
-    def _try_openreview_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str]:
+    def _try_openreview_search(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str], bool, str, str]:
         """
         Try to verify reference using OpenReview search
         
         Returns:
-            Tuple of (verified_data, errors, url, success, failure_type)
+            Tuple of (verified_data, errors, url, success, failure_type, failure_detail)
         """
         if not self.openreview:
-            return None, [], None, False, 'none'
+            return None, [], None, False, 'none', ''
         
         start_time = time.time()
         failure_type = 'none'
@@ -1052,17 +1219,21 @@ class EnhancedHybridReferenceChecker:
             
             if success:
                 logger.debug(f"Enhanced Hybrid: OpenReview search successful in {duration:.2f}s, URL: {url}")
-                return verified_data, errors, url, True, 'none'
+                return verified_data, errors, url, True, 'none', ''
             else:
                 logger.debug(f"Enhanced Hybrid: OpenReview search found no results in {duration:.2f}s")
-                return None, [], None, False, 'not_found'
+                return None, [], None, False, 'not_found', ''
                 
         except requests.exceptions.Timeout as e:
             duration = time.time() - start_time
             self._update_api_stats('openreview', False, duration)
             failure_type = 'timeout'
             logger.debug(f"Enhanced Hybrid: OpenReview search timed out in {duration:.2f}s: {e}")
-            return None, [], None, False, failure_type
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                'openreview',
+                failure_type,
+                str(e) or None,
+            )
             
         except requests.exceptions.RequestException as e:
             duration = time.time() - start_time
@@ -1080,14 +1251,22 @@ class EnhancedHybridReferenceChecker:
                 failure_type = 'other'
             
             logger.debug(f"Enhanced Hybrid: OpenReview search failed in {duration:.2f}s: {type(e).__name__}: {e}")
-            return None, [], None, False, failure_type
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                'openreview',
+                failure_type,
+                str(e) or None,
+            )
             
         except Exception as e:
             duration = time.time() - start_time
             self._update_api_stats('openreview', False, duration)
             failure_type = 'other'
             logger.debug(f"Enhanced Hybrid: OpenReview search error in {duration:.2f}s: {type(e).__name__}: {e}")
-            return None, [], None, False, failure_type
+            return None, [], None, False, failure_type, self._format_failure_detail(
+                'openreview',
+                failure_type,
+                str(e) or None,
+            )
     
     def get_performance_stats(self) -> Dict[str, Any]:
         """

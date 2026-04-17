@@ -102,16 +102,49 @@ class TestResultDisplayLogic(unittest.TestCase):
         # Should contain "Could not verify"
         self.assertIn("❓ Could not verify: Neural machine translation in linear time", output)
         self.assertIn("Subreason: Paper not found by any checker", output)
+
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_display_unverified_error_prefers_url_detail(self, mock_stdout):
+        """Test that URL-specific failures are shown instead of generic unverified text."""
+        reference = {
+            'title': 'Neural machine translation in linear time',
+            'authors': ['Nal Kalchbrenner', 'Lasse Espeholt'],
+            'year': 2017,
+            'url': 'https://arxiv.org/abs/1610.10099v2'
+        }
+
+        errors = [
+            {'error_type': 'unverified', 'error_details': 'Paper not found by any checker; no match in Semantic Scholar'},
+            {'error_type': 'url', 'error_details': 'Cited URL does not reference this paper: https://arxiv.org/abs/1610.10099v2'}
+        ]
+
+        self.checker._display_unverified_error_with_subreason(
+            reference,
+            'https://arxiv.org/abs/1610.10099v2',
+            errors,
+            debug_mode=False,
+            print_output=True
+        )
+
+        output = mock_stdout.getvalue()
+        self.assertIn(
+            'Subreason: Cited URL does not reference this paper: https://arxiv.org/abs/1610.10099v2',
+            output,
+        )
     
     def test_categorize_unverified_reason(self):
         """Test the categorization of unverified reasons"""
         test_cases = [
             ("Paper not found by any checker", "Paper not found by any checker"),
-            ("API error: rate limit exceeded", "Checker had an error"),
-            ("Network error occurred", "Checker had an error"),
-            ("HTTP 404 error", "Paper not found by any checker"),
-            ("Repository not found", "Paper not found by any checker"),
-            ("Some generic error", "Paper not found by any checker"),  # Default fallback
+            (
+                "Paper not found by any checker; no match in Semantic Scholar; checker failures: CrossRef: simulated timeout",
+                "Paper not found by any checker; no match in Semantic Scholar; checker failures: CrossRef: simulated timeout",
+            ),
+            ("API error: rate limit exceeded", "API error: rate limit exceeded"),
+            ("Network error occurred", "Network error occurred"),
+            ("HTTP 404 error", "HTTP 404 error"),
+            ("Repository not found", "Repository not found"),
+            ("Some generic error", "Some generic error"),
         ]
         
         for error_details, expected_subreason in test_cases:

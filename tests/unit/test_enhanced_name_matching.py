@@ -16,7 +16,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from refchecker.utils.text_utils import enhanced_name_match, surname_similarity
+from refchecker.utils.text_utils import compare_authors, enhanced_name_match, surname_similarity
 
 
 class TestEnhancedNameMatching(unittest.TestCase):
@@ -151,6 +151,37 @@ class TestEnhancedNameMatching(unittest.TestCase):
                 result = enhanced_name_match(bib_name, db_name)
                 self.assertTrue(result,
                               f"Real-world case should match: '{bib_name}' vs '{db_name}'")
+
+    def test_compound_surname_and_middle_name_variants(self):
+        """Test compound surname spacing and middle initial vs full name."""
+        cited = "Jose M. Buades-Rubio"
+        correct = "Jose Maria Buades Rubio"
+
+        self.assertTrue(enhanced_name_match(cited, correct))
+        self.assertTrue(enhanced_name_match(correct, cited))
+
+    def test_apostrophe_encoded_accent_variants(self):
+        """Test accent placeholder apostrophes inside surnames."""
+        cited = "Manuela González-González"
+        correct = "Manuela Gonz'alez-Gonz'alez"
+
+        self.assertTrue(enhanced_name_match(cited, correct))
+        self.assertTrue(enhanced_name_match(correct, cited))
+
+    def test_compare_authors_accepts_reported_false_positives(self):
+        """Test full author list comparison for the reported false positives."""
+        cases = [
+            (["F. Xavier Gaya-Morey", "Jose M. Buades-Rubio", "Philippe Palanque", "Raquel Lacuesta", "Cristina Manresa-Yee"],
+             ["F. Xavier Gaya-Morey", "Jose Maria Buades Rubio", "Philippe Palanque", "Raquel Lacuesta", "Cristina Manresa-Yee"]),
+            (["Manuela González-González"],
+             ["Manuela Gonz'alez-Gonz'alez"]),
+        ]
+
+        for cited_authors, correct_authors in cases:
+            with self.subTest(cited_authors=cited_authors, correct_authors=correct_authors):
+                match_result, error_message = compare_authors(cited_authors, correct_authors)
+                self.assertTrue(match_result, error_message)
+                self.assertEqual(error_message, "Authors match")
 
 
 if __name__ == '__main__':
