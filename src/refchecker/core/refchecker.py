@@ -45,6 +45,7 @@ import sys
 import json
 import random
 import csv
+import subprocess
 from refchecker.core.hallucination_policy import should_check_hallucination, assess_hallucination
 from refchecker.core.report_builder import ReportBuilder
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
@@ -56,6 +57,7 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
+from refchecker.utils.database_config import resolve_database_paths, DATABASE_LABELS
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -265,6 +267,7 @@ class ArxivReferenceChecker:
     def __init__(self, semantic_scholar_api_key=None, db_path=None, output_file=None,
                  llm_config=None, debug_mode=False, enable_parallel=True, max_workers=6,
                  report_file=None, report_format='json', cache_dir=None,
+                 db_paths=None, database_directory=None,
                  # Deprecated parameters kept for backward compatibility
                  scan_mode='standard', only_flagged=False):
         # Initialize the reference checker for non-arXiv references
@@ -272,20 +275,19 @@ class ArxivReferenceChecker:
         self.fatal_error_message = None
         self.last_download_error = None
         self.semantic_scholar_api_key = semantic_scholar_api_key
-        # If db_path is a directory, auto-detect the .db file inside it
-        if db_path and os.path.isdir(db_path):
-            db_files = sorted(
-                [f for f in os.listdir(db_path) if f.endswith('.db')],
-                key=lambda f: os.path.getmtime(os.path.join(db_path, f)),
-                reverse=True,
-            )
-            if db_files:
-                db_path = os.path.join(db_path, db_files[0])
-        self.db_path = db_path
+        explicit_db_paths = dict(db_paths or {})
+        if db_path and 's2' not in explicit_db_paths:
+            explicit_db_paths['s2'] = db_path
+        self.db_paths = resolve_database_paths(
+            explicit_paths=explicit_db_paths,
+            database_directory=database_directory,
+        )
+        self.db_path = self.db_paths.get('s2')
         self.cache_dir = cache_dir
         self.verification_output_file = output_file
         self.report_file = report_file
         self.report_format = report_format
+        self.last_bibliography_extraction_method = None
 
         # Initialize optional LLM hallucination verifier
         # If a separate hallucination provider is specified, use it; otherwise
@@ -368,8 +370,11 @@ class ArxivReferenceChecker:
             web_searcher=web_searcher,
         )
         
-        if db_path:
-            logger.info(f"Using local Semantic Scholar database at {db_path} (DB-first mode with API fallbacks)")
+        if self.db_paths:
+            configured = ", ".join(
+                f"{DATABASE_LABELS.get(name, name)}={path}" for name, path in sorted(self.db_paths.items())
+            )
+            logger.info(f"Using local databases (DB-first mode with API fallbacks): {configured}")
         else:
             logger.debug("Using enhanced hybrid checker with multiple API sources")
         
@@ -377,15 +382,20 @@ class ArxivReferenceChecker:
         # for S2 lookups first, then falls back to live APIs (CrossRef, OpenAlex, etc.)
         self.non_arxiv_checker = EnhancedHybridReferenceChecker(
             semantic_scholar_api_key=semantic_scholar_api_key,
-            db_path=db_path,
+            db_path=self.db_path,
+            db_paths=self.db_paths,
             contact_email=None,
             enable_openalex=True,
             enable_crossref=True,
             debug_mode=debug_mode,
             cache_dir=cache_dir,
         )
-        if db_path:
-            self.service_order = "Local S2 DB → Semantic Scholar API → OpenAlex → CrossRef"
+        if self.db_paths:
+            local_services = []
+            for key in ('s2', 'openalex', 'crossref', 'dblp'):
+                if key in self.db_paths:
+                    local_services.append(f"Local {DATABASE_LABELS.get(key, key)} DB")
+            self.service_order = " → ".join(local_services + ["Semantic Scholar API", "OpenAlex", "CrossRef"])
         else:
             self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
         
@@ -414,13 +424,13 @@ class ArxivReferenceChecker:
         self.current_paper_info = None
         
         # Report service order for arXiv lookups
-        if not db_path:
+        if not self.db_paths:
             logger.debug(f"Service order for arXiv verification: Local DB → Intelligent API Switching (Semantic Scholar ↔ arXiv)")
         else:
-            logger.debug(f"Service order for arXiv verification: Local DB only (offline mode)")
+            logger.debug(f"Service order for arXiv verification: Local DBs first, then ArXiv/API fallbacks")
         
         # Report service order for non-arXiv lookups
-        if not db_path:
+        if not self.db_paths:
             logger.debug(f"Service order for reference verification: {self.service_order}")
         self.client = arxiv.Client(
             page_size=100,
@@ -3263,6 +3273,8 @@ class ArxivReferenceChecker:
                 consolidated_entry['ref_verified_url'] = reference_url
             elif verified_data:
                 consolidated_entry['ref_verified_url'] = self._extract_verified_url(verified_data)
+            if verified_data and verified_data.get('_matched_database'):
+                consolidated_entry['matched_database'] = verified_data.get('_matched_database')
             
             # Generate corrected reference using all available corrections
             corrected_data = self._extract_corrected_data_from_error(consolidated_entry, verified_data)
@@ -3341,6 +3353,8 @@ class ArxivReferenceChecker:
                 error_entry['ref_verified_url'] = reference_url
             elif verified_data:
                 error_entry['ref_verified_url'] = self._extract_verified_url(verified_data)
+            if verified_data and verified_data.get('_matched_database'):
+                error_entry['matched_database'] = verified_data.get('_matched_database')
             
             # Add standard format using the correct information (only for non-unverified errors)
             if error_type != 'unverified':
@@ -3704,6 +3718,8 @@ class ArxivReferenceChecker:
                         paper, debug_mode,
                         input_spec=getattr(paper, '_input_spec', None),
                     )
+                    if not debug_mode:
+                        print(f"   Bibliography extraction: {self._format_bibliography_extraction_method()}")
                     # Save to cache if enabled
                     from refchecker.utils.cache_utils import cache_bibliography
                     cache_bibliography(self.cache_dir, getattr(paper, '_input_spec', None), bibliography)
@@ -5682,6 +5698,7 @@ class ArxivReferenceChecker:
         """
         paper_id = paper.get_short_id()
         logger.debug(f"Extracting bibliography for paper {paper_id}: {paper.title}")
+        self.last_bibliography_extraction_method = None
         pdf_content = None
         from refchecker.utils.grobid import extract_pdf_references_with_grobid_fallback
 
@@ -5698,6 +5715,7 @@ class ArxivReferenceChecker:
                 )
                 if references:
                     logger.info("Extracted %d references via GROBID for %s", len(references), paper_id)
+                    self.last_bibliography_extraction_method = 'grobid'
                     self.fatal_error = False
                     return references
             except ValueError as e:
@@ -5708,6 +5726,7 @@ class ArxivReferenceChecker:
         from refchecker.utils.cache_utils import cached_bibliography
         hit = cached_bibliography(self.cache_dir, input_spec)
         if hit is not None:
+            self.last_bibliography_extraction_method = 'cache'
             return hit
         
         # Check if we can get BibTeX content for this paper (ArXiv or other sources)
@@ -5731,6 +5750,7 @@ class ArxivReferenceChecker:
             # Check if this is LaTeX thebibliography format (e.g., from .bbl files)
             if '\\begin{thebibliography}' in bibtex_content and '\\bibitem' in bibtex_content:
                 logger.info(f"Detected LaTeX thebibliography format, using extract_latex_references")
+                self.last_bibliography_extraction_method = 'bbl'
                 # Use None for file_path since this is content from .bbl files
                 references = extract_latex_references(bibtex_content, None)
                 
@@ -5769,6 +5789,7 @@ class ArxivReferenceChecker:
                     logger.debug(f"LaTeX parsing validation passed (quality: {validation['quality_score']:.2f})")
             else:
                 # Parse BibTeX using the standard flow (LLM or regex based on config)
+                self.last_bibliography_extraction_method = 'bib'
                 references = self.parse_references(bibtex_content)
             
             # Save extracted references for debugging
@@ -5781,6 +5802,8 @@ class ArxivReferenceChecker:
             
             if references:
                 logger.debug(f"Extracted {len(references)} references")
+                if not self.last_bibliography_extraction_method:
+                    self.last_bibliography_extraction_method = 'bib'
                 return references
         
         # Check if this is a text file containing references
@@ -5806,6 +5829,7 @@ class ArxivReferenceChecker:
                 
                 # Parse references directly from the text
                 references = self.parse_references(bibliography_text)
+                self.last_bibliography_extraction_method = 'text'
                 
                 # Save the extracted references for debugging
                 if debug_mode:
@@ -5836,6 +5860,7 @@ class ArxivReferenceChecker:
                 
                 if latex_references:
                     logger.info(f"Extracted {len(latex_references)} references using LaTeX parser")
+                    self.last_bibliography_extraction_method = 'latex'
                     return latex_references
         
         # Check if this is a BibTeX file
@@ -5852,6 +5877,7 @@ class ArxivReferenceChecker:
                 
                 if bibtex_references:
                     logger.debug(f"Extracted {len(bibtex_references)} references from BibTeX file")
+                    self.last_bibliography_extraction_method = 'bib'
                     return bibtex_references
                 else:
                     logger.warning(f"No references found in BibTeX file: {paper.file_path}")
@@ -5876,6 +5902,7 @@ class ArxivReferenceChecker:
             
             # Extract text from PDF
             text = self.extract_text_from_pdf(pdf_content)
+            self.last_bibliography_extraction_method = 'pdf'
         
         if not text:
             grobid_references = _maybe_use_grobid_fallback(
@@ -5957,6 +5984,8 @@ class ArxivReferenceChecker:
         
         # Parse references
         references = self.parse_references(bibliography_text)
+        if not self.last_bibliography_extraction_method:
+            self.last_bibliography_extraction_method = 'pdf'
 
         if not references:
             grobid_references = _maybe_use_grobid_fallback(
@@ -6345,6 +6374,20 @@ class ArxivReferenceChecker:
         if year and year != 0:
             return str(year)
         return "year unknown"
+
+    def _format_bibliography_extraction_method(self):
+        method = (self.last_bibliography_extraction_method or '').lower()
+        labels = {
+            'cache': 'cache',
+            'bbl': '.bbl bibliography',
+            'bib': '.bib bibliography',
+            'text': 'plain text references',
+            'latex': 'LaTeX bibliography',
+            'pdf': 'PDF parsing',
+            'grobid': 'GROBID fallback',
+            'llm': 'LLM extraction',
+        }
+        return labels.get(method, method or 'unknown')
     
 
     def _display_unverified_error_with_subreason(self, reference, reference_url, errors, debug_mode, print_output):
@@ -6449,6 +6492,8 @@ class ArxivReferenceChecker:
         verified_url_to_show = self._get_verified_url(verified_data, url_from_verifier, errors)
         if verified_url_to_show:
             print(f"       Verified URL: {verified_url_to_show}")
+        if verified_data and verified_data.get('_matched_database'):
+            print(f"       Matched Database: {verified_data['_matched_database']}")
 
         if verified_data:
             external_ids = verified_data.get('externalIds', {})
@@ -6641,6 +6686,45 @@ class ArxivReferenceChecker:
             pass
 
 
+def _update_local_databases(database_paths, database_directory=None):
+    """Install/update local checker databases."""
+    if not database_paths and not database_directory:
+        print("No local databases configured. Use --database-dir or per-DB flags first.")
+        return 1
+
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    download_script = os.path.join(repo_root, "scripts", "download_db.py")
+    updated_any = False
+
+    for db_name, db_path in sorted(database_paths.items()):
+        if db_name != "s2":
+            print(f"ℹ️  Local {DATABASE_LABELS.get(db_name, db_name)} DB update is not automated yet; keeping current file: {db_path}")
+            continue
+        if not os.path.isfile(download_script):
+            print(f"❌ Semantic Scholar updater not found: {download_script}")
+            return 1
+        output_dir = os.path.dirname(db_path) or "."
+        print(f"🔄 Updating local S2 database: {db_path}")
+        command = [
+            sys.executable,
+            download_script,
+            "--output-dir",
+            output_dir,
+            "--db-path",
+            db_path,
+        ]
+        result = subprocess.run(command, cwd=repo_root)
+        if result.returncode != 0:
+            print(f"❌ Failed to update S2 database (exit code {result.returncode})")
+            return result.returncode
+        print("✅ Updated S2 database")
+        updated_any = True
+
+    if not updated_any:
+        print("No databases were updated.")
+    return 0
+
+
 def main():
     """Main function to parse arguments and run the reference checker"""
     print(f"Refchecker v{__version__} - Validate references in academic papers")
@@ -6660,7 +6744,19 @@ def main():
     parser.add_argument("--semantic-scholar-api-key", type=str,
                         help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
-                        help="Path to local Semantic Scholar database (automatically enables local DB mode)")
+                        help="(Deprecated) Path to local Semantic Scholar database")
+    parser.add_argument("--database-dir", type=str,
+                        help="Directory containing local databases named semantic_scholar.db, openalex.db, crossref.db, dblp.db")
+    parser.add_argument("--s2-db", type=str,
+                        help="Path to local Semantic Scholar database file")
+    parser.add_argument("--openalex-db", type=str,
+                        help="Path to local OpenAlex database file")
+    parser.add_argument("--crossref-db", type=str,
+                        help="Path to local CrossRef database file")
+    parser.add_argument("--dblp-db", type=str,
+                        help="Path to local DBLP database file")
+    parser.add_argument("--update-databases", action="store_true",
+                        help="Install/update configured local databases (if used without --paper/--paper-list/--openreview, updates and exits)")
     parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
                         help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
     parser.add_argument("--report-file", type=str,
@@ -6699,13 +6795,30 @@ def main():
 
     report_format = args.report_format
 
+    resolved_db_paths = resolve_database_paths(
+        explicit_paths={
+            "s2": args.s2_db or args.db_path,
+            "openalex": args.openalex_db,
+            "crossref": args.crossref_db,
+            "dblp": args.dblp_db,
+        },
+        database_directory=args.database_dir,
+    )
+
     input_mode_count = sum(1 for value in (args.paper, args.paper_list, args.openreview) if value)
+    if args.update_databases and input_mode_count == 0:
+        return _update_local_databases(resolved_db_paths, database_directory=args.database_dir)
     if input_mode_count > 1:
         print("Error: Use exactly one of --paper, --paper-list, or --openreview")
         return 1
     if input_mode_count == 0:
         print("Error: Please provide --paper, --paper-list, or --openreview")
         return 1
+
+    if args.update_databases:
+        update_code = _update_local_databases(resolved_db_paths, database_directory=args.database_dir)
+        if update_code != 0:
+            return update_code
 
     # Process paper argument - can be ArXiv ID, URL, or local PDF/LaTeX file
     paper_id = None
@@ -6783,7 +6896,9 @@ def main():
         # Initialize the reference checker
         checker = ArxivReferenceChecker(
             semantic_scholar_api_key=semantic_scholar_api_key,
-            db_path=args.db_path,
+            db_path=resolved_db_paths.get("s2"),
+            db_paths=resolved_db_paths,
+            database_directory=args.database_dir,
             output_file=args.output_file,
             llm_config=llm_config,
             debug_mode=args.debug,

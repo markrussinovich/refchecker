@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 from refchecker.__version__ import __version__
+from refchecker.utils.database_config import resolve_database_paths, DATABASE_LABELS
 
 # Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles).
 # Skip this when running under pytest so we don't replace pytest's capture streams, which can
@@ -172,6 +173,22 @@ async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
     return db_path
 
 
+async def _get_configured_database_paths() -> Dict[str, str]:
+    """Return configured local DB paths (S2 + optional DBs discovered from directory)."""
+    configured_s2 = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or None
+    database_directory = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+    db_paths = resolve_database_paths(
+        explicit_paths={
+            "s2": configured_s2,
+            "openalex": os.environ.get("REFCHECKER_OPENALEX_DB_PATH"),
+            "crossref": os.environ.get("REFCHECKER_CROSSREF_DB_PATH"),
+            "dblp": os.environ.get("REFCHECKER_DBLP_DB_PATH"),
+        },
+        database_directory=database_directory,
+    )
+    return {name: path for name, path in db_paths.items() if os.path.isfile(path)}
+
+
 async def _get_configured_cache_dir() -> Optional[str]:
     """Return the configured shared cache directory, if any."""
     configured_dir = os.environ.get('REFCHECKER_CACHE_DIR') or await db.get_setting("cache_dir")
@@ -209,6 +226,14 @@ async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
     logger.error(f"Background Semantic Scholar refresh failed for {db_path} with exit code {return_code}")
 
 
+async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
+    """Refresh a configured local database in a background subprocess when supported."""
+    if db_name != "s2":
+        logger.info(f"Skipping automated refresh for {DATABASE_LABELS.get(db_name, db_name)} DB: {db_path}")
+        return
+    await _run_semantic_scholar_refresh_subprocess(db_path)
+
+
 async def _schedule_semantic_scholar_refresh() -> Optional[asyncio.Task]:
     """Schedule a non-blocking local Semantic Scholar DB refresh when configured."""
     db_path = await _get_configured_semantic_scholar_db_path()
@@ -221,6 +246,20 @@ async def _schedule_semantic_scholar_refresh() -> Optional[asyncio.Task]:
     )
     logger.info(f"Scheduled background Semantic Scholar refresh for {db_path}")
     return task
+
+
+async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
+    """Schedule non-blocking refreshes for all discovered local databases."""
+    db_paths = await _get_configured_database_paths()
+    tasks: Dict[str, asyncio.Task] = {}
+    for db_name, db_path in sorted(db_paths.items()):
+        task = asyncio.create_task(
+            _run_database_refresh_subprocess(db_name, Path(db_path)),
+            name=f"db-refresh-{db_name}",
+        )
+        tasks[db_name] = task
+        logger.info(f"Scheduled background refresh for {DATABASE_LABELS.get(db_name, db_name)} DB at {db_path}")
+    return tasks
 
 
 def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
@@ -429,8 +468,9 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"Failed to start GROBID: {e}")
 
-    refresh_task = await _schedule_semantic_scholar_refresh()
-    app.state.semantic_scholar_refresh_task = refresh_task
+    refresh_tasks = await _schedule_database_refreshes()
+    app.state.database_refresh_tasks = refresh_tasks
+    app.state.semantic_scholar_refresh_task = refresh_tasks.get("s2")
     yield
 
 
@@ -1033,10 +1073,9 @@ async def run_check(
     email_domain = extract_email_domain(user_row.get("email")) if user_row else None
     start_monotonic = time.perf_counter()
     try:
-        # Resolve local Semantic Scholar database path from environment or settings
-        configured_db_path = os.environ.get('REFCHECKER_DB_PATH') or await db.get_setting("db_path") or None
-        resolved_db_path = _resolve_semantic_scholar_db_path(configured_db_path)
-        db_path = str(resolved_db_path) if resolved_db_path else None
+        # Resolve local checker database paths from environment/settings
+        db_paths = await _get_configured_database_paths()
+        db_path = db_paths.get("s2")
 
         # Resolve cache directory from environment or settings
         cache_dir = await _get_configured_cache_dir()
@@ -1123,6 +1162,7 @@ async def run_check(
             bibliography_source_callback=bibliography_source_callback,
             semantic_scholar_api_key=semantic_scholar_api_key,
             db_path=db_path,
+            db_paths=db_paths,
             cache_dir=cache_dir,
         )
 

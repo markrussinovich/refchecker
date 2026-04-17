@@ -34,6 +34,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib import import_module
 from typing import Dict, List, Tuple, Optional, Any
 
+from refchecker.utils.database_config import DATABASE_LABELS
+
 logger = logging.getLogger(__name__)
 
 class EnhancedHybridReferenceChecker:
@@ -60,6 +62,7 @@ class EnhancedHybridReferenceChecker:
     
     def __init__(self, semantic_scholar_api_key: Optional[str] = None,
                  db_path: Optional[str] = None,
+                 db_paths: Optional[Dict[str, str]] = None,
                  contact_email: Optional[str] = None,
                  enable_openalex: bool = True,
                  enable_crossref: bool = True,
@@ -88,19 +91,38 @@ class EnhancedHybridReferenceChecker:
                 'arxiv_citation', 'ArXivCitationChecker', 'ArXiv Citation checker'
             )
         
-        # Initialize local database checker if available
-        self.local_db = None
-        if db_path:
-            self.local_db = self._initialize_checker(
-                'local_semantic_scholar', 'LocalNonArxivReferenceChecker', 'local database',
-                db_path=db_path, error_level='error'
+        # Initialize local database checkers (S2 first, then optional additional DBs)
+        resolved_db_paths = dict(db_paths or {})
+        if db_path and 's2' not in resolved_db_paths:
+            resolved_db_paths['s2'] = db_path
+        self.db_paths = resolved_db_paths
+
+        self.local_db = None  # Backward-compat alias for S2 local DB
+        self.local_db_checkers: List[Tuple[str, str, Any]] = []
+        for db_name in ('s2', 'openalex', 'crossref', 'dblp'):
+            db_file = resolved_db_paths.get(db_name)
+            if not db_file:
+                continue
+            checker_key = f'local_{db_name}'
+            checker_label = DATABASE_LABELS.get(db_name, db_name.upper())
+            checker = self._initialize_checker(
+                'local_semantic_scholar',
+                'LocalNonArxivReferenceChecker',
+                f'local {checker_label} database',
+                db_path=db_file,
+                database_label=checker_label,
+                database_key=checker_key,
+                error_level='error',
             )
-            if self.local_db is None:
+            if checker is None:
                 raise RuntimeError(
-                    f"Failed to open local Semantic Scholar database at {db_path}. "
+                    f"Failed to open local {checker_label} database at {db_file}. "
                     f"Check that the file exists and contains a valid 'papers' table."
                 )
-            logger.debug(f"Enhanced Hybrid: Local database enabled at {db_path}")
+            self.local_db_checkers.append((checker_key, checker_label, checker))
+            if db_name == 's2':
+                self.local_db = checker
+            logger.debug(f"Enhanced Hybrid: Local {checker_label} database enabled at {db_file}")
         
         # Initialize Semantic Scholar API
         self.semantic_scholar = self._initialize_checker(
@@ -136,7 +158,8 @@ class EnhancedHybridReferenceChecker:
 
         # Propagate cache_dir to all sub-checkers for API response caching
         self.cache_dir = cache_dir
-        for checker in (self.arxiv_citation, self.local_db, self.semantic_scholar,
+        all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
+        for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
                         self.openalex, self.crossref, self.openreview, self.dblp):
             if checker is not None:
                 checker.cache_dir = cache_dir
@@ -144,13 +167,17 @@ class EnhancedHybridReferenceChecker:
         # Track API performance for adaptive selection
         self.api_stats = {
             'arxiv_citation': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
-            'local_db': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'semantic_scholar': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openalex': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'crossref': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'dblp': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
         }
+        for checker_key, _, _ in self.local_db_checkers:
+            self.api_stats.setdefault(
+                checker_key,
+                {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            )
         
         # Track failed API calls for retry logic - OPTIMIZED CONFIGURATION
         self.retry_base_delay = 1  # Base delay for retrying throttled APIs (seconds)
@@ -163,7 +190,6 @@ class EnhancedHybridReferenceChecker:
         # local_db has no limit (instant), ArXiv is rate-limited to 1 (3s gap),
         # others allow moderate parallelism.
         self._api_semaphores: Dict[str, threading.Semaphore] = {
-            'local_db': threading.Semaphore(100),      # unlimited (instant)
             'arxiv_citation': threading.Semaphore(2),   # ArXiv has 3s rate gap
             'semantic_scholar': threading.Semaphore(3),  # moderate parallelism
             'crossref': threading.Semaphore(3),
@@ -171,6 +197,8 @@ class EnhancedHybridReferenceChecker:
             'dblp': threading.Semaphore(2),
             'openreview': threading.Semaphore(2),
         }
+        for checker_key, _, _ in self.local_db_checkers:
+            self._api_semaphores.setdefault(checker_key, threading.Semaphore(100))
 
         # Cumulative timing accumulators (wall-clock seconds per API, thread-safe)
         self._api_total_time: Dict[str, float] = {k: 0.0 for k in self.api_stats}
@@ -199,15 +227,42 @@ class EnhancedHybridReferenceChecker:
 
     def _format_api_name(self, api_name: str) -> str:
         """Convert internal checker names into user-facing labels."""
+        if api_name.startswith('local_'):
+            local_key = api_name.replace('local_', '')
+            label = DATABASE_LABELS.get(local_key)
+            if label:
+                return f'local {label} DB'
         return {
             'arxiv_citation': 'ArXiv',
-            'local_db': 'local Semantic Scholar DB',
             'semantic_scholar': 'Semantic Scholar',
             'openalex': 'OpenAlex',
             'crossref': 'CrossRef',
             'dblp': 'DBLP',
             'openreview': 'OpenReview',
         }.get(api_name, api_name.replace('_', ' '))
+
+    def _annotate_match_source(
+        self,
+        verified_data: Optional[Dict[str, Any]],
+        api_name: str,
+        api_instance: Any,
+    ) -> Optional[Dict[str, Any]]:
+        """Attach the matched checker/database to the verified payload."""
+        if not isinstance(verified_data, dict):
+            return verified_data
+        local_label = getattr(api_instance, 'database_label', None)
+        matched_label = local_label or self._format_api_name(api_name)
+        verified_data.setdefault('_matched_checker', api_name)
+        verified_data.setdefault('_matched_database', matched_label)
+        return verified_data
+
+    def _iter_local_db_checkers(self) -> List[Tuple[str, str, Any]]:
+        """Return configured local DB checkers, honoring legacy test setup."""
+        if self.local_db_checkers:
+            return self.local_db_checkers
+        if self.local_db is not None:
+            return [('local_s2', 'S2', self.local_db)]
+        return []
 
     def _format_failure_detail(self, api_name: str, failure_type: str,
                                detail: Optional[str] = None) -> str:
@@ -301,6 +356,7 @@ class EnhancedHybridReferenceChecker:
             self._update_api_stats(api_name, success, duration)
             
             if success:
+                verified_data = self._annotate_match_source(verified_data, api_name, api_instance)
                 retry_info = " (retry)" if is_retry else ""
                 logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s{retry_info}, URL: {url}")
                 return verified_data, errors, url, True, 'none', ''
@@ -945,20 +1001,26 @@ class EnhancedHybridReferenceChecker:
             # For ArXiv refs: try local DB first (instant). If result looks
             # clean, use it. If there's a major discrepancy (e.g., wrong
             # authors from a corrupt S2 entry), fall back to ArXiv BibTeX.
-            if self.local_db:
-                self._append_attempted_api(attempted_apis, 'local_db')
-                verified_data, errors, url, success, failure_type, failure_detail = self._try_api('local_db', self.local_db, reference)
+            for local_key, _, local_checker in self._iter_local_db_checkers():
+                self._append_attempted_api(attempted_apis, local_key)
+                verified_data, errors, url, success, failure_type, failure_detail = self._try_api(
+                    local_key,
+                    local_checker,
+                    reference,
+                )
                 if success:
                     if not self._has_major_author_discrepancy(errors):
                         return verified_data, errors, url
-                    else:
-                        logger.debug("Enhanced Hybrid: Local DB has major author discrepancy for ArXiv ref, falling back to ArXiv citation")
-                elif failure_type == 'not_found':
+                    logger.debug(
+                        "Enhanced Hybrid: %s has major author discrepancy for ArXiv ref, falling back to ArXiv citation",
+                        local_key,
+                    )
+                elif failure_type == 'not_found' and local_key == 'local_s2':
                     db_not_found = True
                 elif failure_type not in ('none', 'not_found'):
                     failed_apis.append({
-                        'name': 'local_db',
-                        'instance': self.local_db,
+                        'name': local_key,
+                        'instance': local_checker,
                         'failure_type': failure_type,
                         'failure_detail': failure_detail,
                         'active': True,
@@ -1022,20 +1084,24 @@ class EnhancedHybridReferenceChecker:
                     return result
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
-            if self.local_db:
-                self._append_attempted_api(attempted_apis, 'local_db')
-                verified_data, errors, url, success, failure_type, failure_detail = self._try_api('local_db', self.local_db, reference)
+            for local_key, _, local_checker in self._iter_local_db_checkers():
+                self._append_attempted_api(attempted_apis, local_key)
+                verified_data, errors, url, success, failure_type, failure_detail = self._try_api(
+                    local_key,
+                    local_checker,
+                    reference,
+                )
                 if success:
                     return verified_data, errors, url
                 if failure_type not in ('none', 'not_found'):
                     failed_apis.append({
-                        'name': 'local_db',
-                        'instance': self.local_db,
+                        'name': local_key,
+                        'instance': local_checker,
                         'failure_type': failure_type,
                         'failure_detail': failure_detail,
                         'active': True,
                     })
-                elif failure_type == 'not_found':
+                elif failure_type == 'not_found' and local_key == 'local_s2':
                     db_not_found = True
             
             # Skip SS API when the 233M-paper local DB returned not_found —

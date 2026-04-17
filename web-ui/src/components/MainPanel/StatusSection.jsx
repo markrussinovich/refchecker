@@ -749,6 +749,39 @@ export default function StatusSection() {
               )
             }
 
+            if (displayExtractionMethod === 'grobid') {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source: GROBID fallback
+                </p>
+              )
+            }
+
+            if (displayExtractionMethod === 'llm') {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source: LLM extraction
+                </p>
+              )
+            }
+
+            if (displayExtractionMethod === 'cache') {
+              return (
+                <p 
+                  className="text-sm"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >
+                  Source: Cached bibliography
+                </p>
+              )
+            }
+
             if (displaySourceType === 'text' && selectedCheckId) {
               return (
                 <p 

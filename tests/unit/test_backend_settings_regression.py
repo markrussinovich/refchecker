@@ -80,6 +80,14 @@ class TestDbPathSetting:
             "the UI-configured path will be ignored"
         )
 
+    def test_backend_supports_database_directory_env_var(self):
+        """Web UI should discover DBs from REFCHECKER_DATABASE_DIRECTORY."""
+        src = _read_backend_main()
+        assert "REFCHECKER_DATABASE_DIRECTORY" in src, (
+            "backend/main.py does not reference REFCHECKER_DATABASE_DIRECTORY — "
+            "web UI cannot discover multiple local DBs by filename"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 2. Thumbnail fallback for ArXiv papers
