@@ -258,6 +258,8 @@ class EnhancedHybridReferenceChecker:
 
     def _iter_local_db_checkers(self) -> List[Tuple[str, str, Any]]:
         """Return configured local DB checkers, honoring legacy test setup."""
+        # TODO: remove legacy `self.local_db` fallback after dependent tests are
+        # fully migrated to assert against `local_db_checkers`.
         if self.local_db_checkers:
             return self.local_db_checkers
         if self.local_db is not None:
@@ -1016,6 +1018,9 @@ class EnhancedHybridReferenceChecker:
                         local_key,
                     )
                 elif failure_type == 'not_found' and local_key == 'local_s2':
+                    # Only S2 local DB is treated as "global coverage" for skip-SS optimization.
+                    # Other local DBs (OpenAlex/CrossRef/DBLP) are partial and should not suppress
+                    # Semantic Scholar API attempts when they return not_found.
                     db_not_found = True
                 elif failure_type not in ('none', 'not_found'):
                     failed_apis.append({
@@ -1102,6 +1107,7 @@ class EnhancedHybridReferenceChecker:
                         'active': True,
                     })
                 elif failure_type == 'not_found' and local_key == 'local_s2':
+                    # See note above: only local_s2 controls skip_ss behavior.
                     db_not_found = True
             
             # Skip SS API when the 233M-paper local DB returned not_found —

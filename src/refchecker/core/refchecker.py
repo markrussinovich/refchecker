@@ -6687,7 +6687,15 @@ class ArxivReferenceChecker:
 
 
 def _update_local_databases(database_paths, database_directory=None):
-    """Install/update local checker databases."""
+    """Install or update configured local checker databases.
+
+    Args:
+        database_paths: Mapping of database key -> resolved database file path.
+        database_directory: Optional directory used to discover default DB files.
+
+    Returns:
+        Integer process exit code (0 on success, non-zero on failure).
+    """
     if not database_paths and not database_directory:
         print("No local databases configured. Use --database-dir or per-DB flags first.")
         return 1
@@ -6713,9 +6721,22 @@ def _update_local_databases(database_paths, database_directory=None):
             "--db-path",
             db_path,
         ]
-        result = subprocess.run(command, cwd=repo_root)
+        try:
+            result = subprocess.run(
+                command,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=3600,
+            )
+        except subprocess.TimeoutExpired:
+            print("❌ Timed out while updating S2 database")
+            return 1
         if result.returncode != 0:
-            print(f"❌ Failed to update S2 database (exit code {result.returncode})")
+            stderr = (result.stderr or "").strip()
+            stdout = (result.stdout or "").strip()
+            details = stderr or stdout or f"exit code {result.returncode}"
+            print(f"❌ Failed to update S2 database: {details}")
             return result.returncode
         print("✅ Updated S2 database")
         updated_any = True
