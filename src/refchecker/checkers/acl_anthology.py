@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from refchecker.__version__ import __version__
 from refchecker.utils.text_utils import (
     clean_title_for_search,
     normalize_text,
@@ -97,14 +98,14 @@ class ACLAnthologyReferenceChecker:
 
     SEARCH_URL = 'https://aclanthology.org/search/'
     REQUEST_TIMEOUT = 15
-    # Be polite — space requests to ~1 per second
+    # Be polite — space requests to ~0.9 per second (1.1s interval)
     MIN_REQUEST_INTERVAL = 1.1
 
     def __init__(self, email: Optional[str] = None):
         self.session = requests.Session()
         self.session.headers.update({
             'Accept': 'text/html,application/xhtml+xml',
-            'User-Agent': 'RefChecker/1.0.0 (https://github.com/markrussinovich/refchecker)',
+            'User-Agent': f'RefChecker/{__version__} (https://github.com/markrussinovich/refchecker)',
         })
         self._last_request_time = 0.0
 
