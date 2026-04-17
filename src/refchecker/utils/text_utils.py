@@ -84,8 +84,8 @@ def normalize_apostrophes(text):
     # All known apostrophe variants
     apostrophe_variants = [
         "'",      # U+0027 ASCII apostrophe
-        "'",      # U+2019 Right single quotation mark (most common)
-        "'",      # U+2018 Left single quotation mark  
+        "’",      # U+2019 Right single quotation mark (most common)
+        "‘",      # U+2018 Left single quotation mark  
         "ʼ",      # U+02BC Modifier letter apostrophe
         "ˈ",      # U+02C8 Modifier letter vertical line (primary stress)
         "`",      # U+0060 Grave accent (sometimes used as apostrophe)
@@ -986,6 +986,30 @@ def is_name_match(name1: str, name2: str) -> bool:
         True if names match, False otherwise
     """
     if not name1 or not name2:
+        return False
+
+    def has_internal_accent_apostrophe(token: str) -> bool:
+        token = normalize_apostrophes(token)
+        return any(
+            char == "'" and 1 < idx < len(token) - 1
+            for idx, char in enumerate(token)
+        )
+
+    raw_name1 = normalize_apostrophes(name1.strip())
+    raw_name2 = normalize_apostrophes(name2.strip())
+    raw_parts1 = raw_name1.split()
+    raw_parts2 = raw_name2.split()
+
+    # Keep simple two-part surnames with accent-placeholder apostrophes strict.
+    # This avoids treating cases like "Balunovi'c" as exact matches while still
+    # allowing genuine apostrophe surnames such as "D'Mello" and the more
+    # structured fallback paths for hyphenated or initial-expanded names.
+    if (
+        len(raw_parts1) == 2 and len(raw_parts2) == 2 and
+        all(len(part.rstrip('.')) > 1 for part in raw_parts1 + raw_parts2) and
+        not any(re.search(r'[-‐‑–—−]+', name) for name in (raw_name1, raw_name2)) and
+        any(has_internal_accent_apostrophe(part) for part in raw_parts1 + raw_parts2)
+    ):
         return False
     
     # Try primary normalization first (with transliterations)
@@ -1998,6 +2022,19 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
         return False
 
     if len(tokens1) != len(tokens2):
+        return False
+
+    has_hyphenated_structure = any(
+        re.search(r'[-‐‑–—−]+', name)
+        for name in (name1, name2)
+    )
+    has_initial_expansion = any(
+        (len(token1) == 1 and len(token2) > 1) or
+        (len(token2) == 1 and len(token1) > 1)
+        for token1, token2 in zip(tokens1, tokens2)
+    )
+
+    if not has_hyphenated_structure and not has_initial_expansion:
         return False
 
     for token1, token2 in zip(tokens1, tokens2):

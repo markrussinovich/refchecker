@@ -168,6 +168,21 @@ class TestEnhancedNameMatching(unittest.TestCase):
         self.assertTrue(enhanced_name_match(cited, correct))
         self.assertTrue(enhanced_name_match(correct, cited))
 
+    def test_curly_apostrophe_initial_matches_full_name(self):
+        """Curly apostrophes should not block initial-to-full-name author matches."""
+        cited = "Sidney D'Mello"
+        correct = "S. D’Mello"
+
+        self.assertTrue(enhanced_name_match(cited, correct))
+        self.assertTrue(enhanced_name_match(correct, cited))
+
+    def test_compare_authors_accepts_curly_apostrophe_variant(self):
+        """Author list comparison should accept curly apostrophe surname variants."""
+        match_result, error_message = compare_authors(["Sidney D'Mello"], ["S. D’Mello"])
+
+        self.assertTrue(match_result, error_message)
+        self.assertEqual(error_message, "Authors match")
+
     def test_compare_authors_accepts_reported_false_positives(self):
         """Test full author list comparison for the reported false positives."""
         cases = [
