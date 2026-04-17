@@ -183,6 +183,14 @@ class TestEnhancedNameMatching(unittest.TestCase):
                 self.assertTrue(match_result, error_message)
                 self.assertEqual(error_message, "Authors match")
 
+    def test_two_part_accent_placeholder_names_do_not_match_without_structure(self):
+        """Simple two-part names should not use the fallback matcher."""
+        cited = "Mislav Balunović"
+        correct = "Mislav Balunovi'c"
+
+        self.assertFalse(enhanced_name_match(cited, correct))
+        self.assertFalse(enhanced_name_match(correct, cited))
+
 
 if __name__ == '__main__':
     unittest.main()

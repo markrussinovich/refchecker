@@ -2000,6 +2000,19 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
     if len(tokens1) != len(tokens2):
         return False
 
+    has_hyphenated_structure = any(
+        re.search(r'[-‐‑–—−]+', name)
+        for name in (name1, name2)
+    )
+    has_initial_expansion = any(
+        (len(token1) == 1 and len(token2) > 1) or
+        (len(token2) == 1 and len(token1) > 1)
+        for token1, token2 in zip(tokens1, tokens2)
+    )
+
+    if not has_hyphenated_structure and not has_initial_expansion:
+        return False
+
     for token1, token2 in zip(tokens1, tokens2):
         if token1 == token2:
             continue
