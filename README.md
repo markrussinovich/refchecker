@@ -68,6 +68,8 @@ academic-refchecker --paper 1706.03762
 academic-refchecker --paper /path/to/paper.pdf
 ```
 
+LLM extraction is generally more accurate, but PDFs can fall back to GROBID when no LLM is configured. Hallucination web-search checks require an LLM provider.
+
 > **Tip:** Set `SEMANTIC_SCHOLAR_API_KEY` for 1-2s per reference vs 5-10s without.
 
 ---
@@ -142,8 +144,8 @@ academic-refchecker --paper /path/to/paper.pdf
 
 ```bash
 pip install academic-refchecker[llm,webui]  # Web UI + CLI + LLM providers
-pip install academic-refchecker[llm]        # CLI + LLM providers
-pip install academic-refchecker             # CLI only (regex extraction)
+pip install academic-refchecker[llm]        # CLI + LLM providers; recommended for best extraction and hallucination checks
+pip install academic-refchecker             # CLI only; PDFs can still fall back to GROBID when available
 ```
 
 ### From Source (development)
@@ -162,6 +164,8 @@ pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 ## Web UI
 
 The Web UI provides real-time progress, check history, batch tracking, and one-click export of corrections.
+
+LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination web-search checks still require a configured LLM/API key.
 
 ```bash
 refchecker-webui                    # default: http://localhost:8000
@@ -624,6 +628,12 @@ The downloader also writes a `latest_snapshot.txt` file next to the SQLite datab
 
 ---
 
+## Documentation
+
+Detailed project documentation lives under [docs/README.md](docs/README.md), including the Web UI guide and testing guide.
+
+---
+
 ## Testing
 
 680+ tests covering unit, integration, and end-to-end scenarios.
@@ -633,6 +643,7 @@ pytest tests/                    # All tests
 pytest tests/unit/              # Unit only
 pytest tests/e2e/               # End-to-end (Playwright)
 pytest --cov=src tests/         # With coverage
+make clean                      # Remove generated local artifacts (logs, debug output, cache, build files)
 ```
 
 See [tests/README.md](tests/README.md) for details.
