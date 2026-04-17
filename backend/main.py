@@ -175,7 +175,8 @@ async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
 
 async def _get_configured_database_paths() -> Dict[str, str]:
     """Return configured local DB paths (S2 + optional DBs discovered from directory)."""
-    configured_s2 = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or None
+    s2_path = await _get_configured_semantic_scholar_db_path()
+    configured_s2 = str(s2_path) if s2_path else None
     database_directory = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
     db_paths = resolve_database_paths(
         explicit_paths={
@@ -186,7 +187,17 @@ async def _get_configured_database_paths() -> Dict[str, str]:
         },
         database_directory=database_directory,
     )
-    return {name: path for name, path in db_paths.items() if os.path.isfile(path)}
+    filtered: Dict[str, str] = {}
+    for name, path in db_paths.items():
+        if os.path.isfile(path):
+            filtered[name] = path
+        else:
+            logger.warning(
+                "Configured local %s DB path was not found: %s",
+                DATABASE_LABELS.get(name, name),
+                path,
+            )
+    return filtered
 
 
 async def _get_configured_cache_dir() -> Optional[str]:

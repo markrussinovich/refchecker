@@ -808,7 +808,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.errors === next.errors &&
     prev.warnings === next.warnings &&
     prev.suggestions === next.suggestions &&
-    prev.matched_database === next.matched_database &&
+    (prev.matched_database ?? null) === (next.matched_database ?? null) &&
     prev.authoritative_urls === next.authoritative_urls
   )
 })
