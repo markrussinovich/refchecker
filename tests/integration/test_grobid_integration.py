@@ -81,7 +81,7 @@ class TestGrobidIntegration:
         """GROBID should auto-start when Docker is available."""
         available = ensure_grobid_running()
         if not available:
-            pytest.skip("GROBID did not become available (may need more time or resources)")
+            pytest.skip("GROBID could not be started (Docker may lack permissions or image unavailable)")
 
     def test_grobid_health_check(self):
         """GROBID health endpoint should respond correctly."""
