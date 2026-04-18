@@ -48,12 +48,13 @@ def main():
     parser.add_argument(
         "--database-dir",
         type=str,
-        help="Directory containing local DB files (semantic_scholar.db, openalex.db, crossref.db, dblp.db)"
+        help="Directory containing local DB files (semantic_scholar.db, openalex.db, crossref.db, dblp.db, acl_anthology.db)"
     )
     parser.add_argument("--s2-db", type=str, help="Path to local Semantic Scholar DB file")
     parser.add_argument("--openalex-db", type=str, help="Path to local OpenAlex DB file")
     parser.add_argument("--crossref-db", type=str, help="Path to local CrossRef DB file")
     parser.add_argument("--dblp-db", type=str, help="Path to local DBLP DB file")
+    parser.add_argument("--acl-db", type=str, help="Path to local ACL Anthology DB file")
     
     args = parser.parse_args()
 
@@ -67,6 +68,8 @@ def main():
         os.environ["REFCHECKER_CROSSREF_DB_PATH"] = args.crossref_db
     if args.dblp_db:
         os.environ["REFCHECKER_DBLP_DB_PATH"] = args.dblp_db
+    if args.acl_db:
+        os.environ["REFCHECKER_ACL_DB_PATH"] = args.acl_db
     
     try:
         import uvicorn

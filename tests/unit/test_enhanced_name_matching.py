@@ -168,6 +168,31 @@ class TestEnhancedNameMatching(unittest.TestCase):
         self.assertTrue(enhanced_name_match(cited, correct))
         self.assertTrue(enhanced_name_match(correct, cited))
 
+    def test_curly_apostrophe_initial_matches_full_name(self):
+        """Curly apostrophes should not block initial-to-full-name author matches."""
+        cited = "Sidney D'Mello"
+        correct = "S. D’Mello"
+
+        self.assertTrue(enhanced_name_match(cited, correct))
+        self.assertTrue(enhanced_name_match(correct, cited))
+
+    def test_compare_authors_accepts_curly_apostrophe_variant(self):
+        """Author list comparison should accept curly apostrophe surname variants."""
+        match_result, error_message = compare_authors(["Sidney D'Mello"], ["S. D’Mello"])
+
+        self.assertTrue(match_result, error_message)
+        self.assertEqual(error_message, "Authors match")
+    def test_name_token_reorder_li_erran_li(self):
+        """'Erran Li Li' and 'Li Erran Li' are the same person with reordered name parts."""
+        self.assertTrue(enhanced_name_match("Erran Li Li", "Li Erran Li"))
+        self.assertTrue(enhanced_name_match("Li Erran Li", "Erran Li Li"))
+
+    def test_compare_authors_with_reordered_name_et_al(self):
+        """Author list with 'Erran Li Li' vs 'Li Erran Li' and et al should match."""
+        cited = ["Manling Li", "Tony Lee", "Erran Li Li", "Ruohan Zhang", "et al"]
+        correct = ["Manling Li", "Tony Lee", "Li Erran Li", "Ruohan Zhang", "Weiyu Liu"]
+        match_result, error_message = compare_authors(cited, correct)
+        self.assertTrue(match_result, error_message)
     def test_compare_authors_accepts_reported_false_positives(self):
         """Test full author list comparison for the reported false positives."""
         cases = [

@@ -15,7 +15,7 @@ class TimeoutChecker:
 
 
 class LocalMatchChecker:
-    database_label = "S2"
+    database_label = "Semantic Scholar"
     database_key = "local_s2"
 
     def verify_reference(self, reference):
@@ -80,5 +80,5 @@ def test_verify_reference_records_matched_database_from_local_checker():
 
     assert errors == []
     assert url == "https://www.semanticscholar.org/paper/s2-match-id"
-    assert verified_data["_matched_database"] == "S2"
+    assert verified_data["_matched_database"] == "Semantic Scholar"
     assert verified_data["_matched_checker"] == "local_s2"

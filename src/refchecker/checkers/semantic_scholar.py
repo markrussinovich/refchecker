@@ -469,22 +469,45 @@ class NonArxivReferenceChecker:
         if not cited_title:
             return errors, None
         
-        from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+        from refchecker.utils.text_utils import compare_titles_with_latex_cleaning, compare_authors
         
-        # Find the BEST matching version by comparing against all versions
-        # (not just checking if latest exceeds threshold)
+        cited_authors = reference.get('authors', [])
+
+        def _version_match_score(version_data):
+            """Compute a combined (title, author) match score for a version."""
+            version_title = version_data.get('title', '').strip()
+            if not version_title:
+                return -1.0
+            title_score = compare_titles_with_latex_cleaning(cited_title, version_title)
+            if title_score < SIMILARITY_THRESHOLD:
+                return -1.0
+
+            # When the reference has authors, factor in author match quality.
+            # Author matching produces a boolean; we boost the title score by
+            # a small amount when authors match so that among versions with
+            # identical titles, the one whose author list matches wins.
+            if cited_authors:
+                version_authors = [
+                    a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                    for a in version_data.get('authors', [])
+                ]
+                if version_authors:
+                    authors_match, _ = compare_authors(cited_authors, version_authors)
+                    if authors_match:
+                        return title_score + 0.01  # boost
+            return title_score
+
+        # Find the BEST matching version by comparing title + authors
         best_match_version = None
         best_match_score = 0.0
         
         # Check latest version first
         latest_version_data = self._fetch_arxiv_version_metadata(arxiv_id, latest_version_num)
         if latest_version_data:
-            latest_title = latest_version_data.get('title', '').strip()
-            if latest_title:
-                latest_score = compare_titles_with_latex_cleaning(cited_title, latest_title)
-                if latest_score >= SIMILARITY_THRESHOLD:
-                    best_match_version = latest_version_num
-                    best_match_score = latest_score
+            latest_score = _version_match_score(latest_version_data)
+            if latest_score > 0:
+                best_match_version = latest_version_num
+                best_match_score = latest_score
         
         # Check historical versions to find if any is a BETTER match
         for version_num in range(1, latest_version_num):
@@ -492,14 +515,10 @@ class NonArxivReferenceChecker:
             if not version_data:
                 continue
             
-            version_title = version_data.get('title', '').strip()
-            if not version_title:
-                continue
-            
-            version_score = compare_titles_with_latex_cleaning(cited_title, version_title)
+            version_score = _version_match_score(version_data)
             
             # If this version is a better match than current best
-            if version_score > best_match_score and version_score >= SIMILARITY_THRESHOLD:
+            if version_score > best_match_score:
                 best_match_version = version_num
                 best_match_score = version_score
         
@@ -978,12 +997,18 @@ class NonArxivReferenceChecker:
                 from refchecker.utils.error_utils import create_venue_warning
                 errors.append(create_venue_warning(cited_venue, paper_venue))
         elif not cited_venue and paper_venue:
-            # Reference has no venue but paper has one - error for missing venue
-            errors.append({
-                'error_type': 'venue',
-                'error_details': f"Venue missing: should include '{paper_venue}'",
-                'ref_venue_correct': paper_venue
-            })
+            # Reference has no venue but paper has one — skip generic/preprint
+            # server venues (arXiv, CoRR) since they're not meaningful venues.
+            pv = paper_venue.lower().strip()
+            if (pv and
+                pv not in ('arxiv', 'arxiv.org', 'preprint', 'corr', '') and
+                not pv.startswith('arxiv') and
+                not pv.startswith('corr')):
+                errors.append({
+                    'error_type': 'venue',
+                    'error_details': f"Venue missing: should include '{paper_venue}'",
+                    'ref_venue_correct': paper_venue
+                })
 
         # Always check for missing arXiv URLs when paper has arXiv ID
         external_ids = paper_data.get('externalIds', {})

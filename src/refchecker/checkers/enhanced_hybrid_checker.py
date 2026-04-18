@@ -34,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from importlib import import_module
 from typing import Dict, List, Tuple, Optional, Any
 
-from refchecker.utils.database_config import DATABASE_LABELS
+from refchecker.utils.database_config import DATABASE_LABELS, DATABASE_LOOKUP_ORDER
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class EnhancedHybridReferenceChecker:
 
         self.local_db = None  # Backward-compat alias for S2 local DB
         self.local_db_checkers: List[Tuple[str, str, Any]] = []
-        for db_name in ('s2', 'openalex', 'crossref', 'dblp'):
+        for db_name in DATABASE_LOOKUP_ORDER:
             db_file = resolved_db_paths.get(db_name)
             if not db_file:
                 continue
@@ -277,7 +277,7 @@ class EnhancedHybridReferenceChecker:
         if self.local_db_checkers:
             return self.local_db_checkers
         if self.local_db is not None:
-            return [('local_s2', 'S2', self.local_db)]
+            return [('local_s2', 'Semantic Scholar', self.local_db)]
         return []
 
     def _format_failure_detail(self, api_name: str, failure_type: str,
@@ -896,9 +896,24 @@ class EnhancedHybridReferenceChecker:
         #    AND high overlap — S2/DB may have incomplete author data while
         #    ArXiv has the complete list.  Don't trigger for large differences
         #    (≥3 extra) as those indicate fabricated author lists.
+        # 3. DB/S2 has MORE authors than cited AND high overlap — likely an
+        #    ArXiv version update where authors were added in a newer version.
+        #    The ArXiv version checker can match the cited authors to a
+        #    historical version and convert the error to a warning.
+        # 4. High overlap but first author differs — likely an author
+        #    reordering between ArXiv versions (e.g. preprint vs published).
         cited_count = len([a for a in cited_authors.split(',') if a.strip()])
         correct_count = len([a for a in correct_authors.split(',') if a.strip()])
-        small_count_gap = 0 < (cited_count - correct_count) <= 2
+        cited_more = 0 < (cited_count - correct_count) <= 2
+        correct_more = 0 < (correct_count - cited_count)
+
+        # Check for first-author order change with high overall overlap
+        first_author_differs = False
+        if overlap is not None and overlap >= 0.8 and cited_count == correct_count:
+            cited_first = cited_authors.split(',')[0].strip().lower() if cited_authors else ''
+            correct_first = correct_authors.split(',')[0].strip().lower() if correct_authors else ''
+            if cited_first and correct_first and cited_first != correct_first:
+                first_author_differs = True
 
         if overlap is not None and overlap <= 0.1:
             logger.debug(
@@ -906,12 +921,25 @@ class EnhancedHybridReferenceChecker:
                 "attempting ArXiv re-verification for '%s'",
                 overlap * 100, reference.get('title', '')[:60],
             )
-        elif small_count_gap and overlap is not None and overlap >= 0.5:
+        elif cited_more and overlap is not None and overlap >= 0.5:
             logger.debug(
                 "DB has fewer authors (%d) than cited (%d), overlap %.0f%% — "
                 "attempting ArXiv re-verification for '%s'",
                 correct_count, cited_count, overlap * 100,
                 reference.get('title', '')[:60],
+            )
+        elif correct_more and overlap is not None and overlap >= 0.5:
+            logger.debug(
+                "DB has more authors (%d) than cited (%d), overlap %.0f%% — "
+                "likely ArXiv version update, attempting ArXiv re-verification for '%s'",
+                correct_count, cited_count, overlap * 100,
+                reference.get('title', '')[:60],
+            )
+        elif first_author_differs:
+            logger.debug(
+                "First-author order change with %.0f%% overlap — "
+                "attempting ArXiv re-verification for '%s'",
+                overlap * 100, reference.get('title', '')[:60],
             )
         else:
             return None
@@ -969,10 +997,18 @@ class EnhancedHybridReferenceChecker:
 
         # 2. Independent ArXiv ID check — skip when the hybrid checker
         #    already verified the paper with no errors (avoids false
-        #    positives from paraphrased titles in the S2 API)
+        #    positives from paraphrased titles in the S2 API).
+        #    Also skip when version checking already converted title errors
+        #    to warnings (e.g., "title (v9 vs v10 update)") — the version
+        #    checker has already handled the title discrepancy.
         if errors:  # only when there are existing errors
             already_has_arxiv = any(e.get('error_type') == 'arxiv_id' for e in errors)
-            if not already_has_arxiv:
+            has_version_title_warning = any(
+                'title' in (e.get('warning_type') or '').lower()
+                and 'update' in (e.get('warning_type') or '').lower()
+                for e in errors
+            )
+            if not already_has_arxiv and not has_version_title_warning:
                 arxiv_errors = self._check_arxiv_id_mismatch(reference, verified_data)
                 if arxiv_errors:
                     errors = (errors or []) + arxiv_errors

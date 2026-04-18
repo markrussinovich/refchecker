@@ -4,6 +4,7 @@ LLM provider implementations for reference extraction
 
 import json
 import os
+import re
 import subprocess
 from typing import List, Dict, Any, Optional
 import logging
@@ -58,8 +59,6 @@ class LLMProviderMixin:
         """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
         if not bibliography_text:
             return bibliography_text
-            
-        import re
         
         # First, protect LaTeX commands from being stripped
         protected_commands = []
@@ -163,18 +162,55 @@ class LLMProviderMixin:
             logger.warning("LLM response contains no structured references (no # delimiters found)")
             return []
 
-        # Split by double newlines first to handle paragraph-style formatting
-        # then fall back to single newlines
+        # Normalize the response into logical references. Some models emit
+        # multiple one-line references inside a paragraph, while others wrap a
+        # single reference across multiple physical lines.
         references = []
+        potential_refs = []
+        current_parts = []
 
-        # Try double newline splitting first (paragraph style)
-        if '\n\n' in content:
-            potential_refs = content.split('\n\n')
-        else:
-            # Fall back to single newline splitting
-            potential_refs = content.split('\n')
+        def flush_current_parts():
+            if not current_parts:
+                return
+            candidate = ' '.join(part for part in current_parts if part).strip()
+            if candidate:
+                potential_refs.append(candidate)
+            current_parts.clear()
 
-        import re
+        def looks_like_complete_reference(ref_text: str) -> bool:
+            segments = [segment.strip() for segment in ref_text.split('#') if segment.strip()]
+            if len(segments) >= 4:
+                return True
+            if len(segments) != 3:
+                return False
+
+            last_segment = segments[-1]
+            return bool(re.match(r'^(19|20)\d{2}$', last_segment) or last_segment.startswith('http'))
+
+        for raw_line in content.splitlines():
+            line = raw_line.strip()
+
+            if not line:
+                flush_current_parts()
+                continue
+
+            if not current_parts:
+                current_parts.append(line)
+                continue
+
+            current_ref = ' '.join(current_parts)
+            current_has_delimiter = '#' in current_ref
+            current_is_complete = looks_like_complete_reference(current_ref)
+            line_looks_like_new_ref = '#' in line and len(line) > 30
+
+            if line_looks_like_new_ref and (current_is_complete or not current_has_delimiter):
+                flush_current_parts()
+                current_parts.append(line)
+                continue
+
+            current_parts.append(line)
+
+        flush_current_parts()
 
         # Common prose patterns that indicate explanatory text
         prose_starters = (

@@ -422,13 +422,13 @@ def test_inferred_arxiv_clean_match_clears_local_author_error(_make_checker):
 
 
 def test_inferred_arxiv_clean_match_keeps_non_reorder_author_error(_make_checker):
-    """A clean inferred arXiv match should not clear spelling/normalization mismatches that are not pure reorder cases."""
+    """A clean inferred arXiv match should not clear genuine author mismatches."""
     checker = _make_checker([{
         "paperId": "703",
         "title": "MathArena: Evaluating LLMs on uncontaminated math competitions",
         "year": 2025,
         "authors": [
-            {"authorId": "1", "name": "Mislav Balunovi'c"},
+            {"authorId": "1", "name": "Alice Correct"},
             {"authorId": "2", "name": "Jasper Dekoninck"},
             {"authorId": "3", "name": "Ivo Petrov"},
         ],
@@ -438,7 +438,7 @@ def test_inferred_arxiv_clean_match_keeps_non_reorder_author_error(_make_checker
 
     reference = {
         "title": "MathArena: Evaluating LLMs on uncontaminated math competitions",
-        "authors": ["Mislav Balunović", "Jasper Dekoninck", "Ivo Petrov"],
+        "authors": ["Bob Wrong", "Jasper Dekoninck", "Ivo Petrov"],
         "year": 2025,
         "venue": "Advances in Neural Information Processing Systems, Datasets and Benchmarks Track",
         "url": "",
@@ -518,7 +518,9 @@ def test_wrong_arxiv_url_detected_when_paper_found_by_title(_make_checker):
 def test_wrong_arxiv_url_paper_has_no_arxiv_id(_make_checker):
     """
     When the reference cites an arXiv URL but the matched paper has NO ArXiv ID,
-    the arXiv URL should be flagged as incorrect.
+    we no longer flag this as an error because databases (including S2) have
+    incomplete arXiv coverage — a missing mapping is not evidence that the
+    reference's URL is wrong.
     """
     checker = _make_checker([
         {
@@ -542,7 +544,41 @@ def test_wrong_arxiv_url_paper_has_no_arxiv_id(_make_checker):
     verified_data, errors, url = checker.verify_reference(reference)
     assert verified_data is not None
     arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
-    assert len(arxiv_errors) >= 1, f"Expected arxiv_id error for spurious arXiv URL, got: {errors}"
+    assert arxiv_errors == [], f"Missing ArXiv ID should NOT be flagged as an error: {arxiv_errors}"
+
+
+def test_dblp_match_without_arxiv_metadata_does_not_flag_arxiv_id():
+    """DBLP-only matches should not treat missing ArXiv metadata as proof of mismatch."""
+    db_path, tmp_dir = _create_test_db([{
+        "paperId": "dblp:conf/nips/ChengYFGYK0L24",
+        "title": "SpatialRGPT: Grounded Spatial Reasoning in Vision-Language Models",
+        "year": 2024,
+        "authors": [{"authorId": "1", "name": "An-Chieh Cheng"}],
+        "venue": "NeurIPS",
+        # Intentionally no externalIds_ArXiv: DBLP records may omit it.
+    }])
+
+    checker = LocalNonArxivReferenceChecker(
+        db_path=db_path,
+        database_label='DBLP',
+        database_key='local_dblp',
+    )
+    try:
+        verified_data, errors, _url = checker.verify_reference({
+            "title": "SpatialRGPT: Grounded Spatial Reasoning in Vision-Language Models",
+            "authors": ["An-Chieh Cheng"],
+            "year": 2024,
+            "url": "https://arxiv.org/abs/2406.01584",
+            "venue": "NeurIPS",
+        })
+    finally:
+        checker.close()
+        import shutil
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    assert verified_data is not None
+    arxiv_errors = [e for e in errors if e.get("error_type") == "arxiv_id"]
+    assert arxiv_errors == [], f"Unexpected arxiv_id error for DBLP-only match: {errors}"
 
 
 def test_correct_arxiv_url_no_error(_make_checker):

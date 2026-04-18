@@ -214,6 +214,20 @@ class TestVenueNormalization(unittest.TestCase):
         result = are_venues_substantially_different(venue1, venue2)
         self.assertTrue(result, "Genuinely different venues should be detected as different")
 
+    def test_arxiv_preprint_vs_conference_is_not_mismatch(self):
+        """arXiv preprint → real conference is a preprint-to-published upgrade, not a mismatch."""
+        cases = [
+            ("arXiv", "NeurIPS"),
+            ("arXiv preprint", "Neural Information Processing Systems"),
+            ("arXiv preprint arXiv:2406.01584", "NeurIPS"),
+            ("arXiv preprint arXiv:2502.22222", "CVPR"),
+            ("arXiv.org", "ICML"),
+            ("CoRR", "Conference on Computer Vision and Pattern Recognition"),
+        ]
+        for cited, actual in cases:
+            result = are_venues_substantially_different(cited, actual)
+            self.assertFalse(result, f"'{cited}' vs '{actual}' should NOT be flagged as a mismatch")
+
 
 class TestRegressionScenarios(unittest.TestCase):
     """Test specific regression scenarios from user reports"""

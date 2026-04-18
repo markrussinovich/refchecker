@@ -301,7 +301,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       </div>
       )}
 
-      {/* Local Database Path (single-user only, rendered when setting exists in API response) */}
+      {/* Local Database Directory (single-user only, rendered when setting exists in API response) */}
       {settings.db_path && !multiuser && (
         <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
           <div className="mb-2">
@@ -316,7 +316,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             <input
               type="text"
               value={dbPathLocal}
-              placeholder="/path/to/semantic_scholar.db"
+              placeholder="/path/to/local-databases"
               onChange={(e) => { setDbPathLocal(e.target.value); setDbPathError(null); setDbPathSuccess(null) }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleDbPathSave() }}
               className="flex-1 px-3 py-2 rounded-lg border text-sm"
@@ -347,7 +347,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
           {settings.db_path?.value && settings.db_path?.current_snapshot && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Current snapshot: {settings.db_path.current_snapshot}
+              Current Semantic Scholar snapshot: {settings.db_path.current_snapshot}
             </div>
           )}
         </div>

@@ -249,6 +249,24 @@ class TestResultDisplayLogic(unittest.TestCase):
         self.assertEqual(len(processable_errors), 1, "Should have one processable error (year warning)")
         self.assertEqual(processable_errors[0]['warning_type'], 'year')
 
+    def test_get_verified_url_prefers_verifier_returned_url_over_s2_fallback(self):
+        """Local DB matches should keep the verifier's canonical URL."""
+        verified_data = {
+            'paperId': 'dblp:conf/nips/ChengYFGYK0L24',
+            'externalIds': {},
+        }
+
+        verified_url = self.checker._get_verified_url(
+            verified_data,
+            'https://dblp.org/rec/conf/nips/ChengYFGYK0L24',
+            [],
+        )
+
+        self.assertEqual(
+            verified_url,
+            'https://dblp.org/rec/conf/nips/ChengYFGYK0L24',
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

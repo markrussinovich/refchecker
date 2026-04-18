@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import sqlite3
 
 import pytest
 from fastapi import HTTPException
@@ -302,3 +303,97 @@ def test_semantic_scholar_keys_are_browser_only(auth_db):
 
     status3 = _run(api_main.get_semantic_scholar_key_status(owner))
     assert status3["has_key"] is False
+
+
+def _create_local_reference_db(path, *, with_snapshot=False):
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE papers (
+                paperId TEXT PRIMARY KEY,
+                title TEXT,
+                normalized_paper_title TEXT,
+                venue TEXT,
+                year INTEGER,
+                externalIds_DOI TEXT,
+                externalIds_ArXiv TEXT,
+                authors TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "paper-1",
+                "Test Paper",
+                "testpaper",
+                "TestConf",
+                2024,
+                "10.1000/test",
+                None,
+                '["Author One"]',
+            ),
+        )
+        conn.execute("CREATE INDEX idx_papers_normalized_title ON papers(normalized_paper_title)")
+        if with_snapshot:
+            conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+            conn.execute(
+                "INSERT INTO metadata VALUES (?, ?)",
+                ("last_release_id", "2025-01-15"),
+            )
+
+
+@pytest.fixture
+def single_user_settings_db(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization_single_user")
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    for env_name in (
+        "REFCHECKER_DATABASE_DIRECTORY",
+        "REFCHECKER_DB_PATH",
+        "REFCHECKER_OPENALEX_DB_PATH",
+        "REFCHECKER_CROSSREF_DB_PATH",
+        "REFCHECKER_DBLP_DB_PATH",
+        "REFCHECKER_ACL_DB_PATH",
+    ):
+        monkeypatch.delenv(env_name, raising=False)
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "single-user.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+    yield api_main, temp_db
+
+
+def test_single_user_db_setting_accepts_database_directory(single_user_settings_db, tmp_path):
+    api_main, db = single_user_settings_db
+    admin = api_main.UserInfo(
+        id=1,
+        email="admin@example.com",
+        name="admin",
+        provider="github",
+        is_admin=True,
+    )
+
+    db_dir = tmp_path / "local-dbs"
+    db_dir.mkdir()
+    _create_local_reference_db(db_dir / "semantic_scholar.db", with_snapshot=True)
+    _create_local_reference_db(db_dir / "openalex.db")
+
+    result = _run(api_main.update_setting(
+        "db_path",
+        api_main.SettingUpdate(value=str(db_dir)),
+        admin,
+    ))
+
+    assert result["value"] == str(db_dir)
+    assert "Local database directory configured" in result["message"]
+    assert "Semantic Scholar" in result["message"]
+    assert "OpenAlex" in result["message"]
+    assert result["current_snapshot"] == "2025-01-15"
+
+    configured_paths = _run(api_main._get_configured_database_paths())
+    assert configured_paths["s2"] == str(db_dir / "semantic_scholar.db")
+    assert configured_paths["openalex"] == str(db_dir / "openalex.db")
+
+    settings = _run(api_main.get_all_settings(admin))
+    assert settings["db_path"]["label"] == "Local Database Directory"

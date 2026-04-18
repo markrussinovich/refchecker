@@ -124,7 +124,8 @@ class SemanticScholarDownloader:
             year INTEGER,
             externalIds_DOI TEXT,
             externalIds_ArXiv TEXT,
-            authors TEXT  -- JSON array of author name strings
+            authors TEXT,  -- JSON array of author name strings
+            source_url TEXT
         )
         ''')
         
@@ -141,6 +142,13 @@ class SemanticScholarDownloader:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_normalized_title ON papers(normalized_paper_title)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_doi ON papers(externalIds_DOI)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_papers_arxiv ON papers(externalIds_ArXiv)')
+
+        columns = {
+            row[1]
+            for row in cursor.execute('PRAGMA table_info(papers)').fetchall()
+        }
+        if 'source_url' not in columns:
+            cursor.execute('ALTER TABLE papers ADD COLUMN source_url TEXT')
         
         self.conn.commit()
     
@@ -819,6 +827,7 @@ class SemanticScholarDownloader:
                 external_pmc = external_ids.get("PubMedCentral")
                 external_dblp = external_ids.get("DBLP")
                 external_arxiv = external_ids.get("ArXiv")
+                source_url = paper_data.get("source_url") or paper_data.get("url")
                 
                 # Extract journal info
                 journal = paper_data.get("journal", {}) or {}
@@ -836,13 +845,23 @@ class SemanticScholarDownloader:
                 
                 batch.append((
                     paper_id, title, normalized_title, venue, year,
-                    external_doi, external_arxiv, authors_json
+                    external_doi, external_arxiv, authors_json, source_url
                 ))
             
             # Insert all papers in batch
             if batch:
                 cursor.executemany("""
-                    INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO papers (
+                        paperId,
+                        title,
+                        normalized_paper_title,
+                        venue,
+                        year,
+                        externalIds_DOI,
+                        externalIds_ArXiv,
+                        authors,
+                        source_url
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, batch)
             
             # Commit transaction
@@ -1347,13 +1366,24 @@ class SemanticScholarDownloader:
         
         # Full JSON for complete access
         full_json = json.dumps(paper_data)
+        source_url = paper_data.get("source_url") or paper_data.get("url")
         
         # Insert or replace the paper
         cursor.execute("""
-            INSERT OR REPLACE INTO papers VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO papers (
+                paperId,
+                title,
+                normalized_paper_title,
+                venue,
+                year,
+                externalIds_DOI,
+                externalIds_ArXiv,
+                authors,
+                source_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             paper_id, title, normalized_title, venue, year,
-            external_doi, external_arxiv, authors_json
+            external_doi, external_arxiv, authors_json, source_url
         ))
 
     def close(self):

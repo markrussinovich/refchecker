@@ -83,13 +83,13 @@ def normalize_apostrophes(text):
     
     # All known apostrophe variants
     apostrophe_variants = [
-        "'",      # U+0027 ASCII apostrophe
-        "'",      # U+2019 Right single quotation mark (most common)
-        "'",      # U+2018 Left single quotation mark  
-        "ʼ",      # U+02BC Modifier letter apostrophe
-        "ˈ",      # U+02C8 Modifier letter vertical line (primary stress)
-        "`",      # U+0060 Grave accent (sometimes used as apostrophe)
-        "´",      # U+00B4 Acute accent (sometimes used as apostrophe)
+        "\u0027",  # ASCII apostrophe
+        "\u2019",  # Right single quotation mark
+        "\u2018",  # Left single quotation mark
+        "\u02BC",  # Modifier letter apostrophe
+        "\u02C8",  # Modifier letter vertical line
+        "\u0060",  # Grave accent
+        "\u00B4",  # Acute accent
     ]
     
     # Replace all variants with standard ASCII apostrophe
@@ -928,6 +928,13 @@ def normalize_diacritics(text: str) -> str:
     normalized = unicodedata.normalize('NFD', text)
     # Remove all combining characters (accents, diacritics) - category Mn
     ascii_text = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+
+    # Remove LaTeX-style accent markers: an apostrophe between two lowercase
+    # letters inside a word (e.g. "R'obert" → "Robert", "Csord'as" → "Csordas").
+    # This handles names stored with LaTeX accent notation in some databases.
+    # The pattern requires lowercase on both sides to avoid stripping real
+    # apostrophes in names like "O'Brien" (uppercase after apostrophe).
+    ascii_text = re.sub(r"(?<=[a-zA-Z])'(?=[a-z])", '', ascii_text)
     
     # Clean up any extra spaces that may have been created by removing diacritics
     ascii_text = re.sub(r'\s+', ' ', ascii_text).strip()
@@ -986,6 +993,30 @@ def is_name_match(name1: str, name2: str) -> bool:
         True if names match, False otherwise
     """
     if not name1 or not name2:
+        return False
+
+    def has_internal_accent_apostrophe(token: str) -> bool:
+        token = normalize_apostrophes(token)
+        return any(
+            char == "'" and 1 < idx < len(token) - 1
+            for idx, char in enumerate(token)
+        )
+
+    raw_name1 = normalize_apostrophes(name1.strip())
+    raw_name2 = normalize_apostrophes(name2.strip())
+    raw_parts1 = raw_name1.split()
+    raw_parts2 = raw_name2.split()
+
+    # Keep simple two-part surnames with accent-placeholder apostrophes strict.
+    # This avoids treating cases like "Balunovi'c" as exact matches while still
+    # allowing genuine apostrophe surnames such as "D'Mello" and the more
+    # structured fallback paths for hyphenated or initial-expanded names.
+    if (
+        len(raw_parts1) == 2 and len(raw_parts2) == 2 and
+        all(len(part.rstrip('.')) > 1 for part in raw_parts1 + raw_parts2) and
+        not any(re.search(r'[-‐‑–—−]+', name) for name in (raw_name1, raw_name2)) and
+        any(has_internal_accent_apostrophe(part) for part in raw_parts1 + raw_parts2)
+    ):
         return False
     
     # Try primary normalization first (with transliterations)
@@ -2000,6 +2031,19 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
     if len(tokens1) != len(tokens2):
         return False
 
+    has_hyphenated_structure = any(
+        re.search(r'[-‐‑–—−]+', name)
+        for name in (name1, name2)
+    )
+    has_initial_expansion = any(
+        (len(token1) == 1 and len(token2) > 1) or
+        (len(token2) == 1 and len(token1) > 1)
+        for token1, token2 in zip(tokens1, tokens2)
+    )
+
+    if not has_hyphenated_structure and not has_initial_expansion:
+        return False
+
     for token1, token2 in zip(tokens1, tokens2):
         if token1 == token2:
             continue
@@ -2056,12 +2100,30 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     # Clean and normalize both formatted names
     cleaned1 = clean_author_name(name1_formatted).strip().lower()
     cleaned2 = clean_author_name(name2_formatted).strip().lower()
+
+    # Normalize diacritics and LaTeX accent markers so that e.g.
+    # "Róbert Csordás" and "R'obert Csord'as" both become "robert csordas".
+    cleaned1 = normalize_diacritics(cleaned1)
+    cleaned2 = normalize_diacritics(cleaned2)
+
+    # After full normalization the names may already match
+    if cleaned1 == cleaned2:
+        return True
     
     parts1 = cleaned1.split()
     parts2 = cleaned2.split()
     
     if not parts1 or not parts2:
         return False
+
+    # Allow same-first-name matches when a two-part surname differs only by
+    # diacritics or apostrophe-style accent placeholders, e.g. "Ramé" vs
+    # "Ram'e" in some database exports.
+    if len(parts1) == 2 and len(parts2) == 2 and parts1[0] == parts2[0]:
+        surname1_normalized = normalize_diacritics(parts1[1]).replace("'", "")
+        surname2_normalized = normalize_diacritics(parts2[1]).replace("'", "")
+        if surname1_normalized == surname2_normalized:
+            return True
     
     # Enhanced matching for various name format cases
     if len(parts1) == 2 and len(parts2) == 2:
@@ -2140,8 +2202,47 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
             )
             if all_match:
                 return True
+
+        # Token multiset match: handles arbitrary reorderings of name parts.
+        # E.g. "Erran Li Li" ↔ "Li Erran Li" — same tokens, different order.
+        # Names from some cultures can have family names in varying positions.
+        if len(parts1) == len(parts2) and sorted(parts1) == sorted(parts2):
+            return True
     
     return False
+
+
+def _split_concatenated_team_first_author(cited_authors: list, correct_authors: list) -> list:
+    """Split an S2-style "X Team First Author" entry when the citation lists both.
+
+    Semantic Scholar sometimes stores the first author as a single concatenated
+    string like "Gemma Team Aishwarya Kamath". When the citation explicitly
+    lists "Gemma Team, Aishwarya Kamath, ...", split that first authoritative
+    entry so normal author matching can continue.
+    """
+    if len(cited_authors) < 2 or not correct_authors:
+        return correct_authors
+
+    first_cited = str(cited_authors[0]).strip()
+    second_cited = str(cited_authors[1]).strip()
+    first_correct = str(correct_authors[0]).strip()
+
+    if not first_cited or not second_cited or not first_correct:
+        return correct_authors
+
+    first_cited_lower = first_cited.lower()
+    if not first_cited_lower.endswith(' team'):
+        return correct_authors
+
+    prefix = first_cited_lower + ' '
+    if not first_correct.lower().startswith(prefix):
+        return correct_authors
+
+    remainder = first_correct[len(first_cited):].strip()
+    if not remainder or not enhanced_name_match(second_cited, remainder):
+        return correct_authors
+
+    return [first_cited, remainder] + correct_authors[1:]
 
 
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
@@ -2246,6 +2347,20 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     
     if not correct_names:
         return True, "No correct authors available for comparison"
+
+    correct_names = _split_concatenated_team_first_author(cleaned_cited, correct_names)
+
+    # Large collaborative papers are often cited with only the team name as
+    # the author list (e.g. "Gemini Team"). If that shorthand matches the
+    # verified first author, treat the author list as valid rather than
+    # penalizing the citation for omitting hundreds of individual authors.
+    if (
+        len(cleaned_cited) == 1
+        and correct_names
+        and cleaned_cited[0].strip().lower().endswith(' team')
+        and enhanced_name_match(cleaned_cited[0], correct_names[0])
+    ):
+        return True, "Authors match (team authorship shorthand)"
     
     # When "et al" is present, only compare the explicitly listed authors
     # The key insight: if the citation has "et al", we should only verify the listed authors
@@ -4331,6 +4446,21 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
     
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
+    
+    # If one venue is a preprint server (arXiv) and the other is a real
+    # conference or journal, this is a preprint-to-published upgrade, not a
+    # mismatch.  Papers are routinely posted on arXiv before formal publication.
+    def _is_preprint_server(venue_text: str) -> bool:
+        v = re.sub(r'\s+', ' ', venue_text.strip()).lower()
+        # Strip trailing arXiv IDs like "arXiv preprint arXiv:2406.01584"
+        v = re.sub(r'arxiv:\s*[\d.]+.*$', '', v).strip()
+        return v in (
+            'arxiv', 'arxiv.org', 'arxiv preprint', 'arxiv preprints',
+            'preprint', 'corr', 'corr abs',
+        ) or v.startswith('arxiv preprint arxiv')
+
+    if _is_preprint_server(venue1) or _is_preprint_server(venue2):
+        return False
     
     # Clean LaTeX commands from both venues first
     venue1_latex_cleaned = strip_latex_commands(venue1)

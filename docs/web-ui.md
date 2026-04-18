@@ -40,6 +40,7 @@ Useful flags:
 ```bash
 refchecker-webui --port 8080
 refchecker-webui --host 0.0.0.0
+refchecker-webui --database-dir /path/to/local-db-folder
 ```
 
 ### Option 2: Development Mode
@@ -77,6 +78,8 @@ npm run dev
 - History sidebar with re-run and deletion controls
 - Export as Markdown, plain text, or BibTeX
 - Per-reference links to Semantic Scholar, DOI, and ArXiv
+- API-backed verification via Semantic Scholar, OpenAlex, CrossRef, DBLP, and ACL Anthology
+- Optional local/offline databases via `semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`, and `acl_anthology.db`
 - Theme support and hosted multi-user mode
 
 ## Input Modes
@@ -91,6 +94,26 @@ npm run dev
 - upload multiple files at once
 - upload a ZIP containing supported paper files
 - assign an optional batch label for history organization
+
+## Verification Sources
+
+API-backed lookups:
+
+- Semantic Scholar API
+- OpenAlex API
+- CrossRef API
+- DBLP API
+- ACL Anthology API
+
+Local/offline databases:
+
+- `semantic_scholar.db`
+- `openalex.db`
+- `crossref.db`
+- `dblp.db`
+- `acl_anthology.db`
+
+When a local database is present, the Web UI uses it first and falls back to the corresponding APIs when necessary.
 
 ## Configuration
 
@@ -113,6 +136,33 @@ export GROBID_URL=http://localhost:8070
 ```
 
 The Semantic Scholar API key is entered in the UI settings panel and stays in browser memory for the current tab.
+
+### Local Database Directory
+
+Single-user mode exposes a `Local Database Directory` field in Settings. Point it at a folder containing any combination of:
+
+- `semantic_scholar.db`
+- `openalex.db`
+- `crossref.db`
+- `dblp.db`
+- `acl_anthology.db`
+
+You can also configure the same directory when starting the server:
+
+```bash
+refchecker-webui --database-dir /path/to/local-db-folder
+```
+
+The setting accepts a directory and still tolerates a direct `semantic_scholar.db` path for backward compatibility, but the directory form is what enables multi-database discovery.
+
+Build or refresh local databases with the CLI updater:
+
+```bash
+academic-refchecker --database-dir /path/to/local-db-folder --update-databases
+academic-refchecker --database-dir /path/to/local-db-folder --update-databases --openalex-min-year 2020
+```
+
+The Web UI refreshes databases it already finds in that directory on startup. The CLI updater remains the canonical way to do the initial population of a new local database directory.
 
 ## API Surface
 

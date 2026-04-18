@@ -4,7 +4,7 @@ Canonical project documentation lives in this directory.
 
 ## Guides
 
-- [Web UI Guide](web-ui.md) — setup, runtime modes, configuration, API surface, and troubleshooting
+- [Web UI Guide](web-ui.md) — setup, runtime modes, API-backed and local database configuration, API surface, and troubleshooting
 - [Testing Guide](testing.md) — suite structure, recommended pytest commands, markers, and debugging workflow
 
 ## Extraction Modes
