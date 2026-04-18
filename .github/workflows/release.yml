@@ -34,6 +34,47 @@ jobs:
         pip install -e ".[webui]"
         pip install pytest pytest-cov
         pip install build twine
+
+    - name: Start GROBID for integration tests
+      run: |
+        sudo docker pull lfoppiano/grobid:0.8.2
+        sudo docker rm -f refchecker-grobid >/dev/null 2>&1 || true
+        sudo docker run -d --name refchecker-grobid -p 8070:8070 --rm lfoppiano/grobid:0.8.2
+
+        python - <<'PY'
+        import sys
+        import time
+        import urllib.error
+        import urllib.request
+
+        url = "http://localhost:8070/api/isalive"
+        deadline = time.time() + 180
+        last_error = "no response"
+
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    status = response.status
+                    body = response.read().decode("utf-8", "ignore").strip().lower()
+                if status == 200 and body == "true":
+                    print("GROBID ready")
+                    sys.exit(0)
+                last_error = f"unexpected response: status={status} body={body!r}"
+            except Exception as exc:
+                last_error = repr(exc)
+            time.sleep(1)
+
+        print(last_error, file=sys.stderr)
+        sys.exit(1)
+        PY
+
+        status=$?
+        if [ "$status" -ne 0 ]; then
+          echo "GROBID failed to become ready within 180 seconds" >&2
+          sudo docker ps -a || true
+          sudo docker logs refchecker-grobid || true
+          exit "$status"
+        fi
     
     - name: Run tests
       run: |
