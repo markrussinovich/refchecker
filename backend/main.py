@@ -9,7 +9,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import logging
 from refchecker.__version__ import __version__
-from refchecker.utils.database_config import resolve_database_paths, DATABASE_LABELS
+from refchecker.utils.database_config import DATABASE_BUILD_DEPENDENCIES, DATABASE_FILE_ALIASES, DATABASE_LABELS, DATABASE_UPDATE_ORDER, resolve_database_paths
 
 # Fix Windows encoding issues with Unicode characters (e.g., Greek letters in paper titles).
 # Skip this when running under pytest so we don't replace pytest's capture streams, which can
@@ -122,22 +122,82 @@ def _resolve_semantic_scholar_db_path(path_value: Optional[str]) -> Optional[Pat
 
     resolved_path = Path(path_value).expanduser()
     if resolved_path.is_dir():
-        default_db = resolved_path / "semantic_scholar.db"
-        if default_db.is_file():
-            return default_db
-
-        db_files = sorted(
-            resolved_path.glob("*.db"),
-            key=lambda candidate: candidate.stat().st_mtime,
-            reverse=True,
-        )
-        if db_files:
-            return db_files[0]
-
-        logger.warning(f"Configured Semantic Scholar DB directory contains no .db files: {resolved_path}")
+        for filename in DATABASE_FILE_ALIASES["s2"]:
+            default_db = resolved_path / filename
+            if default_db.is_file():
+                return default_db
         return None
 
     return resolved_path
+
+
+def _resolve_local_database_directory(path_value: Optional[str]) -> Optional[Path]:
+    """Resolve a shared local database directory from a configured file or directory path."""
+    if not path_value:
+        return None
+
+    resolved_path = Path(path_value).expanduser()
+    if resolved_path.is_dir():
+        return resolved_path
+    if resolved_path.suffix.lower() == ".db" and resolved_path.parent.is_dir():
+        return resolved_path.parent
+    return None
+
+
+def _validate_local_reference_database_file(db_path: Path) -> Dict[str, object]:
+    """Validate a local reference database file and return summary metadata."""
+    import sqlite3
+
+    required = {
+        "paperId",
+        "title",
+        "normalized_paper_title",
+        "authors",
+        "year",
+        "externalIds_DOI",
+        "externalIds_ArXiv",
+    }
+
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
+            missing = required - cols
+            if missing:
+                raise HTTPException(status_code=400, detail=f"Database missing required columns: {', '.join(sorted(missing))}")
+
+            indexes = {
+                row[0]
+                for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
+            }
+            row_count = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid database: {e}")
+
+    warnings = []
+    has_title_idx = any("title" in index_name.lower() for index_name in indexes)
+    if not has_title_idx:
+        warnings.append("No title index found — queries may be slow")
+
+    return {
+        "columns": cols,
+        "row_count": row_count,
+        "warnings": warnings,
+    }
+
+
+def _summarize_local_database_directory(directory_path: Path) -> Dict[str, object]:
+    """Validate recognized local DB files in a directory and return a summary."""
+    db_paths = resolve_database_paths(database_directory=str(directory_path))
+    validated = {
+        db_name: _validate_local_reference_database_file(Path(db_path))
+        for db_name, db_path in db_paths.items()
+    }
+    return {
+        "db_paths": db_paths,
+        "validated": validated,
+    }
 
 
 def _read_semantic_scholar_db_snapshot(db_path: Optional[Path]) -> Optional[str]:
@@ -163,7 +223,12 @@ def _read_semantic_scholar_db_snapshot(db_path: Optional[Path]) -> Optional[str]
 
 async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
     """Return the configured local Semantic Scholar DB path, if any."""
-    configured_path = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or None
+    configured_path = (
+        os.environ.get("REFCHECKER_DB_PATH")
+        or os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+        or await db.get_setting("db_path")
+        or None
+    )
     db_path = _resolve_semantic_scholar_db_path(configured_path)
     if not db_path:
         return None
@@ -175,15 +240,20 @@ async def _get_configured_semantic_scholar_db_path() -> Optional[Path]:
 
 async def _get_configured_database_paths() -> Dict[str, str]:
     """Return configured local DB paths (S2 + optional DBs discovered from directory)."""
+    configured_setting = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting("db_path") or None
     s2_path = await _get_configured_semantic_scholar_db_path()
     configured_s2 = str(s2_path) if s2_path else None
     database_directory = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+    if not database_directory:
+        resolved_directory = _resolve_local_database_directory(configured_setting)
+        database_directory = str(resolved_directory) if resolved_directory else None
     db_paths = resolve_database_paths(
         explicit_paths={
             "s2": configured_s2,
             "openalex": os.environ.get("REFCHECKER_OPENALEX_DB_PATH"),
             "crossref": os.environ.get("REFCHECKER_CROSSREF_DB_PATH"),
             "dblp": os.environ.get("REFCHECKER_DBLP_DB_PATH"),
+            "acl": os.environ.get("REFCHECKER_ACL_DB_PATH"),
         },
         database_directory=database_directory,
     )
@@ -210,39 +280,42 @@ async def _get_configured_cache_dir() -> Optional[str]:
 
 async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
     """Refresh the configured local Semantic Scholar DB in a background subprocess."""
+    await _run_database_refresh_subprocess('s2', db_path)
+
+
+async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
+    """Refresh a configured local database in a background subprocess when supported."""
     repo_root = Path(__file__).resolve().parent.parent
-    script_path = repo_root / "scripts" / "download_db.py"
+    script_path = repo_root / "scripts" / "update_local_database.py"
     if not script_path.is_file():
-        logger.error(f"Semantic Scholar refresh script not found: {script_path}")
+        logger.error(f"Local database refresh script not found: {script_path}")
         return
 
     command = [
         sys.executable,
         str(script_path),
-        "--output-dir",
-        str(db_path.parent),
+        "--database",
+        db_name,
         "--db-path",
         str(db_path),
     ]
-    api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-    if api_key:
+    api_key = os.environ.get('SEMANTIC_SCHOLAR_API_KEY')
+    if db_name == 's2' and api_key:
         command.extend(["--api-key", api_key])
+    openalex_since = os.environ.get('REFCHECKER_OPENALEX_SINCE')
+    if db_name == 'openalex' and openalex_since:
+        command.extend(['--openalex-since', openalex_since])
+    openalex_min_year = os.environ.get('REFCHECKER_OPENALEX_MIN_YEAR')
+    if db_name == 'openalex' and openalex_min_year:
+        command.extend(['--openalex-min-year', openalex_min_year])
 
-    logger.info(f"Launching background Semantic Scholar refresh for {db_path}")
+    logger.info(f"Launching background {DATABASE_LABELS.get(db_name, db_name)} refresh for {db_path}")
     process = await asyncio.create_subprocess_exec(*command, cwd=str(repo_root))
     return_code = await process.wait()
     if return_code == 0:
-        logger.info(f"Background Semantic Scholar refresh completed successfully for {db_path}")
+        logger.info(f"Background {DATABASE_LABELS.get(db_name, db_name)} refresh completed successfully for {db_path}")
         return
-    logger.error(f"Background Semantic Scholar refresh failed for {db_path} with exit code {return_code}")
-
-
-async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
-    """Refresh a configured local database in a background subprocess when supported."""
-    if db_name != "s2":
-        logger.info(f"Skipping automated refresh for {DATABASE_LABELS.get(db_name, db_name)} DB: {db_path}")
-        return
-    await _run_semantic_scholar_refresh_subprocess(db_path)
+    logger.error(f"Background {DATABASE_LABELS.get(db_name, db_name)} refresh failed for {db_path} with exit code {return_code}")
 
 
 async def _schedule_semantic_scholar_refresh() -> Optional[asyncio.Task]:
@@ -263,9 +336,58 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
     """Schedule non-blocking refreshes for all discovered local databases."""
     db_paths = await _get_configured_database_paths()
     tasks: Dict[str, asyncio.Task] = {}
-    for db_name, db_path in sorted(db_paths.items()):
+
+    async def run_with_dependencies(
+        db_name: str,
+        db_path: str,
+        dependency_names: Tuple[str, ...],
+    ) -> None:
+        for dependency_name in dependency_names:
+            dependency_task = tasks.get(dependency_name)
+            if dependency_task is None:
+                continue
+            try:
+                await dependency_task
+            except Exception as exc:
+                logger.warning(
+                    "Background refresh dependency %s failed before %s: %s",
+                    dependency_name,
+                    db_name,
+                    exc,
+                )
+        await _run_database_refresh_subprocess(db_name, Path(db_path))
+
+    scheduled_names = set()
+    for db_name in DATABASE_UPDATE_ORDER:
+        db_path = db_paths.get(db_name)
+        if not db_path:
+            continue
+        dependency_names = tuple(
+            dependency_name
+            for dependency_name in DATABASE_BUILD_DEPENDENCIES.get(db_name, ())
+            if dependency_name in db_paths
+        )
         task = asyncio.create_task(
-            _run_database_refresh_subprocess(db_name, Path(db_path)),
+            run_with_dependencies(db_name, db_path, dependency_names),
+            name=f"db-refresh-{db_name}",
+        )
+        tasks[db_name] = task
+        scheduled_names.add(db_name)
+        if dependency_names:
+            logger.info(
+                "Scheduled background refresh for %s DB at %s after %s",
+                DATABASE_LABELS.get(db_name, db_name),
+                db_path,
+                ", ".join(DATABASE_LABELS.get(name, name) for name in dependency_names),
+            )
+        else:
+            logger.info(f"Scheduled background refresh for {DATABASE_LABELS.get(db_name, db_name)} DB at {db_path}")
+
+    for db_name, db_path in sorted(db_paths.items()):
+        if db_name in scheduled_names:
+            continue
+        task = asyncio.create_task(
+            run_with_dependencies(db_name, db_path, ()),
             name=f"db-refresh-{db_name}",
         )
         tasks[db_name] = task
@@ -2976,8 +3098,8 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
             settings_config["db_path"] = {
                 "default": "",
                 "type": "text",
-                "label": "Local Semantic Scholar Database",
-                "description": "Path to local Semantic Scholar SQLite database for faster offline verification",
+                "label": "Local Database Directory",
+                "description": "Directory containing local databases such as semantic_scholar.db, openalex.db, crossref.db, dblp.db, and acl_anthology.db",
                 "section": "Database"
             }
             settings_config["cache_dir"] = {
@@ -2992,7 +3114,11 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
         settings = {}
         for key, config in settings_config.items():
             if key == "db_path":
-                value = os.environ.get("REFCHECKER_DB_PATH") or await db.get_setting(key)
+                value = (
+                    os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+                    or os.environ.get("REFCHECKER_DB_PATH")
+                    or await db.get_setting(key)
+                )
             elif key == "cache_dir":
                 value = os.environ.get("REFCHECKER_CACHE_DIR") or await db.get_setting(key)
             else:
@@ -3010,7 +3136,7 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 settings[key]["min"] = config.get("min")
                 settings[key]["max"] = config.get("max")
             if key == "db_path":
-                resolved_db_path = _resolve_semantic_scholar_db_path(settings[key]["value"])
+                resolved_db_path = await _get_configured_semantic_scholar_db_path()
                 settings[key]["current_snapshot"] = _read_semantic_scholar_db_snapshot(resolved_db_path)
         
         return settings
@@ -3058,43 +3184,64 @@ async def update_setting(
             if not path:
                 await db.set_setting(setting_key, "")
                 logger.info("Cleared db_path setting")
-                return {"key": setting_key, "value": "", "message": "Local database disabled", "current_snapshot": None}
-            if not os.path.isfile(path):
-                raise HTTPException(status_code=400, detail=f"File not found: {path}")
-            # Validate SQLite schema
-            import sqlite3
-            try:
-                conn = sqlite3.connect(path)
-                cols = {row[1] for row in conn.execute("PRAGMA table_info(papers)").fetchall()}
-                conn.close()
-                required = {'paperId', 'title', 'normalized_paper_title', 'authors', 'year', 'externalIds_DOI', 'externalIds_ArXiv'}
-                missing = required - cols
-                if missing:
-                    raise HTTPException(status_code=400, detail=f"Database missing required columns: {', '.join(sorted(missing))}")
-                # Check for indexes
-                idx_conn = sqlite3.connect(path)
-                indexes = {row[0] for row in idx_conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()}
-                idx_conn.close()
-                has_title_idx = any('title' in i.lower() for i in indexes)
-                warnings = []
-                if not has_title_idx:
-                    warnings.append("No title index found — queries may be slow")
-                row_count = sqlite3.connect(path).execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid database: {e}")
-            await db.set_setting(setting_key, path)
-            logger.info(f"Updated db_path to: {path} ({row_count:,} papers)")
-            msg = f"Database validated: {row_count:,} papers, {len(cols)} columns"
-            if warnings:
-                msg += f" (⚠ {'; '.join(warnings)})"
+                return {
+                    "key": setting_key,
+                    "value": "",
+                    "message": "Local database configuration cleared",
+                    "current_snapshot": None,
+                }
+
+            path_obj = Path(path).expanduser()
+            if path_obj.is_dir():
+                summary = _summarize_local_database_directory(path_obj)
+                detected_names = [
+                    DATABASE_LABELS.get(db_name, db_name)
+                    for db_name in summary["db_paths"]
+                ]
+                warning_messages = [
+                    f"{DATABASE_LABELS.get(db_name, db_name)}: {warning}"
+                    for db_name, db_summary in summary["validated"].items()
+                    for warning in db_summary["warnings"]
+                ]
+
+                await db.set_setting(setting_key, str(path_obj))
+                logger.info(
+                    "Updated db_path to local database directory: %s (%d detected DBs)",
+                    path_obj,
+                    len(detected_names),
+                )
+
+                if detected_names:
+                    msg = f"Local database directory configured: {', '.join(detected_names)}"
+                else:
+                    msg = "Local database directory configured. No recognized database files found yet"
+                if warning_messages:
+                    msg += f" (⚠ {'; '.join(warning_messages)})"
+
+                s2_path = summary["db_paths"].get("s2")
+                current_snapshot = _read_semantic_scholar_db_snapshot(Path(s2_path)) if s2_path else None
+                return {
+                    "key": setting_key,
+                    "value": str(path_obj),
+                    "message": msg,
+                    "current_snapshot": current_snapshot,
+                }
+
+            if not path_obj.is_file():
+                raise HTTPException(status_code=400, detail=f"Path not found: {path}")
+
+            db_summary = _validate_local_reference_database_file(path_obj)
+            await db.set_setting(setting_key, str(path_obj))
+            logger.info(f"Updated db_path to database file: {path_obj} ({db_summary['row_count']:,} papers)")
+            msg = f"Database file validated: {db_summary['row_count']:,} papers, {len(db_summary['columns'])} columns"
+            if db_summary["warnings"]:
+                msg += f" (⚠ {'; '.join(db_summary['warnings'])})"
             return {
                 "key": setting_key,
-                "value": path,
+                "value": str(path_obj),
                 "message": msg,
-                "papers": row_count,
-                "current_snapshot": _read_semantic_scholar_db_snapshot(Path(path)),
+                "papers": db_summary["row_count"],
+                "current_snapshot": _read_semantic_scholar_db_snapshot(path_obj),
             }
         
         if setting_key == "cache_dir":

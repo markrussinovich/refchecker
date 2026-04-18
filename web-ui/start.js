@@ -57,7 +57,7 @@ async function isServerRunning(port, path = '/') {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
     
-    // Try localhost first (Vite binds to localhost by default)
+    // Probe localhost for readiness even when the dev server listens on all interfaces.
     const response = await fetch(`http://localhost:${port}${path}`, {
       signal: controller.signal
     });
@@ -163,6 +163,51 @@ function openBrowser(url) {
   }
 }
 
+function killProcessTree(child, label) {
+  if (!child || !child.pid) {
+    return;
+  }
+
+  try {
+    if (isWindows) {
+      execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: 'ignore' });
+    } else if (child.spawnargs?.includes('npm') || child.spawnfile === 'npm') {
+      exec(`pkill -TERM -P ${child.pid} 2>/dev/null || true`, () => {
+        try {
+          process.kill(child.pid, 'SIGTERM');
+        } catch (e) { /* ignore */ }
+      });
+    } else {
+      process.kill(child.pid, 'SIGTERM');
+    }
+  } catch (e) {
+    if (debugMode) {
+      log(`Failed to stop ${label} process ${child.pid}: ${e.message}`, colors.yellow);
+    }
+  }
+}
+
+function killProcessOnPortSync(port) {
+  try {
+    if (isWindows) {
+      try {
+        execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
+      } catch (e) { /* ignore */ }
+      if (port === 8000) {
+        try {
+          execSync(`powershell -Command "Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'uvicorn' } | Stop-Process -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
+        } catch (e) { /* ignore */ }
+      }
+    } else {
+      execSync(`pids="$(lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true)"; if [ -n "$pids" ]; then kill -9 $pids 2>/dev/null || true; fi; fuser -k ${port}/tcp 2>/dev/null || true`, { stdio: 'ignore' });
+    }
+  } catch (e) {
+    if (debugMode) {
+      log(`Failed to stop listeners on port ${port}: ${e.message}`, colors.yellow);
+    }
+  }
+}
+
 // Start backend server
 function startBackend() {
   const python = findPython();
@@ -176,14 +221,11 @@ function startBackend() {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env },
     shell: false,  // Don't use shell - it causes issues on Windows
-    detached: !isWindows,  // Use process groups on Unix for cleanup
+    detached: false,
     windowsHide: true  // Hide console window on Windows
   });
-  
-  // Prevent Node from waiting for this process if it's detached
-  if (!isWindows) {
-    backend.unref();
-  }
+
+  let tracebackMode = false;
   
   backend.stdout.on('data', (data) => {
     if (!debugMode) return;
@@ -196,21 +238,36 @@ function startBackend() {
   });
   
   backend.stderr.on('data', (data) => {
-    const lines = data.toString().trim().split('\n');
+    const lines = data.toString().split('\n');
     lines.forEach(line => {
-      if (line.trim()) {
-        // Always show errors, only show other output in debug mode
-        if (line.includes('ERROR') || line.includes('Traceback')) {
-          console.log(`${colors.red}[Backend]${colors.reset} ${line}`);
-        } else if (debugMode) {
-          console.log(`${colors.green}[Backend]${colors.reset} ${line}`);
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      if (trimmed.includes('Traceback')) {
+        tracebackMode = true;
+      }
+
+      if (tracebackMode || trimmed.includes('ERROR') || trimmed.includes('Application startup failed')) {
+        console.log(`${colors.red}[Backend]${colors.reset} ${line}`);
+        if (/^[A-Za-z_][A-Za-z0-9_.]*:/.test(trimmed) || trimmed.includes('Application startup failed')) {
+          tracebackMode = false;
         }
+      } else if (debugMode) {
+        console.log(`${colors.green}[Backend]${colors.reset} ${line}`);
       }
     });
   });
   
   backend.on('error', (err) => {
     log(`Failed to start backend: ${err.message}`, colors.red);
+  });
+
+  backend.on('exit', (code, signal) => {
+    if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
+      log(`Backend process exited early${code !== null ? ` (code ${code})` : ''}${signal ? ` (${signal})` : ''}`, colors.red);
+    }
   });
   
   return backend;
@@ -226,13 +283,15 @@ function startFrontend() {
       cwd: __dirname,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
+      detached: false,
       windowsHide: true
     });
   } else {
     frontend = spawn('npm', ['run', 'dev'], {
       cwd: __dirname,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env }
+      env: { ...process.env },
+      detached: false
     });
   }
   
@@ -258,6 +317,12 @@ function startFrontend() {
   
   frontend.on('error', (err) => {
     log(`Failed to start frontend: ${err.message}`, colors.red);
+  });
+
+  frontend.on('exit', (code, signal) => {
+    if (code !== 0 && signal !== 'SIGTERM' && signal !== 'SIGINT') {
+      log(`Frontend process exited early${code !== null ? ` (code ${code})` : ''}${signal ? ` (${signal})` : ''}`, colors.red);
+    }
   });
   
   return frontend;
@@ -341,6 +406,8 @@ async function main() {
   
   let backend = null;
   let frontend = null;
+  let shuttingDown = false;
+  let lifecycleManaged = false;
   
   // Start backend if not running
   if (!backendRunning) {
@@ -377,7 +444,7 @@ async function main() {
   log('═'.repeat(50), colors.green);
   console.log('');
   log(`  Backend:  http://localhost:${backendPort}`, colors.cyan);
-  log(`  Frontend: http://localhost:${frontendPort}`, colors.cyan);
+  log(`  Frontend: http://localhost:${frontendPort} (also listens on the machine's network interfaces)`, colors.cyan);
   console.log('');
   
   // Open browser
@@ -385,48 +452,49 @@ async function main() {
   openBrowser(`http://localhost:${frontendPort}`);
   console.log('');
   
-  // If we started any processes, set up cleanup
-  if (backend || frontend) {
+  // Keep the launcher alive so Ctrl+C can stop both services, including a
+  // backend that was already running before npm start.
+  if (backend || frontend || backendRunning || frontendRunning) {
+    lifecycleManaged = true;
     log('Press Ctrl+C to stop servers', colors.yellow);
     console.log('');
     
-    const cleanup = () => {
+    const cleanupSync = (exitCode = 0) => {
+      if (shuttingDown) {
+        return;
+      }
+      shuttingDown = true;
+
       console.log('');
       log('Shutting down servers...', colors.yellow);
-      
-      if (backend) {
-        try {
-          if (isWindows) {
-            spawn('taskkill', ['/F', '/T', '/PID', backend.pid.toString()], { stdio: 'ignore' });
-          } else {
-            process.kill(-backend.pid, 'SIGTERM');
-          }
-        } catch (e) { /* ignore */ }
-      }
-      
-      if (frontend) {
-        try {
-          if (isWindows) {
-            spawn('taskkill', ['/F', '/T', '/PID', frontend.pid.toString()], { stdio: 'ignore' });
-          } else {
-            process.kill(-frontend.pid, 'SIGTERM');
-          }
-        } catch (e) { /* ignore */ }
-      }
-      
-      setTimeout(() => {
-        log('Servers stopped.', colors.green);
-        process.exit(0);
-      }, 1000);
+
+      killProcessTree(frontend, 'frontend');
+      killProcessTree(backend, 'backend');
+
+      killProcessOnPortSync(frontendPort);
+      killProcessOnPortSync(backendPort);
+
+      log('Servers stopped.', colors.green);
+      process.exit(exitCode);
     };
+
+    const cleanup = () => cleanupSync(0);
     
     process.on('SIGINT', cleanup);
     process.on('SIGTERM', cleanup);
+    process.on('SIGHUP', cleanup);
+    process.on('exit', () => {
+      if (lifecycleManaged && !shuttingDown) {
+        killProcessTree(frontend, 'frontend');
+        killProcessTree(backend, 'backend');
+        killProcessOnPortSync(frontendPort);
+        killProcessOnPortSync(backendPort);
+      }
+    });
     
     // Keep running
     await new Promise(() => {});
   } else {
-    // Both were already running, just exit
     log('Both servers were already running. Browser opened.', colors.green);
     process.exit(0);
   }

@@ -42,6 +42,7 @@ from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_avail
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
 from refchecker.checkers.arxiv_citation import ArXivCitationChecker
+from refchecker.database.local_database_updater import repair_local_database_schema
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -65,13 +66,13 @@ def log_query_debug(query: str, params: list, execution_time: float, result_coun
 
 class LocalNonArxivReferenceChecker:
     """
-    A class to verify non-arXiv references using a local Semantic Scholar database
+    A class to verify non-arXiv references using a local paper metadata database
     """
     
     def __init__(
         self,
         db_path: str = "semantic_scholar_db/semantic_scholar.db",
-        database_label: str = "S2",
+        database_label: str = "Semantic Scholar",
         database_key: str = "local_s2",
     ):
         """
@@ -85,7 +86,7 @@ class LocalNonArxivReferenceChecker:
             ValueError: If the database is missing the required 'papers' table
         """
         if not os.path.exists(db_path):
-            raise FileNotFoundError(f"Local Semantic Scholar database not found: {db_path}")
+            raise FileNotFoundError(f"Local reference database not found: {db_path}")
         # If db_path is a directory, auto-detect the .db file inside it
         if os.path.isdir(db_path):
             db_files = sorted(
@@ -113,8 +114,19 @@ class LocalNonArxivReferenceChecker:
             self.conn.close()
             raise ValueError(
                 f"Database at {db_path} is missing the required 'papers' table. "
-                f"Ensure --db-path points to a valid Semantic Scholar database."
+                f"Ensure the configured path points to a valid local RefChecker database."
             )
+        try:
+            repair_report = repair_local_database_schema(self.db_path, conn=self.conn)
+            if repair_report['added_columns'] or repair_report['added_indexes']:
+                logger.info(
+                    "Repaired local database schema for %s: columns=%s indexes=%s",
+                    self.db_path,
+                    ', '.join(repair_report['added_columns']) or 'none',
+                    ', '.join(repair_report['added_indexes']) or 'none',
+                )
+        except Exception as exc:
+            logger.warning("Failed to repair local database schema for %s: %s", self.db_path, exc)
         # Optimise for read-heavy workloads (reference lookups are read-only)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
@@ -224,6 +236,31 @@ class LocalNonArxivReferenceChecker:
             return downgraded_errors
 
         return errors
+
+    def _get_verified_paper_arxiv_id(self, paper_data: Dict[str, Any]) -> Optional[str]:
+        """Return the best arXiv ID we can confidently infer for the matched paper."""
+        external_ids = paper_data.get('externalIds', {}) or {}
+        paper_arxiv_id = external_ids.get('ArXiv')
+        if paper_arxiv_id:
+            return paper_arxiv_id
+
+        for url_key in ('source_url', 'url'):
+            candidate_url = paper_data.get(url_key, '')
+            candidate_arxiv_id = extract_arxiv_id_from_url(candidate_url)
+            if candidate_arxiv_id:
+                return candidate_arxiv_id
+
+        return None
+
+    def _missing_arxiv_metadata_is_authoritative(self) -> bool:
+        """Whether this source can reliably disprove a cited arXiv URL by omission.
+
+        Returns ``False`` for all databases.  Even Semantic Scholar has
+        incomplete arXiv coverage (e.g. the Gemini paper 2312.11805 is
+        indexed in S2 but without an arXiv mapping), so a missing arXiv ID
+        is not reliable evidence that the reference's arXiv URL is wrong.
+        """
+        return False
     
     # DOI extraction now handled by utility function
     
@@ -627,8 +664,9 @@ class LocalNonArxivReferenceChecker:
             # Skip generic/empty venues like 'arxiv'
             paper_venue_lower = paper_venue.lower().strip()
             if (paper_venue_lower and 
-                paper_venue_lower not in ['arxiv', 'arxiv.org', 'preprint', ''] and
-                not paper_venue_lower.startswith('arxiv')):
+                paper_venue_lower not in ['arxiv', 'arxiv.org', 'preprint', '', 'corr'] and
+                not paper_venue_lower.startswith('arxiv') and
+                not paper_venue_lower.startswith('corr')):
                 errors.append({
                     'error_type': 'venue',
                     'error_details': f"Venue missing: should include '{paper_venue}'",
@@ -638,7 +676,11 @@ class LocalNonArxivReferenceChecker:
         # Check for incorrect arXiv URL: if the reference has an arXiv URL,
         # verify it matches the paper we found (which was resolved by title).
         external_ids = paper_data.get('externalIds', {})
-        paper_arxiv_id = external_ids.get('ArXiv') if external_ids else None
+        paper_arxiv_id = self._get_verified_paper_arxiv_id(paper_data)
+        correct_author_names = ', '.join(
+            author.get('name', str(author)) if isinstance(author, dict) else str(author)
+            for author in paper_data.get('authors', [])
+        )
         if arxiv_id:
             # Reference has an arXiv URL — cross-check against the found paper
             if paper_arxiv_id and arxiv_id.lower() != paper_arxiv_id.lower():
@@ -647,16 +689,25 @@ class LocalNonArxivReferenceChecker:
                 errors.append({
                     'error_type': 'arxiv_id',
                     'error_details': f"Incorrect ArXiv ID: cited {arxiv_id} should be {paper_arxiv_id}",
-                    'ref_url_correct': correct_arxiv_url
+                    'ref_url_correct': correct_arxiv_url,
+                    'ref_title_correct': paper_data.get('title', ''),
+                    'ref_authors_correct': correct_author_names,
                 })
-            elif not paper_arxiv_id:
-                # Paper has no ArXiv ID in the DB but reference cites one —
-                # the arXiv URL is spurious / points to another paper.
+            elif not paper_arxiv_id and self._missing_arxiv_metadata_is_authoritative():
+                # S2 records are authoritative enough that a missing ArXiv ID
+                # is strong evidence the cited ArXiv URL is spurious.
                 logger.debug(f"Local DB: Reference cites arXiv ID {arxiv_id} but matched paper has no ArXiv ID")
                 errors.append({
                     'error_type': 'arxiv_id',
                     'error_details': f"Incorrect ArXiv ID: paper '{paper_data.get('title', '')}' does not have ArXiv ID {arxiv_id}",
+                    'ref_title_correct': paper_data.get('title', ''),
+                    'ref_authors_correct': correct_author_names,
                 })
+            elif not paper_arxiv_id:
+                logger.debug(
+                    "Local DB: Matched %s record lacks authoritative arXiv metadata; skipping missing-ID error",
+                    self.database_label,
+                )
         elif paper_arxiv_id:
             # No arXiv URL in reference but paper has one — suggest it
             arxiv_url = f"https://arxiv.org/abs/{paper_arxiv_id}"
@@ -683,12 +734,15 @@ class LocalNonArxivReferenceChecker:
         else:
             logger.debug("Local DB: Reference verification passed - no errors found")
         
-        # Return the Semantic Scholar URL that was actually used for verification
-        # since this is a Semantic Scholar database checker
+        # Return the best available source URL for the matched local record.
         external_ids = paper_data.get('externalIds', {})
         
+        # Prefer the source URL stored in non-S2 local databases when available.
+        if paper_data.get('source_url'):
+            paper_url = paper_data['source_url']
+            logger.debug(f"Using stored source URL for verification: {paper_url}")
         # First try to get the Semantic Scholar URL using paperId
-        if paper_data.get('paperId'):
+        elif paper_data.get('paperId'):
             paper_url = construct_semantic_scholar_url(paper_data['paperId'])
             logger.debug(f"Using Semantic Scholar URL for verification: {paper_url}")
         else:

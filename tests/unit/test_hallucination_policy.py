@@ -5,6 +5,7 @@ import csv
 from unittest.mock import MagicMock
 
 from refchecker.core.hallucination_policy import (
+    build_hallucination_error_entry,
     check_author_hallucination,
     detect_name_order_warning,
     run_hallucination_check,
@@ -47,6 +48,44 @@ def test_arxiv_id_conflict_should_be_checked():
         'ref_authors_cited': 'Author One, Author Two',
     }
     assert should_check_hallucination(entry) is True
+
+
+def test_build_hallucination_entry_keeps_authors_for_arxiv_id():
+    raw_errors = [{
+        'error_type': 'arxiv_id',
+        'error_details': "Incorrect ArXiv ID: paper 'Open3DVQA' does not have ArXiv ID 2503.11094",
+        'ref_authors_correct': 'Weichen Zhan, Zile Zhou, Zhiheng Zheng',
+    }]
+    reference = {
+        'title': 'Open3dvqa: A benchmark for comprehensive spatial reasoning with multi-modal large language model in open space',
+        'authors': ['Weichen Zhan', 'Zile Zhou', 'Zhiheng Zheng'],
+        'year': 2025,
+        'url': 'https://arxiv.org/abs/2503.11094',
+        'venue': '',
+    }
+
+    entry = build_hallucination_error_entry(
+        raw_errors,
+        reference,
+        verified_url='https://api.semanticscholar.org/CorpusID:282593059',
+    )
+
+    assert entry is not None
+    assert entry['ref_authors_correct'] == 'Weichen Zhan, Zile Zhou, Zhiheng Zheng'
+
+
+def test_verified_arxiv_id_conflict_with_high_author_overlap_should_not_be_checked():
+    entry = {
+        'error_type': 'arxiv_id',
+        'error_details': "Incorrect ArXiv ID: paper 'Open3DVQA: A Benchmark for Comprehensive Spatial Reasoning with Multimodal Large Language Model in Open Space' does not have ArXiv ID 2503.11094",
+        'ref_title': 'Open3dvqa: A benchmark for comprehensive spatial reasoning with multi-modal large language model in open space',
+        'ref_authors_cited': 'Weichen Zhan, Zile Zhou, Zhiheng Zheng, Chen Gao, Jinqiang Cui, Yong Li, Xinlei Chen, Xiao-Ping Zhang',
+        'ref_authors_correct': 'Weichen Zhan, Zile Zhou, Zhiheng Zheng, Chen Gao, Jinqiang Cui, Yong Li, Xinlei Chen, Xiao-Ping Zhang',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:282593059',
+        'ref_url_cited': 'https://arxiv.org/abs/2503.11094',
+    }
+
+    assert should_check_hallucination(entry) is False
 
 
 def test_venue_only_issue_should_not_be_checked():
@@ -511,6 +550,25 @@ def test_llm_likely_overrides_no_deterministic():
     }
     result = run_hallucination_check(entry, llm_client=mock_llm)
     assert result['verdict'] == 'LIKELY'
+
+
+def test_verified_arxiv_id_high_overlap_skips_llm():
+    entry = {
+        'error_type': 'arxiv_id',
+        'error_details': "Incorrect ArXiv ID: paper 'Open3DVQA: A Benchmark for Comprehensive Spatial Reasoning with Multimodal Large Language Model in Open Space' does not have ArXiv ID 2503.11094",
+        'ref_title': 'Open3dvqa: A benchmark for comprehensive spatial reasoning with multi-modal large language model in open space',
+        'ref_authors_cited': 'Weichen Zhan, Zile Zhou, Zhiheng Zheng, Chen Gao, Jinqiang Cui, Yong Li, Xinlei Chen, Xiao-Ping Zhang',
+        'ref_authors_correct': 'Weichen Zhan, Zile Zhou, Zhiheng Zheng, Chen Gao, Jinqiang Cui, Yong Li, Xinlei Chen, Xiao-Ping Zhang',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:282593059',
+        'ref_url_cited': 'https://arxiv.org/abs/2503.11094',
+    }
+    mock_llm = MagicMock()
+    mock_llm.available = True
+
+    result = run_hallucination_check(entry, llm_client=mock_llm)
+
+    assert result is None
+    mock_llm.assess.assert_not_called()
 
 
 # ------------------------------------------------------------------

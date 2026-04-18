@@ -22,6 +22,7 @@ class TestLocalDbArxivFallback(unittest.TestCase):
     def _make_checker(self, local_db=None, arxiv_citation=None, semantic_scholar=None):
         checker = EnhancedHybridReferenceChecker.__new__(EnhancedHybridReferenceChecker)
         checker.local_db = local_db
+        checker.local_db_checkers = []
         checker.arxiv_citation = arxiv_citation
         checker.semantic_scholar = semantic_scholar
         checker.crossref = None

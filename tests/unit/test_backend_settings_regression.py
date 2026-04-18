@@ -51,7 +51,7 @@ def _get_progress_refchecker_check_paper() -> ast.AsyncFunctionDef:
 # ---------------------------------------------------------------------------
 
 class TestDbPathSetting:
-    """The local Semantic Scholar DB path must be configurable from the UI."""
+    """The local database directory setting must remain configurable from the UI."""
 
     def test_settings_config_contains_db_path(self):
         """GET /api/settings must include db_path in settings_config."""

@@ -179,11 +179,10 @@ def build_hallucination_error_entry(
 
     consolidated_type = 'multiple' if len(error_types) > 1 else error_types[0]
 
-    # When there's an ArXiv ID mismatch, the verification matched a wrong
-    # paper — don't trust its author data for deterministic hallucination checks.
-    has_arxiv_mismatch = any(et == 'arxiv_id' for et in error_types)
-    if has_arxiv_mismatch:
-        authors_correct = None
+    # Preserve checker-supplied author metadata even for ArXiv-ID mismatches.
+    # A verified reference can match the correct paper by title/authors while
+    # still citing a stale or spurious ArXiv URL; downstream screening uses
+    # author overlap to suppress unnecessary LLM calls for those cases.
 
     error_entry: Dict[str, Any] = {
         'error_type': consolidated_type,

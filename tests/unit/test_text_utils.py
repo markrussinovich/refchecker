@@ -929,6 +929,95 @@ class TestVenueParsingRegression:
 
 class TestAuthorComparisonBugFixes:
     """Test author deduplication and error message accuracy"""
+
+    def test_single_team_author_matches_large_collaboration(self):
+        """A sole team-name author should be accepted for large collaborations."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["Gemini Team"]
+        correct_authors = [
+            "Gemini Team",
+            "Rohan Anil",
+            "Sebastian Borgeaud",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "team authorship shorthand" in error_message.lower()
+
+    def test_single_team_author_matches_concatenated_first_author(self):
+        """S2 sometimes concatenates the team name with the first person author."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["Gemma Team"]
+        correct_authors = [
+            "Gemma Team Aishwarya Kamath",
+            "Johan Ferret",
+            "Shreya Pathak",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "team authorship shorthand" in error_message.lower()
+
+    def test_team_author_with_et_al_matches_concatenated_first_author(self):
+        """A cited team name plus named authors should split S2's first author entry."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = [
+            "Gemma Team",
+            "Aishwarya Kamath",
+            "Johan Ferret",
+            "et al",
+        ]
+        correct_authors = [
+            "Gemma Team Aishwarya Kamath",
+            "Johan Ferret",
+            "Shreya Pathak",
+            "Nino Vieillard",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "with et al" in error_message.lower()
+
+    def test_team_author_et_al_handles_malformed_s2_surname(self):
+        """The exact Gemma Team pattern should survive S2's malformed surname encoding."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = [
+            "Gemma Team",
+            "Aishwarya Kamath",
+            "Johan Ferret",
+            "Shreya Pathak",
+            "Nino Vieillard",
+            "Ramona Merhej",
+            "Sarah Perrin",
+            "Tatiana Matejovicova",
+            "Alexandre Ramé",
+            "Morgane Rivière",
+            "et al",
+        ]
+        correct_authors = [
+            "Gemma Team Aishwarya Kamath",
+            "Johan Ferret",
+            "Shreya Pathak",
+            "Nino Vieillard",
+            "Ramona Merhej",
+            "Sarah Perrin",
+            "Tatiana Matejovicova",
+            "Alexandre Ram'e",
+            "Morgane Rivière",
+            "Louis Rouillard",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "with et al" in error_message.lower()
     
     def test_duplicate_author_handling(self):
         """Test that duplicate authors in correct list are handled properly"""

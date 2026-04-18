@@ -57,12 +57,13 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
-from refchecker.utils.database_config import resolve_database_paths, DATABASE_LABELS
+from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_LOOKUP_ORDER, DATABASE_UPDATE_ORDER
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
 from refchecker.core.parallel_processor import ParallelReferenceProcessor  
 from refchecker.core.db_connection_pool import ThreadSafeLocalChecker
+from refchecker.database.local_database_updater import update_local_database
 
 # Import version
 from refchecker.__version__ import __version__
@@ -371,10 +372,10 @@ class ArxivReferenceChecker:
         )
         
         if self.db_paths:
-            configured = ", ".join(
+            configured = "\n   ".join(
                 f"{DATABASE_LABELS.get(name, name)}={path}" for name, path in sorted(self.db_paths.items())
             )
-            logger.info(f"Using local databases (DB-first mode with API fallbacks): {configured}")
+            logger.info(f"Using local databases (DB-first mode with API fallbacks):\n   {configured}")
         else:
             logger.debug("Using enhanced hybrid checker with multiple API sources")
         
@@ -392,12 +393,12 @@ class ArxivReferenceChecker:
         )
         if self.db_paths:
             local_services = []
-            for key in ('s2', 'openalex', 'crossref', 'dblp'):
+            for key in DATABASE_LOOKUP_ORDER:
                 if key in self.db_paths:
                     local_services.append(f"Local {DATABASE_LABELS.get(key, key)} DB")
-            self.service_order = " → ".join(local_services + ["Semantic Scholar API", "OpenAlex", "CrossRef"])
+            self.service_order = " → ".join(local_services + ["Semantic Scholar API", "OpenAlex", "CrossRef", "DBLP", "ACL Anthology"])
         else:
-            self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
+            self.service_order = "Semantic Scholar API → OpenAlex → CrossRef → DBLP → ACL Anthology"
         
         # debug mode
         self.debug_mode = debug_mode
@@ -4208,15 +4209,12 @@ class ArxivReferenceChecker:
                 else:
                     logger.warning("LLM reference extraction returned no results, falling back to regex parsing")
             except Exception as e:
-                logger.warning(f"LLM reference extraction failed: {e}, falling back to regex parsing")
+                logger.warning(f"LLM reference extraction failed: {e}, falling back to GROBID")
         
-        # No LLM available (or LLM failed) and non-standard format — cannot parse reliably
+        # No LLM available (or LLM failed) and non-standard format — fallback to GROBID
         if not self.llm_extractor:
-            logger.error("Cannot parse non-standard bibliography format without an LLM. "
-                         "Use --llm-provider to enable LLM-based extraction.")
-            if not self.debug_mode:
-                print("\n  ❌  Cannot parse this bibliography format without an LLM.")
-                print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
+            print("      For best results, use --llm-provider to enable LLM-based extraction.")
+            print("     Fallbacking back to GROBID extraction.")
             self.fatal_error = True
         else:
             logger.warning("LLM extraction failed for non-standard bibliography format; skipping this paper's references")
@@ -6305,16 +6303,22 @@ class ArxivReferenceChecker:
         if verified_data and verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
             return verified_data['url']
         
-        # Second priority: Semantic Scholar URL from paperId (if no direct URL available)
+        # Second priority: canonical URL returned by the verifier itself.
+        if reference_url:
+            validated_url = self._validate_reference_url(reference_url, verified_data)
+            if validated_url:
+                return validated_url
+
+        # Third priority: Semantic Scholar URL from paperId (if no direct URL available)
         if verified_data and verified_data.get('paperId'):
             return construct_semantic_scholar_url(verified_data['paperId'])
         
-        # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
+        # Fourth priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
         if verified_data and verified_data.get('externalIds', {}).get('DOI'):
             from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(verified_data['externalIds']['DOI'])
         
-        # Fourth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
+        # Fifth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
         if verified_data and verified_data.get('externalIds', {}).get('ArXiv'):
             # Only show ArXiv URL as verified URL if there's no ArXiv ID mismatch
             if not self._has_arxiv_id_error(errors):
@@ -6322,7 +6326,7 @@ class ArxivReferenceChecker:
                 correct_arxiv_id = verified_data['externalIds']['ArXiv']
                 return construct_arxiv_url(correct_arxiv_id)
         
-        # Fifth priority: Other URLs from verified_data
+        # Sixth priority: Other URLs from verified_data
         if verified_data and verified_data.get('url'):
             return verified_data['url']
         
@@ -6686,7 +6690,13 @@ class ArxivReferenceChecker:
             pass
 
 
-def _update_local_databases(database_paths, database_directory=None):
+def _update_local_databases(
+    database_paths,
+    database_directory=None,
+    semantic_scholar_api_key=None,
+    openalex_since=None,
+    openalex_min_year=None,
+):
     """Install or update configured local checker databases.
 
     Args:
@@ -6700,45 +6710,38 @@ def _update_local_databases(database_paths, database_directory=None):
         print("No local databases configured. Use --database-dir or per-DB flags first.")
         return 1
 
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    download_script = os.path.join(repo_root, "scripts", "download_db.py")
+    planned_paths = resolve_database_update_paths(
+        explicit_paths=database_paths,
+        database_directory=database_directory,
+    )
     updated_any = False
 
-    for db_name, db_path in sorted(database_paths.items()):
-        if db_name != "s2":
-            print(f"ℹ️  Local {DATABASE_LABELS.get(db_name, db_name)} DB update is not automated yet; keeping current file: {db_path}")
+    for db_name in DATABASE_UPDATE_ORDER:
+        db_path = planned_paths.get(db_name)
+        if not db_path:
             continue
-        if not os.path.isfile(download_script):
-            print(f"❌ Semantic Scholar updater not found: {download_script}")
-            return 1
-        output_dir = os.path.dirname(db_path) or "."
-        print(f"🔄 Updating local S2 database: {db_path}")
-        command = [
-            sys.executable,
-            download_script,
-            "--output-dir",
-            output_dir,
-            "--db-path",
-            db_path,
-        ]
+        label = DATABASE_LABELS.get(db_name, db_name)
+        print(f"🔄 Updating local {label} database: {db_path}")
         try:
-            result = subprocess.run(
-                command,
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                timeout=3600,
+            outcome = update_local_database(
+                db_name,
+                db_path,
+                api_key=semantic_scholar_api_key,
+                openalex_since=openalex_since,
+                openalex_min_year=openalex_min_year,
             )
-        except subprocess.TimeoutExpired:
-            print("❌ Timed out while updating S2 database")
+        except Exception as exc:
+            print(f"❌ Failed to update local {label} database: {exc}")
             return 1
-        if result.returncode != 0:
-            stderr = (result.stderr or "").strip()
-            stdout = (result.stdout or "").strip()
-            details = stderr or stdout or f"exit code {result.returncode}"
-            print(f"❌ Failed to update S2 database: {details}")
-            return result.returncode
-        print("✅ Updated S2 database")
+
+        if outcome.skipped:
+            print(f"ℹ️  {outcome.message}")
+            continue
+        if not outcome.updated:
+            print(f"❌ {outcome.message}")
+            return 1
+
+        print(f"✅ {outcome.message}")
         updated_any = True
 
     if not updated_any:
@@ -6767,7 +6770,7 @@ def main():
     parser.add_argument("--db-path", type=str,
                         help="(Deprecated) Path to local Semantic Scholar database")
     parser.add_argument("--database-dir", type=str,
-                        help="Directory containing local databases named semantic_scholar.db, openalex.db, crossref.db, dblp.db")
+                        help="Directory containing local databases named semantic_scholar.db, openalex.db, crossref.db, dblp.db, acl_anthology.db")
     parser.add_argument("--s2-db", type=str,
                         help="Path to local Semantic Scholar database file")
     parser.add_argument("--openalex-db", type=str,
@@ -6776,8 +6779,14 @@ def main():
                         help="Path to local CrossRef database file")
     parser.add_argument("--dblp-db", type=str,
                         help="Path to local DBLP database file")
+    parser.add_argument("--acl-db", type=str,
+                        help="Path to local ACL Anthology database file")
     parser.add_argument("--update-databases", action="store_true",
                         help="Install/update configured local databases (if used without --paper/--paper-list/--openreview, updates and exits)")
+    parser.add_argument("--openalex-since", type=str,
+                        help="Only ingest OpenAlex snapshot partitions newer than YYYY-MM-DD during --update-databases")
+    parser.add_argument("--openalex-min-year", type=int,
+                        help="Only ingest OpenAlex works published in this year or later during --update-databases")
     parser.add_argument("--output-file", nargs='?', const='reference_errors.txt', type=str,
                         help="Path to output file for reference discrepancies (default: reference_errors.txt if flag provided, no file if not provided)")
     parser.add_argument("--report-file", type=str,
@@ -6822,13 +6831,20 @@ def main():
             "openalex": args.openalex_db,
             "crossref": args.crossref_db,
             "dblp": args.dblp_db,
+            "acl": args.acl_db,
         },
         database_directory=args.database_dir,
     )
 
     input_mode_count = sum(1 for value in (args.paper, args.paper_list, args.openreview) if value)
     if args.update_databases and input_mode_count == 0:
-        return _update_local_databases(resolved_db_paths, database_directory=args.database_dir)
+        return _update_local_databases(
+            resolved_db_paths,
+            database_directory=args.database_dir,
+            semantic_scholar_api_key=args.semantic_scholar_api_key,
+            openalex_since=args.openalex_since,
+            openalex_min_year=args.openalex_min_year,
+        )
     if input_mode_count > 1:
         print("Error: Use exactly one of --paper, --paper-list, or --openreview")
         return 1
@@ -6837,7 +6853,13 @@ def main():
         return 1
 
     if args.update_databases:
-        update_code = _update_local_databases(resolved_db_paths, database_directory=args.database_dir)
+        update_code = _update_local_databases(
+            resolved_db_paths,
+            database_directory=args.database_dir,
+            semantic_scholar_api_key=args.semantic_scholar_api_key,
+            openalex_since=args.openalex_since,
+            openalex_min_year=args.openalex_min_year,
+        )
         if update_code != 0:
             return update_code
 

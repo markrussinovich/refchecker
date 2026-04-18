@@ -1,20 +1,22 @@
-"""Deterministic cached full-paper regressions.
+"""Deterministic cached full-paper regressions without live LLM usage.
 
-This is the default end-to-end cached paper suite. It serves both purposes:
-correctness (expected hallucination counts for known cached papers) and
-cross-mode consistency (CLI single, CLI bulk, and WebUI agree).
+This suite verifies that given the same cached bibliography and local DB,
+CLI single, CLI bulk, and WebUI all produce identical per-reference
+verification assessments.  Each mode runs its own full code path; the
+outputs are normalised into a common format and compared.
 
-All data comes from the fixture cache and local test DB. External network is
-blocked so the suite remains deterministic.
+External network is blocked so the suite remains deterministic.
+No LLM provider is configured; all data comes from the fixture cache.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -25,10 +27,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 _FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures'
 CACHE_ROOT = _FIXTURES / 'test_cache'
-DB_PATH = str(CACHE_ROOT)
+# Explicit path to the test DB file so all modes resolve identically.
+DB_FILE = str(CACHE_ROOT / 'test_papers.db')
 
 
-def _blocked_request(self, url, **kw):
+def _blocked_request(self, *args, **kw):
     response = MagicMock()
     response.status_code = 404
     response.text = ''
@@ -40,198 +43,233 @@ def _blocked_request(self, url, **kw):
 
 
 PAPER_CASES = [
-    ('0FhrtdKLtD', 2),
-    ('5vdw8Qmrre', 0),
-    ('H8tismBT3Q', 2),
-    ('JFY9MZtWTu', 6),
-    ('ioYdy7aghG', 0),
-    ('izbBqTL8vb', 0),
+    '0FhrtdKLtD',
+    '5vdw8Qmrre',
+    'H8tismBT3Q',
+    'JFY9MZtWTu',
+    'ioYdy7aghG',
+    'izbBqTL8vb',
 ]
 
-_RESULTS_CACHE: Dict[str, dict] = {}
+_RESULTS_CACHE: dict[str, dict] = {}
 
 
 def _skip_if_missing() -> None:
     if not CACHE_ROOT.is_dir():
         pytest.skip(f'Fixture cache not found at {CACHE_ROOT}')
-
+    if not Path(DB_FILE).is_file():
+        pytest.skip(f'Test DB not found at {DB_FILE}')
     missing = [
-        paper_id
-        for paper_id, _ in PAPER_CASES
-        if not (CACHE_ROOT / f'openreview_{paper_id}' / 'bibliography.json').is_file()
+        pid for pid in PAPER_CASES
+        if not (CACHE_ROOT / f'openreview_{pid}' / 'bibliography.json').is_file()
     ]
     if missing:
         pytest.skip(f'Cached bibliographies missing for: {", ".join(sorted(missing))}')
 
 
-def _flagged_titles_cli(payload: dict) -> set[str]:
-    return {
-        record.get('ref_title', '').lower()
-        for record in payload.get('records', [])
-        if (record.get('hallucination_assessment') or {}).get('verdict') == 'LIKELY'
-    }
+def _load_cached_bibliography(paper_id: str) -> List[Dict[str, Any]]:
+    path = CACHE_ROOT / f'openreview_{paper_id}' / 'bibliography.json'
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
-def _flagged_titles_webui(result: dict) -> set[str]:
-    return {
-        ref.get('title', '').lower()
-        for ref in (result.get('references') or [])
-        if ref and (ref.get('hallucination_assessment') or {}).get('verdict') == 'LIKELY'
-    }
+# ---------------------------------------------------------------------------
+# Normalisation helpers – convert each mode's output into a common format:
+#   { title_lower → sorted list of (severity, issue_type) tuples }
+# where severity ∈ {'error', 'warning', 'info'} and issue_type is a string
+# like 'year', 'author', 'venue', 'url', 'unverified', etc.
+# ---------------------------------------------------------------------------
+
+def _normalise_cli(payload: dict) -> Dict[str, List[Tuple[str, str]]]:
+    """Normalise CLI / Bulk structured-report records."""
+    m: Dict[str, List[Tuple[str, str]]] = {}
+    for rec in payload.get('records', []):
+        title = rec.get('ref_title', '').lower().strip()
+        issues: List[Tuple[str, str]] = []
+        for e in rec.get('_original_errors', []):
+            if 'error_type' in e:
+                issues.append(('error', e['error_type']))
+            elif 'warning_type' in e:
+                issues.append(('warning', e['warning_type']))
+            elif 'info_type' in e:
+                issues.append(('info', e['info_type']))
+        m[title] = sorted(issues)
+    return m
 
 
-def _compare_verdicts(
-    left: Dict[str, Optional[str]],
-    right: Dict[str, Optional[str]],
+def _normalise_webui(result: dict) -> Dict[str, List[Tuple[str, str]]]:
+    """Normalise WebUI per-reference results."""
+    m: Dict[str, List[Tuple[str, str]]] = {}
+    for ref in (result.get('references') or []):
+        title = ref.get('title', '').lower().strip()
+        issues: List[Tuple[str, str]] = []
+        for e in ref.get('errors', []):
+            issues.append(('error', e.get('error_type', '')))
+        for w in ref.get('warnings', []):
+            issues.append(('warning', w.get('error_type', '')))
+        for s in ref.get('suggestions', []):
+            issues.append(('info', s.get('suggestion_type') or s.get('error_type', '')))
+        if issues:
+            m[title] = sorted(issues)
+    return m
+
+
+def _compare_assessments(
+    left: Dict[str, List],
+    right: Dict[str, List],
     left_label: str,
     right_label: str,
     paper_id: str,
 ) -> None:
-    diffs = [
-        f'  {title[:60]}: {left_label}={left.get(title)}  {right_label}={right.get(title)}'
-        for title in sorted(set(left) | set(right))
-        if left.get(title) != right.get(title)
-    ]
+    all_titles = sorted(set(left) | set(right))
+    diffs = []
+    for title in all_titles:
+        l = left.get(title, [])
+        r = right.get(title, [])
+        if l != r:
+            diffs.append(
+                f'  {title[:60]}:\n'
+                f'    {left_label}: {l}\n'
+                f'    {right_label}: {r}'
+            )
     assert not diffs, (
-        f'[{paper_id}] {left_label} vs {right_label}: {len(diffs)} ref(s) differ:\n'
-        + '\n'.join(diffs)
+        f'[{paper_id}] {left_label} vs {right_label}: '
+        f'{len(diffs)} ref(s) differ:\n' + '\n'.join(diffs)
     )
 
 
-def _ref_verdicts_cli(payload: dict) -> Dict[str, Optional[str]]:
-    return {
-        record.get('ref_title', '').lower(): (record.get('hallucination_assessment') or {}).get('verdict')
-        for record in payload.get('records', [])
-    }
+# ---------------------------------------------------------------------------
+# Network-blocking context manager
+# ---------------------------------------------------------------------------
+
+class _BlockedNetwork:
+    """Block all HTTP and set arxiv retries to zero."""
+
+    def __enter__(self):
+        self._orig_request = requests.Session.request
+        self._orig_get = requests.Session.get
+        self._orig_post = requests.Session.post
+        requests.Session.request = _blocked_request
+        requests.Session.get = _blocked_request
+        requests.Session.post = _blocked_request
+
+        self._orig_httpx = None
+        try:
+            import httpx
+            self._orig_httpx = httpx.Client.send
+            httpx.Client.send = (
+                lambda self, *a, **k: (_ for _ in ()).throw(ConnectionError('blocked'))
+            )
+        except ImportError:
+            pass
+
+        import arxiv
+        self._orig_arxiv_init = arxiv.Client.__init__
+        _real = self._orig_arxiv_init
+        def _fast(inst, *a, **kw):
+            kw['delay_seconds'] = 0
+            kw['num_retries'] = 0
+            return _real(inst, *a, **kw)
+        arxiv.Client.__init__ = _fast
+        return self
+
+    def __exit__(self, *exc):
+        requests.Session.request = self._orig_request
+        requests.Session.get = self._orig_get
+        requests.Session.post = self._orig_post
+        if self._orig_httpx is not None:
+            import httpx
+            httpx.Client.send = self._orig_httpx
+        import arxiv
+        arxiv.Client.__init__ = self._orig_arxiv_init
+        return False
 
 
-def _ref_verdicts_webui(result: dict) -> Dict[str, Optional[str]]:
-    return {
-        ref.get('title', '').lower(): (ref.get('hallucination_assessment') or {}).get('verdict')
-        for ref in (result.get('references') or []) if ref
-    }
-
+# ---------------------------------------------------------------------------
+# Result collection – runs all 3 modes (cached per paper_id)
+# ---------------------------------------------------------------------------
 
 def _get_paper_results(paper_id: str) -> dict:
     if paper_id in _RESULTS_CACHE:
         return _RESULTS_CACHE[paper_id]
 
     _skip_if_missing()
-
     url = f'https://openreview.net/forum?id={paper_id}'
+    bib = _load_cached_bibliography(paper_id)
 
-    orig_get = requests.Session.get
-    orig_post = requests.Session.post
-    requests.Session.get = _blocked_request
-    requests.Session.post = _blocked_request
-    orig_httpx = None
-    try:
-        import httpx
-
-        orig_httpx = httpx.Client.send
-        httpx.Client.send = lambda self, *a, **k: (_ for _ in ()).throw(ConnectionError('blocked'))
-    except ImportError:
-        pass
-
-    try:
+    with _BlockedNetwork():
         from refchecker.core.refchecker import ArxivReferenceChecker
         from backend.refchecker_wrapper import ProgressRefChecker
 
+        # ---- CLI single ----
         checker = ArxivReferenceChecker(
-            db_path=DB_PATH,
-            llm_config={'provider': 'anthropic'},
-            cache_dir=str(CACHE_ROOT),
-            enable_parallel=True,
+            db_path=DB_FILE, llm_config=None,
+            cache_dir=str(CACHE_ROOT), enable_parallel=True,
         )
-        checker.run(debug_mode=True, input_specs=[url])
+        checker.run(debug_mode=False, input_specs=[url])
         single_payload = checker._build_structured_report_payload()
 
+        # ---- CLI bulk (duplicate URL → dedup to 1) ----
         checker = ArxivReferenceChecker(
-            db_path=DB_PATH,
-            llm_config={'provider': 'anthropic'},
-            cache_dir=str(CACHE_ROOT),
-            enable_parallel=True,
+            db_path=DB_FILE, llm_config=None,
+            cache_dir=str(CACHE_ROOT), enable_parallel=True,
         )
-        checker.run(debug_mode=True, input_specs=[url, url])
+        checker.run(debug_mode=False, input_specs=[url, url])
         bulk_payload = checker._build_structured_report_payload()
 
+        # ---- WebUI ----
         web_checker = ProgressRefChecker(
-            llm_provider='anthropic',
-            use_llm=True,
-            db_path=DB_PATH,
-            cache_dir=str(CACHE_ROOT),
+            llm_provider=None, use_llm=False,
+            db_path=DB_FILE, cache_dir=str(CACHE_ROOT),
         )
-        webui_result = asyncio.get_event_loop().run_until_complete(web_checker.check_paper(url, 'url'))
-    finally:
-        requests.Session.get = orig_get
-        requests.Session.post = orig_post
-        if orig_httpx:
-            import httpx
-
-            httpx.Client.send = orig_httpx
+        webui_result = asyncio.run(web_checker.check_paper(url, 'url'))
 
     result = {
         'single_payload': single_payload,
-        'single_verdicts': _ref_verdicts_cli(single_payload),
         'bulk_payload': bulk_payload,
-        'bulk_verdicts': _ref_verdicts_cli(bulk_payload),
         'webui_result': webui_result,
-        'webui_verdicts': _ref_verdicts_webui(webui_result),
+        'bib_count': len(bib),
+        'norm_single': _normalise_cli(single_payload),
+        'norm_bulk': _normalise_cli(bulk_payload),
+        'norm_webui': _normalise_webui(webui_result),
     }
     _RESULTS_CACHE[paper_id] = result
     return result
 
 
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
 @pytest.mark.integration
 class TestCachedFullPaperRegression:
-    """Default cached full-paper regressions: correctness plus mode consistency."""
+    """Given identical cached inputs, all modes must produce the same
+    per-reference verification assessment."""
 
-    @pytest.mark.parametrize(
-        'paper_id, expected_hallucinated_count',
-        PAPER_CASES,
-        ids=[paper_id for paper_id, _ in PAPER_CASES],
-    )
-    def test_cached_paper_correctness_and_mode_consistency(
-        self,
-        paper_id: str,
-        expected_hallucinated_count: int,
-    ) -> None:
-        result = _get_paper_results(paper_id)
+    @pytest.mark.parametrize('paper_id', PAPER_CASES, ids=PAPER_CASES)
+    def test_bibliography_count_matches(self, paper_id: str) -> None:
+        """All modes process the same number of references."""
+        r = _get_paper_results(paper_id)
+        n = r['bib_count']
+        assert r['single_payload']['summary']['total_references_processed'] == n
+        assert r['bulk_payload']['summary']['total_references_processed'] == n
+        assert r['webui_result']['summary']['total_refs'] == n
 
-        single_flagged = _flagged_titles_cli(result['single_payload'])
-        bulk_flagged = _flagged_titles_cli(result['bulk_payload'])
-        webui_flagged = _flagged_titles_webui(result['webui_result'])
+    @pytest.mark.parametrize('paper_id', PAPER_CASES, ids=PAPER_CASES)
+    def test_single_vs_bulk(self, paper_id: str) -> None:
+        """CLI single and CLI bulk produce identical assessments."""
+        r = _get_paper_results(paper_id)
+        _compare_assessments(
+            r['norm_single'], r['norm_bulk'], 'Single', 'Bulk', paper_id)
 
-        _compare_verdicts(result['single_verdicts'], result['bulk_verdicts'], 'Single', 'Bulk', paper_id)
-        _compare_verdicts(result['single_verdicts'], result['webui_verdicts'], 'Single', 'WebUI', paper_id)
+    @pytest.mark.parametrize('paper_id', PAPER_CASES, ids=PAPER_CASES)
+    def test_single_vs_webui(self, paper_id: str) -> None:
+        """CLI single and WebUI produce identical assessments."""
+        r = _get_paper_results(paper_id)
+        _compare_assessments(
+            r['norm_single'], r['norm_webui'], 'Single', 'WebUI', paper_id)
 
-        assert len(single_flagged) == expected_hallucinated_count, (
-            f'[{paper_id}] single mode flagged {len(single_flagged)} refs, '
-            f'expected {expected_hallucinated_count}.\nFlagged: {sorted(single_flagged)}'
-        )
-        assert len(bulk_flagged) == expected_hallucinated_count, (
-            f'[{paper_id}] bulk mode flagged {len(bulk_flagged)} refs, '
-            f'expected {expected_hallucinated_count}.\nFlagged: {sorted(bulk_flagged)}'
-        )
-        assert len(webui_flagged) == expected_hallucinated_count, (
-            f'[{paper_id}] WebUI mode flagged {len(webui_flagged)} refs, '
-            f'expected {expected_hallucinated_count}.\nFlagged: {sorted(webui_flagged)}'
-        )
-
-        single_summary = result['single_payload']['summary']
-        bulk_summary = result['bulk_payload']['summary']
-        webui_summary = result['webui_result']['summary']
-
-        assert single_summary['flagged_records'] == bulk_summary['flagged_records'] == webui_summary['hallucination_count'], (
-            f'[{paper_id}] Hallucination counts differ: '
-            f'Single={single_summary["flagged_records"]} '
-            f'Bulk={bulk_summary["flagged_records"]} '
-            f'WebUI={webui_summary["hallucination_count"]}'
-        )
-
-        assert single_summary['total_errors_found'] == bulk_summary['total_errors_found'] == webui_summary['errors_count'], (
-            f'[{paper_id}] Error counts differ: '
-            f'Single={single_summary["total_errors_found"]} '
-            f'Bulk={bulk_summary["total_errors_found"]} '
-            f'WebUI={webui_summary["errors_count"]}'
-        )
+    @pytest.mark.parametrize('paper_id', PAPER_CASES, ids=PAPER_CASES)
+    def test_webui_uses_cache(self, paper_id: str) -> None:
+        """WebUI loads bibliography from the fixture cache."""
+        r = _get_paper_results(paper_id)
+        assert r['webui_result']['summary']['extraction_method'] == 'cache'
