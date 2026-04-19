@@ -380,6 +380,18 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     cited = error_entry.get('ref_authors_cited', '')
     correct = error_entry.get('ref_authors_correct', '')
 
+    # When the reference has an incorrect ArXiv ID that resolves to a
+    # completely different paper, the "correct" authors are from the WRONG
+    # paper.  Author-overlap comparison is meaningless in this case — defer
+    # to the LLM which can web-search for the cited title.
+    error_details = (error_entry.get('error_details') or '').lower()
+    if 'incorrect arxiv id' in error_details and 'points to' in error_details:
+        logger.debug(
+            "check_author_hallucination: skip (incorrect ArXiv ID — correct authors are from wrong paper) "
+            "ref=%r", error_entry.get('ref_title', '')[:60],
+        )
+        return None
+
     logger.debug(f"check_author_hallucination: ref={error_entry.get('ref_title','')[:60]!r} "
                  f"type={error_type} is_verified={is_verified} cited={cited[:50]!r} correct={correct[:50]!r}")
 
