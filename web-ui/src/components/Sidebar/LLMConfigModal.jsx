@@ -167,7 +167,8 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
           }
           if (response.data.warning) {
             logger.warn('LLMConfigModal', 'API validation warning', response.data.warning)
-            setError(`⚠️ ${response.data.warning}`)
+            // Don't setError here — the modal will close after save and
+            // the warning would only flash briefly as a red error banner.
           }
           logger.info('LLMConfigModal', 'API validation successful')
         } catch (validationErr) {

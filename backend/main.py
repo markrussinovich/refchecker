@@ -2949,7 +2949,9 @@ async def validate_llm_config(
         # 429 / quota / rate-limit errors mean the key IS valid but the
         # account has a billing or rate issue.  Return success with a warning
         # so the user can still save the config.
-        if "429" in error_msg or "quota" in error_lower or "exceeded" in error_lower or "rate" in error_lower or "billing" in error_lower:
+        # NOTE: match "rate limit" / "rate-limit" instead of bare "rate" to
+        # avoid false positives (e.g. "generateContent" contains "rate").
+        if "429" in error_msg or "quota" in error_lower or "exceeded" in error_lower or "rate limit" in error_lower or "rate-limit" in error_lower or "rate_limit" in error_lower or "billing" in error_lower:
             warning = "API key is valid, but the account has a quota or rate-limit issue. Check your plan and billing details."
             logger.info(f"LLM validation passed with warning: {warning}")
             return {"valid": True, "message": "Connection validated (with warning)", "warning": warning}
