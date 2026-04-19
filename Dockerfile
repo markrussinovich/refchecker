@@ -78,6 +78,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application source
 COPY --chown=refchecker:refchecker src/ ./src/
 COPY --chown=refchecker:refchecker backend/ ./backend/
+COPY --chown=refchecker:refchecker scripts/ ./scripts/
 COPY --chown=refchecker:refchecker pyproject.toml ./
 
 # Copy bundled frontend from node builder

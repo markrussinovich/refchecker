@@ -45,6 +45,10 @@ services:
       - key: MAX_CHECKS_PER_USER
         value: "3"
 
+      # --- GROBID (PDF reference extraction for users without LLM keys) ---
+      - key: GROBID_URL
+        value: http://grobid:8070
+
       # --- Local Semantic Scholar database (optional, improves speed) ---
       - key: REFCHECKER_DB_PATH
         value: /data/semantic_scholar.db
@@ -56,3 +60,14 @@ services:
       sizeGB: 100                    # Fits ~90 GB slim DB ($25/month on Render)
 
     healthCheckPath: /api/health
+
+  # GROBID — PDF reference extraction engine (fallback when no LLM key)
+  - type: pserv
+    name: grobid
+    runtime: image
+    image:
+      url: lfoppiano/grobid:0.8.2
+    envVars:
+      - key: JAVA_OPTS
+        value: "-Xmx512m"
+    healthCheckPath: /api/isalive
