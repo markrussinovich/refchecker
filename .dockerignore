@@ -62,7 +62,6 @@ paper/
 
 # Development files
 Makefile
-scripts/
 UNKNOWN.egg-info/
 
 # Logs and debug
