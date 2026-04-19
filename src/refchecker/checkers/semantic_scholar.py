@@ -501,13 +501,16 @@ class NonArxivReferenceChecker:
         best_match_version = None
         best_match_score = 0.0
         
-        # Check latest version first
+        # Check latest version first — this is the baseline.  If we cannot
+        # fetch the latest version metadata we have no reliable basis for
+        # comparing historical versions, so bail out.
         latest_version_data = self._fetch_arxiv_version_metadata(arxiv_id, latest_version_num)
-        if latest_version_data:
-            latest_score = _version_match_score(latest_version_data)
-            if latest_score > 0:
-                best_match_version = latest_version_num
-                best_match_score = latest_score
+        if not latest_version_data:
+            return errors, None
+        latest_score = _version_match_score(latest_version_data)
+        if latest_score > 0:
+            best_match_version = latest_version_num
+            best_match_score = latest_score
         
         # Check historical versions to find if any is a BETTER match
         for version_num in range(1, latest_version_num):
