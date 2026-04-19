@@ -326,9 +326,8 @@ class LLMHallucinationVerifier:
         )
 
     def _init_google(self) -> None:
-        import google.generativeai as genai
-        genai.configure(api_key=self.api_key)
-        self.client = genai.GenerativeModel(self.model)
+        from google import genai
+        self.client = genai.Client(api_key=self.api_key)
         logger.debug(
             'Hallucination verifier initialized (provider=google, model=%s)',
             self.model,
@@ -451,12 +450,15 @@ class LLMHallucinationVerifier:
 
     def _call_google_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini with google_search tool."""
-        from google.generativeai.types import Tool
+        from google.genai import types
 
-        google_search_tool = Tool(google_search={})
-        resp = self.client.generate_content(
-            f"{system_prompt}\n\n{user_prompt}",
-            tools=[google_search_tool],
+        google_search_tool = types.Tool(google_search=types.GoogleSearch())
+        resp = self.client.models.generate_content(
+            model=self.model,
+            contents=f"{system_prompt}\n\n{user_prompt}",
+            config=types.GenerateContentConfig(
+                tools=[google_search_tool],
+            ),
         )
 
         text = resp.text or ''
@@ -476,7 +478,10 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
-        resp = self.client.generate_content(f"{system_prompt}\n\n{user_prompt}")
+        resp = self.client.models.generate_content(
+            model=self.model,
+            contents=f"{system_prompt}\n\n{user_prompt}",
+        )
         return (resp.text or '').strip(), []
 
     # ------------------------------------------------------------------
