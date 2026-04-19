@@ -114,6 +114,14 @@ names — this is acceptable shorthand, verdict UNLIKELY.
 transliteration variants) — verdict UNLIKELY.
   (c) The paper has been revised and the author list changed between \
 versions — verdict UNLIKELY if the cited authors match an earlier version.
+  (d) The automated checker may have matched a DIFFERENT EDITION or \
+VERSION of a work with the same title but different authors (e.g. two \
+different textbooks titled "Convergence of Probability Measures" by \
+different authors, or a database entry with incomplete author data). \
+If your web search finds a paper/book with the CITED title AND the \
+CITED authors, the checker simply matched the wrong edition — verdict \
+UNLIKELY. Trust your own web search results over the checker's \
+"correct" authors when they conflict.
 
 Key signals that it is NOT hallucinated (verdict should be UNLIKELY):
 - Your web search found a page showing a paper with this EXACT title AND \
@@ -121,6 +129,9 @@ the same authors (or substantially overlapping authors) — BOTH must match
 - Year off-by-one with otherwise matching title and authors is acceptable
 - Venue abbreviation differences are acceptable
 - Team/consortium authorship shorthand for large collaborative papers
+- The checker's "correct" authors differ from the cited authors, but your \
+web search finds the paper with the CITED authors — the checker matched \
+a wrong edition or has incomplete data. Trust your search over the checker.
 
 CRITICAL: If the title matches but the authors are completely different, \
 do NOT verdict UNLIKELY. A "grafted" reference (real title, fake authors) \
