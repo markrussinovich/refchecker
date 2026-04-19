@@ -369,7 +369,11 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
     # For unverified refs, allow 'unverified', 'author', 'multiple', or empty
     # error_type.  A ref can lack ref_verified_url yet still carry an 'author'
     # error when the checker found the paper but the cited authors don't match.
-    # For verified refs, allow 'author' and 'multiple' (they have author errors)
+    # For verified refs, always defer to the LLM (return None) so it can
+    # web-search and distinguish "wrong edition matched" from "grafted ref."
+    # The LLM prompt instructs it to trust web search over checker data.
+    # Without an LLM, run_hallucination_check will fall back to this
+    # function's result via the no-LLM path.
     if is_verified:
         if not (error_type.startswith('author') or error_type in ('multiple', '')):
             return None
@@ -818,7 +822,24 @@ def run_hallucination_check(
     outcome, assessment = pre_screen_hallucination(error_entry)
     logger.debug(f"run_hallucination_check: pre_screen outcome={outcome} ref={ref_title!r}")
     if outcome == 'resolved':
-        return assessment
+        # For verified refs where the rule-based check flagged LIKELY
+        # (author mismatch), prefer the LLM if available.  The checker may
+        # have matched a different edition/paper with the same title, and
+        # the LLM can web-search to distinguish this from a grafted ref.
+        is_verified = bool(error_entry.get('ref_verified_url'))
+        if (
+            is_verified
+            and llm_client
+            and assessment
+            and assessment.get('verdict') == 'LIKELY'
+        ):
+            logger.debug(
+                "run_hallucination_check: verified ref flagged LIKELY by rules — deferring to LLM ref=%r",
+                ref_title,
+            )
+            # Fall through to LLM below
+        else:
+            return assessment
     if outcome == 'skip':
         return None
 

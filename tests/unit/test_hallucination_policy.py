@@ -507,11 +507,11 @@ def test_verified_ref_high_overlap_not_flagged():
 # ------------------------------------------------------------------
 
 def test_deterministic_likely_is_final():
-    """When deterministic author-overlap returns LIKELY, the LLM is NOT called.
+    """When deterministic author-overlap returns LIKELY on a verified ref,
+    the LLM IS called to distinguish wrong-edition matches from grafted refs.
 
-    All three paths (CLI, Batch, WebUI) now treat a deterministic LIKELY as
-    final — the LLM is only invoked when deterministic screening is
-    inconclusive ('needs_llm').
+    For verified refs, the rule-based LIKELY is overridden by the LLM because
+    the checker may have matched a different edition/paper with the same title.
     """
     entry = {
         'error_type': 'multiple',
@@ -529,8 +529,22 @@ def test_deterministic_likely_is_final():
         'web_search': None,
     }
     result = run_hallucination_check(entry, llm_client=mock_llm)
-    assert result['verdict'] == 'LIKELY'  # deterministic is final
-    mock_llm.assess.assert_not_called()  # LLM never invoked
+    assert result['verdict'] == 'UNLIKELY'  # LLM overrides rule-based for verified refs
+    mock_llm.assess.assert_called_once()  # LLM invoked for verified refs
+
+
+def test_deterministic_likely_is_final_without_llm():
+    """Without an LLM, deterministic LIKELY is still final for verified refs."""
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Author mismatch',
+        'ref_title': 'Fairness in machine learning: a survey with some extra words',
+        'ref_authors_cited': 'Solon Barocas, Moritz Hardt, Arvind Narayanan',
+        'ref_authors_correct': 'L. Oneto, S. Chiappa',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:12345',
+    }
+    result = run_hallucination_check(entry, llm_client=None)
+    assert result['verdict'] == 'LIKELY'  # deterministic is final without LLM
 
 
 def test_llm_likely_overrides_no_deterministic():
