@@ -193,6 +193,11 @@ with similar-but-different titles, the verdict MUST be LIKELY or \
 UNCERTAIN — never UNLIKELY. Do not rely on your parametric knowledge \
 to claim a paper exists; provide the URL in the LINK field as proof. \
 An UNLIKELY verdict without a valid LINK is always wrong.
+EXCEPTION: If the validation summary above says a paper with this \
+title WAS found in an academic database (i.e. the checker matched it \
+and provided a verified URL), then the paper exists — even if your web \
+search cannot find it. In that case, base your verdict on the metadata \
+quality (title/author match) not on web-search findability.
 
 ARXIV ID WARNING: If the reference includes an arXiv URL/ID, and the \
 automated checkers report that the arXiv ID points to a DIFFERENT paper, \
