@@ -66,7 +66,10 @@ IMPORTANT CONTEXT: The automated checkers above have already searched \
 Semantic Scholar, OpenAlex, CrossRef, DBLP, and arXiv for this reference. \
 If they report it as unverified, the paper was NOT found in any of these \
 databases. Do not contradict this unless your web search finds a page that \
-shows the paper with the EXACT title listed above.
+shows the paper with the EXACT title listed above. However, if the \
+validation summary says the paper WAS found but has metadata mismatches, \
+the checkers may have matched a wrong edition or version — use your web \
+search to verify the CITED title and authors independently.
 
 ## Instructions
 Search the web for the exact paper title (in quotes) to check whether a \
@@ -257,6 +260,15 @@ def _build_validation_summary_static(error_entry: dict) -> str:
                 lines.append(f'  {detail}')
             elif detail:
                 lines.append(f'  - {detail}')
+        # For verified refs, add context that the paper WAS found
+        if error_entry.get('ref_verified_url'):
+            lines.append(
+                '\n  NOTE: Despite these issues, a paper with this title WAS '
+                'found in an academic database. The metadata mismatches may '
+                'indicate the checker matched a different edition, version, '
+                'or a different paper with the same title. Use web search to '
+                'verify whether the CITED title + authors combination exists.'
+            )
     elif error_type and error_details:
         lines.append(f'- {error_type}: {error_details}')
 
