@@ -503,9 +503,22 @@ class ProgressRefChecker:
                     await self.emit_progress("title_updated", {"paper_title": title})
 
             await self._check_cancelled()
-            # Track if we got references from ArXiv source files and the extraction method
+            # Track if we got references from ArXiv source files and the extraction method.
+            # extraction_method describes the operational path and may become 'cache'.
+            # bibliography_source_kind preserves the original provenance for UI display.
             arxiv_source_references = None
-            extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', or None
+            extraction_method = None  # 'bbl', 'bib', 'pdf', 'llm', 'cache', or None
+            bibliography_source_kind = None
+
+            def set_extraction_method(method: Optional[str]) -> None:
+                nonlocal extraction_method, bibliography_source_kind
+                extraction_method = method
+                if not method:
+                    return
+                normalized = method.lower()
+                if normalized == 'cache':
+                    return
+                bibliography_source_kind = 'pdf' if normalized in {'file', 'pdf'} else normalized
 
             async def maybe_extract_grobid_references(pdf_path: str, failure_message: str):
                 refs, method = await asyncio.to_thread(
@@ -542,7 +555,8 @@ class ProgressRefChecker:
                     cached_bib = cached_bibliography(self.cache_dir, paper_source)
                     if cached_bib is not None:
                         logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
-                        extraction_method = 'cache'
+                        bibliography_source_kind = 'pdf'
+                        set_extraction_method('cache')
                         # Try to get paper title from OpenReview metadata cache
                         if 'openreview.net/pdf' in paper_source.lower():
                             try:
@@ -586,7 +600,7 @@ class ProgressRefChecker:
                                 logger.debug(f"Could not get OpenReview metadata: {e}")
 
                         pdf_path_for_fallback = pdf_path
-                        extraction_method = 'pdf'
+                        set_extraction_method('pdf')
                         pdf_processor = PDFProcessor()
                         paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
 
@@ -643,7 +657,8 @@ class ProgressRefChecker:
                             await self.bibliography_source_callback(self.check_id, bibtex_content, arxiv_id)
                         # Extract references from the BibTeX content (returns tuple)
                         result = await self._extract_references_from_bibtex(bibtex_content)
-                        arxiv_source_references, extraction_method = result
+                        arxiv_source_references, extracted_method = result
+                        set_extraction_method(extracted_method)
                         if arxiv_source_references:
                             logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files (method: {extraction_method})")
                         else:
@@ -657,7 +672,7 @@ class ProgressRefChecker:
                             await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
 
                         pdf_path_for_fallback = pdf_path
-                        extraction_method = 'pdf'
+                        set_extraction_method('pdf')
                         # Extract text from PDF - run in thread
                         pdf_processor = PDFProcessor()
                         paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
@@ -665,7 +680,7 @@ class ProgressRefChecker:
                         paper_text = ""  # Not needed since we have references
 
             elif source_type == "file":
-                extraction_method = 'file'
+                set_extraction_method('file')
                 await self.emit_progress("extracting", {
                     "message": "Extracting text from file..."
                 })
@@ -697,7 +712,7 @@ class ProgressRefChecker:
                         refs_result = await self._extract_references_from_bibtex(paper_text)
                         if refs_result and refs_result[0]:
                             arxiv_source_references = refs_result[0]
-                            extraction_method = 'bib'
+                            set_extraction_method('bib')
                             logger.info(f"Extracted {len(arxiv_source_references)} references from .bib file")
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
@@ -715,7 +730,7 @@ class ProgressRefChecker:
                     # Fallback: paper_source is the actual text (legacy behavior)
                     paper_text = paper_source
                 paper_title = "Pasted Text"
-                extraction_method = 'text'
+                set_extraction_method('text')
                 
                 # Check if the pasted text is LaTeX thebibliography format (.bbl)
                 if '\\begin{thebibliography}' in paper_text and '\\bibitem' in paper_text:
@@ -724,7 +739,7 @@ class ProgressRefChecker:
                     refs_result = await self._extract_references_from_bibtex(paper_text)
                     if refs_result and refs_result[0]:
                         arxiv_source_references = refs_result[0]
-                        extraction_method = 'bbl'  # Mark as bbl extraction
+                        set_extraction_method('bbl')  # Mark as bbl extraction
                         logger.info(f"Extracted {len(arxiv_source_references)} references from pasted .bbl content")
                 # Check if the pasted text is BibTeX format (@article, @misc, @inproceedings, etc.)
                 elif re.search(r'@\s*(article|book|inproceedings|incollection|misc|techreport|phdthesis|mastersthesis|conference|inbook|proceedings)\s*\{', paper_text, re.IGNORECASE):
@@ -732,7 +747,7 @@ class ProgressRefChecker:
                     refs_result = await self._extract_references_from_bibtex(paper_text)
                     if refs_result and refs_result[0]:
                         arxiv_source_references = refs_result[0]
-                        extraction_method = 'bib'  # Mark as bib extraction
+                        set_extraction_method('bib')  # Mark as bib extraction
                         logger.info(f"Extracted {len(arxiv_source_references)} references from pasted BibTeX content")
                 # Fallback: Try BibTeX parsing anyway for partial/malformed content
                 # This handles cases like incomplete paste, or BibTeX-like content without standard entry types
@@ -741,7 +756,7 @@ class ProgressRefChecker:
                     refs_result = await self._extract_references_from_bibtex(paper_text)
                     if refs_result and refs_result[0]:
                         arxiv_source_references = refs_result[0]
-                        extraction_method = 'bib'
+                        set_extraction_method('bib')
                         logger.info(f"Extracted {len(arxiv_source_references)} references from partial BibTeX content")
                     else:
                         logger.warning("BibTeX-like content detected but parsing failed, will try LLM extraction")
@@ -752,7 +767,7 @@ class ProgressRefChecker:
             # Step 2: Extract references (check disk cache first)
             references = cached_bibliography(self.cache_dir, paper_source)
             if references is not None:
-                extraction_method = 'cache'
+                set_extraction_method('cache')
                 logger.info(f"Cache hit: loaded {len(references)} references for {paper_source}")
             else:
                 await self.emit_progress("extracting", {
@@ -774,10 +789,10 @@ class ProgressRefChecker:
                         )
                         if fallback_refs:
                             references = fallback_refs
-                            extraction_method = fallback_method
+                            set_extraction_method(fallback_method)
                     # If we used PDF/file extraction and LLM was configured, mark as LLM-assisted
                     if self.llm and extraction_method in ('pdf', 'file', 'text'):
-                        extraction_method = 'llm'
+                        set_extraction_method('llm')
 
                 # Save to disk cache
                 if references:
@@ -800,6 +815,7 @@ class ProgressRefChecker:
                     "paper_title": paper_title,
                     "paper_source": paper_source,
                     "extraction_method": extraction_method,
+                    "bibliography_source_kind": bibliography_source_kind,
                     "references": [],
                     "summary": {
                         "total_refs": 0,
@@ -844,6 +860,7 @@ class ProgressRefChecker:
                 "paper_title": paper_title,
                 "paper_source": paper_source,
                 "extraction_method": extraction_method,
+                "bibliography_source_kind": bibliography_source_kind,
                 "references": results,
                 "summary": {
                     "total_refs": total_refs,
@@ -1308,17 +1325,6 @@ class ProgressRefChecker:
 
         outcome, assessment = pre_screen_hallucination(error_entry)
         if outcome == 'resolved':
-            # For verified refs where the rule-based check flags LIKELY,
-            # defer to the LLM (async) if one is available.  The checker
-            # may have matched a wrong edition; the LLM can web-search.
-            is_verified = bool(error_entry.get('ref_verified_url'))
-            if (
-                is_verified
-                and getattr(self, 'hallucination_verifier', None)
-                and assessment
-                and assessment.get('verdict') == 'LIKELY'
-            ):
-                return ('needs_async', None)
             updated = apply_hallucination_verdict(result, assessment)
             return ('resolved', updated)
         elif outcome == 'skip':

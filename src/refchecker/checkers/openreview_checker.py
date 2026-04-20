@@ -4,7 +4,7 @@ OpenReview API Client for Reference Verification
 
 This module provides functionality to verify references from OpenReview papers.
 OpenReview is a platform for open peer review in machine learning conferences
-like ICLR, NeurIPS, ICML, etc.
+like ICLR, ICML, AISTATS, UAI, and CoRL.
 
 Usage:
     from openreview_checker import OpenReviewReferenceChecker
@@ -45,13 +45,46 @@ logger = logging.getLogger(__name__)
 
 OPENREVIEW_VENUE_ALIASES = {
     'iclr': 'ICLR',
-    'neurips': 'NeurIPS',
-    'nips': 'NeurIPS',
     'icml': 'ICML',
     'aistats': 'AISTATS',
-    'aaai': 'AAAI',
-    'ijcai': 'IJCAI',
 }
+
+OPENREVIEW_SPECIAL_VENUES = {
+    'aistats': {
+        'series': 'AISTATS',
+        'group_id_template': 'aistats.org/AISTATS/{year}/Conference',
+        'submission_invitation_template': 'aistats.org/AISTATS/{year}/Conference/-/Submission',
+        'accepted_venue_template': 'AISTATS {year} Conference',
+        'alternate_venue_templates': [
+            'AISTATS {year} Conference',
+            'AISTATS {year}',
+        ],
+    },
+    'uai': {
+        'series': 'UAI',
+        'group_id_template': 'auai.org/UAI/{year}/Conference',
+        'submission_invitation_template': 'auai.org/UAI/{year}/Conference/-/Submission',
+        'accepted_venue_template': 'UAI {year} Conference',
+        'alternate_venue_templates': [
+            'UAI {year} Conference',
+            'UAI {year}',
+        ],
+    },
+    'corl': {
+        'series': 'CoRL',
+        'group_id_template': 'robot-learning.org/CoRL/{year}/Conference',
+        'submission_invitation_template': 'robot-learning.org/CoRL/{year}/Conference/-/Submission',
+        'accepted_venue_template': 'CoRL {year} Conference',
+        'alternate_venue_templates': [
+            'CoRL {year} Conference',
+            'CoRL {year}',
+        ],
+    },
+}
+
+OPENREVIEW_SUPPORTED_VENUE_PREFIXES = tuple(
+    sorted(set(OPENREVIEW_VENUE_ALIASES) | set(OPENREVIEW_SPECIAL_VENUES))
+)
 
 class OpenReviewReferenceChecker:
     """
@@ -81,7 +114,7 @@ class OpenReviewReferenceChecker:
 
     @staticmethod
     def parse_venue_spec(venue_spec: str) -> Dict[str, Any]:
-        """Parse a shorthand venue spec like 'iclr2024' or 'NeurIPS-2023'."""
+        """Parse a shorthand venue spec like 'iclr2024' or 'aistats-2025'."""
         spec = (venue_spec or '').strip()
         if not spec:
             raise ValueError('OpenReview venue spec cannot be empty')
@@ -94,9 +127,25 @@ class OpenReviewReferenceChecker:
 
         venue_key = match.group(1).lower()
         year = int(match.group(2))
+        special_config = OPENREVIEW_SPECIAL_VENUES.get(venue_key)
+        if special_config:
+            series = special_config['series']
+            return {
+                'series': series,
+                'year': year,
+                'accepted_venue': special_config['accepted_venue_template'].format(year=year),
+                'alternate_venues': [
+                    template.format(year=year) for template in special_config['alternate_venue_templates']
+                ],
+                'group_id': special_config['group_id_template'].format(year=year),
+                'submission_invitation': special_config['submission_invitation_template'].format(year=year),
+                'slug': f"{series.lower().replace(' ', '')}{year}",
+                'display_name': f'{series} {year}',
+            }
+
         venue_name = OPENREVIEW_VENUE_ALIASES.get(venue_key)
         if not venue_name:
-            supported = ', '.join(sorted(OPENREVIEW_VENUE_ALIASES))
+            supported = ', '.join(OPENREVIEW_SUPPORTED_VENUE_PREFIXES)
             raise ValueError(
                 f"Unsupported OpenReview venue '{match.group(1)}'. Supported prefixes: {supported}."
             )
@@ -309,6 +358,47 @@ class OpenReviewReferenceChecker:
 
         return notes
 
+    def _scrape_submission_listing(self, venue_id: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Scrape the public OpenReview submissions listing when note APIs are unavailable."""
+        papers = []
+        seen_ids = set()
+        page = 1
+
+        while True:
+            response = self._respectful_request(
+                f"{self.base_url}/submissions",
+                params={'venue': venue_id, 'page': page},
+            )
+            if not response or response.status_code != 200:
+                break
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            page_ids = []
+            for link in soup.select('a[href*="/forum?id="]'):
+                href = (link.get('href') or '').strip()
+                forum_url = href if href.startswith('http') else f'{self.base_url}{href}'
+                paper_id = self.extract_paper_id(forum_url)
+                if not paper_id or paper_id in seen_ids:
+                    continue
+
+                seen_ids.add(paper_id)
+                page_ids.append(paper_id)
+                papers.append({
+                    'id': paper_id,
+                    'title': link.get_text(strip=True),
+                    'forum_url': forum_url,
+                    'source': 'openreview_submissions_page',
+                })
+                if max_results is not None and len(papers) >= max_results:
+                    return papers
+
+            if not page_ids:
+                break
+
+            page += 1
+
+        return papers
+
     def _accepted_venue_names(self, conference_info: Dict[str, Any]) -> set[str]:
         """Return accepted venue labels from conference decision metadata."""
         decision_heading_map = conference_info.get('decision_heading_map') or {}
@@ -387,6 +477,21 @@ class OpenReviewReferenceChecker:
             normalized_status,
             len(papers),
         )
+
+        if papers or normalized_status != 'submitted':
+            return papers
+
+        scraped_papers = self._scrape_submission_listing(
+            conference_info['group_id'],
+            max_results=max_results,
+        )
+        logger.debug(
+            "OpenReview submissions page scrape for %s returned %d papers",
+            conference_info['display_name'],
+            len(scraped_papers),
+        )
+        return scraped_papers
+
         return papers
 
     def list_accepted_papers(self, venue_spec: str, max_results: Optional[int] = None) -> List[Dict[str, Any]]:

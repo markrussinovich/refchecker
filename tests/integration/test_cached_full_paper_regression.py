@@ -273,3 +273,4 @@ class TestCachedFullPaperRegression:
         """WebUI loads bibliography from the fixture cache."""
         r = _get_paper_results(paper_id)
         assert r['webui_result']['summary']['extraction_method'] == 'cache'
+        assert r['webui_result']['bibliography_source_kind'] == 'pdf'

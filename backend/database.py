@@ -430,7 +430,8 @@ class Database:
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
-                           llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              bibliography_source_kind,
                            original_filename
                     FROM check_history
                     WHERE user_id = ?
@@ -444,7 +445,8 @@ class Database:
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
-                           llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              bibliography_source_kind,
                            original_filename
                     FROM check_history
                     ORDER BY timestamp DESC
@@ -1260,7 +1262,8 @@ class Database:
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
-                       llm_provider, llm_model, status, source_type, batch_id, batch_label
+                      llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                      bibliography_source_kind, original_filename
                 FROM check_history
                 WHERE batch_id = ?
             """

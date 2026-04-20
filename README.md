@@ -14,7 +14,7 @@
   <a href="#deployment">Deployment</a>
 </p>
 
-RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology** APIs, can use local/offline databases for **S2**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered web search to flag likely fabricated references. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
+RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered web search to flag likely fabricated references. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
 
@@ -37,7 +37,6 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
   - [Multi-User Server (OAuth)](#multi-user-server-oauth)
   - [Deploy to Render](#deploy-to-render)
 - [Configuration](#configuration)
-- [Verification Sources](#verification-sources)
 - [Local Database](#local-database)
 - [Testing](#testing)
 - [License](#license)
@@ -80,7 +79,7 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | Category | What it does |
 |----------|-------------|
 | **Input formats** | ArXiv IDs/URLs, PDFs, LaTeX (.tex), BibTeX (.bib/.bbl), plain text |
-| **Verification sources** | API-backed: Semantic Scholar, OpenAlex, CrossRef, DBLP, ACL Anthology. Local/offline: S2, OpenAlex, CrossRef, DBLP, ACL Anthology |
+| **Verification sources** | Semantic Scholar, OpenAlex, CrossRef, DBLP, ACL Anthology |
 | **LLM extraction** | OpenAI, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
@@ -182,9 +181,7 @@ refchecker-webui --port 9000        # custom port
 - **Reference cards** — per-reference details with corrections, source links (Semantic Scholar, ArXiv, DOI), and hallucination assessment
 - **Export** — download corrections as Markdown, plain text, or BibTeX
 - **History sidebar** — browse and re-run previous checks; batches are grouped together
-- **Settings** — LLM provider/model selection, local database directory, API key management, dark/light/system theme
-
-In single-user mode, Settings includes a `Local Database Directory` field. Point it at a folder containing any combination of `semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`, and `acl_anthology.db`, and the Web UI will use the databases it finds there.
+- **Settings** — LLM provider/model selection, API key management, dark/light/system theme
 
 <!-- screenshot: webui-batch-progress — batch progress bar during a multi-paper check -->
 <!-- screenshot: webui-hallucination-card — reference card with a 🚩 hallucination flag and explanation -->
@@ -236,6 +233,9 @@ academic-refchecker --paper-list papers.txt --report-file report.json
 
 # OpenReview: fetch and scan an entire venue
 academic-refchecker --openreview iclr2024 --report-file report.json
+
+# OpenReview: fetch the paper list only and save it to a custom path
+academic-refchecker --openreview aistats2025 --openreview-list-only --openreview-output-file paper_lists/aistats2025.txt
 ```
 
 ### All CLI Options
@@ -244,8 +244,11 @@ academic-refchecker --openreview iclr2024 --report-file report.json
 Input (choose one):
   --paper PAPER              ArXiv ID, URL, PDF, LaTeX, text, or BibTeX file
   --paper-list PATH          Newline-delimited file of paper specs (URLs, IDs, paths)
-  --openreview VENUE         Fetch papers from an OpenReview venue (e.g. iclr2024)
+  --openreview VENUE         Fetch papers from a supported OpenReview venue (iclr, icml, aistats, uai, corl)
   --openreview-status MODE   accepted (default) or submitted
+  --openreview-list-only     Fetch the OpenReview paper list and exit without scanning
+  --openreview-output-file PATH
+                            Custom path for the generated OpenReview paper list
 
 LLM:
   --llm-provider PROVIDER    openai, anthropic, google, azure, or vllm
@@ -287,7 +290,7 @@ RefChecker automatically evaluates every flagged reference for potential fabrica
 
 References are flagged for deeper inspection when they exhibit:
 
-- **Unverified status** — not found in Semantic Scholar, OpenAlex, or CrossRef
+- **Unverified status** — not found in Semantic Scholar, OpenAlex, CrossRef, DBLP, or ACL Anthology
 - **Author overlap below 60%** — fewer than 60% of cited authors match any known paper (applies to references with 3+ authors)
 - **Identifier conflicts** — DOI or ArXiv ID resolves to a different paper
 - **URL verification failure** — cited URL is broken or points to a different paper
@@ -353,9 +356,11 @@ academic-refchecker --openreview iclr2024 --report-file report.json
 academic-refchecker --openreview iclr2024 --openreview-status submitted --report-file report.json
 ```
 
-**Supported venues include:** ICLR, NeurIPS, ICML, AISTATS, AAAI, IJCAI — use formats like `iclr2024`, `NeurIPS-2023`, or `neurips_2024`.
+**Supported venues:** ICLR, ICML, AISTATS, UAI, and CoRL.
 
-The command fetches the paper list from the OpenReview API, writes it to `output/openreview_<venue>_<status>.txt`, and then runs a bulk scan. The structured report includes per-paper rollups with flagged record counts and error-type distributions, making it easy to triage an entire conference for citation problems.
+Use shorthands like `iclr2024`, `icml2025`, `aistats2025`, `uai2025`, or `corl2025`.
+
+The command fetches the paper list from OpenReview, writes it to `output/openreview_<venue>_<status>.txt` by default, and then runs a bulk scan. Use `--openreview-list-only` to generate the list without running verification, and `--openreview-output-file` to choose the output path. The structured report includes per-paper rollups with flagged record counts and error-type distributions, making it easy to triage an entire conference for citation problems.
 
 ---
 
@@ -623,31 +628,9 @@ export SEMANTIC_SCHOLAR_API_KEY=your_key    # Higher rate limits / faster verifi
 
 ---
 
-## Verification Sources
-
-API-backed lookups:
-
-- Semantic Scholar API
-- OpenAlex API
-- CrossRef API
-- DBLP API
-- ACL Anthology API
-
-Local/offline databases:
-
-- `semantic_scholar.db` for S2 metadata
-- `openalex.db` for OpenAlex metadata
-- `crossref.db` for local CrossRef lookups seeded from DOI-bearing records in sibling local DBs
-- `dblp.db` for DBLP metadata
-- `acl_anthology.db` for ACL Anthology metadata
-
-When a local database is available, RefChecker uses it first and falls back to the corresponding APIs for gaps.
-
----
-
 ## Local Database
 
-For offline verification or faster processing, populate a local database directory and point either the CLI or the Web UI at that folder:
+For offline verification or faster processing:
 
 ```bash
 python scripts/download_db.py \
@@ -658,19 +641,14 @@ academic-refchecker --paper paper.pdf --s2-db semantic_scholar_db/semantic_schol
 academic-refchecker --paper paper.pdf --database-dir /path/to/local-db-folder
 academic-refchecker --database-dir /path/to/local-db-folder --update-databases
 academic-refchecker --database-dir /path/to/local-db-folder --update-databases --openalex-min-year 2020
-academic-refchecker --paper paper.pdf --acl-db acl_anthology.db
-refchecker-webui --database-dir /path/to/local-db-folder
 ```
 
-In the single-user Web UI, set `Settings -> Local Database Directory` to the same folder. The setting accepts a directory and still tolerates a direct `semantic_scholar.db` path for backward compatibility, but the directory form is what enables multi-database discovery.
+`--update-databases` now refreshes local S2, DBLP, and OpenAlex databases when those paths are configured.
+DBLP follows Hallucinator's offline-dump approach by downloading and parsing `dblp.xml.gz`, while OpenAlex follows Hallucinator's S3 snapshot model and can be scoped with `--openalex-since` or `--openalex-min-year` to avoid a full build.
+CrossRef remains API-first; RefChecker will still use live CrossRef lookups, but offline CrossRef population is not automated yet.
 
-`--update-databases` now refreshes local S2, DBLP, ACL Anthology, OpenAlex, and CrossRef databases when those paths are configured.
-DBLP follows Hallucinator's offline-dump approach by downloading and parsing `dblp.xml.gz`, ACL Anthology follows Hallucinator's GitHub tarball approach by building a local SQLite database from `data/xml/*.xml`, and OpenAlex follows Hallucinator's S3 snapshot model and can be scoped with `--openalex-since` or `--openalex-min-year` to avoid a full build.
-CrossRef is built locally by seeding DOI-bearing records from the other configured local databases.
-
-Use `academic-refchecker --database-dir /path/to/local-db-folder --update-databases` for the initial build or a manual refresh of the whole directory.
-When the Web UI has a local database directory configured, it scans that directory for well-formed DB names (`semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`, `acl_anthology.db`) and schedules asynchronous background refresh tasks for discovered DBs.
-Background refresh uses the bundled local database updater for discovered local databases and delays CrossRef refresh until its source databases finish.
+When the Web UI has local databases configured, it scans `REFCHECKER_DATABASE_DIRECTORY` for well-formed DB names (`semantic_scholar.db`, `openalex.db`, `crossref.db`, `dblp.db`) and schedules asynchronous background refresh tasks for discovered DBs.
+Background refresh uses the bundled local database updater for discovered S2, DBLP, and OpenAlex files.
 The downloader also writes a `latest_snapshot.txt` file next to the SQLite database for operator visibility, while the Web UI shows the current snapshot from the database metadata in the settings panel.
 
 ---

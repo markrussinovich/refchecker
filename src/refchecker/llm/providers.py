@@ -116,7 +116,9 @@ class LLMProviderMixin:
             "5. Faithfully include all authors - do not inject 'et al' if not present, but preserve it if it is\n"
             "6. Preserve 'et al' exactly as written\n"
             "7. Skip entries that are only URLs without bibliographic data\n"
-            "8. If no author field exists, start with # (empty author)\n"
+            "8. If no author field exists, start with # (empty author). Anonymous entries like standards \n"
+            "   (e.g. 'ISO/PAS-8800...', 'IEEE Std...') or datasets are separate references with no authors.\n"
+            "   Do NOT merge them with the next entry — output them as #Title#Venue#Year#URL\n"
             "9. Use the EXACT title from the bibliography text - never shorten, paraphrase, or summarize titles\n"
             "10. IGNORE non-reference text: theorems, proofs, algorithms, equations, discussion prose, "
             "section headers, figure/table captions. Only extract actual bibliographic entries\n"
@@ -128,11 +130,45 @@ class LLMProviderMixin:
         """Create user prompt for reference extraction - contains only the bibliography text"""
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
+        
+        # Pre-process: insert blank lines between author-year style entries
+        # to help the LLM identify reference boundaries.
+        cleaned_bibliography = self._insert_entry_separators(cleaned_bibliography)
 
         return f"""Extract references from this bibliography text. Output ONLY lines in Author1*Author2#Title#Venue#Year#URL format.
 
 {cleaned_bibliography}
 """
+    
+    @staticmethod
+    def _insert_entry_separators(text: str) -> str:
+        """Insert blank lines between consecutive bibliography entries in author-year format.
+        
+        Detects boundaries where a line ending with a year/page/URL is followed
+        by a line starting with an author name or anonymous title, and inserts
+        a blank line separator to help the LLM parse entries correctly.
+        """
+        import re
+        lines = text.split('\n')
+        result = []
+        for i, line in enumerate(lines):
+            result.append(line)
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                curr_stripped = line.strip()
+                # A new entry likely starts when the current line ends with
+                # a year, page number, URL, or period, AND the next line
+                # starts with a capital letter (author last name or title)
+                # AND there isn't already a blank line.
+                if (
+                    curr_stripped
+                    and next_line
+                    and not next_line.startswith((' ', '\t'))  # Not a continuation
+                    and re.search(r'(?:\b\d{4}\b|(?:https?://\S+))\s*\.?\s*$', curr_stripped)
+                    and re.match(r'^[A-Z]', next_line)
+                ):
+                    result.append('')  # Insert blank separator
+        return '\n'.join(result)
     
     def _parse_llm_response(self, content: str) -> List[str]:
         """Parse LLM response into list of references"""

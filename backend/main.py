@@ -1318,7 +1318,10 @@ async def run_check(
             source_type=source_type,
         )
         cache_hit = result.get("extraction_method") == "cache"
-        bibliography_source_kind = infer_bibliography_source_kind(result.get("extraction_method"))
+        bibliography_source_kind = (
+            result.get("bibliography_source_kind")
+            or infer_bibliography_source_kind(result.get("extraction_method"))
+        )
         await db.update_check_results(
             check_id=check_id,
             paper_title=result_title,

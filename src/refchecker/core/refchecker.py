@@ -57,7 +57,7 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
                        compare_authors)
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
-from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_LOOKUP_ORDER, DATABASE_UPDATE_ORDER
+from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_UPDATE_ORDER
 from refchecker.utils.config_validator import ConfigValidator
 from refchecker.services.pdf_processor import PDFProcessor
 from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
@@ -238,7 +238,7 @@ def load_paper_specs_from_file(list_path):
     return specs
 
 
-def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='accepted'):
+def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='accepted', output_path=None):
     """Fetch OpenReview conference papers for a shorthand and persist the generated list."""
     from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
 
@@ -257,8 +257,15 @@ def prepare_openreview_paper_specs(venue_spec, output_dir='output', status='acce
     if not paper_specs:
         raise ValueError(f"OpenReview returned {status} papers for {venue_info['display_name']}, but none included a forum URL")
 
-    os.makedirs(output_dir, exist_ok=True)
-    list_path = os.path.join(output_dir, f"openreview_{venue_info['slug']}_{status}.txt")
+    if output_path:
+        list_path = output_path
+        output_parent = os.path.dirname(list_path)
+        if output_parent:
+            os.makedirs(output_parent, exist_ok=True)
+    else:
+        os.makedirs(output_dir, exist_ok=True)
+        list_path = os.path.join(output_dir, f"openreview_{venue_info['slug']}_{status}.txt")
+
     with open(list_path, 'w', encoding='utf-8', newline='\n') as handle:
         handle.write('\n'.join(paper_specs) + '\n')
 
@@ -372,10 +379,10 @@ class ArxivReferenceChecker:
         )
         
         if self.db_paths:
-            configured = "\n   ".join(
+            configured = ", ".join(
                 f"{DATABASE_LABELS.get(name, name)}={path}" for name, path in sorted(self.db_paths.items())
             )
-            logger.info(f"Using local databases (DB-first mode with API fallbacks):\n   {configured}")
+            logger.info(f"Using local databases (DB-first mode with API fallbacks): {configured}")
         else:
             logger.debug("Using enhanced hybrid checker with multiple API sources")
         
@@ -393,12 +400,12 @@ class ArxivReferenceChecker:
         )
         if self.db_paths:
             local_services = []
-            for key in DATABASE_LOOKUP_ORDER:
+            for key in ('s2', 'openalex', 'crossref', 'dblp'):
                 if key in self.db_paths:
                     local_services.append(f"Local {DATABASE_LABELS.get(key, key)} DB")
-            self.service_order = " → ".join(local_services + ["Semantic Scholar API", "OpenAlex", "CrossRef", "DBLP", "ACL Anthology"])
+            self.service_order = " → ".join(local_services + ["Semantic Scholar API", "OpenAlex", "CrossRef"])
         else:
-            self.service_order = "Semantic Scholar API → OpenAlex → CrossRef → DBLP → ACL Anthology"
+            self.service_order = "Semantic Scholar API → OpenAlex → CrossRef"
         
         # debug mode
         self.debug_mode = debug_mode
@@ -1613,6 +1620,11 @@ class ArxivReferenceChecker:
             appendix_section_patterns = [
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                # Numbered appendix sections with ALL-CAPS concatenated words from PDF extraction
+                # artifacts, e.g. "A1 RELATEDWORKS", "A4 ABLATIONSTUDY", "A5.2 SCORINGCRITERIA".
+                # The digit after the letter and the ALL-CAPS requirement distinguish these
+                # from author names like "A. Baranwal".
+                r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
                 # Single-letter appendix sections: "A LRE Dataset", "B Results" — but NOT "A. Baranwal" (author names)
                 # Also handles PDF word-break artifacts where a letter gets separated from its
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
@@ -1764,6 +1776,8 @@ class ArxivReferenceChecker:
                     fallback_appendix_patterns = [
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                        # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
+                        r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
                         r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
@@ -6303,22 +6317,16 @@ class ArxivReferenceChecker:
         if verified_data and verified_data.get('url') and 'arxiv.org' not in verified_data['url']:
             return verified_data['url']
         
-        # Second priority: canonical URL returned by the verifier itself.
-        if reference_url:
-            validated_url = self._validate_reference_url(reference_url, verified_data)
-            if validated_url:
-                return validated_url
-
-        # Third priority: Semantic Scholar URL from paperId (if no direct URL available)
+        # Second priority: Semantic Scholar URL from paperId (if no direct URL available)
         if verified_data and verified_data.get('paperId'):
             return construct_semantic_scholar_url(verified_data['paperId'])
         
-        # Fourth priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
+        # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
         if verified_data and verified_data.get('externalIds', {}).get('DOI'):
             from refchecker.utils.doi_utils import construct_doi_url
             return construct_doi_url(verified_data['externalIds']['DOI'])
         
-        # Fifth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
+        # Fourth priority: ArXiv URL from verified data (but only if there's no ArXiv ID error)
         if verified_data and verified_data.get('externalIds', {}).get('ArXiv'):
             # Only show ArXiv URL as verified URL if there's no ArXiv ID mismatch
             if not self._has_arxiv_id_error(errors):
@@ -6326,7 +6334,7 @@ class ArxivReferenceChecker:
                 correct_arxiv_id = verified_data['externalIds']['ArXiv']
                 return construct_arxiv_url(correct_arxiv_id)
         
-        # Sixth priority: Other URLs from verified_data
+        # Fifth priority: Other URLs from verified_data
         if verified_data and verified_data.get('url'):
             return verified_data['url']
         
@@ -6754,6 +6762,8 @@ def main():
     print(f"Refchecker v{__version__} - Validate references in academic papers")
     print(f"By Mark Russinovich and various agentic AI assistants")
 
+    supported_openreview_help = 'Supported OpenReview shorthands: iclr, icml, aistats, uai, corl'
+
     parser = argparse.ArgumentParser(description="Academic paper references checker")
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
@@ -6762,15 +6772,19 @@ def main():
     parser.add_argument("--paper-list", type=str,
                         help="Path to a newline-delimited list of paper specs for bulk CLI scans")
     parser.add_argument("--openreview", type=str,
-                        help="Fetch accepted papers for an OpenReview venue shorthand such as iclr2024 and run a bulk scan")
+                        help=f"Fetch papers for a supported OpenReview venue shorthand such as iclr2024 and run a bulk scan. {supported_openreview_help}")
     parser.add_argument("--openreview-status", choices=["accepted", "submitted"], default="accepted",
                         help="OpenReview paper set to fetch with --openreview (default: accepted)")
+    parser.add_argument("--openreview-list-only", action="store_true",
+                        help="Fetch OpenReview papers into a generated list file and exit without running verification")
+    parser.add_argument("--openreview-output-file", type=str,
+                        help="Path for the generated OpenReview paper list created by --openreview")
     parser.add_argument("--semantic-scholar-api-key", type=str,
                         help="API key for Semantic Scholar (optional, increases rate limits). Can also be set via SEMANTIC_SCHOLAR_API_KEY environment variable")
     parser.add_argument("--db-path", type=str,
                         help="(Deprecated) Path to local Semantic Scholar database")
     parser.add_argument("--database-dir", type=str,
-                        help="Directory containing local databases named semantic_scholar.db, openalex.db, crossref.db, dblp.db, acl_anthology.db")
+                        help="Directory containing local databases named semantic_scholar.db, openalex.db, crossref.db, dblp.db")
     parser.add_argument("--s2-db", type=str,
                         help="Path to local Semantic Scholar database file")
     parser.add_argument("--openalex-db", type=str,
@@ -6779,8 +6793,6 @@ def main():
                         help="Path to local CrossRef database file")
     parser.add_argument("--dblp-db", type=str,
                         help="Path to local DBLP database file")
-    parser.add_argument("--acl-db", type=str,
-                        help="Path to local ACL Anthology database file")
     parser.add_argument("--update-databases", action="store_true",
                         help="Install/update configured local databases (if used without --paper/--paper-list/--openreview, updates and exits)")
     parser.add_argument("--openalex-since", type=str,
@@ -6831,7 +6843,6 @@ def main():
             "openalex": args.openalex_db,
             "crossref": args.crossref_db,
             "dblp": args.dblp_db,
-            "acl": args.acl_db,
         },
         database_directory=args.database_dir,
     )
@@ -6880,11 +6891,14 @@ def main():
             input_specs, generated_list_path, venue_info = prepare_openreview_paper_specs(
                 args.openreview,
                 status=args.openreview_status,
+                output_path=args.openreview_output_file,
             )
             print(
                 f"Fetched {len(input_specs)} {args.openreview_status} OpenReview papers for {venue_info['display_name']} "
                 f"into {generated_list_path}"
             )
+            if args.openreview_list_only:
+                return 0
         except Exception as e:
             print(f"Error: {e}")
             return 1

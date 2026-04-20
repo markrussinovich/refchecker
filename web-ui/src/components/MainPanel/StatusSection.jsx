@@ -123,6 +123,117 @@ function formatSource(source, title, sourceType, checkId, originalFilename) {
   return { type: 'text', value: source, display: source }
 }
 
+function renderSourceMethodLine({
+  sourceKind,
+  sourceType,
+  checkId,
+  displaySource,
+}) {
+  if (!sourceKind) return null
+
+  const lowerKind = sourceKind.toLowerCase()
+  const bibliographyLink = checkId ? `${API_BASE}/api/bibliography/${checkId}` : null
+
+  if (['bbl', 'bib'].includes(lowerKind)) {
+    let labelPrefix = 'ArXiv'
+    if (sourceType === 'text') {
+      labelPrefix = 'Pasted'
+    } else if (sourceType === 'file') {
+      labelPrefix = 'Uploaded'
+    }
+    const label = `${labelPrefix} .${lowerKind} file`
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source:{' '}
+        {bibliographyLink ? (
+          <a 
+            href={bibliographyLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+            style={{ color: 'var(--color-link)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {label}
+          </a>
+        ) : (
+          label
+        )}
+      </p>
+    )
+  }
+
+  if (lowerKind === 'pdf') {
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source: PDF extraction
+      </p>
+    )
+  }
+
+  if (lowerKind === 'grobid') {
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source: GROBID fallback
+      </p>
+    )
+  }
+
+  if (lowerKind === 'llm') {
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source: LLM extraction
+      </p>
+    )
+  }
+
+  if (lowerKind === 'text' && checkId) {
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source:{' '}
+        <a 
+          href={`${API_BASE}/api/text/${checkId}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+          style={{ color: 'var(--color-link)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          Pasted text
+        </a>
+      </p>
+    )
+  }
+
+  if (lowerKind === 'cache' && displaySource) {
+    return (
+      <p 
+        className="text-sm"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        Source: Cached bibliography
+      </p>
+    )
+  }
+
+  return null
+}
+
 /**
  * Status section showing check progress - treats all checks as peers
  */
@@ -182,6 +293,7 @@ export default function StatusSection() {
   let displayLlmProvider = null
   let displayLlmModel = null
   let displayExtractionMethod = null
+  let displayBibliographySourceKind = null
   let displayOriginalFilename = null
   
   if (isCurrentSessionCheck && checkStoreStatus !== 'idle') {
@@ -201,6 +313,7 @@ export default function StatusSection() {
     displayLlmProvider = selectedCheck?.llm_provider
     displayLlmModel = selectedCheck?.llm_model
     displayExtractionMethod = selectedCheck?.extraction_method || checkStoreStats?.extraction_method
+    displayBibliographySourceKind = selectedCheck?.bibliography_source_kind
     displayOriginalFilename = historyItem?.original_filename || selectedCheck?.original_filename
   } else if (isViewingCheck && selectedCheck) {
     // Other checks: use selectedCheck data from history
@@ -213,6 +326,7 @@ export default function StatusSection() {
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
     displayExtractionMethod = selectedCheck.extraction_method
+    displayBibliographySourceKind = selectedCheck.bibliography_source_kind
     displayOriginalFilename = selectedCheck.original_filename
     
     // Build status message based on state
@@ -712,74 +826,14 @@ export default function StatusSection() {
           )}
           {/* Show extraction source - clickable for text sources */}
           {(() => {
-            if (displayExtractionMethod && ['bbl', 'bib'].includes(displayExtractionMethod)) {
-              const label = displaySourceType === 'text' ? `Pasted .${displayExtractionMethod} file` : `ArXiv .${displayExtractionMethod} file`
-              return (
-                <p 
-                  className="text-sm"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Source:{' '}
-                  {selectedCheckId ? (
-                    <a 
-                      href={`${API_BASE}/api/bibliography/${selectedCheckId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="hover:underline"
-                      style={{ color: 'var(--color-link)' }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {label}
-                    </a>
-                  ) : (
-                    label
-                  )}
-                </p>
-              )
-            }
-
-            if (displayExtractionMethod === 'pdf') {
-              return (
-                <p 
-                  className="text-sm"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Source: PDF extraction
-                </p>
-              )
-            }
-
-            if (displayExtractionMethod === 'grobid') {
-              return (
-                <p 
-                  className="text-sm"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Source: GROBID fallback
-                </p>
-              )
-            }
-
-            if (displayExtractionMethod === 'llm') {
-              return (
-                <p 
-                  className="text-sm"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Source: LLM extraction
-                </p>
-              )
-            }
-
-            if (displayExtractionMethod === 'cache') {
-              return (
-                <p 
-                  className="text-sm"
-                  style={{ color: 'var(--color-text-muted)' }}
-                >
-                  Source: Cached bibliography
-                </p>
-              )
+            const sourceMethodLine = renderSourceMethodLine({
+              sourceKind: displayBibliographySourceKind || displayExtractionMethod,
+              sourceType: displaySourceType,
+              checkId: selectedCheckId,
+              displaySource,
+            })
+            if (sourceMethodLine) {
+              return sourceMethodLine
             }
 
             if (displaySourceType === 'text' && selectedCheckId) {
