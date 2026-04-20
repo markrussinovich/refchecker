@@ -184,7 +184,27 @@ Reply in EXACTLY this format:
 
 VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
 EXPLANATION: <concise 2-3 sentence explanation — do NOT include URLs here>
-LINK: <URL of the exact paper if found, or NONE>"""
+LINK: <URL of the exact paper if found, or NONE>
+
+CRITICAL EVIDENCE RULE: You MUST only verdict UNLIKELY if your web \
+search returned a result page whose title matches the CITED title \
+above. If your search returned no results, or only returned pages \
+with similar-but-different titles, the verdict MUST be LIKELY or \
+UNCERTAIN — never UNLIKELY. Do not rely on your parametric knowledge \
+to claim a paper exists; provide the URL in the LINK field as proof. \
+An UNLIKELY verdict without a valid LINK is always wrong.
+
+ARXIV ID WARNING: If the reference includes an arXiv URL/ID, and the \
+automated checkers report that the arXiv ID points to a DIFFERENT paper, \
+then the arXiv ID is wrong. Do NOT use that arXiv URL in the LINK field — \
+it does not prove this paper exists. Search for the paper BY TITLE instead. \
+If your search only finds the DIFFERENT paper at that arXiv ID, the \
+cited reference is fabricated and the verdict MUST be LIKELY.
+
+VERIFICATION REQUIREMENT: Before writing UNLIKELY, ask yourself: \
+"Did my search results contain a page where the PRIMARY title (not a \
+citation in another paper's reference list) exactly matches the cited \
+title?" If you cannot answer yes, the verdict must be LIKELY."""
 
 _WEB_SEARCH_DECISION_PROMPT = """\
 Given this reference that could not be verified by academic databases:
@@ -472,7 +492,11 @@ class LLMHallucinationVerifier:
     # ------------------------------------------------------------------
 
     def _call_google_with_web_search(self, system_prompt: str, user_prompt: str) -> tuple:
-        """Google Gemini with google_search tool."""
+        """Google Gemini with google_search grounding.
+
+        Uses the ``GoogleSearch`` tool which enables Google Search
+        grounding so the model can verify references against the live web.
+        """
         from google.genai import types
 
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
@@ -496,6 +520,16 @@ class LLMHallucinationVerifier:
                         url = getattr(web_info, 'uri', '') or ''
                         if url:
                             web_urls.append(url)
+                # Also log the search entry point for debugging
+                search_entry = getattr(grounding, 'search_entry_point', None)
+                if search_entry:
+                    logger.debug('Gemini grounding search entry: %s',
+                                 getattr(search_entry, 'rendered_content', '')[:200])
+
+        if web_urls:
+            logger.debug('Gemini grounding returned %d URLs', len(web_urls))
+        else:
+            logger.debug('Gemini grounding returned NO URLs — response is ungrounded')
 
         return text.strip(), web_urls
 
