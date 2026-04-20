@@ -5480,10 +5480,13 @@ class ArxivReferenceChecker:
         
         # Extract year from year_part if we have one
         if 'year_part' in locals() and year_part:
-            # First try to extract a 4-digit year from year_part
-            year_match = re.search(r'\b(19|20)\d{2}\b', year_part)
+            # First try to extract a 4-digit year from year_part.
+            # Allow optional trailing letter suffix (e.g. "2024a", "2024b")
+            # which is common in author-year bibliography styles that
+            # disambiguate multiple works by the same author in the same year.
+            year_match = re.search(r'((?:19|20)\d{2})[a-z]?\b', year_part)
             if year_match:
-                year = int(year_match.group(0))
+                year = int(year_match.group(1))
             else:
                 # Try to extract year from the year_part itself if it's just a year
                 if year_part.isdigit() and len(year_part) == 4:
