@@ -420,7 +420,11 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                 model=self.model or DEFAULT_EXTRACTION_MODELS['anthropic'],
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
-                system=self._get_system_prompt(),
+                system=[{
+                    'type': 'text',
+                    'text': self._get_system_prompt(),
+                    'cache_control': {'type': 'ephemeral'},
+                }],
                 messages=[
                     {"role": "user", "content": prompt}
                 ]

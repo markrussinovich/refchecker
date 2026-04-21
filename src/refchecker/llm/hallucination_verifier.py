@@ -443,7 +443,11 @@ class LLMHallucinationVerifier:
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=1024,
-            system=system_prompt,
+            system=[{
+                'type': 'text',
+                'text': system_prompt,
+                'cache_control': {'type': 'ephemeral'},
+            }],
             tools=[{
                 'type': 'web_search_20250305',
                 'name': 'web_search',
@@ -483,7 +487,11 @@ class LLMHallucinationVerifier:
         resp = self.client.messages.create(
             model=self.model,
             max_tokens=300,
-            system=system_prompt,
+            system=[{
+                'type': 'text',
+                'text': system_prompt,
+                'cache_control': {'type': 'ephemeral'},
+            }],
             messages=[{'role': 'user', 'content': user_prompt}],
         )
         text = ''

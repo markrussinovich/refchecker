@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from refchecker.core.bulk_pipeline import BulkHallucinationBatcher, BulkLLMExtractionBatcher, BulkProgressReporter, BulkVerificationCache
+from refchecker.core.bulk_pipeline import BulkLLMExtractionBatcher, BulkProgressReporter, BulkVerificationCache
 
 
 class _FakeExtractionProvider:
@@ -23,21 +23,6 @@ class _FakeExtractionChecker:
         return [{'raw': reference} for reference in references]
 
 
-class _FakeHallucinationVerifier:
-    available = True
-
-    def _call(self, system_prompt, user_prompt):
-        assert 'ITEM 0' in user_prompt
-        assert 'ITEM 1' in user_prompt
-        return (
-            '[\n'
-            '  {"index": 0, "verdict": "LIKELY", "explanation": "No evidence found."},\n'
-            '  {"index": 1, "verdict": "UNLIKELY", "explanation": "Paper exists."}\n'
-            ']',
-            [],
-        )
-
-
 def test_bulk_llm_extraction_batcher_processes_multiple_items():
     batcher = BulkLLMExtractionBatcher(enabled=False)
     checker = _FakeExtractionChecker()
@@ -51,33 +36,6 @@ def test_bulk_llm_extraction_batcher_processes_multiple_items():
         [{'raw': 'A One#Paper One#Venue One#2024#https://one'}],
         [{'raw': 'B Two#Paper Two#Venue Two#2025#https://two'}],
     ]
-
-
-def test_bulk_hallucination_batcher_processes_multiple_items():
-    """_process_batch delegates to _process_single per item for mode consistency.
-
-    Each item goes through run_hallucination_check → pre_screen_hallucination.
-    With minimal error entries (no real errors), pre_screen returns 'skip'
-    and run_hallucination_check returns None for each item.
-    """
-    batcher = BulkHallucinationBatcher(enabled=False)
-
-    results = batcher._process_batch([
-        SimpleNamespace(
-            error_entry={'ref_title': 'Paper One', 'ref_authors_cited': 'A One', 'error_type': 'unverified', 'error_details': 'could not verify'},
-            llm_verifier=_FakeHallucinationVerifier(),
-            web_searcher=None,
-        ),
-        SimpleNamespace(
-            error_entry={'ref_title': 'Paper Two', 'ref_authors_cited': 'B Two', 'error_type': 'unverified', 'error_details': 'could not verify'},
-            llm_verifier=_FakeHallucinationVerifier(),
-            web_searcher=None,
-        ),
-    ])
-
-    # Individual processing: pre_screen returns 'skip' (no real errors beyond
-    # 'unverified'), so run_hallucination_check returns None for each item.
-    assert results == [None, None]
 
 
 def test_bulk_progress_reporter_prints_timestamped_completion(capsys):
@@ -132,28 +90,6 @@ def test_verification_cache_hit_and_miss():
 
     # Different reference is a miss
     assert cache.get(ref_b) is None
-
-
-def test_bulk_hallucination_batcher_process_single_uses_run_hallucination_check():
-    """Regression: bulk_pipeline must import run_hallucination_check so _process_single works."""
-    from unittest.mock import patch, MagicMock
-
-    batcher = BulkHallucinationBatcher(enabled=False)
-
-    payload = SimpleNamespace(
-        error_entry={'ref_title': 'Test', 'ref_authors_cited': 'A', 'error_type': 'unverified', 'error_details': 'n/a'},
-        llm_verifier=MagicMock(),
-        web_searcher=None,
-    )
-
-    with patch('refchecker.core.bulk_pipeline.run_hallucination_check', return_value={'verdict': 'LIKELY', 'explanation': 'fake'}) as mock_fn:
-        result = batcher._process_single(payload)
-        mock_fn.assert_called_once_with(
-            payload.error_entry,
-            llm_client=payload.llm_verifier,
-            web_searcher=payload.web_searcher,
-        )
-        assert result == {'verdict': 'LIKELY', 'explanation': 'fake'}
 
 
 def test_verification_cache_variant_lookups():

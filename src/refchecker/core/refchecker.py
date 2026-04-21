@@ -6321,7 +6321,9 @@ class ArxivReferenceChecker:
             return verified_data['url']
         
         # Second priority: Semantic Scholar URL from paperId (if no direct URL available)
-        if verified_data and verified_data.get('paperId'):
+        # Skip non-native paper IDs (e.g. 'dblp:...' prefixed IDs) — prefer the
+        # verifier-returned reference_url for those.
+        if verified_data and verified_data.get('paperId') and ':' not in verified_data['paperId']:
             return construct_semantic_scholar_url(verified_data['paperId'])
         
         # Third priority: DOI URL from verified data (more reliable than potentially wrong ArXiv URLs)
@@ -6796,6 +6798,8 @@ def main():
                         help="Path to local CrossRef database file")
     parser.add_argument("--dblp-db", type=str,
                         help="Path to local DBLP database file")
+    parser.add_argument("--acl-db", type=str,
+                        help="Path to local ACL Anthology database file")
     parser.add_argument("--update-databases", action="store_true",
                         help="Install/update configured local databases (if used without --paper/--paper-list/--openreview, updates and exits)")
     parser.add_argument("--openalex-since", type=str,
@@ -6846,6 +6850,7 @@ def main():
             "openalex": args.openalex_db,
             "crossref": args.crossref_db,
             "dblp": args.dblp_db,
+            "acl": args.acl_db,
         },
         database_directory=args.database_dir,
     )
