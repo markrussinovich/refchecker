@@ -483,13 +483,15 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
+            from google.genai import types
             response = self.client.models.generate_content(
                 model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
                 contents=prompt,
-                config={
-                    'max_output_tokens': self.max_tokens,
-                    'temperature': self.temperature,
-                },
+                config=types.GenerateContentConfig(
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                ),
             )
             
             # Handle empty responses (content safety filter or other issues)

@@ -515,9 +515,11 @@ class LLMHallucinationVerifier:
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
             config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
                 tools=[google_search_tool],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
         )
 
@@ -548,9 +550,14 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
+        from google.genai import types
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
         )
         return (resp.text or '').strip(), []
 
