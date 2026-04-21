@@ -420,7 +420,9 @@ class ArXivCitationChecker:
         Calculate a numeric match score between cited reference and authoritative data.
         
         Used to find the BEST matching historical version, not just the first one that
-        passes a threshold.
+        passes a threshold.  A version is only considered a match when BOTH title AND
+        authors have meaningful overlap — a title-only match with completely wrong
+        authors is NOT a version update.
         
         Args:
             cited_title: Title from the reference
@@ -430,6 +432,7 @@ class ArXivCitationChecker:
             
         Returns:
             A score between 0.0 and 1.0 where higher is better.
+            Returns 0.0 when authors have no overlap (prevents false version matches).
         """
         if not cited_title or not authoritative_title:
             return 0.0
@@ -437,19 +440,45 @@ class ArXivCitationChecker:
         # Primary: Title similarity (weighted at 80%)
         title_similarity = compare_titles_with_latex_cleaning(cited_title, authoritative_title)
         
-        # Secondary: Author count match (weighted at 20%)
+        # Secondary: Author overlap (weighted at 20%)
+        # Use actual name matching, not just count comparison, to prevent
+        # false version matches when a different paper has the same title.
         author_score = 0.0
         if cited_authors and authoritative_authors:
-            cited_count = len(cited_authors)
-            auth_count = len(authoritative_authors)
-            if cited_count == auth_count:
-                author_score = 1.0
-            elif abs(cited_count - auth_count) == 1:
-                author_score = 0.7
-            elif abs(cited_count - auth_count) == 2:
-                author_score = 0.4
-            else:
-                author_score = 0.1
+            auth_names = [
+                a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                for a in authoritative_authors
+            ]
+            if auth_names:
+                from refchecker.utils.text_utils import compare_authors
+                authors_match, _ = compare_authors(cited_authors, auth_names)
+                if authors_match:
+                    author_score = 1.0
+                else:
+                    # Check actual overlap — if zero overlap, this is not a
+                    # version update but a completely different paper.
+                    from refchecker.core.hallucination_policy import _compute_author_overlap
+                    cited_str = ', '.join(
+                        a.get('name', str(a)) if isinstance(a, dict) else str(a)
+                        for a in cited_authors
+                    ) if isinstance(cited_authors[0], dict) else ', '.join(str(a) for a in cited_authors)
+                    correct_str = ', '.join(auth_names)
+                    overlap = _compute_author_overlap(cited_str, correct_str)
+                    if overlap is not None and overlap < 0.1:
+                        # No meaningful author overlap — cannot be a version update
+                        return 0.0
+                    elif overlap is not None and overlap >= 0.5:
+                        author_score = 0.7
+                    elif overlap is not None:
+                        author_score = 0.3
+                    else:
+                        # Could not compute overlap (too few authors) — use count heuristic
+                        cited_count = len(cited_authors)
+                        auth_count = len(auth_names)
+                        if abs(cited_count - auth_count) <= 1:
+                            author_score = 0.5
+                        else:
+                            author_score = 0.1
         
         # Weighted combination
         return 0.8 * title_similarity + 0.2 * author_score

@@ -474,7 +474,12 @@ class NonArxivReferenceChecker:
         cited_authors = reference.get('authors', [])
 
         def _version_match_score(version_data):
-            """Compute a combined (title, author) match score for a version."""
+            """Compute a combined (title, author) match score for a version.
+
+            Returns -1.0 when the title doesn't match or the authors have
+            no meaningful overlap (prevents treating a different paper with
+            the same title as a version update).
+            """
             version_title = version_data.get('title', '').strip()
             if not version_title:
                 return -1.0
@@ -482,10 +487,9 @@ class NonArxivReferenceChecker:
             if title_score < SIMILARITY_THRESHOLD:
                 return -1.0
 
-            # When the reference has authors, factor in author match quality.
-            # Author matching produces a boolean; we boost the title score by
-            # a small amount when authors match so that among versions with
-            # identical titles, the one whose author list matches wins.
+            # When the reference has authors, require meaningful author overlap.
+            # A title-only match with completely wrong authors is NOT a version
+            # update — it's a different paper (or hallucinated reference).
             if cited_authors:
                 version_authors = [
                     a.get('name', str(a)) if isinstance(a, dict) else str(a)
@@ -495,6 +499,15 @@ class NonArxivReferenceChecker:
                     authors_match, _ = compare_authors(cited_authors, version_authors)
                     if authors_match:
                         return title_score + 0.01  # boost
+                    # Check actual overlap — reject if no meaningful overlap
+                    from refchecker.core.hallucination_policy import _compute_author_overlap
+                    cited_str = ', '.join(
+                        str(a) for a in cited_authors
+                    )
+                    correct_str = ', '.join(version_authors)
+                    overlap = _compute_author_overlap(cited_str, correct_str)
+                    if overlap is not None and overlap < 0.1:
+                        return -1.0  # no author overlap — not a version update
             return title_score
 
         # Find the BEST matching version by comparing title + authors
