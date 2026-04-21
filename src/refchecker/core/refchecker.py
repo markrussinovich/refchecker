@@ -6507,10 +6507,10 @@ class ArxivReferenceChecker:
 
         print("")
         verified_url_to_show = self._get_verified_url(verified_data, url_from_verifier, errors)
-        if verified_url_to_show:
-            print(f"       Verified URL: {verified_url_to_show}")
         if verified_data and verified_data.get('_matched_database'):
             print(f"       Matched Database: {verified_data['_matched_database']}")
+        if verified_url_to_show:
+            print(f"       Verified URL: {verified_url_to_show}")
 
         if verified_data:
             external_ids = verified_data.get('externalIds', {})

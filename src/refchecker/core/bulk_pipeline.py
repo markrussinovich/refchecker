@@ -444,11 +444,11 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total
         _safe_print(f'       {ref_url}')
 
     _safe_print('')
-    if ref_verified_url:
-        _safe_print(f'       Verified URL: {ref_verified_url}')
     ref_matched_database = error_entry.get('matched_database', '')
     if ref_matched_database:
         _safe_print(f'       Matched Database: {ref_matched_database}')
+    if ref_verified_url:
+        _safe_print(f'       Verified URL: {ref_verified_url}')
 
     # Use original per-error dicts when available (preserves error/warning/info type)
     original_errors = error_entry.get('_original_errors')

@@ -434,5 +434,167 @@ class TestRateLimiting:
             mock_rate_limiter.wait.assert_not_called()
 
 
+class TestVersionMatchScore:
+    """Tests for _calculate_match_score ensuring version matches require author overlap."""
+
+    @pytest.fixture
+    def checker(self):
+        return ArXivCitationChecker()
+
+    def test_title_and_author_match(self, checker):
+        """Perfect title + author match should score high."""
+        score = checker._calculate_match_score(
+            cited_title='Attention Is All You Need',
+            cited_authors=['Ashish Vaswani', 'Noam Shazeer', 'Niki Parmar'],
+            authoritative_title='Attention Is All You Need',
+            authoritative_authors=[
+                {'name': 'Ashish Vaswani'},
+                {'name': 'Noam Shazeer'},
+                {'name': 'Niki Parmar'},
+            ],
+        )
+        assert score >= 0.9
+
+    def test_title_match_no_author_overlap_returns_zero(self, checker):
+        """Same title but completely different authors must return 0.0.
+
+        This is the key regression test: a hallucinated reference that uses
+        a real paper title with fabricated authors should NOT be treated as
+        an ArXiv version update.
+        """
+        score = checker._calculate_match_score(
+            cited_title='Positive-congruent training: Towards regression-free model updates',
+            cited_authors=['L. Zhou', 'Y. Zheng', 'T. Li', 'Y. Wang'],
+            authoritative_title='Positive-Congruent Training: Towards Regression-Free Model Updates',
+            authoritative_authors=[
+                {'name': 'Sijie Yan'},
+                {'name': 'Yuanjun Xiong'},
+                {'name': 'Kaustav Kundu'},
+                {'name': 'Shuo Yang'},
+                {'name': 'Siqi Deng'},
+                {'name': 'Meng Wang'},
+                {'name': 'Wei Xia'},
+                {'name': 'Stefano Soatto'},
+            ],
+        )
+        assert score == 0.0, (
+            f'Expected 0.0 for title-only match with zero author overlap, got {score}'
+        )
+
+    def test_title_match_partial_author_overlap(self, checker):
+        """Title match + some author overlap (version update) should score above threshold."""
+        score = checker._calculate_match_score(
+            cited_title='Some Paper Title',
+            cited_authors=['Alice Smith', 'Bob Jones', 'Charlie Brown'],
+            authoritative_title='Some Paper Title',
+            authoritative_authors=[
+                {'name': 'Alice Smith'},
+                {'name': 'Bob Jones'},
+                {'name': 'Charlie Brown'},
+                {'name': 'Diana Prince'},  # one extra author in newer version
+            ],
+        )
+        assert score >= 0.8, (
+            f'Version update with partial author overlap should score >= 0.8, got {score}'
+        )
+
+    def test_different_title_returns_low_score(self, checker):
+        """Completely different title should score low regardless of authors."""
+        score = checker._calculate_match_score(
+            cited_title='Paper About Cats',
+            cited_authors=['Alice Smith'],
+            authoritative_title='Paper About Dogs',
+            authoritative_authors=[{'name': 'Alice Smith'}],
+        )
+        assert score < 0.8
+
+
+class TestVersionMatchEndToEnd:
+    """End-to-end tests for version matching in verify_reference."""
+
+    @pytest.fixture
+    def checker(self):
+        return ArXivCitationChecker()
+
+    @patch.object(ArXivCitationChecker, '_get_latest_version_number')
+    @patch.object(ArXivCitationChecker, '_fetch_version_metadata_from_html')
+    @patch.object(ArXivCitationChecker, 'fetch_bibtex')
+    def test_version_match_with_overlapping_authors(self, mock_fetch, mock_version_html, mock_latest, checker):
+        """Citing v1 authors when v2 added more authors should produce warnings, not errors."""
+        mock_fetch.return_value = """@misc{test2023,
+      title={My Paper Title v2},
+      author={Alice Smith and Bob Jones and New Author},
+      year={2023},
+      eprint={2301.99999}
+}"""
+        mock_latest.return_value = 2
+        # v1 had the same title and 2 of the 3 authors
+        mock_version_html.return_value = {
+            'title': 'My Paper Title',
+            'authors': [{'name': 'Alice Smith'}, {'name': 'Bob Jones'}],
+            'year': 2023,
+        }
+
+        reference = {
+            'title': 'My Paper Title',
+            'authors': ['Alice Smith', 'Bob Jones'],
+            'year': 2023,
+            'url': 'https://arxiv.org/abs/2301.99999',
+        }
+
+        verified_data, errors, url = checker.verify_reference(reference)
+        # Errors against latest version should be converted to warnings
+        # because v1 metadata matches the citation
+        warning_types = [e.get('warning_type', '') for e in errors]
+        assert any('update' in w for w in warning_types), (
+            f'Expected version update warnings, got: {errors}'
+        )
+
+    @patch.object(ArXivCitationChecker, '_get_latest_version_number')
+    @patch.object(ArXivCitationChecker, '_fetch_version_metadata_from_html')
+    @patch.object(ArXivCitationChecker, 'fetch_bibtex')
+    def test_no_version_match_with_zero_author_overlap(self, mock_fetch, mock_version_html, mock_latest, checker):
+        """Same title but completely different authors across versions must NOT produce version warnings.
+
+        This tests the regression where a hallucinated ref (real title, fake authors)
+        was incorrectly treated as a version update.
+        """
+        mock_fetch.return_value = """@misc{test2020,
+      title={Positive-Congruent Training: Towards Regression-Free Model Updates},
+      author={Sijie Yan and Yuanjun Xiong and Kaustav Kundu and Shuo Yang and Siqi Deng and Meng Wang and Wei Xia and Stefano Soatto},
+      year={2020},
+      eprint={2011.09161}
+}"""
+        mock_latest.return_value = 2
+        # Historical v1 also has the real authors, not the cited ones
+        mock_version_html.return_value = {
+            'title': 'Positive-Congruent Training: Towards Regression-Free Model Updates',
+            'authors': [
+                {'name': 'Sijie Yan'}, {'name': 'Yuanjun Xiong'},
+                {'name': 'Kaustav Kundu'}, {'name': 'Shuo Yang'},
+            ],
+            'year': 2020,
+        }
+
+        reference = {
+            'title': 'Positive-congruent training: Towards regression-free model updates',
+            'authors': ['L. Zhou', 'Y. Zheng', 'T. Li', 'Y. Wang'],
+            'year': 2024,
+            'url': 'https://arxiv.org/abs/2011.09161',
+        }
+
+        verified_data, errors, url = checker.verify_reference(reference)
+        # Should NOT have version update warnings — authors are completely wrong
+        warning_types = [e.get('warning_type', '') for e in errors]
+        assert not any('update' in w for w in warning_types), (
+            f'Should not produce version update warnings with zero author overlap, got: {errors}'
+        )
+        # Should have actual errors (author mismatch)
+        error_types = [e.get('error_type', '') for e in errors]
+        assert any('author' in t for t in error_types), (
+            f'Expected author error, got: {errors}'
+        )
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
