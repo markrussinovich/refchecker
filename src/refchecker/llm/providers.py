@@ -49,11 +49,18 @@ class LLMProviderMixin:
             system = self._get_system_prompt()
             hit = cached_llm_response(self.cache_dir, self.model, system, prompt)
             if hit is not None:
+                logger.debug("Raw LLM extraction response (cached, %d chars):\n%s",
+                             len(hit['text']), hit['text'])
                 return hit['text']
             result = self._call_llm(prompt)
+            logger.debug("Raw LLM extraction response (%d chars):\n%s",
+                         len(result), result)
             cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
             return result
-        return self._call_llm(prompt)
+        result = self._call_llm(prompt)
+        logger.debug("Raw LLM extraction response (%d chars):\n%s",
+                     len(result), result)
+        return result
 
     def _clean_bibtex_for_llm(self, bibliography_text: str) -> str:
         """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
@@ -128,6 +135,10 @@ class LLMProviderMixin:
 
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
         """Create user prompt for reference extraction - contains only the bibliography text"""
+        # Log raw bibliography text for debugging extraction issues
+        logger.debug("Raw bibliography text passed to LLM (%d chars):\n%s",
+                      len(bibliography_text), bibliography_text)
+
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
         
@@ -483,13 +494,15 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
+            from google.genai import types
             response = self.client.models.generate_content(
                 model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
-                contents=prompt,
-                config={
-                    'max_output_tokens': self.max_tokens,
-                    'temperature': self.temperature,
-                },
+                contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
+                config=types.GenerateContentConfig(
+                    system_instruction=self._get_system_prompt(),
+                    max_output_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                ),
             )
             
             # Handle empty responses (content safety filter or other issues)

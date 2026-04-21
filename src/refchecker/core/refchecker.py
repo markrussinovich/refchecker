@@ -3838,7 +3838,7 @@ class ArxivReferenceChecker:
         
         # Print final summary to console (only if no fatal error occurred)
         structured_payload = None
-        if not debug_mode and not self.fatal_error:
+        if not self.fatal_error:
             if self.single_paper_mode:
                 # Single paper mode - show simplified summary
                 # Build structured payload to get hallucination counts
@@ -6507,10 +6507,10 @@ class ArxivReferenceChecker:
 
         print("")
         verified_url_to_show = self._get_verified_url(verified_data, url_from_verifier, errors)
-        if verified_data and verified_data.get('_matched_database'):
-            print(f"       Matched Database: {verified_data['_matched_database']}")
         if verified_url_to_show:
             print(f"       Verified URL: {verified_url_to_show}")
+        if verified_data and verified_data.get('_matched_database'):
+            print(f"       Matched Database: {verified_data['_matched_database']}")
 
         if verified_data:
             external_ids = verified_data.get('externalIds', {})
