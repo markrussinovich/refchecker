@@ -377,7 +377,9 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               className="mt-1 text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Stored securely and never shown again
+              {multiuser
+                ? 'Stored only in your browser — never saved on the server'
+                : 'Stored securely and never shown again'}
             </p>
           </div>
         )}

@@ -271,9 +271,10 @@ class ProgressRefChecker:
             is_warning = 'warning_type' in err
             logger.info(f"Sanitizing error: e_type={e_type}, is_info={is_info}, is_warning={is_warning}, keys={list(err.keys())}")
             sanitized.append({
-                # If it was info_type, store as 'info' to ensure proper categorization
+                # Preserve original error_type for suggestion_type mapping;
+                # use is_suggestion flag for categorization instead.
                 # Map 'timeout' to 'unverified' since timeouts mean we couldn't verify
-                "error_type": 'info' if is_info else ('unverified' if e_type == 'timeout' else (e_type or 'unknown')),
+                "error_type": 'unverified' if e_type == 'timeout' else (e_type or 'unknown'),
                 "error_details": details if e_type != 'timeout' else 'Verification timed out',
                 "cited_value": err.get('cited_value'),
                 "actual_value": err.get('actual_value'),
@@ -286,7 +287,7 @@ class ProgressRefChecker:
         # Items originally from warning_type are warnings, not errors
         # Items with error_type (including year/venue/author when missing) are errors
         has_errors = any(
-            e.get('error_type') not in ['unverified', 'info'] 
+            e.get('error_type') not in ['unverified'] 
             and not e.get('is_suggestion')
             and not e.get('is_warning')
             # 'url' errors where the URL references the paper are informational,
@@ -303,7 +304,7 @@ class ProgressRefChecker:
             and not e.get('is_suggestion') 
             for e in sanitized
         )
-        has_suggestions = any(e.get('is_suggestion') or e.get('error_type') == 'info' for e in sanitized)
+        has_suggestions = any(e.get('is_suggestion') for e in sanitized)
         is_unverified = any(e.get('error_type') == 'unverified' for e in sanitized)
         # Check if the URL was confirmed to reference the paper (webpage checker verified it)
         url_references_paper = any(
@@ -394,7 +395,7 @@ class ProgressRefChecker:
                 "actual_value": err.get('actual_value')
             }
             # Check is_suggestion flag (set when original had info_type)
-            if err.get('is_suggestion') or err.get('error_type') == 'info':
+            if err.get('is_suggestion'):
                 # Store as suggestion with full details
                 formatted_suggestions.append({
                     "suggestion_type": err.get('error_type') or 'info',

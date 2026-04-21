@@ -161,3 +161,4 @@ CLAUDE.md
 output/
 *.db-shm
 *.db-wal
+test_failure.txt

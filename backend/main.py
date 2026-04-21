@@ -2935,12 +2935,13 @@ async def validate_llm_config(
             raise HTTPException(status_code=400, detail=f"Provider '{config.provider}' is not available")
         
         # Make a simple test call using _call_llm
-        test_response = provider._call_llm("Say 'ok' if you can hear me.")
+        test_response = provider._call_llm("Respond with only the word 'ok'.")
         
-        if test_response:
-            return {"valid": True, "message": "Connection successful"}
-        else:
-            raise HTTPException(status_code=400, detail="Provider returned empty response")
+        # If we get here without an exception, the API key and model are valid.
+        # Some models return empty text for trivial prompts (e.g. when a
+        # system prompt tells them to extract references), so we treat
+        # empty-but-no-error as success.
+        return {"valid": True, "message": "Connection successful"}
             
     except HTTPException:
         raise

@@ -275,7 +275,7 @@ export default function LLMSelector({ compact = false }) {
                 setEditConfig(null)
                 setShowModal(true)
               }}
-              className="w-full flex items-center px-3 py-2 text-sm transition-colors"
+              className="w-full flex items-center px-3 py-2 text-sm transition-colors cursor-pointer"
               style={{ color: 'var(--color-accent)' }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'

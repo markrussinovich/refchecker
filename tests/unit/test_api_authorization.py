@@ -397,3 +397,48 @@ def test_single_user_db_setting_accepts_database_directory(single_user_settings_
 
     settings = _run(api_main.get_all_settings(admin))
     assert settings["db_path"]["label"] == "Local Database Directory"
+
+
+def test_multiuser_create_llm_config_does_not_store_api_key(auth_db):
+    """Regression: in multi-user mode, API keys must never be persisted server-side."""
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-key-nostore"))
+
+    result = _run(api_main.create_llm_config(
+        api_main.LLMConfigCreate(
+            name="Anthropic",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="sk-secret-key-12345",
+        ),
+        owner,
+    ))
+    config_id = result["id"]
+
+    # The response should indicate no key is stored
+    assert result["has_key"] is False
+
+    # Verify the database has no key
+    stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
+    assert stored["api_key"] is None or stored["api_key"] == ""
+
+
+def test_multiuser_update_llm_config_does_not_store_api_key(auth_db):
+    """Regression: updating a config in multi-user mode must not persist the API key."""
+    api_main, db = auth_db
+    owner = _run(_create_user(api_main, db, "owner-key-noupdate"))
+
+    result = _run(api_main.create_llm_config(
+        api_main.LLMConfigCreate(name="OpenAI", provider="openai", model="gpt-4.1"),
+        owner,
+    ))
+    config_id = result["id"]
+
+    _run(api_main.update_llm_config(
+        config_id,
+        api_main.LLMConfigUpdate(name="OpenAI Updated", api_key="sk-updated-secret"),
+        owner,
+    ))
+
+    stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
+    assert stored["api_key"] is None or stored["api_key"] == ""
