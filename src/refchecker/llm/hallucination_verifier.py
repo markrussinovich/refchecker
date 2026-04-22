@@ -806,16 +806,20 @@ class LLMHallucinationVerifier:
         error_entry: Dict[str, Any],
         web_urls: list,
     ) -> tuple:
-        """Downgrade LIKELY → UNCERTAIN for verified papers without grounding.
+        """Downgrade LIKELY → UNCERTAIN for verified papers with metadata-only errors.
 
         If the LLM says LIKELY but the paper was actually verified in a
         database (has a verified URL from a checker) and the error is only
         a metadata mismatch (author, year, venue, doi — possibly with a
-        version suffix like 'author (v4 vs v5 update)'), the LLM is wrong.
+        version suffix like 'author (v4 vs v5 update)'), the paper provably
+        exists. The author/metadata mismatch may be due to parsing errors,
+        edition differences, or version updates. Downgrade to UNCERTAIN.
+
+        This applies regardless of whether web search was used, because
+        the database verification is stronger evidence than an LLM's
+        assessment of author overlap.
         """
         if verdict != 'LIKELY':
-            return verdict, explanation
-        if web_urls:
             return verdict, explanation
 
         verified_url = error_entry.get('ref_verified_url', '')
@@ -828,13 +832,15 @@ class LLMHallucinationVerifier:
         _metadata_prefixes = ('author', 'year', 'venue', 'doi')
         if any(error_type.startswith(p) for p in _metadata_prefixes):
             logger.debug(
-                'Overriding ungrounded LIKELY → UNCERTAIN for verified ref '
-                '(error_type=%s, verified_url=%s)', error_type, verified_url,
+                'Overriding LIKELY → UNCERTAIN for verified ref '
+                '(error_type=%s, verified_url=%s, grounded=%s)',
+                error_type, verified_url, bool(web_urls),
             )
             verdict = 'UNCERTAIN'
             explanation += (
                 f' (Verdict downgraded: paper was verified in a database '
-                f'[{verified_url}] but LLM assessment was not grounded in web search.)'
+                f'[{verified_url}] — metadata mismatch is likely a parsing '
+                f'or edition issue, not hallucination.)'
             )
         return verdict, explanation
 
