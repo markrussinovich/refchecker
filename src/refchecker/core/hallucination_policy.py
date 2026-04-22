@@ -834,16 +834,33 @@ def run_hallucination_check(
         author_overlap = assessment.get('author_overlap') if assessment else None
         if (
             is_verified
-            and llm_client
             and assessment
             and assessment.get('verdict') == 'LIKELY'
-            and (author_overlap is None or author_overlap == 0)
         ):
-            logger.debug(
-                "run_hallucination_check: verified ref flagged LIKELY by rules — deferring to LLM ref=%r",
-                ref_title,
-            )
-            # Fall through to LLM below
+            if author_overlap is None or author_overlap == 0:
+                if llm_client:
+                    logger.debug(
+                        "run_hallucination_check: verified ref flagged LIKELY by rules — deferring to LLM ref=%r",
+                        ref_title,
+                    )
+                    # Fall through to LLM below
+                else:
+                    # No LLM available, let deterministic verdict stand
+                    return assessment
+            else:
+                # Verified paper with >0% author overlap flagged LIKELY.
+                # Only the LLM can disambiguate whether this is a genuine
+                # hallucination or a parsing/edition mismatch.  Without
+                # an LLM, let the deterministic verdict stand.
+                if not llm_client:
+                    return assessment
+                # With an LLM available, defer to it for verification.
+                logger.debug(
+                    "run_hallucination_check: verified ref flagged LIKELY by rules "
+                    "(overlap=%.0f%%) — deferring to LLM ref=%r",
+                    (author_overlap or 0) * 100, ref_title,
+                )
+                # Fall through to LLM below
         else:
             return assessment
     if outcome == 'skip':
