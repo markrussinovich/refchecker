@@ -89,13 +89,25 @@ class LLMProvider(ABC):
             
             text_section = bibliography_text[search_start:search_end]
             
-            # Find the latest reference start pattern like "\n[32]"
+            # Find the latest reference start pattern like "\n[32]" or double-newline paragraph breaks
             best_break = end
             ref_boundary_matches = list(re.finditer(r'\n\[\d+\]', text_section))
             if ref_boundary_matches:
                 # Use the last reference boundary found within the search window
                 last_match = ref_boundary_matches[-1]
                 best_break = search_start + last_match.start() + 1  # +1 to include the \n
+            else:
+                # No numbered markers — try paragraph breaks (blank lines between entries)
+                para_matches = list(re.finditer(r'\n\s*\n', text_section))
+                if para_matches:
+                    last_match = para_matches[-1]
+                    best_break = search_start + last_match.start() + 1
+                else:
+                    # Last resort: break at a sentence-ending period followed by newline
+                    sent_matches = list(re.finditer(r'\. *\n', text_section))
+                    if sent_matches:
+                        last_match = sent_matches[-1]
+                        best_break = search_start + last_match.end()  # After the newline
             
             # Extract chunk
             chunk = bibliography_text[start:best_break].strip()

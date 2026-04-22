@@ -5371,8 +5371,19 @@ class ArxivReferenceChecker:
         
         # Split by hashmarks to find components
         parts = ref_text.split('#')
-        parts = [p.strip() for p in parts if p.strip()]  # Clean up whitespace and remove empty parts
-        logger.debug(f"Split by hashmarks: {parts}")
+        # Strip whitespace but preserve empty leading part (empty author field)
+        parts = [p.strip() for p in parts]
+        # Remove only trailing empty parts (from trailing #), keep leading empty for empty-author refs
+        while parts and not parts[-1]:
+            parts.pop()
+        # If first part is empty, this is an empty-author reference (#Title#Venue#Year#URL)
+        # Keep the empty string so field positions are correct
+        if parts and parts[0] == '' and len(parts) >= 2:
+            logger.debug(f"Split by hashmarks (empty author): {parts}")
+        else:
+            # Remove any remaining empty parts in the middle
+            parts = [p for p in parts if p]
+            logger.debug(f"Split by hashmarks: {parts}")
         
         # Handle different formats based on number of parts
         if len(parts) == 1:

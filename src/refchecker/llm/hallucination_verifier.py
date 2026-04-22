@@ -515,9 +515,11 @@ class LLMHallucinationVerifier:
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
             config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
                 tools=[google_search_tool],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             ),
         )
 
@@ -527,17 +529,50 @@ class LLMHallucinationVerifier:
         for candidate in getattr(resp, 'candidates', []):
             grounding = getattr(candidate, 'grounding_metadata', None)
             if grounding:
-                for chunk in getattr(grounding, 'grounding_chunks', []):
+                # Log the full grounding metadata for debugging
+                logger.debug('Gemini grounding_metadata: %s', grounding)
+
+                # Log grounding supports (confidence scores per segment)
+                supports = getattr(grounding, 'grounding_supports', None)
+                if supports:
+                    for i, support in enumerate(supports):
+                        segment = getattr(support, 'segment', None)
+                        seg_text = getattr(segment, 'text', '')[:120] if segment else ''
+                        confidence = getattr(support, 'confidence_scores', [])
+                        indices = getattr(support, 'grounding_chunk_indices', [])
+                        logger.debug(
+                            'Gemini grounding support[%d]: segment=%r confidence=%s chunk_indices=%s',
+                            i, seg_text, confidence, indices,
+                        )
+
+                # Log web search queries used
+                web_queries = getattr(grounding, 'web_search_queries', None)
+                if web_queries:
+                    logger.debug('Gemini web_search_queries: %s', web_queries)
+
+                for chunk in (getattr(grounding, 'grounding_chunks', None) or []):
                     web_info = getattr(chunk, 'web', None)
                     if web_info:
                         url = getattr(web_info, 'uri', '') or ''
+                        title = getattr(web_info, 'title', '') or ''
                         if url:
                             web_urls.append(url)
-                # Also log the search entry point for debugging
+                            logger.debug('Gemini grounding chunk: url=%s title=%s', url, title)
+                # Fallback: extract search result URLs from search_entry_point
+                # when grounding_chunks is empty (common with lighter models)
                 search_entry = getattr(grounding, 'search_entry_point', None)
+                if search_entry and not web_urls:
+                    import re as _re
+                    rendered = getattr(search_entry, 'rendered_content', '') or ''
+                    # Extract href URLs from chip links in the rendered HTML
+                    for match in _re.finditer(r'href="(https?://[^"]+)"', rendered):
+                        chip_url = match.group(1)
+                        if chip_url not in web_urls:
+                            web_urls.append(chip_url)
+                            logger.debug('Gemini search entry chip URL: %s', chip_url[:120])
                 if search_entry:
-                    logger.debug('Gemini grounding search entry: %s',
-                                 getattr(search_entry, 'rendered_content', '')[:200])
+                    logger.debug('Gemini search entry present (rendered_content: %d chars)',
+                                 len(getattr(search_entry, 'rendered_content', '') or ''))
 
         if web_urls:
             logger.debug('Gemini grounding returned %d URLs', len(web_urls))
@@ -548,9 +583,14 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
+        from google.genai import types
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
         )
         return (resp.text or '').strip(), []
 
