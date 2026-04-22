@@ -684,13 +684,18 @@ class LLMHallucinationVerifier:
             hit = cached_llm_response(cache_dir, self.model, system_prompt, user_prompt)
             if hit is not None:
                 verdict, explanation, paper_link = self._parse_verdict(hit['text'])
+                web_urls = hit.get('web_urls', [])
+                # Apply verified-paper safety net to cached results too
+                verdict, explanation = self._apply_verified_safety_net(
+                    verdict, explanation, error_entry, web_urls,
+                )
                 return {
                     'verdict': verdict,
                     'explanation': explanation,
                     'link': paper_link,
-                    'web_search': {'found': bool(hit.get('web_urls')),
-                                   'academic_urls': hit.get('web_urls', []),
-                                   'provider': self.provider} if hit.get('web_urls') else None,
+                    'web_search': {'found': bool(web_urls),
+                                   'academic_urls': web_urls,
+                                   'provider': self.provider} if web_urls else None,
                 }
 
         if not self.available:
@@ -757,25 +762,10 @@ class LLMHallucinationVerifier:
                 verdict = 'UNLIKELY'
                 explanation += ' (Verdict corrected: explanation confirms exact paper was found.)'
 
-        # Safety net: if the LLM says LIKELY but the paper was actually
-        # verified in a database (has a verified URL from a checker),
-        # and the error is only a metadata mismatch (author, year, venue),
-        # the LLM is wrong — the paper exists.  Downgrade to UNCERTAIN
-        # so it doesn't produce a false-positive hallucination flag.
-        if verdict == 'LIKELY' and not web_urls:
-            verified_url = error_entry.get('ref_verified_url', '')
-            error_type = error_entry.get('error_type', '')
-            metadata_only = error_type in ('author', 'year', 'venue', 'doi')
-            if verified_url and metadata_only:
-                logger.debug(
-                    'Overriding ungrounded LIKELY → UNCERTAIN for verified ref '
-                    '(error_type=%s, verified_url=%s)', error_type, verified_url,
-                )
-                verdict = 'UNCERTAIN'
-                explanation += (
-                    f' (Verdict downgraded: paper was verified in a database '
-                    f'[{verified_url}] but LLM assessment was not grounded in web search.)'
-                )
+        # Apply verified-paper safety net
+        verdict, explanation = self._apply_verified_safety_net(
+            verdict, explanation, error_entry, web_urls,
+        )
 
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
@@ -808,6 +798,45 @@ class LLMHallucinationVerifier:
             if 'title' in details or 'not found' in details:
                 return True
         return False
+
+    @staticmethod
+    def _apply_verified_safety_net(
+        verdict: str,
+        explanation: str,
+        error_entry: Dict[str, Any],
+        web_urls: list,
+    ) -> tuple:
+        """Downgrade LIKELY → UNCERTAIN for verified papers without grounding.
+
+        If the LLM says LIKELY but the paper was actually verified in a
+        database (has a verified URL from a checker) and the error is only
+        a metadata mismatch (author, year, venue, doi — possibly with a
+        version suffix like 'author (v4 vs v5 update)'), the LLM is wrong.
+        """
+        if verdict != 'LIKELY':
+            return verdict, explanation
+        if web_urls:
+            return verdict, explanation
+
+        verified_url = error_entry.get('ref_verified_url', '')
+        if not verified_url:
+            return verdict, explanation
+
+        error_type = (error_entry.get('error_type') or '').lower()
+        # Match error types that are purely metadata mismatches.
+        # These can have version suffixes like "author (v4 vs v5 update)".
+        _metadata_prefixes = ('author', 'year', 'venue', 'doi')
+        if any(error_type.startswith(p) for p in _metadata_prefixes):
+            logger.debug(
+                'Overriding ungrounded LIKELY → UNCERTAIN for verified ref '
+                '(error_type=%s, verified_url=%s)', error_type, verified_url,
+            )
+            verdict = 'UNCERTAIN'
+            explanation += (
+                f' (Verdict downgraded: paper was verified in a database '
+                f'[{verified_url}] but LLM assessment was not grounded in web search.)'
+            )
+        return verdict, explanation
 
     @staticmethod
     def _parse_verdict(response: str) -> tuple:
