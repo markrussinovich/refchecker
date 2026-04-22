@@ -23,8 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 _ASSESSMENT_SYSTEM_PROMPT = """\
-You are an academic-integrity assistant that determines whether a cited \
+You are an reference-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
+
+IMPORTANT CONTEXT: The automated checkers have already searched \
+Semantic Scholar, OpenAlex, CrossRef, DBLP, and arXiv for this reference. \
+If they report it as unverified, the paper was NOT found in any of these \
+databases. Do not contradict this unless your web search finds a page that \
+shows the paper with the EXACT title listed above. However, if the \
+validation summary says the paper WAS found but has metadata mismatches, \
+the checkers may have matched a wrong edition or version — use your web \
+search to verify the CITED title and authors independently.
 
 MANDATORY: You MUST perform a web search for the paper title before \
 rendering your verdict. Search for the exact title in quotes on the web \
@@ -38,9 +47,9 @@ evidence. If you cannot search, verdict UNCERTAIN.
 
 Reply in EXACTLY this structured format (three lines only, no preamble):
 
-VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
 EXPLANATION: <1-2 sentence summary of your finding — NO URLs, NO search narration>
 LINK: <URL where the exact paper was found, or NONE if not found>
+VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
 
 Verdicts:
   LIKELY    — this reference is probably fabricated
@@ -54,38 +63,7 @@ CRITICAL formatting rules:
 - Do NOT embed URLs or markdown links in the EXPLANATION. Put the URL \
 only in the LINK field.
 - Start the EXPLANATION directly with your finding (e.g., "No paper with \
-this exact title exists." or "The exact paper was found in Nature 2024.")."""
-
-_ASSESSMENT_PROMPT = """\
-## Reference metadata
-Title:   {title}
-Authors: {authors}
-Venue:   {venue}
-Year:    {year}
-URL:     {url}
-
-## Validation results from automated checkers
-{validation_summary}
-
-IMPORTANT CONTEXT: The automated checkers above have already searched \
-Semantic Scholar, OpenAlex, CrossRef, DBLP, and arXiv for this reference. \
-If they report it as unverified, the paper was NOT found in any of these \
-databases. Do not contradict this unless your web search finds a page that \
-shows the paper with the EXACT title listed above. However, if the \
-validation summary says the paper WAS found but has metadata mismatches, \
-the checkers may have matched a wrong edition or version — use your web \
-search to verify the CITED title and authors independently.
-
-## Instructions
-Search the web for the exact paper title (in quotes) to check whether a \
-paper with THIS SPECIFIC TITLE actually exists.
-
-CRITICAL: Do NOT hallucinate or confabulate results. If your web search \
-does not return a page containing the EXACT title \
-\"{title}\", \
-then the paper does not exist and the verdict must be LIKELY. Do not claim \
-you found the paper if you actually found a DIFFERENT paper with a similar \
-but not identical title.
+this exact title exists." or "The exact paper was found in Nature 2024.").
 
 WARNING: Finding this title mentioned as a CITATION inside another paper \
 (e.g. on OpenReview, arXiv, or in a reference list) does NOT prove this \
@@ -180,34 +158,6 @@ informal name for a paper or model (e.g. "Llama" instead of the full \
 "The Llama 3 Herd of Models"), and the authors substantially match, \
 this is a citation style choice, not hallucination. Verdict UNLIKELY.
 
-Be strict: if this title was not found in any academic database and your \
-web search does not find this exact title, the verdict MUST be LIKELY. \
-If the title exists but the authors are completely different, the verdict \
-MUST also be LIKELY.
-
-Reply in EXACTLY this format:
-
-VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
-EXPLANATION: <concise 2-3 sentence explanation — do NOT include URLs here>
-LINK: <URL of the exact paper if found, or NONE>
-
-CRITICAL EVIDENCE RULE: You MUST only verdict UNLIKELY if your web \
-search returned a result page whose title matches the CITED title \
-above. If your search returned no results, or only returned pages \
-with similar-but-different titles, the verdict MUST be LIKELY or \
-UNCERTAIN — never UNLIKELY. Do not rely on your parametric knowledge \
-to claim a paper exists; provide the URL in the LINK field as proof. \
-An UNLIKELY verdict without a valid LINK is always wrong.
-EXCEPTION — VERIFIED PAPER: If the validation summary above says a \
-paper with this title WAS found in an academic database (i.e. the \
-checker matched it and provided a verified URL), then the paper \
-DEFINITELY exists — this is authoritative ground truth. Do NOT \
-contradict the validation summary by claiming the paper does not exist. \
-In that case, base your verdict SOLELY on whether the cited \
-authors match the actual authors. If the authors substantially match \
-(or the mismatch is minor/formatting-related), verdict MUST be UNLIKELY. \
-Only verdict LIKELY if the authors are completely fabricated.
-
 ARXIV ID WARNING: If the reference includes an arXiv URL/ID, and the \
 automated checkers report that the arXiv ID points to a DIFFERENT paper, \
 then the arXiv ID is wrong. Do NOT use that arXiv URL in the LINK field — \
@@ -218,20 +168,22 @@ cited reference is fabricated and the verdict MUST be LIKELY.
 VERIFICATION REQUIREMENT: Before writing UNLIKELY, ask yourself: \
 "Did my search results contain a page where the PRIMARY title (not a \
 citation in another paper's reference list) exactly matches the cited \
-title?" If you cannot answer yes, the verdict must be LIKELY."""
+title?" If you cannot answer yes, the verdict must be LIKELY.
+"""
 
-_WEB_SEARCH_DECISION_PROMPT = """\
-Given this reference that could not be verified by academic databases:
+_ASSESSMENT_PROMPT = """\
+## Reference metadata
 Title:   {title}
 Authors: {authors}
+Venue:   {venue}
 Year:    {year}
+URL:     {url}
 
-Errors: {errors}
+## Validation results from automated checkers
+{validation_summary}
 
-Would a web search provide useful additional signal to determine if this is \
-a hallucinated reference? Answer YES or NO on the first line.
-Only answer YES for references that are unverified or have major conflicts. \
-Minor author-name or year differences do NOT warrant a search."""
+Perform the web search and assessment as per the instructions. 
+"""
 
 
 def build_assessment_prompt(error_entry: dict) -> tuple:
@@ -575,12 +527,18 @@ class LLMHallucinationVerifier:
     @staticmethod
     def _extract_google_grounding(resp) -> tuple:
         """Extract response text and grounding URLs from a Gemini response."""
-        text = resp.text or ''
+        try:
+            text = resp.text or ''
+        except (TypeError, ValueError, AttributeError):
+            # resp.text can raise when the response has no text parts
+            # (e.g. only function_call parts, or content blocked by safety)
+            text = ''
         web_urls: List[str] = []
         for candidate in getattr(resp, 'candidates', []):
             grounding = getattr(candidate, 'grounding_metadata', None)
             if grounding:
-                for chunk in getattr(grounding, 'grounding_chunks', []):
+                # grounding_chunks may exist as an attribute but be None
+                for chunk in (getattr(grounding, 'grounding_chunks', None) or []):
                     web_info = getattr(chunk, 'web', None)
                     if web_info:
                         url = getattr(web_info, 'uri', '') or ''

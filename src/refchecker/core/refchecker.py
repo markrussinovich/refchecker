@@ -6454,7 +6454,9 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(
                             reference, reference_url, errors, debug_mode, print_output)
                 else:
-                    self.total_unverified_refs += 1
+                    # Don't count as unverified if LLM already confirmed it's real
+                    if not (precomputed_hallucination and precomputed_hallucination.get('verdict') == 'UNLIKELY'):
+                        self.total_unverified_refs += 1
                     self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
             
             # Add to dataset and handle all errors

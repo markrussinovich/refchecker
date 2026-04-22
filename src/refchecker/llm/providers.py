@@ -44,16 +44,25 @@ class LLMProviderMixin:
 
     def _call_llm_cached(self, prompt: str) -> str:
         """Wrapper around _call_llm that checks/saves the LLM response cache."""
+        logger.debug("Raw bibliography text passed to LLM (%d chars):\n%s",
+                      len(prompt), prompt)
         if self.cache_dir:
             from refchecker.utils.cache_utils import cached_llm_response, cache_llm_response
             system = self._get_system_prompt()
             hit = cached_llm_response(self.cache_dir, self.model, system, prompt)
             if hit is not None:
+                logger.debug("Raw LLM extraction response (cached, %d chars):\n%s",
+                             len(hit['text']), hit['text'])
                 return hit['text']
             result = self._call_llm(prompt)
+            logger.debug("Raw LLM extraction response (%d chars):\n%s",
+                         len(result), result)
             cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
             return result
-        return self._call_llm(prompt)
+        result = self._call_llm(prompt)
+        logger.debug("Raw LLM extraction response (%d chars):\n%s",
+                     len(result), result)
+        return result
 
     def _clean_bibtex_for_llm(self, bibliography_text: str) -> str:
         """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
@@ -114,7 +123,7 @@ class LLMProviderMixin:
             "3. For BibTeX: 'title' field = paper title, 'journal'/'booktitle' = venue\n"
             "4. Handle author formats: 'Last, First' becomes 'First Last', separate with *\n"
             "5. Faithfully include all authors - do not inject 'et al' if not present, but preserve it if it is\n"
-            "6. Preserve 'et al' exactly as written\n"
+            "6. Faithfully preserve 'et al' and variants like 'et al.' exactly as written as a separate author\n"
             "7. Skip entries that are only URLs without bibliographic data\n"
             "8. If no author field exists, start with # (empty author). Anonymous entries like standards \n"
             "   (e.g. 'ISO/PAS-8800...', 'IEEE Std...') or datasets are separate references with no authors.\n"
@@ -123,11 +132,32 @@ class LLMProviderMixin:
             "10. IGNORE non-reference text: theorems, proofs, algorithms, equations, discussion prose, "
             "section headers, figure/table captions. Only extract actual bibliographic entries\n"
             "11. If references suddenly change format (e.g. numbered refs followed by unnumbered prose), "
-            "stop extracting - the later text is likely appendix content, not references"
+            "stop extracting - the later text is likely appendix content, not references\n\n"
+            "EXAMPLES (input → output):\n\n"
+            "Input:\n"
+            "Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, et al. Evaluating large language models\n"
+            "trained on code. arXiv preprint arXiv:2107.03374, 2021.\n"
+            "Output:\n"
+            "Mark Chen*Jerry Tworek*Heewoo Jun*Qiming Yuan*et al.#Evaluating large language models trained on code#arXiv preprint arXiv:2107.03374#2021\n\n"
+            "Input:\n"
+            "[17] David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien\n"
+            "Dirani, Julian Michael, and Samuel R. Bowman. GPQA: A graduate-level google-proof Q&A\n"
+            "benchmark. In First Conference on Language Modeling, 2024.\n"
+            "Output:\n"
+            "David Rein*Betty Li Hou*Asa Cooper Stickland*Jackson Petty*Richard Yuanzhe Pang*Julien Dirani*Julian Michael*Samuel R. Bowman#GPQA: A graduate-level google-proof Q&A benchmark#First Conference on Language Modeling#2024\n\n"
+            "Input:\n"
+            "Mathematical Association of America. American invitational mathematics examination (AIME).\n"
+            "Mathematics Competition Series. https://maa.org/math-competitions/aime\n"
+            "Output:\n"
+            "Mathematical Association of America#American invitational mathematics examination (AIME)#Mathematics Competition Series#n.d.#https://maa.org/math-competitions/aime"
         )
 
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
         """Create user prompt for reference extraction - contains only the bibliography text"""
+        # Log the raw bibliography text before any cleaning/preprocessing
+        logger.debug("Raw bibliography text before preprocessing (%d chars):\n%s",
+                      len(bibliography_text), bibliography_text)
+
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
         

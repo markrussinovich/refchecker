@@ -1299,7 +1299,7 @@ class EnhancedHybridReferenceChecker:
                         else:
                             url_msg = f'Cited URL does not reference this paper: {web_url}'
                         errors_out.append({
-                            'error_type': 'url',
+                            'error_type': 'url' if 'URL references paper' not in subreason else 'unverified',
                             'error_details': url_msg,
                         })
                     else:

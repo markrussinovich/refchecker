@@ -52,17 +52,18 @@ config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 _ARXIV_VERSION_SENSITIVE_TYPES = frozenset({"title", "author", "year"})
 
-def log_query_debug(query: str, params: list, execution_time: float, result_count: int, strategy: str):
+def log_query_debug(query: str, params: list, execution_time: float, result_count: int, strategy: str, db_label: str = ''):
     """Log database query details in debug mode"""
+    label_prefix = f"[{db_label}] " if db_label else ''
     if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"DB Query Strategy: {strategy}")
-        logger.debug(f"DB Query: {query}")
-        logger.debug(f"DB Params: {params}")
-        logger.debug(f"DB Execution Time: {execution_time:.3f}s")
-        logger.debug(f"DB Result Count: {result_count}")
+        logger.debug(f"{label_prefix}DB Query Strategy: {strategy}")
+        logger.debug(f"{label_prefix}DB Query: {query}")
+        logger.debug(f"{label_prefix}DB Params: {params}")
+        logger.debug(f"{label_prefix}DB Execution Time: {execution_time:.3f}s")
+        logger.debug(f"{label_prefix}DB Result Count: {result_count}")
     else:
         # Always log strategy and result count for INFO level
-        logger.debug(f"DB Query [{strategy}]: {result_count} results in {execution_time:.3f}s")
+        logger.debug(f"{label_prefix}DB Query [{strategy}]: {result_count} results in {execution_time:.3f}s")
 
 class LocalNonArxivReferenceChecker:
     """
@@ -133,6 +134,7 @@ class LocalNonArxivReferenceChecker:
         self.conn.execute("PRAGMA cache_size=-64000")   # 64 MB page cache
         self.conn.execute("PRAGMA temp_store=MEMORY")
         self._arxiv_citation_checker: Optional[ArXivCitationChecker] = None
+        self._log_prefix = f"Local DB [{self.database_label}]"
 
     def _get_arxiv_citation_checker(self) -> ArXivCitationChecker:
         if self._arxiv_citation_checker is None:
@@ -181,7 +183,7 @@ class LocalNonArxivReferenceChecker:
             return errors
 
         logger.debug(
-            "Local DB: Running inferred arXiv version check for matched paper %s",
+            f"{self._log_prefix}: Running inferred arXiv version check for matched paper %s",
             inferred_arxiv_id,
         )
 
@@ -191,7 +193,7 @@ class LocalNonArxivReferenceChecker:
         try:
             _, arxiv_issues, matched_url = self._get_arxiv_citation_checker().verify_reference(arxiv_reference)
         except Exception as exc:
-            logger.debug("Local DB: Inferred arXiv check failed for %s: %s", inferred_arxiv_id, exc)
+            logger.debug(f"{self._log_prefix}: Inferred arXiv check failed for %s: %s", inferred_arxiv_id, exc)
             return errors
         if not matched_url or f"/abs/{inferred_arxiv_id}" not in matched_url:
             return errors
@@ -229,7 +231,7 @@ class LocalNonArxivReferenceChecker:
 
         if downgraded_any:
             logger.debug(
-                "Local DB: Reconciled inferred arXiv metadata mismatches for %s using %s",
+                f"{self._log_prefix}: Reconciled inferred arXiv metadata mismatches for %s using %s",
                 inferred_arxiv_id,
                 matched_url,
             )
@@ -301,7 +303,7 @@ class LocalNonArxivReferenceChecker:
         execution_time = time.time() - start_time
         
         result_count = 1 if row else 0
-        log_query_debug(query, list(params), execution_time, result_count, "DOI lookup")
+        log_query_debug(query, list(params), execution_time, result_count, "DOI lookup", self.database_label)
         
         if not row:
             return None
@@ -336,7 +338,7 @@ class LocalNonArxivReferenceChecker:
         execution_time = time.time() - start_time
         
         result_count = 1 if row else 0
-        log_query_debug(query, list(params), execution_time, result_count, "arXiv ID lookup")
+        log_query_debug(query, list(params), execution_time, result_count, "arXiv ID lookup", self.database_label)
         
         if not row:
             return None
@@ -380,7 +382,7 @@ class LocalNonArxivReferenceChecker:
                 results.extend([dict(row) for row in cursor.fetchall()])
                 execution_time = time.time() - start_time
                 
-                log_query_debug(query, params, execution_time, len(results), "normalized title match")
+                log_query_debug(query, params, execution_time, len(results), "normalized title match", self.database_label)
                 
                 if results:
                     logger.debug(f"Found {len(results)} results using normalized title match")
@@ -397,7 +399,7 @@ class LocalNonArxivReferenceChecker:
                     results.extend([dict(row) for row in cursor.fetchall()])
                     execution_time = time.time() - start_time
                     
-                    log_query_debug(query, [db_style_normalized], execution_time, len(results), "DB-style normalized title match")
+                    log_query_debug(query, [db_style_normalized], execution_time, len(results), "DB-style normalized title match", self.database_label)
                     
                     if results:
                         logger.debug(f"Found {len(results)} results using DB-style normalized title match")
@@ -421,12 +423,12 @@ class LocalNonArxivReferenceChecker:
         Returns:
             Best matching paper data dictionary or None if not found
         """
-        logger.debug(f"Local DB: Finding best match for title: '{title}', authors: {authors}, year: {year}")
+        logger.debug(f"{self._log_prefix}: Finding best match for title: '{title}', authors: {authors}, year: {year}")
         
         # Search by title
         title_results = self.search_papers_by_title(title, year)
         
-        logger.debug(f"Local DB: Title search returned {len(title_results)} results")
+        logger.debug(f"{self._log_prefix}: Title search returned {len(title_results)} results")
         
         if title_results:
             # Find the best match by title similarity with stable sorting
@@ -451,7 +453,7 @@ class LocalNonArxivReferenceChecker:
                 if year and result.get('year') == year:
                     score += 0.1
                 
-                logger.debug(f"Local DB: Candidate match score {score:.2f} for '{result_title}'")
+                logger.debug(f"{self._log_prefix}: Candidate match score {score:.2f} for '{result_title}'")
                 
                 scored_results.append((score, result))
             
@@ -463,12 +465,12 @@ class LocalNonArxivReferenceChecker:
             
             # If we found a good match, return it
             if best_score >= SIMILARITY_THRESHOLD:
-                logger.debug(f"Local DB: Found good title match with score {best_score:.2f}")
+                logger.debug(f"{self._log_prefix}: Found good title match with score {best_score:.2f}")
                 return best_match
             else:
-                logger.debug(f"Local DB: Best title match score {best_score:.2f} below threshold ({SIMILARITY_THRESHOLD})")
+                logger.debug(f"{self._log_prefix}: Best title match score {best_score:.2f} below threshold ({SIMILARITY_THRESHOLD})")
         
-        logger.debug("Local DB: No good match found")
+        logger.debug(f"{self._log_prefix}: No good match found")
         return None
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
@@ -493,7 +495,7 @@ class LocalNonArxivReferenceChecker:
         url = reference.get('url', '')
         raw_text = reference.get('raw_text', '')
         
-        logger.debug(f"Local DB: Verifying reference - Title: '{title}', Authors: {authors}, Year: {year}")
+        logger.debug(f"{self._log_prefix}: Verifying reference - Title: '{title}', Authors: {authors}, Year: {year}")
         
         # Extract identifiers from the reference
         doi = None
@@ -511,7 +513,7 @@ class LocalNonArxivReferenceChecker:
         # Reject truncated/partial DOIs (e.g., "10.1016/j")
         from refchecker.utils.doi_utils import is_valid_doi_format
         if doi and not is_valid_doi_format(doi):
-            logger.debug(f"Local DB: Rejecting invalid DOI format: {doi}")
+            logger.debug(f"{self._log_prefix}: Rejecting invalid DOI format: {doi}")
             doi = None
         
         paper_data = None
@@ -523,7 +525,7 @@ class LocalNonArxivReferenceChecker:
         # real paper and can flag the incorrect arXiv URL.
         if arxiv_id:
             arxiv_tried = True
-            logger.debug(f"Local DB: Searching by arXiv ID first: {arxiv_id}")
+            logger.debug(f"{self._log_prefix}: Searching by arXiv ID first: {arxiv_id}")
             arxiv_paper = self.get_paper_by_arxiv_id(arxiv_id)
             
             if arxiv_paper:
@@ -545,7 +547,7 @@ class LocalNonArxivReferenceChecker:
         
         # Try title/author search (primary fallback, or first if no arXiv URL)
         if not paper_data and (title or authors):
-            logger.debug(f"Local DB: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
+            logger.debug(f"{self._log_prefix}: Searching by title/authors - Title: '{title}', Authors: {authors}, Year: {year}")
             paper_data = self.find_best_match(title, authors, year)
             
             if paper_data:
@@ -555,7 +557,7 @@ class LocalNonArxivReferenceChecker:
         
         # Try DOI if title search didn't find it
         if not paper_data and doi:
-            logger.debug(f"Local DB: Searching by DOI: {doi}")
+            logger.debug(f"{self._log_prefix}: Searching by DOI: {doi}")
             doi_paper = self.get_paper_by_doi(doi)
             
             if doi_paper:
@@ -583,7 +585,7 @@ class LocalNonArxivReferenceChecker:
         
         # Try arXiv ID as last resort (only if we haven't tried it above)
         if not paper_data and arxiv_id and not arxiv_tried:
-            logger.debug(f"Local DB: Searching by arXiv ID: {arxiv_id}")
+            logger.debug(f"{self._log_prefix}: Searching by arXiv ID: {arxiv_id}")
             paper_data = self.get_paper_by_arxiv_id(arxiv_id)
             
             if paper_data:
@@ -593,10 +595,10 @@ class LocalNonArxivReferenceChecker:
         
         # If we couldn't find the paper, return no errors (can't verify)
         if not paper_data:
-            logger.debug("Local DB: No matching paper found - cannot verify reference")
+            logger.debug(f"{self._log_prefix}: No matching paper found - cannot verify reference")
             return None, [], None
         
-        logger.debug(f"Local DB: Found matching paper - Title: '{paper_data.get('title', '')}', Year: {paper_data.get('year', '')}")
+        logger.debug(f"{self._log_prefix}: Found matching paper - Title: '{paper_data.get('title', '')}', Year: {paper_data.get('year', '')}")
         
         # Check title mismatch using similarity function
         found_title = paper_data.get('title', '')
@@ -615,7 +617,7 @@ class LocalNonArxivReferenceChecker:
             authors_match, author_error = compare_authors(authors, paper_data.get('authors', []))
             
             if not authors_match:
-                logger.debug(f"Local DB: Author mismatch - {author_error}")
+                logger.debug(f"{self._log_prefix}: Author mismatch - {author_error}")
                 errors.append(create_author_error(author_error, paper_data.get('authors', [])))
         
         # Verify year (with tolerance)
@@ -636,7 +638,7 @@ class LocalNonArxivReferenceChecker:
             year_tolerance=year_tolerance
         )
         if year_warning:
-            logger.debug(f"Local DB: Year issue - {year_warning.get('warning_details', '')}")
+            logger.debug(f"{self._log_prefix}: Year issue - {year_warning.get('warning_details', '')}")
             errors.append(year_warning)
         
         # Verify DOI
@@ -647,7 +649,7 @@ class LocalNonArxivReferenceChecker:
             
             # Compare DOIs using utility function
             if doi and paper_doi and not compare_dois(doi, paper_doi):
-                logger.debug(f"Local DB: DOI mismatch - cited: {doi}, actual: {paper_doi}")
+                logger.debug(f"{self._log_prefix}: DOI mismatch - cited: {doi}, actual: {paper_doi}")
                 doi_error = create_doi_error(doi, paper_doi)
                 if doi_error:  # Only add if there's actually a mismatch after cleaning
                     errors.append(doi_error)
@@ -685,7 +687,7 @@ class LocalNonArxivReferenceChecker:
             # Reference has an arXiv URL — cross-check against the found paper
             if paper_arxiv_id and arxiv_id.lower() != paper_arxiv_id.lower():
                 correct_arxiv_url = f"https://arxiv.org/abs/{paper_arxiv_id}"
-                logger.debug(f"Local DB: ArXiv ID mismatch - cited: {arxiv_id}, actual: {paper_arxiv_id}")
+                logger.debug(f"{self._log_prefix}: ArXiv ID mismatch - cited: {arxiv_id}, actual: {paper_arxiv_id}")
                 errors.append({
                     'error_type': 'arxiv_id',
                     'error_details': f"Incorrect ArXiv ID: cited {arxiv_id} should be {paper_arxiv_id}",
@@ -696,7 +698,7 @@ class LocalNonArxivReferenceChecker:
             elif not paper_arxiv_id and self._missing_arxiv_metadata_is_authoritative():
                 # S2 records are authoritative enough that a missing ArXiv ID
                 # is strong evidence the cited ArXiv URL is spurious.
-                logger.debug(f"Local DB: Reference cites arXiv ID {arxiv_id} but matched paper has no ArXiv ID")
+                logger.debug(f"{self._log_prefix}: Reference cites arXiv ID {arxiv_id} but matched paper has no ArXiv ID")
                 errors.append({
                     'error_type': 'arxiv_id',
                     'error_details': f"Incorrect ArXiv ID: paper '{paper_data.get('title', '')}' does not have ArXiv ID {arxiv_id}",
@@ -705,7 +707,7 @@ class LocalNonArxivReferenceChecker:
                 })
             elif not paper_arxiv_id:
                 logger.debug(
-                    "Local DB: Matched %s record lacks authoritative arXiv metadata; skipping missing-ID error",
+                    f"{self._log_prefix}: Matched %s record lacks authoritative arXiv metadata; skipping missing-ID error",
                     self.database_label,
                 )
         elif paper_arxiv_id:
@@ -730,9 +732,9 @@ class LocalNonArxivReferenceChecker:
             )
         
         if errors:
-            logger.debug(f"Local DB: Found {len(errors)} errors in reference verification")
+            logger.debug(f"{self._log_prefix}: Found {len(errors)} errors in reference verification")
         else:
-            logger.debug("Local DB: Reference verification passed - no errors found")
+            logger.debug(f"{self._log_prefix}: Reference verification passed - no errors found")
         
         # Return the best available source URL for the matched local record.
         external_ids = paper_data.get('externalIds', {})

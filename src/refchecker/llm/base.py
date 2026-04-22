@@ -198,13 +198,53 @@ class LLMProvider(ABC):
                             unique_references.append(ref)
             
             logger.debug(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
-            return unique_references
+            return self._restore_et_al(unique_references, bibliography_text)
         else:
             # Process normally for short bibliographies
             prompt = self._create_extraction_prompt(bibliography_text)
             response_text = self._call_llm_cached(prompt)
-            return self._parse_llm_response(response_text)
-    
+            refs = self._parse_llm_response(response_text)
+            return self._restore_et_al(refs, bibliography_text)
+
+    @staticmethod
+    def _restore_et_al(references: List[str], bibliography_text: str) -> List[str]:
+        """Restore 'et al.' that the LLM may have silently dropped.
+
+        Many models (especially Gemini) systematically strip 'et al.' from
+        author lists even when explicitly instructed to preserve it.  This
+        post-processing step checks the original bibliography text: if the
+        last named author in the extracted reference is followed by 'et al.'
+        in the source, we re-append '*et al.' to the author field.
+        """
+        if not bibliography_text:
+            return references
+
+        bib_lower = bibliography_text.lower()
+        restored = []
+        for ref in references:
+            parts = ref.split('#')
+            if len(parts) < 2 or '*et al' in parts[0].lower():
+                restored.append(ref)
+                continue
+
+            authors_field = parts[0]
+            author_names = [a.strip() for a in authors_field.split('*') if a.strip()]
+            if not author_names:
+                restored.append(ref)
+                continue
+
+            last_author = author_names[-1]
+            # Search for "LastAuthor ... et al" in the bibliography
+            # Allow for line breaks, commas, "and" between last author and et al
+            pattern = re.escape(last_author.lower()) + r'[\s,]*(?:and\s+)?et\s+al'
+            if re.search(pattern, bib_lower):
+                parts[0] = authors_field + '*et al.'
+                logger.debug("Restored 'et al.' for reference: %s", parts[1][:60] if len(parts) > 1 else '?')
+                restored.append('#'.join(parts))
+            else:
+                restored.append(ref)
+        return restored
+
     def _process_chunks_parallel(self, chunks: List[str]) -> List[str]:
         """
         Process chunks in parallel using ThreadPoolExecutor
