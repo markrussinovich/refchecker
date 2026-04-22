@@ -5616,6 +5616,28 @@ class ArxivReferenceChecker:
                     authors = [title]  # Store as single author string for now
                     title = ""
         
+        # FIX: Detect when a full inline citation string was parsed as the title.
+        # Example: "Davis hp, squire lr. protein synthesis and memory: a review. psychol bull 96: 518-559"
+        # Heuristic: title contains a volume:pages pattern (e.g. "96: 518-559" or "96(3): 518")
+        # which would never appear in a real paper title.
+        if title:
+            _citation_string_pattern = r'\b\d{1,4}\s*[\(:]?\s*\d{1,4}\s*[\)]?\s*:\s*\d{1,4}\s*[-–]\s*\d{1,4}\b'
+            if re.search(_citation_string_pattern, title):
+                # Try to extract the actual title from within the citation string.
+                # Look for a sentence-like substring between the author abbreviations
+                # and the journal/pages part.
+                # Pattern: anything after "." that looks like a title, before another "."
+                _inner_title_match = re.search(
+                    r'\.\s*([A-Z][^.]{15,}?)\.\s*[a-z]',
+                    title
+                )
+                if _inner_title_match:
+                    extracted = _inner_title_match.group(1).strip()
+                    logger.debug(f"Citation-string-as-title: extracted '{extracted}' from '{title[:80]}'")
+                    title = extracted
+                else:
+                    logger.debug(f"Citation-string-as-title detected but cannot extract title: '{title[:80]}'")
+        
         # FIX: Detect malformed parsing for standards documents
         # When title is just a year (e.g., "2023") and authors contains what looks like a title
         # (common for ISO/SAE/PAS standards), swap them.

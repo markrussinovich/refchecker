@@ -76,6 +76,13 @@ class TestCitationStringAsTitle:
         """When the entire citation is in the title field."""
         ref = "#Davis hp, squire lr. protein synthesis and memory: a review. psychol bull 96: 518-559##1984#"
         result = checker._create_structured_llm_references(ref)
-        # Should still parse, possibly as-is
         assert result is not None
         assert result['year'] == 1984
+        # Should extract "Protein synthesis and memory: a review" as the title
+        assert 'protein synthesis' in result['title'].lower()
+
+    def test_normal_title_with_colon_not_flagged(self, checker):
+        """Normal titles with colons should not be flagged."""
+        ref = "John Smith#GPT-4: A Large Language Model#arXiv#2023#"
+        result = checker._create_structured_llm_references(ref)
+        assert 'gpt-4' in result['title'].lower()
