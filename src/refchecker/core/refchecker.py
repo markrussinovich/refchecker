@@ -2695,10 +2695,77 @@ class ArxivReferenceChecker:
             - url: URL of the paper if found, None otherwise
             - verified_data: The verified paper data from the verification service, None if not found
         """
+        # Apply post-parse fixups (handles cached refs from earlier runs
+        # that may have venue-as-title, author-as-title, etc.)
+        self._fixup_reference_fields(reference)
         # All verification logic (ArXiv ID checks, re-verification, URL
         # fallbacks) is inside the hybrid checker so every code path gets
         # identical results.
         return self.verify_reference_standard(source_paper, reference)
+
+    def _fixup_reference_fields(self, reference):
+        """Correct common field-swap errors in parsed references in-place.
+
+        These errors arise when the LLM puts fields in the wrong order
+        (or from cached results parsed before the fix was applied).
+        """
+        title = reference.get('title', '') or ''
+        authors = reference.get('authors', []) or []
+        venue = reference.get('venue', '') or ''
+
+        # --- Venue-as-title ---
+        _venue_patterns = [
+            r'^Proceedings of the\b',
+            r'^Proc\.\s',
+            r'^Journal of [A-Z]',
+            r'^Transactions on\b',
+            r'^Advances in\s+Neural Information Processing',
+            r'^International Conference on\b',
+            r'^Annual Meeting of\b',
+            r'^IEEE/CVF\b',
+            r'^ACM\s+(SIGKDD|SIGMOD|SIGIR|SIGCHI|SIGPLAN|SIGGRAPH)\b',
+        ]
+        if title and any(re.search(p, title, re.IGNORECASE) for p in _venue_patterns):
+            combined_authors = (' '.join(authors) if isinstance(authors, list) else str(authors)) if authors else ''
+            if combined_authors and len(combined_authors) > 10:
+                reference['venue'] = title
+                reference['title'] = combined_authors
+                reference['authors'] = []
+            elif venue and len(venue) > 10:
+                reference['title'], reference['venue'] = venue, title
+            else:
+                reference['venue'] = title
+                reference['title'] = ''
+
+        # --- Author-list-as-title ---
+        title = reference.get('title', '') or ''
+        authors = reference.get('authors', []) or []
+        if title and not authors:
+            words = title.split()
+            if len(words) >= 8:
+                capitalized = sum(1 for w in words if w[0].isupper() and w.isalpha())
+                _title_words = {'the', 'a', 'an', 'for', 'and', 'with', 'via',
+                                'from', 'is', 'are', 'of', 'in', 'on', 'to',
+                                'by', 'all', 'you', 'we', 'it', 'its', 'as',
+                                'or', 'not', 'can', 'how', 'do', 'at', 'no',
+                                'learning', 'model', 'network', 'data',
+                                'analysis', 'method', 'approach', 'based',
+                                'neural', 'deep', 'training', 'using',
+                                'towards', 'evaluation', 'efficient',
+                                'language', 'generation', 'detection',
+                                'beyond', 'what', 'why', 'when', 'where'}
+                if len(words) > 0 and capitalized / len(words) > 0.8 and not any(w.lower() in _title_words for w in words):
+                    reference['authors'] = [title]
+                    reference['title'] = ''
+
+        # --- Citation-string-as-title ---
+        title = reference.get('title', '') or ''
+        if title:
+            _cit_pattern = r'\b\d{1,4}\s*[\(:]?\s*\d{1,4}\s*[\)]?\s*:\s*\d{1,4}\s*[-–]\s*\d{1,4}\b'
+            if re.search(_cit_pattern, title):
+                m = re.search(r'\.\s*([A-Z][^.]{15,}?)\.\s*[a-z]', title)
+                if m:
+                    reference['title'] = m.group(1).strip()
 
     # ------------------------------------------------------------------
     # ArXiv re-verification fallback for wrong DB matches
