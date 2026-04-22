@@ -5448,8 +5448,18 @@ class ArxivReferenceChecker:
         if parts and parts[0] == '' and len(parts) >= 2:
             logger.debug(f"Split by hashmarks (empty author): {parts}")
         else:
-            # Remove any remaining empty parts in the middle
-            parts = [p for p in parts if p]
+            # Remove empty parts, but preserve empty middle slots when
+            # there are enough parts to be a structured reference
+            # (e.g. Authors#Title# #Year#URL — the empty venue must stay
+            # so that Year and URL don't shift into wrong positions).
+            non_empty = [p for p in parts if p]
+            if len(non_empty) < len(parts) and len(non_empty) >= 3:
+                # Keep structure: only strip leading empties (already
+                # handled above) and trailing empties (already stripped).
+                # Middle empties are intentional placeholders.
+                parts = [p for p in parts]  # keep as-is
+            else:
+                parts = non_empty
             logger.debug(f"Split by hashmarks: {parts}")
         
         # Handle different formats based on number of parts

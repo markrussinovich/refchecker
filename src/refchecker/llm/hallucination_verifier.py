@@ -489,8 +489,9 @@ class LLMHallucinationVerifier:
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
             config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
                 tools=[google_search_tool],
             ),
         )
@@ -502,16 +503,17 @@ class LLMHallucinationVerifier:
         # Retry once with an explicit instruction to search.
         if not web_urls and 'VERDICT: LIKELY' in text.upper():
             logger.debug('Gemini LIKELY verdict without grounding — retrying with explicit search instruction')
-            retry_prompt = (
+            retry_user_prompt = (
                 "IMPORTANT: Your previous answer was not grounded in web search results. "
                 "You MUST use the google_search tool NOW to search for the paper title "
                 "before answering. Search for the exact title in quotes.\n\n"
-                f"{system_prompt}\n\n{user_prompt}"
+                f"{user_prompt}"
             )
             resp2 = self.client.models.generate_content(
                 model=self.model,
-                contents=retry_prompt,
+                contents=retry_user_prompt,
                 config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
                     tools=[google_search_tool],
                 ),
             )
@@ -558,9 +560,13 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
+        from google.genai import types
         resp = self.client.models.generate_content(
             model=self.model,
-            contents=f"{system_prompt}\n\n{user_prompt}",
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+            ),
         )
         return (resp.text or '').strip(), []
 

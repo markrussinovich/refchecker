@@ -517,6 +517,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
                 model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
                 contents=prompt,
                 config={
+                    'system_instruction': self._get_system_prompt(),
                     'max_output_tokens': self.max_tokens,
                     'temperature': self.temperature,
                 },
