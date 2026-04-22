@@ -26,10 +26,15 @@ _ASSESSMENT_SYSTEM_PROMPT = """\
 You are an academic-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
 
-IMPORTANT: Use web search to look up the paper title and authors before \
+MANDATORY: You MUST perform a web search for the paper title before \
 rendering your verdict. Search for the exact title in quotes on the web \
-to check whether the paper actually exists. This is critical — do NOT \
-rely solely on the metadata provided; verify it against the open web.
+to check whether the paper actually exists. Do NOT skip the web search — \
+a verdict issued without searching is invalid.
+
+MANDATORY: Do NOT rely on your parametric knowledge to claim a paper \
+exists or does not exist. Your training data may be outdated or wrong. \
+Only the web search results and the validation summary below count as \
+evidence. If you cannot search, verdict UNCERTAIN.
 
 Reply in EXACTLY this structured format (three lines only, no preamble):
 
@@ -193,11 +198,15 @@ with similar-but-different titles, the verdict MUST be LIKELY or \
 UNCERTAIN — never UNLIKELY. Do not rely on your parametric knowledge \
 to claim a paper exists; provide the URL in the LINK field as proof. \
 An UNLIKELY verdict without a valid LINK is always wrong.
-EXCEPTION: If the validation summary above says a paper with this \
-title WAS found in an academic database (i.e. the checker matched it \
-and provided a verified URL), then the paper exists — even if your web \
-search cannot find it. In that case, base your verdict on the metadata \
-quality (title/author match) not on web-search findability.
+EXCEPTION — VERIFIED PAPER: If the validation summary above says a \
+paper with this title WAS found in an academic database (i.e. the \
+checker matched it and provided a verified URL), then the paper \
+DEFINITELY exists — this is authoritative ground truth. Do NOT \
+contradict the validation summary by claiming the paper does not exist. \
+In that case, base your verdict SOLELY on whether the cited \
+authors match the actual authors. If the authors substantially match \
+(or the mismatch is minor/formatting-related), verdict MUST be UNLIKELY. \
+Only verdict LIKELY if the authors are completely fabricated.
 
 ARXIV ID WARNING: If the reference includes an arXiv URL/ID, and the \
 automated checkers report that the arXiv ID points to a DIFFERENT paper, \
@@ -296,6 +305,19 @@ def _build_validation_summary_static(error_entry: dict) -> str:
             )
     elif error_type and error_details:
         lines.append(f'- {error_type}: {error_details}')
+
+    # For ANY error type (not just 'multiple'), if the paper was verified
+    # in a database, tell the LLM so it doesn't incorrectly claim the
+    # paper doesn't exist.
+    if error_type != 'multiple' and error_type != 'unverified' and error_entry.get('ref_verified_url'):
+        db = error_entry.get('matched_database', 'an academic database')
+        verified_url = error_entry['ref_verified_url']
+        lines.append(
+            f'\n  NOTE: This paper WAS found and verified in {db} '
+            f'(verified URL: {verified_url}). The paper EXISTS — the '
+            f'error above is a metadata mismatch, not a missing paper. '
+            f'Do NOT claim this paper does not exist.'
+        )
 
     return '\n'.join(lines)
 
@@ -521,9 +543,40 @@ class LLMHallucinationVerifier:
             ),
         )
 
+        text, web_urls = self._extract_google_grounding(resp)
+
+        # If the model returned a LIKELY verdict without grounding, it
+        # answered from parametric knowledge only — which is unreliable.
+        # Retry once with an explicit instruction to search.
+        if not web_urls and 'VERDICT: LIKELY' in text.upper():
+            logger.debug('Gemini LIKELY verdict without grounding — retrying with explicit search instruction')
+            retry_prompt = (
+                "IMPORTANT: Your previous answer was not grounded in web search results. "
+                "You MUST use the google_search tool NOW to search for the paper title "
+                "before answering. Search for the exact title in quotes.\n\n"
+                f"{system_prompt}\n\n{user_prompt}"
+            )
+            resp2 = self.client.models.generate_content(
+                model=self.model,
+                contents=retry_prompt,
+                config=types.GenerateContentConfig(
+                    tools=[google_search_tool],
+                ),
+            )
+            text2, web_urls2 = self._extract_google_grounding(resp2)
+            if web_urls2:
+                logger.debug('Gemini retry produced %d grounding URLs', len(web_urls2))
+                return text2.strip(), web_urls2
+            else:
+                logger.debug('Gemini retry still ungrounded — using original response')
+
+        return text.strip(), web_urls
+
+    @staticmethod
+    def _extract_google_grounding(resp) -> tuple:
+        """Extract response text and grounding URLs from a Gemini response."""
         text = resp.text or ''
         web_urls: List[str] = []
-        # Extract grounding URLs from metadata if available
         for candidate in getattr(resp, 'candidates', []):
             grounding = getattr(candidate, 'grounding_metadata', None)
             if grounding:
@@ -533,7 +586,6 @@ class LLMHallucinationVerifier:
                         url = getattr(web_info, 'uri', '') or ''
                         if url:
                             web_urls.append(url)
-                # Also log the search entry point for debugging
                 search_entry = getattr(grounding, 'search_entry_point', None)
                 if search_entry:
                     logger.debug('Gemini grounding search entry: %s',
@@ -544,7 +596,7 @@ class LLMHallucinationVerifier:
         else:
             logger.debug('Gemini grounding returned NO URLs — response is ungrounded')
 
-        return text.strip(), web_urls
+        return text, web_urls
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
@@ -704,6 +756,26 @@ class LLMHallucinationVerifier:
             if any(signal in explanation_lower for signal in exact_match_signals):
                 verdict = 'UNLIKELY'
                 explanation += ' (Verdict corrected: explanation confirms exact paper was found.)'
+
+        # Safety net: if the LLM says LIKELY but the paper was actually
+        # verified in a database (has a verified URL from a checker),
+        # and the error is only a metadata mismatch (author, year, venue),
+        # the LLM is wrong — the paper exists.  Downgrade to UNCERTAIN
+        # so it doesn't produce a false-positive hallucination flag.
+        if verdict == 'LIKELY' and not web_urls:
+            verified_url = error_entry.get('ref_verified_url', '')
+            error_type = error_entry.get('error_type', '')
+            metadata_only = error_type in ('author', 'year', 'venue', 'doi')
+            if verified_url and metadata_only:
+                logger.debug(
+                    'Overriding ungrounded LIKELY → UNCERTAIN for verified ref '
+                    '(error_type=%s, verified_url=%s)', error_type, verified_url,
+                )
+                verdict = 'UNCERTAIN'
+                explanation += (
+                    f' (Verdict downgraded: paper was verified in a database '
+                    f'[{verified_url}] but LLM assessment was not grounded in web search.)'
+                )
 
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
