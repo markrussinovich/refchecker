@@ -82,6 +82,10 @@ def normalize_apostrophes(text):
         return text
     
     # All known apostrophe variants
+    # Note: U+00B4 (acute accent ´) is intentionally NOT included here.
+    # It is a standalone diacritic handled by normalize_diacritics(), not an
+    # apostrophe.  PDF extraction often produces "R ´enyi" (Rényi) where ´ is
+    # a decomposed accent mark, not punctuation.
     apostrophe_variants = [
         "\u0027",  # ASCII apostrophe
         "\u2019",  # Right single quotation mark
@@ -89,7 +93,6 @@ def normalize_apostrophes(text):
         "\u02BC",  # Modifier letter apostrophe
         "\u02C8",  # Modifier letter vertical line
         "\u0060",  # Grave accent
-        "\u00B4",  # Acute accent
     ]
     
     # Replace all variants with standard ASCII apostrophe
@@ -635,6 +638,10 @@ def clean_title_for_search(title):
     # Strip LaTeX commands to handle math formatting and other LaTeX markup
     title = strip_latex_commands(title)
     
+    # Strip diacritics / accents so that mangled PDF extractions like
+    # "R ´enyi" become "Renyi" and search APIs can find the paper.
+    title = normalize_diacritics(title)
+    
     # Clean up newlines and normalize whitespace (but preserve other structure)
     title = title.replace('\n', ' ').strip()
     title = re.sub(r'\s+', ' ', title)  # Normalize whitespace only
@@ -645,7 +652,6 @@ def clean_title_for_search(title):
     # Note: We intentionally preserve:
     # - Capitalization (helps with exact matching)
     # - Colons and other meaningful punctuation (structural markers)
-    # - Special characters that might be part of proper names or technical terms
     
     return title
 
@@ -849,7 +855,34 @@ def normalize_diacritics(text: str) -> str:
         'J. Gl¨ uck' -> 'J. Gluck'
         'D'Amato' -> 'D'Amato' (apostrophes normalized)
     """
-    # First normalize apostrophes
+    # Handle standalone diacritics FIRST (before apostrophe normalization)
+    # so that ´ (U+00B4) is treated as a diacritic and removed, not converted
+    # to an apostrophe.  PDF extraction often produces "R ´enyi" (Rényi)
+    # where ´ is a decomposed accent mark.
+    # We handle ALL standalone diacritics here, merging adjacent letters
+    # only around the diacritic position (not globally).
+    _standalone_diacritics_chars = ''.join([
+        '\u00B4',  # Acute accent ´
+        '\u00A8',  # Diaeresis ¨
+        '\u02DC',  # Small tilde ˜
+        '\u00AF',  # Macron ¯
+        '\u02D8',  # Breve ˘
+        '\u02D9',  # Dot above ˙
+        '\u00B8',  # Cedilla ¸
+        '\u02DA',  # Ring above ˚
+        '\u02DD',  # Double acute accent ˝
+        '\u02C7',  # Caron ˇ
+    ])
+    # Pattern: letter + optional space + diacritic + optional space + lowercase letters
+    # Merges them into a single word: "R ´enyi" → "Renyi", "Natschl ¨ager" → "Natschlager"
+    text = re.sub(
+        r'([a-zA-Z])\s?[' + _standalone_diacritics_chars + r']\s?([a-z])',
+        r'\1\2', text,
+    )
+    # Also remove any remaining standalone diacritics not between letters
+    text = re.sub(r'[' + _standalone_diacritics_chars + r']', '', text)
+
+    # Then normalize apostrophes
     text = normalize_apostrophes(text)
     
     # Then handle special characters that don't decompose properly
@@ -891,25 +924,24 @@ def normalize_diacritics(text: str) -> str:
     }
     
     # Remove standalone diacritics, being careful about spacing
-    # Use a more intelligent approach that considers context
-    for diacritic, replacement in standalone_diacritics.items():
-        # Skip grave accent if it looks like it's being used as a quote mark
-        if diacritic == '`' and ('`' in text[1:] if text else False):
-            continue
-            
-        # Only apply the fix if this diacritic is actually present
-        if diacritic in text:
-            # Replace the diacritic
-            old_text = text
-            text = text.replace(diacritic, replacement)
-            
-            # Only apply the letter merging if we actually made a change
-            # and if it looks like we created a mid-word space issue
-            if old_text != text:
-                # Look for patterns where removing the diacritic created "letter space lowercase"
-                # but be more specific - only merge if there's exactly one space
-                # and the pattern looks like it was from a single word split
-                text = re.sub(r'([a-zA-Z]) ([a-z]{1,4})\b', r'\1\2', text)
+    # Use a targeted regex that merges adjacent letters around the diacritic
+    # position rather than globally scanning the entire string.
+    _all_standalone = ''.join(
+        d for d in standalone_diacritics if d != '`'  # grave accent handled separately
+    )
+    # Merge letter-diacritic-letter patterns first: "R ´enyi" → "Renyi"
+    text = re.sub(
+        r'([a-zA-Z])\s?[' + re.escape(_all_standalone) + r']\s?([a-z])',
+        r'\1\2', text,
+    )
+    # Remove any remaining standalone diacritics not between letters
+    text = re.sub(r'[' + re.escape(_all_standalone) + r']', '', text)
+    
+    # Handle grave accent separately (skip if used as quote marks)
+    if '`' in standalone_diacritics:
+        if not ('`' in text[1:] if len(text) > 1 else False):
+            text = re.sub(r'([a-zA-Z])\s?`\s?([a-z])', r'\1\2', text)
+            text = text.replace('`', '')
     
     # Normalize different hyphen-like characters to standard hyphen
     # Common hyphen variants that appear in academic papers

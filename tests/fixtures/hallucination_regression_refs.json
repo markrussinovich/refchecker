@@ -235,7 +235,7 @@
   },
   {
     "id": "learnable_crossmodal_hallucinated",
-    "description": "Ref [69]: 0% author overlap, fabricated authors. Should be flagged LIKELY.",
+    "description": "Ref [69]: ~33% author overlap (1 of 3 cited matches), fabricated authors. Should be flagged LIKELY deterministically.",
     "error_entry": {
       "error_type": "multiple",
       "error_details": "Author count mismatch: 3 cited vs 6 correct\nVenue mismatch: cited Neural Information Processing Systems (NeurIPS) actual International Conference on Medical Image Computing and Computer-Assisted Intervention",
@@ -248,8 +248,8 @@
       "ref_verified_url": "https://arxiv.org/abs/2310.01035"
     },
     "expect_should_check": true,
-    "expect_deterministic_verdict": null,
-    "expect_run_no_llm_verdict": null
+    "expect_deterministic_verdict": "LIKELY",
+    "expect_run_no_llm_verdict": "LIKELY"
   },
   {
     "id": "knowledge_distillation_suggestion_only",

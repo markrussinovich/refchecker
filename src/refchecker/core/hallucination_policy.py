@@ -37,7 +37,7 @@ _SUSPICIOUS_ERROR_TYPES = frozenset({
 })
 
 _AUTHOR_MATCH_THRESHOLD = 0.6  # Flag if < 60% of authors match (unverified refs)
-_AUTHOR_VERIFIED_THRESHOLD = 0.3  # Stricter: flag if < 30% match (verified refs)
+_AUTHOR_VERIFIED_THRESHOLD = 0.4  # Stricter: flag if < 40% match (verified refs)
 
 # Team/organisation names that appear as first "author" in large collaborative
 # papers.  These are stripped before computing author overlap because the DB
@@ -425,6 +425,7 @@ def check_author_hallucination(error_entry: Dict[str, Any]) -> Optional[Dict[str
             'explanation': f'{overlap_desc} the actual authors — '
                            f'the reference likely cites a different or fabricated paper.',
             'web_search': None,
+            'author_overlap': overlap,
         }
 
     return None
@@ -823,15 +824,20 @@ def run_hallucination_check(
     logger.debug(f"run_hallucination_check: pre_screen outcome={outcome} ref={ref_title!r}")
     if outcome == 'resolved':
         # For verified refs where the rule-based check flagged LIKELY
-        # (author mismatch), prefer the LLM if available.  The checker may
-        # have matched a different edition/paper with the same title, and
-        # the LLM can web-search to distinguish this from a grafted ref.
+        # (author mismatch), defer to LLM only when author overlap is 0%
+        # — the checker may have matched a different paper with the same
+        # title, and the LLM can web-search to confirm.  When overlap is
+        # >0% but below threshold, some authors DO match, confirming it's
+        # the same paper with garbled/fabricated authors — flag
+        # deterministically without wasting an LLM call.
         is_verified = bool(error_entry.get('ref_verified_url'))
+        author_overlap = assessment.get('author_overlap') if assessment else None
         if (
             is_verified
             and llm_client
             and assessment
             and assessment.get('verdict') == 'LIKELY'
+            and (author_overlap is None or author_overlap == 0)
         ):
             logger.debug(
                 "run_hallucination_check: verified ref flagged LIKELY by rules — deferring to LLM ref=%r",

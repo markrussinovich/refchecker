@@ -5536,19 +5536,37 @@ class ArxivReferenceChecker:
         title = clean_title(title) if title else ""
         title = title.rstrip(',').strip()
         
+        # FIX: Reject boilerplate text that the LLM may extract as a title
+        # (e.g. "Published as a conference paper at ICLR 2026" from PDF headers)
+        boilerplate_patterns = [
+            r'^Published as a \w+ paper at\b',
+            r'^Accepted (?:at|to|for|by) \w',
+            r'^Under review at\b',
+            r'^Preprint\.\s*Under review',
+            r'^Workshop paper at\b',
+        ]
+        if title and any(re.search(pat, title, re.IGNORECASE) for pat in boilerplate_patterns):
+            logger.debug(f"Rejecting boilerplate title: '{title}'")
+            title = ""
+        
         # FIX: Detect malformed parsing for standards documents
         # When title is just a year (e.g., "2023") and authors contains what looks like a title
-        # (common for ISO/SAE/PAS standards), swap them
+        # (common for ISO/SAE/PAS standards), swap them.
+        # Skip this heuristic when we have many authors (>10) — real papers with
+        # large author lists should never be swapped.
         if title and re.match(r'^(19|20)\d{2}$', title):
             # Title is just a year - check if authors contains the actual title
-            if authors and len(authors) > 0:
+            if authors and 0 < len(authors) <= 10:
                 # Join all author parts (sometimes title is split into multiple "authors")
                 combined_authors = ' '.join(authors) if isinstance(authors, list) else str(authors)
                 first_author = authors[0] if isinstance(authors, list) else str(authors)
                 # If first "author" looks like a title (contains certain keywords or is long)
-                standard_keywords = ['iso', 'sae', 'pas ', 'asam', 'arp', 'standard', 'specification', 
-                                     'road vehicles', 'driving automation', 'guidelines', 'taxonomy']
-                if any(kw in combined_authors.lower() for kw in standard_keywords):
+                # Use word-boundary matching to avoid false positives from author names
+                # (e.g. "Ruisong" should not match "iso")
+                standard_keywords = [r'\biso\b', r'\bsae\b', r'\bpas\b', r'\basam\b', r'\barp\b',
+                                     r'\bstandard\b', r'\bspecification\b', r'road vehicles',
+                                     r'driving automation', r'\bguidelines\b', r'\btaxonomy\b']
+                if any(re.search(kw, combined_authors, re.IGNORECASE) for kw in standard_keywords):
                     logger.debug(f"Fixing malformed standard reference: swapping title '{title}' with author '{combined_authors[:60]}...'")
                     # Move year to year field, combined authors to actual title
                     year = int(title)
@@ -5563,18 +5581,21 @@ class ArxivReferenceChecker:
         
         # FIX: Detect when title is a publisher/organization name and authors contains the actual title
         # Common publishers for standards: SAE International, BSI Standards, ISO, Beuth Verlag, etc.
+        # Skip when we have many authors (>10) to avoid false positives from large author lists.
         publisher_patterns = ['sae international', 'bsi standards', 'beuth verlag', 'iso/', 'ieee',
                              'acm', 'springer', 'elsevier', 'wiley', 'oxford university press',
                              'cambridge university press', 'mit press', 'verlag', 'förderung']
         title_lower = title.lower() if title else ''
-        if authors and len(authors) > 0:
+        if authors and 0 < len(authors) <= 10:
             combined_authors = ' '.join(authors) if isinstance(authors, list) else str(authors)
             # Check if title looks like a short publisher name and authors looks like a real title
             is_publisher = any(pub in title_lower for pub in publisher_patterns)
             is_short_title = len(title) < 30
-            authors_look_like_title = any(kw in combined_authors.lower() for kw in 
-                ['iso', 'sae', 'pas ', 'asam', 'arp', 'standard', 'specification', 'road vehicles', 
-                 'driving automation', 'guidelines', 'taxonomy', 'openodd'])
+            # Use word-boundary matching for standards keywords
+            standard_kw_patterns = [r'\biso\b', r'\bsae\b', r'\bpas\b', r'\basam\b', r'\barp\b',
+                                    r'\bstandard\b', r'\bspecification\b', r'road vehicles',
+                                    r'driving automation', r'\bguidelines\b', r'\btaxonomy\b', r'\bopenodd\b']
+            authors_look_like_title = any(re.search(kw, combined_authors, re.IGNORECASE) for kw in standard_kw_patterns)
             
             if (is_publisher or (is_short_title and authors_look_like_title)) and len(combined_authors) > 20:
                 logger.debug(f"Fixing publisher-as-title: '{title}' -> '{combined_authors[:60]}...'")
