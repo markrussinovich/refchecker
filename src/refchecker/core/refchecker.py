@@ -5584,6 +5584,38 @@ class ArxivReferenceChecker:
                 venue = title
                 title = ""
         
+        # FIX: Detect when an author list was parsed as the title.
+        # This happens when the LLM puts the author names in the title
+        # field (e.g. "Hunter Lightman Vineet Kosaraju Yuri Burda ...").
+        # Heuristic: a "title" consisting mostly of capitalized name-like
+        # tokens (2–3 words each starting with uppercase, separated by
+        # spaces) with ≥5 such names and no common English function words
+        # is very likely an author list, not a real paper title.
+        if title and not authors:
+            words = title.split()
+            if len(words) >= 8:
+                # Count name-like capitalized words
+                capitalized = sum(1 for w in words if w[0].isupper() and w.isalpha())
+                # Common English words (articles, pronouns, prepositions, verbs)
+                # that appear in paper titles but not in author lists
+                _title_indicators = {'the', 'a', 'an', 'for', 'and', 'with', 'via',
+                                     'from', 'is', 'are', 'of', 'in', 'on', 'to',
+                                     'by', 'all', 'you', 'we', 'it', 'its', 'as',
+                                     'or', 'not', 'can', 'how', 'do', 'at', 'no',
+                                     'learning', 'model', 'network', 'data',
+                                     'analysis', 'method', 'approach', 'based',
+                                     'neural', 'deep', 'training', 'using',
+                                     'towards', 'evaluation', 'efficient',
+                                     'language', 'generation', 'detection',
+                                     'beyond', 'what', 'why', 'when', 'where'}
+                has_title_words = any(w.lower() in _title_indicators for w in words)
+                # If >80% of words are capitalized names and no title-like words
+                if capitalized / len(words) > 0.8 and not has_title_words:
+                    logger.debug(f"Author-as-title detected: '{title[:60]}' looks like an author list")
+                    # Move the "title" to authors; title cannot be recovered
+                    authors = [title]  # Store as single author string for now
+                    title = ""
+        
         # FIX: Detect malformed parsing for standards documents
         # When title is just a year (e.g., "2023") and authors contains what looks like a title
         # (common for ISO/SAE/PAS standards), swap them.

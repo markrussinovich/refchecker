@@ -57,11 +57,16 @@ class TestAuthorAsTitleDetection:
         """When the LLM puts author names in the title field."""
         ref = "#Hunter Lightman Vineet Kosaraju Yuri Burda Harrison Edwards Bowen Baker Teddy Lee Jan Leike John Schulman Ilya Sutskever Karl Cobbe##2023#"
         result = checker._create_structured_llm_references(ref)
-        # Title should still be set (we can't recover the real title)
-        # but the key thing is that authors shouldn't be empty
-        # With current logic the title is set to the author-like string
-        # since we can't know the real title without additional context
-        assert result is not None
+        # The author-as-title detector should recognize this as names, not a title
+        # Title should be empty (since we can't recover the real one)
+        assert result['title'] == ""
+        assert result['year'] == 2023
+
+    def test_real_title_with_many_capitalized_words_not_rejected(self, checker):
+        """Real titles with capitalized words should not be flagged as author lists."""
+        ref = "#Hopfield Networks Is All You Need##2021#"
+        result = checker._create_structured_llm_references(ref)
+        assert "hopfield" in result['title'].lower()
 
 
 class TestCitationStringAsTitle:
