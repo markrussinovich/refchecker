@@ -5549,6 +5549,41 @@ class ArxivReferenceChecker:
             logger.debug(f"Rejecting boilerplate title: '{title}'")
             title = ""
         
+        # FIX: Detect when a venue/journal name was parsed as the title.
+        # This happens when the LLM outputs fields in the wrong order or
+        # the bibliography format confuses the field parser.
+        # Known venue-name patterns that should never be a paper title:
+        _venue_as_title_patterns = [
+            r'^Proceedings of the\b',
+            r'^Proc\.\s',
+            r'^Journal of [A-Z]',
+            r'^Transactions on\b',
+            r'^Advances in\s+Neural Information Processing',
+            r'^International Conference on\b',
+            r'^Annual Meeting of\b',
+            r'^IEEE/CVF\b',
+            r'^ACM\s+(SIGKDD|SIGMOD|SIGIR|SIGCHI|SIGPLAN|SIGGRAPH)\b',
+        ]
+        if title and any(re.search(pat, title, re.IGNORECASE) for pat in _venue_as_title_patterns):
+            # Title looks like a venue — check if author field or venue field
+            # actually contains the real title.
+            combined_authors = (' '.join(authors) if isinstance(authors, list) else str(authors)) if authors else ''
+            if combined_authors and len(combined_authors) > 10:
+                # Authors field likely holds the real title (truncated fragment)
+                logger.debug(f"Venue-as-title detected: swapping title '{title[:60]}' ↔ venue, author text '{combined_authors[:60]}' → title")
+                venue = title
+                title = combined_authors
+                authors = []
+            elif venue and len(venue) > 10:
+                # Venue holds the real title
+                logger.debug(f"Venue-as-title detected: swapping title '{title[:60]}' ↔ venue '{venue[:60]}'")
+                title, venue = venue, title
+            else:
+                # Can't recover a title — mark as empty so it becomes unverified
+                logger.debug(f"Venue-as-title detected but no recovery possible: '{title[:60]}'")
+                venue = title
+                title = ""
+        
         # FIX: Detect malformed parsing for standards documents
         # When title is just a year (e.g., "2023") and authors contains what looks like a title
         # (common for ISO/SAE/PAS standards), swap them.
