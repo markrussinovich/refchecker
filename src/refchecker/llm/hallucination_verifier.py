@@ -795,6 +795,23 @@ class LLMHallucinationVerifier:
         # These can have version suffixes like "author (v4 vs v5 update)".
         _metadata_prefixes = ('author', 'year', 'venue', 'doi')
         if any(error_type.startswith(p) for p in _metadata_prefixes):
+            # For author-type errors, check overlap before downgrading.
+            # Catastrophic mismatches (0% overlap = completely different
+            # authors) are genuine hallucinations, not parsing/edition
+            # issues.  Only downgrade when there is meaningful overlap.
+            if error_type.startswith('author'):
+                from refchecker.core.hallucination_policy import _compute_author_overlap
+                cited_str = error_entry.get('ref_authors_cited', '')
+                correct_str = error_entry.get('ref_authors_correct', '')
+                overlap = _compute_author_overlap(cited_str, correct_str)
+                if overlap is not None and overlap < 0.2:
+                    logger.debug(
+                        'Keeping LIKELY for verified ref with catastrophic author '
+                        'mismatch (overlap=%.0f%%, error_type=%s, verified_url=%s)',
+                        overlap * 100, error_type, verified_url,
+                    )
+                    return verdict, explanation
+
             logger.debug(
                 'Overriding LIKELY → UNCERTAIN for verified ref '
                 '(error_type=%s, verified_url=%s, grounded=%s)',

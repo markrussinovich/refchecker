@@ -882,6 +882,16 @@ def normalize_diacritics(text: str) -> str:
     # Also remove any remaining standalone diacritics not between letters
     text = re.sub(r'[' + _standalone_diacritics_chars + r']', '', text)
 
+    # Handle combining diacritics (U+0300–U+036F) that PDF extractors
+    # sometimes separate from their base character with a space.
+    # E.g. "Crist \u0301obal" (Cristóbal) → merge into "Cristobal".
+    text = re.sub(
+        r'([a-zA-Z])\s?[\u0300-\u036F]+\s?([a-z])',
+        r'\1\2', text,
+    )
+    # Remove any remaining combining diacritics not between letters
+    text = re.sub(r'[\u0300-\u036F]+', '', text)
+
     # Then normalize apostrophes
     text = normalize_apostrophes(text)
     
