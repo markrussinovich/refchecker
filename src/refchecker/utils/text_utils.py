@@ -885,6 +885,22 @@ def normalize_diacritics(text: str) -> str:
     # Then normalize apostrophes
     text = normalize_apostrophes(text)
     
+    # Expand typographic ligatures that PDF extractors often produce.
+    # These are single Unicode code-points that represent multi-character
+    # sequences (e.g. ﬁ = U+FB01 = "fi").  Database titles store the
+    # expanded forms, so we must expand before comparison.
+    _ligatures = {
+        '\ufb00': 'ff',   # ﬀ
+        '\ufb01': 'fi',   # ﬁ
+        '\ufb02': 'fl',   # ﬂ
+        '\ufb03': 'ffi',  # ﬃ
+        '\ufb04': 'ffl',  # ﬄ
+        '\ufb05': 'st',   # ﬅ (long s t)
+        '\ufb06': 'st',   # ﬆ
+    }
+    for lig, expansion in _ligatures.items():
+        text = text.replace(lig, expansion)
+    
     # Then handle special characters that don't decompose properly
     # Including common transliterations
     special_chars = {

@@ -21,6 +21,7 @@ from refchecker.utils.text_utils import (
     are_venues_substantially_different,
     is_year_substantially_different,
     normalize_diacritics,
+    normalize_paper_title,
     compare_authors
 )
 from refchecker.utils.url_utils import extract_arxiv_id_from_url
@@ -1097,4 +1098,40 @@ class TestNeurIPSVenueMatching:
         
         for venue1, venue2 in test_cases:
             result = are_venues_substantially_different(venue1, venue2)
-            assert result, f"Different venues should not match: '{venue1}' vs '{venue2}' (returned {result})"
+            assert result, f"Different venues should not match: '{venue1}' vs '{venue2}'"
+
+
+class TestLigatureExpansion:
+    """Test that typographic ligatures from PDF extraction are expanded correctly."""
+
+    def test_fi_ligature_in_normalize_diacritics(self):
+        """ﬁ (U+FB01) should expand to 'fi'."""
+        assert normalize_diacritics('ﬁnancial') == 'financial'
+        assert normalize_diacritics('classiﬁcation') == 'classification'
+
+    def test_fl_ligature_in_normalize_diacritics(self):
+        """ﬂ (U+FB02) should expand to 'fl'."""
+        assert normalize_diacritics('ﬂow') == 'flow'
+        assert normalize_diacritics('Hopﬁeld') == 'Hopfield'
+
+    def test_ff_ligature_in_normalize_diacritics(self):
+        """ﬀ (U+FB00) should expand to 'ff'."""
+        assert normalize_diacritics('eﬀective') == 'effective'
+
+    def test_ffi_ligature_in_normalize_diacritics(self):
+        """ﬃ (U+FB03) should expand to 'ffi'."""
+        assert normalize_diacritics('eﬃcient') == 'efficient'
+
+    def test_ligatures_in_normalize_paper_title(self):
+        """Ligatures should be transparent in title normalization."""
+        # Titles with ligatures should match titles without
+        assert normalize_paper_title('A survey of anomaly detection techniques in ﬁnancial domain') == \
+               normalize_paper_title('A survey of anomaly detection techniques in financial domain')
+        assert normalize_paper_title('Hopﬁeld networks is all you need') == \
+               normalize_paper_title('Hopfield networks is all you need')
+        assert normalize_paper_title('Real-time patient-speciﬁc ecg classiﬁcation by 1-d convolutional neural networks') == \
+               normalize_paper_title('Real-time patient-specific ecg classification by 1-d convolutional neural networks')
+
+    def test_mixed_ligatures_and_diacritics(self):
+        """Ligatures combined with diacritics should both be normalized."""
+        assert normalize_diacritics('Rényi diﬀerential privacy') == 'Renyi differential privacy'

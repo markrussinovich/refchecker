@@ -44,25 +44,16 @@ class LLMProviderMixin:
 
     def _call_llm_cached(self, prompt: str) -> str:
         """Wrapper around _call_llm that checks/saves the LLM response cache."""
-        logger.debug("Raw bibliography text passed to LLM (%d chars):\n%s",
-                      len(prompt), prompt)
         if self.cache_dir:
             from refchecker.utils.cache_utils import cached_llm_response, cache_llm_response
             system = self._get_system_prompt()
             hit = cached_llm_response(self.cache_dir, self.model, system, prompt)
             if hit is not None:
-                logger.debug("Raw LLM extraction response (cached, %d chars):\n%s",
-                             len(hit['text']), hit['text'])
                 return hit['text']
             result = self._call_llm(prompt)
-            logger.debug("Raw LLM extraction response (%d chars):\n%s",
-                         len(result), result)
             cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
             return result
-        result = self._call_llm(prompt)
-        logger.debug("Raw LLM extraction response (%d chars):\n%s",
-                     len(result), result)
-        return result
+        return self._call_llm(prompt)
 
     def _clean_bibtex_for_llm(self, bibliography_text: str) -> str:
         """Clean BibTeX text before sending to LLM to remove formatting artifacts"""
@@ -132,19 +123,11 @@ class LLMProviderMixin:
             "10. IGNORE non-reference text: theorems, proofs, algorithms, equations, discussion prose, "
             "section headers, figure/table captions. Only extract actual bibliographic entries\n"
             "11. If references suddenly change format (e.g. numbered refs followed by unnumbered prose), "
-            "stop extracting - the later text is likely appendix content, not references\n"
-            "12. IMPORTANT: Lines starting with a publisher name (e.g. 'Association for Computing Machinery', "
-            "'Springer', 'IEEE', 'ACM'), ISBN, DOI, or URL that follow a reference are CONTINUATIONS of the "
-            "preceding reference — they are NOT separate entries. Merge them: use the DOI/URL from the "
-            "continuation and keep the authors/title/venue/year from the preceding reference"
+            "stop extracting - the later text is likely appendix content, not references"
         )
 
     def _create_extraction_prompt(self, bibliography_text: str) -> str:
         """Create user prompt for reference extraction - contains only the bibliography text"""
-        # Log the raw bibliography text before any cleaning/preprocessing
-        logger.debug("Raw bibliography text before preprocessing (%d chars):\n%s",
-                      len(bibliography_text), bibliography_text)
-
         # Clean BibTeX formatting before sending to LLM
         cleaned_bibliography = self._clean_bibtex_for_llm(bibliography_text)
         
@@ -500,16 +483,13 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
-            from google.genai import types
             response = self.client.models.generate_content(
                 model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
-                contents=[types.Content(role='user', parts=[types.Part(text=prompt)])],
-                config=types.GenerateContentConfig(
-                    system_instruction=self._get_system_prompt(),
-                    max_output_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                ),
+                contents=prompt,
+                config={
+                    'max_output_tokens': self.max_tokens,
+                    'temperature': self.temperature,
+                },
             )
             
             # Handle empty responses (content safety filter or other issues)
