@@ -78,6 +78,24 @@ DELTA_INCONCLUSIVE = 0.0     # non-academic results only
 # Abstract provider
 # ══════════════════════════════════════════════════════════════════════
 
+# Shared system prompt for all web search providers used in hallucination
+# checking.  Kept source-type-agnostic so non-academic references (blog
+# posts, datasets, standards, etc.) are not penalised.
+_WEB_SEARCH_SYSTEM_PROMPT = (
+    'You are a reference verifier. The user will give you the '
+    'title, authors, venue, and year of a cited source. It may be an '
+    'academic paper, blog post, technical report, dataset, software tool, '
+    'standard, or any other real-world source. Use web search '
+    'to determine whether this EXACT source exists.\n\n'
+    'Respond with EXACTLY one of these verdicts on the first line:\n'
+    '  EXISTS   \u2014 you found this specific source (matching title and at least one author/creator)\n'
+    '  NOT_FOUND \u2014 web search returned no credible evidence this source exists\n'
+    '  UNSURE   \u2014 results are ambiguous (similar but not identical sources found)\n\n'
+    'Then on the following lines, briefly explain your reasoning (2-3 sentences max). '
+    'If you found the source, include the URL(s) where it appears.'
+)
+
+
 class WebSearchProvider(abc.ABC):
     """Abstract interface for a web search backend.
 
@@ -118,18 +136,6 @@ class OpenAISearchProvider(WebSearchProvider):
 
     name = 'openai'
 
-    _SYSTEM_PROMPT = (
-        'You are an academic reference verifier. The user will give you the '
-        'title, authors, venue, and year of an academic paper. Use web search '
-        'to determine whether this EXACT paper exists.\n\n'
-        'Respond with EXACTLY one of these verdicts on the first line:\n'
-        '  EXISTS   — you found this specific paper (matching title and at least one author)\n'
-        '  NOT_FOUND — web search returned no credible evidence this paper exists\n'
-        '  UNSURE   — results are ambiguous (similar but not identical papers found)\n\n'
-        'Then on the following lines, briefly explain your reasoning (2-3 sentences max). '
-        'If you found the paper, include the URL(s) where it appears.'
-    )
-
     def __init__(self, api_key: Optional[str] = None, endpoint: Optional[str] = None):
         self.api_key = resolve_api_key('openai', override=api_key)
         self.endpoint = resolve_endpoint('openai', override=endpoint)
@@ -156,7 +162,7 @@ class OpenAISearchProvider(WebSearchProvider):
     def search(self, query: str, num_results: int = 10) -> List[Dict[str, str]]:
         response = self._client.responses.create(
             model=DEFAULT_WEB_SEARCH_MODELS['openai'],
-            instructions=self._SYSTEM_PROMPT,
+            instructions=_WEB_SEARCH_SYSTEM_PROMPT,
             tools=[{'type': 'web_search_preview'}],
             input=query,
         )
@@ -213,17 +219,6 @@ class AnthropicSearchProvider(WebSearchProvider):
 
     name = 'anthropic'
 
-    _SYSTEM_PROMPT = (
-        'You are an academic reference verifier. The user will give you the '
-        'title, authors, venue, and year of an academic paper. Use web search '
-        'to determine whether this EXACT paper exists.\n\n'
-        'Respond with EXACTLY one of these verdicts on the first line:\n'
-        '  EXISTS   — you found this specific paper (matching title and at least one author)\n'
-        '  NOT_FOUND — web search returned no credible evidence this paper exists\n'
-        '  UNSURE   — results are ambiguous (similar but not identical papers found)\n\n'
-        'Then on the following lines, briefly explain your reasoning (2-3 sentences max). '
-        'If you found the paper, include the URL(s) where it appears.'
-    )
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = resolve_api_key('anthropic', override=api_key)
@@ -244,7 +239,7 @@ class AnthropicSearchProvider(WebSearchProvider):
         resp = self._client.messages.create(
             model=DEFAULT_WEB_SEARCH_MODELS['anthropic'],
             max_tokens=1024,
-            system=self._SYSTEM_PROMPT,
+            system=_WEB_SEARCH_SYSTEM_PROMPT,
             tools=[{
                 'type': 'web_search_20250305',
                 'name': 'web_search',
@@ -331,6 +326,7 @@ class GeminiSearchProvider(WebSearchProvider):
             model=DEFAULT_WEB_SEARCH_MODELS['google'],
             contents=query,
             config={
+                'system_instruction': _WEB_SEARCH_SYSTEM_PROMPT,
                 'tools': [{'google_search': {}}],
                 'temperature': 0.0,
             },
