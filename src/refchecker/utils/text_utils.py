@@ -882,16 +882,6 @@ def normalize_diacritics(text: str) -> str:
     # Also remove any remaining standalone diacritics not between letters
     text = re.sub(r'[' + _standalone_diacritics_chars + r']', '', text)
 
-    # Handle combining diacritics (U+0300–U+036F) that PDF extractors
-    # sometimes separate from their base character with a space.
-    # E.g. "Crist \u0301obal" (Cristóbal) → merge into "Cristobal".
-    text = re.sub(
-        r'([a-zA-Z])\s?[\u0300-\u036F]+\s?([a-z])',
-        r'\1\2', text,
-    )
-    # Remove any remaining combining diacritics not between letters
-    text = re.sub(r'[\u0300-\u036F]+', '', text)
-
     # Then normalize apostrophes
     text = normalize_apostrophes(text)
     
@@ -993,6 +983,19 @@ def normalize_diacritics(text: str) -> str:
     # The pattern requires lowercase on both sides to avoid stripping real
     # apostrophes in names like "O'Brien" (uppercase after apostrophe).
     ascii_text = re.sub(r"(?<=[a-zA-Z])'(?=[a-z])", '', ascii_text)
+    
+    # Merge apostrophe-space-lowercase fragments from PDF extraction artifacts.
+    # e.g. "Murakhovs' ka" → "Murakhovs'ka" (Ukrainian name with real apostrophe)
+    # The apostrophe is a genuine part of the name, not a diacritic to remove.
+    # Only merge short fragments (1-4 chars) to avoid joining unrelated words.
+    ascii_text = re.sub(r"([a-zA-Z])'\s([a-z]{1,4})\b", r"\1'\2", ascii_text)
+    
+    # Also merge "letter space ' lowercase" where the space is before the
+    # apostrophe (e.g. "H 'ylova" → "Hylova" — the apostrophe was originally
+    # a standalone diacritic like ´ that got converted to ' by the LLM).
+    # Here the apostrophe is NOT part of the real name, so remove it along
+    # with the space.
+    ascii_text = re.sub(r"([a-zA-Z])\s'([a-z]{1,6})\b", r"\1\2", ascii_text)
     
     # Clean up any extra spaces that may have been created by removing diacritics
     ascii_text = re.sub(r'\s+', ' ', ascii_text).strip()
