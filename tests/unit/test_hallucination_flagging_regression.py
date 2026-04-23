@@ -158,6 +158,12 @@ class TestPreScreenHallucination:
         assert outcome == 'skip'
 
     def test_zero_overlap_resolved_as_hallucination(self):
+        """Verified ref with 0% author overlap should be deferred to LLM.
+
+        The rule-based check flags this as LIKELY, but since it's a verified
+        ref, it gets deferred to the async LLM check (which can confirm or
+        override). This matches the CLI's run_hallucination_check() behavior.
+        """
         result = {
             '_raw_errors': [{'error_type': 'author',
                              'error_details': 'Author count mismatch: 4 vs 8',
@@ -172,9 +178,8 @@ class TestPreScreenHallucination:
         ref = {'title': 'Positive-congruent training', 'year': '2024',
                'authors': ['L. Zhou', 'Y. Zheng', 'T. Li', 'Y. Wang']}
         outcome, resolved = self._call(result, ref)
-        assert outcome == 'resolved'
-        assert resolved['hallucination_assessment']['verdict'] == 'LIKELY'
-        assert resolved['status'] == 'hallucination'
+        assert outcome == 'needs_async'
+        assert resolved is None
 
     def test_high_overlap_verified_skips(self):
         result = {
