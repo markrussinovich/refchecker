@@ -45,10 +45,13 @@ exists or does not exist. Your training data may be outdated or wrong. \
 Only the web search results and the validation summary below count as \
 evidence. If you cannot search, verdict UNCERTAIN.
 
-Reply in EXACTLY this structured format (three lines only, no preamble):
+Reply in EXACTLY this structured format (no preamble):
 
 EXPLANATION: <1-2 sentence summary of your finding — NO URLs, NO search narration>
 LINK: <URL where the exact paper was found, or NONE if not found>
+FOUND_TITLE: <the exact title of the paper as found on the web, or NONE>
+FOUND_AUTHORS: <comma-separated author names as found on the web, or NONE>
+FOUND_YEAR: <publication year as found on the web, or NONE>
 VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
 
 Verdicts:
@@ -64,6 +67,9 @@ CRITICAL formatting rules:
 only in the LINK field.
 - Start the EXPLANATION directly with your finding (e.g., "No paper with \
 this exact title exists." or "The exact paper was found in Nature 2024.").
+- FOUND_TITLE, FOUND_AUTHORS, and FOUND_YEAR should contain the metadata \
+as shown on the actual web page or database entry you found. If the \
+verdict is LIKELY or you did not find the paper, set all three to NONE.
 
 WARNING: Finding this title mentioned as a CITATION inside another paper \
 (e.g. on OpenReview, arXiv, or in a reference list) does NOT prove this \
@@ -647,7 +653,7 @@ class LLMHallucinationVerifier:
             from refchecker.utils.cache_utils import cached_llm_response
             hit = cached_llm_response(cache_dir, self.model, system_prompt, user_prompt)
             if hit is not None:
-                verdict, explanation, paper_link = self._parse_verdict(hit['text'])
+                verdict, explanation, paper_link, found_metadata = self._parse_verdict(hit['text'])
                 web_urls = hit.get('web_urls', [])
                 # Apply verified-paper safety net to cached results too
                 verdict, explanation = self._apply_verified_safety_net(
@@ -657,6 +663,9 @@ class LLMHallucinationVerifier:
                     'verdict': verdict,
                     'explanation': explanation,
                     'link': paper_link,
+                    'found_title': found_metadata.get('title'),
+                    'found_authors': found_metadata.get('authors'),
+                    'found_year': found_metadata.get('year'),
                     'web_search': {'found': bool(web_urls),
                                    'academic_urls': web_urls,
                                    'provider': self.provider} if web_urls else None,
@@ -671,7 +680,7 @@ class LLMHallucinationVerifier:
 
         try:
             response, web_urls = self._call(system_prompt, user_prompt)
-            verdict, explanation, paper_link = self._parse_verdict(response)
+            verdict, explanation, paper_link, found_metadata = self._parse_verdict(response)
         except Exception as exc:
             logger.warning(f'LLM hallucination assessment failed: {exc}')
             return {
@@ -740,6 +749,9 @@ class LLMHallucinationVerifier:
             'verdict': verdict,
             'explanation': explanation,
             'link': paper_link,
+            'found_title': found_metadata.get('title'),
+            'found_authors': found_metadata.get('authors'),
+            'found_year': found_metadata.get('year'),
             'web_search': web_result,
         }
 
@@ -827,14 +839,23 @@ class LLMHallucinationVerifier:
 
     @staticmethod
     def _parse_verdict(response: str) -> tuple:
-        """Parse the LLM response into (verdict, explanation, link).
+        """Parse the LLM response into (verdict, explanation, link, found_metadata).
 
         Expects structured format:
-            VERDICT: LIKELY|UNLIKELY|UNCERTAIN
             EXPLANATION: ...
             LINK: <url> | NONE
+            FOUND_TITLE: <title> | NONE
+            FOUND_AUTHORS: <authors> | NONE
+            FOUND_YEAR: <year> | NONE
+            VERDICT: LIKELY|UNLIKELY|UNCERTAIN
 
         Falls back to unstructured parsing if the format isn't followed.
+
+        Returns
+        -------
+        tuple of (verdict, explanation, link, found_metadata)
+            found_metadata is a dict with 'title', 'authors', 'year' keys
+            (values may be None if not provided by the LLM).
         """
         import re
         text = response.strip()
@@ -842,11 +863,30 @@ class LLMHallucinationVerifier:
         verdict = 'UNCERTAIN'
         explanation = ''
         link = None
+        found_metadata = {'title': None, 'authors': None, 'year': None}
 
         # Try structured format first
         verdict_match = re.search(r'^VERDICT:\s*(LIKELY|UNLIKELY|UNCERTAIN)', text, re.IGNORECASE | re.MULTILINE)
         explanation_match = re.search(r'^EXPLANATION:\s*(.+?)(?=^LINK:|\Z)', text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
         link_match = re.search(r'^LINK:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+
+        # Parse FOUND_TITLE, FOUND_AUTHORS, FOUND_YEAR
+        found_title_match = re.search(r'^FOUND_TITLE:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+        found_authors_match = re.search(r'^FOUND_AUTHORS:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+        found_year_match = re.search(r'^FOUND_YEAR:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+
+        if found_title_match:
+            val = found_title_match.group(1).strip()
+            if val.upper() != 'NONE' and val:
+                found_metadata['title'] = val
+        if found_authors_match:
+            val = found_authors_match.group(1).strip()
+            if val.upper() != 'NONE' and val:
+                found_metadata['authors'] = val
+        if found_year_match:
+            val = found_year_match.group(1).strip()
+            if val.upper() != 'NONE' and val:
+                found_metadata['year'] = val
 
         if verdict_match:
             verdict = verdict_match.group(1).strip().upper()
@@ -854,9 +894,9 @@ class LLMHallucinationVerifier:
         if explanation_match:
             explanation = explanation_match.group(1).strip()
         else:
-            # Fallback: use full text minus verdict/link lines as explanation
+            # Fallback: use full text minus verdict/link/found lines as explanation
             lines = [l for l in text.splitlines()
-                     if not re.match(r'^(VERDICT|LINK):', l, re.IGNORECASE)]
+                     if not re.match(r'^(VERDICT|LINK|FOUND_TITLE|FOUND_AUTHORS|FOUND_YEAR):', l, re.IGNORECASE)]
             explanation = ' '.join(lines).strip()
 
         if link_match:
@@ -887,7 +927,7 @@ class LLMHallucinationVerifier:
         # Clean explanation: strip inline markdown links, citations, and chain-of-thought narration
         explanation = LLMHallucinationVerifier._clean_explanation(explanation)
 
-        return verdict, explanation, link
+        return verdict, explanation, link, found_metadata
 
     @staticmethod
     def _clean_explanation(explanation: str) -> str:

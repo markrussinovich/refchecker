@@ -358,6 +358,9 @@ class ReportBuilder:
             'hallucination_verdict',
             'hallucination_explanation',
             'hallucination_link',
+            'hallucination_found_title',
+            'hallucination_found_authors',
+            'hallucination_found_year',
         ]
 
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
@@ -368,6 +371,9 @@ class ReportBuilder:
             row['hallucination_verdict'] = assessment.get('verdict', '')
             row['hallucination_explanation'] = assessment.get('explanation', '')
             row['hallucination_link'] = assessment.get('link', '')
+            row['hallucination_found_title'] = assessment.get('found_title', '')
+            row['hallucination_found_authors'] = assessment.get('found_authors', '')
+            row['hallucination_found_year'] = assessment.get('found_year', '')
             writer.writerow(row)
 
     def _write_text(self, f: IO, records: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:

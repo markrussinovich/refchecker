@@ -290,6 +290,9 @@ class ParallelReferenceProcessor:
                                 )
                                 if has_unverified:
                                     print(f"         Not flagged: {explanation}")
+                            # Show LLM-found metadata when debunking DB errors
+                            if verdict == 'UNLIKELY':
+                                self._print_found_metadata(current_result.hallucination_assessment)
                         
                         # Call callback if provided
                         if result_callback:
@@ -385,6 +388,27 @@ class ParallelReferenceProcessor:
         if result.processing_time > 5.0:
             logger.debug(f"Reference {result.index + 1} took {result.processing_time:.2f}s to verify: {reference.get('title', 'Untitled')}")
             logger.debug(f"Raw text: {reference.get('raw_text', '')}")
+    
+    @staticmethod
+    def _print_found_metadata(assessment: Dict[str, Any]) -> None:
+        """Print LLM-found metadata when the LLM debunks DB errors."""
+        found_title = assessment.get('found_title')
+        found_authors = assessment.get('found_authors')
+        found_year = assessment.get('found_year')
+        ha_link = assessment.get('link')
+        
+        if not any([found_title, found_authors, found_year]):
+            return
+        
+        print("      📖 LLM verified (actual metadata):")
+        if found_title:
+            print(f"                      title:   {found_title}")
+        if found_authors:
+            print(f"                      authors: {found_authors}")
+        if found_year:
+            print(f"                      year:    {found_year}")
+        if ha_link and ha_link.startswith('http'):
+            print(f"                      url:     {ha_link}")
     
     def _update_stats(self, result: ReferenceResult) -> None:
         """Update processing statistics."""
