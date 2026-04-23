@@ -983,6 +983,29 @@ def apply_hallucination_verdict(
             ]
             result['status'] = 'error' if remaining_errors else 'verified'
 
+    elif verdict == 'UNLIKELY' and not is_upgradeable:
+        # Ref was already "verified" by a DB match, but the LLM confirmed
+        # it's a real paper.  If the errors include a DOI mismatch, the
+        # DB likely matched the wrong paper (e.g. a book review instead
+        # of the book).  Clear the DB-mismatch errors since they came
+        # from the wrong record.
+        has_doi_mismatch = any(
+            'doi mismatch' in (e.get('error_details') or '').lower()
+            for e in result.get('errors', [])
+        )
+        if has_doi_mismatch:
+            result['errors'] = [
+                e for e in result.get('errors', [])
+                if not any(kw in (e.get('error_details') or '').lower()
+                           for kw in ('doi mismatch', 'author'))
+            ]
+            remaining_errors = [
+                e for e in result['errors']
+                if e.get('error_type') not in ('unverified', 'info', None)
+                and not e.get('is_suggestion')
+            ]
+            result['status'] = 'error' if remaining_errors else 'verified'
+
     elif verdict != 'LIKELY' and (is_unverified or has_unverified_error):
         # UNCERTAIN or UNLIKELY-but-not-upgradeable: annotate the
         # unverified error with the explanation if available.
