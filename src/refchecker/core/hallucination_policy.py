@@ -574,6 +574,12 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
                     overlap = _compute_author_overlap(cited, correct, cited_list=cited_list)
                     if overlap is not None and overlap < _AUTHOR_VERIFIED_THRESHOLD:
                         pass  # Don't skip — authors critically mismatched
+                    elif overlap is None and 'doi mismatch' in error_details:
+                        # Overlap was inconclusive (e.g. single-author DB record)
+                        # but DOI also doesn't match — the DB likely matched the
+                        # wrong paper (e.g. a book review instead of the book).
+                        # Don't skip; let LLM verify.
+                        pass
                     else:
                         return False
                 elif error_entry.get('ref_verified_url'):
@@ -962,14 +968,20 @@ def apply_hallucination_verdict(
                 and not e.get('is_suggestion')
             ]
             result['status'] = 'error' if remaining_errors else 'verified'
-        elif ha_explanation:
-            # Enrich the unverified error message with the LLM explanation.
+        else:
+            # LLM confirmed the reference is real (UNLIKELY) but didn't
+            # provide a link.  Still strip the unverified error and
+            # upgrade the status so the ref isn't counted as unverified.
             result['errors'] = [
-                {**e, 'error_details':
-                 f"Reference could not be verified — {ha_explanation}"}
-                if e.get('error_type') == 'unverified' else e
-                for e in result.get('errors', [])
+                e for e in result.get('errors', [])
+                if e.get('error_type') != 'unverified'
             ]
+            remaining_errors = [
+                e for e in result['errors']
+                if e.get('error_type') not in ('unverified', 'info', None)
+                and not e.get('is_suggestion')
+            ]
+            result['status'] = 'error' if remaining_errors else 'verified'
 
     elif verdict != 'LIKELY' and (is_unverified or has_unverified_error):
         # UNCERTAIN or UNLIKELY-but-not-upgradeable: annotate the
