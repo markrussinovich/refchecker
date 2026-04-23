@@ -1329,7 +1329,7 @@ class ProgressRefChecker:
 
         outcome, assessment = pre_screen_hallucination(error_entry)
         if outcome == 'resolved':
-            updated = apply_hallucination_verdict(result, assessment)
+            updated = apply_hallucination_verdict(result, assessment, reference=reference)
             return ('resolved', updated)
         elif outcome == 'skip':
             return ('skip', None)
@@ -1563,7 +1563,7 @@ class ProgressRefChecker:
         if has_url_refs_paper and assessment.get('verdict') == 'UNLIKELY':
             return result
 
-        result = apply_hallucination_verdict(result, assessment)
+        result = apply_hallucination_verdict(result, assessment, reference=reference)
         return result
 
     async def _check_single_reference_with_limit(

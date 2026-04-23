@@ -889,9 +889,105 @@ def run_hallucination_check(
     return None
 
 
+def _reverify_with_llm_metadata(
+    reference: Dict[str, Any],
+    old_errors: List[Dict[str, Any]],
+    assessment: Dict[str, Any],
+) -> Optional[List[Dict[str, Any]]]:
+    """Re-verify a reference using LLM-found metadata as the "correct" source.
+
+    When the hallucination check finds the actual paper (UNLIKELY verdict with
+    found_title/found_authors/found_year), this function re-runs the standard
+    comparison logic against the LLM-found data instead of the DB data.
+
+    This avoids special-casing: the normal error/warning paths produce the
+    right output when given correct metadata.
+
+    Returns a new error list, or None if no LLM metadata was available.
+    """
+    found_title = assessment.get('found_title')
+    found_authors = assessment.get('found_authors')
+    found_year = assessment.get('found_year')
+    ha_link = assessment.get('link')
+
+    if not any([found_title, found_authors, found_year]):
+        return None
+
+    from refchecker.utils.text_utils import (
+        compare_authors,
+        compare_titles_with_latex_cleaning,
+        strip_latex_commands,
+        are_venues_substantially_different,
+    )
+    from refchecker.utils.error_utils import (
+        format_title_mismatch,
+        validate_year,
+    )
+
+    new_errors = []
+
+    # --- Title check ---
+    cited_title = reference.get('title', '')
+    if found_title and cited_title:
+        SIMILARITY_THRESHOLD = 0.75
+        sim = compare_titles_with_latex_cleaning(cited_title, found_title)
+        if sim < SIMILARITY_THRESHOLD:
+            clean_cited = strip_latex_commands(cited_title)
+            new_errors.append({
+                'error_type': 'title',
+                'error_details': format_title_mismatch(clean_cited, found_title),
+                'ref_title_correct': found_title,
+            })
+
+    # --- Author check ---
+    cited_authors = reference.get('authors', [])
+    if found_authors and cited_authors:
+        # Parse LLM-returned author string into list-of-dicts (same format
+        # as Semantic Scholar)
+        llm_author_list = [
+            {'name': a.strip()}
+            for a in found_authors.split(',')
+            if a.strip()
+        ]
+        if llm_author_list:
+            match, err_msg = compare_authors(cited_authors, llm_author_list)
+            if not match:
+                correct_str = ', '.join(a['name'] for a in llm_author_list)
+                new_errors.append({
+                    'error_type': 'author',
+                    'error_details': err_msg,
+                    'ref_authors_correct': correct_str,
+                })
+
+    # --- Year check ---
+    cited_year = reference.get('year', 0)
+    if found_year:
+        import re as _re
+        year_match = _re.search(r'\d{4}', str(found_year))
+        llm_year = int(year_match.group()) if year_match else None
+        if llm_year:
+            year_warning = validate_year(
+                cited_year=cited_year,
+                paper_year=llm_year,
+                use_flexible_validation=True,
+                context={},
+            )
+            if year_warning:
+                new_errors.append(year_warning)
+
+    # --- Carry forward info-only errors that aren't metadata comparisons ---
+    # (e.g. "Reference could include arXiv URL", venue-missing suggestions)
+    for e in old_errors:
+        if 'info_type' in e and 'error_type' not in e and 'warning_type' not in e:
+            new_errors.append(e)
+
+    return new_errors
+
+
 def apply_hallucination_verdict(
     result: Dict[str, Any],
     assessment: Dict[str, Any],
+    reference: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Apply a hallucination assessment verdict to a reference result.
 
@@ -908,7 +1004,13 @@ def apply_hallucination_verdict(
         the caller's dict is not mutated.
     assessment : dict
         The hallucination assessment with ``verdict``, ``explanation``,
-        and optionally ``link``.
+        and optionally ``link``, ``found_title``, ``found_authors``,
+        ``found_year``.
+    reference : dict, optional
+        The original reference dict (with ``title``, ``authors``, ``year``
+        etc.).  When provided and the LLM returned found metadata, the
+        errors are re-computed by comparing the cited reference against
+        the LLM-found data.
 
     Returns
     -------
@@ -985,26 +1087,48 @@ def apply_hallucination_verdict(
 
     elif verdict == 'UNLIKELY' and not is_upgradeable:
         # Ref was already "verified" by a DB match, but the LLM confirmed
-        # it's a real paper.  If the errors include a DOI mismatch, the
-        # DB likely matched the wrong paper (e.g. a book review instead
-        # of the book).  Clear the DB-mismatch errors since they came
-        # from the wrong record.
-        has_doi_mismatch = any(
-            'doi mismatch' in (e.get('error_details') or '').lower()
-            for e in result.get('errors', [])
-        )
-        if has_doi_mismatch:
-            result['errors'] = [
-                e for e in result.get('errors', [])
-                if not any(kw in (e.get('error_details') or '').lower()
-                           for kw in ('doi mismatch', 'author'))
-            ]
-            remaining_errors = [
-                e for e in result['errors']
-                if e.get('error_type') not in ('unverified', 'info', None)
-                and not e.get('is_suggestion')
-            ]
-            result['status'] = 'error' if remaining_errors else 'verified'
+        # it's a real paper.  If the LLM returned metadata, re-verify the
+        # cited reference against the LLM-found data (treating it like a
+        # new DB result).  This naturally resolves false-positive errors
+        # from wrong-edition DB matches.
+        if reference is not None:
+            new_errors = _reverify_with_llm_metadata(
+                reference, result.get('errors', []), assessment,
+            )
+            if new_errors is not None:
+                result['errors'] = new_errors
+                # Update the verified URL to the LLM-found source
+                if ha_link and ha_link.startswith('http'):
+                    result['authoritative_urls'] = list(
+                        result.get('authoritative_urls', [])
+                    )
+                    result['authoritative_urls'].append(
+                        {"type": "llm_verified", "url": ha_link}
+                    )
+                remaining_errors = [
+                    e for e in result['errors']
+                    if e.get('error_type') not in ('unverified', 'info', None)
+                    and not e.get('is_suggestion')
+                ]
+                result['status'] = 'error' if remaining_errors else 'verified'
+        else:
+            # No reference dict available — fall back to heuristic clearing.
+            has_doi_mismatch = any(
+                'doi mismatch' in (e.get('error_details') or '').lower()
+                for e in result.get('errors', [])
+            )
+            if has_doi_mismatch:
+                result['errors'] = [
+                    e for e in result.get('errors', [])
+                    if not any(kw in (e.get('error_details') or '').lower()
+                               for kw in ('doi mismatch', 'author'))
+                ]
+                remaining_errors = [
+                    e for e in result['errors']
+                    if e.get('error_type') not in ('unverified', 'info', None)
+                    and not e.get('is_suggestion')
+                ]
+                result['status'] = 'error' if remaining_errors else 'verified'
 
     elif verdict != 'LIKELY' and (is_unverified or has_unverified_error):
         # UNCERTAIN or UNLIKELY-but-not-upgradeable: annotate the

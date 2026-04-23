@@ -6857,33 +6857,6 @@ class ArxivReferenceChecker:
             )
             if has_unverified:
                 print(f"         Not flagged: {explanation}")
-        
-        # Show LLM-found metadata when the LLM debunks DB errors
-        if verdict == 'UNLIKELY':
-            self._print_found_metadata(assessment)
-
-    @staticmethod
-    def _print_found_metadata(assessment):
-        """Print LLM-found metadata when the LLM debunks DB errors."""
-        if not assessment:
-            return
-        found_title = assessment.get('found_title')
-        found_authors = assessment.get('found_authors')
-        found_year = assessment.get('found_year')
-        ha_link = assessment.get('link')
-        
-        if not any([found_title, found_authors, found_year]):
-            return
-        
-        print("      📖 LLM verified (actual metadata):")
-        if found_title:
-            print(f"                      title:   {found_title}")
-        if found_authors:
-            print(f"                      authors: {found_authors}")
-        if found_year:
-            print(f"                      year:    {found_year}")
-        if ha_link and ha_link.startswith('http'):
-            print(f"                      url:     {ha_link}")
 
     @staticmethod
     def _extract_verified_url(verified_data):
