@@ -1397,6 +1397,21 @@ def _submit_hallucination_assessments_async(
 
         outcome, assessment = pre_screen_hallucination(filtered)
         if outcome == 'resolved':
+            # Mirror the deferral logic in run_hallucination_check():
+            # verified refs flagged LIKELY by rules should be deferred to
+            # the LLM, which can web-search and confirm the paper exists.
+            is_verified = bool(verified_url)
+            if (
+                is_verified
+                and assessment
+                and assessment.get('verdict') == 'LIKELY'
+                and llm_verifier
+                and (getattr(llm_verifier, 'available', False) or getattr(llm_verifier, 'cache_dir', None))
+            ):
+                # Defer to LLM instead of applying immediately
+                future = hallucination_pool.submit(filtered, llm_verifier, web_searcher)
+                pending.append((error_entry, future))
+                continue
             error_entry['hallucination_assessment'] = assessment
             continue
         if outcome == 'skip':
