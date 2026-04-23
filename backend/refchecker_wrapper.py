@@ -339,7 +339,10 @@ class ProgressRefChecker:
 
         # Extract authoritative URLs with proper type detection
         authoritative_urls = []
-        if url:
+        # Don't show verification URL as authoritative when the reference is
+        # actually unverified (no database matched) — the URL may point at a
+        # completely different paper.
+        if url and not (is_unverified and not verified_data):
             url_type = "other"
             if "semanticscholar.org" in url:
                 url_type = "semantic_scholar"

@@ -254,6 +254,20 @@ class ParallelReferenceProcessor:
                                 )
                                 if assessment:
                                     current_result.hallucination_assessment = assessment
+                                    # Apply verdict to clear wrong-DB errors
+                                    # (e.g. author/DOI mismatch from wrong
+                                    # record) when the LLM confirms UNLIKELY.
+                                    from refchecker.core.hallucination_policy import apply_hallucination_verdict
+                                    _has_unverified = any(
+                                        e.get('error_type') == 'unverified'
+                                        for e in current_result.errors
+                                    )
+                                    _status = 'unverified' if _has_unverified else 'error'
+                                    tmp = apply_hallucination_verdict(
+                                        {'status': _status, 'errors': current_result.errors},
+                                        assessment,
+                                    )
+                                    current_result.errors = tmp['errors']
                         
                         # Print the result using base checker's output methods
                         # (hallucination_assessment is now available for display decisions)

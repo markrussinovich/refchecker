@@ -6464,10 +6464,24 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(
                             reference, reference_url, errors, debug_mode, print_output)
                 else:
-                    # Don't count as unverified if LLM already confirmed it's real
-                    if not (precomputed_hallucination and precomputed_hallucination.get('verdict') == 'UNLIKELY'):
+                    # Check if the LLM already confirmed this is a real reference
+                    llm_assessment = precomputed_hallucination
+                    if not llm_assessment:
+                        llm_assessment = self._run_and_return_hallucination_assessment(
+                            reference, errors, verified_data=verified_data, reference_url=reference_url
+                        )
+                    if llm_assessment and llm_assessment.get('verdict') == 'UNLIKELY':
+                        # LLM confirmed the reference is real - don't count as unverified
+                        llm_link = llm_assessment.get('link', '')
+                        if llm_link and llm_link.startswith('http') and print_output:
+                            print(f"       Verified URL: {llm_link}")
+                        # Store assessment so it isn't re-run below
+                        precomputed_hallucination = llm_assessment
+                    else:
                         self.total_unverified_refs += 1
-                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
+                        self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
+                        if llm_assessment:
+                            precomputed_hallucination = llm_assessment
             
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
@@ -6543,6 +6557,15 @@ class ArxivReferenceChecker:
         if verified_data and verified_data.get('url'):
             return verified_data['url']
         
+        # Don't show a "Verified URL" when the reference is actually unverified
+        # (no database matched and errors indicate the reference couldn't be found)
+        has_unverified_error = any(
+            e.get('error_type') == 'unverified'
+            for e in (errors or [])
+        )
+        if has_unverified_error and not verified_data:
+            return None
+
         # Last resort: Use the URL returned by the verification process (but be cautious with ArXiv URLs)
         if reference_url:
             return self._validate_reference_url(reference_url, verified_data)
@@ -6706,11 +6729,11 @@ class ArxivReferenceChecker:
         url = reference.get('url', '')
 
         print("")
+        if verified_data and verified_data.get('_matched_database'):
+            print(f"       Matched Database: {verified_data['_matched_database']}")
         verified_url_to_show = self._get_verified_url(verified_data, url_from_verifier, errors)
         if verified_url_to_show:
             print(f"       Verified URL: {verified_url_to_show}")
-        if verified_data and verified_data.get('_matched_database'):
-            print(f"       Matched Database: {verified_data['_matched_database']}")
 
         if verified_data:
             external_ids = verified_data.get('externalIds', {})
