@@ -327,6 +327,20 @@ class ParallelReferenceProcessor:
         self.base_checker._print_reference_header(reference, result.index, self.total_references)
         self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
 
+        # If the ref had no DB match but the LLM confirmed it (UNLIKELY),
+        # apply_hallucination_verdict already stripped the unverified error
+        # and stored the link in authoritative_urls.  Show it here so the
+        # user sees verification info instead of a bare reference.
+        if not result.verified_data and result.hallucination_assessment:
+            ha = result.hallucination_assessment
+            if ha.get('verdict') == 'UNLIKELY':
+                ha_link = ha.get('link')
+                ha_explanation = ha.get('explanation', '')
+                if ha_link and ha_link.startswith('http'):
+                    print(f"\n       Verified URL: {ha_link}")
+                if ha_explanation:
+                    print(f"       LLM confirmed: {ha_explanation}")
+
         # Display errors and warnings
         if result.errors:
             # Check if there's an unverified error
