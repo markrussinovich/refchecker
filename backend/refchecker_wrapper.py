@@ -764,6 +764,18 @@ class ProgressRefChecker:
                         logger.info(f"Extracted {len(arxiv_source_references)} references from partial BibTeX content")
                     else:
                         logger.warning("BibTeX-like content detected but parsing failed, will try LLM extraction")
+                # For plain text without any structured format markers, treat
+                # the entire text as bibliography content (matching CLI behavior
+                # for .txt files).  This avoids find_bibliography_section failing
+                # on text that has no "References" section header.
+                if not arxiv_source_references:
+                    logger.info("Plain text input — treating entire text as bibliography")
+                    cli_checker = _make_cli_checker(self.llm)
+                    refs = await asyncio.to_thread(cli_checker.parse_references, paper_text)
+                    if refs:
+                        arxiv_source_references = [_normalize_reference_fields(r) for r in refs]
+                        set_extraction_method('text')
+                        logger.info(f"Extracted {len(arxiv_source_references)} references from plain text")
                 # Don't update title for pasted text - keep the placeholder
             else:
                 raise ValueError(f"Unsupported source type: {source_type}")
