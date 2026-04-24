@@ -99,13 +99,14 @@ def _build_pdf_candidate_urls(url: str) -> List[str]:
     return candidates
 
 
-def download_pdf_bytes(url: str, timeout: int = 60, max_retries: int = 4) -> bytes:
+def download_pdf_bytes(url: str, timeout: int = 60, max_retry_seconds: float = 600.0) -> bytes:
     """Download a PDF from *url* with browser-like headers.
 
     Tries candidate URLs (e.g. OpenReview forum → pdf) in order and returns
     the raw PDF bytes on the first success.  Retries with exponential backoff
     on 403/429 responses (common with OpenReview rate limiting) and on
-    connection/timeout errors.  Raises on failure.
+    connection/timeout errors until *max_retry_seconds* have elapsed.
+    Raises on failure.
     """
     import time as _time
 
@@ -117,9 +118,18 @@ def download_pdf_bytes(url: str, timeout: int = 60, max_retries: int = 4) -> byt
     # Use shorter connect timeout per attempt so retries don't take forever
     connect_timeout = min(timeout, 15)
 
+    deadline = _time.monotonic() + max_retry_seconds
     last_exc: Optional[Exception] = None
     for candidate_url in dict.fromkeys(candidates):
-        for attempt in range(max_retries):
+        attempt = 0
+        while True:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0 and attempt > 0:
+                logger.error(
+                    "PDF download for %s exceeded %.0fs retry budget after %d attempts",
+                    candidate_url, max_retry_seconds, attempt,
+                )
+                break  # try next candidate URL
             try:
                 current_url = candidate_url
                 with requests.Session() as session:
@@ -142,18 +152,30 @@ def download_pdf_bytes(url: str, timeout: int = 60, max_retries: int = 4) -> byt
                         raise requests.exceptions.TooManyRedirects(f"Too many redirects for URL: {candidate_url}")
 
                 # Retry on 403/429 with exponential backoff
-                if response.status_code in (403, 429) and attempt < max_retries - 1:
+                if response.status_code in (403, 429):
                     retry_after = response.headers.get('Retry-After')
                     try:
                         backoff = float(retry_after) if retry_after else 0.0
                     except (ValueError, TypeError):
                         backoff = 0.0
-                    backoff = max(backoff, 3.0 * (2 ** attempt))  # 3s, 6s, 12s
+                    backoff = max(backoff, 5.0 * (2 ** min(attempt, 4)))  # 5s … 80s
+                    backoff = min(backoff, 60.0)  # cap at 60 seconds
+                    if _time.monotonic() + backoff > deadline:
+                        logger.error(
+                            "PDF download got HTTP %d for %s; no time left for retry (attempt %d, %.0fs budget)",
+                            response.status_code, candidate_url, attempt + 1, max_retry_seconds,
+                        )
+                        last_exc = requests.exceptions.HTTPError(
+                            f"HTTP {response.status_code} for {candidate_url} (retry budget exhausted)",
+                            response=response,
+                        )
+                        break  # try next candidate URL
                     logger.error(
-                        "PDF download got HTTP %d for %s; retrying in %.0fs (attempt %d/%d)",
-                        response.status_code, candidate_url, backoff, attempt + 1, max_retries,
+                        "PDF download got HTTP %d for %s; retrying in %.0fs (attempt %d, %.0fs remaining)",
+                        response.status_code, candidate_url, backoff, attempt + 1, remaining,
                     )
                     _time.sleep(backoff)
+                    attempt += 1
                     continue
 
                 response.raise_for_status()
@@ -164,18 +186,22 @@ def download_pdf_bytes(url: str, timeout: int = 60, max_retries: int = 4) -> byt
 
                 return response.content
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
-                # Connection-level failures: retry with backoff but don't wait
-                # as long — the host may be unreachable.
+                # Connection-level failures: retry with backoff
                 last_exc = exc
-                if attempt < max_retries - 1:
-                    backoff = 3.0 * (2 ** attempt)
+                backoff = 5.0 * (2 ** min(attempt, 4))
+                backoff = min(backoff, 60.0)
+                if _time.monotonic() + backoff > deadline:
                     logger.error(
-                        "PDF download connection error for %s: %s; retrying in %.0fs (attempt %d/%d)",
-                        candidate_url, type(exc).__name__, backoff, attempt + 1, max_retries,
+                        "PDF download connection error for %s: %s; no time left for retry (attempt %d)",
+                        candidate_url, type(exc).__name__, attempt + 1,
                     )
-                    _time.sleep(backoff)
-                else:
-                    logger.error(f"Failed to download PDF from URL {candidate_url} after {max_retries} attempts: {exc}")
+                    break  # try next candidate URL
+                logger.error(
+                    "PDF download connection error for %s: %s; retrying in %.0fs (attempt %d, %.0fs remaining)",
+                    candidate_url, type(exc).__name__, backoff, attempt + 1, remaining,
+                )
+                _time.sleep(backoff)
+                attempt += 1
             except (requests.exceptions.RequestException, ValueError) as exc:
                 # Non-retryable request errors (e.g. invalid URL)
                 last_exc = exc
