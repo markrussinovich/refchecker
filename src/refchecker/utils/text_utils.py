@@ -2409,7 +2409,53 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
     if not correct_names:
         return True, "No correct authors available for comparison"
 
+    # Detect and strip "et al" from the correct (authoritative) author list.
+    # Databases sometimes abbreviate long author lists as
+    # ["Keller Jordan", "et al."].  When the correct list uses "et al",
+    # we should only verify that the *named* correct authors appear
+    # somewhere in the cited list (the cited list may be more complete).
+    correct_has_et_al = False
+    filtered_correct = []
+    for name in correct_names:
+        if is_et_al_variant(name):
+            correct_has_et_al = True
+        elif contains_et_al(name):
+            correct_has_et_al = True
+            stripped = re.sub(r'\s+et\s+al\.?$', '', name, flags=re.IGNORECASE)
+            stripped = re.sub(r'\s+and\s+others?$', '', stripped, flags=re.IGNORECASE)
+            stripped = re.sub(r'\s+et\s*\.?\s*al\.?$', '', stripped, flags=re.IGNORECASE)
+            stripped = stripped.strip()
+            if stripped:
+                filtered_correct.append(stripped)
+        else:
+            filtered_correct.append(name)
+    if correct_has_et_al:
+        correct_names = filtered_correct
+
     correct_names = _split_concatenated_team_first_author(cleaned_cited, correct_names)
+
+    # When the correct (authoritative) list used "et al", verify that every
+    # named correct author appears in the cited list.  The cited list is
+    # allowed to have more authors (it may be the complete list).
+    if correct_has_et_al and correct_names:
+        from refchecker.utils.error_utils import format_author_mismatch
+        for i, correct_author in enumerate(correct_names):
+            found = any(
+                enhanced_name_match(correct_author, cited)
+                for cited in cleaned_cited
+            )
+            if not found:
+                cited_display = format_author_for_display(correct_author)
+                full_cited_list = ', '.join(
+                    format_author_for_display(a) for a in cleaned_cited
+                )
+                error_msg = format_author_mismatch(
+                    i + 1,
+                    f"{cited_display} (expected author not found in cited list)",
+                    full_cited_list,
+                )
+                return False, error_msg
+        return True, f"Authors match (verified {len(correct_names)} correct authors against {len(cleaned_cited)} cited, correct list used et al)"
 
     # Large collaborative papers are often cited with only the team name as
     # the author list (e.g. "Gemini Team"). If that shorthand matches the

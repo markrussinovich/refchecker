@@ -5501,8 +5501,9 @@ class ArxivReferenceChecker:
             third_part = parts[2].strip()
             fourth_part = parts[3].strip()
             
-            # Check if third part looks like a year (4 digits starting with 19 or 20)
-            if re.match(r'^(19|20)\d{2}$', third_part):
+            # Check if third part looks like a year (4 digits starting with 19 or 20,
+            # with optional letter suffix like "2024a" for author-year disambiguation)
+            if re.match(r'^(19|20)\d{2}[a-z]?$', third_part):
                 # Format: Authors # Title # Year # URL
                 venue = ""
                 year_part = third_part
@@ -5586,7 +5587,8 @@ class ArxivReferenceChecker:
             # Remove URLs before searching for years
             text_without_urls = re.sub(r'https?://[^\s]+', '', ref_text)
             text_without_urls = re.sub(r'arxiv:[^\s]+', '', text_without_urls, flags=re.IGNORECASE)
-            year_match = re.search(r'\b(19|20)\d{2}\b', text_without_urls)
+            # Allow optional trailing letter suffix (e.g. "2024a") for author-year styles
+            year_match = re.search(r'\b(19|20)\d{2}(?=[a-z]?\b)', text_without_urls)
             if year_match:
                 year = int(year_match.group(0))
         
