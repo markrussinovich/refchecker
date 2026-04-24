@@ -506,10 +506,10 @@ def get_text_thumbnail(
             # Create a text box for the content
             text_rect = fitz.Rect(margin, margin, THUMBNAIL_WIDTH - margin, int(THUMBNAIL_WIDTH * 1.4) - margin)
             
-            # Truncate to first ~500 chars for thumbnail
-            display_text = text_content[:500]
-            if len(text_content) > 500:
-                display_text += "..."
+            # Truncate to fit thumbnail — ~2000 chars with small font
+            display_text = text_content[:2000]
+            if len(text_content) > 2000:
+                display_text += "\n..."
             
             # Insert text with small font
             page.insert_textbox(
@@ -617,9 +617,9 @@ def get_text_preview(
             # Create a text box for the content
             text_rect = fitz.Rect(margin, margin, PREVIEW_WIDTH - margin, int(PREVIEW_WIDTH * 1.4) - margin)
             
-            # Truncate to first ~4000 chars for preview
-            display_text = text_content[:4000]
-            if len(text_content) > 4000:
+            # Show as much text as fits the preview page
+            display_text = text_content[:16000]
+            if len(text_content) > 16000:
                 display_text += "\n\n..."
             
             # Insert text with readable font size
