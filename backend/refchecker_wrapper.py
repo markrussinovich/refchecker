@@ -718,6 +718,16 @@ class ProgressRefChecker:
                             arxiv_source_references = refs_result[0]
                             set_extraction_method('bib')
                             logger.info(f"Extracted {len(arxiv_source_references)} references from .bib file")
+                    # For .txt files, treat entire content as bibliography
+                    # (matching CLI behavior for text files with no section header)
+                    elif paper_source.lower().endswith('.txt'):
+                        logger.info("Processing uploaded .txt file as plain text references")
+                        cli_checker = _make_cli_checker(self.llm)
+                        refs = await asyncio.to_thread(cli_checker.parse_references, paper_text)
+                        if refs:
+                            arxiv_source_references = [_normalize_reference_fields(r) for r in refs]
+                            set_extraction_method('text')
+                            logger.info(f"Extracted {len(arxiv_source_references)} references from .txt file")
                 else:
                     raise ValueError(f"Unsupported file type: {paper_source}")
             elif source_type == "text":
