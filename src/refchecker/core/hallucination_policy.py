@@ -529,6 +529,8 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
         has_suspicious = any(kw in details for kw in (
             'author', 'doi', 'arxiv_id', 'arxiv id', 'unverified',
             'could not be verified', 'could not verify',
+            'does not reference', "doesn't reference",
+            'non-existent', 'not found',
         ))
         if not has_suspicious:
             return False
