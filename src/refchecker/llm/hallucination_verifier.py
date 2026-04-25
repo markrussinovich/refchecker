@@ -35,10 +35,12 @@ validation summary says the paper WAS found but has metadata mismatches, \
 the checkers may have matched a wrong edition or version — use your web \
 search to verify the CITED title and authors independently.
 
-MANDATORY: You MUST perform a web search for the paper title before \
-rendering your verdict. Search for the exact title in quotes on the web \
-to check whether the paper actually exists. Do NOT skip the web search — \
-a verdict issued without searching is invalid.
+MANDATORY: You MUST perform a web search for the cited title or source \
+name before rendering your verdict. For academic papers, search for the \
+exact title in quotes on the web to check whether the paper actually \
+exists. For non-paper sources such as datasets, software, standards, or \
+web pages, search for the cited source name and cited URL/domain. Do NOT \
+skip the web search — a verdict issued without searching is invalid.
 
 MANDATORY: Do NOT rely on your parametric knowledge to claim a paper \
 exists or does not exist. Your training data may be outdated or wrong. \
@@ -159,6 +161,16 @@ citations even though they are not academic papers. If the cited source \
 is a real, identifiable entity, verdict MUST be UNLIKELY regardless of \
 whether it appears in academic databases.
 
+(4a) DATASET REFERENCES: A dataset citation is valid when the cited URL \
+resolves to the dataset page and the dataset owner/name or page title \
+matches the cited reference after normalizing case, spaces, underscores, \
+hyphens, and punctuation. For example, a citation titled "code \
+instructions" with URL \
+"https://huggingface.co/datasets/red1xe/code_instructions" should be \
+treated as the Hugging Face dataset "red1xe/code_instructions" and \
+verdict MUST be UNLIKELY if that page exists. Do NOT require datasets to \
+have academic-paper authors or an academic database entry.
+
 (5) INFORMAL OR COLLOQUIAL TITLES: If an author uses a widely recognized \
 informal name for a paper or model (e.g. "Llama" instead of the full \
 "The Llama 3 Herd of Models"), and the authors substantially match, \
@@ -171,10 +183,14 @@ it does not prove this paper exists. Search for the paper BY TITLE instead. \
 If your search only finds the DIFFERENT paper at that arXiv ID, the \
 cited reference is fabricated and the verdict MUST be LIKELY.
 
-VERIFICATION REQUIREMENT: Before writing UNLIKELY, ask yourself: \
-"Did my search results contain a page where the PRIMARY title (not a \
-citation in another paper's reference list) exactly matches the cited \
-title?" If you cannot answer yes, the verdict must be LIKELY.
+VERIFICATION REQUIREMENT: Before writing UNLIKELY for an academic paper, \
+ask yourself: "Did my search results contain a page where the PRIMARY \
+title (not a citation in another paper's reference list) exactly matches \
+the cited title?" If you cannot answer yes, the verdict must be LIKELY. \
+For non-paper sources such as datasets or software, answer instead: \
+"Did my search results or cited URL contain a dedicated source page whose \
+name matches the cited source after normalizing separators and case?" If \
+yes, the verdict MUST be UNLIKELY.
 """
 
 _ASSESSMENT_PROMPT = """\

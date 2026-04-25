@@ -14,6 +14,7 @@ from refchecker.core.hallucination_policy import (
     _strip_team_names,
 )
 from refchecker.core.report_builder import ReportBuilder
+from refchecker.llm.hallucination_verifier import build_assessment_prompt
 
 
 # ------------------------------------------------------------------
@@ -221,6 +222,28 @@ def test_huggingface_dataset_should_not_be_checked():
         'ref_url_cited': 'https://huggingface.co/datasets/CharlieDreemur/OpenManus-RL',
     }
     assert should_check_hallucination(entry) is False
+
+
+def test_hallucination_prompt_treats_matching_huggingface_dataset_as_valid():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'code instructions',
+        'ref_authors_cited': 'red1xe',
+        'ref_year_cited': '2023',
+        'ref_url_cited': 'https://huggingface.co/datasets/red1xe/code_instructions',
+        'original_reference': {
+            'venue': '',
+            'url': 'https://huggingface.co/datasets/red1xe/code_instructions',
+        },
+    }
+
+    system_prompt, user_prompt = build_assessment_prompt(entry)
+
+    assert 'DATASET REFERENCES' in system_prompt
+    assert 'red1xe/code_instructions' in system_prompt
+    assert 'Do NOT require datasets to have academic-paper authors' in system_prompt
+    assert 'https://huggingface.co/datasets/red1xe/code_instructions' in user_prompt
 
 
 def test_github_verified_author_mismatch_should_be_checked():

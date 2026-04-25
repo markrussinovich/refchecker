@@ -911,6 +911,45 @@ class TestICLRAppendixOverrun:
         assert "formally define QRAM" not in bib
         assert "Lemma B.1" not in bib
 
+    def test_owZ6KNAtYU_spaced_appendix_with_continued_parenthetical(self):
+        """Regression for owZ6KNAtYU: 'A E XPERIMENTAL S ETTINGS (C ONT ' D )'.
+
+        PDF extraction can split all-caps appendix headings into alternating
+        initials and word fragments, then preserve a parenthetical continuation
+        marker. The bibliography must stop before the appendix table/list text.
+        """
+        refs = (
+            "Yilun Zheng, Xiang Li, Sitao Luan, Xiaojiang Peng, and Lihui Chen. "
+            "Let your features tell the differences: Understanding graph convolution "
+            "by feature splitting. In ICLR, 2025.\n"
+            "Jiong Zhu, Yujun Yan, Lingxiao Zhao, Mark Heimann, Leman Akoglu, "
+            "and Danai Koutra. Beyond homophily in graph neural networks: Current "
+            "limitations and effective designs. In NeurIPS, 2020.\n"
+            "Jiaru Zou, Xiyuan Yang, Ruizhong Qiu, Gaotang Li, Katherine Tieu, "
+            "Pan Lu, Ke Shen, Hanghang Tong, Yejin Choi, Jingrui He, James Zou, "
+            "Mengdi Wang, and Ling Yang. Latent collaboration in multi-agent systems. "
+            "arXiv preprint, 2025b.\n"
+        )
+        appendix = (
+            "19\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "A     E XPERIMENTAL S ETTINGS (C ONT ' D )\n"
+            "A.1   DATASETS (C ONT ' D )\n"
+            "For heterophilic group, we consider the following datasets.\n"
+            "APPNP (Gasteiger et al., 2019): Combines personalized PageRank "
+            "with neural propagation.\n"
+            "We train the GNN using the Adam optimizer (Kingma & Ba, 2014).\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Yilun Zheng" in bib
+        assert "Latent collaboration" in bib
+        assert "E XPERIMENTAL S ETTINGS" not in bib
+        assert "DATASETS" not in bib
+        assert "Combines personalized PageRank" not in bib
+        assert "Adam optimizer" not in bib
+
     def test_looks_like_ref_validation_not_too_broad(self):
         """Test that looks_like_ref doesn't reject valid appendix headers.
 

@@ -1633,6 +1633,9 @@ class ArxivReferenceChecker:
                 # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
                 # in section titles, e.g. "A Theoretical Arguments for Section 3"
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                # PDF word-break artifacts with parenthetical continuation markers,
+                # e.g. "A E XPERIMENTAL S ETTINGS (C ONT ' D )".
+                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?[A-Z]{2,}(?:\s+(?:[A-Z]\s+)?[A-Z]{2,})*(?:\s*\([A-Z0-9\s\'’\-]+\))?\s*\n',
                 # All-caps concatenated appendix headings with optional parenthetical acronym,
                 # e.g. "A QUANTUMRANDOMACCESSMEMORY(QRAM)" from PDF text extraction.
                 r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
