@@ -1496,6 +1496,8 @@ class ArxivReferenceChecker:
             r'\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
             r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
             r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
+            # PDF extraction can collapse this heading: "TECHNICALAPPENDICES ANDSUPPLEMENTARYMATERIAL"
+            r'\n\s*(?:TECHNICAL\s*)?APPENDICES\s*(?:AND\s*)?SUPPLEMENTARY\s*MATERIAL\s*\n',
             r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
             r'\n\s*(?:AUTHOR|Author)\s*(?:CONTRIBUTIONS?|Contributions?)\s*\n',
             r'\n\s*(?:ETHICS|Ethics)\s*(?:STATEMENT|Statement)\s*\n',
@@ -1631,6 +1633,9 @@ class ArxivReferenceChecker:
                 # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
                 # in section titles, e.g. "A Theoretical Arguments for Section 3"
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                # All-caps concatenated appendix headings with optional parenthetical acronym,
+                # e.g. "A QUANTUMRANDOMACCESSMEMORY(QRAM)" from PDF text extraction.
+                r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
                 # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
                 r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
                 # Standalone appendix letter on its own line followed by a subsection:

@@ -872,6 +872,45 @@ class TestICLRAppendixOverrun:
             assert content not in bib.lower(), f"Bib should not include content after: {header}"
             assert "Vaswani" in bib, f"Bib should include refs before: {header}"
 
+    def test_QcRto0GjxC_concatenated_appendix_with_parenthetical(self):
+        """Regression for QcRto0GjxC: 'A QUANTUMRANDOMACCESSMEMORY(QRAM)'.
+
+        PDF extraction can collapse multi-word all-caps appendix headings and
+        leave a parenthetical acronym attached. The bibliography must stop
+        before that appendix rather than feeding proofs/lemmas to LLM extraction.
+        """
+        refs = (
+            "Todd Tilma and E. C. G. Sudarshan. Generalized euler angle parametrization "
+            "for su(n). Journal of Physics A, 35:10467-10501, 2002.\n"
+            "Joel A. Tropp. Improved analysis of the subsampled randomized hadamard "
+            "transform. Advances in Adaptive Data Analysis, 3(1-2):115-126, 2011.\n"
+            "Chao-Yang Wang, Lexing Ying, and Di Fang. Quantum algorithm for nonlinear "
+            "dynamics. SIAM Journal on Scientific Computing, 47(2):A883-A905, 2025.\n"
+            "Kianna Wan, Mario Berta, and Earl Campbell. Randomized quantum algorithm "
+            "for statistical phase estimation. Physical Review Letters, 2022.\n"
+        )
+        appendix = (
+            "20\n"
+            "Published as a conference paper at ICLR 2026\n"
+            "TECHNICALAPPENDICES ANDSUPPLEMENTARYMATERIAL\n"
+            "In Appendix A we present a summary of Quantum Random Access Memory (QRAM), "
+            "which we subsequently use. In Appendix B we present techniques.\n"
+            "A QUANTUMRANDOMACCESSMEMORY(QRAM)\n"
+            "In this section, we will formally define QRAM, and state the assumed complexities.\n"
+            "B QUANTUMMATRIX-VECTORARITHMETIC\n"
+            "Lemma B.1(Product of block encodings). If U is a block-encoding...\n"
+        )
+        text = self._build(refs, appendix)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Todd Tilma" in bib
+        assert "Kianna Wan" in bib
+        assert "TECHNICALAPPENDICES" not in bib
+        assert "In Appendix A we present" not in bib
+        assert "QUANTUMRANDOMACCESSMEMORY" not in bib
+        assert "formally define QRAM" not in bib
+        assert "Lemma B.1" not in bib
+
     def test_looks_like_ref_validation_not_too_broad(self):
         """Test that looks_like_ref doesn't reject valid appendix headers.
 
