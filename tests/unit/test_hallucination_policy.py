@@ -246,6 +246,56 @@ def test_hallucination_prompt_treats_matching_huggingface_dataset_as_valid():
     assert 'https://huggingface.co/datasets/red1xe/code_instructions' in user_prompt
 
 
+def test_hallucination_prompt_treats_official_model_docs_as_valid_sources():
+    entry = {
+        'error_type': 'url',
+        'error_details': (
+            'Cited URL does not reference this paper: '
+            'https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/'
+        ),
+        'ref_title': 'Llama 4|Model Cards and Prompt Formats',
+        'ref_authors_cited': 'Meta',
+        'ref_year_cited': '2025',
+        'ref_url_cited': 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/',
+        'original_reference': {
+            'venue': 'None',
+            'url': 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/',
+        },
+    }
+
+    system_prompt, user_prompt = build_assessment_prompt(entry)
+
+    assert 'OFFICIAL MODEL OR PRODUCT DOCUMENTATION' in system_prompt
+    assert 'Llama 4 | Model Cards and Prompt Formats' in system_prompt
+    assert 'limitation of the paper-oriented checker' in system_prompt
+    assert 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/' in user_prompt
+
+
+def test_hallucination_prompt_treats_vendor_tech_intro_as_valid_source():
+    entry = {
+        'error_type': 'url',
+        'error_details': (
+            'Cited URL does not reference this paper: '
+            'https://seed.bytedance.com/en/seed1_6'
+        ),
+        'ref_title': 'Seed1.6 Tech Introduction',
+        'ref_authors_cited': 'ByteDance Seed Team',
+        'ref_year_cited': '2025',
+        'ref_url_cited': 'https://seed.bytedance.com/en/seed1_6',
+        'original_reference': {
+            'venue': 'Technical report',
+            'url': 'https://seed.bytedance.com/en/seed1_6',
+        },
+    }
+
+    system_prompt, user_prompt = build_assessment_prompt(entry)
+
+    assert 'vendor technical reports' in system_prompt
+    assert 'Seed1.6 Tech Introduction' in system_prompt
+    assert 'Do NOT require these sources to be peer-reviewed papers' in system_prompt
+    assert 'https://seed.bytedance.com/en/seed1_6' in user_prompt
+
+
 def test_github_verified_author_mismatch_should_be_checked():
     """GitHub-verified refs with author mismatch (org name vs real authors) need LLM check.
 

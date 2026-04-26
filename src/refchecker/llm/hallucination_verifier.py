@@ -155,11 +155,13 @@ citation error, not AI hallucination. Verdict MUST be UNLIKELY.
 
 (4) NON-ACADEMIC REAL-WORLD SOURCES: References to competitions, datasets, \
 ethics codes, standards documents, technical blog posts, software tools, \
-or other real-world non-paper sources (e.g. "American Invitational \
-Mathematics Examination", "SPJ Code of Ethics", "Gemini CLI") are valid \
-citations even though they are not academic papers. If the cited source \
-is a real, identifiable entity, verdict MUST be UNLIKELY regardless of \
-whether it appears in academic databases.
+model cards, prompt-format documentation, vendor technical reports, \
+release announcements, or other real-world non-paper sources (e.g. \
+"American Invitational Mathematics Examination", "SPJ Code of Ethics", \
+"Gemini CLI", "Llama 4 | Model Cards and Prompt Formats", "Seed1.6 \
+Tech Introduction") are valid citations even though they are not academic \
+papers. If the cited source is a real, identifiable entity, verdict MUST \
+be UNLIKELY regardless of whether it appears in academic databases.
 
 (4a) DATASET REFERENCES: A dataset citation is valid when the cited URL \
 resolves to the dataset page and the dataset owner/name or page title \
@@ -170,6 +172,17 @@ instructions" with URL \
 treated as the Hugging Face dataset "red1xe/code_instructions" and \
 verdict MUST be UNLIKELY if that page exists. Do NOT require datasets to \
 have academic-paper authors or an academic database entry.
+
+(4b) OFFICIAL MODEL OR PRODUCT DOCUMENTATION: A model card, prompt-format \
+page, API documentation page, model release announcement, or official \
+vendor technical introduction is valid when the cited URL resolves to an \
+official page and the page title or visible page content matches the cited \
+source after normalizing separators such as "|", hyphens, underscores, \
+spaces, and case. Do NOT require these sources to be peer-reviewed papers, \
+indexed academic records, or formal technical reports. If the automated \
+URL checker says the page "does not reference this paper" but the cited \
+reference is clearly a non-paper web source, treat that as a limitation \
+of the paper-oriented checker, not evidence of hallucination.
 
 (5) INFORMAL OR COLLOQUIAL TITLES: If an author uses a widely recognized \
 informal name for a paper or model (e.g. "Llama" instead of the full \
