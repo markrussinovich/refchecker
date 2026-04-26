@@ -740,8 +740,11 @@ def run_bulk_paper_check(root_checker: Any, input_specs: Sequence[str], debug_mo
         payload = root_checker._build_structured_report_payload()
         root_checker.write_structured_report(payload=payload)
 
-    # Remove checkpoint file on successful completion
-    if checkpoint_path and os.path.exists(checkpoint_path):
+    # Remove checkpoint file on successful completion unless a caller wants to
+    # preserve it as an incremental corpus artifact.
+    if checkpoint_path and os.getenv('REFCHECKER_KEEP_CHECKPOINT'):
+        _safe_print(f'Checkpoint file kept: {os.path.basename(checkpoint_path)}')
+    elif checkpoint_path and os.path.exists(checkpoint_path):
         try:
             os.remove(checkpoint_path)
             _safe_print(f'Checkpoint file removed: {os.path.basename(checkpoint_path)}')
