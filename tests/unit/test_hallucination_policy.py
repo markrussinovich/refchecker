@@ -296,6 +296,28 @@ def test_hallucination_prompt_treats_vendor_tech_intro_as_valid_source():
     assert 'https://seed.bytedance.com/en/seed1_6' in user_prompt
 
 
+def test_hallucination_prompt_treats_software_project_citation_as_valid_source():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Leela chess zero',
+        'ref_authors_cited': 'Gian-Carlo Pascutto, Gary Linscott',
+        'ref_year_cited': '2019',
+        'ref_url_cited': '',
+        'original_reference': {
+            'venue': '',
+            'url': '',
+        },
+    }
+
+    system_prompt, user_prompt = build_assessment_prompt(entry)
+
+    assert 'SOFTWARE OR CODE PROJECT REFERENCES' in system_prompt
+    assert 'Do NOT require a DOI, paper venue, academic database' in system_prompt
+    assert 'Leela Chess Zero' in system_prompt
+    assert 'Leela chess zero' in user_prompt
+
+
 def test_github_verified_author_mismatch_should_be_checked():
     """GitHub-verified refs with author mismatch (org name vs real authors) need LLM check.
 

@@ -198,13 +198,101 @@ class LLMProvider(ABC):
                             unique_references.append(ref)
             
             logger.debug(f"Extracted {len(unique_references)} unique references from {len(chunks)} chunks")
+            unique_references = self._repair_truncated_arxiv_dois(unique_references, bibliography_text)
             return self._restore_et_al(unique_references, bibliography_text)
         else:
             # Process normally for short bibliographies
             prompt = self._create_extraction_prompt(bibliography_text)
             response_text = self._call_llm_cached(prompt)
             refs = self._parse_llm_response(response_text)
+            refs = self._repair_truncated_arxiv_dois(refs, bibliography_text)
             return self._restore_et_al(refs, bibliography_text)
+
+    @staticmethod
+    def _repair_truncated_arxiv_dois(references: List[str], bibliography_text: str) -> List[str]:
+        """Repair LLM-shortened arXiv DOI URLs using the source bibliography text."""
+        if not references or not bibliography_text:
+            return references
+
+        full_doi_matches = list(re.finditer(
+            r'10\.48550/(?:arxiv|ARXIV)\.\d{4}\.\d{4,5}',
+            bibliography_text,
+            re.IGNORECASE,
+        ))
+        if not full_doi_matches:
+            return references
+
+        full_dois = [match.group(0) for match in full_doi_matches]
+        repaired = []
+
+        for ref in references:
+            truncated_matches = list(re.finditer(
+                r'10\.48550/(?:arxiv|ARXIV)\.\d{1,4}(?:\.\d{0,4})?(?![\d.])',
+                ref,
+                re.IGNORECASE,
+            ))
+            if not truncated_matches:
+                repaired.append(ref)
+                continue
+
+            updated_ref = ref
+            for truncated_match in truncated_matches:
+                cited_doi = truncated_match.group(0)
+                if any(cited_doi.lower() == full_doi.lower() for full_doi in full_dois):
+                    continue
+
+                prefix_matches = [full_doi for full_doi in full_dois if full_doi.lower().startswith(cited_doi.lower())]
+                if not prefix_matches:
+                    continue
+
+                replacement = LLMProvider._choose_arxiv_doi_replacement(
+                    ref,
+                    bibliography_text,
+                    full_doi_matches,
+                    prefix_matches,
+                )
+                if replacement:
+                    updated_ref = re.sub(re.escape(cited_doi), replacement, updated_ref, flags=re.IGNORECASE)
+
+            repaired.append(updated_ref)
+
+        return repaired
+
+    @staticmethod
+    def _choose_arxiv_doi_replacement(
+        ref: str,
+        bibliography_text: str,
+        full_doi_matches: List[re.Match],
+        prefix_matches: List[str],
+    ) -> Optional[str]:
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
+
+        parts = [part.strip() for part in ref.split('#')]
+        title = parts[1] if len(parts) > 1 else ''
+        title_tokens = [
+            token
+            for token in re.findall(r'[a-z0-9]+', title.lower())
+            if len(token) > 3 and token not in {'paper', 'with', 'from', 'using', 'based'}
+        ][:6]
+        if not title_tokens:
+            return None
+
+        best_doi = None
+        best_score = 0
+        for match in full_doi_matches:
+            candidate = match.group(0)
+            if candidate not in prefix_matches:
+                continue
+            window_start = max(0, match.start() - 800)
+            window_end = min(len(bibliography_text), match.end() + 800)
+            window = bibliography_text[window_start:window_end].lower()
+            score = sum(1 for token in title_tokens if token in window)
+            if score > best_score:
+                best_score = score
+                best_doi = candidate
+
+        return best_doi if best_score >= 2 else None
 
     @staticmethod
     def _restore_et_al(references: List[str], bibliography_text: str) -> List[str]:

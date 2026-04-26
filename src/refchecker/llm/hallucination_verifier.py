@@ -184,6 +184,16 @@ URL checker says the page "does not reference this paper" but the cited \
 reference is clearly a non-paper web source, treat that as a limitation \
 of the paper-oriented checker, not evidence of hallucination.
 
+(4c) SOFTWARE OR CODE PROJECT REFERENCES: A citation to software, a code \
+repository, a game engine, a library, or a project name is valid when web \
+search finds a dedicated project/repository/homepage whose name matches \
+the cited source. Do NOT require a DOI, paper venue, academic database \
+entry, or paper-style author list. If the project identity matches, verdict \
+MUST be UNLIKELY unless the cited maintainers/date are clearly impossible. \
+For example, "Gian-Carlo Pascutto and Gary Linscott. Leela chess zero, \
+March 2019" should be treated as a real software/project citation if the \
+Leela Chess Zero project page or repository is found.
+
 (5) INFORMAL OR COLLOQUIAL TITLES: If an author uses a widely recognized \
 informal name for a paper or model (e.g. "Llama" instead of the full \
 "The Llama 3 Herd of Models"), and the authors substantially match, \

@@ -455,6 +455,8 @@ def clean_url(url: str) -> str:
         # Use the URL from parentheses
         url = markdown_match.group(2)
     
+    url = _strip_glued_pdf_citation_tail(url)
+
     # Remove trailing punctuation that's commonly part of sentence structure
     # but preserve legitimate URL characters
     url = url.rstrip('.,;!?)')
@@ -506,8 +508,22 @@ def clean_url_punctuation(url: str) -> str:
         # Use the URL from parentheses
         url = markdown_match.group(2)
     
+    url = _strip_glued_pdf_citation_tail(url)
+
     # Remove trailing punctuation that's commonly part of sentence structure
     # but preserve legitimate URL characters
     url = url.rstrip('.,;!?)')
     
     return url
+
+
+def _strip_glued_pdf_citation_tail(url: str) -> str:
+    """Trim a next-reference citation accidentally appended after a PDF URL."""
+    if not url:
+        return ""
+
+    match = re.search(r'(?i)(\.pdf)(?:%20|\s).+$', url)
+    if not match:
+        return url
+
+    return url[:match.end(1)]
