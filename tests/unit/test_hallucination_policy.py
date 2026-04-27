@@ -756,6 +756,7 @@ def test_concatenated_word_title_artifact_is_uncertain():
     for title in (
         'Deepconfidentstepstonewpockets: Strategiesfordockinggeneralization',
         'Reviewondiscoverystudio: Animportanttoolformolecular docking',
+        'Provably robust multi-bit watermarking forAI-generatedtext',
     ):
         entry = {
             'error_type': 'unverified',

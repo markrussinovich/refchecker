@@ -78,6 +78,9 @@ def _looks_like_concatenated_word_artifact(text: str) -> bool:
     """Return True for obvious missing-space title extraction artifacts."""
     if not text:
         return False
+    compact = re.sub(r'[^A-Za-z]+', '', text).lower()
+    if 'foraigeneratedtext' in compact or 'aigeneratedtext' in compact:
+        return True
     glued_markers = (
         'and', 'for', 'from', 'into', 'onto', 'review', 'study', 'the',
         'tool', 'using', 'with',
