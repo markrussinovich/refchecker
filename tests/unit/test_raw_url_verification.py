@@ -176,13 +176,38 @@ class TestRawUrlVerification(unittest.TestCase):
         self.assertEqual(len(errors), 0)
         self.assertEqual(verified_data['venue'], 'Web Page')
         self.assertTrue(verified_data['web_metadata']['access_blocked'])
+
+    @patch('refchecker.checkers.webpage_checker.WebPageChecker._respectful_request')
+    def test_403_blocked_academic_venue_not_treated_as_url_references_paper(self, mock_request):
+        """Blocked academic pages are not evidence that the URL references the cited paper."""
+        mock_response = Mock()
+        mock_response.status_code = 403
+        mock_request.return_value = mock_response
+
+        reference = {
+            'title': '3d breast scanning in plastic surgery utilizing free iphone lidar applications and standard consumer devices: A comparative analysis',
+            'authors': ['Dawid Boczar', 'Magdalena Kitala'],
+            'year': 2024,
+            'journal': 'Aesthetic Surgery Journal',
+            'url': 'https://academic.oup.com/asj/advance-article-abstract/doi/10.1093/asj/sjae251/7941969',
+        }
+
+        verified_data, errors, url = self.webpage_checker.verify_raw_url_for_unverified_reference(reference)
+
+        self.assertIsNone(verified_data)
+        self.assertEqual(errors, [{
+            'error_type': 'unverified',
+            'error_details': 'paper not verified; cited URL could not be accessed',
+        }])
+        self.assertEqual(url, reference['url'])
     
     def test_categorization_of_new_error_messages(self):
         """Test that the new error messages are properly categorized."""
         test_cases = [
             ("non-existent web page", "Non-existent web page"),
             ("paper not found and URL doesn't reference it", "Paper not found and URL doesn't reference it"),
-            ("paper not verified but URL references paper", "Paper not verified but URL references paper")
+            ("paper not verified but URL references paper", "Paper not verified but URL references paper"),
+            ("paper not verified; cited URL could not be accessed", "Paper not verified; cited URL could not be accessed"),
         ]
         
         for error_details, expected_category in test_cases:

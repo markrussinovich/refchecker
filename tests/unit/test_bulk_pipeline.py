@@ -1,6 +1,13 @@
+from io import BytesIO
 from types import SimpleNamespace
 
-from refchecker.core.bulk_pipeline import BulkLLMExtractionBatcher, BulkProgressReporter, BulkVerificationCache
+from refchecker.core.bulk_pipeline import (
+    BulkLLMExtractionBatcher,
+    BulkProgressReporter,
+    BulkVerificationCache,
+    extract_bibliography_bulk,
+    parse_references_bulk,
+)
 
 
 class _FakeExtractionProvider:
@@ -23,6 +30,28 @@ class _FakeExtractionChecker:
         return [{'raw': reference} for reference in references]
 
 
+class _EmptyExtractionBatcher:
+    def extract_references(self, checker, bibliography_text):
+        return []
+
+
+class _DiagnosticChecker:
+    def __init__(self, llm_extractor=True):
+        self.fatal_error = False
+        self.fatal_error_message = None
+        self.llm_extractor = object() if llm_extractor else None
+        self.used_regex_extraction = False
+
+    def _parse_biblatex_references(self, bibliography_text):
+        return []
+
+    def _parse_bibtex_references(self, bibliography_text):
+        return []
+
+    def _parse_standard_acm_natbib_references(self, bibliography_text):
+        return []
+
+
 def test_bulk_llm_extraction_batcher_processes_multiple_items():
     batcher = BulkLLMExtractionBatcher(enabled=False)
     checker = _FakeExtractionChecker()
@@ -36,6 +65,45 @@ def test_bulk_llm_extraction_batcher_processes_multiple_items():
         [{'raw': 'A One#Paper One#Venue One#2024#https://one'}],
         [{'raw': 'B Two#Paper Two#Venue Two#2025#https://two'}],
     ]
+
+
+def test_parse_references_bulk_records_zero_reference_diagnostic():
+    checker = _DiagnosticChecker(llm_extractor=True)
+    bibliography_text = 'References\nSmith, Jane. A Paper That Should Be Extracted. Test Venue, 2024.'
+
+    references = parse_references_bulk(checker, bibliography_text, _EmptyExtractionBatcher())
+
+    assert references == []
+    assert checker.fatal_error is True
+    assert 'Reference extraction produced zero references using LLM extraction' in checker.fatal_error_message
+    assert 'bibliography_text_chars=' in checker.fatal_error_message
+
+
+def test_parse_references_bulk_records_missing_llm_diagnostic():
+    checker = _DiagnosticChecker(llm_extractor=False)
+    bibliography_text = 'References\nSmith, Jane. A Paper That Should Be Extracted. Test Venue, 2024.'
+
+    references = parse_references_bulk(checker, bibliography_text, _EmptyExtractionBatcher())
+
+    assert references == []
+    assert checker.fatal_error is True
+    assert 'bibliography format was not recognized' in checker.fatal_error_message
+
+
+def test_extract_bibliography_bulk_records_missing_section_diagnostic():
+    checker = _DiagnosticChecker(llm_extractor=True)
+    checker.download_pdf = lambda paper: BytesIO(b'not a real pdf')
+    checker.extract_text_from_pdf = lambda pdf_content: 'This paper text has no references heading.'
+    checker.find_bibliography_section = lambda text: None
+    checker._get_source_paper_url = lambda paper: 'https://openreview.net/forum?id=missingbib'
+    paper = SimpleNamespace(get_short_id=lambda: 'missingbib', title='Missing Bibliography')
+
+    references = extract_bibliography_bulk(checker, paper, debug_mode=True, extraction_batcher=_EmptyExtractionBatcher())
+
+    assert references == []
+    assert checker.fatal_error is True
+    assert 'Could not locate a bibliography/references section' in checker.fatal_error_message
+    assert 'paper_id=missingbib' in checker.fatal_error_message
 
 
 def test_bulk_progress_reporter_prints_timestamped_completion(capsys):

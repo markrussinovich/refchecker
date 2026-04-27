@@ -664,7 +664,7 @@ class WebPageChecker:
                 }
                 return verified_data, [], web_url
             else:
-                return None, [{"error_type": "unverified", "error_details": "paper not verified but URL references paper"}], web_url
+                return None, [{"error_type": "unverified", "error_details": "paper not verified; cited URL could not be accessed"}], web_url
         elif response.status_code != 200:
             return None, [{"error_type": "unverified", "error_details": "non-existent web page"}], web_url
         

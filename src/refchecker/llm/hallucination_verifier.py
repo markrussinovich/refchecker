@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 from typing import Any, Dict, List, Optional
 
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_HALLUCINATION_MODELS
@@ -330,6 +332,9 @@ class LLMHallucinationVerifier:
 
     # Default models per provider (used when caller doesn't specify)
     _DEFAULT_MODELS = DEFAULT_HALLUCINATION_MODELS
+    _GOOGLE_RETRY_ATTEMPTS = 5
+    _GOOGLE_RETRY_INITIAL_DELAY_SECONDS = 1.0
+    _GOOGLE_RETRY_MAX_DELAY_SECONDS = 60.0
 
     def __init__(
         self,
@@ -532,13 +537,14 @@ class LLMHallucinationVerifier:
         from google.genai import types
 
         google_search_tool = types.Tool(google_search=types.GoogleSearch())
-        resp = self.client.models.generate_content(
-            model=self.model,
+        config = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            tools=[google_search_tool],
+        )
+        resp = self._google_generate_content_with_retry(
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                tools=[google_search_tool],
-            ),
+            config=config,
+            purpose='grounded hallucination search',
         )
 
         text, web_urls = self._extract_google_grounding(resp)
@@ -554,13 +560,10 @@ class LLMHallucinationVerifier:
                 "before answering. Search for the exact title in quotes.\n\n"
                 f"{user_prompt}"
             )
-            resp2 = self.client.models.generate_content(
-                model=self.model,
+            resp2 = self._google_generate_content_with_retry(
                 contents=retry_user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    tools=[google_search_tool],
-                ),
+                config=config,
+                purpose='grounded hallucination search retry',
             )
             text2, web_urls2 = self._extract_google_grounding(resp2)
             if web_urls2:
@@ -606,14 +609,61 @@ class LLMHallucinationVerifier:
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
         from google.genai import types
-        resp = self.client.models.generate_content(
-            model=self.model,
+        resp = self._google_generate_content_with_retry(
             contents=user_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
             ),
+            purpose='hallucination chat fallback',
         )
         return (resp.text or '').strip(), []
+
+    def _google_generate_content_with_retry(self, *, contents: str, config: Any, purpose: str) -> Any:
+        """Call Gemini with truncated exponential backoff for transient errors."""
+        attempts = self._GOOGLE_RETRY_ATTEMPTS
+        for attempt in range(attempts):
+            try:
+                return self.client.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
+            except Exception as exc:
+                if not self._is_google_retryable_error(exc) or attempt == attempts - 1:
+                    raise
+                wait_time = min(
+                    self._GOOGLE_RETRY_MAX_DELAY_SECONDS,
+                    self._GOOGLE_RETRY_INITIAL_DELAY_SECONDS * (2 ** attempt) + random.random(),
+                )
+                logger.debug(
+                    'Google %s transient error (%s); retrying in %.1fs (%d/%d)',
+                    purpose,
+                    exc,
+                    wait_time,
+                    attempt + 2,
+                    attempts,
+                )
+                time.sleep(wait_time)
+
+        raise RuntimeError('unreachable Google retry state')
+
+    @staticmethod
+    def _is_google_retryable_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return (
+            '429' in text
+            or '408' in text
+            or '500' in text
+            or '502' in text
+            or '503' in text
+            or '504' in text
+            or 'resource_exhausted' in text
+            or 'rate limit' in text
+            or 'quota' in text
+            or 'timeout' in text
+            or 'temporarily unavailable' in text
+            or 'unavailable' in text
+        )
 
     # ------------------------------------------------------------------
     # Unified dispatch
@@ -702,6 +752,9 @@ class LLMHallucinationVerifier:
                     len(web_urls),
                 )
                 # Apply verified-paper safety net to cached results too
+                verdict, explanation = self._downgrade_ungrounded_unlikely(
+                    verdict, explanation, error_entry, web_urls,
+                )
                 verdict, explanation = self._apply_verified_safety_net(
                     verdict, explanation, error_entry, web_urls,
                 )
@@ -789,6 +842,9 @@ class LLMHallucinationVerifier:
                 explanation += ' (Verdict corrected: explanation confirms exact paper was found.)'
 
         # Apply verified-paper safety net
+        verdict, explanation = self._downgrade_ungrounded_unlikely(
+            verdict, explanation, error_entry, web_urls,
+        )
         verdict, explanation = self._apply_verified_safety_net(
             verdict, explanation, error_entry, web_urls,
         )
@@ -808,6 +864,41 @@ class LLMHallucinationVerifier:
             'source': 'deep_hallucination_live',
             'web_search': web_result,
         }
+
+    @staticmethod
+    def _downgrade_ungrounded_unlikely(
+        verdict: str,
+        explanation: str,
+        error_entry: Dict[str, Any],
+        web_urls: list,
+    ) -> tuple:
+        """Do not let ungrounded chat fallback prove academic references real."""
+        if verdict != 'UNLIKELY' or web_urls:
+            return verdict, explanation
+
+        if LLMHallucinationVerifier._is_verified_real_world_source(error_entry):
+            return verdict, explanation
+
+        error_type = (error_entry.get('error_type') or '').lower()
+        if error_type not in ('unverified', 'multiple'):
+            return verdict, explanation
+
+        if error_entry.get('ref_verified_url'):
+            return verdict, explanation
+
+        logger.debug(
+            'Downgrading ungrounded UNLIKELY hallucination assessment to UNCERTAIN '
+            'for academic reference ref=%r',
+            error_entry.get('ref_title', ''),
+        )
+        return (
+            'UNCERTAIN',
+            explanation + (
+                ' (Verdict downgraded: the LLM response was not grounded in web '
+                'search results or verified metadata, so it cannot prove this '
+                'academic reference has matching title and authors.)'
+            ),
+        )
 
     def _build_validation_summary(self, error_entry: Dict[str, Any]) -> str:
         """Build a human-readable summary of validation errors for the prompt."""
@@ -935,6 +1026,7 @@ class LLMHallucinationVerifier:
             'aclanthology.org', 'doi.org', 'crossref.org', 'dblp.org',
             'springer.com', 'ieee.org', 'acm.org', 'sciencedirect.com',
             'wiley.com', 'nature.com', 'science.org', 'pubmed.ncbi.nlm.nih.gov',
+            'oup.com', 'cambridge.org', 'tandfonline.com',
         )
         if any(hostname == domain or hostname.endswith('.' + domain) for domain in academic_domains):
             return False

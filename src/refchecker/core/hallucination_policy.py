@@ -745,27 +745,10 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
         return None
 
     if not error_entry.get('ref_verified_url') and _looks_like_split_word_artifact(title):
-        return {
-            'verdict': 'UNCERTAIN',
-            'explanation': (
-                'The reference title contains obvious extraction artifacts such '
-                'as words split by stray spaces or TeX fragments. Treating this '
-                'as a malformed citation rather than reliable evidence of a '
-                'fabricated source.'
-            ),
-            'web_search': None,
-        }
+        return None
 
     if not error_entry.get('ref_verified_url') and _looks_like_concatenated_word_artifact(title):
-        return {
-            'verdict': 'UNCERTAIN',
-            'explanation': (
-                'The reference title contains long concatenated words that look '
-                'like missing-space extraction artifacts. Treating this as a '
-                'malformed citation rather than reliable evidence of a fabricated source.'
-            ),
-            'web_search': None,
-        }
+        return None
 
     # Pattern 0: broken-prefix title with an empty author field.  The raw
     # delimiter layout starts with '#', and the title begins with a short
@@ -964,44 +947,48 @@ def run_hallucination_check(
     outcome, assessment = pre_screen_hallucination(error_entry)
     logger.debug(f"run_hallucination_check: pre_screen outcome={outcome} ref={ref_title!r}")
     if outcome == 'resolved':
-        # For verified refs where the rule-based check flagged LIKELY
-        # (author mismatch), defer to LLM only when author overlap is 0%
-        # — the checker may have matched a different paper with the same
-        # title, and the LLM can web-search to confirm.  When overlap is
-        # >0% but below threshold, some authors DO match, confirming it's
-        # the same paper with garbled/fabricated authors — flag
-        # deterministically without wasting an LLM call.
+        # When the deterministic author-overlap check finds 0% overlap,
+        # defer to the LLM if available: the checker may have matched a
+        # different paper with a similar title, and web search can confirm
+        # whether the cited title/authors exist together.
         is_verified = bool(error_entry.get('ref_verified_url'))
         author_overlap = assessment.get('author_overlap') if assessment else None
         if (
-            is_verified
+            llm_client
             and assessment
             and assessment.get('verdict') == 'LIKELY'
+            and author_overlap == 0
         ):
-            if author_overlap is None or author_overlap == 0:
-                if llm_client:
-                    logger.debug(
-                        "run_hallucination_check: verified ref flagged LIKELY by rules — deferring to LLM ref=%r",
-                        ref_title,
-                    )
-                    # Fall through to LLM below
-                else:
-                    # No LLM available, let deterministic verdict stand
-                    return assessment
-            else:
-                # Verified paper with >0% author overlap flagged LIKELY.
-                # Only the LLM can disambiguate whether this is a genuine
-                # hallucination or a parsing/edition mismatch.  Without
-                # an LLM, let the deterministic verdict stand.
-                if not llm_client:
-                    return assessment
-                # With an LLM available, defer to it for verification.
-                logger.debug(
-                    "run_hallucination_check: verified ref flagged LIKELY by rules "
-                    "(overlap=%.0f%%) — deferring to LLM ref=%r",
-                    (author_overlap or 0) * 100, ref_title,
-                )
-                # Fall through to LLM below
+            logger.debug(
+                "run_hallucination_check: 0%% author overlap flagged LIKELY by rules — deferring to LLM ref=%r",
+                ref_title,
+            )
+            # Fall through to LLM below
+        elif (
+            is_verified
+            and llm_client
+            and assessment
+            and assessment.get('verdict') == 'LIKELY'
+            and author_overlap is None
+        ):
+            logger.debug(
+                "run_hallucination_check: verified ref flagged LIKELY with unknown author overlap — deferring to LLM ref=%r",
+                ref_title,
+            )
+            # Fall through to LLM below
+        elif (
+            is_verified
+            and llm_client
+            and assessment
+            and assessment.get('verdict') == 'LIKELY'
+            and author_overlap is not None
+        ):
+            logger.debug(
+                "run_hallucination_check: verified ref flagged LIKELY by rules "
+                "(overlap=%.0f%%) — deferring to LLM ref=%r",
+                author_overlap * 100, ref_title,
+            )
+            # Fall through to LLM below
         else:
             return assessment
     if outcome == 'skip':

@@ -1019,12 +1019,23 @@ def extract_bibliography_bulk(checker: Any, paper: Any, debug_mode: bool, extrac
             except Exception as e:
                 logger.debug(f"pdftotext fallback from pdf_content failed: {e}")
     if not bibliography_text:
+        source_url = checker._get_source_paper_url(paper) if hasattr(checker, '_get_source_paper_url') else paper_id
+        _set_reference_extraction_fatal(
+            checker,
+            'Could not locate a bibliography/references section in the source paper '
+            f'(paper_id={paper_id}, source_url={source_url}, extracted_text_chars={len(text or "")}). '
+            'PDF text extraction and pdftotext fallback did not produce a recognizable bibliography section.',
+        )
         return []
     return parse_references_bulk(checker, bibliography_text, extraction_batcher)
 
 
 def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batcher: BulkLLMExtractionBatcher) -> List[Dict[str, Any]]:
     if not bibliography_text:
+        _set_reference_extraction_fatal(
+            checker,
+            'Reference extraction failed because no bibliography text was available',
+        )
         return []
 
     if detect_standard_acm_natbib_format(bibliography_text):
@@ -1041,18 +1052,50 @@ def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batch
         if biblatex_refs:
             return biblatex_refs
         if checker.llm_extractor:
-            return extraction_batcher.extract_references(checker, bibliography_text)
+            references = extraction_batcher.extract_references(checker, bibliography_text)
+            if references:
+                return references
+            _set_reference_extraction_fatal(
+                checker,
+                _zero_reference_message(bibliography_text, 'BibLaTeX parser and LLM extraction'),
+            )
+            return []
+        _set_reference_extraction_fatal(
+            checker,
+            _zero_reference_message(bibliography_text, 'BibLaTeX parser'),
+        )
         return []
 
     if checker.llm_extractor:
         references = extraction_batcher.extract_references(checker, bibliography_text)
         if references:
             return references
-        checker.fatal_error = True
+        _set_reference_extraction_fatal(
+            checker,
+            _zero_reference_message(bibliography_text, 'LLM extraction'),
+        )
         return []
 
-    checker.fatal_error = True
+    _set_reference_extraction_fatal(
+        checker,
+        'Reference extraction failed because the bibliography format was not recognized '
+        f'and no LLM extractor is configured (bibliography_text_chars={len(bibliography_text)})',
+    )
     return []
+
+
+def _zero_reference_message(bibliography_text: str, method: str) -> str:
+    return (
+        f'Reference extraction produced zero references using {method} '
+        f'(bibliography_text_chars={len(bibliography_text)}). '
+        'The bibliography section was found, but no parser output could be converted into references.'
+    )
+
+
+def _set_reference_extraction_fatal(checker: Any, message: str) -> None:
+    checker.fatal_error = True
+    checker.fatal_error_message = message
+    logger.error(message)
 
 
 _SS_BATCH_URL = 'https://api.semanticscholar.org/graph/v1/paper/batch'
@@ -1401,13 +1444,17 @@ def _submit_hallucination_assessments_async(
         outcome, assessment = pre_screen_hallucination(filtered)
         if outcome == 'resolved':
             # Mirror the deferral logic in run_hallucination_check():
-            # verified refs flagged LIKELY by rules should be deferred to
-            # the LLM, which can web-search and confirm the paper exists.
-            is_verified = bool(verified_url)
-            if (
-                is_verified
-                and assessment
+            # 0% author-overlap LIKELY verdicts, and verified LIKELY verdicts,
+            # should be deferred to the LLM, which can web-search and confirm
+            # whether the checker matched a different paper.
+            author_overlap = assessment.get('author_overlap') if assessment else None
+            should_defer_likely = (
+                assessment
                 and assessment.get('verdict') == 'LIKELY'
+                and (author_overlap == 0 or bool(verified_url))
+            )
+            if (
+                should_defer_likely
                 and llm_verifier
                 and (getattr(llm_verifier, 'available', False) or getattr(llm_verifier, 'cache_dir', None))
             ):

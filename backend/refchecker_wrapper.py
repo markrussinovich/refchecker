@@ -1352,13 +1352,14 @@ class ProgressRefChecker:
         outcome, assessment = pre_screen_hallucination(error_entry)
         if outcome == 'resolved':
             # Mirror the deferral logic in run_hallucination_check():
-            # verified refs flagged LIKELY by rules should be deferred to
-            # the LLM, which can web-search and confirm the paper exists.
-            is_verified = bool(verified_url)
+            # 0% author-overlap LIKELY verdicts, and verified LIKELY verdicts,
+            # should be deferred to the LLM, which can web-search and confirm
+            # whether the checker matched a different paper.
+            author_overlap = assessment.get('author_overlap') if assessment else None
             if (
-                is_verified
-                and assessment
+                assessment
                 and assessment.get('verdict') == 'LIKELY'
+                and (author_overlap == 0 or bool(verified_url))
             ):
                 # Defer to async LLM check instead of applying immediately
                 return ('needs_async', None)

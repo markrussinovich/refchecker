@@ -6705,6 +6705,7 @@ class ArxivReferenceChecker:
             'non-existent web page': 'Non-existent web page',
             "paper not found and url doesn't reference it": "Paper not found and URL doesn't reference it",
             'paper not verified but url references paper': 'Paper not verified but URL references paper',
+            'paper not verified; cited url could not be accessed': 'Paper not verified; cited URL could not be accessed',
         }
         if error_details_lower in exact_reasons:
             return exact_reasons[error_details_lower]
@@ -6828,7 +6829,7 @@ class ArxivReferenceChecker:
         elif error_entry_record is not None:
             target_record = error_entry_record
 
-        verified_url = reference_url or self._extract_verified_url(verified_data)
+        verified_url = (reference_url or self._extract_verified_url(verified_data)) if verified_data else ''
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             return
@@ -6909,7 +6910,7 @@ class ArxivReferenceChecker:
             build_hallucination_error_entry, run_hallucination_check,
         )
 
-        verified_url = reference_url or self._extract_verified_url(verified_data)
+        verified_url = (reference_url or self._extract_verified_url(verified_data)) if verified_data else ''
         error_entry = build_hallucination_error_entry(errors, reference, verified_url=verified_url)
         if error_entry is None:
             logger.debug("Hallucination skip (no real errors): %s", reference.get('title', '')[:60])

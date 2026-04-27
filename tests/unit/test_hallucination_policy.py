@@ -635,6 +635,28 @@ def test_verified_ref_zero_overlap_flagged_as_likely():
     assert result['verdict'] == 'LIKELY'
 
 
+def test_zero_author_overlap_defers_to_llm_when_available():
+    """0% author overlap should call the LLM because the DB match may be wrong."""
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author mismatch',
+        'ref_title': 'A title that may match a different paper',
+        'ref_authors_cited': 'Alice One, Bob Two, Carol Three',
+        'ref_authors_correct': 'Xavier Four, Yolanda Five, Zach Six',
+    }
+    llm_client = MagicMock()
+    llm_client.assess.return_value = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found a different paper with the cited authors.',
+        'web_search': None,
+    }
+
+    result = run_hallucination_check(entry, llm_client=llm_client)
+
+    llm_client.assess.assert_called_once()
+    assert result['verdict'] == 'UNLIKELY'
+
+
 def test_verified_ref_high_overlap_not_flagged():
     """A verified ref with good author overlap should not be flagged."""
     entry = {
@@ -664,6 +686,28 @@ def test_verified_ref_author_field_with_title_words_is_garbled_metadata():
     assert result is not None
     assert result['verdict'] == 'UNLIKELY'
     assert 'metadata extraction error' in result['explanation']
+
+
+def test_unverified_split_word_title_artifact_calls_llm_when_available():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'De novo design of a fluorescence-activatingβ-barrel',
+        'ref_authors_cited': 'Jiayi Dou, Anastassia A V orobieva, William Sheffler',
+        'ref_year_cited': 2018,
+        'ref_venue_cited': 'Nature',
+    }
+    llm_client = MagicMock()
+    llm_client.assess.return_value = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found the paper despite the title formatting artifact.',
+        'web_search': None,
+    }
+
+    result = run_hallucination_check(entry, llm_client=llm_client)
+
+    llm_client.assess.assert_called_once()
+    assert result['verdict'] == 'UNLIKELY'
 
 
 def test_empty_author_broken_prefix_title_is_uncertain_extraction_artifact():
@@ -708,7 +752,7 @@ def test_empty_author_normal_lowercase_title_is_not_broken_prefix_artifact():
     assert result is None
 
 
-def test_split_word_title_artifact_is_uncertain():
+def test_split_word_title_artifact_needs_llm():
     entry = {
         'error_type': 'unverified',
         'error_details': 'Paper not found by any checker',
@@ -724,12 +768,10 @@ def test_split_word_title_artifact_is_uncertain():
 
     result = run_hallucination_check(entry, llm_client=None)
 
-    assert result is not None
-    assert result['verdict'] == 'UNCERTAIN'
-    assert 'extraction artifacts' in result['explanation']
+    assert result is None
 
 
-def test_overlapping_split_word_title_artifacts_are_detected():
+def test_overlapping_split_word_title_artifacts_need_llm():
     for title in (
         'Eff ect of tokenization on transformers for biological sequences',
         'Discrete diffus ion modeling by estimating the ratios of the data distribution',
@@ -749,11 +791,10 @@ def test_overlapping_split_word_title_artifacts_are_detected():
 
         result = run_hallucination_check(entry, llm_client=None)
 
-        assert result is not None
-        assert result['verdict'] == 'UNCERTAIN'
+        assert result is None
 
 
-def test_concatenated_word_title_artifact_is_uncertain():
+def test_concatenated_word_title_artifact_needs_llm():
     for title in (
         'Deepconfidentstepstonewpockets: Strategiesfordockinggeneralization',
         'Reviewondiscoverystudio: Animportanttoolformolecular docking',
@@ -773,8 +814,7 @@ def test_concatenated_word_title_artifact_is_uncertain():
 
         result = run_hallucination_check(entry, llm_client=None)
 
-        assert result is not None
-        assert result['verdict'] == 'UNCERTAIN'
+        assert result is None
 
 
 def test_truncated_first_author_fragment_is_uncertain():
@@ -955,6 +995,84 @@ def test_deep_hallucination_assessment_log_includes_full_explanation(caplog):
     assert result['verdict'] == 'LIKELY'
     assert full_explanation in caplog.text
     assert 'FULL_EXPLANATION_TAIL' in caplog.text
+
+
+def test_ungrounded_unlikely_for_academic_reference_is_uncertain():
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.provider = 'google'
+    verifier.model = 'gemini-test'
+    verifier.client = object()
+    verifier.cache_dir = None
+    verifier._call = lambda system_prompt, user_prompt: (
+        'EXPLANATION: The paper was found at the provided URL with exact title and authors.\n'
+        'LINK: https://academic.oup.com/asj/advance-article/doi/10.1093/asj/sjae251/7941969\n'
+        'VERDICT: UNLIKELY',
+        [],
+    )
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'All available checkers failed\nPaper not verified; cited URL could not be accessed',
+        'ref_title': '3d breast scanning in plastic surgery utilizing free iphone lidar applications and standard consumer devices: A comparative analysis',
+        'ref_authors_cited': 'Dawid Boczar, Magdalena Kitala, Klaudia Nowak, Bartlomiej Nowak, Rafal Slojewski',
+        'ref_year_cited': 2024,
+        'ref_url_cited': 'https://academic.oup.com/asj/advance-article-abstract/doi/10.1093/asj/sjae251/7941969',
+        'original_reference': {
+            'venue': 'Aesthetic Surgery Journal',
+            'url': 'https://academic.oup.com/asj/advance-article-abstract/doi/10.1093/asj/sjae251/7941969',
+        },
+    }
+
+    result = verifier.assess(entry)
+
+    assert result['verdict'] == 'UNCERTAIN'
+    assert 'not grounded in web search results or verified metadata' in result['explanation']
+
+
+def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.model = 'gemini-test'
+    response = MagicMock()
+    response.text = 'ok'
+    generate_content = MagicMock(side_effect=[RuntimeError('429 RESOURCE_EXHAUSTED'), response])
+    verifier.client = MagicMock()
+    verifier.client.models.generate_content = generate_content
+    sleeps = []
+    monkeypatch.setattr('refchecker.llm.hallucination_verifier.random.random', lambda: 0.25)
+    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleeps.append)
+
+    result = verifier._google_generate_content_with_retry(
+        contents='prompt',
+        config=object(),
+        purpose='test call',
+    )
+
+    assert result is response
+    assert generate_content.call_count == 2
+    assert sleeps == [1.25]
+
+
+def test_google_non_rate_limit_error_is_not_retried(monkeypatch):
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.model = 'gemini-test'
+    generate_content = MagicMock(side_effect=RuntimeError('invalid request'))
+    verifier.client = MagicMock()
+    verifier.client.models.generate_content = generate_content
+    sleep = MagicMock()
+    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleep)
+
+    try:
+        verifier._google_generate_content_with_retry(
+            contents='prompt',
+            config=object(),
+            purpose='test call',
+        )
+    except RuntimeError as exc:
+        assert 'invalid request' in str(exc)
+    else:
+        raise AssertionError('Expected RuntimeError')
+
+    assert generate_content.call_count == 1
+    sleep.assert_not_called()
 
 
 def test_verified_arxiv_id_high_overlap_skips_llm():
