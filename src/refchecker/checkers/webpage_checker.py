@@ -87,7 +87,11 @@ class WebPageChecker:
             'pytorch.org', 'tensorflow.org', 'readthedocs.io', 'onnxruntime.ai',
             'deepspeed.ai', 'huggingface.co', 'openai.com', 'microsoft.com',
             'google.com', 'nvidia.com', 'intel.com', 'langchain.com',
-            'lesswrong.com'  # LessWrong rationality and AI safety blog platform
+            'lesswrong.com',  # LessWrong rationality and AI safety blog platform
+            'llama.com', 'ai.meta.com', 'anthropic.com', 'claude.com',
+            'platform.openai.com', 'developers.openai.com', 'ai.google.dev',
+            'deepmind.google', 'mistral.ai', 'cohere.com', 'x.ai',
+            'docs.anthropic.com', 'docs.mistral.ai', 'docs.cohere.com',
         ]
         
         return any(domain in parsed.netloc for domain in doc_domains)
@@ -288,12 +292,22 @@ class WebPageChecker:
             'tensorflow.org': 'TensorFlow',
             'huggingface.co': 'Hugging Face',
             'openai.com': 'OpenAI',
+            'platform.openai.com': 'OpenAI',
+            'developers.openai.com': 'OpenAI',
             'microsoft.com': 'Microsoft',
             'google.com': 'Google',
+            'ai.google.dev': 'Google',
             'nvidia.com': 'NVIDIA',
             'intel.com': 'Intel',
             'deepspeed.ai': 'DeepSpeed',
-            'langchain.com': 'LangChain'
+            'langchain.com': 'LangChain',
+            'llama.com': 'Meta',
+            'ai.meta.com': 'Meta AI',
+            'anthropic.com': 'Anthropic',
+            'claude.com': 'Anthropic',
+            'mistral.ai': 'Mistral AI',
+            'cohere.com': 'Cohere',
+            'x.ai': 'xAI',
         }
         
         for domain_key, org in org_map.items():
@@ -831,7 +845,10 @@ class WebPageChecker:
             'documentation', 'docs', 'api', 'reference', 'guide', 'tutorial',
             'manual', 'readme', 'wiki', 'help', 'support', 'developer',
             'technical', 'white paper', 'whitepaper', 'brief', 'overview',
-            'policy', 'strategy', 'report', 'study', 'analysis', 'research'
+            'policy', 'strategy', 'report', 'study', 'analysis', 'research',
+            'model card', 'model cards', 'prompt format', 'prompt formats',
+            'release announcement', 'release notes', 'tech introduction',
+            'product documentation', 'model documentation',
         ]
         
         # Check URL domain for additional context
@@ -843,7 +860,10 @@ class WebPageChecker:
             'nytimes.com', 'washingtonpost.com', 'theguardian.com', 'wsj.com',
             'techcrunch.com', 'wired.com', 'theverge.com', 'arstechnica.com',
             'medium.com', 'substack.com', 'linkedin.com', 'github.io',
-            'readthedocs.io', 'stackoverflow.com', 'reddit.com'
+            'readthedocs.io', 'stackoverflow.com', 'reddit.com',
+            'llama.com', 'ai.meta.com', 'anthropic.com', 'claude.com',
+            'platform.openai.com', 'developers.openai.com', 'ai.google.dev',
+            'deepmind.google', 'mistral.ai', 'cohere.com', 'x.ai',
         ]
         
         # Combine all indicators
@@ -883,7 +903,7 @@ class WebPageChecker:
         url_matches = any(domain in url_lower for domain in web_domains)
         
         # Special case: if URL contains news/blog/docs indicators, lean towards web content
-        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy', 'insights', 'publications', 'updates', 'ezine']
+        url_content_indicators = ['news', 'blog', 'post', 'article', 'docs', 'help', 'guide', 'resources', 'policy', 'strategy', 'insights', 'publications', 'updates', 'ezine', 'model', 'models', 'release', 'releases']
         url_has_content_indicators = any(indicator in url_lower for indicator in url_content_indicators)
         
         # Special case: Check if venue is an organizational acronym/name that matches the URL domain
