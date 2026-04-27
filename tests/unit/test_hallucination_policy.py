@@ -707,6 +707,50 @@ def test_empty_author_normal_lowercase_title_is_not_broken_prefix_artifact():
     assert result is None
 
 
+def test_split_word_title_artifact_is_uncertain():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Paper not found by any checker',
+        'ref_title': 'Improving mutual information estimatio n with annealed and energy-based bounds',
+        'ref_authors_cited': 'Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi',
+        'ref_raw_text': 'Rob Brekelmans*Sicong Huang*Marzyeh Ghassemi#Improving mutual information estimatio n with annealed and energy-based bounds#International Conference on Learning Representations#2022#',
+        'original_reference': {
+            'authors': ['Rob Brekelmans', 'Sicong Huang', 'Marzyeh Ghassemi'],
+            'title': 'Improving mutual information estimatio n with annealed and energy-based bounds',
+            'raw_text': 'Rob Brekelmans*Sicong Huang*Marzyeh Ghassemi#Improving mutual information estimatio n with annealed and energy-based bounds#International Conference on Learning Representations#2022#',
+        },
+    }
+
+    result = run_hallucination_check(entry, llm_client=None)
+
+    assert result is not None
+    assert result['verdict'] == 'UNCERTAIN'
+    assert 'extraction artifacts' in result['explanation']
+
+
+def test_truncated_first_author_fragment_is_uncertain():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Author mismatch',
+        'ref_title': 'Multi-modal deep learning',
+        'ref_authors_cited': 'ngyu Kim, Juhan Nam, Honglak Lee, Andrew Y Ng',
+        'ref_authors_correct': 'Cem Akkus, Luyang Chu, Vladana Djakovic',
+        'ref_verified_url': 'https://arxiv.org/abs/2301.04856',
+        'ref_raw_text': 'ngyu Kim*Juhan Nam*Honglak Lee*Andrew Y Ng#Multi-modal deep learning#ICML#2011#',
+        'original_reference': {
+            'authors': ['ngyu Kim', 'Juhan Nam', 'Honglak Lee', 'Andrew Y Ng'],
+            'title': 'Multi-modal deep learning',
+            'raw_text': 'ngyu Kim*Juhan Nam*Honglak Lee*Andrew Y Ng#Multi-modal deep learning#ICML#2011#',
+        },
+    }
+
+    result = run_hallucination_check(entry, llm_client=None)
+
+    assert result is not None
+    assert result['verdict'] == 'UNCERTAIN'
+    assert 'truncated name fragment' in result['explanation']
+
+
 # ------------------------------------------------------------------
 # LLM override behavior
 # ------------------------------------------------------------------

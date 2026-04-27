@@ -48,6 +48,31 @@ _TEAM_NAMES = frozenset({
     '01.ai', 'ai', 'lcm team', 'the lcm team',
 })
 
+_SPLIT_WORD_SUFFIXES = frozenset({
+    'al', 'ed', 'er', 'ers', 'es', 'ing', 'ion', 'ions', 'ive', 'ly', 'n',
+    's', 'tion', 'tions', 'ty', 'ust',
+})
+
+
+def _looks_like_split_word_artifact(text: str) -> bool:
+    """Return True if text contains obvious OCR/PDF intra-word spacing."""
+    if not text:
+        return False
+    lowered = text.lower()
+    if re.search(r'\\\s*emph[a-z]*', text):
+        return True
+    if re.search(r'\b[a-z]{3,}-\s+[a-z]{2,}\b', lowered):
+        return True
+    for match in re.finditer(r'\b([a-z]{2,12})\s+([a-z]{1,6})\b', lowered):
+        first, second = match.groups()
+        if len(first) >= 4 and second in _SPLIT_WORD_SUFFIXES:
+            return True
+        if len(first) <= 3 and len(second) >= 4 and first + second in {
+            'robust', 'denovo', 'effect', 'token', 'model', 'paper',
+        }:
+            return True
+    return False
+
 
 def has_real_errors(error_entry: Dict[str, Any]) -> bool:
     """Return True if this error entry has real errors/warnings, not just info/suggestions.
@@ -699,6 +724,18 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
     if not title:
         return None
 
+    if not error_entry.get('ref_verified_url') and _looks_like_split_word_artifact(title):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The reference title contains obvious extraction artifacts such '
+                'as words split by stray spaces or TeX fragments. Treating this '
+                'as a malformed citation rather than reliable evidence of a '
+                'fabricated source.'
+            ),
+            'web_search': None,
+        }
+
     # Pattern 0: broken-prefix title with an empty author field.  The raw
     # delimiter layout starts with '#', and the title begins with a short
     # lowercase fragment such as "ling structural ...", strongly suggesting
@@ -729,6 +766,20 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
 
     if not authors:
         return None
+
+    first_author = authors.split(',', 1)[0].strip()
+    first_author_words = first_author.split()
+    first_author_word = first_author_words[0] if first_author_words else ''
+    if first_author_word and first_author_word[0].islower() and len(first_author_word) <= 5:
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The first cited author appears to be a truncated name fragment, '
+                'which indicates a reference extraction artifact rather than '
+                'reliable evidence of fabricated authors.'
+            ),
+            'web_search': None,
+        }
 
     # Pattern 1: Author field looks like a title (contains colon suggesting
     # "Title: Subtitle" pattern, and title is very short / org-like)
