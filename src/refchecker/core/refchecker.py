@@ -3058,6 +3058,10 @@ class ArxivReferenceChecker:
         if github_result:
             return github_result
 
+        webpage_result = self.verify_webpage_reference(reference)
+        if webpage_result:
+            return webpage_result
+
         verified_data, errors, paper_url = self.non_arxiv_checker.verify_reference(reference)
 
         if not errors:
