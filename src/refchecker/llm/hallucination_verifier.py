@@ -694,6 +694,13 @@ class LLMHallucinationVerifier:
             if hit is not None:
                 verdict, explanation, paper_link, found_metadata = self._parse_verdict(hit['text'])
                 web_urls = hit.get('web_urls', [])
+                logger.debug(
+                    'deep hallucination check cache hit: provider=%s model=%s ref=%r web_urls=%d',
+                    self.provider,
+                    self.model,
+                    error_entry.get('ref_title', '')[:80],
+                    len(web_urls),
+                )
                 # Apply verified-paper safety net to cached results too
                 verdict, explanation = self._apply_verified_safety_net(
                     verdict, explanation, error_entry, web_urls,
@@ -705,6 +712,7 @@ class LLMHallucinationVerifier:
                     'found_title': found_metadata.get('title'),
                     'found_authors': found_metadata.get('authors'),
                     'found_year': found_metadata.get('year'),
+                    'source': 'deep_hallucination_cache',
                     'web_search': {'found': bool(web_urls),
                                    'academic_urls': web_urls,
                                    'provider': self.provider} if web_urls else None,
@@ -718,6 +726,12 @@ class LLMHallucinationVerifier:
             }
 
         try:
+            logger.debug(
+                'deep hallucination check live call: provider=%s model=%s ref=%r',
+                self.provider,
+                self.model,
+                error_entry.get('ref_title', '')[:80],
+            )
             response, web_urls = self._call(system_prompt, user_prompt)
             verdict, explanation, paper_link, found_metadata = self._parse_verdict(response)
         except Exception as exc:
@@ -791,6 +805,7 @@ class LLMHallucinationVerifier:
             'found_title': found_metadata.get('title'),
             'found_authors': found_metadata.get('authors'),
             'found_year': found_metadata.get('year'),
+            'source': 'deep_hallucination_live',
             'web_search': web_result,
         }
 

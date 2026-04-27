@@ -109,6 +109,8 @@ dmypy.json
 logs/
 debug/
 output/
+_workspace/
+_workspace/**
 validation_output/
 semantic_scholar_db/
 *.log

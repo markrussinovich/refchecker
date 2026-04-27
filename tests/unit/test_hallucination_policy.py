@@ -1,6 +1,7 @@
 """Tests for hallucination policy pre-filter and LLM-based assessment."""
 
 import csv
+import logging
 
 from unittest.mock import MagicMock
 
@@ -861,6 +862,30 @@ def test_llm_likely_overrides_no_deterministic():
     }
     result = run_hallucination_check(entry, llm_client=mock_llm)
     assert result['verdict'] == 'LIKELY'
+
+
+def test_deep_hallucination_check_logs_when_llm_is_invoked(caplog):
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'A fabricated reference title long enough to require the LLM path',
+        'ref_authors_cited': 'Fake Author One, Fake Author Two',
+    }
+    mock_llm = MagicMock()
+    mock_llm.available = True
+    mock_llm.assess.return_value = {
+        'verdict': 'LIKELY',
+        'explanation': 'No paper with this title exists.',
+        'source': 'deep_hallucination_cache',
+        'web_search': None,
+    }
+
+    with caplog.at_level(logging.DEBUG, logger='refchecker.core.hallucination_policy'):
+        result = run_hallucination_check(entry, llm_client=mock_llm)
+
+    assert result['verdict'] == 'LIKELY'
+    assert 'deep hallucination check start' in caplog.text
+    assert 'deep hallucination check verdict=LIKELY' in caplog.text
 
 
 def test_verified_arxiv_id_high_overlap_skips_llm():

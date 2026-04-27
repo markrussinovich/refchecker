@@ -1495,6 +1495,10 @@ class ArxivReferenceChecker:
             # Fully spaced-out APPENDIX: "AP P E N D I X" (each letter separated)
             r'\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
             r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
+            # Collapsed PDF heading: "SUPPLEMENTARYMATERIAL: ..."
+            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s*(?:MATERIAL|Material|INFORMATION|Information)\b[^\n]*\n',
+            # Letter-spaced PDF headings: "S UPPLEMENTARY M ATERIAL : ..."
+            r'\n\s*S\s+U\s*P\s*P\s*L\s*E\s*M\s*E\s*N\s*T\s*A\s*R\s*Y\s+M\s*A\s*T\s*E\s*R\s*I\s*A\s*L\b[^\n]*\n',
             r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
             # PDF extraction can collapse this heading: "TECHNICALAPPENDICES ANDSUPPLEMENTARYMATERIAL"
             r'\n\s*(?:TECHNICAL\s*)?APPENDICES\s*(?:AND\s*)?SUPPLEMENTARY\s*MATERIAL\s*\n',
@@ -1505,6 +1509,7 @@ class ArxivReferenceChecker:
             r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
             r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
             r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
+            r'\n\s*(?:REVIEWER|Reviewer)\s+(?:SCORES?|Scores?)\s*:\s*\n',
             # Common post-bibliography headings (handle PDF concatenation with \s*)
             r'\n\s*(?:LIMITATIONS?|Limitations?)\s*\n',
             r'\n\s*(?:BROADER\s*)?(?:IMPACT|Impact)\s*(?:STATEMENT|Statement)?\s*\n',

@@ -1011,12 +1011,21 @@ def run_hallucination_check(
     # cache before requiring a live API key, so cached results work
     # even when no API key is configured (e.g. CI).
     if llm_client:
-        logger.debug(f"run_hallucination_check: calling LLM for ref={ref_title!r}")
+        logger.debug(
+            "run_hallucination_check: deep hallucination check start ref=%r llm_client=%s",
+            ref_title,
+            type(llm_client).__name__,
+        )
         llm_result = assess_hallucination(
             error_entry, llm_client=llm_client, web_searcher=web_searcher,
         )
         if llm_result:
-            logger.debug(f"run_hallucination_check: LLM verdict={llm_result.get('verdict')} ref={ref_title!r}")
+            logger.debug(
+                "run_hallucination_check: deep hallucination check verdict=%s ref=%r source=%s",
+                llm_result.get('verdict'),
+                ref_title,
+                llm_result.get('source') or 'llm',
+            )
             return llm_result
     else:
         logger.debug(f"run_hallucination_check: no llm_client for ref={ref_title!r}")

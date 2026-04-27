@@ -520,6 +520,62 @@ class TestBibliographyEndDetectionRegression:
         assert "AP P E N D I X" not in bib
         assert "EXPERIMENTS" not in bib
 
+    def test_spaced_supplementary_material_marker(self):
+        """Regression for 7dvYWzOiEu: letter-spaced supplementary heading."""
+        refs = MULTI_PAGE_REFS
+        for heading in (
+            "S UPPLEMENTARY M ATERIAL : M ETA L EARNING T HEORY I NFORMED\n"
+            "I NDUCTIVE B IASES USING D EEP K ERNEL G AUSSIAN P ROCESSES",
+            "SUPPLEMENTARYMATERIAL: METALEARNINGTHEORYINFORMED\n"
+            "INDUCTIVEBIASES USINGDEEPKERNELGAUSSIANPROCESSES",
+        ):
+            appendix = (
+                "15\n"
+                "Published as a conference paper at ICLR 2026\n"
+                f"{heading}\n"
+                "S.A Extended Related Work . . . . . . . . . . . . . . . . . . . S2\n"
+                "Our work is also related to Kobalczyk & van der Schaar (2025), "
+                "whose informed neural process framework is discussed here.\n"
+            )
+            text = self._build(refs, appendix)
+            bib = self.checker.find_bibliography_section(text)
+            assert bib is not None
+            assert "Vaswani" in bib
+            assert "SUPPLEMENTARY" not in bib.replace(" ", "")
+            assert "informed neural process" not in bib
+
+    def test_reviewer_scores_marker_ends_embedded_references(self):
+        """Regression for Fllp8l6Puy: reviewer-score blocks after references are not bibliography."""
+        refs = (
+            "Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, "
+            "Florencia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, "
+            "Shyamal Anadkat, et al. 2023. Gpt-4 technical report. arXiv preprint arXiv:2303.08774.\n"
+            "Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, "
+            "Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. 2024. "
+            "The llama 3 herd of models. arXiv preprint arXiv:2407.21783.\n"
+            "Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, "
+            "Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric Xing, et al. 2024. "
+            "Judging llm-as-a-judge with mt-bench and chatbot arena. Advances in Neural "
+            "Information Processing Systems, 36.\n"
+        )
+        after = (
+            "Published as a conference paper at ICLR 2026\n"
+            "Reviewer Scores:\n"
+            "From Ideation Study:\n"
+            "Novelty: 5.5\n"
+            "Title: Adaptive Contextual Pruning: Improving Relevance and Conciseness in Long-Form Generation\n"
+            "Chang et al. (2024), technical documentation generation (Dvivedi et al., 2024), "
+            "and retrieval-augmented generation appear in the reproduced idea text.\n"
+        )
+        text = self._build(refs, after)
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Josh Achiam" in bib
+        assert "Judging llm-as-a-judge" in bib
+        assert "Reviewer Scores" not in bib
+        assert "Adaptive Contextual Pruning" not in bib
+        assert "retrieval-augmented generation" not in bib
+
     def test_algorithm_header_ends_bibliography(self):
         """Regression for EOV1q1U23N: 'Algorithm 3 ...' should end bibliography."""
         refs = MULTI_PAGE_REFS
