@@ -665,6 +665,48 @@ def test_verified_ref_author_field_with_title_words_is_garbled_metadata():
     assert 'metadata extraction error' in result['explanation']
 
 
+def test_empty_author_broken_prefix_title_is_uncertain_extraction_artifact():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Paper not found by any checker',
+        'ref_title': 'ling structural representations into protein sequence models',
+        'ref_authors_cited': '',
+        'ref_year_cited': 2025,
+        'ref_venue_cited': 'The Thirteenth International Conference on Learning Representations',
+        'ref_raw_text': '#ling structural representations into protein sequence models#The Thirteenth International Conference on Learning Representations#2025#',
+        'original_reference': {
+            'authors': [],
+            'title': 'ling structural representations into protein sequence models',
+            'raw_text': '#ling structural representations into protein sequence models#The Thirteenth International Conference on Learning Representations#2025#',
+        },
+    }
+
+    result = run_hallucination_check(entry, llm_client=None)
+
+    assert result is not None
+    assert result['verdict'] == 'UNCERTAIN'
+    assert 'truncated extraction artifact' in result['explanation']
+
+
+def test_empty_author_normal_lowercase_title_is_not_broken_prefix_artifact():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Paper not found by any checker',
+        'ref_title': 'the effects of representation learning on synthetic tasks',
+        'ref_authors_cited': '',
+        'ref_raw_text': '#the effects of representation learning on synthetic tasks#2025#',
+        'original_reference': {
+            'authors': [],
+            'title': 'the effects of representation learning on synthetic tasks',
+            'raw_text': '#the effects of representation learning on synthetic tasks#2025#',
+        },
+    }
+
+    result = run_hallucination_check(entry, llm_client=None)
+
+    assert result is None
+
+
 # ------------------------------------------------------------------
 # LLM override behavior
 # ------------------------------------------------------------------

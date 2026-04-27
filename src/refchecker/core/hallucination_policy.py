@@ -696,7 +696,38 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
     if orig:
         raw_text = orig.get('raw_text', '') or ''
 
-    if not title or not authors:
+    if not title:
+        return None
+
+    # Pattern 0: broken-prefix title with an empty author field.  The raw
+    # delimiter layout starts with '#', and the title begins with a short
+    # lowercase fragment such as "ling structural ...", strongly suggesting
+    # the beginning of the title was cut off during extraction.
+    raw_text_lstripped = raw_text.lstrip()
+    title_words = re.findall(r'[A-Za-z][A-Za-z0-9-]*', title)
+    if not authors and raw_text_lstripped.startswith('#') and len(title_words) >= 5:
+        first_word = title_words[0]
+        common_lowercase_starts = {
+            'a', 'an', 'and', 'as', 'by', 'for', 'from', 'in', 'of', 'on',
+            'the', 'to', 'toward', 'towards', 'using', 'via', 'with',
+        }
+        if (
+            first_word.islower()
+            and first_word not in common_lowercase_starts
+            and len(first_word) <= 4
+        ):
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': (
+                    'The reference has no parsed authors and the title appears '
+                    'to start in the middle of a word or phrase. This is likely '
+                    'a truncated extraction artifact rather than reliable '
+                    'evidence of a fabricated citation.'
+                ),
+                'web_search': None,
+            }
+
+    if not authors:
         return None
 
     # Pattern 1: Author field looks like a title (contains colon suggesting
