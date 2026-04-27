@@ -906,7 +906,7 @@ def pre_screen_hallucination(
     ('needs_llm', None)
         Deterministic checks were inconclusive — run LLM assessment.
     """
-    ref_title = error_entry.get('ref_title', '')[:80]
+    ref_title = error_entry.get('ref_title', '')
 
     if not has_real_errors(error_entry):
         logger.debug(f"pre_screen: skip (no real errors) ref={ref_title!r}")
@@ -960,7 +960,7 @@ def run_hallucination_check(
     -------
     dict with verdict/explanation/web_search, or None if no assessment needed.
     """
-    ref_title = error_entry.get('ref_title', '')[:80]
+    ref_title = error_entry.get('ref_title', '')
     outcome, assessment = pre_screen_hallucination(error_entry)
     logger.debug(f"run_hallucination_check: pre_screen outcome={outcome} ref={ref_title!r}")
     if outcome == 'resolved':

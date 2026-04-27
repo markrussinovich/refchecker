@@ -6915,10 +6915,10 @@ class ArxivReferenceChecker:
         if result:
             logger.debug(
                 "Hallucination assessment: title='%s' verdict=%s explanation=%s",
-                reference.get('title', '')[:60], result.get('verdict'), (result.get('explanation') or '')[:200],
+                reference.get('title', ''), result.get('verdict'), result.get('explanation') or '',
             )
         else:
-            logger.debug("Hallucination assessment returned None for: %s", reference.get('title', '')[:60])
+            logger.debug("Hallucination assessment returned None for: %s", reference.get('title', ''))
         return result
 
     def _output_reference_errors(self, reference, errors, url):

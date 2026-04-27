@@ -698,7 +698,7 @@ class LLMHallucinationVerifier:
                     'deep hallucination check cache hit: provider=%s model=%s ref=%r web_urls=%d',
                     self.provider,
                     self.model,
-                    error_entry.get('ref_title', '')[:80],
+                    error_entry.get('ref_title', ''),
                     len(web_urls),
                 )
                 # Apply verified-paper safety net to cached results too
@@ -730,7 +730,7 @@ class LLMHallucinationVerifier:
                 'deep hallucination check live call: provider=%s model=%s ref=%r',
                 self.provider,
                 self.model,
-                error_entry.get('ref_title', '')[:80],
+                error_entry.get('ref_title', ''),
             )
             response, web_urls = self._call(system_prompt, user_prompt)
             verdict, explanation, paper_link, found_metadata = self._parse_verdict(response)
@@ -795,7 +795,7 @@ class LLMHallucinationVerifier:
 
         logger.debug(
             'Hallucination assessment: title=%r verdict=%s explanation=%s',
-            error_entry.get('ref_title', '')[:60], verdict, explanation[:100],
+            error_entry.get('ref_title', ''), verdict, explanation,
         )
 
         return {
@@ -877,19 +877,21 @@ class LLMHallucinationVerifier:
         _metadata_prefixes = ('author', 'year', 'venue', 'doi')
         if any(error_type.startswith(p) for p in _metadata_prefixes):
             # For author-type errors, check overlap before downgrading.
-            # Catastrophic mismatches (0% overlap = completely different
-            # authors) are genuine hallucinations, not parsing/edition
-            # issues.  Only downgrade when there is meaningful overlap.
+            # Low-overlap author mismatches are genuine hallucinations, not
+            # parsing/edition issues. Only downgrade when most cited authors
+            # match the verified paper.
             if error_type.startswith('author'):
                 from refchecker.core.hallucination_policy import _compute_author_overlap
                 cited_str = error_entry.get('ref_authors_cited', '')
                 correct_str = error_entry.get('ref_authors_correct', '')
                 overlap = _compute_author_overlap(cited_str, correct_str)
-                if overlap is not None and overlap < 0.2:
+                if overlap is None or overlap <= 0.5:
                     logger.debug(
-                        'Keeping LIKELY for verified ref with catastrophic author '
-                        'mismatch (overlap=%.0f%%, error_type=%s, verified_url=%s)',
-                        overlap * 100, error_type, verified_url,
+                        'Keeping LIKELY for verified ref with low author match '
+                        '(overlap=%s, error_type=%s, verified_url=%s)',
+                        'unknown' if overlap is None else f'{overlap * 100:.0f}%',
+                        error_type,
+                        verified_url,
                     )
                     return verdict, explanation
 

@@ -888,6 +888,75 @@ def test_deep_hallucination_check_logs_when_llm_is_invoked(caplog):
     assert 'deep hallucination check verdict=LIKELY' in caplog.text
 
 
+def test_verified_safety_net_keeps_likely_when_author_overlap_unknown():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author count mismatch: 1 cited vs 9 correct',
+        'ref_title': 'Overcoming data scarcity in biomedical imaging with a foundational multi-task model',
+        'ref_authors_cited': 'Chia-Yu et al. Chang',
+        'ref_authors_correct': (
+            'Raphael Schaefer, Till Nicke, Henning Hoefener, Annkristin Lange, '
+            'D. Merhof, Friedrich Feuerhake, Volkmar Schulz, Johannes Lotz, F. Kiessling'
+        ),
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:265221081',
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_verified_safety_net(
+        'LIKELY', 'The cited paper exists, but the cited authors are for a different work.', entry, [],
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'downgraded' not in explanation
+
+
+def test_verified_safety_net_keeps_likely_when_author_overlap_is_half():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author mismatch',
+        'ref_title': 'A verified paper with half fabricated authors',
+        'ref_authors_cited': 'Ashish Vaswani, Noam Shazeer, Fake Author, Imaginary Person',
+        'ref_authors_correct': 'Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit',
+        'ref_verified_url': 'https://arxiv.org/abs/1706.03762',
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_verified_safety_net(
+        'LIKELY', 'Only half of the cited author list matches the verified paper.', entry, [],
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'downgraded' not in explanation
+
+
+def test_deep_hallucination_assessment_log_includes_full_explanation(caplog):
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.provider = 'google'
+    verifier.model = 'gemini-test'
+    verifier.client = object()
+    verifier.cache_dir = None
+    full_explanation = (
+        'The cited paper exists under the title "Overcoming data scarcity in biomedical imaging '
+        'with a foundational multi-task model" and was published in Nature Computational Science '
+        'in 2024. The cited author list belongs to a different work. FULL_EXPLANATION_TAIL'
+    )
+    verifier._call = lambda system_prompt, user_prompt: (
+        f'EXPLANATION: {full_explanation}\nVERDICT: LIKELY',
+        [],
+    )
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Overcoming data scarcity in biomedical imaging with a foundational multi-task model',
+        'ref_authors_cited': 'Chia-Yu et al. Chang',
+    }
+
+    with caplog.at_level(logging.DEBUG, logger='refchecker.llm.hallucination_verifier'):
+        result = verifier.assess(entry)
+
+    assert result['verdict'] == 'LIKELY'
+    assert full_explanation in caplog.text
+    assert 'FULL_EXPLANATION_TAIL' in caplog.text
+
+
 def test_verified_arxiv_id_high_overlap_skips_llm():
     entry = {
         'error_type': 'arxiv_id',
