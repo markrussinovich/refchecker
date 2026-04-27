@@ -728,6 +728,30 @@ def test_split_word_title_artifact_is_uncertain():
     assert 'extraction artifacts' in result['explanation']
 
 
+def test_overlapping_split_word_title_artifacts_are_detected():
+    for title in (
+        'Eff ect of tokenization on transformers for biological sequences',
+        'Discrete diffus ion modeling by estimating the ratios of the data distribution',
+        'A compara tive analysis of discrete entropy estimators for large-alphabet problems',
+    ):
+        entry = {
+            'error_type': 'unverified',
+            'error_details': 'Paper not found by any checker',
+            'ref_title': title,
+            'ref_authors_cited': 'Example Author, Second Author',
+            'original_reference': {
+                'authors': ['Example Author', 'Second Author'],
+                'title': title,
+                'raw_text': f'Example Author*Second Author#{title}#2024#',
+            },
+        }
+
+        result = run_hallucination_check(entry, llm_client=None)
+
+        assert result is not None
+        assert result['verdict'] == 'UNCERTAIN'
+
+
 def test_truncated_first_author_fragment_is_uncertain():
     entry = {
         'error_type': 'multiple',

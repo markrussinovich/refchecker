@@ -50,7 +50,7 @@ _TEAM_NAMES = frozenset({
 
 _SPLIT_WORD_SUFFIXES = frozenset({
     'al', 'ed', 'er', 'ers', 'es', 'ing', 'ion', 'ions', 'ive', 'ly', 'n',
-    's', 'tion', 'tions', 'ty', 'ust',
+    's', 'tion', 'tions', 'tive', 'ty', 'ust',
 })
 
 
@@ -63,11 +63,11 @@ def _looks_like_split_word_artifact(text: str) -> bool:
         return True
     if re.search(r'\b[a-z]{3,}-\s+[a-z]{2,}\b', lowered):
         return True
-    for match in re.finditer(r'\b([a-z]{2,12})\s+([a-z]{1,6})\b', lowered):
-        first, second = match.groups()
+    words = re.findall(r'[a-z]+', lowered)
+    for first, second in zip(words, words[1:]):
         if len(first) >= 4 and second in _SPLIT_WORD_SUFFIXES:
             return True
-        if len(first) <= 3 and len(second) >= 4 and first + second in {
+        if len(first) <= 3 and len(second) >= 3 and first + second in {
             'robust', 'denovo', 'effect', 'token', 'model', 'paper',
         }:
             return True
