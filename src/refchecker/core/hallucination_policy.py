@@ -74,6 +74,23 @@ def _looks_like_split_word_artifact(text: str) -> bool:
     return False
 
 
+def _looks_like_concatenated_word_artifact(text: str) -> bool:
+    """Return True for obvious missing-space title extraction artifacts."""
+    if not text:
+        return False
+    glued_markers = (
+        'and', 'for', 'from', 'into', 'onto', 'review', 'study', 'the',
+        'tool', 'using', 'with',
+    )
+    for token in re.findall(r'[A-Za-z]{20,}', text):
+        lowered = token.lower()
+        if len(lowered) >= 30:
+            return True
+        if any(0 < lowered.find(marker) < len(lowered) - len(marker) for marker in glued_markers):
+            return True
+    return False
+
+
 def has_real_errors(error_entry: Dict[str, Any]) -> bool:
     """Return True if this error entry has real errors/warnings, not just info/suggestions.
 
@@ -732,6 +749,17 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
                 'as words split by stray spaces or TeX fragments. Treating this '
                 'as a malformed citation rather than reliable evidence of a '
                 'fabricated source.'
+            ),
+            'web_search': None,
+        }
+
+    if not error_entry.get('ref_verified_url') and _looks_like_concatenated_word_artifact(title):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The reference title contains long concatenated words that look '
+                'like missing-space extraction artifacts. Treating this as a '
+                'malformed citation rather than reliable evidence of a fabricated source.'
             ),
             'web_search': None,
         }
