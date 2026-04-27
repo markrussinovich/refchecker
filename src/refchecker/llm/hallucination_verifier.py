@@ -841,6 +841,21 @@ class LLMHallucinationVerifier:
         if not verified_url:
             return verdict, explanation
 
+        if LLMHallucinationVerifier._is_verified_real_world_source(error_entry):
+            logger.debug(
+                'Overriding LIKELY → UNLIKELY for verified real-world web source '
+                '(verified_url=%s, grounded=%s)',
+                verified_url, bool(web_urls),
+            )
+            verdict = 'UNLIKELY'
+            explanation += (
+                f' (Verdict corrected: the cited official web source was '
+                f'verified at {verified_url}; non-academic documentation, '
+                f'model cards, blog posts, release announcements, software, '
+                f'and product pages are valid real-world sources.)'
+            )
+            return verdict, explanation
+
         error_type = (error_entry.get('error_type') or '').lower()
         # Match error types that are purely metadata mismatches.
         # These can have version suffixes like "author (v4 vs v5 update)".
@@ -875,6 +890,66 @@ class LLMHallucinationVerifier:
                 f'or edition issue, not hallucination.)'
             )
         return verdict, explanation
+
+    @staticmethod
+    def _is_verified_real_world_source(error_entry: Dict[str, Any]) -> bool:
+        """Return True for verified non-academic web sources.
+
+        These are citations to docs, model cards, product pages, release
+        announcements, blog posts, datasets, and software pages.  They should
+        not be marked hallucinated merely because academic databases do not
+        index them or the LLM's web search missed the page.
+        """
+        from urllib.parse import urlparse
+
+        verified_url = error_entry.get('ref_verified_url') or ''
+        cited_url = error_entry.get('ref_url_cited') or ''
+        orig = error_entry.get('original_reference') or {}
+        url = verified_url or cited_url or orig.get('url', '') or ''
+        if not isinstance(url, str) or not url.startswith(('http://', 'https://')):
+            return False
+
+        hostname = (urlparse(url).hostname or '').lower()
+        if hostname.startswith('www.'):
+            hostname = hostname[4:]
+
+        academic_domains = (
+            'arxiv.org', 'semanticscholar.org', 'openreview.net',
+            'aclanthology.org', 'doi.org', 'crossref.org', 'dblp.org',
+            'springer.com', 'ieee.org', 'acm.org', 'sciencedirect.com',
+            'wiley.com', 'nature.com', 'science.org', 'pubmed.ncbi.nlm.nih.gov',
+        )
+        if any(hostname == domain or hostname.endswith('.' + domain) for domain in academic_domains):
+            return False
+
+        text = ' '.join(str(part or '') for part in (
+            error_entry.get('ref_title'),
+            error_entry.get('ref_venue_cited'),
+            orig.get('venue'),
+            orig.get('journal'),
+            orig.get('booktitle'),
+            url,
+        )).lower()
+
+        source_markers = (
+            'docs', 'documentation', 'model card', 'model cards',
+            'prompt format', 'prompt formats', 'api', 'developer',
+            'blog', 'release', 'announcement', 'technical report',
+            'tech introduction', 'product', 'software', 'github',
+            'dataset', 'huggingface', 'whitepaper', 'guide', 'manual',
+            'reference', 'platform', 'news', 'index/',
+        )
+        known_real_world_domains = (
+            'llama.com', 'ai.meta.com', 'openai.com', 'anthropic.com',
+            'platform.openai.com', 'developers.openai.com', 'huggingface.co',
+            'github.com', 'microsoft.com', 'google.com', 'nvidia.com',
+            'pytorch.org', 'tensorflow.org', 'readthedocs.io',
+        )
+
+        return (
+            any(marker in text for marker in source_markers)
+            or any(hostname == domain or hostname.endswith('.' + domain) for domain in known_real_world_domains)
+        )
 
     @staticmethod
     def _parse_verdict(response: str) -> tuple:

@@ -15,6 +15,7 @@ from refchecker.core.hallucination_policy import (
 )
 from refchecker.core.report_builder import ReportBuilder
 from refchecker.llm.hallucination_verifier import build_assessment_prompt
+from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
 
 
 # ------------------------------------------------------------------
@@ -294,6 +295,56 @@ def test_hallucination_prompt_treats_vendor_tech_intro_as_valid_source():
     assert 'Seed1.6 Tech Introduction' in system_prompt
     assert 'Do NOT require these sources to be peer-reviewed papers' in system_prompt
     assert 'https://seed.bytedance.com/en/seed1_6' in user_prompt
+
+
+def test_verified_official_model_docs_likely_is_corrected_to_unlikely():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Cited URL does not reference this paper',
+        'ref_title': 'Llama 3.3 — model cards and prompt formats',
+        'ref_authors_cited': 'Meta AI',
+        'ref_year_cited': '2024',
+        'ref_url_cited': 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama3_3/',
+        'ref_verified_url': 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama3_3/',
+        'original_reference': {
+            'venue': 'n.d.',
+            'url': 'https://www.llama.com/docs/model-cards-and-prompt-formats/llama3_3/',
+        },
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_verified_safety_net(
+        'LIKELY',
+        'The page was not found.',
+        entry,
+        [],
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'official web source' in explanation
+
+
+def test_verified_academic_wrong_arxiv_id_is_not_corrected_by_real_world_safety_net():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Incorrect ArXiv ID',
+        'ref_title': 'Gte: General text embeddings with weak supervision',
+        'ref_authors_cited': 'Fake Author',
+        'ref_url_cited': 'https://arxiv.org/abs/2308.03281',
+        'ref_verified_url': 'https://arxiv.org/abs/2308.03281',
+        'original_reference': {
+            'venue': 'arXiv preprint arXiv:2308.03281',
+            'url': 'https://arxiv.org/abs/2308.03281',
+        },
+    }
+
+    verdict, _ = LLMHallucinationVerifier._apply_verified_safety_net(
+        'LIKELY',
+        'The arXiv ID points to a different paper.',
+        entry,
+        [],
+    )
+
+    assert verdict == 'LIKELY'
 
 
 def test_hallucination_prompt_treats_software_project_citation_as_valid_source():
