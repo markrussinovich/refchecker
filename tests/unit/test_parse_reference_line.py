@@ -86,3 +86,39 @@ class TestCitationStringAsTitle:
         ref = "John Smith#GPT-4: A Large Language Model#arXiv#2023#"
         result = checker._create_structured_llm_references(ref)
         assert 'gpt-4' in result['title'].lower()
+
+
+class TestExplicitUrlPreservation:
+    """Test that explicit structured URLs survive arXiv-like venue text."""
+
+    def test_explicit_web_url_preferred_over_arxiv_venue_url(self, checker):
+        ref = (
+            "Anthropic#Introducing claude#arXiv preprint arXiv:2301.00000#"
+            "2023#https://www.anthropic.com/index/introducing-claude/"
+        )
+        result = checker._create_structured_llm_references(ref)
+
+        assert result["url"] == "https://www.anthropic.com/index/introducing-claude/"
+        assert result["cited_url"] == "https://www.anthropic.com/index/introducing-claude/"
+        assert result["arxiv_url"] == "https://arxiv.org/abs/2301.00000"
+        assert result["type"] == "non-arxiv"
+
+    def test_arxiv_url_used_when_no_explicit_web_url(self, checker):
+        ref = "Example Author#Example title#arXiv preprint arXiv:2402.07314#2024#"
+        result = checker._create_structured_llm_references(ref)
+
+        assert result["url"] == "https://arxiv.org/abs/2402.07314"
+        assert result["cited_url"] == "https://arxiv.org/abs/2402.07314"
+        assert result["arxiv_url"] == "https://arxiv.org/abs/2402.07314"
+        assert result["type"] == "arxiv"
+
+    def test_explicit_web_url_has_internal_spaces_normalized(self, checker):
+        ref = (
+            "OpenPangu Team#Openpangu deepdiver-v2: Multi-agent learning for deep information seeking#"
+            "n.d.#2025b#https://ai. gitcode. com/ascend-tribe/openPangu-Embedded-7B-DeepDiver"
+        )
+        result = checker._create_structured_llm_references(ref)
+
+        assert result["url"] == "https://ai.gitcode.com/ascend-tribe/openPangu-Embedded-7B-DeepDiver"
+        assert result["cited_url"] == "https://ai.gitcode.com/ascend-tribe/openPangu-Embedded-7B-DeepDiver"
+        assert result["type"] == "non-arxiv"

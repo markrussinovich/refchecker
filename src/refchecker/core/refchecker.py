@@ -5423,6 +5423,9 @@ class ArxivReferenceChecker:
         
         doi = None
         url = None
+        def _clean_structured_url_field(value: str) -> str:
+            return re.sub(r'\s+', '', value.strip()) if value else ''
+
         for pattern in doi_patterns:
             doi_match = re.search(pattern, ref_text, re.IGNORECASE)
             if doi_match:
@@ -5525,9 +5528,10 @@ class ArxivReferenceChecker:
                 venue = ""
                 year_part = third_part
                 # Check if fourth part is a URL
-                if fourth_part.startswith('http'):
-                    url = fourth_part if 'arxiv' not in fourth_part.lower() else None
-                    arxiv_url = fourth_part if 'arxiv' in fourth_part.lower() else arxiv_url
+                fourth_url = _clean_structured_url_field(fourth_part)
+                if fourth_url.startswith('http'):
+                    url = fourth_url if 'arxiv' not in fourth_url.lower() else None
+                    arxiv_url = fourth_url if 'arxiv' in fourth_url.lower() else arxiv_url
                 else:
                     year_part = fourth_part  # In case fourth part is also a year
                 logger.debug(f"4-part format (Year in 3rd) - Authors: '{author_text}', Title: '{title}', Year: '{year_part}', URL: '{fourth_part}'")
@@ -5545,7 +5549,7 @@ class ArxivReferenceChecker:
             title = clean_title_basic(parts[1].strip())
             venue = parts[2].strip()
             year_part = parts[3].strip()
-            url_part = parts[4].strip()
+            url_part = _clean_structured_url_field(parts[4])
             logger.debug(f"5-part format - Authors: '{author_text}', Title: '{title}', Venue: '{venue}', Year: '{year_part}', URL: '{url_part}'")
             
             # Parse authors
@@ -5572,7 +5576,7 @@ class ArxivReferenceChecker:
                 year_part = parts[3].strip()
             if len(parts) >= 5:
                 # Handle URL in 5th position
-                url_part = parts[4].strip()
+                url_part = _clean_structured_url_field(parts[4])
                 if url_part.startswith('http'):
                     if 'arxiv' in url_part.lower():
                         arxiv_url = url_part
@@ -5799,8 +5803,10 @@ class ArxivReferenceChecker:
         if not authors:
             authors = []  # Allow empty authors for references without author information
         
-        # Determine reference type
-        ref_type = 'arxiv' if arxiv_url else ('non-arxiv' if (url or doi) else 'other')
+        # Determine reference type.  When the structured LLM output includes an
+        # explicit fifth-field URL, that URL is the cited source and should not
+        # be overwritten by an arXiv ID mentioned in the venue field.
+        ref_type = 'arxiv' if arxiv_url and not url else ('non-arxiv' if (url or doi) else 'other')
         
         # If we have an ArXiv URL but suspicious year (like 1911 from ArXiv ID), try to get correct year from ArXiv API
         if arxiv_url and year and (year < 1990 or str(year) in arxiv_url):
@@ -5819,7 +5825,9 @@ class ArxivReferenceChecker:
                     logger.debug(f"Could not fetch ArXiv year for {arxiv_id}: {e}")
         
         return {
-            'url': arxiv_url or url or "",
+            'url': url or arxiv_url or "",
+            'cited_url': url or arxiv_url or "",
+            'arxiv_url': arxiv_url or "",
             'doi': doi,
             'year': year or None,
             'authors': authors,

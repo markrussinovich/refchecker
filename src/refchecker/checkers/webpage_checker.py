@@ -88,6 +88,7 @@ class WebPageChecker:
             'deepspeed.ai', 'huggingface.co', 'openai.com', 'microsoft.com',
             'google.com', 'nvidia.com', 'intel.com', 'langchain.com',
             'lesswrong.com',  # LessWrong rationality and AI safety blog platform
+            'github.io', 'gitcode.com', 'atomgit.com',
             'llama.com', 'ai.meta.com', 'anthropic.com', 'claude.com',
             'platform.openai.com', 'developers.openai.com', 'ai.google.dev',
             'deepmind.google', 'mistral.ai', 'cohere.com', 'x.ai',
@@ -308,6 +309,8 @@ class WebPageChecker:
             'mistral.ai': 'Mistral AI',
             'cohere.com': 'Cohere',
             'x.ai': 'xAI',
+            'gitcode.com': 'GitCode',
+            'atomgit.com': 'AtomGit',
         }
         
         for domain_key, org in org_map.items():
@@ -756,7 +759,7 @@ class WebPageChecker:
                     }
                     logger.debug(f"URL verified as valid source for reference without venue: {web_url}")
                     return verified_data, [], web_url
-                elif self._is_web_content_venue(venue_field, web_url):
+                elif self._is_web_content_venue(venue_field, web_url) or self._is_trusted_web_content_url(web_url):
                     # Has venue but it's a web content venue (news, blog, etc.) - verify it
                     verified_data = {
                         'title': reference.get('title', ''),
@@ -860,7 +863,7 @@ class WebPageChecker:
             'nytimes.com', 'washingtonpost.com', 'theguardian.com', 'wsj.com',
             'techcrunch.com', 'wired.com', 'theverge.com', 'arstechnica.com',
             'medium.com', 'substack.com', 'linkedin.com', 'github.io',
-            'readthedocs.io', 'stackoverflow.com', 'reddit.com',
+            'gitcode.com', 'atomgit.com', 'readthedocs.io', 'stackoverflow.com', 'reddit.com',
             'llama.com', 'ai.meta.com', 'anthropic.com', 'claude.com',
             'platform.openai.com', 'developers.openai.com', 'ai.google.dev',
             'deepmind.google', 'mistral.ai', 'cohere.com', 'x.ai',
@@ -911,6 +914,46 @@ class WebPageChecker:
         organizational_match = self._check_organizational_venue_match(venue, url_lower)
         
         return venue_matches or url_matches or url_has_content_indicators or organizational_match
+
+    def _is_trusted_web_content_url(self, url: str) -> bool:
+        """Return True for non-academic URLs that are appropriate web sources.
+
+        This is intentionally narrower than ``is_web_page_url``: it is used only
+        after a page was fetched and the cited title was found on that page.
+        It lets official blogs, docs, model cards, project pages, and GitHub
+        Pages sources verify even when the venue field was incorrectly labeled
+        as an academic venue such as ``arXiv preprint``.
+        """
+        if not url:
+            return False
+
+        url_lower = url.lower()
+        academic_domains = [
+            'ieee.org', 'acm.org', 'springer.com', 'sciencedirect.com',
+            'wiley.com', 'nature.com', 'science.org', 'cell.com',
+            'thelancet.com', 'plos.org', 'arxiv.org', 'pubmed.ncbi.nlm.nih.gov',
+            'scholar.google.com', 'researchgate.net', 'academia.edu',
+            'ssrn.com', 'jstor.org', 'elsevier.com', 'sagepub.com',
+            'tandfonline.com', 'oup.com', 'cambridge.org', 'openreview.net',
+        ]
+        if any(domain in url_lower for domain in academic_domains):
+            return False
+
+        trusted_domains = [
+            'anthropic.com', 'claude.com', 'openai.com', 'platform.openai.com',
+            'developers.openai.com', 'llama.com', 'ai.meta.com', 'huggingface.co',
+            'github.io', 'gitcode.com', 'atomgit.com', 'readthedocs.io',
+            'ai.google.dev', 'deepmind.google', 'mistral.ai', 'cohere.com', 'x.ai',
+        ]
+        if any(domain in url_lower for domain in trusted_domains):
+            return True
+
+        content_indicators = [
+            'blog', 'news', 'docs', 'documentation', 'model', 'models',
+            'model-card', 'release', 'releases', 'project', 'projects',
+            'repository', 'leaderboard', 'dataset', 'datasets', 'demo',
+        ]
+        return any(indicator in url_lower for indicator in content_indicators)
     
     def _check_organizational_venue_match(self, venue: str, url_lower: str) -> bool:
         """
