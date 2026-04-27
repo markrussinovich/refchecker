@@ -738,6 +738,26 @@ def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, 
                 'web_search': None,
             }
 
+    # Pattern 2b: author field contains title fragments rather than names.
+    # Example: authors="Multi-Linguality Multi-Functionality Multi-Granularity"
+    # for the real paper "M3-Embedding: Multi-Linguality, ...".
+    if error_entry.get('ref_verified_url'):
+        token_re = re.compile(r'[a-z0-9]+')
+        title_tokens = set(token_re.findall(title.lower()))
+        author_tokens = token_re.findall(authors.lower())
+        if len(author_tokens) >= 3 and title_tokens:
+            overlap = sum(1 for token in author_tokens if token in title_tokens)
+            if overlap / len(author_tokens) >= 0.75:
+                return {
+                    'verdict': 'UNLIKELY',
+                    'explanation': (
+                        'The cited author field appears to contain title words '
+                        'rather than person or organization names. The source was '
+                        'verified, so this is a metadata extraction error, not hallucination.'
+                    ),
+                    'web_search': None,
+                }
+
     # Pattern 3: Title is explicitly a truncation/parsing placeholder
     title_lower = title.lower().strip('() ')
     if title_lower in ('incomplete reference - truncated', 'incomplete reference',

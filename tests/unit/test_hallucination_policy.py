@@ -648,6 +648,23 @@ def test_verified_ref_high_overlap_not_flagged():
     assert result is None  # No hallucination for well-matching authors
 
 
+def test_verified_ref_author_field_with_title_words_is_garbled_metadata():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Author mismatch',
+        'ref_title': 'M3-Embedding: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation',
+        'ref_authors_cited': 'Multi-Linguality Multi-Functionality Multi-Granularity',
+        'ref_authors_correct': 'Jianlv Chen, Shitao Xiao, Peitian Zhang, Kun Luo, Defu Lian, Zheng Liu',
+        'ref_verified_url': 'https://arxiv.org/abs/2402.03216',
+    }
+
+    result = run_hallucination_check(entry, llm_client=None)
+
+    assert result is not None
+    assert result['verdict'] == 'UNLIKELY'
+    assert 'metadata extraction error' in result['explanation']
+
+
 # ------------------------------------------------------------------
 # LLM override behavior
 # ------------------------------------------------------------------
