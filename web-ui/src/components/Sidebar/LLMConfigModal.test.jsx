@@ -6,12 +6,16 @@ const mocks = vi.hoisted(() => ({
   updateConfig: vi.fn(),
   multiuser: false,
   validateLLMConfig: vi.fn(),
+  configs: [],
+  hasKey: vi.fn(),
+  getKey: vi.fn(),
 }))
 
 vi.mock('../../stores/useConfigStore', () => ({
   useConfigStore: () => ({
     addConfig: mocks.addConfig,
     updateConfig: mocks.updateConfig,
+    configs: mocks.configs,
   }),
 }))
 
@@ -21,7 +25,7 @@ vi.mock('../../stores/useAuthStore', () => ({
 
 vi.mock('../../stores/useKeyStore', () => {
   const useKeyStore = () => ({})
-  useKeyStore.getState = () => ({ setKey: vi.fn(), getKey: vi.fn() })
+  useKeyStore.getState = () => ({ setKey: vi.fn(), getKey: mocks.getKey, hasKey: mocks.hasKey })
   return { useKeyStore }
 })
 
@@ -39,13 +43,16 @@ describe('LLMConfigModal', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.multiuser = false
+    mocks.configs = []
+    mocks.hasKey.mockReturnValue(false)
+    mocks.getKey.mockReturnValue(null)
   })
 
   it('shows single-user help text when not in multiuser mode', () => {
     mocks.multiuser = false
     render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
 
-    expect(screen.getByText('Stored securely and never shown again')).toBeTruthy()
+    expect(screen.getByText('Stored encrypted in the local RefChecker database and never shown again.')).toBeTruthy()
     expect(screen.queryByText(/never saved on the server/)).toBeNull()
   })
 
@@ -53,7 +60,7 @@ describe('LLMConfigModal', () => {
     mocks.multiuser = true
     render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
 
-    expect(screen.getByText('Stored only in your browser — never saved on the server')).toBeTruthy()
-    expect(screen.queryByText('Stored securely and never shown again')).toBeNull()
+    expect(screen.getByText('Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.')).toBeTruthy()
+    expect(screen.queryByText('Stored encrypted in the local RefChecker database and never shown again.')).toBeNull()
   })
 })

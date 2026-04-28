@@ -168,8 +168,8 @@ export default function LoginPage() {
           className="w-full text-xs text-center italic leading-5"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          Note: any LLM keys you enter will be stored in the browser cache and only kept in
-          memory on the server while handling requests; they are not persisted on the server.
+          Note: any LLM keys you enter are retrieved from the encrypted browser cache and only kept in
+          memory on the server while handling requests; they are not stored in the local database or on the server.
         </p>
       </div>
     </div>

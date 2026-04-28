@@ -4,7 +4,10 @@ import json
 import sqlite3
 import tarfile
 
+import pytest
+
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from refchecker.database import local_database_updater as updater
 from refchecker.database.download_semantic_scholar_db import SemanticScholarDownloader
 from refchecker.database.local_database_updater import (
     build_acl_database_from_tarball,
@@ -126,6 +129,38 @@ def test_build_openalex_database_from_snapshot_files(tmp_path):
         assert last_sync[0] == '2025-01-15'
     finally:
         conn.close()
+
+
+def test_update_openalex_database_checkpoints_completed_partitions(tmp_path, monkeypatch):
+    db_path = tmp_path / 'openalex.db'
+
+    monkeypatch.setattr(
+        updater,
+        'list_openalex_date_partitions',
+        lambda session: [('2025-01-01', 'prefix-1'), ('2025-01-02', 'prefix-2')],
+    )
+
+    def fake_partition_files(session, prefix):
+        if prefix == 'prefix-2':
+            raise RuntimeError('simulated interruption')
+        return []
+
+    monkeypatch.setattr(updater, 'list_openalex_partition_files', fake_partition_files)
+
+    with pytest.raises(RuntimeError, match='simulated interruption'):
+        updater.update_openalex_database(str(db_path))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            'SELECT value FROM metadata WHERE key = ?',
+            ('last_sync_date',),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    assert row[0] == '2025-01-01'
 
 
 def test_build_acl_database_from_tarball(tmp_path):

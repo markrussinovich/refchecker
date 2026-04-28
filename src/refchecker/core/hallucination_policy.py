@@ -1038,10 +1038,11 @@ def _reverify_with_llm_metadata(
     """
     found_title = assessment.get('found_title')
     found_authors = assessment.get('found_authors')
+    found_venue = assessment.get('found_venue')
     found_year = assessment.get('found_year')
     ha_link = assessment.get('link')
 
-    if not any([found_title, found_authors, found_year]):
+    if not any([found_title, found_authors, found_venue, found_year]):
         return None
 
     from refchecker.utils.text_utils import (
@@ -1051,6 +1052,7 @@ def _reverify_with_llm_metadata(
         are_venues_substantially_different,
     )
     from refchecker.utils.error_utils import (
+        create_venue_warning,
         format_title_mismatch,
         validate_year,
     )
@@ -1105,6 +1107,11 @@ def _reverify_with_llm_metadata(
             )
             if year_warning:
                 new_errors.append(year_warning)
+
+    # --- Venue check ---
+    cited_venue = reference.get('venue', '')
+    if found_venue and are_venues_substantially_different(cited_venue, found_venue):
+        new_errors.append(create_venue_warning(cited_venue, found_venue))
 
     # --- Carry forward info-only errors that aren't metadata comparisons ---
     # (e.g. "Reference could include arXiv URL", venue-missing suggestions)

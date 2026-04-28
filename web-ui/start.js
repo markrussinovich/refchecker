@@ -22,11 +22,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = resolve(__dirname, '..');
 const backendDir = join(rootDir, 'backend');
+const srcDir = join(rootDir, 'src');
 
 const isWindows = process.platform === 'win32';
 const args = process.argv.slice(2);
 const shouldRestart = args.includes('--restart') || args.includes('-r');
 const debugMode = args.includes('--debug') || args.includes('-d');
+
+function withBackendPythonPath(env) {
+  const separator = isWindows ? ';' : ':';
+  const existing = env.PYTHONPATH || '';
+  const parts = existing ? existing.split(separator) : [];
+  if (!parts.includes(srcDir)) {
+    parts.unshift(srcDir);
+  }
+  return { ...env, PYTHONPATH: parts.filter(Boolean).join(separator) };
+}
 
 // Colors for console output
 const colors = {
@@ -208,6 +219,21 @@ function killProcessOnPortSync(port) {
   }
 }
 
+function waitForExit(child, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!child || !child.pid || child.exitCode !== null || child.signalCode !== null) {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(resolve, timeoutMs);
+    child.once('exit', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+  });
+}
+
 // Start backend server
 function startBackend() {
   const python = findPython();
@@ -219,7 +245,7 @@ function startBackend() {
   const backend = spawn(python, ['-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000'], {
     cwd: rootDir,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: withBackendPythonPath(process.env),
     shell: false,  // Don't use shell - it causes issues on Windows
     detached: false,
     windowsHide: true  // Hide console window on Windows
@@ -408,6 +434,7 @@ async function main() {
   let frontend = null;
   let shuttingDown = false;
   let lifecycleManaged = false;
+  let keepAliveTimer = null;
   
   // Start backend if not running
   if (!backendRunning) {
@@ -456,20 +483,29 @@ async function main() {
   // backend that was already running before npm start.
   if (backend || frontend || backendRunning || frontendRunning) {
     lifecycleManaged = true;
+    keepAliveTimer = setInterval(() => {}, 60 * 60 * 1000);
     log('Press Ctrl+C to stop servers', colors.yellow);
     console.log('');
     
-    const cleanupSync = (exitCode = 0) => {
+    const cleanup = async (exitCode = 0) => {
       if (shuttingDown) {
         return;
       }
       shuttingDown = true;
+      if (keepAliveTimer) {
+        clearInterval(keepAliveTimer);
+      }
 
       console.log('');
       log('Shutting down servers...', colors.yellow);
 
       killProcessTree(frontend, 'frontend');
       killProcessTree(backend, 'backend');
+
+      await Promise.all([
+        waitForExit(frontend, 5000),
+        waitForExit(backend, 5000),
+      ]);
 
       killProcessOnPortSync(frontendPort);
       killProcessOnPortSync(backendPort);
@@ -478,17 +514,31 @@ async function main() {
       process.exit(exitCode);
     };
 
-    const cleanup = () => cleanupSync(0);
+    const stopOnUnexpectedExit = (child, label) => {
+      if (!child) {
+        return;
+      }
+      child.on('exit', (code, signal) => {
+        if (shuttingDown) {
+          return;
+        }
+        const expected = code === 0 || signal === 'SIGTERM' || signal === 'SIGINT';
+        if (!expected) {
+          log(`${label} exited unexpectedly; stopping remaining servers...`, colors.red);
+          cleanup(1);
+        }
+      });
+    };
+    stopOnUnexpectedExit(frontend, 'Frontend');
+    stopOnUnexpectedExit(backend, 'Backend');
     
-    process.on('SIGINT', cleanup);
-    process.on('SIGTERM', cleanup);
-    process.on('SIGHUP', cleanup);
+    process.on('SIGINT', () => cleanup(0));
+    process.on('SIGTERM', () => cleanup(0));
+    process.on('SIGHUP', () => cleanup(0));
     process.on('exit', () => {
       if (lifecycleManaged && !shuttingDown) {
         killProcessTree(frontend, 'frontend');
         killProcessTree(backend, 'backend');
-        killProcessOnPortSync(frontendPort);
-        killProcessOnPortSync(backendPort);
       }
     });
     

@@ -397,6 +397,48 @@
         "ref_venue_cited": "arXiv",
         "ref_url_cited": "https://arxiv.org/abs/1706.03762"
       }
+    },
+    {
+      "id": "real_acl_paper_wrong_same_url_metadata",
+      "ground_truth": "UNLIKELY",
+      "rationale": "The cited ACL Anthology URL, title, authors, venue, and year identify a real paper; wrong checker metadata for the same URL should not turn it into a hallucination.",
+      "reference": {
+        "title": "Membership inference attacks against language models via neighbourhood comparison",
+        "authors": [
+          "Justus Mattern",
+          "Fatemehsadat Mireshghallah",
+          "Zhijing Jin",
+          "Bernhard Schoelkopf",
+          "Mrinmaya Sachan",
+          "Taylor Berg-Kirkpatrick"
+        ],
+        "venue": "Findings of the Association for Computational Linguistics: ACL 2023",
+        "year": 2023,
+        "url": "https://aclanthology.org/2023.findings-acl.719/",
+        "cited_url": "https://aclanthology.org/2023.findings-acl.719/",
+        "type": "non-arxiv",
+        "raw_text": "Justus Mattern*Fatemehsadat Mireshghallah*Zhijing Jin*Bernhard Schoelkopf*Mrinmaya Sachan*Taylor Berg-Kirkpatrick#Membership inference attacks against language models via neighbourhood comparison#Findings of the Association for Computational Linguistics: ACL 2023#2023#https://aclanthology.org/2023.findings-acl.719/"
+      },
+      "error_entry": {
+        "error_type": "multiple",
+        "error_details": "Title mismatch:\n       cited:  Membership inference attacks against language models via neighbourhood comparison\n       actual: JarviX: A LLM No code Platform for Tabular Data Analysis and Optimization\nAuthor count mismatch: 6 cited vs 9 correct:\n       cited:  Justus Mattern, Fatemehsadat Mireshghallah, Zhijing Jin, Bernhard Schoelkopf, Mrinmaya Sachan, Taylor Berg-Kirkpatrick\n       actual: Shang-Ching Liu, ShengKun Wang, Wenqi Lin, Chung-Wei Hsiung, Yi-Chen Hsieh, Yu-Ping Cheng, Sian-Hong Luo, Tsungyao Chang, Jianwei Zhang",
+        "ref_title": "Membership inference attacks against language models via neighbourhood comparison",
+        "ref_authors_cited": "Justus Mattern, Fatemehsadat Mireshghallah, Zhijing Jin, Bernhard Schoelkopf, Mrinmaya Sachan, Taylor Berg-Kirkpatrick",
+        "_ref_authors_cited_list": [
+          "Justus Mattern",
+          "Fatemehsadat Mireshghallah",
+          "Zhijing Jin",
+          "Bernhard Schoelkopf",
+          "Mrinmaya Sachan",
+          "Taylor Berg-Kirkpatrick"
+        ],
+        "ref_authors_correct": "Shang-Ching Liu, ShengKun Wang, Wenqi Lin, Chung-Wei Hsiung, Yi-Chen Hsieh, Yu-Ping Cheng, Sian-Hong Luo, Tsungyao Chang, Jianwei Zhang",
+        "ref_year_cited": 2023,
+        "ref_venue_cited": "Findings of the Association for Computational Linguistics: ACL 2023",
+        "ref_url_cited": "https://aclanthology.org/2023.findings-acl.719/",
+        "ref_verified_url": "https://aclanthology.org/2023.findings-acl.719/",
+        "matched_database": "ACL Anthology"
+      }
     }
   ]
 }

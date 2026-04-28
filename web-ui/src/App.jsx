@@ -4,7 +4,6 @@ import MainPanel from './components/MainPanel/MainPanel'
 import DebugPanel from './components/DebugPanel'
 import LiveWebSocketManager from './components/LiveWebSocketManager'
 import SettingsPanel from './components/Settings/SettingsPanel'
-import LLMSelector from './components/Sidebar/LLMSelector'
 import LoginPage from './components/Auth/LoginPage'
 import UserMenu from './components/Auth/UserMenu'
 import { logger } from './utils/logger'
@@ -132,9 +131,6 @@ function App() {
             </h1>
           </div>
           <div className="flex items-center gap-2 lg:gap-4">
-            <div className="header-llm-selector w-64">
-              <LLMSelector compact={true} />
-            </div>
             <a
               href="https://github.com/markrussinovich/refchecker"
               target="_blank"

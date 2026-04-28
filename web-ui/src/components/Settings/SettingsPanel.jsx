@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useKeyStore } from '../../stores/useKeyStore'
 import { useAuthStore } from '../../stores/useAuthStore'
-import { useConfigStore } from '../../stores/useConfigStore'
+import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
@@ -22,24 +22,9 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
 
-  // Key store for per-tab in-memory LLM API key management
+  // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
-  const currentUser = useAuthStore(state => state.user)
-  const configs = useConfigStore(state => state.configs)
-  const canManageSettings = !multiuser || currentUser?.is_admin
-
-  // Check if a provider has a key in the current tab OR in any DB config
-  const providerHasKey = (provider) => {
-    if (hasKey(provider)) return true
-    return configs.some(c => c.provider === provider && c.has_key)
-  }
-
-  // In-memory LLM API key state
-  const LLM_PROVIDERS = ['anthropic', 'openai', 'google', 'gemini']
-  const [llmKeyInputs, setLlmKeyInputs] = useState({})   // provider -> string
-  const [llmKeyEditing, setLlmKeyEditing] = useState({}) // provider -> bool
-  const [llmKeySaving, setLlmKeySaving] = useState({})   // provider -> bool
   
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
@@ -231,6 +216,12 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
     )},
+    { id: 'LLM', label: 'LLM', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 3.75h4.5M9.75 20.25h4.5M6.75 7.5h10.5a2.25 2.25 0 012.25 2.25v4.5a2.25 2.25 0 01-2.25 2.25H6.75a2.25 2.25 0 01-2.25-2.25v-4.5A2.25 2.25 0 016.75 7.5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h.01M15 12h.01" />
+      </svg>
+    )},
     { id: 'API Keys', label: 'API Keys', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
@@ -402,126 +393,56 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     </div>
   )
 
+  const renderLLMSection = () => (
+    <div className="space-y-4">
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Configured LLMs
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Both selectors use the same configured LLM list. Add, edit, and remove configurations from either selector.
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Extraction LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used to extract references from PDFs, URLs, and pasted text. Local vLLM is available for extraction in single-user local deployments.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="extraction" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Hallucination LLM
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          Used for hallucination checks that require web-capable providers: OpenAI, Google, Anthropic, or Azure OpenAI.
+        </div>
+        <div className="mt-3 max-w-sm">
+          <LLMSelector mode="hallucination" />
+        </div>
+      </div>
+
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+          Key Storage
+        </div>
+        <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+          {multiuser
+            ? 'Multi-user web UI keys are retrieved from this encrypted browser cache for the local web interface and are not stored in the local database or on the server.'
+            : 'Local web UI keys are encrypted in the local RefChecker database.'}
+        </div>
+      </div>
+    </div>
+  )
+
   const renderAPIKeysSection = () => (
     <div className="space-y-1">
-      {/* LLM API Keys (stored in browser localStorage) */}
-      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
-          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>
-            LLM API Keys
-          </div>
-          {multiuser && (
-            <div className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-              Keys are stored in the browser cache and not on the server.
-            </div>
-          )}
-          <div className="space-y-3">
-            {LLM_PROVIDERS.map((provider) => {
-              const hasKeyForProvider = providerHasKey(provider)
-              const isEditing = !!llmKeyEditing[provider]
-              const isSaving = !!llmKeySaving[provider]
-              const inputValue = llmKeyInputs[provider] || ''
-              return (
-                <div key={provider} className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm capitalize font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                        {provider}
-                      </span>
-                    </div>
-                    <div className="flex gap-2">
-                      {!isEditing && (
-                        <button
-                          onClick={() => setLlmKeyEditing(s => ({ ...s, [provider]: true }))}
-                          className="text-xs px-2 py-1 rounded cursor-pointer"
-                          style={{ color: 'var(--color-accent)' }}
-                        >
-                          {hasKeyForProvider ? 'Edit' : 'Set'}
-                        </button>
-                      )}
-                      {!isEditing && hasKeyForProvider && (
-                        <button
-                          onClick={() => {
-                            setLlmKeySaving(s => ({ ...s, [provider]: true }))
-                            try { deleteKey(provider) } finally {
-                              setLlmKeySaving(s => ({ ...s, [provider]: false }))
-                            }
-                          }}
-                          className="text-xs px-2 py-1 rounded cursor-pointer"
-                          style={{ color: 'var(--color-error)' }}
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  {isEditing && (
-                    <div className="flex gap-2">
-                      <input
-                        type="password"
-                        value={inputValue}
-                        onChange={e => setLlmKeyInputs(s => ({ ...s, [provider]: e.target.value }))}
-                        placeholder={`Enter ${provider} API key…`}
-                        className="flex-1 px-2 py-1.5 text-sm rounded border"
-                        style={{
-                          backgroundColor: 'var(--color-bg-primary)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-primary)',
-                        }}
-                        disabled={isSaving}
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && inputValue.trim()) {
-                            setLlmKeySaving(s => ({ ...s, [provider]: true }))
-                            try {
-                              setKey(provider, inputValue.trim())
-                              setLlmKeyEditing(s => ({ ...s, [provider]: false }))
-                              setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
-                            } finally {
-                              setLlmKeySaving(s => ({ ...s, [provider]: false }))
-                            }
-                          }
-                          if (e.key === 'Escape') {
-                            setLlmKeyEditing(s => ({ ...s, [provider]: false }))
-                            setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
-                          }
-                        }}
-                      />
-                      <button
-                        onClick={() => {
-                          if (!inputValue.trim()) return
-                          setLlmKeySaving(s => ({ ...s, [provider]: true }))
-                          try {
-                            setKey(provider, inputValue.trim())
-                            setLlmKeyEditing(s => ({ ...s, [provider]: false }))
-                            setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
-                          } finally {
-                            setLlmKeySaving(s => ({ ...s, [provider]: false }))
-                          }
-                        }}
-                        disabled={isSaving || !inputValue.trim()}
-                        className="px-3 py-1.5 text-xs rounded cursor-pointer"
-                        style={{ backgroundColor: 'var(--color-accent)', color: 'white', opacity: isSaving || !inputValue.trim() ? 0.5 : 1 }}
-                      >
-                        {isSaving ? '…' : 'Save'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setLlmKeyEditing(s => ({ ...s, [provider]: false }))
-                          setLlmKeyInputs(s => ({ ...s, [provider]: '' }))
-                        }}
-                        className="px-3 py-1.5 text-xs rounded border cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
       {/* Semantic Scholar API Key */}
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex items-center justify-between mb-1">
@@ -532,7 +453,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             </div>
             {multiuser && (
               <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                Stored in the browser cache and not on the server.
+                Encrypted in this browser cache for the local web interface and not saved on the server.
               </div>
             )}
           </div>
@@ -687,6 +608,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             ) : (
               <>
                 {activeSection === 'General' && renderGeneralSection()}
+                {activeSection === 'LLM' && renderLLMSection()}
                 {activeSection === 'API Keys' && renderAPIKeysSection()}
               </>
             )}

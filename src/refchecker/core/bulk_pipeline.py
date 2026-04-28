@@ -364,16 +364,9 @@ class BulkLLMExtractionBatcher:
         )
 
         response_text = provider._call_llm(prompt)
-        try:
-            parsed = _extract_json_payload(response_text)
-        except ValueError:
-            parsed = None
+        parsed = _extract_json_payload(response_text)
         if not isinstance(parsed, list):
-            logger.info(
-                'Batched LLM extraction response was not a JSON array; retrying %s items individually',
-                len(payloads),
-            )
-            return [self._process_single(payload) for payload in payloads]
+            raise ValueError('Batched extraction response was not a JSON array')
 
         grouped: Dict[int, List[str]] = {}
         for item in parsed:
@@ -389,16 +382,10 @@ class BulkLLMExtractionBatcher:
         results: List[List[Dict[str, Any]]] = []
         for index, payload in enumerate(payloads):
             raw_refs = grouped.get(index, [])
-            processed_refs: List[Dict[str, Any]] = []
             if raw_refs:
-                processed_refs = payload.checker._process_llm_extracted_references(raw_refs)
-            if not processed_refs and payload.bibliography_text.strip():
-                logger.info(
-                    'Batched LLM extraction produced zero processed references for item %s; retrying single-item extraction',
-                    index,
-                )
-                processed_refs = self._process_single(payload)
-            results.append(processed_refs)
+                results.append(payload.checker._process_llm_extracted_references(raw_refs))
+            else:
+                results.append([])
         return results
 
 

@@ -4267,11 +4267,76 @@ def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) ->
     if not cited_title or not database_title:
         return 0.0
     
-    # Clean LaTeX commands from cited title to match database format
+    # Clean LaTeX commands from cited title to match database format.
     clean_cited = strip_latex_commands(cited_title)
+    clean_database = strip_latex_commands(database_title)
+
+    artifact_cited = normalize_extracted_title_artifacts(clean_cited)
+    artifact_database = normalize_extracted_title_artifacts(clean_database)
+    if artifact_cited and artifact_cited == artifact_database:
+        return 1.0
+    compact_cited = re.sub(r'[^A-Za-z0-9]+', '', artifact_cited).lower()
+    compact_database = re.sub(r'[^A-Za-z0-9]+', '', artifact_database).lower()
+    if compact_cited and compact_cited == compact_database:
+        return 1.0
     
     # Calculate similarity using cleaned titles
-    return calculate_title_similarity(clean_cited, database_title)
+    return calculate_title_similarity(artifact_cited, artifact_database)
+
+
+def normalize_extracted_title_artifacts(title: str) -> str:
+    """Normalize PDF extraction artifacts before title comparison.
+
+    Some bibliography extractors detach accents and split tokens inside words,
+    producing strings such as "R ´enyi", "V oicebox", "VQ-V AE", or
+    "c ˆ2mˆ3".  This normalization is intentionally used for comparison only;
+    it should not rewrite displayed citation text.
+    """
+    if not isinstance(title, str):
+        return str(title) if title is not None else ''
+
+    title = normalize_apostrophes(title)
+
+    # Join detached combining marks/accent glyphs back to the following token so
+    # simple accent folding can treat them like composed accented characters.
+    title = re.sub(r'\s+([\u00b4`\^~\u00a8])\s*', r'\1', title)
+    title = normalize_diacritics_simple(title)
+
+    # PDF extraction can put spaces between letters and following math/power
+    # marks: "c ^2m^3" should compare with "C^2M^3".
+    title = re.sub(r'(?i)\b([a-z])\s+[\^ˆ]\s*(\d)', r'\1^\2', title)
+    title = re.sub(r'(?i)(\d)\s+([a-z])\s*[\^ˆ]\s*(\d)', r'\1\2^\3', title)
+
+    # Join one-letter fragments that were split from longer words or acronyms.
+    # This covers "V oicebox", "V olumetric", and "VQ-V AE" without joining
+    # meaningful short words such as "a" or "I" in normal prose.
+    title = re.sub(
+        r'(?i)(?<!\w)([bcdfghjklmnpqrstvwxyz])\s+([a-z]{2,})(?!\w)',
+        lambda match: match.group(1) + match.group(2),
+        title,
+    )
+    title = re.sub(
+        r'(?i)(?<=-)\s*([bcdfghjklmnpqrstvwxyz])\s+([a-z]{2,})(?!\w)',
+        lambda match: match.group(1) + match.group(2),
+        title,
+    )
+
+    # Missing spaces before Greek letters are common in extracted titles, e.g.
+    # "forβ-mixing".  Expanding Greek names keeps comparison ASCII-friendly.
+    greek_names = {
+        'α': 'alpha', 'β': 'beta', 'γ': 'gamma', 'δ': 'delta',
+        'ε': 'epsilon', 'κ': 'kappa', 'λ': 'lambda', 'μ': 'mu',
+        'π': 'pi', 'ρ': 'rho', 'σ': 'sigma', 'τ': 'tau', 'φ': 'phi',
+        'χ': 'chi', 'ω': 'omega',
+        'Α': 'alpha', 'Β': 'beta', 'Γ': 'gamma', 'Δ': 'delta',
+        'Ε': 'epsilon', 'Κ': 'kappa', 'Λ': 'lambda', 'Μ': 'mu',
+        'Π': 'pi', 'Ρ': 'rho', 'Σ': 'sigma', 'Τ': 'tau', 'Φ': 'phi',
+        'Χ': 'chi', 'Ω': 'omega',
+    }
+    for symbol, name in greek_names.items():
+        title = title.replace(symbol, f' {name} ')
+
+    return re.sub(r'\s+', ' ', title).strip()
 
 
 def calculate_title_similarity(title1: str, title2: str) -> float:

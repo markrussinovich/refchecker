@@ -986,6 +986,23 @@ def _ingest_openalex_text_stream(conn: sqlite3.Connection, text_stream: Iterable
     return inserted
 
 
+def _write_openalex_progress_metadata(
+    conn: sqlite3.Connection,
+    last_sync_date: str,
+    min_year: Optional[int],
+) -> None:
+    _write_metadata(
+        conn,
+        {
+            'schema_version': LOCAL_DB_SCHEMA_VERSION,
+            'database': 'openalex',
+            'last_updated': str(int(time.time())),
+            'last_sync_date': last_sync_date,
+            'openalex_min_year': str(min_year) if min_year is not None else None,
+        },
+    )
+
+
 def build_openalex_database_from_snapshot_files(
     db_path: str,
     snapshot_files: Sequence[str],
@@ -1074,6 +1091,7 @@ def update_openalex_database(
                 finally:
                     response.close()
             newest_date = partition_date
+            _write_openalex_progress_metadata(conn, newest_date, min_year)
 
         _ensure_common_indexes(conn)
         _write_metadata(

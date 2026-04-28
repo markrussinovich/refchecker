@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   addToHistory: vi.fn(),
   registerSession: vi.fn(),
   getSelectedConfig: vi.fn(),
+  getSelectedExtractionConfig: vi.fn(),
+  getSelectedHallucinationConfig: vi.fn(),
   getKey: vi.fn(),
   logger: {
     info: vi.fn(),
@@ -54,6 +56,8 @@ vi.mock('../../stores/useCheckStore', () => {
 vi.mock('../../stores/useConfigStore', () => ({
   useConfigStore: () => ({
     getSelectedConfig: mocks.getSelectedConfig,
+    getSelectedExtractionConfig: mocks.getSelectedExtractionConfig,
+    getSelectedHallucinationConfig: mocks.getSelectedHallucinationConfig,
   }),
 }))
 
@@ -106,8 +110,21 @@ describe('InputSection bulk mode', () => {
       model: 'claude-4',
       name: 'Hosted Claude',
     })
+    mocks.getSelectedExtractionConfig.mockReturnValue({
+      id: 7,
+      provider: 'anthropic',
+      model: 'claude-4',
+      name: 'Hosted Claude',
+    })
+    mocks.getSelectedHallucinationConfig.mockReturnValue({
+      id: 8,
+      provider: 'google',
+      model: 'gemini-2.5-flash',
+      name: 'Hosted Gemini',
+    })
     mocks.getKey.mockImplementation((provider) => {
       if (provider === 'anthropic') return 'llm-key'
+      if (provider === 'google') return 'hallucination-key'
       if (provider === 'semantic_scholar') return 'ss-key'
       return null
     })
@@ -142,8 +159,12 @@ describe('InputSection bulk mode', () => {
         llm_config_id: 7,
         llm_provider: 'anthropic',
         llm_model: 'claude-4',
+        hallucination_config_id: 8,
+        hallucination_provider: 'google',
+        hallucination_model: 'gemini-2.5-flash',
         use_llm: true,
         api_key: 'llm-key',
+        hallucination_api_key: 'hallucination-key',
         semantic_scholar_api_key: 'ss-key',
       })
     })

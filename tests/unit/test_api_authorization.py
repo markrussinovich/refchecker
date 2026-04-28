@@ -205,6 +205,40 @@ def test_llm_config_mutations_are_user_scoped(auth_db):
     assert _run(db.get_llm_config_by_id(config_id, user_id=owner.id)) is None
 
 
+def test_single_user_llm_config_update_validates_model_with_stored_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization")
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "local.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+
+    config_id = _run(temp_db.create_llm_config(
+        name="Anthropic",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        api_key="stored-key",
+        user_id=None,
+    ))
+
+    async def reject_invalid_model(**kwargs):
+        raise HTTPException(status_code=400, detail="Invalid model name")
+
+    monkeypatch.setattr(api_main, "_validate_llm_connection_or_raise", reject_invalid_model)
+
+    with pytest.raises(HTTPException) as exc:
+        _run(api_main.update_llm_config(
+            config_id,
+            api_main.LLMConfigUpdate(model="claude-does-not-exist"),
+            api_main.UserInfo(id=0, name="Local User", provider="local", is_admin=True),
+        ))
+
+    assert exc.value.status_code == 400
+    stored = _run(temp_db.get_llm_config_by_id(config_id))
+    assert stored["model"] == "claude-sonnet-4-6"
+
+
 def test_multiuser_rejects_vllm_config_creation_and_validation(auth_db):
     api_main, _db = auth_db
     owner = _run(_create_user(api_main, _db, "owner-vllm"))

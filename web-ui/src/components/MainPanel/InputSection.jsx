@@ -11,6 +11,11 @@ import { useFileUpload } from '../../hooks/useFileUpload'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 
+function getConfigApiKey(keyStore, config) {
+  if (!config) return null
+  return keyStore.getKey(`llm:${config.id}`) || keyStore.getKey(config.provider)
+}
+
 /**
  * Sanitize URL input - detect and fix duplicated URLs
  * E.g., "https://arxiv.org/abs/123https://arxiv.org/abs/123" -> "https://arxiv.org/abs/123"
@@ -57,7 +62,7 @@ export default function InputSection() {
     setError: s.setError,
   })))
   
-  const { getSelectedConfig } = useConfigStore()
+  const { getSelectedExtractionConfig, getSelectedHallucinationConfig, getSelectedConfig } = useConfigStore()
   const { fetchHistory, clearSelection, selectCheck } = useHistoryStore()
   
   const fileUpload = useFileUpload()
@@ -80,8 +85,9 @@ export default function InputSection() {
     setIsSubmitting(true)
     
     try {
-      // Get selected LLM config
-      const config = getSelectedConfig()
+      // Get selected LLM configs
+      const config = getSelectedExtractionConfig?.() || getSelectedConfig()
+      const hallucinationConfig = getSelectedHallucinationConfig?.() || config
       
       // Sanitize URL input to handle duplicated URLs (e.g., from double paste)
       const sanitizedUrl = inputMode === 'url' ? sanitizeUrlInput(inputValue) : null
@@ -106,17 +112,26 @@ export default function InputSection() {
           formData.append('llm_model', config.model)
         }
         formData.append('use_llm', 'true')
+        if (hallucinationConfig) {
+          formData.append('hallucination_config_id', hallucinationConfig.id.toString())
+          formData.append('hallucination_provider', hallucinationConfig.provider)
+          if (hallucinationConfig.model) {
+            formData.append('hallucination_model', hallucinationConfig.model)
+          }
+        }
       } else {
         formData.append('use_llm', 'false')
       }
 
       // Attach per-tab API keys from the in-memory browser store.
       const keyStore = useKeyStore.getState()
-      const llmKey = config ? keyStore.getKey(config.provider) : null
+      const llmKey = getConfigApiKey(keyStore, config)
+      const hallucinationKey = getConfigApiKey(keyStore, hallucinationConfig)
       if (llmKey) formData.append('api_key', llmKey)
       else if (config && !config.has_key) {
         logger.warn('InputSection', `No API key for provider '${config.provider}'. LLM features may be unavailable.`)
       }
+      if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
 
@@ -124,6 +139,8 @@ export default function InputSection() {
         mode: inputMode, 
         llm: config?.provider,
         model: config?.model,
+        hallucinationLlm: hallucinationConfig?.provider,
+        hallucinationModel: hallucinationConfig?.model,
         hasApiKey: !!(llmKey || config?.has_key),
         source: inputMode === 'url' ? sanitizedUrl : (inputMode === 'file' ? fileUpload.file?.name : 'pasted text')
       })
@@ -201,10 +218,12 @@ export default function InputSection() {
     setIsSubmitting(true)
 
     try {
-      const config = getSelectedConfig()
+      const config = getSelectedExtractionConfig?.() || getSelectedConfig()
+      const hallucinationConfig = getSelectedHallucinationConfig?.() || config
       const { addToHistory } = useHistoryStore.getState()
       const keyStore = useKeyStore.getState()
-      const llmKey = config ? keyStore.getKey(config.provider) : null
+      const llmKey = getConfigApiKey(keyStore, config)
+      const hallucinationKey = getConfigApiKey(keyStore, hallucinationConfig)
       const ssKey = keyStore.getKey('semantic_scholar')
       
       let response
@@ -218,8 +237,12 @@ export default function InputSection() {
           llm_config_id: config?.id,
           llm_provider: config?.provider || 'anthropic',
           llm_model: config?.model,
+          hallucination_config_id: hallucinationConfig?.id,
+          hallucination_provider: hallucinationConfig?.provider,
+          hallucination_model: hallucinationConfig?.model,
           use_llm: !!config,
           api_key: llmKey,
+          hallucination_api_key: hallucinationKey,
           semantic_scholar_api_key: ssKey,
         })
       } else {
@@ -232,10 +255,16 @@ export default function InputSection() {
           formData.append('llm_provider', config.provider)
           if (config.model) formData.append('llm_model', config.model)
           formData.append('use_llm', 'true')
+          if (hallucinationConfig) {
+            formData.append('hallucination_config_id', hallucinationConfig.id.toString())
+            formData.append('hallucination_provider', hallucinationConfig.provider)
+            if (hallucinationConfig.model) formData.append('hallucination_model', hallucinationConfig.model)
+          }
         } else {
           formData.append('use_llm', 'false')
         }
         if (llmKey) formData.append('api_key', llmKey)
+        if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
         if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
         
         response = await api.startBatchFileCheck(formData)
@@ -488,22 +517,6 @@ export default function InputSection() {
           >
             New Check
           </Button>
-        )}
-
-        {/* LLM indicator - hide for bulk mode */}
-        {!isComplete && inputMode !== 'bulk' && (
-          <span 
-            className="text-sm"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            {(() => {
-              const config = getSelectedConfig()
-              if (config) {
-                return `Using ${config.name} (${config.provider})`
-              }
-              return 'No LLM configured - using regex extraction'
-            })()}
-          </span>
         )}
       </div>
     </div>

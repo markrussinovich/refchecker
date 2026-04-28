@@ -9,6 +9,7 @@ from refchecker.core.hallucination_policy import (
     build_hallucination_error_entry,
     check_author_hallucination,
     detect_name_order_warning,
+    apply_hallucination_verdict,
     run_hallucination_check,
     should_check_hallucination,
     _compute_author_overlap,
@@ -31,6 +32,51 @@ def test_unverified_reference_should_be_checked():
         'ref_authors_cited': 'Author One, Author Two',
     }
     assert should_check_hallucination(entry) is True
+
+
+def test_parse_verdict_preserves_found_venue():
+    verdict, explanation, link, found_metadata = LLMHallucinationVerifier._parse_verdict(
+        'EXPLANATION: The exact paper was found.\n'
+        'LINK: https://aclanthology.org/2023.findings-acl.719/\n'
+        'FOUND_TITLE: Membership Inference Attacks against Language Models via Neighbourhood Comparison\n'
+        'FOUND_AUTHORS: Justus Mattern, Fatemehsadat Mireshghallah\n'
+        'FOUND_VENUE: Findings of the Association for Computational Linguistics: ACL 2023\n'
+        'FOUND_YEAR: 2023\n'
+        'VERDICT: UNLIKELY\n'
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert explanation == 'The exact paper was found.'
+    assert link == 'https://aclanthology.org/2023.findings-acl.719/'
+    assert found_metadata['venue'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
+
+
+def test_apply_hallucination_verdict_rechecks_found_venue():
+    result = {
+        'status': 'error',
+        'errors': [],
+    }
+    reference = {
+        'title': 'Membership inference attacks against language models via neighbourhood comparison',
+        'authors': ['Justus Mattern', 'Fatemehsadat Mireshghallah'],
+        'year': 2023,
+        'venue': 'Wrong Venue',
+    }
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The exact paper was found.',
+        'link': 'https://aclanthology.org/2023.findings-acl.719/',
+        'found_title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+        'found_authors': 'Justus Mattern, Fatemehsadat Mireshghallah',
+        'found_venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+        'found_year': '2023',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment, reference)
+
+    assert updated['status'] == 'verified'
+    assert updated['errors'][0]['warning_type'] == 'venue'
+    assert updated['errors'][0]['ref_venue_correct'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
 
 
 def test_year_only_issue_should_not_be_checked():
@@ -395,103 +441,6 @@ def test_citation_evidence_guard_does_not_override_verified_paper():
 
     assert verdict == 'UNLIKELY'
     assert explanation == 'The paper also appears in another publication bibliography.'
-
-
-def test_unverified_academic_unlikely_requires_found_metadata():
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
-        'ref_title': 'Prophet inequalities and posted pricing mechanisms',
-        'ref_authors_cited': 'José Correa, Anja Korol, Ruben Hoeksma',
-        '_ref_authors_cited_list': ['José Correa', 'Anja Korol', 'Ruben Hoeksma'],
-        'ref_year_cited': '2022',
-        'ref_venue_cited': 'Mathematics of Operations Research',
-    }
-
-    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
-        'UNLIKELY',
-        'The exact paper with the cited title, authors, venue, and year was found in the search results.',
-        entry,
-        {'title': None, 'authors': None, 'year': None},
-    )
-
-    assert verdict == 'LIKELY'
-    assert 'did not provide found title and author metadata' in explanation
-
-
-def test_unverified_academic_unlikely_rejects_mismatched_found_authors():
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
-        'ref_title': 'Prophet inequalities and posted pricing mechanisms',
-        'ref_authors_cited': 'José Correa, Anja Korol, Ruben Hoeksma',
-        '_ref_authors_cited_list': ['José Correa', 'Anja Korol', 'Ruben Hoeksma'],
-    }
-
-    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
-        'UNLIKELY',
-        'A related paper was found.',
-        entry,
-        {
-            'title': 'Prophet inequalities for independent random variables from an unknown distribution',
-            'authors': 'José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior',
-            'year': '2019',
-        },
-    )
-
-    assert verdict == 'LIKELY'
-    assert 'do not substantially match' in explanation
-
-
-def test_unverified_academic_unlikely_allows_matching_found_metadata():
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
-        'ref_title': 'A real paper with exact metadata',
-        'ref_authors_cited': 'Alice Smith, Bob Jones',
-        '_ref_authors_cited_list': ['Alice Smith', 'Bob Jones'],
-    }
-
-    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
-        'UNLIKELY',
-        'The exact paper was found.',
-        entry,
-        {
-            'title': 'A real paper with exact metadata',
-            'authors': 'Alice Smith, Bob Jones',
-            'year': '2024',
-        },
-    )
-
-    assert verdict == 'UNLIKELY'
-    assert explanation == 'The exact paper was found.'
-
-
-def test_unverified_academic_unlikely_allows_split_word_title_artifact():
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified',
-        'ref_title': 'Improving mutual information estimatio n with annealed and energy-based bounds',
-        'ref_authors_cited': 'Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi',
-        '_ref_authors_cited_list': ['Rob Brekelmans', 'Sicong Huang', 'Marzyeh Ghassemi'],
-    }
-
-    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
-        'UNLIKELY',
-        'The paper exists and the cited authors are a subset of the full author list.',
-        entry,
-        {
-            'title': 'Improving mutual information estimation with annealed and energy-based bounds',
-            'authors': (
-                'Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi, Greg Ver Steeg, '
-                'Roger Baker Grosse, Alireza Makhzani'
-            ),
-            'year': '2022',
-        },
-    )
-
-    assert verdict == 'UNLIKELY'
-    assert explanation == 'The paper exists and the cited authors are a subset of the full author list.'
 
 
 def test_hallucination_prompt_treats_software_project_citation_as_valid_source():
@@ -1174,42 +1123,6 @@ def test_ungrounded_unlikely_for_academic_reference_is_uncertain():
     assert 'not grounded in web search results or verified metadata' in result['explanation']
 
 
-def test_ungrounded_unlikely_with_matching_found_metadata_is_allowed():
-    verifier = object.__new__(LLMHallucinationVerifier)
-    verifier.provider = 'anthropic'
-    verifier.model = 'claude-test'
-    verifier.client = object()
-    verifier.cache_dir = None
-    verifier._call = lambda system_prompt, user_prompt: (
-        'EXPLANATION: The real paper exists with exactly matching authors.\n'
-        'FOUND_TITLE: Deep Reinforcement Learning at the Edge of the Statistical Precipice\n'
-        'FOUND_AUTHORS: Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron Courville, Marc G. Bellemare\n'
-        'FOUND_YEAR: 2021\n'
-        'VERDICT: UNLIKELY',
-        [],
-    )
-    entry = {
-        'error_type': 'unverified',
-        'error_details': 'Reference could not be verified exactly; cited title appears truncated.',
-        'ref_title': 'Deep reinforcement learning at edge of statistical precipice',
-        'ref_authors_cited': 'Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron Courville, Marc G. Bellemare',
-        '_ref_authors_cited_list': [
-            'Rishabh Agarwal',
-            'Max Schwarzer',
-            'Pablo Samuel Castro',
-            'Aaron Courville',
-            'Marc G. Bellemare',
-        ],
-        'ref_year_cited': 2022,
-        'ref_venue_cited': 'arXiv',
-    }
-
-    result = verifier.assess(entry)
-
-    assert result['verdict'] == 'UNLIKELY'
-    assert 'not grounded in web search results' not in result['explanation']
-
-
 def test_unlikely_low_overlap_author_mismatch_is_corrected_to_likely():
     verifier = object.__new__(LLMHallucinationVerifier)
     verifier.provider = 'google'
@@ -1281,6 +1194,39 @@ def test_unlikely_low_overlap_rejects_conflicting_found_authors_for_checked_url(
 
     assert verdict == 'LIKELY'
     assert 'real title with fabricated coauthors' in explanation
+
+
+def test_unlikely_low_overlap_accepts_found_authors_when_found_title_matches_citation():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The exact paper with this title and author list was found on ACL Anthology.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Membership inference attacks against language models via neighbourhood comparison',
+            'ref_authors_cited': 'Justus Mattern, Fatemehsadat Mireshghallah, Zhijing Jin, Bernhard Schoelkopf, Mrinmaya Sachan, Taylor Berg-Kirkpatrick',
+            '_ref_authors_cited_list': [
+                'Justus Mattern',
+                'Fatemehsadat Mireshghallah',
+                'Zhijing Jin',
+                'Bernhard Schoelkopf',
+                'Mrinmaya Sachan',
+                'Taylor Berg-Kirkpatrick',
+            ],
+            'ref_authors_correct': 'Shang-Ching Liu, ShengKun Wang, Wenqi Lin, Chung-Wei Hsiung, Yi-Chen Hsieh, Yu-Ping Cheng, Sian-Hong Luo, Tsungyao Chang, Jianwei Zhang',
+            'ref_url_cited': 'https://aclanthology.org/2023.findings-acl.719/',
+            'ref_verified_url': 'https://aclanthology.org/2023.findings-acl.719/',
+        },
+        ['https://aclanthology.org/2023.findings-acl.719.pdf'],
+        {
+            'title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+            'authors': 'Justus Mattern, Fatemehsadat Mireshghallah, Zhijing Jin, Bernhard Schölkopf, Mrinmaya Sachan, Taylor Berg-Kirkpatrick',
+            'year': '2023',
+        },
+        'https://aclanthology.org/2023.findings-acl.719/',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'corrected' not in explanation
 
 
 def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):

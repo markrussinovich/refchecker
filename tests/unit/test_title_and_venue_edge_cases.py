@@ -1,6 +1,10 @@
 import pytest
 
-from refchecker.utils.text_utils import calculate_title_similarity, normalize_venue_for_display
+from refchecker.utils.text_utils import (
+    calculate_title_similarity,
+    compare_titles_with_latex_cleaning,
+    normalize_venue_for_display,
+)
 
 
 def test_title_similarity_ignores_trailing_year():
@@ -8,6 +12,26 @@ def test_title_similarity_ignores_trailing_year():
     b = "Phi-4 Technical Report"
     score = calculate_title_similarity(a, b)
     assert score >= 0.95
+
+
+@pytest.mark.parametrize(
+    ('cited', 'found'),
+    [
+        ('R ´enyi differential privacy', 'Rényi Differential Privacy'),
+        ('V oicebox: Text-guided multilingual universal speech generation at scale',
+         'Voicebox: Text-Guided Multilingual Universal Speech Generation at Scale'),
+        ('Nystr ¨omformer: A nystr ¨om-based algorithm for approximating self-attention',
+         'Nyströmformer: A Nyström-Based Algorithm for Approximating Self-Attention'),
+        ('Lasso guarantees forβ-mixing heavy-tailed time series',
+         'Lasso guarantees for β-mixing heavy-tailed time series'),
+        ('Finite scalar quantization: VQ-V AE made simple',
+         'Finite Scalar Quantization: VQ-VAE Made Simple'),
+        ('c ˆ2mˆ3: Cycle-consistent multi-model merging',
+         '$C^2M^3$: Cycle-Consistent Multi-Model Merging'),
+    ],
+)
+def test_title_similarity_handles_pdf_spacing_artifacts(cited, found):
+    assert compare_titles_with_latex_cleaning(cited, found) >= 0.95
 
 
 def test_normalize_venue_preserves_communications_of_the_acm():

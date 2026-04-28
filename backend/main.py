@@ -6,6 +6,7 @@ import asyncio
 import time
 import uuid
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -309,9 +310,56 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
     if db_name == 'openalex' and openalex_min_year:
         command.extend(['--openalex-min-year', openalex_min_year])
 
-    logger.info(f"Launching background {DATABASE_LABELS.get(db_name, db_name)} refresh for {db_path}")
-    process = await asyncio.create_subprocess_exec(*command, cwd=str(repo_root))
-    return_code = await process.wait()
+    if db_name == 'openalex' and os.name != 'nt':
+        priority_prefix = []
+        ionice_path = shutil.which('ionice')
+        nice_path = shutil.which('nice')
+        if ionice_path:
+            priority_prefix.extend([ionice_path, '-c', '3'])
+        if nice_path:
+            priority_prefix.extend([nice_path, '-n', '10'])
+        command = priority_prefix + command
+
+    log_dir = get_data_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"database-refresh-{db_name}.log"
+
+    logger.info(
+        "Launching background %s refresh for %s (log: %s)",
+        DATABASE_LABELS.get(db_name, db_name),
+        db_path,
+        log_path,
+    )
+    log_handle = log_path.open("ab", buffering=0)
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=str(repo_root),
+        stdout=log_handle,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        return_code = await process.wait()
+    except asyncio.CancelledError:
+        if process.returncode is None:
+            logger.info(
+                "Terminating background %s refresh for %s",
+                DATABASE_LABELS.get(db_name, db_name),
+                db_path,
+            )
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Killing unresponsive background %s refresh for %s",
+                    DATABASE_LABELS.get(db_name, db_name),
+                    db_path,
+                )
+                process.kill()
+                await process.wait()
+        raise
+    finally:
+        log_handle.close()
     if return_code == 0:
         logger.info(f"Background {DATABASE_LABELS.get(db_name, db_name)} refresh completed successfully for {db_path}")
         return
@@ -403,6 +451,150 @@ def _ensure_allowed_web_llm_provider(provider_name: Optional[str]) -> None:
             status_code=403,
             detail="vLLM is only supported in single-user local deployments",
         )
+
+
+def _ensure_hallucination_capable_provider(provider_name: Optional[str]) -> None:
+    """Reject providers that cannot perform hallucination checks."""
+    from refchecker.config.settings import HALLUCINATION_CAPABLE_PROVIDERS
+
+    normalized = (provider_name or "").strip().lower()
+    if normalized and normalized not in HALLUCINATION_CAPABLE_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_name}' is only available for extraction, not hallucination checks",
+        )
+
+
+async def _resolve_llm_config_for_request(
+    *,
+    user_id: int,
+    use_llm: bool,
+    llm_config_id: Optional[int],
+    llm_provider: Optional[str],
+    llm_model: Optional[str],
+    api_key: Optional[str],
+    require_hallucination_capable: bool = False,
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Resolve provider/model/key/endpoint from form fields plus a saved config."""
+    if not use_llm:
+        return llm_provider, llm_model, api_key, None
+
+    effective_api_key = api_key
+    endpoint = None
+    provider = llm_provider
+    model = llm_model
+
+    if llm_config_id:
+        config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
+        if config:
+            if not effective_api_key:
+                effective_api_key = config.get('api_key')
+            endpoint = config.get('endpoint')
+            provider = config.get('provider', provider)
+            model = config.get('model') or model
+            logger.info(f"Using LLM config {llm_config_id}: {provider}/{model}")
+        else:
+            logger.warning(f"LLM config {llm_config_id} not found")
+
+    if not effective_api_key and provider:
+        effective_api_key = await _reuse_provider_key_for_new_config(
+            provider=provider,
+            user_id=user_id,
+        )
+
+    _ensure_allowed_web_llm_provider(provider)
+    if require_hallucination_capable:
+        _ensure_hallucination_capable_provider(provider)
+
+    return provider, model, effective_api_key, endpoint
+
+
+async def _reuse_provider_key_for_new_config(
+    *,
+    provider: str,
+    user_id: Optional[int],
+) -> Optional[str]:
+    """Return an existing same-provider key for single-user config creation."""
+    if is_multiuser_mode():
+        return None
+
+    configs = await db.get_llm_configs(user_id=user_id)
+    for existing in configs:
+        if existing.get('provider') == provider and existing.get('has_key'):
+            config = await db.get_llm_config_by_id(existing['id'], user_id=user_id)
+            if config and config.get('api_key'):
+                return config['api_key']
+    return None
+
+
+def _is_invalid_model_error(error: Exception) -> bool:
+    """Return True for provider errors that mean the requested model is invalid."""
+    message = str(error)
+    error_lower = message.lower()
+    status_code = getattr(error, 'status_code', None)
+    if status_code is None and getattr(error, 'response', None) is not None:
+        status_code = getattr(error.response, 'status_code', None)
+
+    mentions_model = 'model' in error_lower
+    invalid_model_terms = (
+        'not found',
+        'does not exist',
+        'invalid model',
+        'model_not_found',
+        'not_found_error',
+        'unsupported model',
+    )
+    return mentions_model and (
+        status_code in (400, 404)
+        or any(term in error_lower for term in invalid_model_terms)
+    )
+
+
+async def _validate_llm_connection_or_raise(
+    *,
+    provider: str,
+    model: Optional[str],
+    api_key: Optional[str],
+    endpoint: Optional[str] = None,
+) -> None:
+    """Validate an LLM provider/model/key combination before persisting it."""
+    _ensure_allowed_web_llm_provider(provider)
+
+    try:
+        from refchecker.llm.base import create_llm_provider
+
+        llm_config = {}
+        if model:
+            llm_config['model'] = model
+        if api_key:
+            llm_config['api_key'] = api_key
+        if endpoint:
+            llm_config['endpoint'] = endpoint
+
+        llm_provider = create_llm_provider(provider, llm_config)
+        if not llm_provider:
+            raise HTTPException(status_code=400, detail=f"Failed to create {provider} provider")
+        if hasattr(llm_provider, 'is_available') and not llm_provider.is_available():
+            raise HTTPException(status_code=400, detail=f"Provider '{provider}' is not available")
+
+        llm_provider._call_llm("Respond with only the word 'ok'.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        error_msg = str(exc)
+        error_lower = error_msg.lower()
+        logger.error("LLM validation failed: %s", error_msg)
+
+        if _is_invalid_model_error(exc):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid model name. The model '{model}' was not found for provider '{provider}'.",
+            )
+        if "401" in error_msg or "unauthorized" in error_lower or ("invalid" in error_lower and "api" in error_lower and "key" in error_lower):
+            raise HTTPException(status_code=400, detail="Invalid API key")
+        if "429" in error_msg or "quota" in error_lower or "rate limit" in error_lower or "rate-limit" in error_lower or "rate_limit" in error_lower or "billing" in error_lower:
+            return
+        raise HTTPException(status_code=400, detail=f"Validation failed: {error_msg}")
 
 
 def _require_admin(current_user: UserInfo) -> None:
@@ -543,8 +735,12 @@ class BatchUrlsRequest(BaseModel):
     llm_config_id: Optional[int] = None
     llm_provider: str = "anthropic"
     llm_model: Optional[str] = None
+    hallucination_config_id: Optional[int] = None
+    hallucination_provider: Optional[str] = None
+    hallucination_model: Optional[str] = None
     use_llm: bool = True
     api_key: Optional[str] = None
+    hallucination_api_key: Optional[str] = None
     semantic_scholar_api_key: Optional[str] = None
 
 
@@ -604,7 +800,14 @@ async def lifespan(app: FastAPI):
     refresh_tasks = await _schedule_database_refreshes()
     app.state.database_refresh_tasks = refresh_tasks
     app.state.semantic_scholar_refresh_task = refresh_tasks.get("s2")
-    yield
+    try:
+        yield
+    finally:
+        for task in refresh_tasks.values():
+            if not task.done():
+                task.cancel()
+        if refresh_tasks:
+            await asyncio.gather(*refresh_tasks.values(), return_exceptions=True)
 
 
 app = FastAPI(title="RefChecker Web UI API", version="1.0.0", lifespan=lifespan)
@@ -982,8 +1185,12 @@ async def start_check(
     llm_config_id: Optional[int] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
+    hallucination_config_id: Optional[int] = Form(None),
+    hallucination_provider: Optional[str] = Form(None),
+    hallucination_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
+    hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
@@ -1013,25 +1220,45 @@ async def start_check(
 
         user_id = get_user_id_filter(current_user)
 
-        # api_key from form (client localStorage) takes precedence over config stored key
-        effective_api_key = api_key
-        endpoint = None
+        # API keys from form (client localStorage) take precedence over config stored keys.
         logger.info(f"API key from form: {'present' if api_key else 'MISSING'}, use_llm={use_llm}, provider={llm_provider}")
-        if llm_config_id and use_llm:
-            config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
-            if config:
-                if not effective_api_key:
-                    effective_api_key = config.get('api_key')
-                    logger.info(f"API key from DB config: {'present' if effective_api_key else 'MISSING'}")
-                endpoint = config.get('endpoint')
-                llm_provider = config.get('provider', llm_provider)
-                llm_model = config.get('model') or llm_model
-                logger.info(f"Using LLM config {llm_config_id}: {llm_provider}/{llm_model}")
-            else:
-                logger.warning(f"LLM config {llm_config_id} not found")
-        if use_llm:
-            _ensure_allowed_web_llm_provider(llm_provider)
-        logger.info(f"Effective API key resolved: {'present' if effective_api_key else 'MISSING'}, SS key: {'present' if semantic_scholar_api_key else 'MISSING'}")
+        llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
+            user_id=user_id,
+            use_llm=use_llm,
+            llm_config_id=llm_config_id,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_key=api_key,
+        )
+        resolved_hallucination_provider = hallucination_provider
+        resolved_hallucination_model = hallucination_model
+        resolved_hallucination_api_key = hallucination_api_key
+        resolved_hallucination_endpoint = None
+        if hallucination_config_id or hallucination_provider:
+            (
+                resolved_hallucination_provider,
+                resolved_hallucination_model,
+                resolved_hallucination_api_key,
+                resolved_hallucination_endpoint,
+            ) = await _resolve_llm_config_for_request(
+                user_id=user_id,
+                use_llm=use_llm,
+                llm_config_id=hallucination_config_id,
+                llm_provider=hallucination_provider,
+                llm_model=hallucination_model,
+                api_key=hallucination_api_key,
+                require_hallucination_capable=True,
+            )
+        logger.info(
+            "Effective LLMs resolved: extraction=%s/%s key=%s; hallucination=%s/%s key=%s; SS=%s",
+            llm_provider,
+            llm_model,
+            'present' if effective_api_key else 'MISSING',
+            resolved_hallucination_provider,
+            resolved_hallucination_model,
+            'present' if resolved_hallucination_api_key else 'MISSING',
+            'present' if semantic_scholar_api_key else 'MISSING',
+        )
 
         # Handle file upload or pasted text
         paper_source = source_value
@@ -1113,6 +1340,8 @@ async def start_check(
             source_type=source_type,
             llm_provider=llm_provider if use_llm else None,
             llm_model=llm_model if use_llm else None,
+            hallucination_provider=resolved_hallucination_provider if use_llm else None,
+            hallucination_model=resolved_hallucination_model if use_llm else None,
             original_filename=original_filename,
             user_id=user_id,
             started_at=check_started_at,
@@ -1141,6 +1370,8 @@ async def start_check(
                 "use_llm": use_llm,
                 "llm_provider": llm_provider if use_llm else None,
                 "llm_model": llm_model if use_llm else None,
+                "hallucination_provider": resolved_hallucination_provider if use_llm else None,
+                "hallucination_model": resolved_hallucination_model if use_llm else None,
                 "input_bytes": input_bytes,
                 "semantic_scholar_key_present": bool(semantic_scholar_api_key),
                 "original_filename_ext": Path(original_filename).suffix.lower() if original_filename else None,
@@ -1150,7 +1381,16 @@ async def start_check(
         # Start check in background
         cancel_event = asyncio.Event()
         task = asyncio.create_task(
-            run_check(session_id, check_id, paper_source, source_type, llm_provider, llm_model, effective_api_key, endpoint, use_llm, cancel_event, user_id, semantic_scholar_api_key=semantic_scholar_api_key)
+            run_check(
+                session_id, check_id, paper_source, source_type,
+                llm_provider, llm_model, effective_api_key, endpoint,
+                use_llm, cancel_event, user_id,
+                semantic_scholar_api_key=semantic_scholar_api_key,
+                hallucination_provider=resolved_hallucination_provider,
+                hallucination_model=resolved_hallucination_model,
+                hallucination_api_key=resolved_hallucination_api_key,
+                hallucination_endpoint=resolved_hallucination_endpoint,
+            )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
         active_checks[session_id] = {"task": task, "cancel_event": cancel_event, "check_id": check_id, "user_id": user_id}
@@ -1186,6 +1426,10 @@ async def run_check(
     cancel_event: asyncio.Event,
     user_id: int = 0,
     semantic_scholar_api_key: Optional[str] = None,
+    hallucination_provider: Optional[str] = None,
+    hallucination_model: Optional[str] = None,
+    hallucination_api_key: Optional[str] = None,
+    hallucination_endpoint: Optional[str] = None,
 ):
     """
     Run reference check in background and emit progress updates
@@ -1297,6 +1541,10 @@ async def run_check(
             db_path=db_path,
             db_paths=db_paths,
             cache_dir=cache_dir,
+            hallucination_provider=hallucination_provider,
+            hallucination_model=hallucination_model,
+            hallucination_api_key=hallucination_api_key,
+            hallucination_endpoint=hallucination_endpoint,
         )
 
         # Run the check
@@ -1368,6 +1616,8 @@ async def run_check(
                 "suggestions_count": result["summary"].get("suggestions_count", 0),
                 "unverified_count": result["summary"]["unverified_count"],
                 "hallucination_count": result["summary"].get("hallucination_count", 0),
+                "hallucination_provider": hallucination_provider,
+                "hallucination_model": hallucination_model,
                 "refs_with_errors": result["summary"].get("refs_with_errors", 0),
                 "refs_with_warnings_only": result["summary"].get("refs_with_warnings_only", 0),
                 "refs_verified": result["summary"].get("refs_verified", 0),
@@ -2140,22 +2390,33 @@ async def start_batch_check(
         
         user_id = get_user_id_filter(current_user)
 
-        # api_key from request body takes precedence over config stored key
-        effective_api_key = request.api_key
-        endpoint = None
-        llm_provider = request.llm_provider
-        llm_model = request.llm_model
-        
-        if request.llm_config_id and request.use_llm:
-            config = await db.get_llm_config_by_id(request.llm_config_id, user_id=user_id)
-            if config:
-                if not effective_api_key:
-                    effective_api_key = config.get('api_key')
-                endpoint = config.get('endpoint')
-                llm_provider = config.get('provider', llm_provider)
-                llm_model = config.get('model') or llm_model
-        if request.use_llm:
-            _ensure_allowed_web_llm_provider(llm_provider)
+        llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
+            user_id=user_id,
+            use_llm=request.use_llm,
+            llm_config_id=request.llm_config_id,
+            llm_provider=request.llm_provider,
+            llm_model=request.llm_model,
+            api_key=request.api_key,
+        )
+        resolved_hallucination_provider = request.hallucination_provider
+        resolved_hallucination_model = request.hallucination_model
+        resolved_hallucination_api_key = request.hallucination_api_key
+        resolved_hallucination_endpoint = None
+        if request.hallucination_config_id or request.hallucination_provider:
+            (
+                resolved_hallucination_provider,
+                resolved_hallucination_model,
+                resolved_hallucination_api_key,
+                resolved_hallucination_endpoint,
+            ) = await _resolve_llm_config_for_request(
+                user_id=user_id,
+                use_llm=request.use_llm,
+                llm_config_id=request.hallucination_config_id,
+                llm_provider=request.hallucination_provider,
+                llm_model=request.hallucination_model,
+                api_key=request.hallucination_api_key,
+                require_hallucination_capable=True,
+            )
 
         valid_urls = [u.strip() for u in request.urls if u.strip()]
 
@@ -2215,6 +2476,8 @@ async def start_batch_check(
                 source_type='url',
                 llm_provider=llm_provider if request.use_llm else None,
                 llm_model=llm_model if request.use_llm else None,
+                hallucination_provider=resolved_hallucination_provider if request.use_llm else None,
+                hallucination_model=resolved_hallucination_model if request.use_llm else None,
                 batch_id=batch_id,
                 batch_label=batch_label,
                 user_id=user_id,
@@ -2256,6 +2519,10 @@ async def start_batch_check(
                     llm_provider, llm_model, effective_api_key, endpoint,
                     request.use_llm, cancel_event, user_id,
                     semantic_scholar_api_key=request.semantic_scholar_api_key,
+                    hallucination_provider=resolved_hallucination_provider,
+                    hallucination_model=resolved_hallucination_model,
+                    hallucination_api_key=resolved_hallucination_api_key,
+                    hallucination_endpoint=resolved_hallucination_endpoint,
                 )
             )
             active_checks[session_id] = {
@@ -2295,8 +2562,12 @@ async def start_batch_check_files(
     llm_config_id: Optional[int] = Form(None),
     llm_provider: str = Form("anthropic"),
     llm_model: Optional[str] = Form(None),
+    hallucination_config_id: Optional[int] = Form(None),
+    hallucination_provider: Optional[str] = Form(None),
+    hallucination_model: Optional[str] = Form(None),
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
+    hallucination_api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -2319,20 +2590,33 @@ async def start_batch_check_files(
         uploads_dir = get_uploads_dir() / str(user_id)
         uploads_dir.mkdir(parents=True, exist_ok=True)
         
-        # api_key from form takes precedence over config stored key
-        effective_api_key = api_key
-        endpoint = None
-
-        if llm_config_id and use_llm:
-            config = await db.get_llm_config_by_id(llm_config_id, user_id=user_id)
-            if config:
-                if not effective_api_key:
-                    effective_api_key = config.get('api_key')
-                endpoint = config.get('endpoint')
-                llm_provider = config.get('provider', llm_provider)
-                llm_model = config.get('model') or llm_model
-        if use_llm:
-            _ensure_allowed_web_llm_provider(llm_provider)
+        llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
+            user_id=user_id,
+            use_llm=use_llm,
+            llm_config_id=llm_config_id,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_key=api_key,
+        )
+        resolved_hallucination_provider = hallucination_provider
+        resolved_hallucination_model = hallucination_model
+        resolved_hallucination_api_key = hallucination_api_key
+        resolved_hallucination_endpoint = None
+        if hallucination_config_id or hallucination_provider:
+            (
+                resolved_hallucination_provider,
+                resolved_hallucination_model,
+                resolved_hallucination_api_key,
+                resolved_hallucination_endpoint,
+            ) = await _resolve_llm_config_for_request(
+                user_id=user_id,
+                use_llm=use_llm,
+                llm_config_id=hallucination_config_id,
+                llm_provider=hallucination_provider,
+                llm_model=hallucination_model,
+                api_key=hallucination_api_key,
+                require_hallucination_capable=True,
+            )
         
         files_to_process = []
         created_paths: list[Path] = []
@@ -2427,6 +2711,8 @@ async def start_batch_check_files(
                 source_type='file',
                 llm_provider=llm_provider if use_llm else None,
                 llm_model=llm_model if use_llm else None,
+                hallucination_provider=resolved_hallucination_provider if use_llm else None,
+                hallucination_model=resolved_hallucination_model if use_llm else None,
                 batch_id=batch_id,
                 batch_label=label,
                 original_filename=file_info['filename'],
@@ -2461,7 +2747,11 @@ async def start_batch_check_files(
                 run_check(
                     session_id, check_id, file_info['path'], 'file',
                     llm_provider, llm_model, effective_api_key, endpoint,
-                    use_llm, cancel_event, user_id
+                    use_llm, cancel_event, user_id,
+                    hallucination_provider=resolved_hallucination_provider,
+                    hallucination_model=resolved_hallucination_model,
+                    hallucination_api_key=resolved_hallucination_api_key,
+                    hallucination_endpoint=resolved_hallucination_endpoint,
                 )
             )
             active_checks[session_id] = {
@@ -2770,6 +3060,18 @@ async def create_llm_config(
         _ensure_allowed_web_llm_provider(config.provider)
         # In single-user mode, store the API key in the database
         store_key = config.api_key if not is_multiuser_mode() else None
+        if not store_key:
+            store_key = await _reuse_provider_key_for_new_config(
+                provider=config.provider,
+                user_id=user_id,
+            )
+        if store_key and not is_multiuser_mode():
+            await _validate_llm_connection_or_raise(
+                provider=config.provider,
+                model=config.model,
+                api_key=store_key,
+                endpoint=config.endpoint,
+            )
         config_id = await db.create_llm_config(
             name=config.name,
             provider=config.provider,
@@ -2805,8 +3107,27 @@ async def update_llm_config(
         user_id = get_user_id_filter(current_user)
         if config.provider is not None:
             _ensure_allowed_web_llm_provider(config.provider)
+        existing_config = await db.get_llm_config_by_id(config_id, user_id=user_id)
+        if not existing_config:
+            raise HTTPException(status_code=404, detail="Config not found")
+
         # In single-user mode, store the API key in the database
         store_key = config.api_key if not is_multiuser_mode() else None
+        validation_provider = config.provider or existing_config.get('provider')
+        validation_model = config.model if config.model is not None else existing_config.get('model')
+        validation_endpoint = config.endpoint if config.endpoint is not None else existing_config.get('endpoint')
+        validation_key = store_key or existing_config.get('api_key')
+        provider_changed = config.provider is not None and config.provider != existing_config.get('provider')
+        model_changed = config.model is not None and config.model != existing_config.get('model')
+        endpoint_changed = config.endpoint is not None and config.endpoint != existing_config.get('endpoint')
+        key_changed = bool(store_key)
+        if validation_key and not is_multiuser_mode() and (provider_changed or model_changed or endpoint_changed or key_changed):
+            await _validate_llm_connection_or_raise(
+                provider=validation_provider,
+                model=validation_model,
+                api_key=validation_key,
+                endpoint=validation_endpoint,
+            )
         success = await db.update_llm_config(
             config_id=config_id,
             name=config.name,
@@ -2959,7 +3280,7 @@ async def validate_llm_config(
             warning = "API key is valid, but the account has a quota or rate-limit issue. Check your plan and billing details."
             logger.info(f"LLM validation passed with warning: {warning}")
             return {"valid": True, "message": "Connection validated (with warning)", "warning": warning}
-        elif "404" in error_msg and "model" in error_lower:
+        elif _is_invalid_model_error(e):
             raise HTTPException(status_code=400, detail=f"Invalid model name. The model '{config.model}' was not found.")
         elif "401" in error_msg or "unauthorized" in error_lower or "invalid" in error_lower and "api" in error_lower and "key" in error_lower:
             raise HTTPException(status_code=400, detail="Invalid API key")

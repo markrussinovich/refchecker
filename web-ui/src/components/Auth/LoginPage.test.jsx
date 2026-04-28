@@ -36,11 +36,11 @@ describe('LoginPage', () => {
     expect(repoLink.getAttribute('href')).toBe('https://github.com/markrussinovich/refchecker')
   })
 
-  it('shows the note about browser-cached keys and non-persisted server storage', () => {
+  it('shows the note about encrypted browser-cached keys and non-persisted server storage', () => {
     render(<LoginPage />)
 
-    expect(screen.getByText(/any LLM keys you enter will be stored in the browser cache/i)).toBeTruthy()
+    expect(screen.getByText(/any LLM keys you enter are retrieved from the encrypted browser cache/i)).toBeTruthy()
     expect(screen.getByText(/only kept in memory on the server/i)).toBeTruthy()
-    expect(screen.getByText(/they are not persisted on the server/i)).toBeTruthy()
+    expect(screen.getByText(/they are not stored in the local database or on the server/i)).toBeTruthy()
   })
 })

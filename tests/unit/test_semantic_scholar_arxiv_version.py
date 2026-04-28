@@ -152,6 +152,61 @@ class TestArxivVersionCheck(unittest.TestCase):
         
         self.assertIsNone(matched_version)
         self.assertEqual(result_errors, errors)
+
+    @patch.object(NonArxivReferenceChecker, '_fetch_arxiv_version_metadata')
+    @patch.object(NonArxivReferenceChecker, '_get_latest_arxiv_version_number')
+    def test_no_inferred_version_update_when_authors_have_low_overlap(self, mock_get_latest, mock_fetch_version):
+        """Same-title arXiv metadata with mostly wrong authors is not a version update."""
+        mock_get_latest.return_value = 2
+        mock_fetch_version.side_effect = lambda arxiv_id, version_num: {
+            'title': 'Optimizing Pretraining Data Mixtures with LLM-Estimated Utility',
+            'authors': [
+                {'name': 'William Held'},
+                {'name': 'Bhargavi Paranjape'},
+                {'name': 'Punit Singh Koura'},
+                {'name': 'Mike Lewis'},
+                {'name': 'Frank Zhang'},
+                {'name': 'Todor Mihaylov'},
+            ],
+            'year': 2025,
+        }
+
+        reference = {
+            'title': 'Optimizing pretraining data mixtures with LLM-estimated utility',
+            'authors': [
+                'Bhargavi Paranjape',
+                'Chunting Zhou',
+                'Adam Roberts',
+                'Sebastian Gehrmann',
+                'Xuezhi Wang',
+                'Jason Wei',
+                'Vincent Zhao',
+                'William Fedus',
+                'Denny Zhou',
+                'Colin Raffel',
+                'Mohit Bansal',
+            ],
+            'year': 2023,
+            'url': 'https://aclanthology.org/2023.emnlp-main.74',
+        }
+        paper_data = {
+            'title': 'Optimizing Pretraining Data Mixtures with LLM-Estimated Utility',
+            'authors': [{'name': 'William Held'}, {'name': 'Bhargavi Paranjape'}],
+        }
+        errors = [
+            {'error_type': 'author', 'error_details': 'Author count mismatch', 'ref_authors_correct': 'William Held, Bhargavi Paranjape'},
+            {'warning_type': 'year', 'warning_details': 'Year mismatch', 'ref_year_correct': 2025},
+        ]
+
+        result_errors, matched_version = self.checker._check_arxiv_version_update(
+            reference,
+            paper_data,
+            '2501.11747',
+            errors,
+        )
+
+        self.assertIsNone(matched_version)
+        self.assertEqual(result_errors, errors)
     
     def test_convert_errors_to_version_warnings(self):
         """Test the error to warning conversion preserves all fields."""

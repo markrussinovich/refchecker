@@ -9,18 +9,18 @@ import { logger } from '../../utils/logger'
 
 // Keep in sync with src/refchecker/config/settings.py DEFAULT_EXTRACTION_MODELS
 const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true },
-  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true },
-  { id: 'google', name: 'Google', defaultModel: 'gemini-2.5-flash', requiresKey: true },
-  { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true },
-  { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true },
+  { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, hallucinationCapable: true },
+  { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true, hallucinationCapable: true },
+  { id: 'google', name: 'Google', defaultModel: 'gemini-2.5-flash', requiresKey: true, hallucinationCapable: true },
+  { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
+  { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true, hallucinationCapable: false },
 ]
 
 /**
  * Modal for adding/editing LLM configurations
  */
 export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null }) {
-  const { addConfig, updateConfig } = useConfigStore()
+  const { addConfig, updateConfig, configs } = useConfigStore()
   const multiuser = useAuthStore(state => state.multiuser)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
@@ -59,6 +59,16 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     [multiuser],
   )
   const selectedProvider = availableProviders.find(p => p.id === formData.provider)
+  const existingProviderConfig = configs.find(config => (
+    config.provider === formData.provider &&
+    config.id !== editConfig?.id &&
+    (config.has_key || useKeyStore.getState().hasKey(config.provider) || useKeyStore.getState().hasKey(`llm:${config.id}`))
+  ))
+  const reusableProviderKey = (
+    useKeyStore.getState().getKey(formData.provider) ||
+    (existingProviderConfig ? useKeyStore.getState().getKey(`llm:${existingProviderConfig.id}`) : null)
+  )
+  const hasReusableProviderKey = !!existingProviderConfig || !!reusableProviderKey
 
   useEffect(() => {
     if (!multiuser) return
@@ -116,7 +126,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
       return false
     }
 
-    if (selectedProvider?.requiresKey && !editConfig && !formData.api_key.trim()) {
+    if (selectedProvider?.requiresKey && !editConfig && !formData.api_key.trim() && !hasReusableProviderKey) {
       setError('API key is required')
       return false
     }
@@ -145,19 +155,21 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         endpoint: formData.endpoint.trim() || null,
       }
 
-      // Only include API key if it was entered
-      if (formData.api_key.trim()) {
-        configData.api_key = formData.api_key.trim()
+      const effectiveApiKey = formData.api_key.trim() || reusableProviderKey
+
+      // Only include API key if it was entered or is available from this browser cache.
+      if (effectiveApiKey) {
+        configData.api_key = effectiveApiKey
       }
 
       // Validate API connection before saving (only for new configs or when API key is provided)
-      if (selectedProvider?.requiresKey && (formData.api_key.trim() || !editConfig)) {
+      if (selectedProvider?.requiresKey && (effectiveApiKey || (!editConfig && !existingProviderConfig))) {
         setIsValidating(true)
         try {
           const validationData = {
             provider: configData.provider,
             model: configData.model,
-            api_key: configData.api_key,
+            api_key: effectiveApiKey,
             endpoint: configData.endpoint,
           }
           logger.info('LLMConfigModal', 'Validating API connection...', { provider: configData.provider, model: configData.model })
@@ -210,27 +222,32 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         setIsValidating(false)
       }
 
+      let savedConfig = null
       if (editConfig) {
-        await updateConfig(editConfig.id, configData)
+        savedConfig = await updateConfig(editConfig.id, configData)
         // Re-fetch to get updated has_key flags
         await useConfigStore.getState().fetchConfigs()
         logger.info('LLMConfigModal', 'Config updated')
       } else if (prefillConfig) {
         // Update the existing keyless config instead of creating a duplicate
-        await updateConfig(prefillConfig.id, configData)
+        savedConfig = await updateConfig(prefillConfig.id, configData)
         // Re-fetch configs to get updated has_key flags from backend
         await useConfigStore.getState().fetchConfigs()
         // Auto-select the newly keyed config
         await useConfigStore.getState().selectConfig(prefillConfig.id)
         logger.info('LLMConfigModal', 'Keyless config updated with key')
       } else {
-        await addConfig(configData)
+        savedConfig = await addConfig(configData)
         logger.info('LLMConfigModal', 'Config created')
       }
 
       // Save the API key in memory for this tab so it's available for check submissions
-      if (formData.api_key.trim()) {
-        useKeyStore.getState().setKey(formData.provider, formData.api_key.trim())
+      if (effectiveApiKey) {
+        const configId = editConfig?.id || prefillConfig?.id || savedConfig?.id
+        if (configId) {
+          useKeyStore.getState().setKey(`llm:${configId}`, effectiveApiKey)
+        }
+        useKeyStore.getState().setKey(formData.provider, effectiveApiKey)
         logger.info('LLMConfigModal', 'API key saved to local key store', { provider: formData.provider })
       }
 
@@ -302,6 +319,14 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
+          <p
+            className="mt-1 text-xs"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            {selectedProvider?.hallucinationCapable
+              ? 'Can be used for extraction and hallucination checks.'
+              : 'Local vLLM is available for extraction only.'}
+          </p>
         </div>
 
         {/* Model */}
@@ -365,7 +390,7 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               name="api_key"
               value={formData.api_key}
               onChange={handleChange}
-              placeholder={editConfig ? '••••••••' : 'Enter API key'}
+              placeholder={editConfig ? '••••••••' : hasReusableProviderKey ? 'Reuse existing provider key' : 'Enter API key'}
               className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
               style={{
                 backgroundColor: 'var(--color-bg-secondary)',
@@ -378,8 +403,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
               style={{ color: 'var(--color-text-muted)' }}
             >
               {multiuser
-                ? 'Stored only in your browser — never saved on the server'
-                : 'Stored securely and never shown again'}
+                ? 'Retrieved from this encrypted browser cache for the local web interface and not stored in the local database or on the server.'
+                : hasReusableProviderKey && !editConfig
+                  ? 'Defaults to the existing encrypted provider key in the local RefChecker database.'
+                  : 'Stored encrypted in the local RefChecker database and never shown again.'}
             </p>
           </div>
         )}

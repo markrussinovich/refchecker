@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+const waitForSave = () => new Promise(resolve => setTimeout(resolve, 0))
+
 describe('useKeyStore', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -27,15 +29,16 @@ describe('useKeyStore', () => {
     expect(useKeyStore.getState().getKey('anthropic')).toBe('persisted-key')
 
     useKeyStore.getState().setKey('openai', 'new-key')
+    await waitForSave()
 
     expect(useKeyStore.getState().getKey('openai')).toBe('new-key')
     const saved = JSON.parse(localStorage.getItem('refchecker_tab_keys'))
-    expect(saved.openai).toBe('new-key')
-    expect(saved.anthropic).toBe('persisted-key')
+    expect(saved.version).toBe(2)
+    expect(saved.encrypted).toBeTypeOf('boolean')
   })
 
   it('restores keys from localStorage on load', async () => {
-    localStorage.setItem('refchecker_tab_keys', JSON.stringify({ openai: 'restored-key' }))
+    localStorage.setItem('refchecker_tab_keys', JSON.stringify({ version: 2, encrypted: false, keys: { openai: 'restored-key' } }))
 
     const { useKeyStore } = await import('./useKeyStore')
 
@@ -48,10 +51,16 @@ describe('useKeyStore', () => {
     useKeyStore.getState().setKey('openai', 'openai-key')
     useKeyStore.getState().setKey('semantic_scholar', 'ss-key')
     useKeyStore.getState().clearAll()
+    await waitForSave()
 
     expect(useKeyStore.getState().getKey('openai')).toBeNull()
     expect(useKeyStore.getState().getKey('semantic_scholar')).toBeNull()
     const saved = JSON.parse(localStorage.getItem('refchecker_tab_keys'))
-    expect(saved).toEqual({})
+    expect(saved.version).toBe(2)
+    if (saved.encrypted) {
+      expect(saved.data).toBeTruthy()
+    } else {
+      expect(saved.keys).toEqual({})
+    }
   })
 })

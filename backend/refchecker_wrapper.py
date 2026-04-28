@@ -227,7 +227,14 @@ class ProgressRefChecker:
                 verifier.cache_dir = cache_dir
                 if verifier.available or cache_dir:
                     self.hallucination_verifier = verifier
-                    logger.debug('Hallucination verifier initialized for web UI (provider=%s, available=%s, cache=%s)', h_provider, verifier.available, bool(cache_dir))
+                    logger.info(
+                        'Hallucination verifier configured for web UI (provider=%s, model=%s, available=%s, key=%s, cache=%s)',
+                        verifier.provider,
+                        verifier.model,
+                        verifier.available,
+                        'present' if h_api_key else 'resolved-from-env' if verifier.available else 'missing',
+                        bool(cache_dir),
+                    )
         except Exception as e:
             logger.debug(f'Hallucination verifier init failed: {e}')
         # Web UI Semantic Scholar keys are supplied per request from the browser.

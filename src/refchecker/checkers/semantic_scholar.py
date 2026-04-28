@@ -499,15 +499,17 @@ class NonArxivReferenceChecker:
                     authors_match, _ = compare_authors(cited_authors, version_authors)
                     if authors_match:
                         return title_score + 0.01  # boost
-                    # Check actual overlap — reject if no meaningful overlap
+                    # Check actual overlap. A version update should preserve most
+                    # cited authors; one shared author on the same title is often
+                    # a different or hallucinated paper, not an arXiv revision.
                     from refchecker.core.hallucination_policy import _compute_author_overlap
                     cited_str = ', '.join(
                         str(a) for a in cited_authors
                     )
                     correct_str = ', '.join(version_authors)
                     overlap = _compute_author_overlap(cited_str, correct_str)
-                    if overlap is not None and overlap < 0.1:
-                        return -1.0  # no author overlap — not a version update
+                    if overlap is not None and overlap < 0.6:
+                        return -1.0  # low author overlap — not a version update
             return title_score
 
         # Find the BEST matching version by comparing title + authors

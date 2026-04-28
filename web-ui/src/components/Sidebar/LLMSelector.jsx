@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useAuthStore } from '../../stores/useAuthStore'
 import { useKeyStore } from '../../stores/useKeyStore'
@@ -8,29 +9,52 @@ import { logger } from '../../utils/logger'
 /**
  * LLM configuration selector with dropdown
  * @param {Object} props
- * @param {boolean} props.compact - If true, shows a more compact version for the header
+ * @param {string} props.mode - extraction or hallucination
  */
-export default function LLMSelector({ compact = false }) {
-  const { configs, selectedConfigId, selectConfig, deleteConfig, isLoading } = useConfigStore()
+export default function LLMSelector({ mode = 'extraction' }) {
+  const {
+    configs,
+    selectedConfigId,
+    selectedExtractionConfigId,
+    selectedHallucinationConfigId,
+    selectConfig,
+    selectExtractionConfig,
+    selectHallucinationConfig,
+    deleteConfig,
+    isLoading,
+  } = useConfigStore()
   const multiuser = useAuthStore(state => state.multiuser)
   const hasKeyInBrowser = useKeyStore(state => state.hasKey)
+  const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
+  const isHallucinationMode = mode === 'hallucination'
+  const visibleConfigs = isHallucinationMode
+    ? configs.filter(config => hallucinationCapableProviders.includes(config.provider))
+    : configs
+  const activeSelectedId = isHallucinationMode
+    ? selectedHallucinationConfigId
+    : (selectedExtractionConfigId || selectedConfigId)
 
   // A config is "valid" (selectable) if it has a key:
   //   single-user: has_key flag from DB
   //   multi-user: the current tab has a key for that provider
   const configHasKey = (config) => {
     if (!config) return false
-    if (multiuser) return hasKeyInBrowser(config.provider)
-    return !!config.has_key
+    if (config.provider === 'vllm') return true
+    if (hasKeyInBrowser(`llm:${config.id}`)) return true
+    if (hasKeyInBrowser(config.provider)) return true
+    if (multiuser) return false
+    return !!config.has_key || configs.some(existing => (
+      existing.provider === config.provider && existing.has_key
+    ))
   }
-  const validConfigs = configs.filter(configHasKey)
   const [isOpen, setIsOpen] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [editConfig, setEditConfig] = useState(null)
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null)
+  const [menuStyle, setMenuStyle] = useState(null)
   const dropdownRef = useRef(null)
 
-  const selectedConfig = validConfigs.find(c => c.id === selectedConfigId)
+  const selectedConfig = visibleConfigs.find(c => c.id === activeSelectedId && configHasKey(c))
 
   // Format display name as provider-model
   const formatConfigName = (config) => {
@@ -40,7 +64,7 @@ export default function LLMSelector({ compact = false }) {
 
   // Find a keyless config for the same provider to use as prefill when creating new configs
   const findPrefillConfig = () => {
-    const keylessConfigs = configs.filter(c => !configHasKey(c))
+    const keylessConfigs = visibleConfigs.filter(c => !configHasKey(c))
     return keylessConfigs.length > 0 ? keylessConfigs[0] : null
   }
 
@@ -56,9 +80,54 @@ export default function LLMSelector({ compact = false }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const handleSelect = (id) => {
-    logger.info('LLMSelector', `Selected config ${id}`)
-    selectConfig(id)
+  useEffect(() => {
+    if (!isOpen) return undefined
+
+    const updateMenuPosition = () => {
+      const rect = dropdownRef.current?.getBoundingClientRect()
+      if (!rect) return
+
+      const viewportPadding = 16
+      const availableBelow = window.innerHeight - rect.bottom - viewportPadding
+      const availableAbove = rect.top - viewportPadding
+      const menuMaxHeight = Math.min(320, Math.max(180, Math.max(availableBelow, availableAbove)))
+      const openAbove = availableBelow < 220 && availableAbove > availableBelow
+
+      setMenuStyle({
+        position: 'fixed',
+        left: `${rect.left}px`,
+        top: openAbove ? 'auto' : `${rect.bottom + 4}px`,
+        bottom: openAbove ? `${window.innerHeight - rect.top + 4}px` : 'auto',
+        width: `${rect.width}px`,
+        maxHeight: `${menuMaxHeight}px`,
+        zIndex: 1000,
+      })
+    }
+
+    updateMenuPosition()
+    window.addEventListener('resize', updateMenuPosition)
+    window.addEventListener('scroll', updateMenuPosition, true)
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition)
+      window.removeEventListener('scroll', updateMenuPosition, true)
+    }
+  }, [isOpen])
+
+  const handleSelect = (config) => {
+    if (!configHasKey(config)) {
+      setEditConfig(config)
+      setShowModal(true)
+      setIsOpen(false)
+      return
+    }
+    logger.info('LLMSelector', `Selected config ${config.id}`)
+    if (isHallucinationMode) {
+      selectHallucinationConfig(config.id)
+    } else if (selectExtractionConfig) {
+      selectExtractionConfig(config.id)
+    } else {
+      selectConfig(config.id)
+    }
     setIsOpen(false)
   }
 
@@ -119,47 +188,51 @@ export default function LLMSelector({ compact = false }) {
       </button>
 
       {/* Dropdown menu */}
-      {isOpen && (
+      {isOpen && menuStyle && createPortal((
         <div 
-          className="absolute z-10 w-full mt-1 rounded-lg border shadow-lg overflow-hidden"
+          className="rounded-lg border shadow-lg overflow-hidden"
+          onMouseDown={(event) => event.stopPropagation()}
           style={{
             backgroundColor: 'var(--color-bg-primary)',
             borderColor: 'var(--color-border)',
+            ...menuStyle,
           }}
         >
-          {/* Existing configs (only those with valid keys) */}
-          <div className="max-h-48 overflow-y-auto">
-            {validConfigs.length === 0 ? (
+          {/* Existing configs */}
+          <div className="overflow-y-auto" style={{ maxHeight: `calc(${menuStyle.maxHeight} - 41px)` }}>
+            {visibleConfigs.length === 0 ? (
               <div 
                 className="px-3 py-2 text-sm"
                 style={{ color: 'var(--color-text-muted)' }}
               >
-                No configurations
+                {isHallucinationMode ? 'No hallucination-capable configurations' : 'No configurations'}
               </div>
             ) : (
-              validConfigs.map(config => (
+              visibleConfigs.map(config => {
+                const selectable = configHasKey(config)
+                return (
                 <div
                   key={config.id}
                   className="flex items-center justify-between px-3 py-2 cursor-pointer transition-colors"
                   style={{
-                    backgroundColor: config.id === selectedConfigId 
+                    backgroundColor: config.id === activeSelectedId 
                       ? 'var(--color-bg-tertiary)' 
                       : 'transparent',
                   }}
                   onMouseEnter={(e) => {
-                    if (config.id !== selectedConfigId) {
+                    if (config.id !== activeSelectedId) {
                       e.currentTarget.style.backgroundColor = 'var(--color-bg-secondary)'
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (config.id !== selectedConfigId) {
+                    if (config.id !== activeSelectedId) {
                       e.currentTarget.style.backgroundColor = 'transparent'
                     }
                   }}
                 >
                   <div 
                     className="flex-1 min-w-0"
-                    onClick={() => handleSelect(config.id)}
+                    onClick={() => handleSelect(config)}
                   >
                     <div 
                       className="font-medium truncate"
@@ -172,6 +245,8 @@ export default function LLMSelector({ compact = false }) {
                       style={{ color: 'var(--color-text-muted)' }}
                     >
                       {config.provider}{config.model ? ` / ${config.model}` : ''}
+                      {!selectable ? ' / key needed' : ''}
+                      {config.provider === 'vllm' ? ' / extraction only' : ''}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -260,7 +335,8 @@ export default function LLMSelector({ compact = false }) {
                     )}
                   </div>
                 </div>
-              ))
+                )
+              })
             )}
           </div>
 
@@ -291,7 +367,7 @@ export default function LLMSelector({ compact = false }) {
             </button>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* Add/Edit Modal */}
       <LLMConfigModal 

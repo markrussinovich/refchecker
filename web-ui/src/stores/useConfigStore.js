@@ -2,6 +2,28 @@ import { create } from 'zustand'
 import { logger } from '../utils/logger'
 import * as api from '../utils/api'
 
+const EXTRACTION_SELECTION_KEY = 'refchecker_selected_extraction_llm'
+const HALLUCINATION_SELECTION_KEY = 'refchecker_selected_hallucination_llm'
+const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
+
+function getStoredSelection(key) {
+  try {
+    const value = localStorage.getItem(key)
+    return value ? Number(value) : null
+  } catch {
+    return null
+  }
+}
+
+function setStoredSelection(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key)
+    else localStorage.setItem(key, String(value))
+  } catch {
+    // Ignore storage failures; in-memory selection still works.
+  }
+}
+
 /**
  * Store for LLM configuration management
  */
@@ -9,6 +31,8 @@ export const useConfigStore = create((set, get) => ({
   // State
   configs: [],
   selectedConfigId: null,
+  selectedExtractionConfigId: getStoredSelection(EXTRACTION_SELECTION_KEY),
+  selectedHallucinationConfigId: getStoredSelection(HALLUCINATION_SELECTION_KEY),
   isLoading: false,
   error: null,
 
@@ -30,9 +54,25 @@ export const useConfigStore = create((set, get) => ({
         // Find the default config
         const defaultConfig = configs.find(c => c.is_default)
         
+        const defaultConfigId = defaultConfig?.id || configs[0]?.id || null
+        const storedExtractionId = get().selectedExtractionConfigId
+        const storedHallucinationId = get().selectedHallucinationConfigId
+        const extractionConfigId = configs.some(c => c.id === storedExtractionId)
+          ? storedExtractionId
+          : defaultConfigId
+        const hallucinationConfig = configs.find(c => hallucinationCapableProviders.includes(c.provider))
+        const hallucinationConfigId = configs.some(c => c.id === storedHallucinationId && hallucinationCapableProviders.includes(c.provider))
+          ? storedHallucinationId
+          : hallucinationConfig?.id || null
+
+        setStoredSelection(EXTRACTION_SELECTION_KEY, extractionConfigId)
+        setStoredSelection(HALLUCINATION_SELECTION_KEY, hallucinationConfigId)
+
         set({ 
           configs, 
-          selectedConfigId: defaultConfig?.id || configs[0]?.id || null,
+          selectedConfigId: defaultConfigId,
+          selectedExtractionConfigId: extractionConfigId,
+          selectedHallucinationConfigId: hallucinationConfigId,
           isLoading: false,
           error: null
         })
@@ -68,10 +108,18 @@ export const useConfigStore = create((set, get) => ({
       logger.info('ConfigStore', 'Creating LLM config', { name: config.name, provider: config.provider })
       const response = await api.createLLMConfig(config)
       const newConfig = response.data
+      setStoredSelection(EXTRACTION_SELECTION_KEY, newConfig.id)
+      if (hallucinationCapableProviders.includes(newConfig.provider)) {
+        setStoredSelection(HALLUCINATION_SELECTION_KEY, newConfig.id)
+      }
       
       set(state => ({
         configs: [...state.configs, newConfig],
         selectedConfigId: newConfig.id, // Auto-select new config
+        selectedExtractionConfigId: newConfig.id,
+        selectedHallucinationConfigId: hallucinationCapableProviders.includes(newConfig.provider)
+          ? newConfig.id
+          : state.selectedHallucinationConfigId,
         isLoading: false
       }))
       
@@ -119,9 +167,19 @@ export const useConfigStore = create((set, get) => ({
         const newSelectedId = state.selectedConfigId === id 
           ? (newConfigs[0]?.id || null) 
           : state.selectedConfigId
+        const newExtractionId = state.selectedExtractionConfigId === id
+          ? (newConfigs[0]?.id || null)
+          : state.selectedExtractionConfigId
+        const newHallucinationId = state.selectedHallucinationConfigId === id
+          ? (newConfigs.find(c => hallucinationCapableProviders.includes(c.provider))?.id || null)
+          : state.selectedHallucinationConfigId
+        setStoredSelection(EXTRACTION_SELECTION_KEY, newExtractionId)
+        setStoredSelection(HALLUCINATION_SELECTION_KEY, newHallucinationId)
         return {
           configs: newConfigs,
           selectedConfigId: newSelectedId,
+          selectedExtractionConfigId: newExtractionId,
+          selectedHallucinationConfigId: newHallucinationId,
           isLoading: false
         }
       })
@@ -138,14 +196,44 @@ export const useConfigStore = create((set, get) => ({
     logger.info('ConfigStore', `Selecting config ${id}`)
     try {
       await api.setDefaultLLMConfig(id)
-      set({ selectedConfigId: id })
+      setStoredSelection(EXTRACTION_SELECTION_KEY, id)
+      set({ selectedConfigId: id, selectedExtractionConfigId: id })
     } catch (error) {
       logger.error('ConfigStore', 'Failed to set default config', error)
     }
   },
 
+  selectExtractionConfig: async (id) => {
+    logger.info('ConfigStore', `Selecting extraction config ${id}`)
+    try {
+      await api.setDefaultLLMConfig(id)
+      setStoredSelection(EXTRACTION_SELECTION_KEY, id)
+      set({ selectedConfigId: id, selectedExtractionConfigId: id })
+    } catch (error) {
+      logger.error('ConfigStore', 'Failed to set extraction config', error)
+    }
+  },
+
+  selectHallucinationConfig: (id) => {
+    logger.info('ConfigStore', `Selecting hallucination config ${id}`)
+    setStoredSelection(HALLUCINATION_SELECTION_KEY, id)
+    set({ selectedHallucinationConfigId: id })
+  },
+
   getSelectedConfig: () => {
     const { configs, selectedConfigId } = get()
     return configs.find(c => c.id === selectedConfigId) || null
+  },
+
+  getSelectedExtractionConfig: () => {
+    const { configs, selectedExtractionConfigId, selectedConfigId } = get()
+    return configs.find(c => c.id === (selectedExtractionConfigId || selectedConfigId)) || null
+  },
+
+  getSelectedHallucinationConfig: () => {
+    const { configs, selectedHallucinationConfigId, selectedExtractionConfigId, selectedConfigId } = get()
+    const selected = configs.find(c => c.id === (selectedHallucinationConfigId || selectedExtractionConfigId || selectedConfigId))
+    if (selected && hallucinationCapableProviders.includes(selected.provider)) return selected
+    return configs.find(c => hallucinationCapableProviders.includes(c.provider)) || null
   },
 }))

@@ -21,6 +21,8 @@ describe('useConfigStore', () => {
     
     expect(result.current.configs).toEqual([])
     expect(result.current.selectedConfigId).toBeNull()
+    expect(result.current.selectedExtractionConfigId).toBeNull()
+    expect(result.current.selectedHallucinationConfigId).toBeNull()
     expect(result.current.isLoading).toBe(false)
   })
 
@@ -57,5 +59,15 @@ describe('useConfigStore', () => {
     const { result } = renderHook(() => useConfigStore())
     
     expect(typeof result.current.getSelectedConfig).toBe('function')
+  })
+
+  it('should have mode-specific selection methods', async () => {
+    const { useConfigStore } = await import('./useConfigStore')
+    const { result } = renderHook(() => useConfigStore())
+
+    expect(typeof result.current.selectExtractionConfig).toBe('function')
+    expect(typeof result.current.selectHallucinationConfig).toBe('function')
+    expect(typeof result.current.getSelectedExtractionConfig).toBe('function')
+    expect(typeof result.current.getSelectedHallucinationConfig).toBe('function')
   })
 })

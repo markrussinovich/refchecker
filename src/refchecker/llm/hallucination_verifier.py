@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import os
 import random
-import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -56,6 +55,7 @@ EXPLANATION: <1-2 sentence summary of your finding — NO URLs, NO search narrat
 LINK: <URL where the exact paper was found, or NONE if not found>
 FOUND_TITLE: <the exact title of the paper as found on the web, or NONE>
 FOUND_AUTHORS: <comma-separated author names as found on the web, or NONE>
+FOUND_VENUE: <venue or publication/source name as found on the web, or NONE>
 FOUND_YEAR: <publication year as found on the web, or NONE>
 VERDICT: <LIKELY|UNLIKELY|UNCERTAIN>
 
@@ -72,9 +72,9 @@ CRITICAL formatting rules:
 only in the LINK field.
 - Start the EXPLANATION directly with your finding (e.g., "No paper with \
 this exact title exists." or "The exact paper was found in Nature 2024.").
-- FOUND_TITLE, FOUND_AUTHORS, and FOUND_YEAR should contain the metadata \
+- FOUND_TITLE, FOUND_AUTHORS, FOUND_VENUE, and FOUND_YEAR should contain the metadata \
 as shown on the actual web page or database entry you found. If the \
-verdict is LIKELY or you did not find the paper, set all three to NONE.
+verdict is LIKELY or you did not find the paper, set all four to NONE.
 
 WARNING: Finding this title mentioned as a CITATION inside another paper \
 (e.g. on OpenReview, arXiv, or in a reference list) does NOT prove this \
@@ -758,16 +758,13 @@ class LLMHallucinationVerifier:
                 )
                 # Apply verified-paper safety net to cached results too
                 verdict, explanation = self._downgrade_ungrounded_unlikely(
-                    verdict, explanation, error_entry, web_urls, found_metadata,
+                    verdict, explanation, error_entry, web_urls,
                 )
                 verdict, explanation = self._apply_unlikely_author_mismatch_guard(
                     verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
                 )
                 verdict, explanation = self._apply_citation_evidence_guard(
                     verdict, explanation, error_entry,
-                )
-                verdict, explanation = self._apply_unverified_academic_metadata_guard(
-                    verdict, explanation, error_entry, found_metadata,
                 )
                 verdict, explanation = self._apply_verified_safety_net(
                     verdict, explanation, error_entry, web_urls,
@@ -778,6 +775,7 @@ class LLMHallucinationVerifier:
                     'link': paper_link,
                     'found_title': found_metadata.get('title'),
                     'found_authors': found_metadata.get('authors'),
+                    'found_venue': found_metadata.get('venue'),
                     'found_year': found_metadata.get('year'),
                     'source': 'deep_hallucination_cache',
                     'web_search': {'found': bool(web_urls),
@@ -857,16 +855,13 @@ class LLMHallucinationVerifier:
 
         # Apply verified-paper safety net
         verdict, explanation = self._downgrade_ungrounded_unlikely(
-            verdict, explanation, error_entry, web_urls, found_metadata,
+            verdict, explanation, error_entry, web_urls,
         )
         verdict, explanation = self._apply_unlikely_author_mismatch_guard(
             verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
         )
         verdict, explanation = self._apply_citation_evidence_guard(
             verdict, explanation, error_entry,
-        )
-        verdict, explanation = self._apply_unverified_academic_metadata_guard(
-            verdict, explanation, error_entry, found_metadata,
         )
         verdict, explanation = self._apply_verified_safety_net(
             verdict, explanation, error_entry, web_urls,
@@ -883,6 +878,7 @@ class LLMHallucinationVerifier:
             'link': paper_link,
             'found_title': found_metadata.get('title'),
             'found_authors': found_metadata.get('authors'),
+            'found_venue': found_metadata.get('venue'),
             'found_year': found_metadata.get('year'),
             'source': 'deep_hallucination_live',
             'web_search': web_result,
@@ -894,7 +890,6 @@ class LLMHallucinationVerifier:
         explanation: str,
         error_entry: Dict[str, Any],
         web_urls: list,
-        found_metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """Do not let ungrounded chat fallback prove academic references real."""
         if verdict != 'UNLIKELY' or web_urls:
@@ -908,12 +903,6 @@ class LLMHallucinationVerifier:
             return verdict, explanation
 
         if error_entry.get('ref_verified_url'):
-            return verdict, explanation
-
-        metadata_matches, _, _ = LLMHallucinationVerifier._found_metadata_matches_cited_reference(
-            error_entry, found_metadata or {},
-        )
-        if metadata_matches:
             return verdict, explanation
 
         logger.debug(
@@ -972,7 +961,7 @@ class LLMHallucinationVerifier:
             found_overlap = _compute_author_overlap(cited, found_authors, cited_list=cited_list)
             if found_overlap is not None and found_overlap >= 0.6:
                 if not LLMHallucinationVerifier._found_authors_conflict_with_checked_source(
-                    found_authors, error_entry, paper_link,
+                    found_metadata, error_entry, paper_link,
                 ):
                     return verdict, explanation
 
@@ -1046,113 +1035,8 @@ class LLMHallucinationVerifier:
         )
 
     @staticmethod
-    def _apply_unverified_academic_metadata_guard(
-        verdict: str,
-        explanation: str,
-        error_entry: Dict[str, Any],
-        found_metadata: Dict[str, Any],
-    ) -> tuple:
-        """Require title+author metadata before upgrading unverified papers."""
-        if verdict != 'UNLIKELY':
-            return verdict, explanation
-
-        if LLMHallucinationVerifier._is_verified_real_world_source(error_entry):
-            return verdict, explanation
-
-        if error_entry.get('ref_verified_url'):
-            return verdict, explanation
-
-        error_type = (error_entry.get('error_type') or '').lower()
-        if error_type not in ('unverified', 'multiple'):
-            return verdict, explanation
-
-        found_title = (found_metadata or {}).get('title')
-        found_authors = (found_metadata or {}).get('authors')
-        if not found_title or not found_authors:
-            logger.debug(
-                'Overriding UNLIKELY -> LIKELY because LLM did not provide found metadata ref=%r',
-                error_entry.get('ref_title', ''),
-            )
-            return (
-                'LIKELY',
-                explanation + (
-                    ' (Verdict corrected: this academic reference was not found '
-                    'by the regular checkers, and the LLM did not provide found '
-                    'title and author metadata from a dedicated source page.)'
-                ),
-            )
-
-        metadata_matches, title_similarity, author_overlap = (
-            LLMHallucinationVerifier._found_metadata_matches_cited_reference(
-                error_entry, found_metadata,
-            )
-        )
-        if metadata_matches:
-            return verdict, explanation
-
-        logger.debug(
-            'Overriding UNLIKELY -> LIKELY because LLM-found metadata does not match '
-            '(title_similarity=%.2f, author_overlap=%s, ref=%r)',
-            title_similarity,
-            'unknown' if author_overlap is None else f'{author_overlap * 100:.0f}%',
-            error_entry.get('ref_title', ''),
-        )
-        return (
-            'LIKELY',
-            explanation + (
-                ' (Verdict corrected: the LLM-found title and authors do not '
-                'substantially match the cited academic reference.)'
-            ),
-        )
-
-    @staticmethod
-    def _found_metadata_matches_cited_reference(
-        error_entry: Dict[str, Any],
-        found_metadata: Dict[str, Any],
-    ) -> tuple:
-        found_title = (found_metadata or {}).get('title')
-        found_authors = (found_metadata or {}).get('authors')
-        if not found_title or not found_authors:
-            return False, 0.0, None
-
-        cited_title = error_entry.get('ref_title', '')
-        cited_authors = error_entry.get('ref_authors_cited', '')
-
-        from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
-        from refchecker.core.hallucination_policy import _compute_author_overlap
-
-        title_similarity = compare_titles_with_latex_cleaning(cited_title, found_title)
-        title_matches = (
-            title_similarity >= 0.9
-            or LLMHallucinationVerifier._titles_match_despite_extraction_artifact(
-                cited_title, found_title,
-            )
-        )
-        author_overlap = _compute_author_overlap(
-            cited_authors,
-            found_authors,
-            cited_list=error_entry.get('_ref_authors_cited_list'),
-        )
-        return title_matches and (author_overlap is None or author_overlap >= 0.6), title_similarity, author_overlap
-
-    @staticmethod
-    def _titles_match_despite_extraction_artifact(cited_title: str, found_title: str) -> bool:
-        """Match titles that differ only by obvious PDF/OCR spacing artifacts."""
-        if not cited_title or not found_title:
-            return False
-
-        from refchecker.core.hallucination_policy import _looks_like_split_word_artifact
-
-        if not _looks_like_split_word_artifact(cited_title):
-            return False
-
-        compact_cited = re.sub(r'[^a-z0-9]+', '', cited_title.lower())
-        compact_found = re.sub(r'[^a-z0-9]+', '', found_title.lower())
-        return bool(compact_cited and compact_cited == compact_found)
-
-    @staticmethod
     def _found_authors_conflict_with_checked_source(
-        found_authors: str,
+        found_metadata: Dict[str, Any],
         error_entry: Dict[str, Any],
         paper_link: Optional[str],
     ) -> bool:
@@ -1163,8 +1047,17 @@ class LLMHallucinationVerifier:
         already verified. In that case, prefer the checker metadata over the
         LLM-provided field.
         """
+        found_authors = (found_metadata or {}).get('authors')
         if not paper_link or not found_authors:
             return False
+
+        found_title = (found_metadata or {}).get('title')
+        cited_title = error_entry.get('ref_title', '')
+        if found_title and cited_title:
+            from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+
+            if compare_titles_with_latex_cleaning(cited_title, found_title) >= 0.9:
+                return False
 
         checked_urls = [
             error_entry.get('ref_url_cited', ''),
@@ -1370,6 +1263,7 @@ class LLMHallucinationVerifier:
             LINK: <url> | NONE
             FOUND_TITLE: <title> | NONE
             FOUND_AUTHORS: <authors> | NONE
+            FOUND_VENUE: <venue> | NONE
             FOUND_YEAR: <year> | NONE
             VERDICT: LIKELY|UNLIKELY|UNCERTAIN
 
@@ -1378,7 +1272,7 @@ class LLMHallucinationVerifier:
         Returns
         -------
         tuple of (verdict, explanation, link, found_metadata)
-            found_metadata is a dict with 'title', 'authors', 'year' keys
+            found_metadata is a dict with 'title', 'authors', 'venue', 'year' keys
             (values may be None if not provided by the LLM).
         """
         import re
@@ -1387,16 +1281,17 @@ class LLMHallucinationVerifier:
         verdict = 'UNCERTAIN'
         explanation = ''
         link = None
-        found_metadata = {'title': None, 'authors': None, 'year': None}
+        found_metadata = {'title': None, 'authors': None, 'venue': None, 'year': None}
 
         # Try structured format first
         verdict_match = re.search(r'^VERDICT:\s*(LIKELY|UNLIKELY|UNCERTAIN)', text, re.IGNORECASE | re.MULTILINE)
         explanation_match = re.search(r'^EXPLANATION:\s*(.+?)(?=^LINK:|\Z)', text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
         link_match = re.search(r'^LINK:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
 
-        # Parse FOUND_TITLE, FOUND_AUTHORS, FOUND_YEAR
+        # Parse FOUND_TITLE, FOUND_AUTHORS, FOUND_VENUE, FOUND_YEAR
         found_title_match = re.search(r'^FOUND_TITLE:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
         found_authors_match = re.search(r'^FOUND_AUTHORS:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
+        found_venue_match = re.search(r'^FOUND_VENUE:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
         found_year_match = re.search(r'^FOUND_YEAR:\s*(.+)', text, re.IGNORECASE | re.MULTILINE)
 
         if found_title_match:
@@ -1407,6 +1302,10 @@ class LLMHallucinationVerifier:
             val = found_authors_match.group(1).strip()
             if val.upper() != 'NONE' and val:
                 found_metadata['authors'] = val
+        if found_venue_match:
+            val = found_venue_match.group(1).strip()
+            if val.upper() != 'NONE' and val:
+                found_metadata['venue'] = val
         if found_year_match:
             val = found_year_match.group(1).strip()
             if val.upper() != 'NONE' and val:
@@ -1420,7 +1319,7 @@ class LLMHallucinationVerifier:
         else:
             # Fallback: use full text minus verdict/link/found lines as explanation
             lines = [l for l in text.splitlines()
-                     if not re.match(r'^(VERDICT|LINK|FOUND_TITLE|FOUND_AUTHORS|FOUND_YEAR):', l, re.IGNORECASE)]
+                     if not re.match(r'^(VERDICT|LINK|FOUND_TITLE|FOUND_AUTHORS|FOUND_VENUE|FOUND_YEAR):', l, re.IGNORECASE)]
             explanation = ' '.join(lines).strip()
 
         if link_match:

@@ -188,6 +188,8 @@ class Database:
                     results_json TEXT,
                     llm_provider TEXT,
                     llm_model TEXT,
+                    hallucination_provider TEXT,
+                    hallucination_model TEXT,
                     extraction_method TEXT,
                     status TEXT DEFAULT 'completed'
                 )
@@ -300,6 +302,10 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN user_id INTEGER REFERENCES users(id)")
         if "hallucination_count" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN hallucination_count INTEGER DEFAULT 0")
+        if "hallucination_provider" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN hallucination_provider TEXT")
+        if "hallucination_model" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN hallucination_model TEXT")
         if "started_at" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN started_at DATETIME")
         if "completed_at" not in columns:
@@ -430,7 +436,8 @@ class Database:
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
-                              llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              llm_provider, llm_model, hallucination_provider, hallucination_model,
+                              status, source_type, batch_id, batch_label,
                               bibliography_source_kind,
                            original_filename
                     FROM check_history
@@ -445,7 +452,8 @@ class Database:
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
                            refs_with_errors, refs_with_warnings_only, refs_verified,
-                              llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                              llm_provider, llm_model, hallucination_provider, hallucination_model,
+                              status, source_type, batch_id, batch_label,
                               bibliography_source_kind,
                            original_filename
                     FROM check_history
@@ -525,6 +533,8 @@ class Database:
                                     source_type: str,
                                     llm_provider: Optional[str] = None,
                                     llm_model: Optional[str] = None,
+                                    hallucination_provider: Optional[str] = None,
+                                    hallucination_model: Optional[str] = None,
                                     batch_id: Optional[str] = None,
                                     batch_label: Optional[str] = None,
                                     original_filename: Optional[str] = None,
@@ -541,16 +551,19 @@ class Database:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
-                 suggestions_count, unverified_count, results_json, llm_provider, llm_model, status,
+                 suggestions_count, unverified_count, results_json, llm_provider, llm_model,
+                 hallucination_provider, hallucination_model, status,
                  batch_id, batch_label, original_filename, user_id, started_at, input_bytes,
                  source_host, paper_identifier_type, paper_identifier_value, paper_key, batch_size)
-                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, 'in_progress', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, 0, 0, 0, 0, 0, '[]', ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
                 source_type,
                 llm_provider,
                 llm_model,
+                hallucination_provider,
+                hallucination_model,
                 batch_id,
                 batch_label,
                 original_filename,
@@ -1262,7 +1275,8 @@ class Database:
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
-                      llm_provider, llm_model, status, source_type, batch_id, batch_label,
+                      llm_provider, llm_model, hallucination_provider, hallucination_model,
+                      status, source_type, batch_id, batch_label,
                       bibliography_source_kind, original_filename
                 FROM check_history
                 WHERE batch_id = ?
