@@ -1028,6 +1028,79 @@ def test_ungrounded_unlikely_for_academic_reference_is_uncertain():
     assert 'not grounded in web search results or verified metadata' in result['explanation']
 
 
+def test_unlikely_low_overlap_author_mismatch_is_corrected_to_likely():
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.provider = 'google'
+    verifier.model = 'gemini-test'
+    verifier.client = object()
+    verifier.cache_dir = None
+    verifier._call = lambda system_prompt, user_prompt: (
+        'EXPLANATION: The paper exists, but the cited author list contains an error; this is metadata rather than fabrication.\n'
+        'LINK: https://api.semanticscholar.org/CorpusID:53438169\n'
+        'FOUND_TITLE: Prophet inequalities for independent random variables from an unknown distribution\n'
+        'FOUND_AUTHORS: José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior\n'
+        'FOUND_YEAR: 2019\n'
+        'VERDICT: UNLIKELY',
+        [],
+    )
+    entry = {
+        'error_type': 'author (v1 vs v2 update)',
+        'error_details': 'Author 2 mismatch:\n  cited: Pablo D. A. Foncea\n  actual: Paul Dütting',
+        'ref_title': 'Prophet inequalities for independent random variables from an unknown distribution',
+        'ref_authors_cited': 'José Correa, Pablo D. A. Foncea, Ruben Hoeksma, Tim Roughgarden',
+        '_ref_authors_cited_list': ['José Correa', 'Pablo D. A. Foncea', 'Ruben Hoeksma', 'Tim Roughgarden'],
+        'ref_authors_correct': 'José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior',
+        'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:53438169',
+    }
+
+    result = verifier.assess(entry)
+
+    assert result['verdict'] == 'LIKELY'
+    assert 'real title with fabricated coauthors' in result['explanation']
+
+
+def test_unlikely_low_overlap_allowed_when_found_authors_match_cited_authors():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The checker matched a different edition; the cited authors appear on the found source.',
+        {
+            'error_type': 'multiple',
+            'ref_title': 'Convergence of Probability Measures',
+            'ref_authors_cited': 'Patrick Billingsley, Example Coauthor, Third Author',
+            '_ref_authors_cited_list': ['Patrick Billingsley', 'Example Coauthor', 'Third Author'],
+            'ref_authors_correct': 'Fake Database Author, Another Database Author, Third Database Author',
+            'ref_verified_url': 'https://example.org/wrong-edition',
+        },
+        ['https://example.org/cited-edition'],
+        {'authors': 'Patrick Billingsley, Example Coauthor, Third Author'},
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'corrected' not in explanation
+
+
+def test_unlikely_low_overlap_rejects_conflicting_found_authors_for_checked_url():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The paper exists, and the second author discrepancy is a minor metadata error.',
+        {
+            'error_type': 'author (v1 vs v2 update)',
+            'ref_title': 'Prophet inequalities for independent random variables from an unknown distribution',
+            'ref_authors_cited': 'José Correa, Pablo D. A. Foncea, Ruben Hoeksma, Tim Roughgarden',
+            '_ref_authors_cited_list': ['José Correa', 'Pablo D. A. Foncea', 'Ruben Hoeksma', 'Tim Roughgarden'],
+            'ref_authors_correct': 'José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior',
+            'ref_url_cited': 'https://arxiv.org/abs/1811.06114',
+            'ref_verified_url': 'https://api.semanticscholar.org/CorpusID:53438169',
+        },
+        [],
+        {'authors': 'José Correa, Paul Dütting, Ruben Hoeksma, Tim Roughgarden'},
+        'https://arxiv.org/abs/1811.06114',
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'real title with fabricated coauthors' in explanation
+
+
 def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
     verifier = object.__new__(LLMHallucinationVerifier)
     verifier.model = 'gemini-test'

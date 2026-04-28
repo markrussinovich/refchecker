@@ -153,7 +153,11 @@ the real paper being referenced despite the garbled fields.
 an author name that is a clear typo or OCR error of the real author \
 (e.g. "J. Queen" instead of "J. MacQueen", or "Nestrov" instead of \
 "Nesterov"), and the title matches a known paper, this is a human \
-citation error, not AI hallucination. Verdict MUST be UNLIKELY.
+citation error, not AI hallucination. Verdict MUST be UNLIKELY. This \
+exception applies only when the cited name is recognizably the SAME \
+person as the real author. It does NOT apply when a cited coauthor is \
+a different person or when fewer than half of the cited authors appear \
+on the real paper; those are fabricated-author signals.
 
 (4) NON-ACADEMIC REAL-WORLD SOURCES: References to competitions, datasets, \
 ethics codes, standards documents, technical blog posts, software tools, \
@@ -755,6 +759,9 @@ class LLMHallucinationVerifier:
                 verdict, explanation = self._downgrade_ungrounded_unlikely(
                     verdict, explanation, error_entry, web_urls,
                 )
+                verdict, explanation = self._apply_unlikely_author_mismatch_guard(
+                    verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
+                )
                 verdict, explanation = self._apply_verified_safety_net(
                     verdict, explanation, error_entry, web_urls,
                 )
@@ -845,6 +852,9 @@ class LLMHallucinationVerifier:
         verdict, explanation = self._downgrade_ungrounded_unlikely(
             verdict, explanation, error_entry, web_urls,
         )
+        verdict, explanation = self._apply_unlikely_author_mismatch_guard(
+            verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
+        )
         verdict, explanation = self._apply_verified_safety_net(
             verdict, explanation, error_entry, web_urls,
         )
@@ -899,6 +909,121 @@ class LLMHallucinationVerifier:
                 'academic reference has matching title and authors.)'
             ),
         )
+
+    @staticmethod
+    def _apply_unlikely_author_mismatch_guard(
+        verdict: str,
+        explanation: str,
+        error_entry: Dict[str, Any],
+        web_urls: list,
+        found_metadata: Dict[str, Any],
+        paper_link: Optional[str] = None,
+    ) -> tuple:
+        """Do not let low-overlap verified author mismatches become UNLIKELY.
+
+        A real title with mostly fabricated authors is still a hallucinated
+        reference unless the LLM found a source whose authors substantially
+        match the cited author list. This catches cases where the model says
+        "the paper exists, so this is only a metadata error" even though the
+        cited coauthors are different people.
+        """
+        if verdict != 'UNLIKELY':
+            return verdict, explanation
+
+        error_type = (error_entry.get('error_type') or '').lower()
+        if not (error_type.startswith('author') or error_type == 'multiple'):
+            return verdict, explanation
+
+        cited = error_entry.get('ref_authors_cited', '')
+        correct = error_entry.get('ref_authors_correct', '')
+        if not cited or not correct:
+            return verdict, explanation
+
+        from refchecker.core.hallucination_policy import _compute_author_overlap
+
+        cited_list = error_entry.get('_ref_authors_cited_list')
+        checker_overlap = _compute_author_overlap(cited, correct, cited_list=cited_list)
+        if checker_overlap is None or checker_overlap > 0.5:
+            return verdict, explanation
+
+        found_authors = (found_metadata or {}).get('authors')
+        found_overlap = None
+        if found_authors:
+            found_overlap = _compute_author_overlap(cited, found_authors, cited_list=cited_list)
+            if found_overlap is not None and found_overlap >= 0.6:
+                if not LLMHallucinationVerifier._found_authors_conflict_with_checked_source(
+                    found_authors, error_entry, paper_link,
+                ):
+                    return verdict, explanation
+
+        logger.debug(
+            'Overriding UNLIKELY -> LIKELY for low-overlap author mismatch '
+            '(checker_overlap=%s, found_overlap=%s, grounded=%s, ref=%r)',
+            f'{checker_overlap * 100:.0f}%',
+            'unknown' if found_overlap is None else f'{found_overlap * 100:.0f}%',
+            bool(web_urls),
+            error_entry.get('ref_title', ''),
+        )
+        return (
+            'LIKELY',
+            explanation + (
+                ' (Verdict corrected: the cited author list has low overlap '
+                'with the verified paper, and the LLM did not provide found '
+                'authors that substantially match the cited authors. A real '
+                'title with fabricated coauthors is treated as hallucinated.)'
+            ),
+        )
+
+    @staticmethod
+    def _found_authors_conflict_with_checked_source(
+        found_authors: str,
+        error_entry: Dict[str, Any],
+        paper_link: Optional[str],
+    ) -> bool:
+        """Return True when LLM-found authors contradict a checked source.
+
+        The LLM may sometimes fill FOUND_AUTHORS with the citation's authors
+        even while linking to the same arXiv/DOI/source URL that the checker
+        already verified. In that case, prefer the checker metadata over the
+        LLM-provided field.
+        """
+        if not paper_link or not found_authors:
+            return False
+
+        checked_urls = [
+            error_entry.get('ref_url_cited', ''),
+            error_entry.get('ref_verified_url', ''),
+        ]
+        if not any(
+            LLMHallucinationVerifier._same_reference_url(paper_link, url)
+            for url in checked_urls
+            if url
+        ):
+            return False
+
+        correct = error_entry.get('ref_authors_correct', '')
+        if not correct:
+            return False
+
+        from refchecker.core.hallucination_policy import _compute_author_overlap
+
+        found_correct_overlap = _compute_author_overlap(found_authors, correct)
+        return found_correct_overlap is not None and found_correct_overlap < 0.6
+
+    @staticmethod
+    def _same_reference_url(left: str, right: str) -> bool:
+        """Compare reference URLs after basic normalization."""
+        from urllib.parse import urlparse
+
+        def normalize(url: str) -> str:
+            parsed = urlparse((url or '').strip())
+            host = (parsed.hostname or '').lower()
+            if host.startswith('www.'):
+                host = host[4:]
+            path = parsed.path.rstrip('/').lower()
+            return f'{host}{path}'
+
+        return bool(left and right and normalize(left) == normalize(right))
 
     def _build_validation_summary(self, error_entry: Dict[str, Any]) -> str:
         """Build a human-readable summary of validation errors for the prompt."""

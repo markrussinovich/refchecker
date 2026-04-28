@@ -1,0 +1,372 @@
+{
+  "input_spec": "fixture://hallucination-llm-benchmark",
+  "description": "Pre-extracted bibliography and labeled hallucination-check cases for live LLM validation.",
+  "cases": [
+    {
+      "id": "real_title_wrong_coauthor_low_overlap",
+      "ground_truth": "LIKELY",
+      "rationale": "The title is real, but the cited coauthor list is mostly for different people; this is a grafted/fabricated-author citation.",
+      "reference": {
+        "title": "Prophet inequalities for independent random variables from an unknown distribution",
+        "authors": [
+          "José Correa",
+          "Pablo D. A. Foncea",
+          "Ruben Hoeksma",
+          "Tim Roughgarden"
+        ],
+        "venue": "Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+        "year": 2019,
+        "url": "https://arxiv.org/abs/1811.06114",
+        "cited_url": "https://arxiv.org/abs/1811.06114",
+        "arxiv_url": "https://arxiv.org/abs/1811.06114",
+        "type": "arxiv",
+        "raw_text": "José Correa*Pablo D. A. Foncea*Ruben Hoeksma*Tim Roughgarden#Prophet inequalities for independent random variables from an unknown distribution#Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)#2019#https://arxiv.org/abs/1811.06114"
+      },
+      "error_entry": {
+        "error_type": "author (v1 vs v2 update)",
+        "error_details": "Author 2 mismatch:\n  cited: Pablo D. A. Foncea\n  actual: Paul Dütting",
+        "ref_title": "Prophet inequalities for independent random variables from an unknown distribution",
+        "ref_authors_cited": "José Correa, Pablo D. A. Foncea, Ruben Hoeksma, Tim Roughgarden",
+        "_ref_authors_cited_list": [
+          "José Correa",
+          "Pablo D. A. Foncea",
+          "Ruben Hoeksma",
+          "Tim Roughgarden"
+        ],
+        "ref_authors_correct": "José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior",
+        "ref_year_cited": 2019,
+        "ref_venue_cited": "Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)",
+        "ref_url_cited": "https://arxiv.org/abs/1811.06114",
+        "ref_verified_url": "https://api.semanticscholar.org/CorpusID:53438169",
+        "matched_database": "Semantic Scholar"
+      }
+    },
+    {
+      "id": "real_title_zero_authors_correct",
+      "ground_truth": "LIKELY",
+      "rationale": "The title exists but none of the cited authors are the paper authors.",
+      "reference": {
+        "title": "Attention is all you need",
+        "authors": [
+          "Geoffrey Hinton",
+          "Yann LeCun",
+          "Yoshua Bengio"
+        ],
+        "venue": "Advances in Neural Information Processing Systems",
+        "year": 2017,
+        "url": "https://arxiv.org/abs/1706.03762",
+        "type": "arxiv",
+        "raw_text": "Geoffrey Hinton*Yann LeCun*Yoshua Bengio#Attention is all you need#Advances in Neural Information Processing Systems#2017#https://arxiv.org/abs/1706.03762"
+      },
+      "error_entry": {
+        "error_type": "author",
+        "error_details": "Author list mismatch: cited authors do not appear on the verified paper.",
+        "ref_title": "Attention is all you need",
+        "ref_authors_cited": "Geoffrey Hinton, Yann LeCun, Yoshua Bengio",
+        "_ref_authors_cited_list": [
+          "Geoffrey Hinton",
+          "Yann LeCun",
+          "Yoshua Bengio"
+        ],
+        "ref_authors_correct": "Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin",
+        "ref_year_cited": 2017,
+        "ref_venue_cited": "Advances in Neural Information Processing Systems",
+        "ref_url_cited": "https://arxiv.org/abs/1706.03762",
+        "ref_verified_url": "https://arxiv.org/abs/1706.03762",
+        "matched_database": "arXiv"
+      }
+    },
+    {
+      "id": "real_title_one_of_many_authors_correct",
+      "ground_truth": "LIKELY",
+      "rationale": "Only one cited author overlaps with the real paper; this should not be excused as a metadata typo.",
+      "reference": {
+        "title": "Online stochastic matching: Beating 1 - 1/e",
+        "authors": [
+          "Michal Feldman",
+          "Thomas Kesselheim",
+          "Brendan Lucier"
+        ],
+        "venue": "FOCS",
+        "year": 2009,
+        "type": "other",
+        "raw_text": "Michal Feldman*Thomas Kesselheim*Brendan Lucier#Online stochastic matching: Beating 1 - 1/e#FOCS#2009#"
+      },
+      "error_entry": {
+        "error_type": "multiple",
+        "error_details": "Author mismatch:\n  cited: Michal Feldman, Thomas Kesselheim, Brendan Lucier\n  actual: Jon Feldman, Aranyak Mehta, Vahab Mirrokni, S. Muthukrishnan",
+        "ref_title": "Online stochastic matching: Beating 1 - 1/e",
+        "ref_authors_cited": "Michal Feldman, Thomas Kesselheim, Brendan Lucier",
+        "_ref_authors_cited_list": [
+          "Michal Feldman",
+          "Thomas Kesselheim",
+          "Brendan Lucier"
+        ],
+        "ref_authors_correct": "Jon Feldman, Aranyak Mehta, Vahab Mirrokni, S. Muthukrishnan",
+        "ref_year_cited": 2009,
+        "ref_venue_cited": "FOCS",
+        "ref_verified_url": "https://doi.org/10.1109/focs.2009.53",
+        "matched_database": "Semantic Scholar"
+      }
+    },
+    {
+      "id": "real_paper_malformed_title_split_word",
+      "ground_truth": "UNLIKELY",
+      "rationale": "The title has an OCR/PDF split-word artifact but refers to a real paper with matching authors.",
+      "reference": {
+        "title": "Improving mutual information estimatio n with annealed and energy-based bounds",
+        "authors": [
+          "Rob Brekelmans",
+          "Sicong Huang",
+          "Marzyeh Ghassemi"
+        ],
+        "venue": "International Conference on Learning Representations",
+        "year": 2022,
+        "type": "other",
+        "raw_text": "Rob Brekelmans*Sicong Huang*Marzyeh Ghassemi#Improving mutual information estimatio n with annealed and energy-based bounds#International Conference on Learning Representations#2022#"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could NOT be found in any academic database, likely because of a title extraction artifact.",
+        "ref_title": "Improving mutual information estimatio n with annealed and energy-based bounds",
+        "ref_authors_cited": "Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi",
+        "_ref_authors_cited_list": [
+          "Rob Brekelmans",
+          "Sicong Huang",
+          "Marzyeh Ghassemi"
+        ],
+        "ref_year_cited": 2022,
+        "ref_venue_cited": "International Conference on Learning Representations"
+      }
+    },
+    {
+      "id": "real_paper_truncated_title_prefix",
+      "ground_truth": "UNLIKELY",
+      "rationale": "The cited title is a truncated prefix/near-prefix of a real paper and the authors match.",
+      "reference": {
+        "title": "Deep reinforcement learning at the edge of the statistical precipice",
+        "authors": [
+          "Rishabh Agarwal",
+          "Max Schwarzer",
+          "Pablo Samuel Castro",
+          "Aaron Courville",
+          "Marc G. Bellemare"
+        ],
+        "venue": "arXiv",
+        "year": 2022,
+        "url": "https://arxiv.org/abs/2108.13264",
+        "type": "arxiv",
+        "raw_text": "Rishabh Agarwal*Max Schwarzer*Pablo Samuel Castro*Aaron Courville*Marc G. Bellemare#Deep reinforcement learning at the edge of the statistical precipice#arXiv#2022#https://arxiv.org/abs/2108.13264"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could not be verified exactly; cited title appears truncated or normalized differently.",
+        "ref_title": "Deep reinforcement learning at edge of statistical precipice",
+        "ref_authors_cited": "Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron Courville, Marc G. Bellemare",
+        "_ref_authors_cited_list": [
+          "Rishabh Agarwal",
+          "Max Schwarzer",
+          "Pablo Samuel Castro",
+          "Aaron Courville",
+          "Marc G. Bellemare"
+        ],
+        "ref_year_cited": 2022,
+        "ref_venue_cited": "arXiv"
+      }
+    },
+    {
+      "id": "official_website_exists",
+      "ground_truth": "UNLIKELY",
+      "rationale": "A real non-academic web source should not be treated as a hallucinated paper.",
+      "reference": {
+        "title": "SPJ Code of Ethics",
+        "authors": [
+          "Society of Professional Journalists"
+        ],
+        "venue": "Web page",
+        "year": 2014,
+        "url": "https://www.spj.org/ethicscode.asp",
+        "type": "non-arxiv",
+        "raw_text": "Society of Professional Journalists#SPJ Code of Ethics#Web page#2014#https://www.spj.org/ethicscode.asp"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could not be found in academic databases; it is a web source.",
+        "ref_title": "SPJ Code of Ethics",
+        "ref_authors_cited": "Society of Professional Journalists",
+        "ref_year_cited": 2014,
+        "ref_venue_cited": "Web page",
+        "ref_url_cited": "https://www.spj.org/ethicscode.asp"
+      }
+    },
+    {
+      "id": "official_website_does_not_exist",
+      "ground_truth": "LIKELY",
+      "rationale": "The cited non-paper source has no identifiable dedicated page and the cited URL is fabricated.",
+      "reference": {
+        "title": "OpenAI Model Spec Quantum Narwhal Edition",
+        "authors": [
+          "OpenAI"
+        ],
+        "venue": "Web page",
+        "year": 2025,
+        "url": "https://openai.com/nonexistent/model-spec-quantum-narwhal-edition",
+        "type": "non-arxiv",
+        "raw_text": "OpenAI#OpenAI Model Spec Quantum Narwhal Edition#Web page#2025#https://openai.com/nonexistent/model-spec-quantum-narwhal-edition"
+      },
+      "error_entry": {
+        "error_type": "url",
+        "error_details": "Non-existent web page: https://openai.com/nonexistent/model-spec-quantum-narwhal-edition",
+        "ref_title": "OpenAI Model Spec Quantum Narwhal Edition",
+        "ref_authors_cited": "OpenAI",
+        "ref_year_cited": 2025,
+        "ref_venue_cited": "Web page",
+        "ref_url_cited": "https://openai.com/nonexistent/model-spec-quantum-narwhal-edition"
+      }
+    },
+    {
+      "id": "paper_url_exists_but_title_wrong",
+      "ground_truth": "LIKELY",
+      "rationale": "The URL resolves to a real paper, but it is not the cited paper title.",
+      "reference": {
+        "title": "Transformers solve protein folding exactly",
+        "authors": [
+          "Ashish Vaswani",
+          "Noam Shazeer"
+        ],
+        "venue": "arXiv",
+        "year": 2017,
+        "url": "https://arxiv.org/abs/1706.03762",
+        "type": "arxiv",
+        "raw_text": "Ashish Vaswani*Noam Shazeer#Transformers solve protein folding exactly#arXiv#2017#https://arxiv.org/abs/1706.03762"
+      },
+      "error_entry": {
+        "error_type": "multiple",
+        "error_details": "Title mismatch: cited title 'Transformers solve protein folding exactly' does not match URL target 'Attention Is All You Need'.\nIncorrect ArXiv ID: cited arXiv ID 1706.03762 points to a different paper.",
+        "ref_title": "Transformers solve protein folding exactly",
+        "ref_authors_cited": "Ashish Vaswani, Noam Shazeer",
+        "_ref_authors_cited_list": [
+          "Ashish Vaswani",
+          "Noam Shazeer"
+        ],
+        "ref_year_cited": 2017,
+        "ref_venue_cited": "arXiv",
+        "ref_url_cited": "https://arxiv.org/abs/1706.03762",
+        "ref_verified_url": "https://arxiv.org/abs/1706.03762"
+      }
+    },
+    {
+      "id": "official_model_card",
+      "ground_truth": "UNLIKELY",
+      "rationale": "Official model-card/prompt-format documentation is a valid real-world source.",
+      "reference": {
+        "title": "Llama 4 | Model Cards and Prompt Formats",
+        "authors": [
+          "Meta"
+        ],
+        "venue": "Documentation",
+        "year": 2025,
+        "url": "https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/",
+        "type": "non-arxiv",
+        "raw_text": "Meta#Llama 4 | Model Cards and Prompt Formats#Documentation#2025#https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/"
+      },
+      "error_entry": {
+        "error_type": "url",
+        "error_details": "Cited URL does not reference this paper because this is not a paper-oriented source.",
+        "ref_title": "Llama 4 | Model Cards and Prompt Formats",
+        "ref_authors_cited": "Meta",
+        "ref_year_cited": 2025,
+        "ref_venue_cited": "Documentation",
+        "ref_url_cited": "https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/",
+        "ref_verified_url": "https://www.llama.com/docs/model-cards-and-prompt-formats/llama4/"
+      }
+    },
+    {
+      "id": "huggingface_dataset",
+      "ground_truth": "UNLIKELY",
+      "rationale": "A Hugging Face dataset page is a valid dataset citation even when academic databases do not index it.",
+      "reference": {
+        "title": "code instructions",
+        "authors": [
+          "red1xe"
+        ],
+        "venue": "Hugging Face dataset",
+        "year": 2023,
+        "url": "https://huggingface.co/datasets/red1xe/code_instructions",
+        "type": "non-arxiv",
+        "raw_text": "red1xe#code instructions#Hugging Face dataset#2023#https://huggingface.co/datasets/red1xe/code_instructions"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could not be found in academic databases; cited source is a dataset page.",
+        "ref_title": "code instructions",
+        "ref_authors_cited": "red1xe",
+        "ref_year_cited": 2023,
+        "ref_venue_cited": "Hugging Face dataset",
+        "ref_url_cited": "https://huggingface.co/datasets/red1xe/code_instructions"
+      }
+    },
+    {
+      "id": "software_project",
+      "ground_truth": "UNLIKELY",
+      "rationale": "A real software project citation should not require a DOI or paper-style metadata.",
+      "reference": {
+        "title": "Leela Chess Zero",
+        "authors": [
+          "Gian-Carlo Pascutto",
+          "Gary Linscott"
+        ],
+        "venue": "Software project",
+        "year": 2019,
+        "url": "https://lczero.org/",
+        "type": "non-arxiv",
+        "raw_text": "Gian-Carlo Pascutto*Gary Linscott#Leela Chess Zero#Software project#2019#https://lczero.org/"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could not be found in academic databases; cited source is software.",
+        "ref_title": "Leela Chess Zero",
+        "ref_authors_cited": "Gian-Carlo Pascutto, Gary Linscott",
+        "_ref_authors_cited_list": [
+          "Gian-Carlo Pascutto",
+          "Gary Linscott"
+        ],
+        "ref_year_cited": 2019,
+        "ref_venue_cited": "Software project",
+        "ref_url_cited": "https://lczero.org/"
+      }
+    },
+    {
+      "id": "arxiv_id_points_to_different_paper",
+      "ground_truth": "LIKELY",
+      "rationale": "The cited arXiv ID resolves, but to a different title than the citation claims.",
+      "reference": {
+        "title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+        "authors": [
+          "Ashish Vaswani",
+          "Noam Shazeer",
+          "Niki Parmar"
+        ],
+        "venue": "arXiv",
+        "year": 2018,
+        "url": "https://arxiv.org/abs/1706.03762",
+        "type": "arxiv",
+        "raw_text": "Ashish Vaswani*Noam Shazeer*Niki Parmar#BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding#arXiv#2018#https://arxiv.org/abs/1706.03762"
+      },
+      "error_entry": {
+        "error_type": "arxiv_id",
+        "error_details": "Incorrect ArXiv ID: cited arXiv ID 1706.03762 points to 'Attention Is All You Need', not the cited BERT paper.",
+        "ref_title": "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding",
+        "ref_authors_cited": "Ashish Vaswani, Noam Shazeer, Niki Parmar",
+        "_ref_authors_cited_list": [
+          "Ashish Vaswani",
+          "Noam Shazeer",
+          "Niki Parmar"
+        ],
+        "ref_year_cited": 2018,
+        "ref_venue_cited": "arXiv",
+        "ref_url_cited": "https://arxiv.org/abs/1706.03762"
+      }
+    }
+  ]
+}

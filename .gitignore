@@ -120,6 +120,7 @@ semantic_scholar_db/
 !web-ui/package.json
 !web-ui/package-lock.json
 !tests/fixtures/test_cache/**
+!tests/fixtures/hallucination_llm_benchmark/**
 backend/uploads/
 
 # Temporary files
