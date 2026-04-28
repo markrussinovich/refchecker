@@ -312,6 +312,27 @@ class ProgressRefChecker:
             for e in (errors or [])
         )
 
+        if is_unverified:
+            from refchecker.checkers.web_search import is_academic_url
+
+            cited_url = reference.get('cited_url') or reference.get('url') or url or ''
+            real_errors = [
+                e for e in sanitized
+                if e.get('error_type') != 'unverified'
+                and not e.get('is_suggestion')
+                and not e.get('is_warning')
+            ]
+            cited_url_lower = cited_url.lower()
+            is_direct_pdf = cited_url_lower.split('?', 1)[0].endswith('.pdf')
+            if (
+                real_errors
+                and all(e.get('error_type') == 'url' for e in real_errors)
+                and not is_academic_url(cited_url)
+                and (not is_direct_pdf or 'openai.com' in cited_url_lower)
+            ):
+                sanitized = [e for e in sanitized if e.get('error_type') != 'url']
+                has_errors = False
+
         if has_errors:
             status = 'error'
         elif has_warnings:

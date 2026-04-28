@@ -16,6 +16,51 @@ from refchecker.core.hallucination_policy import (
 )
 
 
+def _format_webui_unverified_url_result(cited_url: str) -> dict:
+    from backend.refchecker_wrapper import ProgressRefChecker
+
+    checker = ProgressRefChecker(llm_provider=None, use_llm=False)
+    return checker._format_verification_result(
+        {
+            'title': 'Official Model Documentation',
+            'authors': ['OpenAI'],
+            'year': 2025,
+            'url': cited_url,
+        },
+        verified_data=None,
+        errors=[
+            {
+                'error_type': 'unverified',
+                'error_details': 'Paper not found by any checker',
+            },
+            {
+                'error_type': 'url',
+                'error_details': f'Non-existent web page: {cited_url}',
+            },
+        ],
+        index=1,
+        url=cited_url,
+    )
+
+
+def test_webui_folds_openai_doc_url_failure_into_unverified():
+    result = _format_webui_unverified_url_result(
+        'https://cdn.openai.com/pdf/example-system-card.pdf'
+    )
+
+    assert result['status'] == 'unverified'
+    assert [(e['error_type']) for e in result['errors']] == ['unverified']
+
+
+def test_webui_preserves_non_openai_pdf_url_failure():
+    result = _format_webui_unverified_url_result(
+        'https://www-cdn.anthropic.com/example-model-card.pdf'
+    )
+
+    assert result['status'] == 'error'
+    assert [(e['error_type']) for e in result['errors']] == ['unverified', 'url']
+
+
 # ------------------------------------------------------------------
 # should_check_hallucination: URL-failed references with 'multiple' type
 # ------------------------------------------------------------------
