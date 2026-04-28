@@ -30,9 +30,54 @@ class _FakeExtractionChecker:
         return [{'raw': reference} for reference in references]
 
 
+class _EmptyItemExtractionProvider:
+    def _call_llm(self, prompt):
+        assert 'ITEM 0' in prompt
+        assert 'ITEM 1' in prompt
+        return (
+            '[\n'
+            '  {"index": 0, "references": ["A One#Paper One#Venue One#2024#https://one"]},\n'
+            '  {"index": 1, "references": []}\n'
+            ']'
+        )
+
+
+class _InvalidJsonExtractionProvider:
+    def _call_llm(self, prompt):
+        assert 'ITEM 0' in prompt
+        assert 'ITEM 1' in prompt
+        return 'I found references, but this is not the requested JSON array.'
+
+
+class _FallbackExtractionChecker:
+    def __init__(self, provider=None):
+        self.single_calls = []
+        self.llm_extractor = SimpleNamespace(
+            llm_provider=provider or _EmptyItemExtractionProvider(),
+            extract_references=self._extract_single,
+        )
+
+    def _extract_single(self, bibliography_text):
+        self.single_calls.append(bibliography_text)
+        return ['Fallback Author#Fallback Paper#Fallback Venue#2026#https://fallback']
+
+    def _process_llm_extracted_references(self, references):
+        return [{'raw': reference} for reference in references]
+
+
 class _EmptyExtractionBatcher:
     def extract_references(self, checker, bibliography_text):
         return []
+
+
+class _RecordingExtractionBatcher:
+    def __init__(self, references=None):
+        self.calls = []
+        self.references = references or [{'title': 'LLM Extracted'}]
+
+    def extract_references(self, checker, bibliography_text):
+        self.calls.append(bibliography_text)
+        return self.references
 
 
 class _DiagnosticChecker:
@@ -67,6 +112,38 @@ def test_bulk_llm_extraction_batcher_processes_multiple_items():
     ]
 
 
+def test_bulk_llm_extraction_batcher_retries_empty_items_individually():
+    batcher = BulkLLMExtractionBatcher(enabled=False)
+    checker = _FallbackExtractionChecker()
+
+    results = batcher._process_batch([
+        SimpleNamespace(checker=checker, bibliography_text='refs one'),
+        SimpleNamespace(checker=checker, bibliography_text='refs two'),
+    ])
+
+    assert results == [
+        [{'raw': 'A One#Paper One#Venue One#2024#https://one'}],
+        [{'raw': 'Fallback Author#Fallback Paper#Fallback Venue#2026#https://fallback'}],
+    ]
+    assert checker.single_calls == ['refs two']
+
+
+def test_bulk_llm_extraction_batcher_retries_invalid_json_batch_individually():
+    batcher = BulkLLMExtractionBatcher(enabled=False)
+    checker = _FallbackExtractionChecker(provider=_InvalidJsonExtractionProvider())
+
+    results = batcher._process_batch([
+        SimpleNamespace(checker=checker, bibliography_text='refs one'),
+        SimpleNamespace(checker=checker, bibliography_text='refs two'),
+    ])
+
+    assert results == [
+        [{'raw': 'Fallback Author#Fallback Paper#Fallback Venue#2026#https://fallback'}],
+        [{'raw': 'Fallback Author#Fallback Paper#Fallback Venue#2026#https://fallback'}],
+    ]
+    assert checker.single_calls == ['refs one', 'refs two']
+
+
 def test_parse_references_bulk_records_zero_reference_diagnostic():
     checker = _DiagnosticChecker(llm_extractor=True)
     bibliography_text = 'References\nSmith, Jane. A Paper That Should Be Extracted. Test Venue, 2024.'
@@ -79,6 +156,21 @@ def test_parse_references_bulk_records_zero_reference_diagnostic():
     assert 'bibliography_text_chars=' in checker.fatal_error_message
 
 
+def test_parse_references_bulk_uses_llm_before_structured_parsers():
+    checker = _DiagnosticChecker(llm_extractor=True)
+    bibliography_text = (
+        'References\n'
+        '[1] Jane Smith and John Doe. A structured-looking paper. Test Venue, 2024.\n'
+    )
+    batcher = _RecordingExtractionBatcher()
+
+    references = parse_references_bulk(checker, bibliography_text, batcher)
+
+    assert references == [{'title': 'LLM Extracted'}]
+    assert batcher.calls == [bibliography_text]
+    assert checker.used_regex_extraction is False
+
+
 def test_parse_references_bulk_records_missing_llm_diagnostic():
     checker = _DiagnosticChecker(llm_extractor=False)
     bibliography_text = 'References\nSmith, Jane. A Paper That Should Be Extracted. Test Venue, 2024.'
@@ -87,7 +179,7 @@ def test_parse_references_bulk_records_missing_llm_diagnostic():
 
     assert references == []
     assert checker.fatal_error is True
-    assert 'bibliography format was not recognized' in checker.fatal_error_message
+    assert 'no LLM extractor is configured' in checker.fatal_error_message
 
 
 def test_extract_bibliography_bulk_records_missing_section_diagnostic():

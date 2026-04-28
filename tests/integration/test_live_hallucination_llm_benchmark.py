@@ -1,8 +1,8 @@
 """Live hallucination-check benchmark for provider LLMs.
 
 This test uses a pre-extracted, labeled bibliography fixture and validates the
-hallucination-check LLM against each case. It runs automatically for providers
-with API keys in the environment:
+hallucination-check LLM against each case. It runs as part of the normal test
+suite for providers with API keys in the environment:
 
 - OpenAI: OPENAI_API_KEY, REFCHECKER_OPENAI_API_KEY, or OPENAI_CHAT_KEY
 - Anthropic: ANTHROPIC_API_KEY or REFCHECKER_ANTHROPIC_API_KEY
@@ -106,6 +106,7 @@ _CASES = _load_cases()
 
 @pytest.mark.integration
 @pytest.mark.llm
+@pytest.mark.llm_auto_keyed
 @pytest.mark.parametrize('model_config', _MODEL_CONFIGS or [None], ids=[cfg.id for cfg in _MODEL_CONFIGS] or ['no-api-keys'])
 def test_live_hallucination_llm_matches_labeled_bibliography(model_config: ModelConfig | None) -> None:
     if model_config is None:

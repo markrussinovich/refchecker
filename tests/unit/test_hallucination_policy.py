@@ -348,6 +348,152 @@ def test_verified_academic_wrong_arxiv_id_is_not_corrected_by_real_world_safety_
     assert verdict == 'LIKELY'
 
 
+def test_citation_evidence_does_not_verify_unverified_academic_paper():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Prophet inequalities with unknown distributions',
+        'ref_authors_cited': (
+            'Hossein Esfandiari, Mohammad Taghi Hajiaghayi, '
+            'Brendan Lucier, Morteza Zadimoghaddam'
+        ),
+        'ref_year_cited': '2017',
+        'ref_url_cited': '',
+        'original_reference': {
+            'venue': 'Proceedings of the 49th Annual ACM SIGACT Symposium on Theory of Computing (STOC)',
+        },
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_citation_evidence_guard(
+        'UNLIKELY',
+        (
+            'The paper "Prophet inequalities with unknown distributions" by '
+            'Esfandiari, Hajiaghayi, Lucier, and Zadimoghaddam, presented at '
+            'STOC 2017, is referenced in another arXiv paper.'
+        ),
+        entry,
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'citation or reference in another paper is not proof' in explanation
+
+
+def test_citation_evidence_guard_does_not_override_verified_paper():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author formatting mismatch',
+        'ref_title': 'A verified academic paper',
+        'ref_authors_cited': 'Author One, Author Two',
+        'ref_verified_url': 'https://doi.org/10.1000/example',
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_citation_evidence_guard(
+        'UNLIKELY',
+        'The paper also appears in another publication bibliography.',
+        entry,
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert explanation == 'The paper also appears in another publication bibliography.'
+
+
+def test_unverified_academic_unlikely_requires_found_metadata():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Prophet inequalities and posted pricing mechanisms',
+        'ref_authors_cited': 'José Correa, Anja Korol, Ruben Hoeksma',
+        '_ref_authors_cited_list': ['José Correa', 'Anja Korol', 'Ruben Hoeksma'],
+        'ref_year_cited': '2022',
+        'ref_venue_cited': 'Mathematics of Operations Research',
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
+        'UNLIKELY',
+        'The exact paper with the cited title, authors, venue, and year was found in the search results.',
+        entry,
+        {'title': None, 'authors': None, 'year': None},
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'did not provide found title and author metadata' in explanation
+
+
+def test_unverified_academic_unlikely_rejects_mismatched_found_authors():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Prophet inequalities and posted pricing mechanisms',
+        'ref_authors_cited': 'José Correa, Anja Korol, Ruben Hoeksma',
+        '_ref_authors_cited_list': ['José Correa', 'Anja Korol', 'Ruben Hoeksma'],
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
+        'UNLIKELY',
+        'A related paper was found.',
+        entry,
+        {
+            'title': 'Prophet inequalities for independent random variables from an unknown distribution',
+            'authors': 'José R. Correa, Paul Dütting, Felix A. Fischer, Kevin Schewior',
+            'year': '2019',
+        },
+    )
+
+    assert verdict == 'LIKELY'
+    assert 'do not substantially match' in explanation
+
+
+def test_unverified_academic_unlikely_allows_matching_found_metadata():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'A real paper with exact metadata',
+        'ref_authors_cited': 'Alice Smith, Bob Jones',
+        '_ref_authors_cited_list': ['Alice Smith', 'Bob Jones'],
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
+        'UNLIKELY',
+        'The exact paper was found.',
+        entry,
+        {
+            'title': 'A real paper with exact metadata',
+            'authors': 'Alice Smith, Bob Jones',
+            'year': '2024',
+        },
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert explanation == 'The exact paper was found.'
+
+
+def test_unverified_academic_unlikely_allows_split_word_title_artifact():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'Improving mutual information estimatio n with annealed and energy-based bounds',
+        'ref_authors_cited': 'Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi',
+        '_ref_authors_cited_list': ['Rob Brekelmans', 'Sicong Huang', 'Marzyeh Ghassemi'],
+    }
+
+    verdict, explanation = LLMHallucinationVerifier._apply_unverified_academic_metadata_guard(
+        'UNLIKELY',
+        'The paper exists and the cited authors are a subset of the full author list.',
+        entry,
+        {
+            'title': 'Improving mutual information estimation with annealed and energy-based bounds',
+            'authors': (
+                'Rob Brekelmans, Sicong Huang, Marzyeh Ghassemi, Greg Ver Steeg, '
+                'Roger Baker Grosse, Alireza Makhzani'
+            ),
+            'year': '2022',
+        },
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert explanation == 'The paper exists and the cited authors are a subset of the full author list.'
+
+
 def test_hallucination_prompt_treats_software_project_citation_as_valid_source():
     entry = {
         'error_type': 'unverified',
@@ -1026,6 +1172,42 @@ def test_ungrounded_unlikely_for_academic_reference_is_uncertain():
 
     assert result['verdict'] == 'UNCERTAIN'
     assert 'not grounded in web search results or verified metadata' in result['explanation']
+
+
+def test_ungrounded_unlikely_with_matching_found_metadata_is_allowed():
+    verifier = object.__new__(LLMHallucinationVerifier)
+    verifier.provider = 'anthropic'
+    verifier.model = 'claude-test'
+    verifier.client = object()
+    verifier.cache_dir = None
+    verifier._call = lambda system_prompt, user_prompt: (
+        'EXPLANATION: The real paper exists with exactly matching authors.\n'
+        'FOUND_TITLE: Deep Reinforcement Learning at the Edge of the Statistical Precipice\n'
+        'FOUND_AUTHORS: Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron Courville, Marc G. Bellemare\n'
+        'FOUND_YEAR: 2021\n'
+        'VERDICT: UNLIKELY',
+        [],
+    )
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified exactly; cited title appears truncated.',
+        'ref_title': 'Deep reinforcement learning at edge of statistical precipice',
+        'ref_authors_cited': 'Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron Courville, Marc G. Bellemare',
+        '_ref_authors_cited_list': [
+            'Rishabh Agarwal',
+            'Max Schwarzer',
+            'Pablo Samuel Castro',
+            'Aaron Courville',
+            'Marc G. Bellemare',
+        ],
+        'ref_year_cited': 2022,
+        'ref_venue_cited': 'arXiv',
+    }
+
+    result = verifier.assess(entry)
+
+    assert result['verdict'] == 'UNLIKELY'
+    assert 'not grounded in web search results' not in result['explanation']
 
 
 def test_unlikely_low_overlap_author_mismatch_is_corrected_to_likely():

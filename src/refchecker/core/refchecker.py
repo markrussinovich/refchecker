@@ -3820,8 +3820,9 @@ class ArxivReferenceChecker:
                     if not debug_mode:
                         print(f"   Bibliography extraction: {self._format_bibliography_extraction_method()}")
                     # Save to cache if enabled
-                    from refchecker.utils.cache_utils import cache_bibliography
-                    cache_bibliography(self.cache_dir, getattr(paper, '_input_spec', None), bibliography)
+                    from refchecker.utils.cache_utils import cache_bibliography, llm_cache_identity_from_extractor
+                    llm_cache_identity = llm_cache_identity_from_extractor(self.llm_extractor)
+                    cache_bibliography(self.cache_dir, getattr(paper, '_input_spec', None), bibliography, llm_cache_identity)
                     
                     # Apply deduplication to all bibliography sources (not just LLM-extracted)
                     if len(bibliography) > 1:  # Only deduplicate if we have multiple references
@@ -4254,68 +4255,23 @@ class ArxivReferenceChecker:
         bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
         logger.debug(f"Bibliography sample: {bib_sample}")
 
-        # Check if this is a standard ACM/natbib format first
-        if detect_standard_acm_natbib_format(bibliography_text):
-            logger.info("Detected standard ACM/natbib format, using regex-based parsing")
-            self.used_regex_extraction = True
-            # Note: ACM/natbib parsing is also quite robust for standard formats
-            return self._parse_standard_acm_natbib_references(bibliography_text)
-        
-        # Check if this is BibTeX format
-        from refchecker.utils.bibtex_parser import detect_bibtex_format
-        if detect_bibtex_format(bibliography_text):
-            logger.info("Detected BibTeX format, using BibTeX parser")
-            self.used_regex_extraction = True
-            # Note: BibTeX parsing is robust, so we don't set used_unreliable_extraction
-            return self._parse_bibtex_references(bibliography_text)
-        
-        # Check if this is biblatex format  
-        from refchecker.utils.biblatex_parser import detect_biblatex_format
-        if detect_biblatex_format(bibliography_text):
-            logger.debug("Detected biblatex format")
-            self.used_regex_extraction = True
-            # Note: biblatex parsing is also robust, so we don't set used_unreliable_extraction
-            biblatex_refs = self._parse_biblatex_references(bibliography_text)
-            
-            # If biblatex parsing returned empty results (due to quality validation),
-            # fallback to LLM if available
-            if not biblatex_refs and self.llm_extractor:
-                logger.debug("Biblatex is incompatible with parser")
-                try:
-                    references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
-                    if references:
-                        logger.debug(f"LLM fallback extracted {len(references)} references")
-                        return self._process_llm_extracted_references(references)
-                    else:
-                        logger.warning("LLM fallback also returned no results")
-                        return []
-                except Exception as e:
-                    logger.error(f"LLM fallback failed: {e}")
-                    return []
-            if len(biblatex_refs) > 0:
-                logger.debug("Using biblatex file")
-                return biblatex_refs
-        
-        # For non-standard formats, try LLM-based extraction if available
         if self.llm_extractor:
             try:
-                logger.info("Non-standard bibliography format detected, using LLM-based extraction")
+                logger.info("Using LLM-based reference extraction")
                 references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
                 if references:
                     logger.debug(f"Parsed {len(references)} references")
                     return self._process_llm_extracted_references(references)
                 else:
-                    logger.warning("LLM reference extraction returned no results, falling back to regex parsing")
+                    logger.warning("LLM reference extraction returned no results")
             except Exception as e:
-                logger.warning(f"LLM reference extraction failed: {e}, falling back to GROBID")
+                logger.warning(f"LLM reference extraction failed: {e}")
         
-        # No LLM available (or LLM failed) and non-standard format — fallback to GROBID
         if not self.llm_extractor:
-            print("      For best results, use --llm-provider to enable LLM-based extraction.")
-            print("     Fallbacking back to GROBID extraction.")
+            logger.warning("No LLM extractor configured for reference extraction")
             self.fatal_error = True
         else:
-            logger.warning("LLM extraction failed for non-standard bibliography format; skipping this paper's references")
+            logger.warning("LLM extraction failed; skipping this paper's references")
         return []
     
     def _parse_standard_acm_natbib_references(self, bibliography_text):
@@ -5963,8 +5919,9 @@ class ArxivReferenceChecker:
             return None
 
         # Check bibliography cache
-        from refchecker.utils.cache_utils import cached_bibliography
-        hit = cached_bibliography(self.cache_dir, input_spec)
+        from refchecker.utils.cache_utils import cached_bibliography, llm_cache_identity_from_extractor
+        llm_cache_identity = llm_cache_identity_from_extractor(self.llm_extractor)
+        hit = cached_bibliography(self.cache_dir, input_spec, llm_cache_identity)
         if hit is not None:
             self.last_bibliography_extraction_method = 'cache'
             return hit
@@ -6227,7 +6184,7 @@ class ArxivReferenceChecker:
         if not self.last_bibliography_extraction_method:
             self.last_bibliography_extraction_method = 'pdf'
 
-        if not references:
+        if not references and not self.llm_extractor:
             grobid_references = _maybe_use_grobid_fallback(
                 "No LLM or GROBID available for PDF reference extraction. "
                 "Please configure an API key or ensure Docker is installed so GROBID can auto-start."

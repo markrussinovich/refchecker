@@ -8,25 +8,25 @@ step.
 Directory layout::
 
     <cache_dir>/
-      arxiv_2312.02091/
-        paper.pdf
-        bibliography.json
+            arxiv_2312.02091/
+                paper.pdf
+                bibliography_<llm-identity>.json
                 thumbnail.png
                 preview.png
-      openreview_H8tismBT3Q/
-        paper.pdf
-        bibliography.json
+            openreview_H8tismBT3Q/
+                paper.pdf
+                bibliography_<llm-identity>.json
       url_<sha256>/
         paper.pdf
-        bibliography.json
+                bibliography_<llm-identity>.json
 
 High-level API
 --------------
-``cached_bibliography(cache_dir, input_spec)``
+``cached_bibliography(cache_dir, input_spec, llm_identity)``
     Returns cached bibliography list or None.  Single call replaces
     key derivation + load in every call site.
 
-``cache_bibliography(cache_dir, input_spec, bibliography)``
+``cache_bibliography(cache_dir, input_spec, bibliography, llm_identity)``
     Saves bibliography list.  Single call replaces key derivation + save.
 
 ``cached_pdf(cache_dir, input_spec)``
@@ -107,13 +107,37 @@ def get_cached_artifact_path(
     return os.path.join(entry_dir, filename)
 
 
+def llm_cache_identity_from_extractor(llm_extractor: Any) -> str:
+    """Return a stable bibliography-cache identity for the extraction LLM."""
+    provider = getattr(llm_extractor, 'llm_provider', None) if llm_extractor else None
+    if not provider:
+        return 'no_llm'
+
+    provider_name = provider.__class__.__name__
+    model = getattr(provider, 'model', None) or getattr(provider, 'model_name', None) or 'default'
+    endpoint = getattr(provider, 'endpoint', None) or getattr(provider, 'server_url', None) or ''
+    return f'{provider_name}:{model}:{endpoint}'
+
+
+def _safe_cache_component(value: str, max_prefix: int = 48) -> str:
+    text = str(value or 'unknown')
+    digest = hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+    prefix = re.sub(r'[^A-Za-z0-9_.-]+', '_', text).strip('_')[:max_prefix]
+    return f'{prefix}_{digest}' if prefix else digest
+
+
+def bibliography_cache_filename(llm_identity: Optional[str]) -> str:
+    """Return the LLM-scoped bibliography cache filename."""
+    return f'bibliography_{_safe_cache_component(llm_identity or "no_llm")}.json'
+
+
 # ---------------------------------------------------------------------------
 # Bibliography (parsed reference list) cache
 # ---------------------------------------------------------------------------
 
-def load_cached_bibliography(cache_dir: str, key: str) -> Optional[List[Dict[str, Any]]]:
+def load_cached_bibliography(cache_dir: str, key: str, llm_identity: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Return the cached bibliography list, or *None* on miss."""
-    path = os.path.join(cache_dir, key, 'bibliography.json')
+    path = os.path.join(cache_dir, key, bibliography_cache_filename(llm_identity))
     if not os.path.isfile(path):
         return None
     try:
@@ -127,13 +151,13 @@ def load_cached_bibliography(cache_dir: str, key: str) -> Optional[List[Dict[str
     return None
 
 
-def save_cached_bibliography(cache_dir: str, key: str, bibliography: List[Dict[str, Any]]) -> None:
+def save_cached_bibliography(cache_dir: str, key: str, bibliography: List[Dict[str, Any]], llm_identity: Optional[str] = None) -> None:
     """Persist the parsed bibliography list to the cache directory."""
     if not bibliography:
         return
     entry_dir = os.path.join(cache_dir, key)
     os.makedirs(entry_dir, exist_ok=True)
-    path = os.path.join(entry_dir, 'bibliography.json')
+    path = os.path.join(entry_dir, bibliography_cache_filename(llm_identity))
     try:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(bibliography, f, ensure_ascii=False, indent=2)
@@ -181,18 +205,18 @@ def save_cached_pdf(cache_dir: str, key: str, pdf_content: BytesIO) -> None:
 # High-level convenience API (derive key + load/save in one call)
 # ---------------------------------------------------------------------------
 
-def cached_bibliography(cache_dir: Optional[str], input_spec: Optional[str]) -> Optional[List[Dict[str, Any]]]:
+def cached_bibliography(cache_dir: Optional[str], input_spec: Optional[str], llm_identity: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Return cached bibliography for *input_spec*, or None on miss/disabled."""
     if not cache_dir or not input_spec:
         return None
-    return load_cached_bibliography(cache_dir, cache_key_for_spec(input_spec))
+    return load_cached_bibliography(cache_dir, cache_key_for_spec(input_spec), llm_identity)
 
 
-def cache_bibliography(cache_dir: Optional[str], input_spec: Optional[str], bibliography: List[Dict[str, Any]]) -> None:
+def cache_bibliography(cache_dir: Optional[str], input_spec: Optional[str], bibliography: List[Dict[str, Any]], llm_identity: Optional[str] = None) -> None:
     """Save *bibliography* to the cache (no-op when caching is disabled)."""
     if not cache_dir or not input_spec or not bibliography:
         return
-    save_cached_bibliography(cache_dir, cache_key_for_spec(input_spec), bibliography)
+    save_cached_bibliography(cache_dir, cache_key_for_spec(input_spec), bibliography, llm_identity)
 
 
 def cached_pdf(cache_dir: Optional[str], input_spec: Optional[str]) -> Optional[BytesIO]:

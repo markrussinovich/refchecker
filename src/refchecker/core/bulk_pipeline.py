@@ -20,9 +20,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
 from refchecker.core.hallucination_policy import build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
 from refchecker.utils.arxiv_utils import get_bibtex_content
-from refchecker.utils.biblatex_parser import detect_biblatex_format
-from refchecker.utils.bibtex_parser import detect_bibtex_format
-from refchecker.utils.text_utils import detect_latex_bibliography_format, detect_standard_acm_natbib_format, extract_latex_references, validate_parsed_references
+from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
 
 logger = logging.getLogger(__name__)
 
@@ -366,9 +364,16 @@ class BulkLLMExtractionBatcher:
         )
 
         response_text = provider._call_llm(prompt)
-        parsed = _extract_json_payload(response_text)
+        try:
+            parsed = _extract_json_payload(response_text)
+        except ValueError:
+            parsed = None
         if not isinstance(parsed, list):
-            raise ValueError('Batched extraction response was not a JSON array')
+            logger.info(
+                'Batched LLM extraction response was not a JSON array; retrying %s items individually',
+                len(payloads),
+            )
+            return [self._process_single(payload) for payload in payloads]
 
         grouped: Dict[int, List[str]] = {}
         for item in parsed:
@@ -384,10 +389,16 @@ class BulkLLMExtractionBatcher:
         results: List[List[Dict[str, Any]]] = []
         for index, payload in enumerate(payloads):
             raw_refs = grouped.get(index, [])
+            processed_refs: List[Dict[str, Any]] = []
             if raw_refs:
-                results.append(payload.checker._process_llm_extracted_references(raw_refs))
-            else:
-                results.append([])
+                processed_refs = payload.checker._process_llm_extracted_references(raw_refs)
+            if not processed_refs and payload.bibliography_text.strip():
+                logger.info(
+                    'Batched LLM extraction produced zero processed references for item %s; retrying single-item extraction',
+                    index,
+                )
+                processed_refs = self._process_single(payload)
+            results.append(processed_refs)
         return results
 
 
@@ -791,13 +802,14 @@ def _process_bulk_paper_job(
         _t = time.perf_counter()
 
         # Check bibliography cache
-        from refchecker.utils.cache_utils import cached_bibliography, cache_bibliography
-        bibliography = cached_bibliography(checker.cache_dir, job.input_spec)
+        from refchecker.utils.cache_utils import cached_bibliography, cache_bibliography, llm_cache_identity_from_extractor
+        llm_cache_identity = llm_cache_identity_from_extractor(checker.llm_extractor)
+        bibliography = cached_bibliography(checker.cache_dir, job.input_spec, llm_cache_identity)
         if bibliography is not None:
             phase_times['extract_bib'] = time.perf_counter() - _t
         else:
             bibliography = extract_bibliography_bulk(checker, paper, debug_mode=debug_mode, extraction_batcher=extraction_batcher)
-            cache_bibliography(checker.cache_dir, job.input_spec, bibliography)
+            cache_bibliography(checker.cache_dir, job.input_spec, bibliography, llm_cache_identity)
             phase_times['extract_bib'] = time.perf_counter() - _t
         if checker.fatal_error:
             return _build_bulk_result(checker, job, paper_id, title, start_time, source_url=source_url), []
@@ -926,16 +938,6 @@ def extract_bibliography_bulk(checker: Any, paper: Any, debug_mode: bool, extrac
 
     bibtex_content = get_bibtex_content(paper)
     if bibtex_content:
-        if '\\begin{thebibliography}' in bibtex_content and '\\bibitem' in bibtex_content:
-            references = extract_latex_references(bibtex_content, None)
-            validation = validate_parsed_references(references)
-            if not validation['is_valid'] and checker.llm_extractor:
-                llm_refs = extraction_batcher.extract_references(checker, bibtex_content)
-                if llm_refs:
-                    llm_validation = validate_parsed_references(llm_refs)
-                    if llm_validation['quality_score'] > validation['quality_score']:
-                        references = llm_refs
-            return references
         return parse_references_bulk(checker, bibtex_content, extraction_batcher)
 
     if hasattr(paper, 'is_text_refs') and paper.is_text_refs:
@@ -1027,7 +1029,32 @@ def extract_bibliography_bulk(checker: Any, paper: Any, debug_mode: bool, extrac
             'PDF text extraction and pdftotext fallback did not produce a recognizable bibliography section.',
         )
         return []
-    return parse_references_bulk(checker, bibliography_text, extraction_batcher)
+    references = parse_references_bulk(checker, bibliography_text, extraction_batcher)
+    if references or checker.llm_extractor:
+        return references
+
+    try:
+        from refchecker.utils.grobid import extract_pdf_references_with_grobid_fallback
+
+        pdf_path = getattr(paper, 'file_path', None)
+        if not pdf_path or not os.path.exists(pdf_path):
+            pdf_path = None
+        grobid_references, _ = extract_pdf_references_with_grobid_fallback(
+            pdf_path=pdf_path,
+            pdf_content=pdf_content,
+            llm_available=False,
+            failure_message=(
+                'No LLM configured for PDF reference extraction; falling back to GROBID.'
+            ),
+        )
+        if grobid_references:
+            checker.fatal_error = False
+            checker.fatal_error_message = None
+            return grobid_references
+    except Exception as exc:
+        logger.debug('GROBID fallback failed for %s: %s', paper_id, exc)
+
+    return references
 
 
 def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batcher: BulkLLMExtractionBatcher) -> List[Dict[str, Any]]:
@@ -1035,34 +1062,6 @@ def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batch
         _set_reference_extraction_fatal(
             checker,
             'Reference extraction failed because no bibliography text was available',
-        )
-        return []
-
-    if detect_standard_acm_natbib_format(bibliography_text):
-        checker.used_regex_extraction = True
-        return checker._parse_standard_acm_natbib_references(bibliography_text)
-
-    if detect_bibtex_format(bibliography_text):
-        checker.used_regex_extraction = True
-        return checker._parse_bibtex_references(bibliography_text)
-
-    if detect_biblatex_format(bibliography_text):
-        checker.used_regex_extraction = True
-        biblatex_refs = checker._parse_biblatex_references(bibliography_text)
-        if biblatex_refs:
-            return biblatex_refs
-        if checker.llm_extractor:
-            references = extraction_batcher.extract_references(checker, bibliography_text)
-            if references:
-                return references
-            _set_reference_extraction_fatal(
-                checker,
-                _zero_reference_message(bibliography_text, 'BibLaTeX parser and LLM extraction'),
-            )
-            return []
-        _set_reference_extraction_fatal(
-            checker,
-            _zero_reference_message(bibliography_text, 'BibLaTeX parser'),
         )
         return []
 
@@ -1078,8 +1077,8 @@ def parse_references_bulk(checker: Any, bibliography_text: str, extraction_batch
 
     _set_reference_extraction_fatal(
         checker,
-        'Reference extraction failed because the bibliography format was not recognized '
-        f'and no LLM extractor is configured (bibliography_text_chars={len(bibliography_text)})',
+        'Reference extraction failed because no LLM extractor is configured '
+        f'(bibliography_text_chars={len(bibliography_text)}). Configure an LLM extractor or use GROBID fallback for PDF inputs.',
     )
     return []
 

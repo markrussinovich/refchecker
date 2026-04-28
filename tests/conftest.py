@@ -37,9 +37,14 @@ def pytest_collection_modifyitems(config, items):
         os.environ.get(name)
         for name in (
             "ANTHROPIC_API_KEY",
+            "REFCHECKER_ANTHROPIC_API_KEY",
             "OPENAI_API_KEY",
+            "REFCHECKER_OPENAI_API_KEY",
+            "OPENAI_CHAT_KEY",
             "GOOGLE_API_KEY",
+            "REFCHECKER_GOOGLE_API_KEY",
             "AZURE_OPENAI_API_KEY",
+            "REFCHECKER_AZURE_OPENAI_API_KEY",
         )
     )
 
@@ -49,6 +54,10 @@ def pytest_collection_modifyitems(config, items):
 
     for item in items:
         if "llm" in item.keywords:
+            if "llm_auto_keyed" in item.keywords:
+                if not has_llm_key:
+                    item.add_marker(missing_llm_key)
+                continue
             if not run_llm:
                 item.add_marker(skip_llm)
                 continue

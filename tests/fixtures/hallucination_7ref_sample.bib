@@ -1,9 +1,9 @@
 % Hallucination detection test fixture.
 %
-% 7 references designed to exercise hallucination triage:
+% 9 references designed to exercise hallucination triage:
 %   1 accurate        — correct metadata, should verify cleanly
 %   3 minor issues    — real papers with small citation errors
-%   3 hallucinated    — fabricated references from documented LLM patterns
+%   5 hallucinated    — fabricated references from documented LLM patterns
 %
 % The three hallucinated entries are modeled on patterns reported in
 % GPTZero's NeurIPS 2025 hallucination audit and the arXiv study
@@ -52,7 +52,7 @@
   url       = {https://arxiv.org/abs/1406.2661}
 }
 
-% ── 5-7. HALLUCINATED ───────────────────────────────────────────────
+% ── 5-9. HALLUCINATED ───────────────────────────────────────────────
 % Completely fabricated references based on documented LLM patterns.
 
 % 5. Fully fabricated: fake authors, title, and venue.
@@ -81,4 +81,23 @@
   author    = {Rajesh Kumar and Wei Zhang and Priya Narasimhan},
   booktitle = {Proceedings of the International Conference on Learning Representations},
   year      = {2019}
+}
+
+% 8. Real title grafted onto mostly wrong coauthors. The real paper is by
+%    Correa, Duetting, Fischer, and Schewior, not Foncea, Hoeksma, Roughgarden.
+@inproceedings{correa2019prophet_wrongauthors,
+  title     = {Prophet inequalities for independent random variables from an unknown distribution},
+  author    = {José Correa and Pablo D. A. Foncea and Ruben Hoeksma and Tim Roughgarden},
+  booktitle = {Proceedings of the 30th Annual ACM-SIAM Symposium on Discrete Algorithms (SODA)},
+  year      = {2019},
+  url       = {https://arxiv.org/abs/1811.06114}
+}
+
+% 9. Similar prophet-inequality graft: related real papers exist, but this
+%    title/author/venue combination should not be accepted from citations alone.
+@article{correa2022posted_pricing_fake,
+  title   = {Prophet inequalities and posted pricing mechanisms},
+  author  = {José Correa and Anja Korol and Ruben Hoeksma},
+  journal = {Mathematics of Operations Research},
+  year    = {2022}
 }

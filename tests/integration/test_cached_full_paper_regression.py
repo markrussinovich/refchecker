@@ -25,10 +25,13 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
+from refchecker.utils.cache_utils import bibliography_cache_filename
+
 _FIXTURES = Path(__file__).resolve().parents[1] / 'fixtures'
 CACHE_ROOT = _FIXTURES / 'test_cache'
 # Explicit path to the test DB file so all modes resolve identically.
 DB_FILE = str(CACHE_ROOT / 'test_papers.db')
+NO_LLM_BIBLIOGRAPHY_FILENAME = bibliography_cache_filename('no_llm')
 
 
 def _blocked_request(self, *args, **kw):
@@ -61,14 +64,14 @@ def _skip_if_missing() -> None:
         pytest.skip(f'Test DB not found at {DB_FILE}')
     missing = [
         pid for pid in PAPER_CASES
-        if not (CACHE_ROOT / f'openreview_{pid}' / 'bibliography.json').is_file()
+        if not (CACHE_ROOT / f'openreview_{pid}' / NO_LLM_BIBLIOGRAPHY_FILENAME).is_file()
     ]
     if missing:
         pytest.skip(f'Cached bibliographies missing for: {", ".join(sorted(missing))}')
 
 
 def _load_cached_bibliography(paper_id: str) -> List[Dict[str, Any]]:
-    path = CACHE_ROOT / f'openreview_{paper_id}' / 'bibliography.json'
+    path = CACHE_ROOT / f'openreview_{paper_id}' / NO_LLM_BIBLIOGRAPHY_FILENAME
     return json.loads(path.read_text(encoding='utf-8'))
 
 

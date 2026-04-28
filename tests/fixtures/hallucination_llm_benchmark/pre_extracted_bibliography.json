@@ -77,6 +77,36 @@
       }
     },
     {
+      "id": "unverified_prophet_posted_pricing_citation_only",
+      "ground_truth": "LIKELY",
+      "rationale": "The title/author/venue combination is not verified by academic databases; citation-list mentions or vague LLM search claims should not upgrade it to real.",
+      "reference": {
+        "title": "Prophet inequalities and posted pricing mechanisms",
+        "authors": [
+          "José Correa",
+          "Anja Korol",
+          "Ruben Hoeksma"
+        ],
+        "venue": "Mathematics of Operations Research",
+        "year": 2022,
+        "type": "other",
+        "raw_text": "José Correa*Anja Korol*Ruben Hoeksma#Prophet inequalities and posted pricing mechanisms#Mathematics of Operations Research#2022#"
+      },
+      "error_entry": {
+        "error_type": "unverified",
+        "error_details": "Reference could NOT be found in any academic database (Semantic Scholar, OpenAlex, CrossRef, DBLP, arXiv)",
+        "ref_title": "Prophet inequalities and posted pricing mechanisms",
+        "ref_authors_cited": "José Correa, Anja Korol, Ruben Hoeksma",
+        "_ref_authors_cited_list": [
+          "José Correa",
+          "Anja Korol",
+          "Ruben Hoeksma"
+        ],
+        "ref_year_cited": 2022,
+        "ref_venue_cited": "Mathematics of Operations Research"
+      }
+    },
+    {
       "id": "real_title_one_of_many_authors_correct",
       "ground_truth": "LIKELY",
       "rationale": "Only one cited author overlaps with the real paper; this should not be excused as a metadata typo.",

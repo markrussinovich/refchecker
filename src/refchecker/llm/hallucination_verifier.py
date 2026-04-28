@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -757,10 +758,16 @@ class LLMHallucinationVerifier:
                 )
                 # Apply verified-paper safety net to cached results too
                 verdict, explanation = self._downgrade_ungrounded_unlikely(
-                    verdict, explanation, error_entry, web_urls,
+                    verdict, explanation, error_entry, web_urls, found_metadata,
                 )
                 verdict, explanation = self._apply_unlikely_author_mismatch_guard(
                     verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
+                )
+                verdict, explanation = self._apply_citation_evidence_guard(
+                    verdict, explanation, error_entry,
+                )
+                verdict, explanation = self._apply_unverified_academic_metadata_guard(
+                    verdict, explanation, error_entry, found_metadata,
                 )
                 verdict, explanation = self._apply_verified_safety_net(
                     verdict, explanation, error_entry, web_urls,
@@ -850,10 +857,16 @@ class LLMHallucinationVerifier:
 
         # Apply verified-paper safety net
         verdict, explanation = self._downgrade_ungrounded_unlikely(
-            verdict, explanation, error_entry, web_urls,
+            verdict, explanation, error_entry, web_urls, found_metadata,
         )
         verdict, explanation = self._apply_unlikely_author_mismatch_guard(
             verdict, explanation, error_entry, web_urls, found_metadata, paper_link,
+        )
+        verdict, explanation = self._apply_citation_evidence_guard(
+            verdict, explanation, error_entry,
+        )
+        verdict, explanation = self._apply_unverified_academic_metadata_guard(
+            verdict, explanation, error_entry, found_metadata,
         )
         verdict, explanation = self._apply_verified_safety_net(
             verdict, explanation, error_entry, web_urls,
@@ -881,6 +894,7 @@ class LLMHallucinationVerifier:
         explanation: str,
         error_entry: Dict[str, Any],
         web_urls: list,
+        found_metadata: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """Do not let ungrounded chat fallback prove academic references real."""
         if verdict != 'UNLIKELY' or web_urls:
@@ -894,6 +908,12 @@ class LLMHallucinationVerifier:
             return verdict, explanation
 
         if error_entry.get('ref_verified_url'):
+            return verdict, explanation
+
+        metadata_matches, _, _ = LLMHallucinationVerifier._found_metadata_matches_cited_reference(
+            error_entry, found_metadata or {},
+        )
+        if metadata_matches:
             return verdict, explanation
 
         logger.debug(
@@ -973,6 +993,162 @@ class LLMHallucinationVerifier:
                 'title with fabricated coauthors is treated as hallucinated.)'
             ),
         )
+
+    @staticmethod
+    def _apply_citation_evidence_guard(
+        verdict: str,
+        explanation: str,
+        error_entry: Dict[str, Any],
+    ) -> tuple:
+        """Do not accept another paper's references as proof a paper exists."""
+        if verdict != 'UNLIKELY':
+            return verdict, explanation
+
+        if LLMHallucinationVerifier._is_verified_real_world_source(error_entry):
+            return verdict, explanation
+
+        if error_entry.get('ref_verified_url'):
+            return verdict, explanation
+
+        error_type = (error_entry.get('error_type') or '').lower()
+        if error_type not in ('unverified', 'multiple'):
+            return verdict, explanation
+
+        text = (explanation or '').lower()
+        citation_only_signals = (
+            'referenced in another',
+            'cited in another',
+            'mentioned in another',
+            'appears in another',
+            'listed in another',
+            'referenced by another',
+            'cited by another',
+            'another arxiv paper',
+            'another academic paper',
+            'another publication',
+            'reference list',
+            'bibliography',
+        )
+        if not any(signal in text for signal in citation_only_signals):
+            return verdict, explanation
+
+        logger.debug(
+            'Overriding UNLIKELY -> LIKELY because LLM used citation-list evidence ref=%r',
+            error_entry.get('ref_title', ''),
+        )
+        return (
+            'LIKELY',
+            explanation + (
+                ' (Verdict corrected: finding the title only as a citation or '
+                'reference in another paper is not proof that the cited paper '
+                'has its own dedicated publication page.)'
+            ),
+        )
+
+    @staticmethod
+    def _apply_unverified_academic_metadata_guard(
+        verdict: str,
+        explanation: str,
+        error_entry: Dict[str, Any],
+        found_metadata: Dict[str, Any],
+    ) -> tuple:
+        """Require title+author metadata before upgrading unverified papers."""
+        if verdict != 'UNLIKELY':
+            return verdict, explanation
+
+        if LLMHallucinationVerifier._is_verified_real_world_source(error_entry):
+            return verdict, explanation
+
+        if error_entry.get('ref_verified_url'):
+            return verdict, explanation
+
+        error_type = (error_entry.get('error_type') or '').lower()
+        if error_type not in ('unverified', 'multiple'):
+            return verdict, explanation
+
+        found_title = (found_metadata or {}).get('title')
+        found_authors = (found_metadata or {}).get('authors')
+        if not found_title or not found_authors:
+            logger.debug(
+                'Overriding UNLIKELY -> LIKELY because LLM did not provide found metadata ref=%r',
+                error_entry.get('ref_title', ''),
+            )
+            return (
+                'LIKELY',
+                explanation + (
+                    ' (Verdict corrected: this academic reference was not found '
+                    'by the regular checkers, and the LLM did not provide found '
+                    'title and author metadata from a dedicated source page.)'
+                ),
+            )
+
+        metadata_matches, title_similarity, author_overlap = (
+            LLMHallucinationVerifier._found_metadata_matches_cited_reference(
+                error_entry, found_metadata,
+            )
+        )
+        if metadata_matches:
+            return verdict, explanation
+
+        logger.debug(
+            'Overriding UNLIKELY -> LIKELY because LLM-found metadata does not match '
+            '(title_similarity=%.2f, author_overlap=%s, ref=%r)',
+            title_similarity,
+            'unknown' if author_overlap is None else f'{author_overlap * 100:.0f}%',
+            error_entry.get('ref_title', ''),
+        )
+        return (
+            'LIKELY',
+            explanation + (
+                ' (Verdict corrected: the LLM-found title and authors do not '
+                'substantially match the cited academic reference.)'
+            ),
+        )
+
+    @staticmethod
+    def _found_metadata_matches_cited_reference(
+        error_entry: Dict[str, Any],
+        found_metadata: Dict[str, Any],
+    ) -> tuple:
+        found_title = (found_metadata or {}).get('title')
+        found_authors = (found_metadata or {}).get('authors')
+        if not found_title or not found_authors:
+            return False, 0.0, None
+
+        cited_title = error_entry.get('ref_title', '')
+        cited_authors = error_entry.get('ref_authors_cited', '')
+
+        from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+        from refchecker.core.hallucination_policy import _compute_author_overlap
+
+        title_similarity = compare_titles_with_latex_cleaning(cited_title, found_title)
+        title_matches = (
+            title_similarity >= 0.9
+            or LLMHallucinationVerifier._titles_match_despite_extraction_artifact(
+                cited_title, found_title,
+            )
+        )
+        author_overlap = _compute_author_overlap(
+            cited_authors,
+            found_authors,
+            cited_list=error_entry.get('_ref_authors_cited_list'),
+        )
+        return title_matches and (author_overlap is None or author_overlap >= 0.6), title_similarity, author_overlap
+
+    @staticmethod
+    def _titles_match_despite_extraction_artifact(cited_title: str, found_title: str) -> bool:
+        """Match titles that differ only by obvious PDF/OCR spacing artifacts."""
+        if not cited_title or not found_title:
+            return False
+
+        from refchecker.core.hallucination_policy import _looks_like_split_word_artifact
+
+        if not _looks_like_split_word_artifact(cited_title):
+            return False
+
+        compact_cited = re.sub(r'[^a-z0-9]+', '', cited_title.lower())
+        compact_found = re.sub(r'[^a-z0-9]+', '', found_title.lower())
+        return bool(compact_cited and compact_cited == compact_found)
 
     @staticmethod
     def _found_authors_conflict_with_checked_source(
