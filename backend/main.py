@@ -16,6 +16,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic.fields import FieldInfo
 from pydantic import BaseModel
 import logging
 from refchecker.__version__ import __version__
@@ -90,6 +91,13 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+def _form_default_value(value):
+    if not isinstance(value, FieldInfo):
+        return value
+    default = value.default
+    return None if str(default) == 'PydanticUndefined' else default
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 MAX_UPLOAD_FILE_BYTES = int(os.environ.get("MAX_UPLOAD_FILE_BYTES", str(25 * 1024 * 1024)))
@@ -1214,6 +1222,20 @@ async def start_check(
     """
     slot_acquired = False
     try:
+        source_value = _form_default_value(source_value)
+        file = _form_default_value(file)
+        source_text = _form_default_value(source_text)
+        llm_config_id = _form_default_value(llm_config_id)
+        llm_provider = _form_default_value(llm_provider)
+        llm_model = _form_default_value(llm_model)
+        hallucination_config_id = _form_default_value(hallucination_config_id)
+        hallucination_provider = _form_default_value(hallucination_provider)
+        hallucination_model = _form_default_value(hallucination_model)
+        use_llm = _form_default_value(use_llm)
+        api_key = _form_default_value(api_key)
+        hallucination_api_key = _form_default_value(hallucination_api_key)
+        semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
+
         # Generate session ID
         session_id = str(uuid.uuid4())
         check_started_at = utcnow_sqlite()
@@ -2577,6 +2599,17 @@ async def start_batch_check_files(
     Accepts multiple files or a single ZIP file containing documents.
     """
     try:
+        batch_label = _form_default_value(batch_label)
+        llm_config_id = _form_default_value(llm_config_id)
+        llm_provider = _form_default_value(llm_provider)
+        llm_model = _form_default_value(llm_model)
+        hallucination_config_id = _form_default_value(hallucination_config_id)
+        hallucination_provider = _form_default_value(hallucination_provider)
+        hallucination_model = _form_default_value(hallucination_model)
+        use_llm = _form_default_value(use_llm)
+        api_key = _form_default_value(api_key)
+        hallucination_api_key = _form_default_value(hallucination_api_key)
+
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
         
@@ -2589,34 +2622,6 @@ async def start_batch_check_files(
         user_id = get_user_id_filter(current_user)
         uploads_dir = get_uploads_dir() / str(user_id)
         uploads_dir.mkdir(parents=True, exist_ok=True)
-        
-        llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
-            user_id=user_id,
-            use_llm=use_llm,
-            llm_config_id=llm_config_id,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            api_key=api_key,
-        )
-        resolved_hallucination_provider = hallucination_provider
-        resolved_hallucination_model = hallucination_model
-        resolved_hallucination_api_key = hallucination_api_key
-        resolved_hallucination_endpoint = None
-        if hallucination_config_id or hallucination_provider:
-            (
-                resolved_hallucination_provider,
-                resolved_hallucination_model,
-                resolved_hallucination_api_key,
-                resolved_hallucination_endpoint,
-            ) = await _resolve_llm_config_for_request(
-                user_id=user_id,
-                use_llm=use_llm,
-                llm_config_id=hallucination_config_id,
-                llm_provider=hallucination_provider,
-                llm_model=hallucination_model,
-                api_key=hallucination_api_key,
-                require_hallucination_capable=True,
-            )
         
         files_to_process = []
         created_paths: list[Path] = []
@@ -2655,6 +2660,34 @@ async def start_batch_check_files(
         
         if not files_to_process:
             raise HTTPException(status_code=400, detail="No valid files found")
+
+        llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
+            user_id=user_id,
+            use_llm=use_llm,
+            llm_config_id=llm_config_id,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_key=api_key,
+        )
+        resolved_hallucination_provider = hallucination_provider
+        resolved_hallucination_model = hallucination_model
+        resolved_hallucination_api_key = hallucination_api_key
+        resolved_hallucination_endpoint = None
+        if hallucination_config_id or hallucination_provider:
+            (
+                resolved_hallucination_provider,
+                resolved_hallucination_model,
+                resolved_hallucination_api_key,
+                resolved_hallucination_endpoint,
+            ) = await _resolve_llm_config_for_request(
+                user_id=user_id,
+                use_llm=use_llm,
+                llm_config_id=hallucination_config_id,
+                llm_provider=hallucination_provider,
+                llm_model=hallucination_model,
+                api_key=hallucination_api_key,
+                require_hallucination_capable=True,
+            )
         
         label = batch_label or f"Batch of {len(files_to_process)} files"
 

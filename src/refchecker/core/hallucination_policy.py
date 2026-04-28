@@ -1110,7 +1110,12 @@ def _reverify_with_llm_metadata(
 
     # --- Venue check ---
     cited_venue = reference.get('venue', '')
-    if found_venue and are_venues_substantially_different(cited_venue, found_venue):
+    cited_venue_missing = str(cited_venue or '').strip().lower() in {'', 'n.d.', 'n/a', 'na', 'none'}
+    if (
+        found_venue
+        and not cited_venue_missing
+        and are_venues_substantially_different(cited_venue, found_venue)
+    ):
         new_errors.append(create_venue_warning(cited_venue, found_venue))
 
     # --- Carry forward info-only errors that aren't metadata comparisons ---
@@ -1120,6 +1125,20 @@ def _reverify_with_llm_metadata(
             new_errors.append(e)
 
     return new_errors
+
+
+def _split_reverified_issues(issues: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    errors: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    for issue in issues:
+        if 'warning_type' in issue and 'error_type' not in issue:
+            warning = dict(issue)
+            warning['error_type'] = warning.pop('warning_type')
+            warning['error_details'] = warning.pop('warning_details', '')
+            warnings.append(warning)
+        else:
+            errors.append(issue)
+    return errors, warnings
 
 
 def apply_hallucination_verdict(
@@ -1178,6 +1197,34 @@ def apply_hallucination_verdict(
     )
 
     if verdict == 'LIKELY':
+        if reference is not None:
+            llm_issues = _reverify_with_llm_metadata(
+                reference, [], assessment,
+            )
+            if llm_issues is not None:
+                rechecked_errors, rechecked_warnings = _split_reverified_issues(llm_issues)
+                remaining_errors = [
+                    e for e in rechecked_errors
+                    if e.get('error_type') not in ('unverified', 'info', None)
+                    and not e.get('is_suggestion')
+                ]
+                if not remaining_errors and ha_link and ha_link.startswith('http'):
+                    corrected_assessment = dict(assessment)
+                    corrected_assessment['original_verdict'] = verdict
+                    corrected_assessment['verdict'] = 'UNLIKELY'
+                    corrected_assessment['explanation'] = (
+                        'The LLM found reference metadata matching the citation; '
+                        'the earlier database match appears to point to a different work.'
+                    )
+                    result['hallucination_assessment'] = corrected_assessment
+                    result['errors'] = []
+                    result['warnings'] = rechecked_warnings
+                    result['authoritative_urls'] = [
+                        {"type": "llm_verified", "url": ha_link}
+                    ]
+                    result['matched_database'] = 'LLM search'
+                    result['status'] = 'warning' if rechecked_warnings else 'verified'
+                    return result
         result['status'] = 'hallucination'
 
     elif verdict == 'UNLIKELY' and is_upgradeable:
@@ -1188,6 +1235,7 @@ def apply_hallucination_verdict(
             result['authoritative_urls'].append(
                 {"type": "llm_verified", "url": ha_link}
             )
+            result['matched_database'] = 'LLM search'
             # Strip resolved errors so downstream counters are correct.
             # Remove 'unverified' errors and informational URL-references-paper
             # entries that are now obsolete (the LLM found the paper).
@@ -1234,15 +1282,13 @@ def apply_hallucination_verdict(
                 reference, result.get('errors', []), assessment,
             )
             if new_errors is not None:
-                result['errors'] = new_errors
+                result['errors'], result['warnings'] = _split_reverified_issues(new_errors)
                 # Update the verified URL to the LLM-found source
                 if ha_link and ha_link.startswith('http'):
-                    result['authoritative_urls'] = list(
-                        result.get('authoritative_urls', [])
-                    )
-                    result['authoritative_urls'].append(
+                    result['authoritative_urls'] = [
                         {"type": "llm_verified", "url": ha_link}
-                    )
+                    ]
+                    result['matched_database'] = 'LLM search'
                 remaining_errors = [
                     e for e in result['errors']
                     if e.get('error_type') not in ('unverified', 'info', None)

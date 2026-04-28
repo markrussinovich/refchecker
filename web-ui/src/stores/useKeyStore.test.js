@@ -2,6 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const waitForSave = () => new Promise(resolve => setTimeout(resolve, 0))
 
+const waitForSavedKeys = async () => {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const raw = localStorage.getItem('refchecker_tab_keys')
+    if (raw) return JSON.parse(raw)
+    await waitForSave()
+  }
+  return JSON.parse(localStorage.getItem('refchecker_tab_keys'))
+}
+
 describe('useKeyStore', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -32,7 +41,7 @@ describe('useKeyStore', () => {
     await waitForSave()
 
     expect(useKeyStore.getState().getKey('openai')).toBe('new-key')
-    const saved = JSON.parse(localStorage.getItem('refchecker_tab_keys'))
+    const saved = await waitForSavedKeys()
     expect(saved.version).toBe(2)
     expect(saved.encrypted).toBeTypeOf('boolean')
   })
@@ -55,7 +64,7 @@ describe('useKeyStore', () => {
 
     expect(useKeyStore.getState().getKey('openai')).toBeNull()
     expect(useKeyStore.getState().getKey('semantic_scholar')).toBeNull()
-    const saved = JSON.parse(localStorage.getItem('refchecker_tab_keys'))
+    const saved = await waitForSavedKeys()
     expect(saved.version).toBe(2)
     if (saved.encrypted) {
       expect(saved.data).toBeTruthy()

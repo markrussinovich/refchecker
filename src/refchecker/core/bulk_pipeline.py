@@ -364,9 +364,12 @@ class BulkLLMExtractionBatcher:
         )
 
         response_text = provider._call_llm(prompt)
-        parsed = _extract_json_payload(response_text)
+        try:
+            parsed = _extract_json_payload(response_text)
+        except Exception:
+            return [self._process_single(payload) for payload in payloads]
         if not isinstance(parsed, list):
-            raise ValueError('Batched extraction response was not a JSON array')
+            return [self._process_single(payload) for payload in payloads]
 
         grouped: Dict[int, List[str]] = {}
         for item in parsed:
@@ -385,7 +388,7 @@ class BulkLLMExtractionBatcher:
             if raw_refs:
                 results.append(payload.checker._process_llm_extracted_references(raw_refs))
             else:
-                results.append([])
+                results.append(self._process_single(payload))
         return results
 
 

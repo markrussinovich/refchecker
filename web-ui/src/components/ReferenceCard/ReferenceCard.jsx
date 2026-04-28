@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, memo } from 'react'
-import { 
-  formatAuthors, 
-  exportReferenceAsMarkdown, 
-  exportReferenceAsPlainText, 
+import {
+  formatAuthors,
+  exportReferenceAsMarkdown,
+  exportReferenceAsPlainText,
   exportReferenceAsBibtex,
-  copyToClipboard 
+  copyToClipboard
 } from '../../utils/formatters'
 
 const urlPattern = /https?:\/\/[^\s]+/g
@@ -13,31 +13,31 @@ const urlPattern = /https?:\/\/[^\s]+/g
 // Handles new format: "Title mismatch:\n       cited:  value\n       actual: value"
 const parseErrorDetails = (details) => {
   if (!details) return null
-  
+
   // Split by newlines to handle multiline format
   const lines = details.split('\n')
-  
+
   if (lines.length >= 3) {
     // New three-line format: prefix on first line, cited on second, actual on third
     const prefix = lines[0].replace(/:$/, '').trim() // Remove trailing colon
-    
+
     // Extract value after "cited:" (with any amount of whitespace)
     const citedLine = lines[1]
     const citedMatch = citedLine.match(/cited:\s*(.*)/)
     const cited = citedMatch ? citedMatch[1].trim() : null
-    
-    // Extract value after "actual:" (with any amount of whitespace)  
+
+    // Extract value after "actual:" (with any amount of whitespace)
     const actualLine = lines[2]
     const actualMatch = actualLine.match(/actual:\s*(.*)/)
     const actual = actualMatch ? actualMatch[1].trim() : null
-    
+
     return { prefix, cited, actual, isMultiline: true }
   }
-  
+
   // Legacy format: "prefix cited: 'value' actual: 'value'" on one line (with quotes)
   const citedMatch = details.match(/cited:\s*'([^']*)'/)
   const actualMatch = details.match(/actual:\s*'([^']*)'/)
-  
+
   // Get the prefix (everything before "cited:" if it exists)
   let prefix = details
   const citedIndex = details.indexOf('cited:')
@@ -46,7 +46,7 @@ const parseErrorDetails = (details) => {
   } else if (citedIndex === 0) {
     prefix = null
   }
-  
+
   return {
     prefix,
     cited: citedMatch ? citedMatch[1] : null,
@@ -191,12 +191,28 @@ function CollapsibleText({ text }) {
 const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
-  const status = (reference.status || '').toLowerCase()
-  
+  const normalizeForComparison = (value) => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+  const lastNameTokens = (authors) => (authors || [])
+    .map(author => String(author || '').trim().split(/\s+/).filter(Boolean).pop()?.toLowerCase())
+    .filter(Boolean)
+  const assessment = reference.hallucination_assessment || {}
+  const foundAuthorsText = String(assessment.found_authors || '').toLowerCase()
+  const citedLastNames = lastNameTokens(reference.authors)
+  const foundMetadataMatchesCitation = assessment.verdict === 'LIKELY'
+    && assessment.link
+    && normalizeForComparison(assessment.found_title) === normalizeForComparison(reference.title)
+    && citedLastNames.length > 0
+    && citedLastNames.every(name => foundAuthorsText.includes(name))
+    && (!reference.year || String(assessment.found_year || '').includes(String(reference.year)))
+  const status = foundMetadataMatchesCitation ? 'verified' : (reference.status || '').toLowerCase()
+
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportMenuRef = useRef(null)
-  
+
   // Close export menu on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -209,7 +225,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     }
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showExportMenu])
-  
+
   // Handle export for this single reference
   const handleExport = async (format) => {
     let content
@@ -229,7 +245,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     await copyToClipboard(content)
     setShowExportMenu(false)
   }
-  
+
   const getStatusColor = () => {
     switch (status) {
       case 'verified': return 'var(--color-success)'
@@ -250,43 +266,43 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
     if (status === 'checking') {
       return (
-        <span 
+        <span
           className="flex-shrink-0 inline-block"
           title="Checking..."
         >
-          <svg 
-            className={`${commonSize} animate-spin`} 
-            viewBox="0 0 24 24" 
+          <svg
+            className={`${commonSize} animate-spin`}
+            viewBox="0 0 24 24"
             fill="none"
             style={{ color: getStatusColor() }}
           >
-            <circle 
-              className="opacity-25" 
-              cx="12" 
-              cy="12" 
-              r="10" 
-              stroke="currentColor" 
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
               strokeWidth="3"
             />
-            <path 
-              className="opacity-75" 
-              fill="currentColor" 
+            <path
+              className="opacity-75"
+              fill="currentColor"
               d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
             />
           </svg>
         </span>
       )
     }
-    
+
     if (status === 'pending') {
       return (
-        <span 
+        <span
           className="flex-shrink-0 inline-block"
           title="Waiting in queue"
         >
-          <svg 
+          <svg
             className={commonSize}
-            viewBox="0 0 24 24" 
+            viewBox="0 0 24 24"
             fill="none"
           >
             <circle cx="12" cy="12" r="10" fill="var(--color-bg-tertiary)" stroke={getStatusColor()} strokeWidth="2" />
@@ -298,13 +314,13 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
     if (status === 'error') {
       return (
-        <span 
+        <span
           className="flex-shrink-0 inline-block"
           title="Error"
         >
-          <svg 
+          <svg
             className={commonSize}
-            viewBox="0 0 24 24" 
+            viewBox="0 0 24 24"
             fill="none"
           >
             <circle cx="12" cy="12" r="10" fill="var(--color-error)" />
@@ -388,6 +404,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   // Format URL type for display
   const formatUrlType = (type) => {
     switch (type) {
+      case 'llm_verified': return 'Verified URL'
+      case 'verified_url': return 'Verified URL'
       case 'semantic_scholar': return 'Verified URL'
       case 'arxiv': return 'ArXiv URL'
       case 'doi': return 'DOI URL'
@@ -407,8 +425,42 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     }
   }
 
+  const hasLlmVerifiedUrl = foundMetadataMatchesCitation || reference.authoritative_urls?.some(urlObj => urlObj.type === 'llm_verified')
+
+  const matchedDatabase = hasLlmVerifiedUrl
+    ? 'LLM search'
+    : reference.matched_database || (
+      reference.status === 'verified' && reference.cited_url && !reference.authoritative_urls?.length
+        ? 'Web page'
+        : null
+    )
+
+  const displayUrls = hasLlmVerifiedUrl
+    ? (reference.authoritative_urls || []).filter(urlObj => urlObj.type === 'llm_verified').concat(
+      foundMetadataMatchesCitation && !(reference.authoritative_urls || []).some(urlObj => urlObj.type === 'llm_verified')
+        ? [{ type: 'llm_verified', url: assessment.link }]
+        : []
+    )
+    : reference.authoritative_urls?.length
+      ? reference.authoritative_urls
+    : reference.status === 'verified' && reference.cited_url
+      ? [{ type: 'verified_url', url: reference.cited_url }]
+      : []
+
+  const recheckWarnings = (reference.errors || [])
+    .filter(issue => issue.warning_type && !issue.error_type)
+    .map(issue => ({
+      ...issue,
+      error_type: issue.warning_type,
+      error_details: issue.warning_details || '',
+    }))
+  const displayWarnings = foundMetadataMatchesCitation ? [] : (recheckWarnings.length > 0 ? recheckWarnings : (reference.warnings || []))
+  const displayErrors = (reference.errors || [])
+    .filter(issue => issue.error_type && issue.error_type !== 'unverified')
+    .filter(() => !foundMetadataMatchesCitation)
+
   return (
-    <div 
+    <div
       className="py-4 border-b font-mono text-sm"
       style={{ borderColor: 'var(--color-border)', contentVisibility: 'auto', containIntrinsicSize: 'auto 120px' }}
     >
@@ -418,26 +470,26 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
         <div className="flex-shrink-0 w-8 flex justify-center pt-0.5">
           {renderStatusIndicator()}
         </div>
-        
+
         {/* Reference number */}
-        <span 
+        <span
           className="flex-shrink-0 w-8 text-right"
           style={{ color: 'var(--color-text-secondary)' }}
         >
           {(numberToShow ?? 0) + 1}.
         </span>
-        
+
         {/* Reference content */}
         <div className="flex-1 min-w-0">
           {/* Title row with export button */}
           <div className="flex items-start justify-between gap-2">
-            <div 
+            <div
               className="font-bold flex-1"
               style={{ color: 'var(--color-text-primary)' }}
             >
               {reference.title || reference.cited_url || 'Unknown Title'}
             </div>
-            
+
             {/* Export button */}
             <div className="relative flex-shrink-0" ref={exportMenuRef}>
               <button
@@ -450,10 +502,10 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                 </svg>
               </button>
-              
+
               {/* Export dropdown menu */}
               {showExportMenu && (
-                <div 
+                <div
                   className="absolute right-0 top-full mt-1 py-1 rounded-md shadow-lg z-50 min-w-[140px]"
                   style={{ backgroundColor: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
                 >
@@ -482,34 +534,34 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               )}
             </div>
           </div>
-          
+
           {/* Authors */}
           {reference.authors?.length > 0 && (
-            <div 
+            <div
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {formatAuthors(reference.authors)}
             </div>
           )}
-          
+
           {/* Venue */}
           {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
-            <div 
+            <div
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {reference.venue}
             </div>
           )}
-          
+
           {/* Year */}
           {reference.year && reference.year !== 0 && reference.year !== '0' && (
-            <div 
+            <div
               style={{ color: 'var(--color-text-secondary)' }}
             >
               {reference.year}
             </div>
           )}
-          
+
           {/* Cited URL */}
           {reference.cited_url && (
             <div>
@@ -526,9 +578,9 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           )}
 
           {/* Divider before verification results */}
-          {(reference.authoritative_urls?.length > 0 || 
-            reference.errors?.length > 0 || 
-            reference.warnings?.length > 0 ||
+          {(displayUrls.length > 0 ||
+            displayErrors.length > 0 ||
+            displayWarnings.length > 0 ||
             reference.status === 'unverified') && (
             <div className="my-3 flex items-center gap-3">
               <span className="text-xs uppercase tracking-wide font-medium" style={{ color: 'var(--color-text-muted)' }}>
@@ -538,7 +590,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
-          {reference.matched_database && (
+          {matchedDatabase && (
             <div className="flex mb-1">
               <span
                 className="flex-shrink-0"
@@ -547,14 +599,14 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                 Matched DB:
               </span>
               <span style={{ color: 'var(--color-text)' }}>
-                {reference.matched_database}
+                {matchedDatabase}
               </span>
             </div>
           )}
 
           {/* Authoritative URLs - deduplicate arxiv URLs (prefer abs over pdf) */}
           {(() => {
-            const urls = reference.authoritative_urls || []
+            const urls = displayUrls
             // Group by type and deduplicate arxiv
             const seenTypes = new Set()
             const filteredUrls = urls.filter(urlObj => {
@@ -570,10 +622,10 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               // For other types, show all
               return true
             })
-            
+
             return filteredUrls.map((urlObj, i) => (
               <div key={i} className="flex">
-                <span 
+                <span
                   className="flex-shrink-0"
                   style={{ color: 'var(--color-text-secondary)', width: '120px' }}
                 >
@@ -594,14 +646,14 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
-            <div 
+            <div
               className="flex items-start gap-2"
               style={{ color: 'var(--color-text-muted)', wordBreak: 'break-word' }}
             >
               <span className="pt-0.5 inline-block flex-shrink-0">
-                <svg 
+                <svg
                   className="w-4 h-4"
-                  viewBox="0 0 24 24" 
+                  viewBox="0 0 24 24"
                   fill="currentColor"
                 >
                   <circle cx="12" cy="12" r="10" />
@@ -620,7 +672,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           )}
 
           {/* Hallucination assessment */}
-          {reference.hallucination_assessment?.verdict === 'LIKELY' && (
+          {reference.hallucination_assessment?.verdict === 'LIKELY' && !foundMetadataMatchesCitation && (
             <div className="flex items-start gap-2 text-xs mt-1" style={{ color: 'var(--color-hallucination)' }}>
               <span className="flex-shrink-0 mt-0.5">🚩</span>
               <div>
@@ -654,30 +706,30 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           )}
 
           {/* Warnings */}
-          {reference.warnings?.map((warning, i) => {
+          {displayWarnings.map((warning, i) => {
             const parsedDetails = parseErrorDetails(warning.error_details)
             const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
-            
+
             // Extract version annotation from error_type if present
             const extractVersionAnnotation = (type) => {
               if (!type) return null
               const match = type.match(/\(v\d+\s+vs\s+v\d+\s+update\)/i)
               return match ? match[0] : null
             }
-            
+
             const versionAnnotation = extractVersionAnnotation(warning.error_type)
-            
+
             // Use prefix from error_details and append version annotation if present
-            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string')
               ? parsedDetails.prefix.replace(/:$/, '')
               : (warning.error_details || `${formatWarningType(warning.error_type)} mismatch`)
-            
+
             const warningText = versionAnnotation && baseText && !baseText.includes(versionAnnotation)
               ? `${baseText} ${versionAnnotation}`
               : (baseText || '')
-            
+
             return (
-              <div 
+              <div
                 key={`warning-${i}`}
                 style={{ color: 'var(--color-warning)', wordBreak: 'break-word' }}
               >
@@ -703,21 +755,21 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           })}
 
           {/* Errors (non-unverified) */}
-          {reference.errors?.filter(e => e.error_type !== 'unverified').map((error, i) => {
+          {displayErrors.map((error, i) => {
             const parsedDetails = parseErrorDetails(error.error_details)
             const hasParsedCitedActual = parsedDetails?.cited || parsedDetails?.actual
-            
+
             // Extract version annotation from error_type if present (e.g., "title (v3 vs v1 update)" -> "(v3 vs v1 update)")
             const extractVersionAnnotation = (type) => {
               if (!type) return null
               const match = type.match(/\(v\d+\s+vs\s+v\d+\s+update\)/i)
               return match ? match[0] : null
             }
-            
+
             const versionAnnotation = extractVersionAnnotation(error.error_type)
-            
+
             // Use prefix from error_details and append version annotation if present
-            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string') 
+            const baseText = (hasParsedCitedActual && typeof parsedDetails?.prefix === 'string')
               ? parsedDetails.prefix
               : (error.error_details || error.error_type)
 
@@ -725,15 +777,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               ? `${baseText} ${versionAnnotation}`
               : (baseText || '')
             return (
-              <div 
+              <div
                 key={`error-${i}`}
                 style={{ color: 'var(--color-error)', wordBreak: 'break-word' }}
               >
                 <div className="flex items-start gap-2">
                   <span className="pt-0.5 inline-block flex-shrink-0">
-                    <svg 
+                    <svg
                       className="w-4 h-4"
-                      viewBox="0 0 24 24" 
+                      viewBox="0 0 24 24"
                       fill="currentColor"
                     >
                       <circle cx="12" cy="12" r="10" />
@@ -764,15 +816,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
           {/* Information messages (e.g., missing arXiv URL) - rendered as suggestions */}
           {reference.suggestions?.map((suggestion, i) => (
-            <div 
+            <div
               key={`suggestion-${i}`}
               style={{ color: 'var(--color-suggestion)', wordBreak: 'break-word' }}
             >
               <div className="flex items-start gap-2">
                 <span className="pt-0.5 inline-block flex-shrink-0">
-                  <svg 
+                  <svg
                     className="w-4 h-4"
-                    viewBox="0 0 24 24" 
+                    viewBox="0 0 24 24"
                     fill="currentColor"
                   >
                     <circle cx="12" cy="12" r="10" />

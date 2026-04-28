@@ -367,10 +367,16 @@ class ProgressRefChecker:
 
         # Extract authoritative URLs with proper type detection
         authoritative_urls = []
+        verified_via_cited_url = status == 'verified' and url_references_paper
+        verified_via_webpage = verified_via_cited_url or bool((verified_data or {}).get('web_metadata'))
         # Don't show verification URL as authoritative when the reference is
         # actually unverified (no database matched) — the URL may point at a
         # completely different paper.
-        if url and not (is_unverified and not verified_data):
+        if verified_via_webpage:
+            cited_url = reference.get('cited_url') or reference.get('url') or url or ''
+            if cited_url:
+                authoritative_urls.append({"type": "verified_url", "url": cited_url})
+        elif url and not (is_unverified and not verified_data):
             url_type = "other"
             if "semanticscholar.org" in url:
                 url_type = "semantic_scholar"
@@ -459,7 +465,7 @@ class ProgressRefChecker:
             "warnings": formatted_warnings,
             "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
-            "matched_database": (verified_data or {}).get('_matched_database'),
+            "matched_database": (verified_data or {}).get('_matched_database') or ('Web page' if verified_via_webpage else None),
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
             "_raw_errors": errors,  # Stashed for deferred hallucination check

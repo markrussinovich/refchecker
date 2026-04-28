@@ -61,6 +61,77 @@ def test_webui_preserves_non_openai_pdf_url_failure():
     assert [(e['error_type']) for e in result['errors']] == ['unverified', 'url']
 
 
+def test_webui_records_verified_cited_webpage_source():
+    from backend.refchecker_wrapper import ProgressRefChecker
+
+    cited_url = 'https://www.enisa.europa.eu/events/engineering-data-protection-in-the-wake-of-ai'
+    checker = ProgressRefChecker(llm_provider=None, use_llm=False)
+
+    result = checker._format_verification_result(
+        {
+            'title': 'Engineering data protection in the wake of ai',
+            'authors': ['European Union Agency for Cybersecurity (ENISA)'],
+            'year': 2025,
+            'venue': 'April 2025',
+            'cited_url': cited_url,
+        },
+        verified_data=None,
+        errors=[
+            {
+                'error_type': 'unverified',
+                'error_details': 'Paper not found by any checker',
+            },
+            {
+                'error_type': 'url',
+                'error_details': f'Paper not verified but URL references paper: {cited_url}',
+            },
+        ],
+        index=17,
+        url=cited_url,
+    )
+
+    assert result['status'] == 'verified'
+    assert result['matched_database'] == 'Web page'
+    assert result['authoritative_urls'] == [
+        {'type': 'verified_url', 'url': cited_url}
+    ]
+    assert result['errors'] == []
+
+
+def test_webui_records_direct_webpage_checker_success_source():
+    from backend.refchecker_wrapper import ProgressRefChecker
+
+    cited_url = 'https://www.presidency.ucsb.edu/documents/executive-order-14110-safe-secure-and-trustworthy-development-and-use-artificial'
+    checker = ProgressRefChecker(llm_provider=None, use_llm=False)
+
+    result = checker._format_verification_result(
+        {
+            'title': 'Executive order 14110—safe, secure, and trustworthy development and use of artificial intelligence',
+            'authors': ['Joseph R. Jr. Biden'],
+            'year': 2023,
+            'venue': 'Executive Order',
+            'cited_url': cited_url,
+        },
+        verified_data={
+            'title': 'Executive order 14110—safe, secure, and trustworthy development and use of artificial intelligence',
+            'authors': ['Joseph R. Jr. Biden'],
+            'year': 2023,
+            'venue': 'Executive Order',
+            'url': cited_url,
+            'web_metadata': {'status_code': 200},
+        },
+        errors=[],
+        index=9,
+        url=cited_url,
+    )
+
+    assert result['status'] == 'verified'
+    assert result['matched_database'] == 'Web page'
+    assert result['authoritative_urls'] == [
+        {'type': 'verified_url', 'url': cited_url}
+    ]
+
+
 # ------------------------------------------------------------------
 # should_check_hallucination: URL-failed references with 'multiple' type
 # ------------------------------------------------------------------
@@ -285,7 +356,7 @@ def _simulate_counting(results):
 
         if result['status'] == 'hallucination':
             hallucination_count += 1
-        
+
         # Count refs matching the frontend 'unverified' filter:
         # status === 'unverified' OR has any error with error_type === 'unverified'
         if result['status'] == 'unverified' or has_unverified_error:
