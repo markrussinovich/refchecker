@@ -453,6 +453,10 @@ class ProgressRefChecker:
         # slow Anthropic web-search API call.
         hallucination_assessment = None
 
+        matched_database = (verified_data or {}).get('_matched_database') or (
+            'Web page' if verified_via_webpage else None
+        )
+
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
@@ -465,7 +469,7 @@ class ProgressRefChecker:
             "warnings": formatted_warnings,
             "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
-            "matched_database": (verified_data or {}).get('_matched_database') or ('Web page' if verified_via_webpage else None),
+            "matched_database": matched_database,
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
             "_raw_errors": errors,  # Stashed for deferred hallucination check

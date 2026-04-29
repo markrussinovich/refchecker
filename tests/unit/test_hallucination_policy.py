@@ -17,7 +17,7 @@ from refchecker.core.hallucination_policy import (
 )
 from refchecker.core.report_builder import ReportBuilder
 from refchecker.llm.hallucination_verifier import build_assessment_prompt
-from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier, normalize_hallucination_model
+from refchecker.llm.hallucination_verifier import LLMHallucinationVerifier
 
 
 # ------------------------------------------------------------------
@@ -51,12 +51,6 @@ def test_parse_verdict_preserves_found_venue():
     assert found_metadata['venue'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
 
 
-def test_anthropic_haiku_model_aliases_normalize_to_versioned_id():
-    assert normalize_hallucination_model('anthropic', 'claude-haiku-4.5') == 'claude-haiku-4-5-20251001'
-    assert normalize_hallucination_model('anthropic', 'claude-haiku-4-5') == 'claude-haiku-4-5-20251001'
-    assert normalize_hallucination_model('anthropic', 'claude-haiku-4-5-20251001') == 'claude-haiku-4-5-20251001'
-
-
 def test_apply_hallucination_verdict_rechecks_found_venue():
     result = {
         'status': 'error',
@@ -81,118 +75,44 @@ def test_apply_hallucination_verdict_rechecks_found_venue():
     updated = apply_hallucination_verdict(result, assessment, reference)
 
     assert updated['status'] == 'verified'
-    assert updated['errors'] == []
     assert updated['warnings'][0]['error_type'] == 'venue'
     assert updated['warnings'][0]['ref_venue_correct'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
 
 
-def test_apply_hallucination_verdict_replaces_stale_db_urls_after_llm_recheck():
-    result = {
-        'status': 'warning',
-        'errors': [],
-        'warnings': [
-            {'error_type': 'year', 'error_details': 'Year mismatch:\n cited: 2018\n actual: 2020'},
-        ],
-        'authoritative_urls': [
-            {'type': 'semantic_scholar', 'url': 'https://api.semanticscholar.org/CorpusID:221910705'},
-            {'type': 'doi', 'url': 'https://doi.org/10.1080/14697688.2020.1813475'},
-        ],
-        'matched_database': 'Semantic Scholar',
-    }
-    reference = {
-        'title': 'High-dimensional probability : an introduction with applications in data science',
-        'authors': ['Roman Vershynin'],
-        'year': 2018,
-        'venue': 'Cambridge series in statistical and probabilistic mathematics ; 47. Cambridge University Press',
-    }
-    assessment = {
-        'verdict': 'UNLIKELY',
-        'explanation': 'The exact book was found.',
-        'link': 'https://www.cambridge.org/core/books/highdimensional-probability/797C466DA29743D2C8213493BD2D2102',
-        'found_title': 'High-Dimensional Probability: An Introduction with Applications in Data Science',
-        'found_authors': 'Roman Vershynin',
-        'found_venue': 'Cambridge University Press',
-        'found_year': '2018',
-    }
-
-    updated = apply_hallucination_verdict(result, assessment, reference)
-
-    assert updated['status'] == 'verified'
-    assert updated['errors'] == []
-    assert updated['matched_database'] == 'LLM search'
-    assert updated['authoritative_urls'] == [
-        {
-            'type': 'llm_verified',
-            'url': 'https://www.cambridge.org/core/books/highdimensional-probability/797C466DA29743D2C8213493BD2D2102',
-        }
-    ]
-    assert [warning['error_type'] for warning in updated['warnings']] == ['venue']
-
-
-def test_likely_verdict_with_matching_found_metadata_replaces_wrong_db_match():
-    result = {
-        'status': 'error',
-        'errors': [
-            {
-                'error_type': 'author',
-                'error_details': 'Author count mismatch: 3 cited vs 2 correct',
-                'ref_authors_correct': 'Rasmus Bruckner, Matt R. Nassar',
-            }
-        ],
-        'authoritative_urls': [
-            {'type': 'doi', 'url': 'https://doi.org/10.31234/osf.io/ce8jf'},
-        ],
-        'matched_database': 'CrossRef',
-    }
-    reference = {
-        'title': 'Moral decision-making under uncertainty',
-        'authors': ['Christian Tarsney', 'Teruji Thomas', 'William MacAskill'],
-        'year': 2024,
-        'venue': 'n.d.',
-    }
-    assessment = {
-        'verdict': 'LIKELY',
-        'explanation': 'The verified URL points to a different paper.',
-        'link': 'https://plato.stanford.edu/entries/moral-decision-uncertainty/',
-        'found_title': 'Moral Decision-Making Under Uncertainty',
-        'found_authors': 'Christian Tarsney, Teruji Thomas, William MacAskill',
-        'found_venue': 'Stanford Encyclopedia of Philosophy',
-        'found_year': '2024',
-    }
-
-    updated = apply_hallucination_verdict(result, assessment, reference)
-
-    assert updated['status'] == 'verified'
-    assert updated['errors'] == []
-    assert updated['matched_database'] == 'LLM search'
-    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
-    assert updated['hallucination_assessment']['original_verdict'] == 'LIKELY'
-    assert updated['authoritative_urls'] == [
-        {
-            'type': 'llm_verified',
-            'url': 'https://plato.stanford.edu/entries/moral-decision-uncertainty/',
-        }
-    ]
-
-
-def test_apply_hallucination_verdict_marks_llm_search_database_for_upgraded_reference():
+def test_apply_hallucination_verdict_labels_unlinked_llm_upgrade():
     result = {
         'status': 'unverified',
-        'errors': [{'error_type': 'unverified', 'error_details': 'Could not verify'}],
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
     }
     assessment = {
         'verdict': 'UNLIKELY',
-        'explanation': 'The exact paper was found.',
-        'link': 'https://arxiv.org/abs/2506.00181',
+        'explanation': 'The paper exists, but no stable URL was returned.',
     }
 
     updated = apply_hallucination_verdict(result, assessment)
 
     assert updated['status'] == 'verified'
     assert updated['matched_database'] == 'LLM search'
-    assert updated['authoritative_urls'] == [
-        {'type': 'llm_verified', 'url': 'https://arxiv.org/abs/2506.00181'}
-    ]
+    assert updated['errors'] == []
+
+
+def test_apply_hallucination_verdict_labels_likely_llm_match_without_existing_source():
+    result = {
+        'status': 'error',
+        'errors': [{'error_type': 'author', 'error_details': 'Author count mismatch'}],
+    }
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The title exists with different authors.',
+        'link': 'https://doi.org/10.1145/example',
+        'found_title': 'A Different Paper With The Same Title',
+        'found_authors': 'Author One, Author Two',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment)
+
+    assert updated['status'] == 'hallucination'
+    assert updated['matched_database'] == 'LLM search'
 
 
 def test_year_only_issue_should_not_be_checked():

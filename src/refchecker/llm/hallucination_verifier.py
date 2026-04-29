@@ -24,22 +24,6 @@ from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAUL
 logger = logging.getLogger(__name__)
 
 
-_MODEL_ALIASES = {
-    'anthropic': {
-        'claude-haiku-4.5': 'claude-haiku-4-5-20251001',
-        'claude-haiku-4.5-current': 'claude-haiku-4-5-20251001',
-        'claude-haiku-4-5': 'claude-haiku-4-5-20251001',
-    }
-}
-
-
-def normalize_hallucination_model(provider: str, model: Optional[str]) -> Optional[str]:
-    if not model:
-        return model
-    provider_aliases = _MODEL_ALIASES.get((provider or '').lower(), {})
-    return provider_aliases.get(model, model)
-
-
 _ASSESSMENT_SYSTEM_PROMPT = """\
 You are an reference-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
@@ -250,7 +234,7 @@ URL:     {url}
 ## Validation results from automated checkers
 {validation_summary}
 
-Perform the web search and assessment as per the instructions.
+Perform the web search and assessment as per the instructions. 
 """
 
 
@@ -368,10 +352,7 @@ class LLMHallucinationVerifier:
         self.provider = (provider or 'openai').lower()
         self.api_key = api_key or resolve_api_key(self.provider)
         self.endpoint = endpoint or resolve_endpoint(self.provider)
-        self.model = normalize_hallucination_model(
-            self.provider,
-            model or self._DEFAULT_MODELS.get(self.provider, DEFAULT_HALLUCINATION_MODELS['openai']),
-        )
+        self.model = model or self._DEFAULT_MODELS.get(self.provider, DEFAULT_HALLUCINATION_MODELS['openai'])
         self.client = None
         self._use_responses_api = False
 

@@ -1225,6 +1225,12 @@ def apply_hallucination_verdict(
                     result['matched_database'] = 'LLM search'
                     result['status'] = 'warning' if rechecked_warnings else 'verified'
                     return result
+        if not result.get('matched_database') and (
+            (ha_link and ha_link.startswith('http'))
+            or assessment.get('found_title')
+            or assessment.get('found_authors')
+        ):
+            result['matched_database'] = 'LLM search'
         result['status'] = 'hallucination'
 
     elif verdict == 'UNLIKELY' and is_upgradeable:
@@ -1260,6 +1266,7 @@ def apply_hallucination_verdict(
             # LLM confirmed the reference is real (UNLIKELY) but didn't
             # provide a link.  Still strip the unverified error and
             # upgrade the status so the ref isn't counted as unverified.
+            result['matched_database'] = 'LLM search'
             result['errors'] = [
                 e for e in result.get('errors', [])
                 if e.get('error_type') != 'unverified'

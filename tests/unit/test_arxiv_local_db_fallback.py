@@ -257,6 +257,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         assert paper_data is not None, \
             "Title revision should not be treated as a different paper"
         assert paper_data['title'] == arxiv_verified_data['title']
+        assert paper_data['_matched_database'] == 'ArXiv'
+        assert paper_data['_matched_checker'] == 'arxiv_citation'
 
         # Should NOT contain 'does not reference this paper'
         url_errors = [e for e in errors if e.get('error_type') == 'url'

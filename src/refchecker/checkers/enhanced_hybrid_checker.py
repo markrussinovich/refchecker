@@ -265,6 +265,8 @@ class EnhancedHybridReferenceChecker:
         if not isinstance(verified_data, dict):
             return verified_data
         local_label = getattr(api_instance, 'database_label', None)
+        if not isinstance(local_label, str) or not local_label.strip():
+            local_label = None
         matched_label = local_label or self._format_api_name(api_name)
         verified_data.setdefault('_matched_checker', api_name)
         verified_data.setdefault('_matched_database', matched_label)
@@ -966,6 +968,11 @@ class EnhancedHybridReferenceChecker:
                 re_ref['url'] = f'https://arxiv.org/abs/{arxiv_id}'
             arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(re_ref)
             if arxiv_data is not None:
+                arxiv_data = self._annotate_match_source(
+                    arxiv_data,
+                    'arxiv_citation',
+                    self.arxiv_citation,
+                )
                 logger.debug("ArXiv re-verification succeeded for %s", arxiv_id)
                 return arxiv_errors or [], arxiv_url, arxiv_data
         except Exception as exc:
