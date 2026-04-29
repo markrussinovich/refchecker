@@ -149,7 +149,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     updateSetting(key, value)
   }
 
-  // Semantic Scholar API key handlers — validated and persisted encrypted on server
+  // Semantic Scholar API key handlers: browser cache in multi-user, database in single-user.
   const handleSsSave = async () => {
     if (!ssApiKey.trim()) {
       setSsError('API key cannot be empty')
@@ -168,13 +168,17 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         return
       }
 
-      // Persist encrypted on server
-      await api.setSemanticScholarKey(ssApiKey.trim())
-      logger.info('SettingsPanel', 'SS API key validated and saved to server')
+      if (multiuser) {
+        setKey('semantic_scholar', ssApiKey.trim())
+        setSsServerHasKey(false)
+        logger.info('SettingsPanel', 'SS API key saved to browser key cache')
+      } else {
+        await api.setSemanticScholarKey(ssApiKey.trim())
+        deleteKey('semantic_scholar')
+        setSsServerHasKey(true)
+        logger.info('SettingsPanel', 'SS API key saved to local database')
+      }
       setSsIsValidating(false)
-
-      setKey('semantic_scholar', ssApiKey.trim())
-      setSsServerHasKey(true)
       setSsIsEditing(false)
       setSsApiKey('')
     } catch (err) {
@@ -189,13 +193,18 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const handleSsDelete = async () => {
     setSsIsSaving(true)
     try {
-      await api.deleteSemanticScholarKey()
-      deleteKey('semantic_scholar')
-      setSsServerHasKey(false)
+      if (multiuser) {
+        deleteKey('semantic_scholar')
+        setSsServerHasKey(false)
+      } else {
+        await api.deleteSemanticScholarKey()
+        deleteKey('semantic_scholar')
+        setSsServerHasKey(false)
+      }
       setSsIsEditing(false)
       setSsApiKey('')
       setSsError(null)
-      logger.info('SettingsPanel', 'SS API key deleted from server')
+      logger.info('SettingsPanel', 'SS API key removed')
     } catch (err) {
       logger.error('SettingsPanel', 'Failed to delete SS key', err)
     } finally {

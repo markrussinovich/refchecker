@@ -758,12 +758,13 @@ async def _run_startup_tasks() -> None:
     await db.init_db()
     logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
 
-    try:
-        if await db.has_setting("semantic_scholar_api_key"):
-            await db.delete_setting("semantic_scholar_api_key")
-            logger.info("Removed deprecated server-side Semantic Scholar API key")
-    except Exception as e:
-        logger.warning(f"Failed to clear deprecated Semantic Scholar key: {e}")
+    if is_multiuser_mode():
+        try:
+            if await db.has_setting("semantic_scholar_api_key"):
+                await db.delete_setting("semantic_scholar_api_key")
+                logger.info("Removed server-side Semantic Scholar API key in multi-user mode")
+        except Exception as e:
+            logger.warning(f"Failed to clear Semantic Scholar key in multi-user mode: {e}")
 
     try:
         concurrency_setting = await db.get_setting("max_concurrent_checks")
@@ -1211,7 +1212,7 @@ async def start_check(
         source_value: URL or ArXiv ID (for url type)
         file: Uploaded file (for file type)
         api_key: API key from client (sent per-request, never stored)
-        semantic_scholar_api_key: SS API key from client (sent per-request, never stored)
+        semantic_scholar_api_key: SS API key from client, or stored key in single-user mode
         llm_config_id: ID of the LLM config to use (for provider/model/endpoint)
         llm_provider: LLM provider to use
         llm_model: Specific model to use
@@ -1234,7 +1235,9 @@ async def start_check(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
-        semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
+        semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
+            _form_default_value(semantic_scholar_api_key)
+        )
 
         # Generate session ID
         session_id = str(uuid.uuid4())
@@ -1242,7 +1245,7 @@ async def start_check(
 
         user_id = get_user_id_filter(current_user)
 
-        # API keys from form (client localStorage) take precedence over config stored keys.
+        # API keys from form (browser storage) take precedence over stored keys.
         logger.info(f"API key from form: {'present' if api_key else 'MISSING'}, use_llm={use_llm}, provider={llm_provider}")
         llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
             user_id=user_id,
@@ -1465,7 +1468,7 @@ async def run_check(
         llm_model: Specific model
         api_key: API key for the LLM provider
         use_llm: Whether to use LLM
-        semantic_scholar_api_key: Semantic Scholar API key (sent per-request from client)
+        semantic_scholar_api_key: Semantic Scholar API key from browser storage or the single-user database
     """
     user_row = await db.get_user_by_id(user_id) if user_id else None
     provider = user_row.get("provider") if user_row else None
@@ -2411,6 +2414,9 @@ async def start_batch_check(
         started_at = utcnow_sqlite()
         
         user_id = get_user_id_filter(current_user)
+        semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
+            request.semantic_scholar_api_key
+        )
 
         llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
             user_id=user_id,
@@ -2481,7 +2487,7 @@ async def start_batch_check(
                 "use_llm": request.use_llm,
                 "llm_provider": llm_provider if request.use_llm else None,
                 "llm_model": llm_model if request.use_llm else None,
-                "semantic_scholar_key_present": bool(request.semantic_scholar_api_key),
+                "semantic_scholar_key_present": bool(semantic_scholar_api_key),
             },
         )
 
@@ -2540,7 +2546,7 @@ async def start_batch_check(
                     session_id, check_id, url, 'url',
                     llm_provider, llm_model, effective_api_key, endpoint,
                     request.use_llm, cancel_event, user_id,
-                    semantic_scholar_api_key=request.semantic_scholar_api_key,
+                    semantic_scholar_api_key=semantic_scholar_api_key,
                     hallucination_provider=resolved_hallucination_provider,
                     hallucination_model=resolved_hallucination_model,
                     hallucination_api_key=resolved_hallucination_api_key,
@@ -2590,6 +2596,7 @@ async def start_batch_check_files(
     use_llm: bool = Form(True),
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
+    semantic_scholar_api_key: Optional[str] = Form(None),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -2609,6 +2616,9 @@ async def start_batch_check_files(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
+        semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
+            _form_default_value(semantic_scholar_api_key)
+        )
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -2729,6 +2739,7 @@ async def start_batch_check_files(
                 "use_llm": use_llm,
                 "llm_provider": llm_provider if use_llm else None,
                 "llm_model": llm_model if use_llm else None,
+                "semantic_scholar_key_present": bool(semantic_scholar_api_key),
                 "uploaded_bytes": sum(Path(item['path']).stat().st_size for item in files_to_process if Path(item['path']).exists()),
             },
         )
@@ -2770,6 +2781,7 @@ async def start_batch_check_files(
                     "use_llm": use_llm,
                     "llm_provider": llm_provider if use_llm else None,
                     "llm_model": llm_model if use_llm else None,
+                    "semantic_scholar_key_present": bool(semantic_scholar_api_key),
                     "input_bytes": file_size,
                     "original_filename_ext": Path(file_info['filename']).suffix.lower(),
                 },
@@ -2781,6 +2793,7 @@ async def start_batch_check_files(
                     session_id, check_id, file_info['path'], 'file',
                     llm_provider, llm_model, effective_api_key, endpoint,
                     use_llm, cancel_event, user_id,
+                    semantic_scholar_api_key=semantic_scholar_api_key,
                     hallucination_provider=resolved_hallucination_provider,
                     hallucination_model=resolved_hallucination_model,
                     hallucination_api_key=resolved_hallucination_api_key,
@@ -3341,6 +3354,15 @@ class SemanticScholarKeyValidate(BaseModel):
     api_key: str
 
 
+async def _resolve_semantic_scholar_api_key(api_key: Optional[str]) -> Optional[str]:
+    """Use per-request browser keys first, then the single-user stored key."""
+    if api_key:
+        return api_key
+    if is_multiuser_mode():
+        return None
+    return await db.get_setting("semantic_scholar_api_key")
+
+
 @app.post("/api/settings/semantic-scholar/validate")
 async def validate_semantic_scholar_key(
     data: SemanticScholarKeyValidate,
@@ -3401,11 +3423,19 @@ async def validate_semantic_scholar_key(
 
 @app.get("/api/settings/semantic-scholar")
 async def get_semantic_scholar_key_status(current_user: UserInfo = Depends(require_user)):
-    """Semantic Scholar keys are now browser-only for the current tab."""
+    """Return Semantic Scholar API key storage status for the current mode."""
+    if is_multiuser_mode():
+        return {
+            "has_key": False,
+            "storage": "browser-only",
+            "message": "Semantic Scholar API keys are encrypted in the browser cache and are not stored on the server",
+        }
+
+    has_key = await db.has_setting("semantic_scholar_api_key")
     return {
-        "has_key": False,
-        "storage": "browser-only",
-        "message": "Semantic Scholar API keys are managed in browser memory for the current tab only",
+        "has_key": has_key,
+        "storage": "database",
+        "message": "Semantic Scholar API keys are encrypted in the local RefChecker database",
     }
 
 
@@ -3414,20 +3444,37 @@ async def set_semantic_scholar_key(
     data: SemanticScholarKeyUpdate,
     current_user: UserInfo = Depends(require_user),
 ):
-    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
-    raise HTTPException(
-        status_code=410,
-        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
-    )
+    """Store the Semantic Scholar key in single-user mode only."""
+    if is_multiuser_mode():
+        raise HTTPException(
+            status_code=410,
+            detail="Semantic Scholar API keys are encrypted in the browser cache and are not stored on the server",
+        )
+    api_key = (data.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key cannot be empty")
+    await db.set_setting("semantic_scholar_api_key", api_key)
+    return {
+        "has_key": True,
+        "storage": "database",
+        "message": "Semantic Scholar API key saved encrypted in the local RefChecker database",
+    }
 
 
 @app.delete("/api/settings/semantic-scholar")
 async def delete_semantic_scholar_key(current_user: UserInfo = Depends(require_user)):
-    """Deprecated: Semantic Scholar keys are no longer stored on the server."""
-    raise HTTPException(
-        status_code=410,
-        detail="Semantic Scholar API keys are managed in browser memory and are not stored on the server",
-    )
+    """Delete the single-user stored Semantic Scholar key."""
+    if is_multiuser_mode():
+        raise HTTPException(
+            status_code=410,
+            detail="Semantic Scholar API keys are encrypted in the browser cache and are not stored on the server",
+        )
+    await db.delete_setting("semantic_scholar_api_key")
+    return {
+        "has_key": False,
+        "storage": "database",
+        "message": "Semantic Scholar API key removed from the local RefChecker database",
+    }
 
 
 # General Settings endpoints

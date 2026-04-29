@@ -314,8 +314,8 @@ def test_settings_updates_require_admin(auth_db):
     assert result["value"] == "7"
 
 
-def test_semantic_scholar_keys_are_browser_only(auth_db):
-    """Semantic Scholar keys are managed in browser memory, not stored on server."""
+def test_multiuser_semantic_scholar_keys_are_browser_only(auth_db):
+    """Semantic Scholar keys are managed in browser storage in multi-user mode."""
     api_main, db = auth_db
     owner = _run(_create_user(api_main, db, "owner-ss"))
 
@@ -337,6 +337,42 @@ def test_semantic_scholar_keys_are_browser_only(auth_db):
 
     status3 = _run(api_main.get_semantic_scholar_key_status(owner))
     assert status3["has_key"] is False
+
+
+def test_single_user_semantic_scholar_key_is_stored_in_database(tmp_path, monkeypatch):
+    monkeypatch.delenv("REFCHECKER_MULTIUSER", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "test_api_authorization")
+    api_main = importlib.import_module("backend.main")
+    api_main = importlib.reload(api_main)
+    temp_db = Database(str(tmp_path / "local-ss.db"))
+    _run(temp_db.init_db())
+    monkeypatch.setattr(api_main, "db", temp_db)
+    local_user = api_main.UserInfo(id=0, name="Local User", provider="local", is_admin=True)
+
+    status = _run(api_main.get_semantic_scholar_key_status(local_user))
+    assert status["has_key"] is False
+    assert status["storage"] == "database"
+
+    result = _run(api_main.set_semantic_scholar_key(
+        api_main.SemanticScholarKeyUpdate(api_key="ss-key"),
+        local_user,
+    ))
+    assert result["has_key"] is True
+    assert result["storage"] == "database"
+    assert _run(temp_db.get_setting("semantic_scholar_api_key")) == "ss-key"
+    stored_encrypted = _run(temp_db.get_setting("semantic_scholar_api_key", decrypt=False))
+    assert stored_encrypted != "ss-key"
+    assert stored_encrypted.startswith("enc:")
+
+    status = _run(api_main.get_semantic_scholar_key_status(local_user))
+    assert status["has_key"] is True
+    assert status["storage"] == "database"
+    assert _run(api_main._resolve_semantic_scholar_api_key(None)) == "ss-key"
+    assert _run(api_main._resolve_semantic_scholar_api_key("browser-key")) == "browser-key"
+
+    delete_result = _run(api_main.delete_semantic_scholar_key(local_user))
+    assert delete_result["has_key"] is False
+    assert _run(temp_db.has_setting("semantic_scholar_api_key")) is False
 
 
 def _create_local_reference_db(path, *, with_snapshot=False):

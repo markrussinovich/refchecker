@@ -14,7 +14,7 @@
   <a href="#deployment">Deployment</a>
 </p>
 
-RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered web search to flag likely fabricated references. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
+RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
 
@@ -68,7 +68,7 @@ academic-refchecker --paper 1706.03762
 academic-refchecker --paper /path/to/paper.pdf
 ```
 
-LLM extraction is generally more accurate, but PDFs can fall back to GROBID when no LLM is configured. Hallucination web-search checks require an LLM provider.
+LLM extraction is generally more accurate, but PDFs can fall back to GROBID when no extraction LLM is configured. Deep hallucination checks require a hallucination-capable LLM provider: OpenAI, Anthropic, Google, or Azure.
 
 > **Tip:** Set `SEMANTIC_SCHOLAR_API_KEY` for 1-2s per reference vs 5-10s without.
 
@@ -83,12 +83,12 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **LLM extraction** | OpenAI, Anthropic, Google, Azure, or local vLLM for parsing complex bibliographies |
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
-| **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters + LLM web search |
+| **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters, LLM deep web search, and metadata reverification when the LLM finds a better match |
 | **Bulk checking** | Upload multiple files or a ZIP in the Web UI; use `--paper-list` or `--openreview` in the CLI |
 | **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
 | **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
 | **Corrections** | Auto-generates corrected BibTeX, plain-text, and bibitem entries for each error |
-| **Web UI** | Real-time progress, history sidebar, batch tracking, export (Markdown/text/BibTeX), dark mode |
+| **Web UI** | Real-time progress, history sidebar, batch tracking, split extraction/hallucination LLM settings, export (Markdown/text/BibTeX), dark mode |
 | **Multi-user hosting** | OAuth sign-in (Google, GitHub, Microsoft), per-user rate limiting, admin controls |
 
 ---
@@ -157,7 +157,7 @@ pip install -e ".[llm,webui]"
 pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 ```
 
-**Requirements:** Python 3.7+ (3.10+ recommended). Node.js 18+ is only needed for Web UI frontend development.
+**Requirements:** Python 3.11+. Node.js 20.19+ is only needed for Web UI frontend development.
 
 ---
 
@@ -165,7 +165,7 @@ pip install -r requirements-dev.txt                  # pytest, playwright, etc.
 
 The Web UI provides real-time progress, check history, batch tracking, and one-click export of corrections.
 
-LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination web-search checks still require a configured LLM/API key.
+LLM extraction is preferred, but PDF uploads and direct PDF URLs can fall back to GROBID. Hallucination checks use a separate hallucination LLM selection when one is configured; otherwise the UI falls back to the selected extraction LLM only if that provider supports web search. Local vLLM can be used for extraction, but hallucination checks require OpenAI, Anthropic, Google, or Azure.
 
 ```bash
 refchecker-webui                    # default: http://localhost:8000
@@ -181,7 +181,7 @@ refchecker-webui --port 9000        # custom port
 - **Reference cards** — per-reference details with corrections, source links (Semantic Scholar, ArXiv, DOI), and hallucination assessment
 - **Export** — download corrections as Markdown, plain text, or BibTeX
 - **History sidebar** — browse and re-run previous checks; batches are grouped together
-- **Settings** — LLM provider/model selection, API key management, dark/light/system theme
+- **Settings** — separate extraction and hallucination LLM provider/model selection, API key management, Semantic Scholar key validation, local database directory, dark/light/system theme
 
 <!-- screenshot: webui-batch-progress — batch progress bar during a multi-paper check -->
 <!-- screenshot: webui-hallucination-card — reference card with a 🚩 hallucination flag and explanation -->
@@ -257,6 +257,12 @@ LLM:
   --llm-parallel-chunks      Enable parallel LLM chunk processing (default)
   --llm-no-parallel-chunks   Disable parallel LLM chunk processing
   --llm-max-chunk-workers N  Max workers for parallel LLM chunks (default: 4)
+  --hallucination-provider PROVIDER
+                            Separate provider for deep hallucination checks: openai, anthropic, google, or azure
+  --hallucination-model MODEL
+                            Override the hallucination-check model for the provider
+  --hallucination-endpoint URL
+                            Custom endpoint for the hallucination-check provider
 
 Verification:
   --database-dir PATH        Directory containing local DBs: semantic_scholar.db, openalex.db, crossref.db, dblp.db, acl_anthology.db
@@ -284,7 +290,7 @@ Output:
 
 ## Hallucination Detection
 
-RefChecker automatically evaluates every flagged reference for potential fabrication using a two-stage pipeline.
+RefChecker automatically evaluates suspicious references for potential fabrication using deterministic filters, LLM deep web search, and metadata reverification.
 
 ### Stage 1 — Deterministic Pre-filter (no LLM needed)
 
@@ -297,17 +303,25 @@ References are flagged for deeper inspection when they exhibit:
 
 References with only minor issues (year off by one, venue variation) are not flagged.
 
-### Stage 2 — LLM Web Search Verification
+### Stage 2 — LLM Deep Web Search
 
-Flagged references are sent to the configured LLM for a web search. The LLM searches for the exact title, authors, and venue to determine whether the paper actually exists.
+Flagged references are sent to the configured hallucination LLM for a mandatory web search. The LLM must look for a dedicated page for the cited work, not just a citation in another paper's reference list. It returns a short verdict plus the best link it found and any found title, authors, and year.
+
+Supported hallucination-check providers are **OpenAI**, **Anthropic**, **Google**, and **Azure**. The CLI can use the extraction provider when it is hallucination-capable, or you can pass `--hallucination-provider` / `--hallucination-model` to use a different model. The Web UI exposes the same split as separate extraction and hallucination selectors in Settings.
+
+### Stage 3 — Reverification Against LLM-Found Metadata
+
+When the LLM says the reference is probably real (`UNLIKELY`) and provides found metadata, RefChecker re-runs its normal title, author, and year comparison against that LLM-found metadata. This catches cases where a database lookup matched the wrong edition, version, or similarly titled work. If the cited title/authors/year match the LLM-found source, stale unverified or wrong-match errors can be cleared and the LLM-found URL is added as an `llm_verified` source. If substantive mismatches remain, the reference stays an error rather than being blindly upgraded.
+
+If the LLM cannot find an exact source, or finds only a similar paper with different authors or identifiers, the reference remains suspicious and can be marked as a likely hallucination.
 
 Each reference receives a verdict:
 
 | Verdict | Meaning |
 |---------|---------|
-| 🚩 **LIKELY** | Probably fabricated — no evidence the paper exists |
+| 🚩 **LIKELY** | Probably fabricated — no exact source was found, or the found source conflicts substantially with the citation |
 | ❓ **UNCERTAIN** | Inconclusive — may exist but could not be confirmed |
-| ✅ **UNLIKELY** | Real paper — found in academic databases or on the web |
+| ✅ **UNLIKELY** | Probably real — found on a dedicated page with matching title/authors, then rechecked against the cited metadata |
 
 Hallucination assessments appear inline in CLI output, in Web UI reference cards, and in structured reports (JSON/JSONL/CSV) via the `hallucination_assessment` field.
 
@@ -587,23 +601,30 @@ RefChecker includes a [`render.yaml`](render.yaml) Blueprint for one-click deplo
 
 ### LLM Providers
 
-LLM-powered extraction improves accuracy with complex bibliographies. Claude Sonnet 4 performs best; GPT-4o may hallucinate DOIs.
+LLM-powered extraction improves accuracy with complex bibliographies. Hallucination detection is configured separately so you can use one model for extraction and another, web-search-capable model for deep hallucination checks. Claude Sonnet 4 performs best for extraction; GPT-4o may hallucinate DOIs.
 
 | Provider | Env Variable | Example Model |
 |----------|--------------|---------------|
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-20250514` |
-| OpenAI | `OPENAI_API_KEY` | `gpt-5.2-mini` |
-| Google | `GOOGLE_API_KEY` | `gemini-3` |
-| Azure | `AZURE_OPENAI_API_KEY` | `gpt-4o` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4.1` |
+| Google | `GOOGLE_API_KEY` | `gemini-2.5-flash` |
+| Azure | `AZURE_OPENAI_API_KEY` | `gpt-4.1` |
 | vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
 
 ```bash
 export ANTHROPIC_API_KEY=your_key
 academic-refchecker --paper 1706.03762 --llm-provider anthropic
 
-academic-refchecker --paper paper.pdf --llm-provider openai --llm-model gpt-5.2-mini
+academic-refchecker --paper paper.pdf --llm-provider openai --llm-model gpt-4.1
 academic-refchecker --paper paper.pdf --llm-provider vllm --llm-model meta-llama/Llama-3.3-70B-Instruct
+
+# Use one model for extraction and another for hallucination checks
+academic-refchecker --paper paper.pdf \
+  --llm-provider vllm --llm-model meta-llama/Llama-3.3-70B-Instruct \
+  --hallucination-provider anthropic --hallucination-model claude-sonnet-4-6
 ```
+
+Hallucination-capable providers are OpenAI, Anthropic, Google, and Azure. vLLM can extract references but cannot perform live web search, so pair it with `--hallucination-provider` when you want hallucination checks.
 
 #### Local Models (vLLM)
 
