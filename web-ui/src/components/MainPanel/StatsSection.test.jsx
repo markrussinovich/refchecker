@@ -14,10 +14,11 @@ vi.mock('../../stores/useCheckStore', () => {
 })
 
 // Helper to build a reference object
-const makeRef = (status, { errors = [], warnings = [] } = {}) => ({
+const makeRef = (status, { errors = [], warnings = [], ...rest } = {}) => ({
   status,
   errors,
   warnings,
+  ...rest,
 })
 
 describe('StatsSection warning count excludes refs that also have errors', () => {
@@ -80,5 +81,36 @@ describe('StatsSection warning count excludes refs that also have errors', () =>
     expect(badgeTexts).toContain('2')
     // Warnings should NOT show 4 (inclusive would count refs with both errors+warnings)
     expect(badgeTexts).not.toContain('4')
+  })
+})
+
+describe('StatsSection hallucination count', () => {
+  it('does not count LLM-found matching metadata as hallucinated', () => {
+    const references = [
+      makeRef('hallucination', {
+        title: 'Pytag: Tabletop games for multi-agent reinforcement learning',
+        authors: ['Martin Balla', 'M. Long', 'George E. James Goodman'],
+        year: 2024,
+        hallucination_assessment: {
+          verdict: 'LIKELY',
+          link: 'https://arxiv.org/abs/2405.18123',
+          found_title: 'Pytag: Tabletop games for multi-agent reinforcement learning',
+          found_authors: 'Martin Balla, G. E. Long, George E. James Goodman',
+          found_year: '2024',
+        },
+      }),
+    ]
+
+    render(
+      <StatsSection
+        stats={{ total_refs: 1, processed_refs: 1, hallucination_count: 1 }}
+        isComplete={true}
+        references={references}
+        paperTitle="Test Paper"
+        paperSource="https://example.com/paper"
+      />
+    )
+
+    expect(screen.queryByTitle(/likely hallucinated/i)).toBeNull()
   })
 })

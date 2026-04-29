@@ -529,6 +529,41 @@ class ArXivCitationChecker:
         # 3. The same ArXiv version can be cited with different years
         
         return True
+
+    def _authors_from_metadata(self, metadata: Dict[str, Any]) -> List[str]:
+        authors = []
+        for author in metadata.get('authors', []) or []:
+            if isinstance(author, dict):
+                name = author.get('name', '')
+            else:
+                name = str(author)
+            name = name.strip()
+            if name:
+                authors.append(name)
+        return authors
+
+    def _version_metadata_changed_for_issue(
+            self, issue_type: str, historical_data: Dict[str, Any], latest_data: Dict[str, Any]) -> bool:
+        """Return True when an issue type reflects metadata changed across arXiv versions."""
+        issue_type = (issue_type or '').split(' (', 1)[0]
+        if issue_type == 'title':
+            historical_title = historical_data.get('title', '').strip()
+            latest_title = latest_data.get('title', '').strip()
+            if not historical_title or not latest_title:
+                return False
+            return compare_titles_with_latex_cleaning(historical_title, latest_title) < SIMILARITY_THRESHOLD
+        if issue_type == 'author':
+            historical_authors = self._authors_from_metadata(historical_data)
+            latest_authors = self._authors_from_metadata(latest_data)
+            if not historical_authors or not latest_authors:
+                return False
+            authors_match, _ = compare_authors(historical_authors, latest_authors)
+            return not authors_match
+        if issue_type == 'year':
+            historical_year = historical_data.get('year')
+            latest_year = latest_data.get('year')
+            return bool(historical_year and latest_year and str(historical_year) != str(latest_year))
+        return False
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
@@ -672,12 +707,18 @@ class ArXivCitationChecker:
                 logger.debug(f"ArXivCitationChecker: Reference best matches historical version v{best_match_version} (score: {best_match_score:.3f})")
                 
                 # Convert errors to warnings with version update info
-                # Version update issues are informational, not errors - the citation was correct for its time
+                # Version update issues are informational only for fields that
+                # actually changed between the matched historical version and
+                # the latest version. Keep unrelated mismatches as errors.
                 version_suffix = f" (v{best_match_version} vs v{latest_version_num} update)"
                 warnings = []
+                downgraded_any = False
                 for error in errors:
                     # Get the error/warning type - handle both error_type and warning_type
                     err_type = error.get('error_type') or error.get('warning_type', 'unknown')
+                    if not self._version_metadata_changed_for_issue(err_type, best_match_data or {}, latest_data):
+                        warnings.append(error)
+                        continue
                     warning = {
                         'warning_type': err_type + version_suffix,
                         'warning_details': error.get('error_details') or error.get('warning_details', ''),
@@ -687,10 +728,12 @@ class ArXivCitationChecker:
                         if key in error:
                             warning[key] = error[key]
                     warnings.append(warning)
+                    downgraded_any = True
                 
                 # Return with warnings instead of errors - URL points to the matched version
-                matched_url = f"https://arxiv.org/abs/{arxiv_id}v{best_match_version}"
-                return latest_data, warnings, matched_url
+                if downgraded_any:
+                    matched_url = f"https://arxiv.org/abs/{arxiv_id}v{best_match_version}"
+                    return latest_data, warnings, matched_url
         
         logger.debug(f"ArXivCitationChecker: Verified {arxiv_id} with {len(errors)} errors/warnings")
         return latest_data, errors, paper_url

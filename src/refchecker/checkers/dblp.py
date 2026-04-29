@@ -167,6 +167,7 @@ class DBLPReferenceChecker:
             'year': int(hit_year) if str(hit_year).isdigit() else None,
             'venue': best_hit.get('venue', ''),
             'url': hit_url,
+            '_matched_database': 'DBLP',
             'source': 'dblp',
         }
 

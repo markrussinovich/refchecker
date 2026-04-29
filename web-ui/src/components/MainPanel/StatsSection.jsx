@@ -6,6 +6,7 @@ import {
   exportResultsAsBibtex,
   downloadAsFile 
 } from '../../utils/formatters'
+import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
 
 /**
  * Stats section showing reference check summary with clickable filters
@@ -122,16 +123,15 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         !r.errors?.some(e => e.error_type !== 'unverified')
       ).length,
       withUnverified: finalized.filter(r =>
-        (r.status || '').toLowerCase() === 'unverified' ||
-        (r.status || '').toLowerCase() === 'hallucination' ||
+        getEffectiveReferenceStatus(r, isComplete) === 'unverified' ||
+        getEffectiveReferenceStatus(r, isComplete) === 'hallucination' ||
         r.errors?.some(e => e.error_type === 'unverified')
       ).length,
       hallucinated: finalized.filter(r =>
-        (r.status || '').toLowerCase() === 'hallucination' ||
-        r.hallucination_assessment?.verdict === 'LIKELY'
+        getEffectiveReferenceStatus(r, isComplete) === 'hallucination'
       ).length,
       verified: finalized.filter(r => {
-        const s = (r.status || '').toLowerCase()
+        const s = getEffectiveReferenceStatus(r, isComplete)
         return s === 'verified' || s === 'suggestion'
       }).length,
     }

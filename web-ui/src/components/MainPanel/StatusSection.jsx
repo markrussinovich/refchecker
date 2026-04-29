@@ -147,7 +147,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source:{' '}
+        Extraction:{' '}
         {bibliographyLink ? (
           <a 
             href={bibliographyLink}
@@ -172,7 +172,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source: PDF extraction
+        Extraction: PDF extraction
       </p>
     )
   }
@@ -183,7 +183,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source: GROBID fallback
+        Extraction: GROBID fallback
       </p>
     )
   }
@@ -194,7 +194,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source: LLM extraction
+        Extraction: LLM extraction
       </p>
     )
   }
@@ -205,7 +205,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source:{' '}
+        Extraction:{' '}
         <a 
           href={`${API_BASE}/api/text/${checkId}`}
           target="_blank"
@@ -226,7 +226,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Source: Cached bibliography
+        Extraction: Cached bibliography
       </p>
     )
   }
@@ -292,6 +292,8 @@ export default function StatusSection() {
   let displayProcessedRefs
   let displayLlmProvider = null
   let displayLlmModel = null
+  let displayHallucinationProvider = null
+  let displayHallucinationModel = null
   let displayExtractionMethod = null
   let displayBibliographySourceKind = null
   let displayOriginalFilename = null
@@ -311,6 +313,8 @@ export default function StatusSection() {
     // Get LLM info and extraction method from selectedCheck (history) since it's not in checkStore
     displayLlmProvider = selectedCheck?.llm_provider
     displayLlmModel = selectedCheck?.llm_model
+    displayHallucinationProvider = selectedCheck?.hallucination_provider
+    displayHallucinationModel = selectedCheck?.hallucination_model
     displayExtractionMethod = selectedCheck?.extraction_method || checkStoreStats?.extraction_method
     displayBibliographySourceKind = selectedCheck?.bibliography_source_kind
     displayOriginalFilename = historyItem?.original_filename || selectedCheck?.original_filename
@@ -324,6 +328,8 @@ export default function StatusSection() {
     displayProgress = displayTotalRefs > 0 ? (displayProcessedRefs / displayTotalRefs) * 100 : 0
     displayLlmProvider = selectedCheck.llm_provider
     displayLlmModel = selectedCheck.llm_model
+    displayHallucinationProvider = selectedCheck.hallucination_provider
+    displayHallucinationModel = selectedCheck.hallucination_model
     displayExtractionMethod = selectedCheck.extraction_method
     displayBibliographySourceKind = selectedCheck.bibliography_source_kind
     displayOriginalFilename = selectedCheck.original_filename
@@ -352,6 +358,18 @@ export default function StatusSection() {
   const displaySourceType = selectedCheck?.source_type || (isCurrentSessionCheck ? checkStoreSourceType : null)
   const displayLlmLabel = displayLlmModel 
     ? `${displayLlmProvider ? `${displayLlmProvider} / ` : ''}${displayLlmModel}`
+    : null
+  const hallucinationCapableProviders = new Set(['openai', 'anthropic', 'google', 'azure'])
+  const inferredHallucinationProvider = displayHallucinationProvider || (
+    hallucinationCapableProviders.has(String(displayLlmProvider || '').toLowerCase())
+      ? displayLlmProvider
+      : null
+  )
+  const inferredHallucinationModel = displayHallucinationModel || (
+    inferredHallucinationProvider === displayLlmProvider ? displayLlmModel : null
+  )
+  const displayHallucinationLabel = inferredHallucinationModel
+    ? `${inferredHallucinationProvider ? `${inferredHallucinationProvider} / ` : ''}${inferredHallucinationModel}`
     : null
   
   const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId, displayOriginalFilename)
@@ -841,7 +859,7 @@ export default function StatusSection() {
                   className="text-sm"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  Source:{' '}
+                  Extraction:{' '}
                   <a 
                     href={`${API_BASE}/api/text/${selectedCheckId}`}
                     target="_blank"
@@ -862,7 +880,7 @@ export default function StatusSection() {
                   className="text-sm"
                   style={{ color: 'var(--color-text-muted)' }}
                 >
-                  Source:{' '}
+                  Extraction:{' '}
                   <a 
                     href={`${API_BASE}/api/file/${selectedCheckId}`}
                     target="_blank"
@@ -885,7 +903,15 @@ export default function StatusSection() {
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Model: {displayLlmLabel}
+              Extraction Model: {displayLlmLabel}
+            </p>
+          )}
+          {displayHallucinationLabel && (
+            <p
+              className="text-sm"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              Hallucination Model: {displayHallucinationLabel}
             </p>
           )}
           <p 

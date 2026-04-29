@@ -453,11 +453,20 @@ class NonArxivReferenceChecker:
             if match:
                 cited_version_num = int(match.group(1))
         
-        # If a specific older version is cited in the URL, convert errors to warnings
+        # If a specific older version is cited in the URL, convert only the
+        # fields that actually changed between that version and the latest.
         if cited_version_num and cited_version_num < latest_version_num:
+            cited_version_data = self._fetch_arxiv_version_metadata(arxiv_id, cited_version_num)
+            latest_version_data = self._fetch_arxiv_version_metadata(arxiv_id, latest_version_num)
+            if not cited_version_data or not latest_version_data:
+                return errors, None
             version_suffix = f" (v{cited_version_num} vs v{latest_version_num} update)"
-            warnings = self._convert_errors_to_version_warnings(errors, version_suffix)
-            return warnings, cited_version_num
+            warnings = self._convert_errors_to_version_warnings(
+                errors, version_suffix, cited_version_data, latest_version_data,
+            )
+            if warnings != errors:
+                return warnings, cited_version_num
+            return errors, None
         
         # If no explicit version or no errors to check, return original
         if not errors:
@@ -515,6 +524,7 @@ class NonArxivReferenceChecker:
         # Find the BEST matching version by comparing title + authors
         best_match_version = None
         best_match_score = 0.0
+        best_match_data = None
         
         # Check latest version first — this is the baseline.  If we cannot
         # fetch the latest version metadata we have no reliable basis for
@@ -526,6 +536,7 @@ class NonArxivReferenceChecker:
         if latest_score > 0:
             best_match_version = latest_version_num
             best_match_score = latest_score
+            best_match_data = latest_version_data
         
         # Check historical versions to find if any is a BETTER match
         for version_num in range(1, latest_version_num):
@@ -539,17 +550,62 @@ class NonArxivReferenceChecker:
             if version_score > best_match_score:
                 best_match_version = version_num
                 best_match_score = version_score
+                best_match_data = version_data
         
         # If best match is a historical version (not latest), convert errors to warnings
         if best_match_version is not None and best_match_version < latest_version_num:
             logger.debug(f"Reference best matches ArXiv v{best_match_version} (score: {best_match_score:.3f}, latest is v{latest_version_num})")
             version_suffix = f" (v{best_match_version} vs v{latest_version_num} update)"
-            warnings = self._convert_errors_to_version_warnings(errors, version_suffix)
-            return warnings, best_match_version
+            warnings = self._convert_errors_to_version_warnings(
+                errors, version_suffix, best_match_data, latest_version_data,
+            )
+            return warnings, best_match_version if warnings != errors else None
         
         return errors, None
-    
-    def _convert_errors_to_version_warnings(self, errors: List[Dict[str, Any]], version_suffix: str) -> List[Dict[str, Any]]:
+
+    def _version_metadata_changed_for_issue(
+            self,
+            issue_type: str,
+            historical_data: Optional[Dict[str, Any]],
+            latest_data: Optional[Dict[str, Any]],
+    ) -> bool:
+        issue_type = (issue_type or '').split(' (', 1)[0]
+        if not historical_data or not latest_data:
+            return True
+        if issue_type == 'title':
+            historical_title = historical_data.get('title', '').strip()
+            latest_title = latest_data.get('title', '').strip()
+            if not historical_title or not latest_title:
+                return False
+            return compare_titles_with_latex_cleaning(historical_title, latest_title) < SIMILARITY_THRESHOLD
+        if issue_type == 'author':
+            historical_authors = [
+                a.get('name', str(a)).strip() if isinstance(a, dict) else str(a).strip()
+                for a in historical_data.get('authors', []) or []
+            ]
+            latest_authors = [
+                a.get('name', str(a)).strip() if isinstance(a, dict) else str(a).strip()
+                for a in latest_data.get('authors', []) or []
+            ]
+            historical_authors = [a for a in historical_authors if a]
+            latest_authors = [a for a in latest_authors if a]
+            if not historical_authors or not latest_authors:
+                return False
+            authors_match, _ = compare_authors(historical_authors, latest_authors)
+            return not authors_match
+        if issue_type == 'year':
+            historical_year = historical_data.get('year')
+            latest_year = latest_data.get('year')
+            return bool(historical_year and latest_year and str(historical_year) != str(latest_year))
+        return False
+
+    def _convert_errors_to_version_warnings(
+            self,
+            errors: List[Dict[str, Any]],
+            version_suffix: str,
+            historical_data: Optional[Dict[str, Any]] = None,
+            latest_data: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
         """
         Convert error dictionaries to warning dictionaries with version suffix.
         
@@ -572,9 +628,15 @@ class NonArxivReferenceChecker:
             # Skip entries that are already warnings
             if 'warning_type' in error:
                 # Just append the version suffix
+                if not self._version_metadata_changed_for_issue(error['warning_type'], historical_data, latest_data):
+                    warnings.append(error)
+                    continue
                 warning = error.copy()
                 warning['warning_type'] = error['warning_type'] + version_suffix
                 warnings.append(warning)
+                continue
+            if not self._version_metadata_changed_for_issue(error_type, historical_data, latest_data):
+                warnings.append(error)
                 continue
             
             # Convert error to warning with version suffix

@@ -6,6 +6,10 @@ import {
   exportReferenceAsBibtex,
   copyToClipboard
 } from '../../utils/formatters'
+import {
+  getEffectiveReferenceStatus,
+  llmFoundMetadataMatchesCitation,
+} from '../../utils/referenceStatus'
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
@@ -191,23 +195,9 @@ function CollapsibleText({ text }) {
 const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
-  const normalizeForComparison = (value) => String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-  const lastNameTokens = (authors) => (authors || [])
-    .map(author => String(author || '').trim().split(/\s+/).filter(Boolean).pop()?.toLowerCase())
-    .filter(Boolean)
   const assessment = reference.hallucination_assessment || {}
-  const foundAuthorsText = String(assessment.found_authors || '').toLowerCase()
-  const citedLastNames = lastNameTokens(reference.authors)
-  const foundMetadataMatchesCitation = assessment.verdict === 'LIKELY'
-    && assessment.link
-    && normalizeForComparison(assessment.found_title) === normalizeForComparison(reference.title)
-    && citedLastNames.length > 0
-    && citedLastNames.every(name => foundAuthorsText.includes(name))
-    && (!reference.year || String(assessment.found_year || '').includes(String(reference.year)))
-  const status = foundMetadataMatchesCitation ? 'verified' : (reference.status || '').toLowerCase()
+  const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
+  const status = getEffectiveReferenceStatus(reference)
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)

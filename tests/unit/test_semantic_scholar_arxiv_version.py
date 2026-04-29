@@ -58,10 +58,23 @@ class TestArxivVersionCheck(unittest.TestCase):
     def setUp(self):
         self.checker = NonArxivReferenceChecker()
     
+    @patch.object(NonArxivReferenceChecker, '_fetch_arxiv_version_metadata')
     @patch.object(NonArxivReferenceChecker, '_get_latest_arxiv_version_number')
-    def test_version_update_converts_errors_to_warnings(self, mock_get_latest):
+    def test_version_update_converts_errors_to_warnings(self, mock_get_latest, mock_fetch_version):
         """Test that errors are converted to warnings with version suffix when citing older version."""
         mock_get_latest.return_value = 5
+        mock_fetch_version.side_effect = lambda arxiv_id, version_num: {
+            2: {
+                'title': 'Attention Is All You Need',
+                'authors': [{'name': 'Ashish Vaswani'}],
+                'year': 2017,
+            },
+            5: {
+                'title': 'Attention Is All You Need: Revised Transformer Architecture',
+                'authors': [{'name': 'Ashish Vaswani'}, {'name': 'Noam Shazeer'}],
+                'year': 2017,
+            },
+        }.get(version_num)
         
         reference = {
             'url': 'https://arxiv.org/abs/1706.03762v2',
@@ -207,6 +220,67 @@ class TestArxivVersionCheck(unittest.TestCase):
 
         self.assertIsNone(matched_version)
         self.assertEqual(result_errors, errors)
+
+    @patch.object(NonArxivReferenceChecker, '_fetch_arxiv_version_metadata')
+    @patch.object(NonArxivReferenceChecker, '_get_latest_arxiv_version_number')
+    def test_title_only_version_update_keeps_author_error(self, mock_get_latest, mock_fetch_version):
+        """A title-only arXiv update should not downgrade unrelated author mismatches."""
+        mock_get_latest.return_value = 2
+
+        def version_metadata(arxiv_id, version_num):
+            if version_num == 1:
+                return {
+                    'title': 'Beyond outcomes: Transparent assessment of llm reasoning in games',
+                    'authors': [
+                        {'name': 'Wenye Lin'},
+                        {'name': 'Jonathan Roberts'},
+                        {'name': 'Yunhan Yang'},
+                        {'name': 'Samuel Albanie'},
+                        {'name': 'Zongqing Lu'},
+                        {'name': 'Kai Han'},
+                    ],
+                    'year': 2024,
+                }
+            return {
+                'title': 'GAMEBoT: Transparent Assessment of LLM Reasoning in Games',
+                'authors': [
+                    {'name': 'Wenye Lin'},
+                    {'name': 'Jonathan Roberts'},
+                    {'name': 'Yunhan Yang'},
+                    {'name': 'Samuel Albanie'},
+                    {'name': 'Zongqing Lu'},
+                    {'name': 'Kai Han'},
+                ],
+                'year': 2024,
+            }
+
+        mock_fetch_version.side_effect = version_metadata
+        reference = {
+            'title': 'Beyond outcomes: Transparent assessment of llm reasoning in games',
+            'authors': ['Wenye Lin', 'Rohan Paul', 'et al'],
+            'year': 2024,
+            'url': 'https://arxiv.org/abs/2412.13602',
+        }
+        paper_data = {
+            'title': 'GAMEBoT: Transparent Assessment of LLM Reasoning in Games',
+            'authors': [{'name': 'Wenye Lin'}, {'name': 'Jonathan Roberts'}],
+        }
+        errors = [
+            {'error_type': 'title', 'error_details': 'Title mismatch', 'ref_title_correct': paper_data['title']},
+            {'error_type': 'author', 'error_details': 'Author 2 mismatch', 'ref_authors_correct': 'Wenye Lin, Jonathan Roberts'},
+        ]
+
+        result_errors, matched_version = self.checker._check_arxiv_version_update(
+            reference,
+            paper_data,
+            '2412.13602',
+            errors,
+        )
+
+        self.assertEqual(matched_version, 1)
+        self.assertTrue(any(e.get('warning_type') == 'title (v1 vs v2 update)' for e in result_errors), result_errors)
+        self.assertTrue(any(e.get('error_type') == 'author' for e in result_errors), result_errors)
+        self.assertFalse(any(e.get('warning_type') == 'author (v1 vs v2 update)' for e in result_errors), result_errors)
     
     def test_convert_errors_to_version_warnings(self):
         """Test the error to warning conversion preserves all fields."""

@@ -59,6 +59,36 @@ class GitHubChecker:
                 return owner, repo
         
         return None
+
+    def extract_github_owner_info(self, url: str) -> Optional[str]:
+        """
+        Extract an owner/organization name from a GitHub profile URL.
+
+        This intentionally only matches root owner URLs (github.com/owner),
+        not repository URLs, which are handled by extract_github_repo_info().
+        """
+        if not url:
+            return None
+
+        parsed = urlparse(url.strip())
+        if parsed.netloc.lower() not in {'github.com', 'www.github.com'}:
+            return None
+
+        parts = [part for part in parsed.path.strip('/').split('/') if part]
+        if len(parts) != 1:
+            return None
+
+        owner = parts[0]
+        if owner.lower() in {'features', 'topics', 'collections', 'trending', 'marketplace', 'explore'}:
+            return None
+        return owner
+
+    def is_github_reference_url(self, url: str) -> bool:
+        """Return True for GitHub repo URLs and root owner/org URLs."""
+        return (
+            self.extract_github_repo_info(url) is not None
+            or self.extract_github_owner_info(url) is not None
+        )
     
     def is_github_url(self, url: str) -> bool:
         """
@@ -74,16 +104,16 @@ class GitHubChecker:
     
     def verify_reference(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """
-        Verify a GitHub repository reference
+        Verify a GitHub repository or owner/organization reference
         
         Args:
             reference: Reference dictionary with title, authors, year, url, etc.
             
         Returns:
             Tuple of (verified_data, errors, paper_url) where:
-            - verified_data: Dict with verified repository information or None
+            - verified_data: Dict with verified GitHub information or None
             - errors: List of error/warning dictionaries
-            - paper_url: The GitHub repository URL
+            - paper_url: The GitHub URL
         """
         logger.debug(f"Verifying GitHub reference: {reference.get('title', 'Untitled')}")
         
@@ -91,11 +121,13 @@ class GitHubChecker:
         github_url = None
         if reference.get('url') and self.is_github_url(reference['url']):
             github_url = reference['url']
+        elif reference.get('url') and self.extract_github_owner_info(reference['url']):
+            github_url = reference['url']
         elif reference.get('venue') and 'github.com' in reference.get('venue', ''):
             # Sometimes GitHub URLs are in the venue field
             venue_parts = reference['venue'].split()
             for part in venue_parts:
-                if self.is_github_url(part):
+                if self.is_github_reference_url(part):
                     github_url = part
                     break
         
@@ -106,6 +138,9 @@ class GitHubChecker:
         # Extract repository information
         repo_info = self.extract_github_repo_info(github_url)
         if not repo_info:
+            owner = self.extract_github_owner_info(github_url)
+            if owner:
+                return self._verify_owner_reference(reference, github_url, owner)
             logger.debug(f"Could not parse GitHub URL: {github_url}")
             return None, [{"error_type": "unverified", "error_details": "Invalid GitHub URL format"}], github_url
         
@@ -151,6 +186,7 @@ class GitHubChecker:
                 'year': creation_year,
                 'venue': 'GitHub Repository',
                 'url': github_url,
+                '_matched_database': 'GitHub',
                 'github_metadata': {
                     'name': actual_name,
                     'description': actual_description,
@@ -227,6 +263,71 @@ class GitHubChecker:
             return None, [{"error_type": "unverified", "error_details": f"Network error: {str(e)}"}], github_url
         except Exception as e:
             logger.error(f"Unexpected error verifying GitHub repository {owner}/{repo}: {e}")
+            return None, [{"error_type": "unverified", "error_details": f"Unexpected error: {str(e)}"}], github_url
+
+    def _verify_owner_reference(
+            self,
+            reference: Dict[str, Any],
+            github_url: str,
+            owner: str,
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        api_url = f'https://api.github.com/users/{owner}'
+
+        try:
+            response = requests.get(api_url, headers=self.base_headers, timeout=10)
+
+            if response.status_code == 404:
+                logger.debug(f"GitHub owner not found: {owner}")
+                return None, [{
+                    "error_type": "unverified",
+                    "error_details": "GitHub owner or organization not found",
+                }], github_url
+            if response.status_code == 403:
+                logger.warning("GitHub API rate limit exceeded")
+                return None, [{"error_type": "unverified", "error_details": "GitHub API rate limit exceeded"}], github_url
+            if response.status_code != 200:
+                logger.warning(f"GitHub API error {response.status_code} for owner {owner}")
+                return None, [{"error_type": "unverified", "error_details": f"GitHub API error: {response.status_code}"}], github_url
+
+            owner_data = response.json()
+            login = owner_data.get('login') or owner
+            display_name = owner_data.get('name') or login
+            company = owner_data.get('company') or ''
+            bio = owner_data.get('bio') or ''
+            created_at = owner_data.get('created_at') or ''
+            created_year = None
+            if created_at:
+                try:
+                    created_year = int(created_at.split('-', 1)[0])
+                except (ValueError, IndexError):
+                    pass
+
+            verified_data = {
+                'title': bio or display_name,
+                'authors': [company or display_name],
+                'year': created_year,
+                'venue': 'GitHub Organization' if owner_data.get('type') == 'Organization' else 'GitHub User',
+                'url': github_url.rstrip('/') + '/',
+                '_matched_database': 'GitHub',
+                'github_metadata': {
+                    'owner': login,
+                    'owner_name': display_name,
+                    'company': company,
+                    'bio': bio,
+                    'created_year': created_year,
+                    'type': owner_data.get('type', ''),
+                    'public_repos': owner_data.get('public_repos', 0),
+                },
+            }
+
+            logger.debug(f"GitHub owner verification successful for {owner}")
+            return verified_data, [], github_url.rstrip('/') + '/'
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Network error accessing GitHub API for owner {owner}: {e}")
+            return None, [{"error_type": "unverified", "error_details": f"Network error: {str(e)}"}], github_url
+        except Exception as e:
+            logger.error(f"Unexpected error verifying GitHub owner {owner}: {e}")
             return None, [{"error_type": "unverified", "error_details": f"Unexpected error: {str(e)}"}], github_url
     
     def _check_title_match(self, cited_title: str, repo_name: str, repo_description: str) -> bool:

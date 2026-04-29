@@ -595,6 +595,47 @@ class TestVersionMatchEndToEnd:
             f'Expected author error, got: {errors}'
         )
 
+    @patch.object(ArXivCitationChecker, '_get_latest_version_number')
+    @patch.object(ArXivCitationChecker, '_fetch_version_metadata_from_html')
+    @patch.object(ArXivCitationChecker, 'fetch_bibtex')
+    def test_title_only_version_update_keeps_author_error(self, mock_fetch, mock_version_html, mock_latest, checker):
+        """If only the title changed between versions, wrong cited authors remain errors."""
+        mock_fetch.return_value = """@misc{lin2024gamebot,
+      title={GAMEBoT: Transparent Assessment of LLM Reasoning in Games},
+      author={Wenye Lin and Jonathan Roberts and Yunhan Yang and Samuel Albanie and Zongqing Lu and Kai Han},
+      year={2024},
+      eprint={2412.13602}
+}"""
+        mock_latest.return_value = 2
+        mock_version_html.return_value = {
+            'title': 'Beyond outcomes: Transparent assessment of llm reasoning in games',
+            'authors': [
+                {'name': 'Wenye Lin'},
+                {'name': 'Jonathan Roberts'},
+                {'name': 'Yunhan Yang'},
+                {'name': 'Samuel Albanie'},
+                {'name': 'Zongqing Lu'},
+                {'name': 'Kai Han'},
+            ],
+            'year': 2024,
+        }
+
+        reference = {
+            'title': 'Beyond outcomes: Transparent assessment of llm reasoning in games',
+            'authors': ['Wenye Lin', 'Rohan Paul', 'et al'],
+            'year': 2024,
+            'url': 'https://arxiv.org/abs/2412.13602',
+        }
+
+        verified_data, errors, url = checker.verify_reference(reference)
+
+        warning_types = [e.get('warning_type', '') for e in errors]
+        error_types = [e.get('error_type', '') for e in errors]
+        assert any(t == 'title (v1 vs v2 update)' for t in warning_types), errors
+        assert any(t == 'author' for t in error_types), errors
+        assert not any(t == 'author (v1 vs v2 update)' for t in warning_types), errors
+        assert url == 'https://arxiv.org/abs/2412.13602v1'
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

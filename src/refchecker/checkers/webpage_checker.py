@@ -174,6 +174,7 @@ class WebPageChecker:
                 'year': reference.get('year'),
                 'venue': 'Web Page',
                 'url': web_url,
+                '_matched_database': 'Web Page',
                 'web_metadata': {
                     'page_title': page_title,
                     'description': page_description,
@@ -465,6 +466,7 @@ class WebPageChecker:
             'year': reference.get('year'),
             'venue': 'PDF Document',
             'url': web_url,
+            '_matched_database': 'PDF Document',
             'web_metadata': {
                 'content_type': response.headers.get('content-type', ''),
                 'content_length': response.headers.get('content-length', ''),
@@ -508,6 +510,7 @@ class WebPageChecker:
             'year': reference.get('year'),
             'venue': 'PDF Document' if web_url.lower().endswith('.pdf') else 'Web Page',
             'url': web_url,
+            '_matched_database': 'PDF Document' if web_url.lower().endswith('.pdf') else 'Web Page',
             'web_metadata': {
                 'status_code': 403,
                 'domain': domain,
@@ -657,6 +660,7 @@ class WebPageChecker:
                     'year': reference.get('year'),
                     'venue': venue_field or 'Web Page',
                     'url': web_url,
+                    '_matched_database': 'Web Page',
                     'web_metadata': {
                         'status_code': 403,
                         'access_blocked': True
@@ -681,6 +685,7 @@ class WebPageChecker:
                         'year': reference.get('year'),
                         'venue': venue_field or 'PDF Document',
                         'url': web_url,
+                        '_matched_database': 'PDF Document',
                         'web_metadata': {
                             'content_type': response.headers.get('content-type', ''),
                             'status_code': response.status_code
@@ -749,6 +754,7 @@ class WebPageChecker:
                         'year': reference.get('year'),
                         'venue': venue,
                         'url': web_url,
+                        '_matched_database': 'Web Page',
                         'web_metadata': {
                             'page_title': page_title,
                             'description': page_description,
@@ -767,6 +773,7 @@ class WebPageChecker:
                         'year': reference.get('year'),
                         'venue': venue_field,  # Keep the original venue
                         'url': web_url,
+                        '_matched_database': 'Web Page',
                         'web_metadata': {
                             'page_title': page_title,
                             'description': page_description,

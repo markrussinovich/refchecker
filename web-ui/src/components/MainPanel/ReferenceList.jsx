@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import ReferenceCard from '../ReferenceCard/ReferenceCard'
 import { useCheckStore } from '../../stores/useCheckStore'
+import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
 
 /**
  * Derive status from reference data, trusting backend final statuses
@@ -8,50 +9,7 @@ import { useCheckStore } from '../../stores/useCheckStore'
  * @param {boolean} isCheckComplete - Whether the overall check has completed/cancelled
  */
 const computeDerivedStatus = (ref, isCheckComplete = false) => {
-  const baseStatus = (ref.status || '').trim().toLowerCase()
-
-  // Any ref awaiting hallucination check shows as in-progress (checking).
-  // Until the check completes, the final status is unknown — the ref could
-  // be verified, hallucinated, or stay as error/warning.
-  if (ref.hallucination_check_pending && !ref.hallucination_assessment) {
-    return 'checking'
-  }
-  // Unverified refs that haven't been assessed yet also stay as checking
-  // until the overall check completes.
-  if (baseStatus === 'unverified' && !ref.hallucination_assessment && !isCheckComplete) {
-    return 'checking'
-  }
-
-  // Trust backend's final status values
-  if (['error', 'warning', 'suggestion', 'unverified', 'verified', 'hallucination'].includes(baseStatus)) {
-    return baseStatus
-  }
-  
-  // Keep pending and checking distinct so UI shows appropriate icons
-  // - pending: clock icon (waiting in queue)
-  // - checking: spinner (actively being verified)
-  // - unchecked: grey X (never checked due to cancellation/timeout)
-  if (baseStatus === 'pending' || baseStatus === 'checking' || 
-      ['in_progress', 'queued', 'processing', 'started'].includes(baseStatus)) {
-    // If check is complete but this ref wasn't processed, mark as unchecked
-    if (isCheckComplete) {
-      return 'unchecked'
-    }
-    return baseStatus === 'pending' ? 'pending' : 'checking'
-  }
-  
-  // For unknown states, derive from errors/warnings/suggestions arrays
-  const hasErrors = Array.isArray(ref.errors) && ref.errors.some(
-    e => (e?.error_type || '').toLowerCase() !== 'unverified'
-  )
-  const hasWarnings = !hasErrors && Array.isArray(ref.warnings) && ref.warnings.length > 0
-  const hasSuggestions = !hasErrors && !hasWarnings && Array.isArray(ref.suggestions) && ref.suggestions.length > 0
-
-  if (hasErrors) return 'error'
-  if (hasWarnings) return 'warning'
-  if (hasSuggestions) return 'suggestion'
-  // No status and no issues = verified
-  return 'verified'
+  return getEffectiveReferenceStatus(ref, isCheckComplete)
 }
 
 /**
@@ -106,7 +64,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             if (status === 'checking') return false
             return status === 'unverified' || status === 'hallucination' || ref.errors?.some(e => e.error_type === 'unverified')
           case 'hallucination':
-            return status === 'hallucination' || ref.hallucination_assessment?.verdict === 'LIKELY'
+            return status === 'hallucination'
           default:
             // For other statuses (pending, checking, unchecked), match exactly
             return status === filter

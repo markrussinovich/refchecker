@@ -855,6 +855,11 @@ def normalize_diacritics(text: str) -> str:
         'J. Gl¨ uck' -> 'J. Gluck'
         'D'Amato' -> 'D'Amato' (apostrophes normalized)
     """
+    # PDF extraction can split a combining accent away from its base letter,
+    # e.g. "Z ̈ugner" for "Zügner". Merge that artifact before decomposing
+    # and dropping combining marks, otherwise the name becomes "z ugner".
+    text = re.sub(r'([A-Za-z])\s+[\u0300-\u036f]+\s*([A-Za-z])', r'\1\2', text)
+
     # Handle standalone diacritics FIRST (before apostrophe normalization)
     # so that ´ (U+00B4) is treated as a diacritic and removed, not converted
     # to an apostrophe.  PDF extraction often produces "R ´enyi" (Rényi)
@@ -1007,6 +1012,9 @@ def normalize_diacritics_simple(text: str) -> str:
     Simple diacritic normalization that only removes accents without transliteration.
     Used as an alternative normalization for name matching.
     """
+    # Same PDF extraction artifact handled in normalize_diacritics().
+    text = re.sub(r'([A-Za-z])\s+[\u0300-\u036f]+\s*([A-Za-z])', r'\1\2', text)
+
     # Remove standalone diacritics without transliteration
     standalone_diacritics = {
         '¨': '',    # Diaeresis
@@ -2306,6 +2314,27 @@ def _split_concatenated_team_first_author(cited_authors: list, correct_authors: 
     return [first_cited, remainder] + correct_authors[1:]
 
 
+_COLLECTIVE_AUTHOR_SHORTHANDS = frozenset({
+    'anthropic',
+    'arc prize',
+    'deepmind',
+    'deepseek-ai',
+    'google',
+    'google cloud',
+    'google deepmind',
+    'meta',
+    'meta ai',
+    'microsoft',
+    'openai',
+    'qwen',
+})
+
+
+def _is_collective_author_shorthand(author: str) -> bool:
+    author_lower = normalize_diacritics(str(author or '').strip().lower())
+    return author_lower.endswith(' team') or author_lower in _COLLECTIVE_AUTHOR_SHORTHANDS
+
+
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
     """
     Compare author lists to check if they match.
@@ -2458,16 +2487,16 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         return True, f"Authors match (verified {len(correct_names)} correct authors against {len(cleaned_cited)} cited, correct list used et al)"
 
     # Large collaborative papers are often cited with only the team name as
-    # the author list (e.g. "Gemini Team"). If that shorthand matches the
+    # the author list (e.g. "Gemini Team" or "OpenAI"). If that shorthand matches the
     # verified first author, treat the author list as valid rather than
     # penalizing the citation for omitting hundreds of individual authors.
     if (
         len(cleaned_cited) == 1
         and correct_names
-        and cleaned_cited[0].strip().lower().endswith(' team')
+        and _is_collective_author_shorthand(cleaned_cited[0])
         and enhanced_name_match(cleaned_cited[0], correct_names[0])
     ):
-        return True, "Authors match (team authorship shorthand)"
+        return True, "Authors match (collective authorship shorthand)"
     
     # When "et al" is present, only compare the explicitly listed authors
     # The key insight: if the citation has "et al", we should only verify the listed authors

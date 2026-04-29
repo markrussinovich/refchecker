@@ -16,7 +16,7 @@ import os
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
 
-from refchecker.utils.text_utils import clean_author_name
+from refchecker.utils.text_utils import clean_author_name, enhanced_name_match
 
 
 class TestUnicodeAuthorProcessing(unittest.TestCase):
@@ -191,6 +191,11 @@ class TestUnicodeAuthorProcessing(unittest.TestCase):
                         bib_last in db_last or db_last in bib_last or bib_last == db_last,
                         f"Last name similarity failed: {bib_last} vs {db_last}"
                     )
+
+    def test_spaced_combining_diaeresis_author_match(self):
+        """PDF-extracted spaced combining accents should not break name matching."""
+        self.assertTrue(enhanced_name_match('Daniel Z ̈ugner', 'Daniel Zügner'))
+        self.assertTrue(enhanced_name_match('Stephan G ̈unnemann', 'Stephan Günnemann'))
 
 
 if __name__ == '__main__':

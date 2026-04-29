@@ -267,6 +267,35 @@ class TestResultDisplayLogic(unittest.TestCase):
             'https://dblp.org/rec/conf/nips/ChengYFGYK0L24',
         )
 
+    @patch('sys.stdout', new_callable=StringIO)
+    def test_web_page_verified_url_prints_matched_source(self, mock_stdout):
+        """Web-page verification should print a matched source before the URL."""
+        reference = {
+            'title': 'GPT-4.1: Introducing gpt-4.1 in the api',
+            'authors': ['OpenAI'],
+            'venue': 'openai.com',
+            'year': 2025,
+            'url': 'https://openai.com/index/gpt-4-1/',
+        }
+        verified_data = {
+            'title': reference['title'],
+            'authors': reference['authors'],
+            'year': reference['year'],
+            'venue': reference['venue'],
+            'url': reference['url'],
+            '_matched_database': 'Web Page',
+        }
+
+        self.checker._print_verified_urls(reference, verified_data, reference['url'], [])
+
+        output = mock_stdout.getvalue()
+        self.assertIn('       Matched Database: Web Page', output)
+        self.assertIn('       Verified URL: https://openai.com/index/gpt-4-1/', output)
+        self.assertLess(
+            output.index('       Matched Database: Web Page'),
+            output.index('       Verified URL:'),
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

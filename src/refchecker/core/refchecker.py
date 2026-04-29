@@ -6457,8 +6457,10 @@ class ArxivReferenceChecker:
                     if llm_assessment and llm_assessment.get('verdict') == 'UNLIKELY':
                         # LLM confirmed the reference is real - don't count as unverified
                         llm_link = llm_assessment.get('link', '')
-                        if llm_link and llm_link.startswith('http') and print_output:
-                            print(f"       Verified URL: {llm_link}")
+                        if print_output:
+                            print("       Matched Database: LLM search")
+                            if llm_link and llm_link.startswith('http'):
+                                print(f"       Verified URL: {llm_link}")
                         # Store assessment so it isn't re-run below
                         precomputed_hallucination = llm_assessment
                     else:

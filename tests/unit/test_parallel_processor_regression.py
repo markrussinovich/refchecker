@@ -38,3 +38,48 @@ def test_parallel_printer_does_not_rerun_hallucination_assessment(capsys):
 
     captured = capsys.readouterr()
     assert 'Synthetic Reference' in captured.out
+
+
+def test_parallel_printer_labels_llm_verified_source(capsys):
+    base_checker = SimpleNamespace(
+        _print_reference_header=lambda ref, index, total: print(
+            f"[{index+1}/{total}] {ref.get('title', '')}"
+        ),
+        _print_verified_urls=lambda ref, vd, url, errors: print(''),
+        _display_non_unverified_errors=lambda errors, debug_mode, print_output: None,
+        _display_unverified_error_with_subreason=lambda *args, **kwargs: None,
+    )
+
+    processor = ParallelReferenceProcessor(base_checker=base_checker, max_workers=2)
+    processor.total_references = 1
+
+    result = ReferenceResult(
+        index=0,
+        errors=[],
+        url='https://doi.org/10.1007/978-3-030-10973-8',
+        processing_time=0.25,
+        reference={
+            'title': 'Potential explanations for why people are missed in the us census',
+            'authors': ["William P O'Hare", "William P O'Hare"],
+            'year': 2019,
+            'venue': 'Differential Undercounts in the US Census: Who is Missed?',
+            'raw_text': (
+                '[68] Potential explanations for why people are missed in the us census'
+            ),
+        },
+        verified_data=None,
+        hallucination_assessment={
+            'verdict': 'UNLIKELY',
+            'link': 'https://doi.org/10.1007/978-3-030-10973-8',
+            'explanation': 'The cited work is a real book chapter.',
+        },
+    )
+
+    processor._print_reference_result(result)
+
+    output = capsys.readouterr().out
+    assert '       Matched Database: LLM search' in output
+    assert '       Verified URL: https://doi.org/10.1007/978-3-030-10973-8' in output
+    assert output.index('       Matched Database: LLM search') < output.index('       Verified URL:')
+    assert '\n\n       Matched Database: LLM search' in output
+    assert '\n\n\n       Matched Database: LLM search' not in output

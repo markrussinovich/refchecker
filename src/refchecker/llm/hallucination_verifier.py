@@ -1277,6 +1277,10 @@ class LLMHallucinationVerifier:
         """
         import re
         text = response.strip()
+        labels = r'(EXPLANATION|LINK|FOUND_TITLE|FOUND_AUTHORS|FOUND_VENUE|FOUND_YEAR|VERDICT)'
+        text = re.sub(rf'\*\*\s*{labels}\s*:\s*\*\*', r'\n\1: ', text, flags=re.IGNORECASE)
+        text = re.sub(rf'(?<!^)\s+({labels}:)', r'\n\1', text, flags=re.IGNORECASE)
+        text = text.strip()
 
         verdict = 'UNCERTAIN'
         explanation = ''

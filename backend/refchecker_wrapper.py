@@ -572,6 +572,39 @@ class ProgressRefChecker:
                 if refs:
                     logger.info(f"Extracted {len(refs)} references via GROBID")
                 return refs, method
+
+            async def maybe_update_title_from_direct_pdf(pdf_url: str) -> None:
+                nonlocal paper_title
+                if paper_title != "Unknown Paper":
+                    return
+
+                if 'openreview.net' in pdf_url.lower():
+                    try:
+                        from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
+                        or_checker = OpenReviewReferenceChecker(request_delay=0.0)
+                        or_checker.cache_dir = self.cache_dir
+                        or_id = or_checker.extract_paper_id(pdf_url)
+                        if or_id:
+                            or_meta = await asyncio.to_thread(or_checker.get_paper_metadata, or_id)
+                            if or_meta and or_meta.get('title'):
+                                paper_title = or_meta['title']
+                                await update_title_if_needed(paper_title)
+                                logger.info(f"Got title from OpenReview metadata: {paper_title}")
+                                return
+                    except Exception as e:
+                        logger.debug(f"Could not get OpenReview metadata: {e}")
+
+                cached_pdf_path = get_cached_artifact_path(self.cache_dir, pdf_url, 'paper.pdf')
+                if cached_pdf_path and os.path.exists(cached_pdf_path) and os.path.getsize(cached_pdf_path) > 0:
+                    try:
+                        pdf_processor = PDFProcessor()
+                        extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, cached_pdf_path)
+                        if extracted_title:
+                            paper_title = extracted_title
+                            await update_title_if_needed(paper_title)
+                            logger.info(f"Extracted title from cached PDF: {paper_title}")
+                    except Exception as e:
+                        logger.warning(f"Could not extract title from cached PDF: {e}")
             
             if source_type == "url":
                 # Check if this is an OpenReview URL — convert to PDF download
@@ -599,20 +632,7 @@ class ProgressRefChecker:
                         logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
                         bibliography_source_kind = 'pdf'
                         set_extraction_method('cache')
-                        # Try to get paper title from OpenReview metadata cache
-                        if 'openreview.net/pdf' in paper_source.lower():
-                            try:
-                                from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
-                                or_checker = OpenReviewReferenceChecker(request_delay=0.0)
-                                or_checker.cache_dir = self.cache_dir
-                                or_id = or_checker.extract_paper_id(paper_source)
-                                if or_id:
-                                    or_meta = or_checker.get_paper_metadata(or_id)
-                                    if or_meta and or_meta.get('title'):
-                                        paper_title = or_meta['title']
-                                        await update_title_if_needed(paper_title)
-                            except Exception:
-                                pass
+                        await maybe_update_title_from_direct_pdf(paper_source)
 
                     # Handle direct PDF URLs (e.g., Microsoft Research PDFs)
                     else:
@@ -627,19 +647,7 @@ class ProgressRefChecker:
                             await asyncio.to_thread(download_pdf, paper_source, pdf_path)
 
                         # For OpenReview PDFs, try to get metadata from the API
-                        if 'openreview.net' in paper_source.lower():
-                            try:
-                                from refchecker.checkers.openreview_checker import OpenReviewReferenceChecker
-                                or_checker = OpenReviewReferenceChecker(request_delay=0.0)
-                                or_id = or_checker.extract_paper_id(paper_source)
-                                if or_id:
-                                    or_meta = or_checker.get_paper_metadata(or_id)
-                                    if or_meta and or_meta.get('title'):
-                                        paper_title = or_meta['title']
-                                        await update_title_if_needed(paper_title)
-                                        logger.info(f"Got title from OpenReview API: {paper_title}")
-                            except Exception as e:
-                                logger.debug(f"Could not get OpenReview metadata: {e}")
+                        await maybe_update_title_from_direct_pdf(paper_source)
 
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')

@@ -337,7 +337,8 @@ class ParallelReferenceProcessor:
                 ha_link = ha.get('link')
                 ha_explanation = ha.get('explanation', '')
                 if ha_link and ha_link.startswith('http'):
-                    print(f"\n       Verified URL: {ha_link}")
+                    print("       Matched Database: LLM search")
+                    print(f"       Verified URL: {ha_link}")
                 if ha_explanation:
                     print(f"       LLM confirmed: {ha_explanation}")
 
@@ -382,6 +383,7 @@ class ParallelReferenceProcessor:
                     print(f"       ✅ Verified via URL: {cited_url}")
                 elif llm_verified and llm_verified_url:
                     # Show clean verified URL instead of 'Could not verify'
+                    print("       Matched Database: LLM search")
                     print(f"       Verified URL: {llm_verified_url}")
                 elif llm_verified:
                     # LLM confirmed real but no URL — keep as unverified, show explanation

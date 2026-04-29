@@ -51,6 +51,26 @@ def test_parse_verdict_preserves_found_venue():
     assert found_metadata['venue'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
 
 
+def test_parse_verdict_tolerates_markdown_labels_and_search_narration():
+    verdict, explanation, link, found_metadata = LLMHallucinationVerifier._parse_verdict(
+        'I\'ll search for this paper to verify the exact title and author information. '
+        'Based on my web search results, I can now provide a definitive assessment: '
+        '**EXPLANATION:** The cited reference contains a shortened title and incorrect author names. '
+        '**LINK:** https://arxiv.org/abs/2407.07796 '
+        '**FOUND_TITLE:** Evaluating Large Language Models with Grid-Based Game Competitions: An Extensible LLM Benchmark and Leaderboard '
+        '**FOUND_AUTHORS:** Oguzhan Topsakal, Colby Jacob Edell, Jackson Bailey Harper '
+        '**FOUND_VENUE:** arXiv preprint '
+        '**FOUND_YEAR:** 2024 '
+        '**VERDICT:** LIKELY'
+    )
+
+    assert verdict == 'LIKELY'
+    assert explanation == 'The cited reference contains a shortened title and incorrect author names.'
+    assert link == 'https://arxiv.org/abs/2407.07796'
+    assert found_metadata['title'] == 'Evaluating Large Language Models with Grid-Based Game Competitions: An Extensible LLM Benchmark and Leaderboard'
+    assert found_metadata['authors'] == 'Oguzhan Topsakal, Colby Jacob Edell, Jackson Bailey Harper'
+
+
 def test_apply_hallucination_verdict_rechecks_found_venue():
     result = {
         'status': 'error',
@@ -1230,6 +1250,26 @@ def test_unlikely_low_overlap_rejects_conflicting_found_authors_for_checked_url(
 
     assert verdict == 'LIKELY'
     assert 'real title with fabricated coauthors' in explanation
+
+
+def test_unlikely_author_guard_allows_spaced_combining_diacritic_errors():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The cited author name contains a minor character encoding issue.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Certifiable robustness and robust training for graph convolutional networks',
+            'ref_authors_cited': 'Daniel Z ̈ugner, Stephan G ̈unnemann',
+            '_ref_authors_cited_list': ['Daniel Z ̈ugner', 'Stephan G ̈unnemann'],
+            'ref_authors_correct': 'Daniel Zügner, Stephan Günnemann',
+            'ref_verified_url': 'https://doi.org/10.1145/3292500.3330905',
+        },
+        ['https://doi.org/10.1145/3292500.3330905'],
+        {},
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
 
 
 def test_unlikely_low_overlap_accepts_found_authors_when_found_title_matches_citation():

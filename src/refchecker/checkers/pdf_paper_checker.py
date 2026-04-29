@@ -120,6 +120,7 @@ class PDFPaperChecker:
                     'year': reference.get('year'),
                     'venue': venue,
                     'url': url,
+                    '_matched_database': 'PDF Document',
                     'pdf_metadata': {
                         'extracted_title': pdf_data.get('title'),
                         'extracted_authors': pdf_data.get('authors'),

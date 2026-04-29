@@ -945,7 +945,40 @@ class TestAuthorComparisonBugFixes:
         match_result, error_message = compare_authors(cited_authors, correct_authors)
 
         assert match_result, error_message
-        assert "team authorship shorthand" in error_message.lower()
+        assert "collective authorship shorthand" in error_message.lower()
+
+    def test_single_lab_author_matches_large_collaboration(self):
+        """A sole lab/org author should be accepted when it is the verified first author."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["OpenAI"]
+        correct_authors = [
+            "OpenAI",
+            "Josh Achiam",
+            "Steven Adler",
+            "Sandhini Agarwal",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "collective authorship shorthand" in error_message.lower()
+
+    def test_single_person_author_does_not_match_large_collaboration(self):
+        """A normal first author should still fail when the rest of the list is missing."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["Josh Achiam"]
+        correct_authors = [
+            "Josh Achiam",
+            "Steven Adler",
+            "Sandhini Agarwal",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert not match_result
+        assert "author count mismatch" in error_message.lower()
 
     def test_single_team_author_matches_concatenated_first_author(self):
         """S2 sometimes concatenates the team name with the first person author."""
@@ -961,7 +994,7 @@ class TestAuthorComparisonBugFixes:
         match_result, error_message = compare_authors(cited_authors, correct_authors)
 
         assert match_result, error_message
-        assert "team authorship shorthand" in error_message.lower()
+        assert "collective authorship shorthand" in error_message.lower()
 
     def test_team_author_with_et_al_matches_concatenated_first_author(self):
         """A cited team name plus named authors should split S2's first author entry."""
