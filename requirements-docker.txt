@@ -2,41 +2,41 @@
 # This is a subset of requirements.txt optimized for smaller image size
 
 # Core dependencies - required for basic functionality
-numpy>=1.26.0
-requests>=2.32.5
+numpy>=2.4.4
+requests>=2.33.1
 beautifulsoup4>=4.14.3
-pypdf>=6.9.1
-arxiv>=2.4.1
+pypdf>=6.10.2
+arxiv>=3.0.0
 python-dateutil>=2.9.0.post0
 tqdm>=4.67.3
-colorama>=0.4.4
+colorama>=0.4.6
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.27.3
-cryptography>=46.0.5  # For API key encryption in web UI
-pybtex>=0.25.1  # For parsing ArXiv BibTeX citations
+cryptography>=47.0.0  # For API key encryption in web UI
+pybtex>=0.26.1  # For parsing ArXiv BibTeX citations
 
 # Additional core dependencies found in codebase
-pandas>=2.0.0
+pandas>=3.0.2
 pdfplumber>=0.11.9
-pymupdf>=1.27.2  # For PDF thumbnail generation
+pymupdf>=1.27.2.3  # For PDF thumbnail generation
 
 # Web UI backend dependencies
-fastapi>=0.135.1
-uvicorn[standard]>=0.42.0  # Includes websockets and other production dependencies
-pydantic>=2.12.5
+fastapi>=0.136.1
+uvicorn[standard]>=0.46.0  # Includes websockets and other production dependencies
+pydantic>=2.13.3
 aiosqlite>=0.22.1
 httpx>=0.28.1
-Pillow>=12.1.1  # For thumbnail image enhancement
-python-multipart>=0.0.22  # For FastAPI form data handling
+Pillow>=12.2.0  # For thumbnail image enhancement
+python-multipart>=0.0.27  # For FastAPI form data handling
 python-jose[cryptography]>=3.5.0  # JWT signing/verification (multi-user auth)
 
 # LLM provider dependencies (API-based, lightweight)
-openai>=2.29.0
-anthropic>=0.86.0
-google-genai>=1.60.0
+openai>=2.33.0
+anthropic>=0.97.0
+google-genai>=1.73.1
 
 # Optional enhanced functionality
-lxml>=6.0.2
+lxml>=6.1.0
 
 # Note: Heavy dependencies excluded for smaller image:
 # - torch, vllm (local model inference - use pip/source install instead)

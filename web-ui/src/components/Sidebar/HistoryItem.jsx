@@ -1,4 +1,4 @@
-import { useState, useCallback, memo } from 'react'
+import { useState, memo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'

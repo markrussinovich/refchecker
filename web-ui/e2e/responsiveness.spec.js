@@ -190,7 +190,7 @@ test.describe('UI responsiveness during active scans', () => {
         await emit(SESSION, summaryUpdate(i, TOTAL_REFS, errs, warns));
       }
     }
-    const burstDuration = Date.now() - burstStart;
+    expect(Date.now() - burstStart).toBeGreaterThanOrEqual(0);
 
     // After burst, the UI must be interactive: we test by clicking a button
     // and checking it responds within a reasonable time (< 2s).

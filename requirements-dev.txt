@@ -2,29 +2,29 @@
 # Use this for testing and CI to avoid disk space issues
 
 # Core dependencies - required for basic functionality
-numpy>=1.26.0
-requests>=2.32.5
+numpy>=2.4.4
+requests>=2.33.1
 beautifulsoup4>=4.14.3
-pypdf>=6.9.1
-arxiv>=2.4.1
+pypdf>=6.10.2
+arxiv>=3.0.0
 python-dateutil>=2.9.0.post0
 tqdm>=4.67.3
-colorama>=0.4.4
+colorama>=0.4.6
 fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.27.3
-pandas>=2.0.0
+pandas>=3.0.2
 pdfplumber>=0.11.9
 
 # Web UI / auth dependencies (needed for backend/auth.py tests)
 python-jose[cryptography]>=3.5.0
 httpx>=0.28.1
-fastapi>=0.135.1
-pydantic>=2.12.5
-anthropic>=0.86.0
+fastapi>=0.136.1
+pydantic>=2.13.3
+anthropic>=0.97.0
 
 # Testing dependencies
-pytest>=9.0.2
-pytest-cov>=7.0.0
+pytest>=9.0.3
+pytest-cov>=7.1.0
 
 # Note: The following are NOT included to save disk space in CI:
 # - openai, google-generativeai (LLM providers - imported lazily)

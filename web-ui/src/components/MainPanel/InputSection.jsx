@@ -52,13 +52,11 @@ export default function InputSection() {
     status, 
     startCheck, 
     reset,
-    cancelCheck: storeCancelCheck,
     setError,
   } = useCheckStore(useShallow(s => ({
     status: s.status,
     startCheck: s.startCheck,
     reset: s.reset,
-    cancelCheck: s.cancelCheck,
     setError: s.setError,
   })))
   
@@ -317,24 +315,6 @@ export default function InputSection() {
       setError(error.response?.data?.detail || error.message || 'Failed to start bulk check')
     } finally {
       setIsSubmitting(false)
-    }
-  }
-
-  const handleCancel = async () => {
-    const { sessionId } = useCheckStore.getState()
-    if (!sessionId) return
-
-    try {
-      logger.info('InputSection', `Cancelling check ${sessionId}`)
-      await api.cancelCheck(sessionId)
-      
-      // Update store immediately
-      storeCancelCheck()
-      
-    } catch (error) {
-      logger.error('InputSection', 'Failed to cancel', error)
-      // Still update the store to reflect cancellation intent
-      storeCancelCheck()
     }
   }
 

@@ -16,73 +16,71 @@ classifiers = [
     "Intended Audience :: Science/Research", 
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8", 
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.32.5",
-    "beautifulsoup4>=4.12.0",
-    "pypdf>=4.0.0",
-    "arxiv>=2.1.0",
+    "requests>=2.33.1",
+    "beautifulsoup4>=4.14.3",
+    "pypdf>=6.10.2",
+    "arxiv>=3.0.0",
     "python-dateutil>=2.9.0.post0",
-    "tqdm>=4.67.0",
-    "colorama>=0.4.4",
+    "tqdm>=4.67.3",
+    "colorama>=0.4.6",
     "fuzzywuzzy>=0.18.0",
-    "python-Levenshtein>=0.25.0",
-    "pandas>=2.0.0",
-    "numpy>=1.26.0",
-    "pdfplumber>=0.10.0",
-    "pybtex>=0.25.1",
+    "python-Levenshtein>=0.27.3",
+    "pandas>=3.0.2",
+    "numpy>=2.4.4",
+    "pdfplumber>=0.11.9",
+    "pybtex>=0.26.1",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0", 
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
     "black>=26.3.1",
     "isort>=8.0.1",
     "flake8>=7.3.0",
-    "mypy>=1.19.1",
+    "mypy>=1.20.2",
 ]
 docs = [
-    "sphinx>=9.1.0",
+    "sphinx>=9.0.4",
     "sphinx-rtd-theme>=3.1.0",
 ]
 llm = [
-    "openai>=1.99.1",
-    "anthropic>=0.86.0",
-    "google-genai>=1.60.0",
+    "openai>=2.33.0",
+    "anthropic>=0.97.0",
+    "google-genai>=1.73.1",
 ]
 optional = [
-    "lxml>=6.0.2",
-    "selenium>=4.41.0",
+    "lxml>=6.1.0",
+    "selenium>=4.43.0",
     "pikepdf>=10.5.1", 
-    "nltk>=3.9.3",
+    "nltk>=3.9.4",
     "scikit-learn>=1.8.0",
     "joblib>=1.5.3",
 ]
 vllm = [
-    "vllm>=0.17.1",
-    "huggingface_hub>=1.7.1",
-    "torch>=2.10.0",
+    "vllm>=0.20.0",
+    "huggingface_hub>=1.12.0",
+    "torch>=2.11.0",
 ]
 webui = [
-    "fastapi>=0.135.1",
-    "uvicorn[standard]>=0.42.0",  # Includes websockets for WebSocket support
-    "pydantic>=2.12.5",
+    "fastapi>=0.136.1",
+    "uvicorn[standard]>=0.46.0",  # Includes websockets for WebSocket support
+    "pydantic>=2.13.3",
     "aiosqlite>=0.22.1",
     "httpx>=0.28.1",
-    "cryptography>=46.0.5",
-    "pymupdf>=1.27.2",
-    "Pillow>=12.1.1",  # For thumbnail image enhancement
-    "python-multipart>=0.0.22",  # For FastAPI form data handling
+    "cryptography>=47.0.0",
+    "pymupdf>=1.27.2.3",
+    "Pillow>=12.2.0",  # For thumbnail image enhancement
+    "python-multipart>=0.0.27",  # For FastAPI form data handling
     "python-jose[cryptography]>=3.5.0",  # For JWT token creation and validation (multi-user auth)
-    "itsdangerous>=2.1.0",  # For signed cookies / CSRF protection
+    "itsdangerous>=2.2.0",  # For signed cookies / CSRF protection
 ]
 
 [project.urls]

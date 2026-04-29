@@ -308,13 +308,14 @@ export default function LiveWebSocketManager() {
 
   // Cleanup all connections on unmount
   useEffect(() => {
+    const webSockets = wsMapRef.current
     return () => {
       logger.info('LiveWebSocketManager', 'Unmounting, closing all WebSocket connections')
-      wsMapRef.current.forEach((ws, sid) => {
+      webSockets.forEach((ws, sid) => {
         logger.info('LiveWebSocketManager', `Closing connection to session ${sid}`)
         ws.close()
       })
-      wsMapRef.current.clear()
+      webSockets.clear()
     }
   }, [])
 

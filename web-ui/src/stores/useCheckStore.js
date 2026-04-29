@@ -27,7 +27,6 @@ export const useCheckStore = create((set, get) => ({
     suggestions_count: 0,
     unverified_count: 0,
     hallucination_count: 0,
-    hallucination_count: 0,
     refs_with_issues: 0,
     refs_with_errors: 0,
     refs_with_warnings_only: 0,
@@ -68,7 +67,7 @@ export const useCheckStore = create((set, get) => ({
         warnings_count: 0,
         suggestions_count: 0,
         unverified_count: 0,
-    hallucination_count: 0,
+        hallucination_count: 0,
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
@@ -329,7 +328,7 @@ export const useCheckStore = create((set, get) => ({
         warnings_count: 0,
         suggestions_count: 0,
         unverified_count: 0,
-    hallucination_count: 0,
+        hallucination_count: 0,
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
@@ -374,7 +373,7 @@ export const useCheckStore = create((set, get) => ({
             historyStore.updateHistoryItemTitle(checkIdForMessage, data.paper_title)
           }
           break
-        case 'references_extracted':
+        case 'references_extracted': {
           // Store the extracted references so they can be displayed
           const extractedRefs = data.references 
             ? data.references.map((ref, index) => ({
@@ -394,6 +393,7 @@ export const useCheckStore = create((set, get) => ({
             extraction_method: data.extraction_method,
           })
           break
+        }
         case 'checking_reference':
           // Mark reference as 'checking' in the history store for concurrent sessions
           if (typeof data.index === 'number') {

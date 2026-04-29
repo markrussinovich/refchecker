@@ -30,7 +30,7 @@ export default function MainPanel() {
     currentCheckId: s.currentCheckId,
     clearStatusFilter: s.clearStatusFilter,
   })))
-  const { selectedCheck, selectedCheckId, isLoadingDetail, selectCheck } = useHistoryStore()
+  const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
 
   // Track scroll position to show/hide scroll-to-top button
   useEffect(() => {

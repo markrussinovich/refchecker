@@ -240,11 +240,7 @@ test.describe('Hallucination-pending ref lifecycle', () => {
 
     // ── Assertion 2: Unverified filter should NOT match refs showing as checking ──
     // Simulate clicking unverified filter
-    // The badge shouldn't be visible, but test the filter logic directly
-    await page.evaluate(() => {
-      // Access zustand store to set filter
-      const stores = document.querySelectorAll('[data-testid]');
-    });
+    // The badge should not be visible while references are still checking.
 
     // ── Phase 2: Hallucination phase starts ──
     // Backend marks unverified refs as hallucination_check_pending

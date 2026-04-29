@@ -61,7 +61,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
   const statusFilter = useCheckStore(s => s.statusFilter)
 
   // Memoize all derived data to ensure consistency within a render
-  const { sortedReferences, filteredReferences, normalizedFilters } = useMemo(() => {
+  const { sortedReferences, filteredReferences } = useMemo(() => {
     const filters = statusFilter.map(f => f.toLowerCase())
     
     const sorted = (references || []).slice().sort((a, b) => {
@@ -114,7 +114,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
       })
     })
 
-    return { sortedReferences: sorted, filteredReferences: filtered, normalizedFilters: filters }
+    return { sortedReferences: sorted, filteredReferences: filtered }
   }, [references, statusFilter, isCheckComplete])
 
   if (isLoading) {

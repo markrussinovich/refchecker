@@ -21,7 +21,6 @@ import { existsSync } from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = resolve(__dirname, '..');
-const backendDir = join(rootDir, 'backend');
 const srcDir = join(rootDir, 'src');
 
 const isWindows = process.platform === 'win32';
@@ -76,7 +75,7 @@ async function isServerRunning(port, path = '/') {
     clearTimeout(timeout);
     // Backend should return 200 or 404 (for root path), frontend returns 200
     return response.status < 500;
-  } catch (e) {
+  } catch (_e) {
     return false;
   }
 }
@@ -93,7 +92,7 @@ async function isBackendRunning() {
     
     clearTimeout(timeout);
     return response.ok;
-  } catch (e) {
+  } catch (_e) {
     return false;
   }
 }
@@ -119,18 +118,18 @@ function killProcessOnPort(port) {
               try {
                 // Use /T for tree kill to kill child processes too
                 execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
-              } catch (e) { /* ignore */ }
+              } catch (_e) { /* ignore */ }
             });
           }
           // Also try to kill by port using PowerShell
           try {
             execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
-          } catch (e) { /* ignore */ }
+          } catch (_e) { /* ignore */ }
           // Also kill any Python uvicorn processes that might be orphaned
           if (port === 8000) {
             try {
               execSync(`powershell -Command "Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'uvicorn' } | Stop-Process -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
-            } catch (e) { /* ignore */ }
+            } catch (_e) { /* ignore */ }
           }
           resolve();
         });
@@ -140,7 +139,7 @@ function killProcessOnPort(port) {
           resolve();
         });
       }
-    } catch (e) {
+    } catch (_e) {
       resolve();
     }
   });
@@ -186,7 +185,7 @@ function killProcessTree(child, label) {
       exec(`pkill -TERM -P ${child.pid} 2>/dev/null || true`, () => {
         try {
           process.kill(child.pid, 'SIGTERM');
-        } catch (e) { /* ignore */ }
+        } catch (_e) { /* ignore */ }
       });
     } else {
       process.kill(child.pid, 'SIGTERM');
@@ -203,11 +202,11 @@ function killProcessOnPortSync(port) {
     if (isWindows) {
       try {
         execSync(`powershell -Command "Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"`, { stdio: 'ignore' });
-      } catch (e) { /* ignore */ }
+      } catch (_e) { /* ignore */ }
       if (port === 8000) {
         try {
           execSync(`powershell -Command "Get-Process python -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match 'uvicorn' } | Stop-Process -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
-        } catch (e) { /* ignore */ }
+        } catch (_e) { /* ignore */ }
       }
     } else {
       execSync(`pids="$(lsof -tiTCP:${port} -sTCP:LISTEN 2>/dev/null || true)"; if [ -n "$pids" ]; then kill -9 $pids 2>/dev/null || true; fi; fuser -k ${port}/tcp 2>/dev/null || true`, { stdio: 'ignore' });

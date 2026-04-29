@@ -289,7 +289,7 @@ export default function StatusSection() {
   let displayMessage = ''
   let displayProgress = 0
   let displayTotalRefs = 0
-  let displayProcessedRefs = 0
+  let displayProcessedRefs
   let displayLlmProvider = null
   let displayLlmModel = null
   let displayExtractionMethod = null
@@ -308,7 +308,6 @@ export default function StatusSection() {
     displayMessage = checkStoreMessage
     displayProgress = checkStoreProgress
     displayTotalRefs = checkStoreStats?.total_refs || 0
-    displayProcessedRefs = checkStoreStats?.processed_refs || 0
     // Get LLM info and extraction method from selectedCheck (history) since it's not in checkStore
     displayLlmProvider = selectedCheck?.llm_provider
     displayLlmModel = selectedCheck?.llm_model

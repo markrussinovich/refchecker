@@ -135,7 +135,7 @@ export default function HistoryList() {
 
   return (
     <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-      {groupedHistory.map((group, index) => {
+      {groupedHistory.map((group) => {
         if (group.type === 'batch') {
           return (
             <BatchGroup

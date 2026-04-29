@@ -18,7 +18,7 @@ import { useKeyStore } from './useKeyStore'
  * Login helpers redirect the browser to the OAuth provider URL.
  * After OAuth completes, the server sets the cookie and redirects to /.
  */
-export const useAuthStore = create((set, get) => {
+export const useAuthStore = create((set, _get) => {
   // Listen for 401 events dispatched by the api response interceptor
   if (typeof window !== 'undefined') {
     window.addEventListener('auth:unauthorized', () => {

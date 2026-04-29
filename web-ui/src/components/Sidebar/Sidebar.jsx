@@ -79,11 +79,6 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
     }
   }, [isResizing, resize, stopResizing])
 
-  // Close mobile drawer when a history item is selected
-  const handleMobileSelect = useCallback(() => {
-    if (onMobileClose) onMobileClose()
-  }, [onMobileClose])
-
   const sidebarContent = (
     <>
       {/* New Refcheck button - fixed at top */}

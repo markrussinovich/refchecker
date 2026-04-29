@@ -24,7 +24,7 @@ function shouldLog(level) {
 function addToDebugStore(level, component, message, data) {
   try {
     useDebugStore.getState().addLog(level, component, message, data)
-  } catch (e) {
+  } catch (_e) {
     // Ignore errors if store not ready
   }
 }

@@ -188,7 +188,7 @@ function CollapsibleText({ text }) {
 /**
  * Individual reference card matching CLI output format
  */
-const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs }) {
+const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const normalizeForComparison = (value) => String(value || '')

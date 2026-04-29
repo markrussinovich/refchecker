@@ -406,8 +406,6 @@ export const useHistoryStore = create((set, get) => ({
 
     // Check if we already have in-memory data for an in-progress check (from WebSocket updates)
     const existingHistoryItem = get().history.find(h => h.id === id)
-    const hasLiveUpdates = existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.total_refs > 0
-
     // If we have an in-progress check with results in memory, use that directly without API call
     if (existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.results?.length > 0) {
       set({ 

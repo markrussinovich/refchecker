@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { useKeyStore } from '../../stores/useKeyStore'
@@ -10,14 +10,9 @@ export default function SemanticScholarConfig() {
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const [isEditing, setIsEditing] = useState(false)
   const [apiKey, setApiKey] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
   const [error, setError] = useState(null)
-
-  useEffect(() => {
-    setError(null)
-  }, [])
 
   const handleSave = async () => {
     if (!apiKey.trim()) {
@@ -76,17 +71,6 @@ export default function SemanticScholarConfig() {
     setIsEditing(false)
     setApiKey('')
     setError(null)
-  }
-
-  if (isLoading) {
-    return (
-      <div 
-        className="text-sm"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        Loading...
-      </div>
-    )
   }
 
   return (
