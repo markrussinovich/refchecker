@@ -2616,9 +2616,7 @@ async def start_batch_check_files(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
-        semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
-            _form_default_value(semantic_scholar_api_key)
-        )
+        semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -2670,6 +2668,10 @@ async def start_batch_check_files(
         
         if not files_to_process:
             raise HTTPException(status_code=400, detail="No valid files found")
+
+        semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
+            semantic_scholar_api_key
+        )
 
         llm_provider, llm_model, effective_api_key, endpoint = await _resolve_llm_config_for_request(
             user_id=user_id,
