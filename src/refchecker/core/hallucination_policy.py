@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -555,6 +555,16 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     error_type = (error_entry.get('error_type') or '').lower()
     error_details = (error_entry.get('error_details') or '').lower()
 
+    # Consolidation may collapse multiple warning-only verifier issues into a
+    # single ``error_type: multiple`` record.  Those are metadata quality notes
+    # (for example arXiv version-update warnings), not hallucination candidates.
+    original_errors = error_entry.get('_original_errors') or []
+    if original_errors and all(
+        issue.get('warning_type') and not issue.get('error_type')
+        for issue in original_errors
+    ):
+        return False
+
     if error_type in {'api_failure', 'processing_failed'}:
         return False
 
@@ -1020,6 +1030,39 @@ def run_hallucination_check(
     return None
 
 
+def _metadata_has_found_reference(assessment: Dict[str, Any]) -> bool:
+    return bool(
+        assessment.get('found_title')
+        or assessment.get('found_authors')
+        or assessment.get('found_venue')
+        or assessment.get('found_year')
+        or assessment.get('link')
+    )
+
+
+def _reverify_with_standard_refcheck(
+    reference: Dict[str, Any],
+    old_errors: List[Dict[str, Any]],
+    assessment: Dict[str, Any],
+    standard_refchecker: Optional[Callable[[Dict[str, Any]], Any]],
+) -> Optional[tuple[List[Dict[str, Any]], Dict[str, Any]]]:
+    """Compare the citation against the LLM-returned authoritative match.
+
+    The LLM has already done the search step.  This function intentionally
+    does *not* perform a fresh DB/API lookup, because a lookup can reproduce
+    the original bad match for ambiguous titles.  Instead, it treats the
+    LLM-returned title/authors/venue/year/link as the verifier's matched data
+    and runs the normal field-level comparison against the original citation.
+
+    ``standard_refchecker`` is accepted for backward-compatible call sites but
+    deliberately unused.
+    """
+    new_errors = _reverify_with_llm_metadata(reference, old_errors, assessment)
+    if new_errors is None:
+        return None
+    return new_errors, assessment
+
+
 def _reverify_with_llm_metadata(
     reference: Dict[str, Any],
     old_errors: List[Dict[str, Any]],
@@ -1145,6 +1188,7 @@ def apply_hallucination_verdict(
     result: Dict[str, Any],
     assessment: Dict[str, Any],
     reference: Optional[Dict[str, Any]] = None,
+    standard_refchecker: Optional[Callable[[Dict[str, Any]], Any]] = None,
 ) -> Dict[str, Any]:
     """Apply a hallucination assessment verdict to a reference result.
 
@@ -1168,6 +1212,11 @@ def apply_hallucination_verdict(
         etc.).  When provided and the LLM returned found metadata, the
         errors are re-computed by comparing the cited reference against
         the LLM-found data.
+    standard_refchecker : callable, optional
+        Deprecated compatibility parameter.  LLM-found metadata is treated as
+        the authoritative match returned by search and is compared directly
+        against the original citation; this function must not perform a fresh
+        database lookup for that metadata.
 
     Returns
     -------
@@ -1198,9 +1247,15 @@ def apply_hallucination_verdict(
 
     if verdict == 'LIKELY':
         if reference is not None:
-            llm_issues = _reverify_with_llm_metadata(
-                reference, [], assessment,
+            rechecked = _reverify_with_standard_refcheck(
+                reference, [], assessment, standard_refchecker,
             )
+            if rechecked is not None:
+                llm_issues, assessment = rechecked
+            else:
+                llm_issues = _reverify_with_llm_metadata(
+                    reference, [], assessment,
+                )
             if llm_issues is not None:
                 rechecked_errors, rechecked_warnings = _split_reverified_issues(llm_issues)
                 remaining_errors = [
@@ -1208,7 +1263,8 @@ def apply_hallucination_verdict(
                     if e.get('error_type') not in ('unverified', 'info', None)
                     and not e.get('is_suggestion')
                 ]
-                if not remaining_errors and ha_link and ha_link.startswith('http'):
+                current_link = assessment.get('link') or ha_link
+                if not remaining_errors and current_link and current_link.startswith('http'):
                     corrected_assessment = dict(assessment)
                     corrected_assessment['original_verdict'] = verdict
                     corrected_assessment['verdict'] = 'UNLIKELY'
@@ -1220,7 +1276,7 @@ def apply_hallucination_verdict(
                     result['errors'] = []
                     result['warnings'] = rechecked_warnings
                     result['authoritative_urls'] = [
-                        {"type": "llm_verified", "url": ha_link}
+                        {"type": "llm_verified", "url": current_link}
                     ]
                     result['matched_database'] = 'LLM search'
                     result['status'] = 'warning' if rechecked_warnings else 'verified'
@@ -1234,7 +1290,25 @@ def apply_hallucination_verdict(
         result['status'] = 'hallucination'
 
     elif verdict == 'UNLIKELY' and is_upgradeable:
-        if ha_link and ha_link.startswith('http'):
+        rechecked = None
+        if reference is not None:
+            rechecked = _reverify_with_standard_refcheck(
+                reference, result.get('errors', []), assessment, standard_refchecker,
+            )
+        if rechecked is not None:
+            rechecked_issues, assessment = rechecked
+            result['hallucination_assessment'] = assessment
+            result['errors'], result['warnings'] = _split_reverified_issues(rechecked_issues)
+            if (assessment.get('link') or '').startswith('http'):
+                result['authoritative_urls'] = [{"type": "standard_refcheck", "url": assessment['link']}]
+            result['matched_database'] = 'LLM search + standard refcheck'
+            remaining_errors = [
+                e for e in result['errors']
+                if e.get('error_type') not in ('unverified', 'info', None)
+                and not e.get('is_suggestion')
+            ]
+            result['status'] = 'error' if remaining_errors else 'verified'
+        elif ha_link and ha_link.startswith('http'):
             result['authoritative_urls'] = list(
                 result.get('authoritative_urls', [])
             )
@@ -1262,7 +1336,7 @@ def apply_hallucination_verdict(
                 and not e.get('is_suggestion')
             ]
             result['status'] = 'error' if remaining_errors else 'verified'
-        else:
+        elif standard_refchecker is None:
             # LLM confirmed the reference is real (UNLIKELY) but didn't
             # provide a link.  Still strip the unverified error and
             # upgrade the status so the ref isn't counted as unverified.
@@ -1285,15 +1359,23 @@ def apply_hallucination_verdict(
         # new DB result).  This naturally resolves false-positive errors
         # from wrong-edition DB matches.
         if reference is not None:
-            new_errors = _reverify_with_llm_metadata(
-                reference, result.get('errors', []), assessment,
+            rechecked = _reverify_with_standard_refcheck(
+                reference, result.get('errors', []), assessment, standard_refchecker,
             )
+            if rechecked is not None:
+                new_errors, assessment = rechecked
+                result['hallucination_assessment'] = assessment
+            else:
+                new_errors = _reverify_with_llm_metadata(
+                    reference, result.get('errors', []), assessment,
+                )
             if new_errors is not None:
                 result['errors'], result['warnings'] = _split_reverified_issues(new_errors)
                 # Update the verified URL to the LLM-found source
-                if ha_link and ha_link.startswith('http'):
+                current_link = assessment.get('link') or ha_link
+                if current_link and current_link.startswith('http'):
                     result['authoritative_urls'] = [
-                        {"type": "llm_verified", "url": ha_link}
+                        {"type": "llm_verified", "url": current_link}
                     ]
                     result['matched_database'] = 'LLM search'
                 remaining_errors = [

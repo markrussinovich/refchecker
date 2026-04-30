@@ -1,10 +1,13 @@
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from refchecker.core.bulk_pipeline import (
+    BulkPaperResult,
     BulkLLMExtractionBatcher,
     BulkProgressReporter,
     BulkVerificationCache,
+    _finalize_hallucination_on_result,
     extract_bibliography_bulk,
     parse_references_bulk,
 )
@@ -279,3 +282,66 @@ def test_verification_cache_skips_short_titles():
     cache.put(ref, 'should_not_store')
     assert cache.size == 0
     assert cache.get(ref) is None
+
+
+def test_bulk_finalize_rechecks_against_llm_returned_match():
+    reference = {
+        'title': 'Membership inference attacks against language models via neighbourhood comparison',
+        'authors': ['Justus Mattern', 'Fatemehsadat Mireshghallah'],
+        'year': 2023,
+        'venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+    }
+    error_entry = {
+        'ref_title': reference['title'],
+        'original_reference': reference,
+        '_original_errors': [{'error_type': 'author', 'error_details': 'Wrong database match'}],
+    }
+    result = BulkPaperResult(
+        index=0,
+        input_spec='fixture://paper',
+        paper_id='paper',
+        title='Paper',
+        source_url='fixture://paper',
+        elapsed_seconds=1.0,
+        references_processed=1,
+        total_errors_found=1,
+        total_warnings_found=0,
+        total_info_found=0,
+        total_unverified_refs=0,
+        total_arxiv_refs=0,
+        total_non_arxiv_refs=1,
+        total_other_refs=0,
+        papers_with_errors=1,
+        papers_with_warnings=0,
+        papers_with_info=0,
+        errors=[error_entry],
+    )
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The checker matched a different paper, but search found this citation.',
+        'link': 'https://aclanthology.org/2023.findings-acl.719/',
+        'found_title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+        'found_authors': 'Justus Mattern, Fatemehsadat Mireshghallah',
+        'found_venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+        'found_year': '2023',
+    }
+    future = SimpleNamespace(result=lambda timeout=None: assessment)
+    checker = SimpleNamespace(
+        verify_reference_standard=MagicMock(return_value=(
+            None,
+            'https://aclanthology.org/2023.findings-acl.719/',
+            {
+                'title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+                'authors': [{'name': 'Justus Mattern'}, {'name': 'Fatemehsadat Mireshghallah'}],
+                'venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+                'year': 2023,
+            },
+        ))
+    )
+
+    _finalize_hallucination_on_result(result, [(checker, error_entry, future)])
+
+    checker.verify_reference_standard.assert_not_called()
+    assert result.errors[0]['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert result.errors[0]['hallucination_assessment']['original_verdict'] == 'LIKELY'
+    assert result.errors[0]['matched_database'] == 'LLM search'

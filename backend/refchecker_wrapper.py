@@ -1338,6 +1338,16 @@ class ProgressRefChecker:
 
         return self.checker.verify_reference(reference)
 
+    def _standard_refcheck_for_hallucination(self, reference: Dict[str, Any]):
+        """Run the normal WebUI verifier for LLM-found metadata.
+
+        The shared hallucination policy expects the CLI tuple order
+        ``(errors, url, verified_data)``; WebUI's internal verifier returns
+        ``(verified_data, errors, url)``.
+        """
+        verified_data, errors, url = self._verify_reference(dict(reference))
+        return errors, url, verified_data
+
     def _check_reference_sync(self, reference: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Synchronous version of reference checking for thread pool"""
         try:
@@ -1409,7 +1419,12 @@ class ProgressRefChecker:
             ):
                 # Defer to async LLM check instead of applying immediately
                 return ('needs_async', None)
-            updated = apply_hallucination_verdict(result, assessment, reference=reference)
+            updated = apply_hallucination_verdict(
+                result,
+                assessment,
+                reference=reference,
+                standard_refchecker=self._standard_refcheck_for_hallucination,
+            )
             return ('resolved', updated)
         elif outcome == 'skip':
             return ('skip', None)
@@ -1643,7 +1658,12 @@ class ProgressRefChecker:
         if has_url_refs_paper and assessment.get('verdict') == 'UNLIKELY':
             return result
 
-        result = apply_hallucination_verdict(result, assessment, reference=reference)
+        result = apply_hallucination_verdict(
+            result,
+            assessment,
+            reference=reference,
+            standard_refchecker=self._standard_refcheck_for_hallucination,
+        )
         return result
 
     async def _check_single_reference_with_limit(

@@ -99,6 +99,92 @@ def test_apply_hallucination_verdict_rechecks_found_venue():
     assert updated['warnings'][0]['ref_venue_correct'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
 
 
+def test_apply_likely_verdict_uses_llm_match_without_fresh_lookup():
+    result = {
+        'status': 'error',
+        'errors': [{'error_type': 'author', 'error_details': 'Wrong database match'}],
+    }
+    reference = {
+        'title': 'Membership inference attacks against language models via neighbourhood comparison',
+        'authors': ['Justus Mattern', 'Fatemehsadat Mireshghallah'],
+        'year': 2023,
+        'venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+    }
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The checker matched a different paper, but search found this citation.',
+        'link': 'https://aclanthology.org/2023.findings-acl.719/',
+        'found_title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+        'found_authors': 'Justus Mattern, Fatemehsadat Mireshghallah',
+        'found_venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+        'found_year': '2023',
+    }
+    standard_refchecker = MagicMock(return_value=(
+        [{'error_type': 'unverified', 'error_details': 'Not found by standard checker'}],
+        None,
+        None,
+    ))
+
+    updated = apply_hallucination_verdict(
+        result,
+        assessment,
+        reference,
+        standard_refchecker=standard_refchecker,
+    )
+
+    standard_refchecker.assert_not_called()
+    assert updated['status'] == 'verified'
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['hallucination_assessment']['original_verdict'] == 'LIKELY'
+
+
+def test_apply_likely_verdict_clears_against_llm_returned_match():
+    result = {
+        'status': 'error',
+        'errors': [{'error_type': 'author', 'error_details': 'Wrong database match'}],
+    }
+    reference = {
+        'title': 'Membership inference attacks against language models via neighbourhood comparison',
+        'authors': ['Justus Mattern', 'Fatemehsadat Mireshghallah'],
+        'year': 2023,
+        'venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+    }
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The checker matched a different paper, but search found this citation.',
+        'link': 'https://aclanthology.org/2023.findings-acl.719/',
+        'found_title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+        'found_authors': 'Justus Mattern, Fatemehsadat Mireshghallah',
+        'found_venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+        'found_year': '2023',
+    }
+    standard_refchecker = MagicMock(return_value=(
+        None,
+        'https://aclanthology.org/2023.findings-acl.719/',
+        {
+            'title': 'Membership Inference Attacks against Language Models via Neighbourhood Comparison',
+            'authors': [
+                {'name': 'Justus Mattern'},
+                {'name': 'Fatemehsadat Mireshghallah'},
+            ],
+            'venue': 'Findings of the Association for Computational Linguistics: ACL 2023',
+            'year': 2023,
+        },
+    ))
+
+    updated = apply_hallucination_verdict(
+        result,
+        assessment,
+        reference,
+        standard_refchecker=standard_refchecker,
+    )
+
+    standard_refchecker.assert_not_called()
+    assert updated['status'] == 'verified'
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['hallucination_assessment']['original_verdict'] == 'LIKELY'
+
+
 def test_apply_hallucination_verdict_labels_unlinked_llm_upgrade():
     result = {
         'status': 'unverified',
@@ -142,6 +228,28 @@ def test_year_only_issue_should_not_be_checked():
         'ref_title': 'A Real Paper',
         'ref_authors_cited': 'Author One',
     }
+    assert should_check_hallucination(entry) is False
+
+
+def test_warning_only_consolidated_issue_should_not_be_checked():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Title mismatch\nAuthor mismatch',
+        'ref_title': 'SynthVLM: High-Efficiency and High-Quality Synthetic Data for Vision Language Models',
+        'ref_authors_cited': 'Zheng Liu, Hao Liang, Bozhou Li, Tianyi Bai',
+        'ref_verified_url': 'https://arxiv.org/abs/2407.20756v4',
+        '_original_errors': [
+            {
+                'warning_type': 'title (v4 vs v5 update)',
+                'warning_details': 'Title mismatch from latest arXiv version',
+            },
+            {
+                'warning_type': 'author (v4 vs v5 update)',
+                'warning_details': 'Author mismatch from latest arXiv version',
+            },
+        ],
+    }
+
     assert should_check_hallucination(entry) is False
 
 

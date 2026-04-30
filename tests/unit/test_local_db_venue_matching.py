@@ -157,6 +157,26 @@ def test_venue_match_no_warning(_make_checker):
     assert len(venue_issues) == 0, f"Unexpected venue issue: {venue_issues}"
 
 
+def test_markup_normalized_title_fallback_finds_math_title(_make_checker):
+    checker = _make_checker([{
+        "paperId": "openalex:2043804332",
+        "title": "Sampling algorithms for <i>l</i><sub>2</sub> regression and applications",
+        "normalized_paper_title": "samplingalgorithmsforilisub2subregressionandapplications",
+        "year": 2006,
+        "authors": ["Petros Drineas", "Michael W. Mahoney", "S. Muthukrishnan"],
+        "venue": "Proceedings of the seventeenth annual ACM-SIAM symposium on Discrete algorithm - SODA '06",
+    }])
+
+    match = checker.find_best_match(
+        "Sampling algorithms for ℓ2 regression and applications",
+        ["Petros Drineas", "Michael W Mahoney", "Shan Muthukrishnan"],
+        2006,
+    )
+
+    assert match is not None
+    assert match["paperId"] == "openalex:2043804332"
+
+
 # ── Missing venue ───────────────────────────────────────────────────
 
 def test_missing_venue_produces_error(_make_checker):

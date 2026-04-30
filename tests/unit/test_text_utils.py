@@ -22,9 +22,19 @@ from refchecker.utils.text_utils import (
     is_year_substantially_different,
     normalize_diacritics,
     normalize_paper_title,
+    compare_titles_with_latex_cleaning,
     compare_authors
 )
 from refchecker.utils.url_utils import extract_arxiv_id_from_url
+
+
+def test_html_math_title_markup_matches_unicode_script_l():
+    cited = "Sampling algorithms for ℓ2 regression and applications"
+    stored = "Sampling algorithms for <i>l</i><sub>2</sub> regression and applications"
+
+    assert normalize_paper_title(cited) == normalize_paper_title(stored)
+    assert compare_titles_with_latex_cleaning(cited, stored) == 1.0
+    assert calculate_title_similarity(cited, stored) == 1.0
 
 
 class TestNameMatching:

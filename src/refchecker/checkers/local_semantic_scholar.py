@@ -404,6 +404,37 @@ class LocalNonArxivReferenceChecker:
                     if results:
                         logger.debug(f"Found {len(results)} results using DB-style normalized title match")
                         return process_semantic_scholar_results(results)
+
+                # Strategy 1c: Existing local DBs may contain normalized titles
+                # produced from API HTML/math markup, e.g. OpenAlex stores
+                # ``<i>l</i><sub>2</sub>`` as ``ilisub2sub``.  Use a narrow
+                # token-substring fallback so Unicode/math titles like ``ℓ2``
+                # can still find those rows without a broad table scan.
+                significant_tokens = [
+                    re.sub(r'[^a-z0-9]', '', token)
+                    for token in title_lower.split()
+                ]
+                significant_tokens = [
+                    token for token in significant_tokens
+                    if len(token) >= 4 and token not in {'with', 'from', 'into', 'using'}
+                ]
+                if len(significant_tokens) >= 3:
+                    token_clauses = ' AND '.join(
+                        'normalized_paper_title LIKE ?'
+                        for _ in significant_tokens[:5]
+                    )
+                    query = f"SELECT * FROM papers WHERE {token_clauses} LIMIT 25"
+                    params = [f"%{token}%" for token in significant_tokens[:5]]
+                    start_time = time.time()
+                    cursor.execute(query, params)
+                    results.extend([dict(row) for row in cursor.fetchall()])
+                    execution_time = time.time() - start_time
+
+                    log_query_debug(query, params, execution_time, len(results), "markup-tolerant token title match", self.database_label)
+
+                    if results:
+                        logger.debug(f"Found {len(results)} results using markup-tolerant token title match")
+                        return process_semantic_scholar_results(results)
         except Exception as e:
             logger.warning(f"Error in normalized title search: {e}")
         

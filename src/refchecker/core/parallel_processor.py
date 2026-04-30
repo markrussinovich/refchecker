@@ -267,7 +267,9 @@ class ParallelReferenceProcessor:
                                         {'status': _status, 'errors': current_result.errors},
                                         assessment,
                                         reference=current_result.reference,
+                                        standard_refchecker=lambda found_ref: self.base_checker.verify_reference_standard(None, found_ref),
                                     )
+                                    current_result.hallucination_assessment = tmp.get('hallucination_assessment', assessment)
                                     current_result.errors = tmp['errors']
                         
                         # Print the result using base checker's output methods

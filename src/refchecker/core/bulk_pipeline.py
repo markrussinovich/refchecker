@@ -18,7 +18,7 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
+from refchecker.core.hallucination_policy import apply_hallucination_verdict, build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
 
@@ -1449,7 +1449,7 @@ def _submit_hallucination_assessments_async(
             ):
                 # Defer to LLM instead of applying immediately
                 future = hallucination_pool.submit(filtered, llm_verifier, web_searcher)
-                pending.append((error_entry, future))
+                pending.append((checker, error_entry, future))
                 continue
             error_entry['hallucination_assessment'] = assessment
             continue
@@ -1463,7 +1463,7 @@ def _submit_hallucination_assessments_async(
             continue
 
         future = hallucination_pool.submit(filtered, llm_verifier, web_searcher)
-        pending.append((error_entry, future))
+        pending.append((checker, error_entry, future))
 
     return pending
 
@@ -1478,11 +1478,25 @@ def _finalize_hallucination_on_result(
     URL-verified UNLIKELY entries, matching the CLI single-paper behaviour.
     """
     # Collect LLM results
-    for error_entry, future in pending_tasks:
+    for checker, error_entry, future in pending_tasks:
         try:
             assessment = future.result(timeout=120)
             if assessment:
-                error_entry['hallucination_assessment'] = assessment
+                reference = error_entry.get('original_reference') or {}
+                raw_errors = error_entry.get('_original_errors') or []
+                has_unverified = any((e.get('error_type') or '') == 'unverified' for e in raw_errors)
+                applied = apply_hallucination_verdict(
+                    {'status': 'unverified' if has_unverified else 'error', 'errors': raw_errors, '_raw_errors': raw_errors},
+                    assessment,
+                    reference=reference,
+                    standard_refchecker=lambda found_ref, checker=checker: checker.verify_reference_standard(None, found_ref),
+                )
+                error_entry['hallucination_assessment'] = applied.get('hallucination_assessment', assessment)
+                if applied.get('matched_database'):
+                    error_entry['matched_database'] = applied['matched_database']
+                authoritative_urls = applied.get('authoritative_urls') or []
+                if authoritative_urls:
+                    error_entry['ref_verified_url'] = authoritative_urls[0].get('url', error_entry.get('ref_verified_url', ''))
         except Exception as exc:
             logger.warning('Hallucination check failed for %s: %s',
                            error_entry.get('ref_title', '?')[:60], exc)

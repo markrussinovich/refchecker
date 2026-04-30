@@ -6407,8 +6407,21 @@ class ArxivReferenceChecker:
         """
         # If errors found, add to dataset and optionally print details
         if errors:
+            from refchecker.core.hallucination_policy import apply_hallucination_verdict
+
             # Check if there's an unverified error among the errors
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in errors)
+
+            def _apply_hallucination_for_decision(assessment):
+                if not assessment:
+                    return None, {}
+                applied = apply_hallucination_verdict(
+                    {'status': 'unverified' if has_unverified_error else 'error', 'errors': errors},
+                    assessment,
+                    reference=reference,
+                    standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                )
+                return applied.get('hallucination_assessment', assessment), applied
             
             if has_unverified_error:
                 # Check if the URL was confirmed to contain the paper
@@ -6425,8 +6438,9 @@ class ArxivReferenceChecker:
                         url_assessment = self._run_and_return_hallucination_assessment(
                             reference, errors, verified_data=verified_data, reference_url=reference_url
                         )
+                    url_assessment, applied_hallucination = _apply_hallucination_for_decision(url_assessment)
                     
-                    if url_assessment and url_assessment.get('verdict') == 'UNLIKELY':
+                    if url_assessment and applied_hallucination.get('status') == 'verified':
                         # LLM confirmed the reference is real — treat as verified
                         cited_url = reference.get('cited_url') or reference.get('url', '')
                         if print_output:
@@ -6435,7 +6449,7 @@ class ArxivReferenceChecker:
                             if explanation:
                                 print(f"         LLM confirmed: {explanation}")
                         return  # Don't add to errors — reference is verified
-                    elif url_assessment and url_assessment.get('verdict') == 'LIKELY':
+                    elif url_assessment and applied_hallucination.get('status') == 'hallucination':
                         # LLM says likely hallucinated despite URL containing title
                         self.total_unverified_refs += 1
                         if not debug_mode and print_output:
@@ -6454,7 +6468,8 @@ class ArxivReferenceChecker:
                         llm_assessment = self._run_and_return_hallucination_assessment(
                             reference, errors, verified_data=verified_data, reference_url=reference_url
                         )
-                    if llm_assessment and llm_assessment.get('verdict') == 'UNLIKELY':
+                    llm_assessment, applied_hallucination = _apply_hallucination_for_decision(llm_assessment)
+                    if llm_assessment and applied_hallucination.get('status') == 'verified':
                         # LLM confirmed the reference is real - don't count as unverified
                         llm_link = llm_assessment.get('link', '')
                         if print_output:
@@ -6489,6 +6504,14 @@ class ArxivReferenceChecker:
             # If the parallel printer already ran the assessment, just store it
             # on the error record instead of re-calling the LLM.
             if precomputed_hallucination:
+                _has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
+                applied = apply_hallucination_verdict(
+                    {'status': 'unverified' if _has_unverified else 'error', 'errors': errors},
+                    precomputed_hallucination,
+                    reference=reference,
+                    standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                )
+                precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
                 if error_entry_record is not None:
                     error_entry_record['hallucination_assessment'] = precomputed_hallucination
                 elif self.errors:
@@ -6801,6 +6824,16 @@ class ArxivReferenceChecker:
 
         if not assessment:
             return
+
+        from refchecker.core.hallucination_policy import apply_hallucination_verdict
+        has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
+        applied = apply_hallucination_verdict(
+            {'status': 'unverified' if has_unverified else 'error', 'errors': errors},
+            assessment,
+            reference=reference,
+            standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+        )
+        assessment = applied.get('hallucination_assessment', assessment)
 
         # Store assessment on the exact error record for this reference so
         # later references cannot overwrite earlier report entries.

@@ -1,8 +1,9 @@
 % Hallucination detection test fixture.
 %
-% 9 references designed to exercise hallucination triage:
+% 10 references designed to exercise hallucination triage:
 %   1 accurate        — correct metadata, should verify cleanly
 %   3 minor issues    — real papers with small citation errors
+%   1 recheck case    — real paper that must be cleared only after standard refcheck
 %   5 hallucinated    — fabricated references from documented LLM patterns
 %
 % The three hallucinated entries are modeled on patterns reported in
@@ -50,6 +51,18 @@
   booktitle = {Proceedings of the International Conference on Machine Learning},
   year      = {2014},
   url       = {https://arxiv.org/abs/1406.2661}
+}
+
+% 4b. Real ACL paper used by hallucination-LLM regression tests: if the
+%     checker initially matches the wrong database record for this URL/title,
+%     LLM-found metadata must go back through the standard refcheck path before
+%     the hallucination flag is cleared.
+@inproceedings{mattern2023membership_refcheck_required,
+  title     = {Membership inference attacks against language models via neighbourhood comparison},
+  author    = {Justus Mattern and Fatemehsadat Mireshghallah and Zhijing Jin and Bernhard Schölkopf and Mrinmaya Sachan and Taylor Berg-Kirkpatrick},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL 2023},
+  year      = {2023},
+  url       = {https://aclanthology.org/2023.findings-acl.719/}
 }
 
 % ── 5-9. HALLUCINATED ───────────────────────────────────────────────

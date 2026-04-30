@@ -6,9 +6,19 @@ Text processing utilities for ArXiv Reference Checker
 import re
 import logging
 import unicodedata
+import html
 from typing import List
 
 logger = logging.getLogger(__name__)
+
+
+def strip_html_markup(text: str) -> str:
+    """Remove simple HTML/XML markup while preserving tag contents."""
+    if not isinstance(text, str):
+        return str(text) if text is not None else ''
+    text = html.unescape(text)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    return re.sub(r'\s+', ' ', text).strip()
 
 
 def expand_abbreviations(text: str) -> str:
@@ -635,6 +645,10 @@ def clean_title_for_search(title):
     if not isinstance(title, str):
         return str(title) if title is not None else ''
     
+    # Strip markup to handle math formatting and other title markup
+    # from APIs (e.g. OpenAlex/DBLP HTML subscript tags).
+    title = strip_html_markup(title)
+
     # Strip LaTeX commands to handle math formatting and other LaTeX markup
     title = strip_latex_commands(title)
     
@@ -798,8 +812,10 @@ def normalize_paper_title(title: str) -> str:
     if not title:
         return ""
     
-    # Strip LaTeX commands first to handle math formatting consistently
-    normalized = strip_latex_commands(title)
+    # Strip markup first to handle math formatting consistently, including
+    # API titles such as "<i>l</i><sub>2</sub>".
+    normalized = strip_html_markup(title)
+    normalized = strip_latex_commands(normalized)
     
     # Normalize diacritics (ü -> u, é -> e, etc.) for consistent comparison
     normalized = normalize_diacritics(normalized)
@@ -910,6 +926,7 @@ def normalize_diacritics(text: str) -> str:
     # Including common transliterations
     special_chars = {
         'ł': 'l', 'Ł': 'L',
+        'ℓ': 'l', 'ℒ': 'L',
         'đ': 'd', 'Đ': 'D', 
         'ħ': 'h', 'Ħ': 'H',
         'ø': 'o', 'Ø': 'O',
@@ -4296,9 +4313,9 @@ def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) ->
     if not cited_title or not database_title:
         return 0.0
     
-    # Clean LaTeX commands from cited title to match database format.
-    clean_cited = strip_latex_commands(cited_title)
-    clean_database = strip_latex_commands(database_title)
+    # Clean markup from cited title and database title to match formatting.
+    clean_cited = strip_latex_commands(strip_html_markup(cited_title))
+    clean_database = strip_latex_commands(strip_html_markup(database_title))
 
     artifact_cited = normalize_extracted_title_artifacts(clean_cited)
     artifact_database = normalize_extracted_title_artifacts(clean_database)
@@ -4324,6 +4341,7 @@ def normalize_extracted_title_artifacts(title: str) -> str:
     if not isinstance(title, str):
         return str(title) if title is not None else ''
 
+    title = title.replace('ℓ', 'l').replace('ℒ', 'L')
     title = normalize_apostrophes(title)
 
     # Join detached combining marks/accent glyphs back to the following token so
@@ -4333,6 +4351,7 @@ def normalize_extracted_title_artifacts(title: str) -> str:
 
     # PDF extraction can put spaces between letters and following math/power
     # marks: "c ^2m^3" should compare with "C^2M^3".
+    title = re.sub(r'(?i)\b([a-z])\s+(\d)\b', r'\1\2', title)
     title = re.sub(r'(?i)\b([a-z])\s+[\^ˆ]\s*(\d)', r'\1^\2', title)
     title = re.sub(r'(?i)(\d)\s+([a-z])\s*[\^ˆ]\s*(\d)', r'\1\2^\3', title)
 
@@ -4381,6 +4400,9 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     """
     if not title1 or not title2:
         return 0.0
+
+    title1 = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(title1)))
+    title2 = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(title2)))
     
     # Normalize titles for comparison
     t1 = title1.lower().strip()
