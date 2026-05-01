@@ -1040,6 +1040,18 @@ def _metadata_has_found_reference(assessment: Dict[str, Any]) -> bool:
     )
 
 
+def _parse_llm_found_authors(found_authors: str, cited_author_count: int) -> List[str]:
+    from refchecker.utils.text_utils import parse_authors_with_initials
+
+    authors = parse_authors_with_initials(found_authors)
+    if cited_author_count and len(authors) == cited_author_count * 2:
+        return [
+            f"{authors[i + 1]} {authors[i]}"
+            for i in range(0, len(authors), 2)
+        ]
+    return authors
+
+
 def _reverify_with_standard_refcheck(
     reference: Dict[str, Any],
     old_errors: List[Dict[str, Any]],
@@ -1122,7 +1134,7 @@ def _reverify_with_llm_metadata(
         # as Semantic Scholar)
         llm_author_list = [
             {'name': a.strip()}
-            for a in found_authors.split(',')
+            for a in _parse_llm_found_authors(found_authors, len(cited_authors))
             if a.strip()
         ]
         if llm_author_list:
