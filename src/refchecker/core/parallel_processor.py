@@ -327,12 +327,26 @@ class ParallelReferenceProcessor:
         reference = result.reference
 
         self.base_checker._print_reference_header(reference, result.index, self.total_references)
-        self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
+
+        assessment = result.hallucination_assessment
+        ha_link = assessment.get('link') if assessment else None
+        ha_link_is_http = isinstance(ha_link, str) and ha_link.startswith('http')
+        llm_assessment_unlikely = bool(
+            assessment and assessment.get('verdict') == 'UNLIKELY'
+        )
+        should_suppress_url_from_verifier = (
+            not result.verified_data
+            and llm_assessment_unlikely
+            and ha_link_is_http
+        )
+        url_from_verifier = None if should_suppress_url_from_verifier else result.url
+        self.base_checker._print_verified_urls(reference, result.verified_data, url_from_verifier, result.errors)
 
         # If the ref had no DB match but the LLM confirmed it (UNLIKELY),
         # apply_hallucination_verdict already stripped the unverified error
         # and stored the link in authoritative_urls.  Show it here so the
         # user sees verification info instead of a bare reference.
+        printed_llm_verification = False
         if not result.verified_data and result.hallucination_assessment:
             ha = result.hallucination_assessment
             if ha.get('verdict') == 'UNLIKELY':
@@ -341,6 +355,7 @@ class ParallelReferenceProcessor:
                 if ha_link and ha_link.startswith('http'):
                     print("       Matched Database: LLM search")
                     print(f"       Verified URL: {ha_link}")
+                    printed_llm_verification = True
                 if ha_explanation:
                     print(f"       LLM confirmed: {ha_explanation}")
 
@@ -350,16 +365,8 @@ class ParallelReferenceProcessor:
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in result.errors)
             
             # Check if LLM verified this reference
-            llm_verified = False
-            llm_verified_url = None
-            assessment = result.hallucination_assessment
-            if assessment and has_unverified_error:
-                ha_verdict = assessment.get('verdict')
-                ha_link = assessment.get('link')
-                if ha_verdict == 'UNLIKELY':
-                    llm_verified = True
-                    if ha_link and ha_link.startswith('http'):
-                        llm_verified_url = ha_link
+            llm_verified = bool(has_unverified_error and llm_assessment_unlikely)
+            llm_verified_url = ha_link if llm_verified and ha_link_is_http else None
             
             # Check if "url references paper" (webpage checker confirmed
             # the cited URL contains the paper)
@@ -385,8 +392,9 @@ class ParallelReferenceProcessor:
                     print(f"       ✅ Verified via URL: {cited_url}")
                 elif llm_verified and llm_verified_url:
                     # Show clean verified URL instead of 'Could not verify'
-                    print("       Matched Database: LLM search")
-                    print(f"       Verified URL: {llm_verified_url}")
+                    if not printed_llm_verification:
+                        print("       Matched Database: LLM search")
+                        print(f"       Verified URL: {llm_verified_url}")
                 elif llm_verified:
                     # LLM confirmed real but no URL — keep as unverified, show explanation
                     ha_explanation = assessment.get('explanation', '')
@@ -445,4 +453,3 @@ class ParallelReferenceProcessor:
             'fastest_time': self.processing_stats['fastest_time'] if self.processing_stats['fastest_time'] != float('inf') else 0,
             'slowest_time': self.processing_stats['slowest_time']
         }
-
