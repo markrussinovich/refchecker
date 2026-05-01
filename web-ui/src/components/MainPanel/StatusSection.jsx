@@ -427,8 +427,8 @@ export default function StatusSection() {
     if (!selectedCheckId || selectedCheckId === -1) return null
     
     const thumbnailStyle = {
-      width: '80px',
-      height: '100px',
+      width: '112px',
+      height: '150px',
       flexShrink: 0,
       borderRadius: '4px',
       overflow: 'hidden',
@@ -792,7 +792,7 @@ export default function StatusSection() {
         borderColor: 'var(--color-border)',
       }}
     >
-      <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3">
         <div 
           className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
           style={{ backgroundColor: getStatusBgColor() }}

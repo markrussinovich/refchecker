@@ -485,7 +485,13 @@ export const useHistoryStore = create((set, get) => ({
           history: state.history.map(h =>
             h.id === id
               ? keepExisting
-                ? h  // Keep existing history item as-is
+                ? {
+                    ...h,
+                    // Keep fresher in-memory status/progress, but ensure results are present
+                    // so sidebar counts can be derived with the same logic as Summary.
+                    results: h.results?.length ? h.results : (useExistingResults ? existingResults : fetchedResults),
+                    paper_title: check.paper_title || h.paper_title,
+                  }
                 : {
                     ...h,
                     status: check.status,
@@ -498,6 +504,7 @@ export const useHistoryStore = create((set, get) => ({
                     hallucination_count: check.hallucination_count || 0,
                     refs_with_errors: check.refs_with_errors,
                     refs_with_warnings_only: check.refs_with_warnings_only,
+                    results: useExistingResults ? existingResults : fetchedResults,
                     paper_title: check.paper_title || h.paper_title,
                   }
               : h
