@@ -516,6 +516,18 @@ def test_semantic_scholar_downloader_stores_source_url(tmp_path):
     assert row['source_url'] == 'https://www.semanticscholar.org/paper/S2-1'
 
 
+def test_semantic_scholar_downloader_normalizes_markup_math_titles(tmp_path):
+    downloader = SemanticScholarDownloader(output_dir=str(tmp_path))
+    try:
+        normalized_title = downloader.normalize_paper_title(
+            'Sampling algorithms for <i>l</i><sub>2</sub> regression and applications'
+        )
+    finally:
+        downloader.close()
+
+    assert normalized_title == normalize_paper_title('Sampling algorithms for ℓ2 regression and applications')
+
+
 def test_local_checker_prefers_source_url(tmp_path):
     xml_gz_path = tmp_path / 'dblp.xml.gz'
     db_path = tmp_path / 'dblp.db'

@@ -103,6 +103,17 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024
 MAX_UPLOAD_FILE_BYTES = int(os.environ.get("MAX_UPLOAD_FILE_BYTES", str(25 * 1024 * 1024)))
 MAX_BATCH_UPLOAD_TOTAL_BYTES = int(os.environ.get("MAX_BATCH_UPLOAD_TOTAL_BYTES", str(100 * 1024 * 1024)))
 MAX_BATCH_ARCHIVE_BYTES = int(os.environ.get("MAX_BATCH_ARCHIVE_BYTES", str(50 * 1024 * 1024)))
+DEFAULT_DATABASE_REFRESH_CONCURRENCY = 1
+DEFAULT_DATABASE_REFRESH_NICE = 15
+DEFAULT_DATABASE_REFRESH_MAX_THREADS = 1
+DATABASE_REFRESH_THREAD_ENV_VARS = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+    "BLIS_NUM_THREADS",
+)
 
 
 def get_uploads_dir() -> Path:
@@ -292,6 +303,64 @@ async def _run_semantic_scholar_refresh_subprocess(db_path: Path) -> None:
     await _run_database_refresh_subprocess('s2', db_path)
 
 
+def _get_int_env(name: str, default: int, minimum: int, maximum: Optional[int] = None) -> int:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning("Ignoring invalid integer value for %s: %s", name, raw_value)
+        return default
+    value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
+def _get_database_refresh_concurrency() -> int:
+    return _get_int_env(
+        "REFCHECKER_DATABASE_REFRESH_CONCURRENCY",
+        DEFAULT_DATABASE_REFRESH_CONCURRENCY,
+        minimum=1,
+    )
+
+
+def _build_database_refresh_command(command: list[str]) -> list[str]:
+    """Return a refresh command with best-effort low-priority wrappers."""
+    if os.name == 'nt':
+        return command
+
+    priority_prefix = []
+    ionice_path = shutil.which('ionice')
+    nice_path = shutil.which('nice')
+    if ionice_path:
+        priority_prefix.extend([ionice_path, '-c', '3'])
+    if nice_path:
+        nice_level = _get_int_env(
+            "REFCHECKER_DATABASE_REFRESH_NICE",
+            DEFAULT_DATABASE_REFRESH_NICE,
+            minimum=0,
+            maximum=19,
+        )
+        priority_prefix.extend([nice_path, '-n', str(nice_level)])
+    return priority_prefix + command
+
+
+def _build_database_refresh_env() -> Dict[str, str]:
+    env = os.environ.copy()
+    max_threads = str(
+        _get_int_env(
+            "REFCHECKER_DATABASE_REFRESH_MAX_THREADS",
+            DEFAULT_DATABASE_REFRESH_MAX_THREADS,
+            minimum=1,
+        )
+    )
+    for var_name in DATABASE_REFRESH_THREAD_ENV_VARS:
+        env.setdefault(var_name, max_threads)
+    return env
+
+
 async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
     """Refresh a configured local database in a background subprocess when supported."""
     repo_root = Path(__file__).resolve().parent.parent
@@ -318,15 +387,7 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
     if db_name == 'openalex' and openalex_min_year:
         command.extend(['--openalex-min-year', openalex_min_year])
 
-    if db_name == 'openalex' and os.name != 'nt':
-        priority_prefix = []
-        ionice_path = shutil.which('ionice')
-        nice_path = shutil.which('nice')
-        if ionice_path:
-            priority_prefix.extend([ionice_path, '-c', '3'])
-        if nice_path:
-            priority_prefix.extend([nice_path, '-n', '10'])
-        command = priority_prefix + command
+    command = _build_database_refresh_command(command)
 
     log_dir = get_data_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -342,6 +403,7 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=str(repo_root),
+        env=_build_database_refresh_env(),
         stdout=log_handle,
         stderr=asyncio.subprocess.STDOUT,
     )
@@ -392,6 +454,10 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
     """Schedule non-blocking refreshes for all discovered local databases."""
     db_paths = await _get_configured_database_paths()
     tasks: Dict[str, asyncio.Task] = {}
+    refresh_concurrency = _get_database_refresh_concurrency()
+    refresh_semaphore = asyncio.Semaphore(refresh_concurrency)
+    if db_paths:
+        logger.info("Database refresh concurrency limited to %s", refresh_concurrency)
 
     async def run_with_dependencies(
         db_name: str,
@@ -411,7 +477,8 @@ async def _schedule_database_refreshes() -> Dict[str, asyncio.Task]:
                     db_name,
                     exc,
                 )
-        await _run_database_refresh_subprocess(db_name, Path(db_path))
+        async with refresh_semaphore:
+            await _run_database_refresh_subprocess(db_name, Path(db_path))
 
     scheduled_names = set()
     for db_name in DATABASE_UPDATE_ORDER:

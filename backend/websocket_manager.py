@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Pending message buffers older than this are discarded
 _PENDING_MAX_AGE_SECONDS = 300  # 5 minutes
+_SEND_TIMEOUT_SECONDS = 2.0
 
 
 class ConnectionManager:
@@ -40,7 +41,7 @@ class ConnectionManager:
             logger.info(f"Replaying {len(pending)} buffered messages for session {session_id}")
             for msg_json in pending:
                 try:
-                    await websocket.send_text(msg_json)
+                    await asyncio.wait_for(websocket.send_text(msg_json), timeout=_SEND_TIMEOUT_SECONDS)
                 except Exception as e:
                     logger.error(f"Error replaying buffered message: {e}")
                     break
@@ -90,7 +91,14 @@ class ConnectionManager:
         disconnected = set()
         for websocket in self.active_connections[session_id]:
             try:
-                await websocket.send_text(message_json)
+                await asyncio.wait_for(websocket.send_text(message_json), timeout=_SEND_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Timed out sending %s message to websocket for session %s; disconnecting slow client",
+                    message_type,
+                    session_id,
+                )
+                disconnected.add(websocket)
             except Exception as e:
                 logger.error(f"Error sending message to websocket: {e}")
                 disconnected.add(websocket)

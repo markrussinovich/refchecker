@@ -13,6 +13,7 @@ import pytest
 from unittest.mock import patch
 
 from refchecker.checkers.local_semantic_scholar import LocalNonArxivReferenceChecker
+from refchecker.utils.text_utils import normalize_paper_title
 
 
 def _create_test_db(papers):
@@ -157,11 +158,12 @@ def test_venue_match_no_warning(_make_checker):
     assert len(venue_issues) == 0, f"Unexpected venue issue: {venue_issues}"
 
 
-def test_markup_normalized_title_fallback_finds_math_title(_make_checker):
+def test_markup_normalized_title_exact_match_finds_math_title(_make_checker):
+    stored_title = "Sampling algorithms for <i>l</i><sub>2</sub> regression and applications"
     checker = _make_checker([{
         "paperId": "openalex:2043804332",
-        "title": "Sampling algorithms for <i>l</i><sub>2</sub> regression and applications",
-        "normalized_paper_title": "samplingalgorithmsforilisub2subregressionandapplications",
+        "title": stored_title,
+        "normalized_paper_title": normalize_paper_title(stored_title),
         "year": 2006,
         "authors": ["Petros Drineas", "Michael W. Mahoney", "S. Muthukrishnan"],
         "venue": "Proceedings of the seventeenth annual ACM-SIAM symposium on Discrete algorithm - SODA '06",

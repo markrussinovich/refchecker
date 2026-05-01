@@ -617,7 +617,7 @@ class SemanticScholarDownloader:
     
     def normalize_paper_title(self, title: str) -> str:
         """
-        Normalize paper title by converting to lowercase and removing whitespace and punctuation
+        Normalize paper title for indexed lookup using the same rules as the checker.
         
         Args:
             title: Original paper title
@@ -625,17 +625,9 @@ class SemanticScholarDownloader:
         Returns:
             Normalized title string
         """
-        if not title:
-            return ""
-        
-        # Convert to lowercase
-        normalized = title.lower()
-        
-        # Remove all non-alphanumeric characters (keeping only letters and numbers)
-        import re
-        normalized = re.sub(r'[^a-z0-9]', '', normalized)
-        
-        return normalized
+        from refchecker.utils.text_utils import normalize_paper_title
+
+        return normalize_paper_title(title)
     
     @lru_cache(maxsize=32)
     def _build_search_query(self, query, year, field):
