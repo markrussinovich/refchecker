@@ -3,6 +3,8 @@ import { logger } from '../utils/logger'
 import * as api from '../utils/api'
 import { useCheckStore } from './useCheckStore'
 
+const DETAIL_CACHE_TTL_MS = 30 * 1000
+
 /**
  * Store for check history management
  */
@@ -13,6 +15,7 @@ export const useHistoryStore = create((set, get) => ({
   selectedCheck: null,
   isLoading: false,
   isLoadingDetail: false,
+  detailCache: {}, // checkId -> { check, fetchedAt }
   error: null,
   placeholderAdded: false, // tracks whether we've already injected the placeholder automatically
   scrollTrigger: 0, // incremented to trigger scroll-to-top in HistoryList
@@ -404,8 +407,22 @@ export const useHistoryStore = create((set, get) => ({
       return
     }
 
-    // Check if we already have in-memory data for an in-progress check (from WebSocket updates)
-    const existingHistoryItem = get().history.find(h => h.id === id)
+    const stateSnapshot = get()
+    const existingHistoryItem = stateSnapshot.history.find(h => h.id === id)
+    const cachedDetail = stateSnapshot.detailCache[id]
+    const cacheIsFresh = !!(cachedDetail && (Date.now() - cachedDetail.fetchedAt) < DETAIL_CACHE_TTL_MS)
+
+    // If user re-selects the currently shown check, avoid unnecessary work.
+    if (stateSnapshot.selectedCheckId === id && stateSnapshot.selectedCheck && !stateSnapshot.isLoadingDetail) {
+      return
+    }
+
+    // Fast-path for recently loaded completed/cancelled/error checks.
+    if (cacheIsFresh && cachedDetail?.check?.status !== 'in_progress') {
+      set({ selectedCheckId: id, selectedCheck: cachedDetail.check, isLoadingDetail: false, error: null })
+      return
+    }
+
     // If we have an in-progress check with results in memory, use that directly without API call
     if (existingHistoryItem?.status === 'in_progress' && existingHistoryItem?.results?.length > 0) {
       set({ 
@@ -415,6 +432,22 @@ export const useHistoryStore = create((set, get) => ({
         error: null 
       })
       return
+    }
+
+    // Show whatever local data we have immediately to reduce perceived selection latency.
+    if (existingHistoryItem) {
+      const hasLocalResults = Array.isArray(existingHistoryItem.results) && existingHistoryItem.results.length > 0
+      set({
+        selectedCheckId: id,
+        selectedCheck: existingHistoryItem,
+        isLoadingDetail: !hasLocalResults,
+        error: null,
+      })
+
+      // Completed checks with local results are already fully viewable.
+      if (hasLocalResults && existingHistoryItem.status !== 'in_progress') {
+        return
+      }
     }
 
     // Set selectedCheckId immediately so UI can react
@@ -482,6 +515,10 @@ export const useHistoryStore = create((set, get) => ({
           selectedCheck: mergedSelectedCheck,
           isLoadingDetail: false,
           selectedCheckId: id,
+          detailCache: {
+            ...state.detailCache,
+            [id]: { check: mergedSelectedCheck, fetchedAt: Date.now() },
+          },
           history: state.history.map(h =>
             h.id === id
               ? keepExisting
@@ -553,10 +590,23 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryProgress called with no id')
       return
     }
-    set(state => ({
-      history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
-      selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
-    }))
+    set(state => {
+      const nextCache = { ...state.detailCache }
+      // Invalidate cached detail when progress/status changes for this check.
+      if (nextCache[id] && (
+        payload.status !== undefined ||
+        payload.processed_refs !== undefined ||
+        payload.results !== undefined
+      )) {
+        delete nextCache[id]
+      }
+
+      return {
+        history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
+        selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
+        detailCache: nextCache,
+      }
+    })
   },
 
   // Update a single reference result within a history item (for concurrent session updates)
