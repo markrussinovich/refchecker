@@ -1051,6 +1051,7 @@ def _parse_llm_found_authors(found_authors: str, cited_author_count: int) -> Lis
     from refchecker.utils.text_utils import parse_authors_with_initials
 
     authors = parse_authors_with_initials(found_authors)
+    # "Last, First" comma-separated metadata produces two fragments per author.
     if cited_author_count and len(authors) == cited_author_count * 2:
         return [
             f"{authors[i + 1]} {authors[i]}"

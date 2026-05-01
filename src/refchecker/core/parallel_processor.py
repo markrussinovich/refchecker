@@ -339,7 +339,7 @@ class ParallelReferenceProcessor:
             and llm_assessment_unlikely
             and ha_link_is_http
         )
-        url_from_verifier = '' if llm_link_is_verified else result.url
+        url_from_verifier = None if llm_link_is_verified else result.url
         self.base_checker._print_verified_urls(reference, result.verified_data, url_from_verifier, result.errors)
 
         # If the ref had no DB match but the LLM confirmed it (UNLIKELY),

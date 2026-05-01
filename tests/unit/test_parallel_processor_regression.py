@@ -85,7 +85,7 @@ def test_parallel_printer_labels_llm_verified_source(capsys):
     assert '\n\n\n       Matched Database: LLM search' not in output
 
 
-def test_parallel_printer_does_not_duplicate_llm_verified_url(capsys):
+def test_parallel_printer_prints_llm_verified_url_once(capsys):
     def print_verified_urls(ref, verified_data, url_from_verifier, errors):
         print('')
         if url_from_verifier:
