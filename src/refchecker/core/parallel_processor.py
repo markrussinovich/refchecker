@@ -330,12 +330,14 @@ class ParallelReferenceProcessor:
 
         assessment = result.hallucination_assessment
         ha_link = assessment.get('link') if assessment else None
+        ha_link_is_http = isinstance(ha_link, str) and ha_link.startswith('http')
+        llm_assessment_unlikely = bool(
+            assessment and assessment.get('verdict') == 'UNLIKELY'
+        )
         llm_link_is_verified = (
             not result.verified_data
-            and assessment
-            and assessment.get('verdict') == 'UNLIKELY'
-            and ha_link
-            and ha_link.startswith('http')
+            and llm_assessment_unlikely
+            and ha_link_is_http
         )
         url_from_verifier = '' if llm_link_is_verified else result.url
         self.base_checker._print_verified_urls(reference, result.verified_data, url_from_verifier, result.errors)
@@ -363,15 +365,8 @@ class ParallelReferenceProcessor:
             has_unverified_error = any(e.get('error_type') == 'unverified' or e.get('warning_type') == 'unverified' or e.get('info_type') == 'unverified' for e in result.errors)
             
             # Check if LLM verified this reference
-            llm_verified = False
-            llm_verified_url = None
-            if assessment and has_unverified_error:
-                ha_verdict = assessment.get('verdict')
-                ha_link = assessment.get('link')
-                if ha_verdict == 'UNLIKELY':
-                    llm_verified = True
-                    if ha_link and ha_link.startswith('http'):
-                        llm_verified_url = ha_link
+            llm_verified = bool(has_unverified_error and llm_assessment_unlikely)
+            llm_verified_url = ha_link if llm_verified and ha_link_is_http else None
             
             # Check if "url references paper" (webpage checker confirmed
             # the cited URL contains the paper)

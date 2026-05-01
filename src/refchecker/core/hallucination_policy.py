@@ -1041,6 +1041,13 @@ def _metadata_has_found_reference(assessment: Dict[str, Any]) -> bool:
 
 
 def _parse_llm_found_authors(found_authors: str, cited_author_count: int) -> List[str]:
+    """Parse author metadata returned by the LLM into individual names.
+
+    The normal author parser handles most comma-separated lists.  If it returns
+    exactly twice as many fragments as the cited author count, treat the
+    fragments as a ``Last, First`` sequence and convert each pair to
+    ``First Last`` before re-running the standard author comparison.
+    """
     from refchecker.utils.text_utils import parse_authors_with_initials
 
     authors = parse_authors_with_initials(found_authors)
