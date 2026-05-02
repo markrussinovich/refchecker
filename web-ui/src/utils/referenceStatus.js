@@ -76,3 +76,100 @@ export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = fa
 
   return 'verified'
 }
+
+
+/**
+ * Compute reference-level summary stats from a list of references.
+ *
+ * Single source of truth used by both the main paper Summary
+ * (StatsSection) and the sidebar history card (HistoryItem) so the
+ * two surfaces never disagree.
+ *
+ * Returns counts of:
+ *   - totalProcessed: refs that have left the pending/checking state
+ *   - count: refs that have a "finalized" status (no LLM check pending)
+ *   - errorsCount/warningsCount/suggestionsCount: total individual issue items
+ *   - withErrors/withWarnings/withSuggestions: per-ref bucket counts using
+ *     getEffectiveReferenceStatus (so hallucinated refs are excluded from
+ *     the error/warning bucket, suggestion-only refs from suggestions, etc.)
+ *   - withUnverified, hallucinated, verified: per-ref status buckets
+ */
+export const computeReferenceStats = (references = [], isCheckComplete = false) => {
+  if (!Array.isArray(references) || references.length === 0) {
+    return null
+  }
+
+  const totalProcessed = references.filter(r => {
+    const s = (r?.status || '').toLowerCase()
+    if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
+    return true
+  }).length
+
+  const finalized = references.filter(r => {
+    const s = (r?.status || '').toLowerCase()
+    if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
+    if (r?.hallucination_check_pending && !r?.hallucination_assessment) return false
+    if (s === 'unverified' && !r?.hallucination_assessment && !isCheckComplete) return false
+    return true
+  })
+
+  let errorsCount = 0
+  let warningsCount = 0
+  let suggestionsCount = 0
+  let withErrors = 0
+  let withWarnings = 0
+  let withSuggestions = 0
+  let withUnverified = 0
+  let hallucinated = 0
+  let verified = 0
+
+  for (const r of finalized) {
+    const s = getEffectiveReferenceStatus(r, isCheckComplete)
+    const llmMatch = llmFoundMetadataMatchesCitation(r)
+    const likelyHallucinated =
+      r?.hallucination_assessment?.verdict === 'LIKELY' && !llmMatch
+
+    // Hallucinated refs contribute their per-issue items only to the
+    // hallucinated bucket, not to errors/warnings (those error entries
+    // are evidence of the hallucination).
+    if (s !== 'hallucination') {
+      errorsCount += (r?.errors?.filter(e => e.error_type !== 'unverified') || []).length
+      warningsCount += (r?.warnings || []).length
+      suggestionsCount += (r?.suggestions || []).length
+    }
+
+    if (s === 'error') withErrors += 1
+    else if (s === 'warning') withWarnings += 1
+    else if (s === 'suggestion') withSuggestions += 1
+
+    if (
+      s === 'unverified' || s === 'hallucination' ||
+      r?.errors?.some(e => e.error_type === 'unverified') ||
+      likelyHallucinated
+    ) {
+      withUnverified += 1
+    }
+
+    if (s === 'hallucination' || likelyHallucinated) {
+      hallucinated += 1
+    }
+
+    if (s === 'verified' || s === 'suggestion') {
+      verified += 1
+    }
+  }
+
+  return {
+    count: finalized.length,
+    totalProcessed,
+    errorsCount,
+    warningsCount,
+    suggestionsCount,
+    withErrors,
+    withWarnings,
+    withSuggestions,
+    withUnverified,
+    hallucinated,
+    verified,
+  }
+}

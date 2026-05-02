@@ -33,7 +33,7 @@ if sys.platform == 'win32' and not os.environ.get("PYTEST_CURRENT_TEST"):
         sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 import aiosqlite
-from .database import db, get_data_dir
+from .database import db, get_data_dir, get_logs_dir
 from .websocket_manager import manager
 from .refchecker_wrapper import ProgressRefChecker
 from .models import CheckRequest, CheckHistoryItem
@@ -328,7 +328,7 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
             priority_prefix.extend([nice_path, '-n', '10'])
         command = priority_prefix + command
 
-    log_dir = get_data_dir() / "logs"
+    log_dir = get_logs_dir()
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"database-refresh-{db_name}.log"
 

@@ -3,7 +3,7 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
-import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
+import { computeReferenceStats } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
 
 /**
@@ -52,58 +52,24 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
   const processedRefs = item.processed_refs || 0
   const progressPercent = totalRefs > 0 ? Math.min((processedRefs / totalRefs) * 100, 100) : 0
 
-  // Keep sidebar counts aligned with Summary by deriving from loaded results when available.
+  // Keep sidebar counts aligned with the Summary by deriving from the same
+  // shared helper.  When this item is the *active* selected check, prefer
+  // the live `references` from the check store so updates flow through in
+  // real time (item.results is only refreshed at completion).
+  const isCurrentCheck = useCheckStore(state => state.currentCheckId === item.id)
+  const liveReferences = useCheckStore(state => (isCurrentCheck ? state.references : null))
   const derivedCounts = useMemo(() => {
-    const refs = Array.isArray(item.results) ? item.results : []
-    if (refs.length === 0) return null
+    const refs = Array.isArray(liveReferences) && liveReferences.length > 0
+      ? liveReferences
+      : (Array.isArray(item.results) ? item.results : [])
+    return computeReferenceStats(refs, isComplete)
+  }, [liveReferences, item.results, isComplete])
 
-    const finalized = refs.filter(r => {
-      const s = (r?.status || '').toLowerCase()
-      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      if (r?.hallucination_check_pending && !r?.hallucination_assessment) return false
-      if (s === 'unverified' && !r?.hallucination_assessment && !isComplete) return false
-      return true
-    })
-
-    const refsWithErrors = finalized.filter(r =>
-      (r?.status === 'error') || r?.errors?.some(e => e.error_type !== 'unverified')
-    ).length
-
-    const refsWithWarningsOnly = finalized.filter(r =>
-      (r?.status === 'warning' || r?.warnings?.length > 0) &&
-      r?.status !== 'error' && !r?.errors?.some(e => e.error_type !== 'unverified')
-    ).length
-
-    const refsWithSuggestionsOnly = finalized.filter(r => {
-      const hasError = (r?.status === 'error') || r?.errors?.some(e => e.error_type !== 'unverified')
-      const hasWarning = (r?.status === 'warning' || r?.warnings?.length > 0) && !hasError
-      return (r?.status === 'suggestion' || r?.suggestions?.length > 0) && !hasError && !hasWarning
-    }).length
-
-    return {
-      refsWithErrors,
-      refsWithWarningsOnly,
-      refsWithSuggestionsOnly,
-      unverifiedCount: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        const likelyHallucinated = r?.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
-        return s === 'unverified' || s === 'hallucination' ||
-          r?.errors?.some(e => e.error_type === 'unverified') ||
-          likelyHallucinated
-      }).length,
-      hallucinationCount: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        const likelyHallucinated = r?.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
-        return s === 'hallucination' || likelyHallucinated
-      }).length,
-    }
-  }, [item.results, isComplete])
-
-  const refsWithErrors = derivedCounts?.refsWithErrors ?? item.refs_with_errors ?? 0
-  const refsWithWarningsOnly = derivedCounts?.refsWithWarningsOnly ?? item.refs_with_warnings_only ?? 0
-  const refsWithSuggestionsOnly = derivedCounts?.refsWithSuggestionsOnly ?? item.refs_with_suggestions_only ?? 0
-  const unverifiedCount = derivedCounts?.unverifiedCount ?? item.unverified_count ?? 0
-  const hallucinationCount = derivedCounts?.hallucinationCount ?? item.hallucination_count ?? 0
+  const refsWithErrors = derivedCounts?.withErrors ?? item.refs_with_errors ?? 0
+  const refsWithWarningsOnly = derivedCounts?.withWarnings ?? item.refs_with_warnings_only ?? 0
+  const refsWithSuggestionsOnly = derivedCounts?.withSuggestions ?? item.refs_with_suggestions_only ?? 0
+  const unverifiedCount = derivedCounts?.withUnverified ?? item.unverified_count ?? 0
+  const hallucinationCount = derivedCounts?.hallucinated ?? item.hallucination_count ?? 0
 
   const handleClick = () => {
     if (!isEditing && !isSelected) {

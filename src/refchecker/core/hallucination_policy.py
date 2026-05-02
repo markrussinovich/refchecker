@@ -1264,6 +1264,54 @@ def _split_reverified_issues(issues: List[Dict[str, Any]]) -> tuple[List[Dict[st
 _MAX_HALLUCINATION_ASSESSMENT_ROUNDS = 1
 
 
+_LLM_SOURCE_HOST_LABELS = (
+    ('semanticscholar.org', 'Semantic Scholar'),
+    ('api.semanticscholar', 'Semantic Scholar'),
+    ('openalex.org', 'OpenAlex'),
+    ('api.openalex', 'OpenAlex'),
+    ('doi.org', 'CrossRef'),
+    ('crossref.org', 'CrossRef'),
+    ('dblp.org', 'DBLP'),
+    ('aclanthology.org', 'ACL Anthology'),
+    ('arxiv.org', 'arXiv'),
+    ('openreview.net', 'OpenReview'),
+    ('pubmed.ncbi.nlm.nih.gov', 'PubMed'),
+    ('ncbi.nlm.nih.gov', 'PubMed'),
+    ('ieee.org', 'IEEE Xplore'),
+    ('acm.org', 'ACM Digital Library'),
+    ('springer.com', 'Springer'),
+    ('sciencedirect.com', 'ScienceDirect'),
+    ('nature.com', 'Nature'),
+    ('jmlr.org', 'JMLR'),
+    ('proceedings.mlr.press', 'PMLR'),
+    ('papers.nips.cc', 'NeurIPS'),
+    ('papers.neurips.cc', 'NeurIPS'),
+    ('openaccess.thecvf.com', 'CVF Open Access'),
+    ('huggingface.co', 'Hugging Face'),
+    ('github.com', 'GitHub'),
+    ('zenodo.org', 'Zenodo'),
+)
+
+
+def _label_for_llm_source_url(url: str) -> Optional[str]:
+    """Return a friendly source name for a URL the LLM returned, or None."""
+    if not url:
+        return None
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(url).hostname or '').lower()
+    except Exception:
+        return None
+    if not host:
+        return None
+    if host.startswith('www.'):
+        host = host[4:]
+    for needle, label in _LLM_SOURCE_HOST_LABELS:
+        if needle in host:
+            return label
+    return None
+
+
 def _rerun_hallucination_for_reverified_errors(
     result: Dict[str, Any],
     reference: Optional[Dict[str, Any]],
@@ -1461,7 +1509,10 @@ def apply_hallucination_verdict(
             result['errors'], result['warnings'] = _split_reverified_issues(rechecked_issues)
             if (assessment.get('link') or '').startswith('http'):
                 result['authoritative_urls'] = [{"type": "standard_refcheck", "url": assessment['link']}]
-            result['matched_database'] = 'LLM search + standard refcheck'
+            second_source = _label_for_llm_source_url(assessment.get('link') or '')
+            result['matched_database'] = (
+                f'LLM search + {second_source}' if second_source else 'LLM search'
+            )
             remaining_errors = [
                 e for e in result['errors']
                 if e.get('error_type') not in ('unverified', 'info', None)

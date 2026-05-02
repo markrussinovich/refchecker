@@ -130,6 +130,23 @@ def get_data_dir() -> Path:
     return data_dir
 
 
+def get_logs_dir() -> Path:
+    """Get directory for refchecker log files.
+
+    Honors REFCHECKER_LOG_DIR for installs that want logs on a different
+    volume than the SQLite DB / uploads (e.g. background database-refresh
+    logs that can grow into the tens of gigabytes).  Falls back to
+    ``get_data_dir() / "logs"``.
+    """
+    env_log_dir = os.environ.get("REFCHECKER_LOG_DIR")
+    if env_log_dir:
+        log_dir = Path(env_log_dir)
+    else:
+        log_dir = get_data_dir() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+
 def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
     """Compute reference-level sidebar buckets from stored check results.
 

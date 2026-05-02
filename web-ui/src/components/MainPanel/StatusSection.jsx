@@ -903,7 +903,10 @@ export default function StatusSection() {
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Extraction Model: {displayLlmLabel}
+              Extraction Model:{' '}
+              <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                {displayLlmLabel}
+              </span>
             </p>
           )}
           {displayHallucinationLabel && (
@@ -911,7 +914,10 @@ export default function StatusSection() {
               className="text-sm"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              Hallucination Model: {displayHallucinationLabel}
+              Hallucination Model:{' '}
+              <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>
+                {displayHallucinationLabel}
+              </span>
             </p>
           )}
           <p 

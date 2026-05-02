@@ -6,7 +6,7 @@ import {
   exportResultsAsBibtex,
   downloadAsFile 
 } from '../../utils/formatters'
-import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
+import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation, computeReferenceStats } from '../../utils/referenceStatus'
 
 /**
  * Stats section showing reference check summary with clickable filters
@@ -77,72 +77,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const activeFilterId = isFilterActive ? statusFilter[0] : null
   const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
-  // Compute inclusive badge counts from references using the same filter logic
-  // as ReferenceList.jsx, so clicking a badge always shows the matching count.
-  // Only used for badge breakdowns — processedRefs always comes from backend stats.
-  const inclusiveCounts = useMemo(() => {
-    if (!references || references.length === 0) return null
-    // totalProcessed: count of ALL refs that have completed verification,
-    // regardless of status (used for the "of N" progress denominator).
-    const totalProcessed = references.filter(r => {
-      const s = (r.status || '').toLowerCase()
-      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      return true
-    }).length
-    // Only count finalized refs (not pending/checking/hallucination-pending).
-    // ALL refs with hallucination_check_pending are excluded until their
-    // check completes and final status is known.
-    const processed = references.filter(r => {
-      const s = (r.status || '').toLowerCase()
-      if (!s || ['pending', 'checking', 'in_progress', 'queued', 'processing', 'started'].includes(s)) return false
-      if (r.hallucination_check_pending && !r.hallucination_assessment) return false
-      if (s === 'unverified' && !r.hallucination_assessment && !isComplete) return false
-      return true
-    })
-    const finalized = processed
-    // Compute total individual issue counts from reference objects so they
-    // stay accurate even when the backend defers counting for refs pending
-    // hallucination checks.
-    let errorsCount = 0
-    let warningsCount = 0
-    let suggestionsCount = 0
-    for (const r of finalized) {
-      errorsCount += (r.errors?.filter(e => e.error_type !== 'unverified') || []).length
-      warningsCount += (r.warnings || []).length
-      suggestionsCount += (r.suggestions || []).length
-    }
-    return {
-      count: processed.length,
-      totalProcessed,
-      errorsCount,
-      warningsCount,
-      suggestionsCount,
-      withErrors: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        return s === 'error'
-      }).length,
-      withWarnings: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        return s === 'warning'
-      }).length,
-      withUnverified: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        const likelyHallucinated = r.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
-        return s === 'unverified' || s === 'hallucination' ||
-          r.errors?.some(e => e.error_type === 'unverified') ||
-          likelyHallucinated
-      }).length,
-      hallucinated: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        const likelyHallucinated = r.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
-        return s === 'hallucination' || likelyHallucinated
-      }).length,
-      verified: finalized.filter(r => {
-        const s = getEffectiveReferenceStatus(r, isComplete)
-        return s === 'verified' || s === 'suggestion'
-      }).length,
-    }
-  }, [references, isComplete])
+  // Compute inclusive badge counts from references using the shared helper
+  // so the sidebar history card and the Summary always agree.
+  const inclusiveCounts = useMemo(
+    () => computeReferenceStats(references, isComplete),
+    [references, isComplete]
+  )
 
   // Use inclusive counts from references for badge breakdowns, backend stats for totals
   const refsWithErrors = inclusiveCounts?.withErrors ?? stats.refs_with_errors ?? 0
