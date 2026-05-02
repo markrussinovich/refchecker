@@ -352,7 +352,7 @@ class ParallelReferenceProcessor:
                     print("       Matched Database: LLM search")
                     print(f"       Verified URL: {ha_link}")
                 if ha_explanation:
-                    print(f"       LLM confirmed: {ha_explanation}")
+                    print(f"       {ha_explanation}")
 
         # Display errors and warnings
         if result.errors:
@@ -385,7 +385,7 @@ class ParallelReferenceProcessor:
                     print(f"       ✅ Verified via URL: {cited_url}")
                     ha_explanation = assessment.get('explanation', '')
                     if ha_explanation:
-                        print(f"         LLM confirmed: {ha_explanation}")
+                        print(f"         {ha_explanation}")
                 elif url_references_paper and assessment and assessment.get('verdict') == 'LIKELY':
                     # URL references paper but LLM says likely hallucinated
                     self.base_checker._display_unverified_error_with_subreason(reference, result.url, result.errors, debug_mode=False, print_output=True)

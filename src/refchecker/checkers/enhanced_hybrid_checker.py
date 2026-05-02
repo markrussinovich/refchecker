@@ -672,6 +672,53 @@ class EnhancedHybridReferenceChecker:
             return ss_result
         return None
 
+    def _handle_arxiv_result(self, result, reference):
+        """Return an ArXiv verification result, short-circuiting wrong IDs.
+
+        The ArXiv citation checker is authoritative for an explicit cited
+        ArXiv ID.  A title error with very low similarity means that ID points
+        at a different paper, so do not let a later title search against a
+        database mask the bad cited URL.
+        """
+        verified_data, errors, url = result
+
+        has_title_error = any(
+            e.get('error_type') == 'title' for e in (errors or [])
+        )
+        if has_title_error:
+            cited_title = reference.get('title', 'unknown')
+            actual_title = (verified_data or {}).get('title', 'unknown')
+            # Compute similarity to distinguish "completely different paper"
+            # from "same paper, revised title between versions". Truly
+            # different papers score 0.0-0.1; revised titles score higher.
+            from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
+            title_sim = compare_titles_with_latex_cleaning(cited_title, actual_title)
+            if title_sim < 0.25:
+                arxiv_url = reference.get('cited_url') or reference.get('url', '') or url
+                logger.debug(
+                    f"Enhanced Hybrid: ArXiv URL points to a different paper "
+                    f"(cited: '{cited_title}', actual: '{actual_title}', "
+                    f"sim={title_sim:.2f}) — returning as unverified"
+                )
+                return None, [
+                    {
+                        'error_type': 'unverified',
+                        'error_details': f'Could not verify: {cited_title}',
+                    },
+                    {
+                        'error_type': 'url',
+                        'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
+                    },
+                ], arxiv_url
+
+            logger.debug(
+                f"Enhanced Hybrid: ArXiv title mismatch but titles "
+                f"are similar (sim={title_sim:.2f}), treating as "
+                f"version update: '{cited_title}' vs '{actual_title}'"
+            )
+
+        return result
+
     def _verify_non_arxiv_parallel(self, reference, failed_apis, attempted_apis, skip_ss: bool = False):
         """Try Semantic Scholar first (highest hit rate), then fallback APIs in parallel.
         
@@ -1105,9 +1152,15 @@ class EnhancedHybridReferenceChecker:
         # ── PHASE 1: Parallel API calls ──
         
         if is_arxiv:
-            # For ArXiv refs: try local DB first (instant). If result looks
-            # clean, use it. If there's a major discrepancy (e.g., wrong
-            # authors from a corrupt S2 entry), fall back to ArXiv BibTeX.
+            # For explicit ArXiv refs, the cited ArXiv ID/URL is the source of
+            # truth. Verify it before local DB title search so a clean-looking
+            # database match cannot hide a wrong cited ArXiv target.
+            result = self._verify_arxiv_parallel(reference, failed_apis, attempted_apis)
+            if result is not None:
+                return self._handle_arxiv_result(result, reference)
+
+            # ArXiv was unavailable or returned no result; fall back to local
+            # DB lookups so offline/bulk runs can still verify by metadata.
             for local_key, _, local_checker in self._iter_local_db_checkers():
                 self._append_attempted_api(attempted_apis, local_key)
                 verified_data, errors, url, success, failure_type, failure_detail = self._try_api(
@@ -1135,63 +1188,6 @@ class EnhancedHybridReferenceChecker:
                         'failure_detail': failure_detail,
                         'active': True,
                     })
-            
-            # Local DB failed or had discrepancy — use ArXiv citation checker
-            result = self._verify_arxiv_parallel(reference, failed_apis, attempted_apis)
-            if result is not None:
-                verified_data, errors, url = result
-                # Check if the ArXiv URL points to a completely different paper.
-                # A title *error* (not warning) means the cited title didn't match
-                # ANY version of the ArXiv paper at this ID — the URL is wrong.
-                # However, version checking may have failed (rate-limiting,
-                # timeout) even though the paper IS the same — just with a
-                # revised title.  Only short-circuit when the titles are truly
-                # unrelated (similarity < 0.5); moderate similarity suggests a
-                # title revision that the version checker couldn't confirm.
-                has_title_error = any(
-                    e.get('error_type') == 'title' for e in errors
-                )
-                if has_title_error:
-                    cited_title = reference.get('title', 'unknown')
-                    actual_title = (verified_data or {}).get('title', 'unknown')
-                    # Compute similarity to distinguish "completely different
-                    # paper" from "same paper, revised title between versions".
-                    # Truly different papers score 0.0–0.1; revised titles
-                    # score 0.3–0.5+.  Use 0.25 as a conservative cutoff.
-                    from refchecker.utils.text_utils import compare_titles_with_latex_cleaning
-                    title_sim = compare_titles_with_latex_cleaning(cited_title, actual_title)
-                    if title_sim < 0.25:
-                        # Titles are truly unrelated — the ArXiv ID points to
-                        # a different paper.  Short-circuit to avoid wasting
-                        # time on fallback APIs for a likely fabricated ref.
-                        arxiv_url = reference.get('cited_url') or reference.get('url', '')
-                        logger.debug(
-                            f"Enhanced Hybrid: ArXiv URL points to a different paper "
-                            f"(cited: '{cited_title}', actual: '{actual_title}', "
-                            f"sim={title_sim:.2f}) — returning as unverified"
-                        )
-                        return None, [
-                            {
-                                'error_type': 'unverified',
-                                'error_details': f'Could not verify: {cited_title}',
-                            },
-                            {
-                                'error_type': 'url',
-                                'error_details': f'Cited URL does not reference this paper: {arxiv_url}',
-                            },
-                        ], arxiv_url
-                    else:
-                        # Titles share significant overlap — likely the same
-                        # paper with a revised title.  Return the ArXiv data
-                        # so downstream can evaluate it normally.
-                        logger.debug(
-                            f"Enhanced Hybrid: ArXiv title mismatch but titles "
-                            f"are similar (sim={title_sim:.2f}), treating as "
-                            f"version update: '{cited_title}' vs '{actual_title}'"
-                        )
-                        return result
-                else:
-                    return result
         else:
             # Non-ArXiv: try local DB first (instant), then parallel remote APIs
             for local_key, _, local_checker in self._iter_local_db_checkers():

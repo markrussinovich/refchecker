@@ -6453,7 +6453,7 @@ class ArxivReferenceChecker:
                             print(f"       ✅ Verified via URL: {cited_url}")
                             explanation = url_assessment.get('explanation', '')
                             if explanation:
-                                print(f"         LLM confirmed: {explanation}")
+                                print(f"         {explanation}")
                         return  # Don't add to errors — reference is verified
                     elif url_assessment and applied_hallucination.get('status') == 'hallucination':
                         # LLM says likely hallucinated despite URL containing title
