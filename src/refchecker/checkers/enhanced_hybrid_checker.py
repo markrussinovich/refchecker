@@ -885,6 +885,85 @@ class EnhancedHybridReferenceChecker:
     # Post-verification checks (shared by CLI, WebUI, and bulk paths)
     # ------------------------------------------------------------------
 
+    def _extract_verified_arxiv_id(
+        self,
+        reference: Dict[str, Any],
+        verified_data: Optional[Dict[str, Any]],
+        url: Optional[str],
+    ) -> Optional[str]:
+        """Return the best ArXiv ID available from reference or verified data."""
+        from refchecker.utils.url_utils import extract_arxiv_id_from_url
+
+        for candidate in (
+            reference.get('url'),
+            reference.get('cited_url'),
+            reference.get('venue'),
+            url,
+        ):
+            arxiv_id = extract_arxiv_id_from_url(candidate or '')
+            if arxiv_id:
+                return arxiv_id
+
+        if verified_data:
+            ext = verified_data.get('externalIds') or {}
+            arxiv_id = ext.get('ArXiv') or ext.get('arxiv')
+            if arxiv_id:
+                return str(arxiv_id)
+
+        return None
+
+    def _apply_arxiv_version_warnings(
+        self,
+        verified_data: Optional[Dict[str, Any]],
+        errors: List[Dict[str, Any]],
+        url: Optional[str],
+        reference: Dict[str, Any],
+    ) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
+        """Convert version-only ArXiv metadata mismatches to warnings.
+
+        This normalizes the result at the shared checker layer so CLI, bulk,
+        and WebUI all see the same warning-only record before any presentation
+        or hallucination code runs.
+        """
+        if not self.arxiv_citation or not errors:
+            return verified_data, errors, url
+        if any(e.get('warning_type') and 'update' in e.get('warning_type', '').lower() for e in errors):
+            return verified_data, errors, url
+
+        arxiv_id = self._extract_verified_arxiv_id(reference, verified_data, url)
+        if not arxiv_id:
+            return verified_data, errors, url
+
+        try:
+            arxiv_ref = dict(reference)
+            arxiv_ref['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+            arxiv_data, arxiv_errors, arxiv_url = self.arxiv_citation.verify_reference(arxiv_ref)
+        except Exception as exc:
+            logger.debug("Enhanced Hybrid: shared ArXiv version check failed: %s", exc)
+            return verified_data, errors, url
+
+        if not arxiv_data or not arxiv_errors:
+            return verified_data, errors, url
+
+        has_version_warning = any(
+            e.get('warning_type') and 'update' in e.get('warning_type', '').lower()
+            for e in arxiv_errors
+        )
+        has_real_error = any(e.get('error_type') for e in arxiv_errors)
+        if not has_version_warning or has_real_error:
+            return verified_data, errors, url
+
+        annotated_data = self._annotate_match_source(
+            arxiv_data,
+            'arxiv_citation',
+            self.arxiv_citation,
+        )
+        logger.debug(
+            "Enhanced Hybrid: ArXiv version update converted errors to warnings for %s",
+            arxiv_id,
+        )
+        return annotated_data, arxiv_errors, arxiv_url or url
+
     def _check_arxiv_id_mismatch(self, reference: Dict[str, Any],
                                   verified_data: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Check if the cited ArXiv ID actually points to the cited paper.
@@ -1095,7 +1174,13 @@ class EnhancedHybridReferenceChecker:
             if re_result is not None:
                 errors, url, verified_data = re_result
 
-        # 2. Independent ArXiv ID check — skip when the hybrid checker
+        # 2. Convert ArXiv version-only metadata differences to warnings.
+        if errors and verified_data is not None:
+            verified_data, errors, url = self._apply_arxiv_version_warnings(
+                verified_data, errors, url, reference,
+            )
+
+        # 3. Independent ArXiv ID check — skip when the hybrid checker
         #    already verified the paper with no errors (avoids false
         #    positives from paraphrased titles in the S2 API).
         #    Also skip when version checking already converted title errors

@@ -144,11 +144,11 @@ export const useCheckStore = create((set, get) => ({
         const hasSuggestions = ref.suggestions?.length > 0
         const status = (ref.status || '').toLowerCase()
         
-        if (status === 'error' || hasErrors) {
+        if (hasErrors) {
           refs_with_errors++
-        } else if (status === 'warning' || hasWarnings) {
+        } else if (hasWarnings) {
           refs_with_warnings_only++
-        } else if (status === 'suggestion' || hasSuggestions) {
+        } else if (hasSuggestions) {
           refs_with_suggestions_only++
         } else if (status === 'verified' || status === 'suggestion') {
           refs_verified++

@@ -167,13 +167,12 @@ export default function MainPanel() {
       // If not stored, compute from results
       if (refsWithErrors === undefined && displayRefs?.length > 0) {
         refsWithErrors = displayRefs.filter(r => 
-          r.status === 'error' || (r.errors?.some(e => e.error_type !== 'unverified'))
+          r.errors?.some(e => e.error_type !== 'unverified')
         ).length
       }
       if (refsWithWarningsOnly === undefined && displayRefs?.length > 0) {
         refsWithWarningsOnly = displayRefs.filter(r => 
-          (r.status === 'warning' || r.warnings?.length > 0) && 
-          r.status !== 'error' && !r.errors?.some(e => e.error_type !== 'unverified')
+          r.warnings?.length > 0 && !r.errors?.some(e => e.error_type !== 'unverified')
         ).length
       }
       

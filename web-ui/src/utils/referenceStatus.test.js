@@ -69,4 +69,44 @@ describe('referenceStatus', () => {
 
     expect(getEffectiveReferenceStatus(reference, true)).toBe('warning')
   })
+
+  it('does not show error for an LLM-validated reference with no remaining errors', () => {
+    const reference = {
+      status: 'error',
+      errors: [],
+      warnings: [],
+      suggestions: [{ suggestion_type: 'arxiv', suggestion_details: 'Reference could include arXiv URL' }],
+      matched_database: 'LLM search',
+      authoritative_urls: [{ type: 'llm_verified', url: 'https://arxiv.org/abs/2002.09518' }],
+      hallucination_assessment: {
+        verdict: 'UNLIKELY',
+        link: 'https://arxiv.org/abs/2002.09518',
+      },
+    }
+
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('suggestion')
+  })
+
+  it('does not show hidden errors when LLM-found metadata matches the citation', () => {
+    const reference = {
+      status: 'error',
+      title: 'Memory-based graph networks',
+      authors: ['Amir Hosein Khas Ahmadi'],
+      year: 2020,
+      errors: [{ error_type: 'author', error_details: 'Author mismatch' }],
+      warnings: [{ error_type: 'year', error_details: 'Year mismatch' }],
+      suggestions: [{ suggestion_type: 'arxiv', suggestion_details: 'Reference could include arXiv URL' }],
+      authoritative_urls: [{ type: 'llm_verified', url: 'https://arxiv.org/abs/2002.09518' }],
+      hallucination_assessment: {
+        verdict: 'LIKELY',
+        link: 'https://arxiv.org/abs/2002.09518',
+        found_title: 'Memory-based graph networks',
+        found_authors: 'Amir Hosein Khas Ahmadi',
+        found_year: '2020',
+      },
+    }
+
+    expect(llmFoundMetadataMatchesCitation(reference)).toBe(true)
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('suggestion')
+  })
 })

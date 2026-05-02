@@ -55,10 +55,12 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             // classified as hallucinated — those errors are evidence of
             // the hallucination, displayed under the hallucinated card.
             if (status === 'hallucination') return false
+            if (llmFoundMetadataMatchesCitation(ref)) return false
             return ref.errors?.some(e => e.error_type !== 'unverified')
           case 'warning':
             // Has any warning, excluding hallucinated refs.
             if (status === 'hallucination') return false
+            if (llmFoundMetadataMatchesCitation(ref)) return false
             return ref.warnings?.length > 0
           case 'suggestion':
             // Has any suggestion

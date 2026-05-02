@@ -232,6 +232,7 @@ def build_hallucination_error_entry(
     error_entry: Dict[str, Any] = {
         'error_type': consolidated_type,
         'error_details': '\n'.join(error_details_parts),
+        '_original_errors': list(errors),
         'ref_title': reference.get('title', ''),
         'ref_authors_cited': ', '.join(reference.get('authors', [])),
         # Keep the original list so overlap checks don't need to

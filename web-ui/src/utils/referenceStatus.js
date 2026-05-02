@@ -45,17 +45,23 @@ export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = fa
     return 'hallucination'
   }
 
-  const hasErrors = baseStatus === 'error' || (Array.isArray(reference.errors) && reference.errors.some(
+  if (llmMatch) {
+    return Array.isArray(reference.suggestions) && reference.suggestions.length > 0
+      ? 'suggestion'
+      : 'verified'
+  }
+
+  const hasErrors = Array.isArray(reference.errors) && reference.errors.some(
     e => (e?.error_type || '').toLowerCase() !== 'unverified'
-  ))
-  const hasWarnings = baseStatus === 'warning' || (Array.isArray(reference.warnings) && reference.warnings.length > 0)
-  const hasSuggestions = baseStatus === 'suggestion' || (Array.isArray(reference.suggestions) && reference.suggestions.length > 0)
+  )
+  const hasWarnings = Array.isArray(reference.warnings) && reference.warnings.length > 0
+  const hasSuggestions = Array.isArray(reference.suggestions) && reference.suggestions.length > 0
 
   if (hasErrors) return 'error'
   if (hasWarnings) return 'warning'
   if (hasSuggestions) return 'suggestion'
 
-  if (llmMatch) {
+  if (baseStatus === 'error' || baseStatus === 'warning' || baseStatus === 'suggestion') {
     return 'verified'
   }
 
@@ -129,9 +135,11 @@ export const computeReferenceStats = (references = [], isCheckComplete = false) 
     // Hallucinated refs contribute their per-issue items only to the
     // hallucinated bucket, not to errors/warnings (those error entries
     // are evidence of the hallucination).
-    if (s !== 'hallucination') {
+    if (s !== 'hallucination' && !llmMatch) {
       errorsCount += (r?.errors?.filter(e => e.error_type !== 'unverified') || []).length
       warningsCount += (r?.warnings || []).length
+    }
+    if (s !== 'hallucination') {
       suggestionsCount += (r?.suggestions || []).length
     }
 

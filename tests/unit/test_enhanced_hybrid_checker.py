@@ -29,6 +29,73 @@ class LocalMatchChecker:
         )
 
 
+class LocalArxivMismatchChecker:
+    database_label = "Semantic Scholar"
+    database_key = "local_s2"
+
+    def verify_reference(self, reference):
+        return (
+            {
+                "title": "Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection",
+                "authors": [
+                    {"name": "Fengjun Pan"},
+                    {"name": "Xiaobao Wu"},
+                    {"name": "Tho Quan"},
+                    {"name": "Anh Tuan Luu"},
+                ],
+                "year": 2025,
+                "externalIds": {"ArXiv": "2506.08477"},
+            },
+            [
+                {
+                    "error_type": "title",
+                    "error_details": "Title mismatch",
+                    "ref_title_correct": "Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection",
+                },
+                {
+                    "error_type": "author",
+                    "error_details": "Author count mismatch: 3 cited vs 4 correct",
+                    "ref_authors_correct": "Fengjun Pan, Xiaobao Wu, Tho Quan, Anh Tuan Luu",
+                },
+            ],
+            "https://api.semanticscholar.org/CorpusID:test",
+        )
+
+
+class ArxivVersionWarningChecker:
+    def is_arxiv_reference(self, reference):
+        return False
+
+    def verify_reference(self, reference):
+        assert reference["url"] == "https://arxiv.org/abs/2506.08477"
+        return (
+            {
+                "title": "Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection",
+                "authors": [
+                    {"name": "Fengjun Pan"},
+                    {"name": "Xiaobao Wu"},
+                    {"name": "Tho Quan"},
+                    {"name": "Anh Tuan Luu"},
+                ],
+                "year": 2025,
+                "externalIds": {"ArXiv": "2506.08477"},
+            },
+            [
+                {
+                    "warning_type": "title (v1 vs v2 update)",
+                    "warning_details": "Title mismatch (v1 vs v2 update)",
+                    "ref_title_correct": "Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection",
+                },
+                {
+                    "warning_type": "author (v1 vs v2 update)",
+                    "warning_details": "Author count mismatch: 3 cited vs 4 correct (v1 vs v2 update)",
+                    "ref_authors_correct": "Fengjun Pan, Xiaobao Wu, Tho Quan, Anh Tuan Luu",
+                },
+            ],
+            "https://arxiv.org/abs/2506.08477v1",
+        )
+
+
 class ArxivTitleSearchChecker:
     def is_arxiv_reference(self, reference):
         return False
@@ -129,6 +196,30 @@ def test_verify_reference_records_matched_database_from_local_checker():
     assert url == "https://www.semanticscholar.org/paper/s2-match-id"
     assert verified_data["_matched_database"] == "Semantic Scholar"
     assert verified_data["_matched_checker"] == "local_s2"
+
+
+def test_shared_postprocess_converts_arxiv_version_mismatch_to_warnings():
+    checker = _build_checker()
+    checker.local_db = LocalArxivMismatchChecker()
+    checker.semantic_scholar = None
+    checker.crossref = None
+    checker.arxiv_citation = ArxivVersionWarningChecker()
+
+    reference = {
+        "title": "Detecting harmful memes with decoupled understanding and guided cot reasoning",
+        "authors": ["Fengjun Pan", "Anh Tuan Luu", "Xiaobao Wu"],
+        "year": 2025,
+        "venue": "arXiv:2506.08477",
+    }
+
+    verified_data, errors, url = checker.verify_reference(reference)
+
+    assert url == "https://arxiv.org/abs/2506.08477v1"
+    assert verified_data["_matched_database"] == "ArXiv"
+    assert all("warning_type" in error for error in errors)
+    assert not any("error_type" in error for error in errors)
+    assert any(error["warning_type"] == "title (v1 vs v2 update)" for error in errors)
+    assert any(error["warning_type"] == "author (v1 vs v2 update)" for error in errors)
 
 
 def test_arxiv_title_search_precedes_loose_openreview_match():

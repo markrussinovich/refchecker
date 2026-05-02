@@ -59,6 +59,33 @@ import arxiv
 logger = logging.getLogger(__name__)
 
 
+def _llm_found_metadata_matches_citation(result: Dict[str, Any]) -> bool:
+    assessment = result.get('hallucination_assessment') or {}
+    if assessment.get('verdict') != 'LIKELY' or not assessment.get('link'):
+        return False
+
+    def normalize(value: Any) -> str:
+        return re.sub(r'[^a-z0-9]+', ' ', str(value or '').lower()).strip()
+
+    cited_title = normalize(result.get('title'))
+    found_title = normalize(assessment.get('found_title'))
+    if not cited_title or cited_title != found_title:
+        return False
+
+    found_authors = str(assessment.get('found_authors') or '').lower()
+    cited_last_names = [
+        str(author or '').strip().split()[-1].lower()
+        for author in (result.get('authors') or [])
+        if str(author or '').strip()
+    ]
+    if not cited_last_names or not all(name in found_authors for name in cited_last_names):
+        return False
+
+    cited_year = result.get('year')
+    found_year = str(assessment.get('found_year') or '')
+    return not cited_year or str(cited_year) in found_year
+
+
 def download_pdf(url: str, dest_path: str) -> None:
     """Download a PDF with browser-like headers (avoids 403 from OpenReview etc.)."""
     import tempfile, os
@@ -1387,22 +1414,6 @@ class ProgressRefChecker:
             logger.error(f"Error checking reference {index}: {e}")
             return self._format_error_result(reference, index, e)
 
-    @staticmethod
-    def _author_last_names(authors) -> set:
-        """Extract lowercased last-name tokens from an author list.
-
-        Handles both string lists (['A. Smith', 'B. Jones']) and
-        dict lists ([{'name': 'A. Smith'}]).
-        """
-        names = set()
-        for a in (authors or []):
-            name = a.get('name', a) if isinstance(a, dict) else a
-            parts = str(name).strip().split()
-            if parts:
-                # Use the last token as the surname
-                names.add(parts[-1].lower().rstrip('.'))
-        return names
-
     def _pre_screen_hallucination(
         self, result: Dict[str, Any], reference: Dict[str, Any]
     ) -> tuple:
@@ -1460,8 +1471,12 @@ class ProgressRefChecker:
         # The sanitized errors list only contains error_type entries
         # (warnings/suggestions are in separate lists), so we only
         # take the error_count from count_raw_errors.
+        llm_match_overrides = _llm_found_metadata_matches_citation(result)
         num_errors, _, _ = count_raw_errors(result.get('errors', []))
         num_warnings = len(result.get('warnings', []))
+        if llm_match_overrides:
+            num_errors = 0
+            num_warnings = 0
         num_suggestions = len(result.get('suggestions', []))
 
         d: Dict[str, int] = {
@@ -1482,19 +1497,23 @@ class ProgressRefChecker:
             e.get('error_type') == 'unverified' for e in result.get('errors', [])
         )
 
-        if status == 'hallucination':
+        if status == 'hallucination' and not llm_match_overrides:
             d['hallucination_count'] = 1
-        if status in ('unverified', 'hallucination') or has_unverified_error:
+        if not llm_match_overrides and (status in ('unverified', 'hallucination') or has_unverified_error):
             d['unverified_count'] = 1
-        if status in ('verified', 'suggestion'):
+        if (
+            llm_match_overrides
+            or status in ('verified', 'suggestion')
+            or (status not in ('unverified', 'hallucination') and num_errors == 0 and num_warnings == 0)
+        ):
             d['verified_count'] = 1
             d['refs_verified'] = 1
 
-        if status == 'error' or num_errors > 0:
+        if num_errors > 0:
             d['refs_with_errors'] = 1
-        elif status == 'warning' or num_warnings > 0:
+        elif num_warnings > 0:
             d['refs_with_warnings_only'] = 1
-        elif status == 'suggestion' or num_suggestions > 0:
+        elif num_suggestions > 0:
             d['refs_with_suggestions_only'] = 1
 
         return d
@@ -1514,141 +1533,15 @@ class ProgressRefChecker:
         old_d = ProgressRefChecker._compute_ref_stats(old_result)
         return {k: new_d[k] - old_d.get(k, 0) for k in new_d}
 
-    def _try_arxiv_version_match(self, result: Dict[str, Any], reference: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Check if errors are explained by an older ArXiv version.
-
-        When a paper was verified but has metadata mismatches (year, venue,
-        authors), check other ArXiv versions.  If a historical version matches
-        the citation well — including author name overlap — convert errors to
-        warnings and return the updated result.
-
-        Returns updated result if a better version was found, None otherwise.
-        """
-        import re
-        import time as _time
-
-        auth_urls = result.get('authoritative_urls') or []
-        arxiv_url = next((u['url'] for u in auth_urls if u.get('type') == 'arxiv'), None)
-        if not arxiv_url:
-            return None
-
-        match = re.search(r'arxiv\.org/abs/([0-9]{4}\.[0-9]{4,5}|[a-z-]+/[0-9]{7})', arxiv_url)
-        if not match:
-            return None
-        arxiv_id = match.group(1)
-
-        # Skip if there's a title mismatch — the ArXiv ID points to a different paper
-        raw_errors = result.get('_raw_errors', [])
-        if any((e.get('error_type') or '').lower() == 'title' for e in raw_errors):
-            return None
-
-        try:
-            from refchecker.checkers.arxiv_citation import ArXivCitationChecker
-            checker = ArXivCitationChecker()
-
-            latest_version = checker._get_latest_version_number(arxiv_id)
-            if not latest_version or latest_version <= 1:
-                return None
-
-            cited_title = reference.get('title', '')
-            cited_authors = reference.get('authors', [])
-            cited_last_names = self._author_last_names(cited_authors)
-            if not cited_last_names:
-                return None
-
-            best_score = 0.0
-            best_version = None
-            best_overlap = 0.0
-            start = _time.time()
-
-            for version_num in range(latest_version - 1, 0, -1):
-                if _time.time() - start > 15:
-                    logger.debug(f"ArXiv version check timed out for {arxiv_id}")
-                    break
-                version_data = checker._fetch_version_metadata_from_html(arxiv_id, version_num)
-                if not version_data:
-                    continue
-
-                score = checker._calculate_match_score(
-                    cited_title, cited_authors,
-                    version_data['title'], version_data['authors'],
-                )
-
-                # Also check actual author name overlap
-                version_last_names = self._author_last_names(version_data.get('authors', []))
-                if cited_last_names and version_last_names:
-                    overlap = len(cited_last_names & version_last_names) / len(cited_last_names)
-                else:
-                    overlap = 0.0
-
-                if score > best_score:
-                    best_score = score
-                    best_version = version_num
-                    best_overlap = overlap
-                if best_score >= 0.98 and overlap >= 0.5:
-                    break
-
-            SIMILARITY_THRESHOLD = 0.75
-            AUTHOR_OVERLAP_THRESHOLD = 0.4  # At least 40% of cited last names must appear
-
-            if not best_version or best_score < SIMILARITY_THRESHOLD:
-                return None
-            if best_overlap < AUTHOR_OVERLAP_THRESHOLD:
-                logger.debug(
-                    f"ArXiv version v{best_version} title matches (score {best_score:.2f}) "
-                    f"but author overlap is only {best_overlap:.0%} — not a version match"
-                )
-                return None
-
-            logger.info(
-                f"ArXiv version match: ref matches v{best_version} "
-                f"(score {best_score:.2f}, author overlap {best_overlap:.0%}) of {arxiv_id}"
-            )
-
-            # Convert errors to warnings with version annotation
-            updated = dict(result)
-            version_suffix = f" (v{best_version} vs v{latest_version} update)"
-            new_errors = []
-            new_warnings = list(updated.get('warnings', []))
-            for err in updated.get('errors', []):
-                etype = err.get('error_type', '')
-                if etype in ('year', 'venue', 'author') or 'mismatch' in (err.get('error_details') or '').lower():
-                    new_warnings.append({
-                        'error_type': etype + version_suffix,
-                        'error_details': err.get('error_details', ''),
-                        'is_warning': True,
-                        **{k: err[k] for k in ('cited_value', 'actual_value', 'ref_authors_correct', 'ref_year_correct') if k in err},
-                    })
-                else:
-                    new_errors.append(err)
-
-            updated['errors'] = new_errors
-            updated['warnings'] = new_warnings
-            if not new_errors:
-                updated['status'] = 'warning' if new_warnings else 'verified'
-            updated['_raw_errors'] = []  # Clear so hallucination check is skipped
-
-            return updated
-
-        except Exception as exc:
-            logger.debug(f"ArXiv version check failed: {exc}")
-            return None
-
     def _run_hallucination_check_sync(self, result: Dict[str, Any], reference: Dict[str, Any]) -> Dict[str, Any]:
         """Run hallucination check synchronously and return updated result.
 
         Called from a thread pool *after* the initial result has already
         been streamed to the UI, so the user sees the reference immediately.
         Deterministic checks (author overlap, name order) are already handled
-        by _pre_screen_hallucination — this method focuses on ArXiv version
-        match and LLM assessment.
+        by _pre_screen_hallucination. ArXiv version-update normalization lives
+        in the shared EnhancedHybridReferenceChecker postprocess path.
         """
-        # Before running the LLM, check if metadata mismatches are explained
-        # by a different ArXiv version (e.g. v1 preprint vs v2 conference).
-        version_result = self._try_arxiv_version_match(result, reference)
-        if version_result is not None:
-            return version_result
-
         auth_urls = result.get('authoritative_urls') or []
         verified_url = auth_urls[0]['url'] if auth_urls else ''
         error_entry = build_hallucination_error_entry(
@@ -2144,5 +2037,25 @@ class ProgressRefChecker:
         
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
+
+        # Final aggregates should be derived from the settled reference objects,
+        # not only from incremental deltas emitted during streaming.
+        errors_count = warnings_count = suggestions_count = 0
+        unverified_count = verified_count = hallucination_count = 0
+        refs_with_errors = refs_with_warnings_only = refs_with_suggestions_only = refs_verified = 0
+        for result in results_list:
+            if not result:
+                continue
+            d = self._compute_ref_stats(result)
+            errors_count += d['errors_count']
+            warnings_count += d['warnings_count']
+            suggestions_count += d['suggestions_count']
+            hallucination_count += d['hallucination_count']
+            unverified_count += d['unverified_count']
+            verified_count += d['verified_count']
+            refs_verified += d['refs_verified']
+            refs_with_errors += d['refs_with_errors']
+            refs_with_warnings_only += d['refs_with_warnings_only']
+            refs_with_suggestions_only += d['refs_with_suggestions_only']
         
         return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count

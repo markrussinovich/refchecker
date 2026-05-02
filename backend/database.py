@@ -223,11 +223,14 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
             # Hallucinated refs are tracked in their own bucket; their
             # accompanying errors/warnings are evidence, not separate issues.
             pass
-        elif status == "error" or has_non_unverified_error:
+        elif llm_match_overrides:
+            if has_suggestion:
+                refs_with_suggestions_only += 1
+        elif has_non_unverified_error:
             refs_with_errors += 1
-        elif status == "warning" or has_warning:
+        elif has_warning:
             refs_with_warnings_only += 1
-        elif status == "suggestion" or has_suggestion:
+        elif has_suggestion:
             refs_with_suggestions_only += 1
 
         if not llm_match_overrides and (

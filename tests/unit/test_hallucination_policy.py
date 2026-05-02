@@ -421,6 +421,39 @@ def test_warning_only_consolidated_issue_should_not_be_checked():
     assert should_check_hallucination(entry) is False
 
 
+def test_warning_only_built_entry_should_not_call_llm():
+    raw_errors = [
+        {
+            'warning_type': 'title (v1 vs v2 update)',
+            'warning_details': 'Title mismatch (v1 vs v2 update)',
+        },
+        {
+            'warning_type': 'author (v1 vs v2 update)',
+            'warning_details': 'Author count mismatch: 3 cited vs 4 correct (v1 vs v2 update)',
+        },
+    ]
+    reference = {
+        'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'year': 2025,
+        'url': 'http://arxiv.org/abs/2506.08477',
+    }
+    entry = build_hallucination_error_entry(
+        raw_errors,
+        reference,
+        verified_url='https://arxiv.org/abs/2506.08477v1',
+    )
+
+    assert entry is not None
+    assert should_check_hallucination(entry) is False
+
+    llm_client = MagicMock()
+    llm_client.available = True
+
+    assert run_hallucination_check(entry, llm_client=llm_client) is None
+    llm_client.assess.assert_not_called()
+
+
 def test_arxiv_id_conflict_should_be_checked():
     entry = {
         'error_type': 'arxiv_id',
