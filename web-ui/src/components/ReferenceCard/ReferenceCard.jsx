@@ -192,12 +192,12 @@ function CollapsibleText({ text }) {
 /**
  * Individual reference card matching CLI output format
  */
-const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs }) {
+const ReferenceCard = memo(function ReferenceCard({ reference, index, displayIndex, totalRefs: _totalRefs, isCheckComplete = false }) {
   // Always use the original index for consistent numbering, even when filtered
   const numberToShow = typeof index === 'number' ? index : (typeof displayIndex === 'number' ? displayIndex : 0)
   const assessment = reference.hallucination_assessment || {}
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
-  const status = getEffectiveReferenceStatus(reference)
+  const status = getEffectiveReferenceStatus(reference, isCheckComplete)
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -835,6 +835,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   if (prevProps.index !== nextProps.index) return false
   if (prevProps.displayIndex !== nextProps.displayIndex) return false
   if (prevProps.totalRefs !== nextProps.totalRefs) return false
+  if (prevProps.isCheckComplete !== nextProps.isCheckComplete) return false
   const prev = prevProps.reference
   const next = nextProps.reference
   if (prev === next) return true

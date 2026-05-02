@@ -18,7 +18,13 @@ from dataclasses import asdict, dataclass, field
 from queue import Empty, Queue
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 
-from refchecker.core.hallucination_policy import apply_hallucination_verdict, build_hallucination_error_entry, pre_screen_hallucination, run_hallucination_check
+from refchecker.core.hallucination_policy import (
+    apply_hallucination_verdict,
+    build_hallucination_error_entry,
+    pre_screen_hallucination,
+    run_hallucination_check,
+    should_defer_likely_to_llm,
+)
 from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
 
@@ -1432,18 +1438,8 @@ def _submit_hallucination_assessments_async(
 
         outcome, assessment = pre_screen_hallucination(filtered)
         if outcome == 'resolved':
-            # Mirror the deferral logic in run_hallucination_check():
-            # 0% author-overlap LIKELY verdicts, and verified LIKELY verdicts,
-            # should be deferred to the LLM, which can web-search and confirm
-            # whether the checker matched a different paper.
-            author_overlap = assessment.get('author_overlap') if assessment else None
-            should_defer_likely = (
-                assessment
-                and assessment.get('verdict') == 'LIKELY'
-                and (author_overlap == 0 or bool(verified_url))
-            )
             if (
-                should_defer_likely
+                should_defer_likely_to_llm(assessment, verified_url)
                 and llm_verifier
                 and (getattr(llm_verifier, 'available', False) or getattr(llm_verifier, 'cache_dir', None))
             ):

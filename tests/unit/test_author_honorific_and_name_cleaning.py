@@ -23,3 +23,15 @@ def test_enhanced_name_match_intended_behavior():
     assert enhanced_name_match("M. Sachan", "Mrinmaya Sachan")
     # Display formatting shouldn't alter name content
     assert format_author_for_display("Sachan, Mrinmaya") == "Mrinmaya Sachan"
+
+
+def test_enhanced_name_match_compact_initials():
+    assert enhanced_name_match("BR Cowley", "Benjamin R. Cowley")
+    assert enhanced_name_match("JW Pillow", "Jonathan W. Pillow")
+
+
+def test_enhanced_name_match_collapsed_author_tokens():
+    assert enhanced_name_match("KonstantinFWilleke", "Konstantin F. Willeke")
+    assert enhanced_name_match("PaulGFahey", "Paul G. Fahey")
+    assert enhanced_name_match("PatrickMarino", "Patrick J. Marino")
+    assert enhanced_name_match("JoelYe", "Joel Ye")

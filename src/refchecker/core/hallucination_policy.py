@@ -363,6 +363,8 @@ def _compute_author_overlap(
 
     # With only 2 authors, having 1 correct is a normal citation error,
     # not hallucination — require at least 3 cited authors for overlap scoring
+    if len(cited_cmp) <= 2 and matches == len(cited_cmp):
+        return 1.0
     if len(cited_cmp) <= 2 and matches >= 1:
         return None
 
@@ -694,7 +696,7 @@ def assess_hallucination(
     error_entry: Dict[str, Any],
     llm_client: Any,
     web_searcher: Optional[Any] = None,
-) -> Dict[str, Any]:
+) -> Optional[Dict[str, Any]]:
     """Assess whether a reference is likely hallucinated using an LLM.
 
     Parameters
@@ -724,6 +726,12 @@ def assess_hallucination(
         # The verifier's assess() checks its disk cache before requiring
         # a live API key, so this works even without an API key in CI.
         result = llm_client.assess(error_entry, web_searcher=web_searcher)
+        if (
+            result
+            and result.get('verdict') == 'UNCERTAIN'
+            and (result.get('explanation') or '').strip().lower() == 'llm not available.'
+        ):
+            return None
         return result
     except Exception as exc:
         logger.warning(f'Hallucination assessment failed: {exc}')
@@ -732,6 +740,21 @@ def assess_hallucination(
             'explanation': f'Assessment failed: {exc}',
             'web_search': None,
         }
+
+
+def should_defer_likely_to_llm(
+    assessment: Optional[Dict[str, Any]],
+    verified_url: Optional[str] = None,
+) -> bool:
+    """Return True when deterministic LIKELY needs LLM/web-search confirmation.
+
+    A zero-overlap author verdict can be caused by the verifier matching a
+    different paper with a similar title, and any verified-url mismatch should
+    be checked with web evidence before becoming a hallucination flag.
+    """
+    if not assessment or assessment.get('verdict') != 'LIKELY':
+        return False
+    return assessment.get('author_overlap') == 0 or bool(verified_url)
 
 
 def _detect_garbled_metadata(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -961,42 +984,11 @@ def run_hallucination_check(
         # defer to the LLM if available: the checker may have matched a
         # different paper with a similar title, and web search can confirm
         # whether the cited title/authors exist together.
-        is_verified = bool(error_entry.get('ref_verified_url'))
-        author_overlap = assessment.get('author_overlap') if assessment else None
-        if (
-            llm_client
-            and assessment
-            and assessment.get('verdict') == 'LIKELY'
-            and author_overlap == 0
-        ):
+        verified_url = error_entry.get('ref_verified_url')
+        if llm_client and should_defer_likely_to_llm(assessment, verified_url):
             logger.debug(
-                "run_hallucination_check: 0%% author overlap flagged LIKELY by rules — deferring to LLM ref=%r",
+                "run_hallucination_check: deterministic LIKELY deferred to LLM ref=%r",
                 ref_title,
-            )
-            # Fall through to LLM below
-        elif (
-            is_verified
-            and llm_client
-            and assessment
-            and assessment.get('verdict') == 'LIKELY'
-            and author_overlap is None
-        ):
-            logger.debug(
-                "run_hallucination_check: verified ref flagged LIKELY with unknown author overlap — deferring to LLM ref=%r",
-                ref_title,
-            )
-            # Fall through to LLM below
-        elif (
-            is_verified
-            and llm_client
-            and assessment
-            and assessment.get('verdict') == 'LIKELY'
-            and author_overlap is not None
-        ):
-            logger.debug(
-                "run_hallucination_check: verified ref flagged LIKELY by rules "
-                "(overlap=%.0f%%) — deferring to LLM ref=%r",
-                author_overlap * 100, ref_title,
             )
             # Fall through to LLM below
         else:
@@ -1038,6 +1030,90 @@ def _metadata_has_found_reference(assessment: Dict[str, Any]) -> bool:
         or assessment.get('found_year')
         or assessment.get('link')
     )
+
+
+def _normalize_reference_url(url: str) -> str:
+    """Normalize a source URL enough to avoid duplicate display entries."""
+    if not url:
+        return ''
+    from urllib.parse import urlparse
+
+    parsed = urlparse(str(url).strip())
+    host = (parsed.hostname or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    path = parsed.path.rstrip('/').lower()
+    return f'{host}{path}'
+
+
+def _same_reference_url(left: str, right: str) -> bool:
+    return bool(left and right and _normalize_reference_url(left) == _normalize_reference_url(right))
+
+
+def _authoritative_urls_with_once(
+    existing_urls: List[Dict[str, Any]],
+    url_type: str,
+    url: str,
+) -> List[Dict[str, Any]]:
+    """Return authoritative URLs with *url* added only if it is new."""
+    urls = list(existing_urls or [])
+    if not url:
+        return urls
+    if any(_same_reference_url(item.get('url', ''), url) for item in urls):
+        return urls
+    urls.append({'type': url_type, 'url': url})
+    return urls
+
+
+def _parse_llm_author_names(author_text: str, cited_authors: Optional[List[str]] = None) -> List[str]:
+    """Parse LLM-returned author text into names for comparison.
+
+    LLM/web metadata often returns repository-style names as
+    ``Last, First, Last, First``. A naive comma split turns five authors into
+    ten fragments, which then produces false author-count errors.
+    """
+    if not author_text:
+        return []
+
+    text = str(author_text).strip()
+    if not text or text.upper() == 'NONE':
+        return []
+
+    if ';' in text:
+        names = []
+        for chunk in text.split(';'):
+            parts = [part.strip() for part in chunk.split(',') if part.strip()]
+            if len(parts) == 2:
+                names.append(f'{parts[1]} {parts[0]}')
+            elif chunk.strip():
+                names.append(chunk.strip())
+        if names:
+            return names
+
+    if '*' in text:
+        return [part.strip() for part in text.split('*') if part.strip()]
+
+    parts = [part.strip() for part in text.split(',') if part.strip()]
+    if not parts:
+        return []
+
+    if len(parts) % 2 == 0 and len(parts) >= 4:
+        paired = [f'{parts[i + 1]} {parts[i]}' for i in range(0, len(parts), 2)]
+        if cited_authors and len(paired) == len(cited_authors):
+            from refchecker.utils.text_utils import enhanced_name_match
+
+            matches = 0
+            for cited_name in cited_authors:
+                if any(enhanced_name_match(cited_name, paired_name) for paired_name in paired):
+                    matches += 1
+            if matches >= max(1, len(cited_authors) - 1):
+                return paired
+
+        single_token_left_parts = sum(1 for i in range(0, len(parts), 2) if len(parts[i].split()) == 1)
+        if not cited_authors and single_token_left_parts >= len(paired) * 0.8:
+            return paired
+
+    return parts
 
 
 def _reverify_with_standard_refcheck(
@@ -1120,10 +1196,11 @@ def _reverify_with_llm_metadata(
     if found_authors and cited_authors:
         # Parse LLM-returned author string into list-of-dicts (same format
         # as Semantic Scholar)
+        llm_author_names = _parse_llm_author_names(found_authors, cited_authors)
         llm_author_list = [
-            {'name': a.strip()}
-            for a in found_authors.split(',')
-            if a.strip()
+            {'name': author_name}
+            for author_name in llm_author_names
+            if author_name
         ]
         if llm_author_list:
             match, err_msg = compare_authors(cited_authors, llm_author_list)
@@ -1275,9 +1352,9 @@ def apply_hallucination_verdict(
                     result['hallucination_assessment'] = corrected_assessment
                     result['errors'] = []
                     result['warnings'] = rechecked_warnings
-                    result['authoritative_urls'] = [
-                        {"type": "llm_verified", "url": current_link}
-                    ]
+                    result['authoritative_urls'] = _authoritative_urls_with_once(
+                        result.get('authoritative_urls', []), 'llm_verified', current_link,
+                    )
                     result['matched_database'] = 'LLM search'
                     result['status'] = 'warning' if rechecked_warnings else 'verified'
                     return result
@@ -1309,11 +1386,8 @@ def apply_hallucination_verdict(
             ]
             result['status'] = 'error' if remaining_errors else 'verified'
         elif ha_link and ha_link.startswith('http'):
-            result['authoritative_urls'] = list(
-                result.get('authoritative_urls', [])
-            )
-            result['authoritative_urls'].append(
-                {"type": "llm_verified", "url": ha_link}
+            result['authoritative_urls'] = _authoritative_urls_with_once(
+                result.get('authoritative_urls', []), 'llm_verified', ha_link,
             )
             result['matched_database'] = 'LLM search'
             # Strip resolved errors so downstream counters are correct.
@@ -1374,9 +1448,9 @@ def apply_hallucination_verdict(
                 # Update the verified URL to the LLM-found source
                 current_link = assessment.get('link') or ha_link
                 if current_link and current_link.startswith('http'):
-                    result['authoritative_urls'] = [
-                        {"type": "llm_verified", "url": current_link}
-                    ]
+                    result['authoritative_urls'] = _authoritative_urls_with_once(
+                        result.get('authoritative_urls', []), 'llm_verified', current_link,
+                    )
                     result['matched_database'] = 'LLM search'
                 remaining_errors = [
                     e for e in result['errors']

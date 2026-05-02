@@ -32,6 +32,8 @@ import logging
 import requests
 import html
 import time
+import urllib.parse
+import xml.etree.ElementTree as ET
 from typing import Dict, List, Tuple, Optional, Any
 
 from pybtex.database import parse_string
@@ -156,6 +158,125 @@ class ArXivCitationChecker:
         else:
             logger.debug(f"Invalid BibTeX response for ArXiv paper {arxiv_id}")
             return None
+
+    def _build_title_search_query(self, title: str) -> str:
+        """Build a conservative ArXiv API query from distinctive title terms."""
+        words = re.findall(r'[A-Za-z0-9]+', title.lower())
+        stopwords = {
+            'the', 'and', 'for', 'with', 'from', 'into', 'onto', 'using',
+            'large', 'scale', 'based', 'paper', 'study', 'towards', 'toward',
+        }
+        terms = []
+        for word in words:
+            if len(word) < 4 or word in stopwords:
+                continue
+            if word.endswith('s') and len(word) > 5:
+                word = word[:-1]
+            if word not in terms:
+                terms.append(word)
+            if len(terms) >= 8:
+                break
+
+        if not terms:
+            terms = [word for word in words if len(word) >= 3][:6]
+        return ' AND '.join(f'all:{term}' for term in terms)
+
+    def find_arxiv_id_by_title(
+        self,
+        title: str,
+        authors: Optional[List[Any]] = None,
+        year: Optional[Any] = None,
+        max_results: int = 5,
+    ) -> Optional[str]:
+        """Search ArXiv by title and return the best matching arXiv ID."""
+        if not title or not title.strip():
+            return None
+
+        query = self._build_title_search_query(title)
+        if not query:
+            return None
+
+        params = urllib.parse.urlencode({
+            'search_query': query,
+            'start': 0,
+            'max_results': max_results,
+            'sortBy': 'relevance',
+            'sortOrder': 'descending',
+        })
+        url = f'https://export.arxiv.org/api/query?{params}'
+        logger.debug("Searching ArXiv by title: %s", query)
+
+        try:
+            self.rate_limiter.wait()
+            response = requests.get(url, timeout=self.timeout)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.debug("ArXiv title search failed: %s", exc)
+            return None
+
+        try:
+            root = ET.fromstring(response.text)
+        except ET.ParseError as exc:
+            logger.debug("ArXiv title search returned invalid XML: %s", exc)
+            return None
+
+        namespace = {'atom': 'http://www.w3.org/2005/Atom'}
+        best_id = None
+        best_score = 0.0
+        cited_year = None
+        try:
+            cited_year = int(year) if year else None
+        except (TypeError, ValueError):
+            cited_year = None
+
+        for entry in root.findall('atom:entry', namespace):
+            found_title = ' '.join((entry.findtext('atom:title', default='', namespaces=namespace) or '').split())
+            found_id_url = (entry.findtext('atom:id', default='', namespaces=namespace) or '').strip()
+            if not found_title or '/abs/' not in found_id_url:
+                continue
+
+            found_id = found_id_url.rsplit('/abs/', 1)[-1].split('v', 1)[0]
+            published = entry.findtext('atom:published', default='', namespaces=namespace) or ''
+            found_year = None
+            if len(published) >= 4:
+                try:
+                    found_year = int(published[:4])
+                except ValueError:
+                    found_year = None
+            if cited_year and found_year and abs(cited_year - found_year) > 2:
+                continue
+
+            title_score = compare_titles_with_latex_cleaning(title, found_title)
+            if title_score < 0.82:
+                continue
+
+            author_score = 0.0
+            found_authors = [
+                (author.findtext('atom:name', default='', namespaces=namespace) or '').strip()
+                for author in entry.findall('atom:author', namespace)
+            ]
+            found_authors = [author for author in found_authors if author]
+            if authors and found_authors:
+                try:
+                    authors_match, _ = compare_authors(authors, found_authors)
+                    author_score = 1.0 if authors_match else 0.0
+                except Exception:
+                    author_score = 0.0
+
+                if author_score == 0.0:
+                    cited_first = str(authors[0]).lower() if authors else ''
+                    found_first = found_authors[0].lower() if found_authors else ''
+                    if cited_first and found_first and cited_first.split()[-1] in found_first:
+                        author_score = 0.5
+
+            score = title_score + (0.1 * author_score)
+            if score > best_score:
+                best_score = score
+                best_id = found_id
+
+        if best_id:
+            logger.debug("ArXiv title search matched %s with score %.2f", best_id, best_score)
+        return best_id
     
     def parse_bibtex(self, bibtex_str: str) -> Optional[Dict[str, Any]]:
         """

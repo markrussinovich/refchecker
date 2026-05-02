@@ -9,8 +9,10 @@ from refchecker.core.hallucination_policy import (
     build_hallucination_error_entry,
     check_author_hallucination,
     detect_name_order_warning,
+    assess_hallucination,
     apply_hallucination_verdict,
     run_hallucination_check,
+    should_defer_likely_to_llm,
     should_check_hallucination,
     _compute_author_overlap,
     _strip_team_names,
@@ -32,6 +34,34 @@ def test_unverified_reference_should_be_checked():
         'ref_authors_cited': 'Author One, Author Two',
     }
     assert should_check_hallucination(entry) is True
+
+
+def test_shared_likely_deferral_policy_for_verified_or_zero_overlap():
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0}, '') is True
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0.8}, 'https://example.test/paper') is True
+    assert should_defer_likely_to_llm({'verdict': 'LIKELY', 'author_overlap': 0.8}, '') is False
+    assert should_defer_likely_to_llm({'verdict': 'UNLIKELY', 'author_overlap': 0}, 'https://example.test/paper') is False
+
+
+def test_cache_only_llm_unavailable_is_not_an_assessment():
+    class CacheOnlyVerifier:
+        def assess(self, _error_entry, web_searcher=None):
+            return {
+                'verdict': 'UNCERTAIN',
+                'explanation': 'LLM not available.',
+                'web_search': None,
+            }
+
+    result = assess_hallucination(
+        {
+            'error_type': 'unverified',
+            'error_details': 'Reference could not be verified',
+            'ref_title': 'A missing title',
+        },
+        CacheOnlyVerifier(),
+    )
+
+    assert result is None
 
 
 def test_parse_verdict_preserves_found_venue():
@@ -97,6 +127,64 @@ def test_apply_hallucination_verdict_rechecks_found_venue():
     assert updated['status'] == 'verified'
     assert updated['warnings'][0]['error_type'] == 'venue'
     assert updated['warnings'][0]['ref_venue_correct'] == 'Findings of the Association for Computational Linguistics: ACL 2023'
+
+
+def test_apply_hallucination_verdict_handles_last_first_found_authors():
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Marlowe: Stanford’s gpu-based computational instrument',
+        'authors': [
+            'Craig Kapfer',
+            'Kurt Stine',
+            'Balasubramanian Narasimhan',
+            'Christopher Mentzel',
+            'Emmanuel Candes',
+        ],
+        'year': 2025,
+        'venue': 'n.d.',
+        'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899',
+    }
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The cited work is hosted on Zenodo.',
+        'link': 'https://zenodo.org/doi/10.5281/zenodo.14751899',
+        'found_title': 'Marlowe: Stanford’s GPU-based Computational Instrument',
+        'found_authors': 'Kapfer, Craig, Stine, Kurt, Narasimhan, Balasubramanian, Mentzel, Christopher, Candès, Emmanuel',
+        'found_venue': 'Zenodo',
+        'found_year': '2025',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment, reference)
+
+    assert updated['status'] == 'verified'
+    assert updated['errors'] == []
+    assert updated['authoritative_urls'] == [
+        {'type': 'standard_refcheck', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+    ]
+
+
+def test_apply_hallucination_verdict_deduplicates_same_llm_url():
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+        'authoritative_urls': [
+            {'type': 'verified_url', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+        ],
+    }
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The cited work is hosted on Zenodo.',
+        'link': 'https://zenodo.org/doi/10.5281/zenodo.14751899/',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment)
+
+    assert updated['authoritative_urls'] == [
+        {'type': 'verified_url', 'url': 'https://zenodo.org/doi/10.5281/zenodo.14751899'}
+    ]
 
 
 def test_apply_likely_verdict_uses_llm_match_without_fresh_lookup():
@@ -928,6 +1016,50 @@ def test_verified_ref_high_overlap_not_flagged():
     }
     result = run_hallucination_check(entry, llm_client=None)
     assert result is None  # No hallucination for well-matching authors
+
+def test_verified_compact_initial_authors_skip_hallucination_check():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'First author mismatch',
+        'ref_title': 'High-contrast gaudy images improve the training of deep neural network models of visual cortex',
+        'ref_authors_cited': 'BR Cowley, JW Pillow',
+        '_ref_authors_cited_list': ['BR Cowley', 'JW Pillow'],
+        'ref_authors_correct': 'Benjamin R. Cowley, Jonathan W. Pillow',
+        'ref_verified_url': 'https://arxiv.org/abs/2006.11412',
+    }
+
+    assert _compute_author_overlap(
+        entry['ref_authors_cited'],
+        entry['ref_authors_correct'],
+        cited_list=entry['_ref_authors_cited_list'],
+    ) == 1.0
+    assert should_check_hallucination(entry) is False
+
+def test_verified_collapsed_author_tokens_skip_hallucination_check():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author 1 mismatch',
+        'ref_title': 'The sensorium competition on predicting large-scale mouse primary visual cortex activity',
+        'ref_authors_cited': (
+            'KonstantinFWilleke, PaulGFahey, MohammadBashiri, LauraPede, '
+            'MaxFBurg, ChristophBlessing, Santiago A Cadena, Zhiwei Ding, '
+            'Konstantin-Klemens Lurz, Kayla Ponder, et al'
+        ),
+        '_ref_authors_cited_list': [
+            'KonstantinFWilleke', 'PaulGFahey', 'MohammadBashiri', 'LauraPede',
+            'MaxFBurg', 'ChristophBlessing', 'Santiago A Cadena', 'Zhiwei Ding',
+            'Konstantin-Klemens Lurz', 'Kayla Ponder', 'et al',
+        ],
+        'ref_authors_correct': (
+            'Konstantin F. Willeke, Paul G. Fahey, Mohammad Bashiri, Laura Pede, '
+            'Max F. Burg, Christoph Blessing, Santiago A. Cadena, Zhiwei Ding, '
+            'Konstantin-Klemens Lurz, Kayla Ponder, Taliah Muhammad, '
+            'Saumil S. Patel, Alexander S. Ecker, Andreas S. Tolias, Fabian H. Sinz'
+        ),
+        'ref_verified_url': 'https://arxiv.org/abs/2206.08666',
+    }
+
+    assert should_check_hallucination(entry) is False
 
 
 def test_verified_ref_author_field_with_title_words_is_garbled_metadata():

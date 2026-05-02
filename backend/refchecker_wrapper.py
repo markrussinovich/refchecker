@@ -4,6 +4,7 @@ Wrapper around refchecker library with progress callbacks for real-time updates
 import sys
 import os
 import re
+import io
 import asyncio
 import logging
 import tempfile
@@ -11,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any, Optional, Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 # Debug file logging
 DEBUG_LOG_FILE = Path(tempfile.gettempdir()) / "refchecker_debug.log"
@@ -42,9 +44,15 @@ from refchecker.core.hallucination_policy import (
     has_real_raw_errors,
     pre_screen_hallucination,
     run_hallucination_check,
+    should_defer_likely_to_llm,
 )
 from refchecker.utils.arxiv_utils import get_bibtex_content
-from refchecker.utils.cache_utils import cache_bibliography, cached_bibliography, get_cached_artifact_path
+from refchecker.utils.cache_utils import (
+    cache_bibliography,
+    cached_bibliography,
+    get_cached_artifact_path,
+    llm_cache_identity_from_extractor,
+)
 from refchecker.utils.grobid import extract_pdf_references_with_grobid_fallback
 import arxiv
 
@@ -94,6 +102,17 @@ def _make_cli_checker(llm_provider):
     cli_checker.used_unreliable_extraction = False
     cli_checker.fatal_error = False
     return cli_checker
+
+
+def _extract_pdf_text_cli_style(pdf_path: str, llm_provider) -> str:
+    """Extract PDF text using the same method as the CLI checker.
+
+    This keeps WebUI text extraction behavior aligned with CLI/bulk and avoids
+    path-specific PDF parsing differences before bibliography detection.
+    """
+    cli_checker = _make_cli_checker(llm_provider)
+    with open(pdf_path, 'rb') as pdf_file:
+        return cli_checker.extract_text_from_pdf(io.BytesIO(pdf_file.read()))
 
 
 def _normalize_reference_fields(ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -512,6 +531,9 @@ class ProgressRefChecker:
         if self.cancel_event and self.cancel_event.is_set():
             raise asyncio.CancelledError()
 
+    def _bibliography_cache_identity(self) -> str:
+        return llm_cache_identity_from_extractor(SimpleNamespace(llm_provider=self.llm) if self.llm else None)
+
     async def check_paper(self, paper_source: str, source_type: str) -> Dict[str, Any]:
         """
         Check a paper and emit progress updates
@@ -573,6 +595,8 @@ class ProgressRefChecker:
                     logger.info(f"Extracted {len(refs)} references via GROBID")
                 return refs, method
 
+            bibliography_cache_identity = self._bibliography_cache_identity()
+
             async def maybe_update_title_from_direct_pdf(pdf_url: str) -> None:
                 nonlocal paper_title
                 if paper_title != "Unknown Paper":
@@ -627,7 +651,7 @@ class ProgressRefChecker:
                 if is_direct_pdf_url:
                     # Check bibliography cache first — avoids PDF download
                     # entirely when references are already cached.
-                    cached_bib = cached_bibliography(self.cache_dir, paper_source)
+                    cached_bib = cached_bibliography(self.cache_dir, paper_source, bibliography_cache_identity)
                     if cached_bib is not None:
                         logger.info(f"Cache hit: loaded {len(cached_bib)} references for {paper_source}")
                         bibliography_source_kind = 'pdf'
@@ -652,7 +676,7 @@ class ProgressRefChecker:
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')
                         pdf_processor = PDFProcessor()
-                        paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
+                        paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, pdf_path, self.llm)
 
                         # Try to extract the paper title from the PDF content
                         # (only if we don't already have a title from the API)
@@ -723,9 +747,8 @@ class ProgressRefChecker:
 
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')
-                        # Extract text from PDF - run in thread
-                        pdf_processor = PDFProcessor()
-                        paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, pdf_path)
+                        # Extract text using the same CLI path for parity.
+                        paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, pdf_path, self.llm)
                     else:
                         paper_text = ""  # Not needed since we have references
 
@@ -739,7 +762,7 @@ class ProgressRefChecker:
                 if paper_source.lower().endswith('.pdf'):
                     pdf_processor = PDFProcessor()
                     pdf_path_for_fallback = paper_source
-                    paper_text = await asyncio.to_thread(pdf_processor.extract_text_from_pdf, paper_source)
+                    paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, self.llm)
                     
                     # Try to extract the paper title from the PDF
                     try:
@@ -837,7 +860,7 @@ class ProgressRefChecker:
                 raise ValueError(f"Unsupported source type: {source_type}")
 
             # Step 2: Extract references (check disk cache first)
-            references = cached_bibliography(self.cache_dir, paper_source)
+            references = cached_bibliography(self.cache_dir, paper_source, bibliography_cache_identity)
             if references is not None:
                 set_extraction_method('cache')
                 logger.info(f"Cache hit: loaded {len(references)} references for {paper_source}")
@@ -868,7 +891,7 @@ class ProgressRefChecker:
 
                 # Save to disk cache
                 if references:
-                    cache_bibliography(self.cache_dir, paper_source, references)
+                    cache_bibliography(self.cache_dir, paper_source, references, bibliography_cache_identity)
 
             if not references:
                 await self.emit_progress("completed", {
@@ -1407,16 +1430,7 @@ class ProgressRefChecker:
 
         outcome, assessment = pre_screen_hallucination(error_entry)
         if outcome == 'resolved':
-            # Mirror the deferral logic in run_hallucination_check():
-            # 0% author-overlap LIKELY verdicts, and verified LIKELY verdicts,
-            # should be deferred to the LLM, which can web-search and confirm
-            # whether the checker matched a different paper.
-            author_overlap = assessment.get('author_overlap') if assessment else None
-            if (
-                assessment
-                and assessment.get('verdict') == 'LIKELY'
-                and (author_overlap == 0 or bool(verified_url))
-            ):
+            if should_defer_likely_to_llm(assessment, verified_url):
                 # Defer to async LLM check instead of applying immediately
                 return ('needs_async', None)
             updated = apply_hallucination_verdict(

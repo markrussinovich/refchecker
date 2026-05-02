@@ -11,6 +11,22 @@ vi.mock('../../utils/formatters', async () => {
 })
 
 describe('ReferenceCard', () => {
+  it('does not show a spinner for final unverified refs after completion', () => {
+    const reference = {
+      status: 'unverified',
+      title: 'Unknown Paper',
+      authors: ['A. Author'],
+      errors: [{ error_type: 'unverified', error_details: 'Paper not found by any checker' }],
+      warnings: [],
+      suggestions: [],
+    }
+
+    const { container } = render(<ReferenceCard reference={reference} index={0} isCheckComplete />)
+
+    expect(container.querySelector('svg.animate-spin')).toBeNull()
+    expect(screen.getByText(/Could not verify: Unknown Paper/)).toBeTruthy()
+  })
+
   it('renders LLM-found matching metadata without crashing', () => {
     const reference = {
       status: 'hallucination',

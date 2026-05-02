@@ -37,6 +37,14 @@ def test_html_math_title_markup_matches_unicode_script_l():
     assert calculate_title_similarity(cited, stored) == 1.0
 
 
+def test_title_similarity_handles_missing_word_spacing_artifact():
+    cited = "Inception loops discoverwhatexcitesneuronsmostusingdeeppredictivemodels"
+    found = "Inception loops discover what excites neurons most using deep predictive models"
+
+    assert calculate_title_similarity(cited, found) == 1.0
+    assert compare_titles_with_latex_cleaning(cited, found) == 1.0
+
+
 class TestNameMatching:
     """Test name matching functionality."""
     
@@ -950,6 +958,23 @@ class TestAuthorComparisonBugFixes:
             "Gemini Team",
             "Rohan Anil",
             "Sebastian Borgeaud",
+        ]
+
+        match_result, error_message = compare_authors(cited_authors, correct_authors)
+
+        assert match_result, error_message
+        assert "collective authorship shorthand" in error_message.lower()
+
+    def test_single_consortium_author_matches_large_collaboration(self):
+        """A sole consortium author should be accepted for large collaborations."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["MICrONS Consortium"]
+        correct_authors = [
+            "MICrONS Consortium",
+            "J. Alexander Bae",
+            "Mahaly Baptiste",
+            "Maya R. Baptiste",
         ]
 
         match_result, error_message = compare_authors(cited_authors, correct_authors)

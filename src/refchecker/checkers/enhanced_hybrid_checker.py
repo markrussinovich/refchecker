@@ -744,6 +744,10 @@ class EnhancedHybridReferenceChecker:
                         last_crossref_result = (verified_data, errors, url)
                     elif api_name == 'openalex':
                         last_openalex_result = (verified_data, errors, url)
+
+        arxiv_title_result = self._try_arxiv_title_search(reference, attempted_apis)
+        if arxiv_title_result is not None:
+            return arxiv_title_result, {}
         
         # Try OpenReview as a secondary step (not parallelized — rare path)
         if self.openreview:
@@ -787,6 +791,48 @@ class EnhancedHybridReferenceChecker:
         if last_openalex_result:
             incomplete['openalex'] = last_openalex_result
         return None, incomplete
+
+    def _try_arxiv_title_search(self, reference, attempted_apis):
+        """Try ArXiv title search for non-ArXiv citations before loose venue fallbacks."""
+        if not self.arxiv_citation or not hasattr(self.arxiv_citation, 'find_arxiv_id_by_title'):
+            return None
+
+        title = reference.get('title', '').strip()
+        if not title:
+            return None
+
+        try:
+            arxiv_id, _ = self.arxiv_citation.extract_arxiv_id(reference)
+        except Exception:
+            arxiv_id = None
+        if arxiv_id:
+            return None
+
+        try:
+            arxiv_id = self.arxiv_citation.find_arxiv_id_by_title(
+                title,
+                authors=reference.get('authors', []),
+                year=reference.get('year'),
+            )
+        except Exception as exc:
+            logger.debug("Enhanced Hybrid: ArXiv title search failed: %s", exc)
+            return None
+
+        if not arxiv_id:
+            return None
+
+        arxiv_reference = dict(reference)
+        arxiv_reference['url'] = f'https://arxiv.org/abs/{arxiv_id}'
+        self._append_attempted_api(attempted_apis, 'arxiv_citation')
+        verified_data, errors, url, success, _failure_type, _failure_detail = self._try_api(
+            'arxiv_citation',
+            self.arxiv_citation,
+            arxiv_reference,
+        )
+        if success and verified_data is not None:
+            logger.debug("Enhanced Hybrid: ArXiv title search verification succeeded for %s", arxiv_id)
+            return verified_data, errors, url
+        return None
 
     # ------------------------------------------------------------------
     # Post-verification checks (shared by CLI, WebUI, and bulk paths)

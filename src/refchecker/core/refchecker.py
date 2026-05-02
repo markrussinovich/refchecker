@@ -5284,6 +5284,10 @@ class ArxivReferenceChecker:
             return None
             
         author_text = author_text.strip()
+
+        # Repair OCR/PDF tokenization artifacts where a surname is split after
+        # its first character (e.g., "Y ang" -> "Yang", "Y e" -> "Ye").
+        author_text = re.sub(r'\b([A-Z])\s+([a-z]{1,})\b', r'\1\2', author_text)
         
         # Check if this looks like BibTeX format "Surname, Given"
         if ',' in author_text and author_text.count(',') == 1:
@@ -6707,7 +6711,7 @@ class ArxivReferenceChecker:
         """
         from refchecker.utils.text_utils import strip_latex_commands, format_authors_for_display
 
-        raw_title = reference.get('title', 'Untitled')
+        raw_title = reference.get('display_title') or reference.get('title', 'Untitled')
         title = strip_latex_commands(raw_title)
         authors = format_authors_for_display(reference.get('authors', []))
         year = reference.get('year', '')

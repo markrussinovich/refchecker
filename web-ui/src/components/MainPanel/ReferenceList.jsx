@@ -173,6 +173,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
               index={ref.index ?? displayIndex}
               displayIndex={displayIndex}
               totalRefs={sortedReferences.length}
+              isCheckComplete={isCheckComplete}
             />
         ))}
       </div>

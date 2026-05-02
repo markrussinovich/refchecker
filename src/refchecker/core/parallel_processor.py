@@ -327,7 +327,15 @@ class ParallelReferenceProcessor:
         reference = result.reference
 
         self.base_checker._print_reference_header(reference, result.index, self.total_references)
-        self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
+        llm_confirmed_without_checker_data = (
+            not result.verified_data
+            and result.hallucination_assessment
+            and result.hallucination_assessment.get('verdict') == 'UNLIKELY'
+        )
+        if llm_confirmed_without_checker_data:
+            print("")
+        else:
+            self.base_checker._print_verified_urls(reference, result.verified_data, result.url, result.errors)
 
         # If the ref had no DB match but the LLM confirmed it (UNLIKELY),
         # apply_hallucination_verdict already stripped the unverified error

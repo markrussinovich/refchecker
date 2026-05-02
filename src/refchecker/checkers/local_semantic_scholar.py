@@ -37,7 +37,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from refchecker.utils.doi_utils import extract_doi_from_url, compare_dois, construct_doi_url
 from refchecker.utils.error_utils import create_author_error, create_doi_error, create_venue_warning, format_title_mismatch
-from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, compare_titles_with_latex_cleaning, strip_latex_commands, are_venues_substantially_different
+from refchecker.utils.text_utils import normalize_author_name, normalize_paper_title, is_name_match, compare_authors, calculate_title_similarity, compare_titles_with_latex_cleaning, strip_latex_commands, are_venues_substantially_different, is_missing_title_spacing_artifact
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, get_best_available_url, construct_semantic_scholar_url
 from refchecker.utils.db_utils import process_semantic_scholar_result, process_semantic_scholar_results
 from refchecker.config.settings import get_config
@@ -51,6 +51,38 @@ logger = logging.getLogger(__name__)
 config = get_config()
 SIMILARITY_THRESHOLD = config["text_processing"]["similarity_threshold"]
 _ARXIV_VERSION_SENSITIVE_TYPES = frozenset({"title", "author", "year"})
+
+_SUBSCRIPT_DIGITS = str.maketrans({
+    '₀': '0',
+    '₁': '1',
+    '₂': '2',
+    '₃': '3',
+    '₄': '4',
+    '₅': '5',
+    '₆': '6',
+    '₇': '7',
+    '₈': '8',
+    '₉': '9',
+})
+
+
+def _legacy_markup_normalized_title_variants(title: str) -> List[str]:
+    """Return exact normalized-title variants for older DB rows with HTML math markup."""
+    if not title:
+        return []
+
+    title_lower = title.lower().translate(_SUBSCRIPT_DIGITS)
+    markup_variants = {
+        re.sub(r'ℓ\s*([0-9]+)', r'<i>l</i><sub>\1</sub>', title_lower),
+        re.sub(r'\bl\s*([0-9]+)\b', r'<i>l</i><sub>\1</sub>', title_lower),
+    }
+
+    normalized_variants = []
+    for variant in markup_variants:
+        normalized = re.sub(r'[^a-z0-9]', '', variant)
+        if normalized and normalized not in normalized_variants:
+            normalized_variants.append(normalized)
+    return normalized_variants
 
 def log_query_debug(query: str, params: list, execution_time: float, result_count: int, strategy: str, db_label: str = ''):
     """Log database query details in debug mode"""
@@ -407,33 +439,23 @@ class LocalNonArxivReferenceChecker:
 
                 # Strategy 1c: Existing local DBs may contain normalized titles
                 # produced from API HTML/math markup, e.g. OpenAlex stores
-                # ``<i>l</i><sub>2</sub>`` as ``ilisub2sub``.  Use a narrow
-                # token-substring fallback so Unicode/math titles like ``ℓ2``
-                # can still find those rows without a broad table scan.
-                significant_tokens = [
-                    re.sub(r'[^a-z0-9]', '', token)
-                    for token in title_lower.split()
-                ]
-                significant_tokens = [
-                    token for token in significant_tokens
-                    if len(token) >= 4 and token not in {'with', 'from', 'into', 'using'}
-                ]
-                if len(significant_tokens) >= 3:
-                    token_clauses = ' AND '.join(
-                        'normalized_paper_title LIKE ?'
-                        for _ in significant_tokens[:5]
-                    )
-                    query = f"SELECT * FROM papers WHERE {token_clauses} LIMIT 25"
-                    params = [f"%{token}%" for token in significant_tokens[:5]]
+                # ``<i>l</i><sub>2</sub>`` as ``ilisub2sub``.  Keep this as
+                # exact indexed lookups only.  Leading-wildcard LIKE scans on
+                # the large local DBs can take minutes per batch.
+                tried_normalized_titles = {title_normalized, db_style_normalized}
+                for legacy_normalized in _legacy_markup_normalized_title_variants(title_cleaned):
+                    if legacy_normalized in tried_normalized_titles:
+                        continue
+                    tried_normalized_titles.add(legacy_normalized)
                     start_time = time.time()
-                    cursor.execute(query, params)
+                    cursor.execute(query, [legacy_normalized])
                     results.extend([dict(row) for row in cursor.fetchall()])
                     execution_time = time.time() - start_time
 
-                    log_query_debug(query, params, execution_time, len(results), "markup-tolerant token title match", self.database_label)
+                    log_query_debug(query, [legacy_normalized], execution_time, len(results), "legacy markup normalized title match", self.database_label)
 
                     if results:
-                        logger.debug(f"Found {len(results)} results using markup-tolerant token title match")
+                        logger.debug(f"Found {len(results)} results using legacy markup normalized title match")
                         return process_semantic_scholar_results(results)
         except Exception as e:
             logger.warning(f"Error in normalized title search: {e}")
@@ -633,6 +655,13 @@ class LocalNonArxivReferenceChecker:
         
         # Check title mismatch using similarity function
         found_title = paper_data.get('title', '')
+        if title and found_title and is_missing_title_spacing_artifact(title, found_title):
+            reference['display_title'] = found_title
+            logger.debug(
+                "%s: Using verified title for display after spacing-artifact match: '%s'",
+                self._log_prefix,
+                found_title,
+            )
         if title and found_title:
             title_similarity = compare_titles_with_latex_cleaning(title, found_title)
             if title_similarity < SIMILARITY_THRESHOLD:

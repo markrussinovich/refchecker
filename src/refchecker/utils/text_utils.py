@@ -64,6 +64,8 @@ def expand_abbreviations(text: str) -> str:
         'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
         'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
         'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+        # Neuroscience journals
+        'j. comput. neurosci.': 'journal of computational neuroscience',
         # Nature journals
         'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
         # Handle specific multi-word patterns and well-known acronyms
@@ -2145,6 +2147,59 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
     return True
 
 
+def _compact_initials_name_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match compact initials plus surname against expanded name tokens."""
+    if len(parts1) == 2 and len(parts2) >= 3:
+        compact_initials, compact_surname = parts1
+        expanded_prefix = parts2[:-1]
+        expanded_surname = parts2[-1]
+    elif len(parts2) == 2 and len(parts1) >= 3:
+        compact_initials, compact_surname = parts2
+        expanded_prefix = parts1[:-1]
+        expanded_surname = parts1[-1]
+    else:
+        return False
+
+    if not compact_initials.isalpha() or len(compact_initials) < 2:
+        return False
+    if len(compact_initials) != len(expanded_prefix):
+        return False
+    if not surname_similarity(compact_surname, expanded_surname):
+        return False
+
+    return all(
+        initial == token[0]
+        for initial, token in zip(compact_initials, expanded_prefix)
+        if token
+    )
+
+
+def _collapsed_author_token_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match names where PDF extraction removed spaces inside one author."""
+    def compact_token_text(tokens: List[str]) -> str:
+        return re.sub(r'[^a-z0-9]+', '', ''.join(tokens))
+
+    if len(parts1) == 1 and len(parts2) >= 2:
+        compact, expanded_parts = compact_token_text(parts1), parts2
+    elif len(parts2) == 1 and len(parts1) >= 2:
+        compact, expanded_parts = compact_token_text(parts2), parts1
+    else:
+        return False
+
+    if len(compact) < 5:
+        return False
+    expanded = compact_token_text(expanded_parts)
+    if compact == expanded:
+        return True
+
+    if len(expanded_parts) >= 3:
+        middle_parts = expanded_parts[1:-1]
+        if all(len(re.sub(r'[^a-z0-9]+', '', part)) == 1 for part in middle_parts):
+            return compact == compact_token_text([expanded_parts[0], expanded_parts[-1]])
+
+    return False
+
+
 def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     Enhanced name matching that handles initial-to-full-name and surname variations.
@@ -2201,6 +2256,12 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     
     if not parts1 or not parts2:
         return False
+
+    if _collapsed_author_token_match(parts1, parts2):
+        return True
+
+    if _compact_initials_name_match(parts1, parts2):
+        return True
 
     # Allow same-first-name matches when a two-part surname differs only by
     # diacritics or apostrophe-style accent placeholders, e.g. "Ramé" vs
@@ -2346,10 +2407,20 @@ _COLLECTIVE_AUTHOR_SHORTHANDS = frozenset({
     'qwen',
 })
 
+_COLLECTIVE_AUTHOR_SUFFIXES = frozenset({
+    'team',
+    'consortium',
+    'collaboration',
+    'collective',
+})
+
 
 def _is_collective_author_shorthand(author: str) -> bool:
     author_lower = normalize_diacritics(str(author or '').strip().lower())
-    return author_lower.endswith(' team') or author_lower in _COLLECTIVE_AUTHOR_SHORTHANDS
+    return (
+        any(author_lower.endswith(f' {suffix}') for suffix in _COLLECTIVE_AUTHOR_SUFFIXES)
+        or author_lower in _COLLECTIVE_AUTHOR_SHORTHANDS
+    )
 
 
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
@@ -4330,6 +4401,26 @@ def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) ->
     return calculate_title_similarity(artifact_cited, artifact_database)
 
 
+def is_missing_title_spacing_artifact(cited_title: str, found_title: str) -> bool:
+    """Return True when titles differ only because extracted text lost word spaces."""
+    if not cited_title or not found_title:
+        return False
+
+    cited_clean = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(cited_title)))
+    found_clean = normalize_extracted_title_artifacts(strip_latex_commands(strip_html_markup(found_title)))
+    cited_compact = re.sub(r'[^A-Za-z0-9]+', '', cited_clean).lower()
+    found_compact = re.sub(r'[^A-Za-z0-9]+', '', found_clean).lower()
+    if not cited_compact or cited_compact != found_compact:
+        return False
+
+    cited_words = re.findall(r'[A-Za-z0-9]+', cited_clean)
+    found_words = re.findall(r'[A-Za-z0-9]+', found_clean)
+    if len(found_words) < len(cited_words) + 2:
+        return False
+
+    return any(len(word) >= 16 for word in cited_words)
+
+
 def normalize_extracted_title_artifacts(title: str) -> str:
     """Normalize PDF extraction artifacts before title comparison.
 
@@ -4416,6 +4507,11 @@ def calculate_title_similarity(title1: str, title2: str) -> float:
     
     # Exact match
     if t1 == t2:
+        return 1.0
+
+    compact_t1 = re.sub(r'[^a-z0-9]+', '', t1)
+    compact_t2 = re.sub(r'[^a-z0-9]+', '', t2)
+    if compact_t1 and compact_t1 == compact_t2:
         return 1.0
     
     # Handle common technical term variations before other processing
@@ -4729,6 +4825,8 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
                 'nucl. phys. a': 'nuclear physics a', 'nucl. phys. b': 'nuclear physics b',
                 'j. phys.': 'journal of physics', 'ann. phys.': 'annals of physics',
                 'mod. phys. lett.': 'modern physics letters', 'eur. phys. j.': 'european physical journal',
+                # Neuroscience journals
+                'j. comput. neurosci.': 'journal of computational neuroscience',
                 # Nature journals
                 'nature phys.': 'nature physics', 'sci. adv.': 'science advances',
                 # Handle specific multi-word patterns and well-known acronyms
@@ -4866,6 +4964,9 @@ def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
             'pnas': 'proceedings of the national academy of sciences',
             'natl.': 'national',
             'acad.': 'academy',
+            
+            # Neuroscience journals
+            'j. comput. neurosci.': 'journal of computational neuroscience',
             
             # Special cases that don't follow standard acronym patterns
             'neurips': 'neural information processing systems',  # Special case: doesn't follow standard acronym rules
@@ -5526,12 +5627,17 @@ def normalize_venue_for_display(venue: str) -> str:
             'symp.': 'symposium',
             'workshop': 'workshop',
             'worksh.': 'workshop',
+            # Neuroscience journals
+            'j. comput. neurosci.': 'journal of computational neuroscience',
         }
         
         text_lower = text.lower()
         for abbrev, expansion in common_abbrevs.items():
-            # Only replace if it's a word boundary to avoid partial replacements
-            pattern = r'\b' + re.escape(abbrev) + r'\b'
+            # For abbreviations ending in period, use word boundary at start only
+            if abbrev.endswith('.'):
+                pattern = r'\b' + re.escape(abbrev)
+            else:
+                pattern = r'\b' + re.escape(abbrev) + r'\b'
             text_lower = re.sub(pattern, expansion, text_lower)
         
         return text_lower
