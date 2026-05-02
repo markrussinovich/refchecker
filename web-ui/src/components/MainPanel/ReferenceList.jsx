@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import ReferenceCard from '../ReferenceCard/ReferenceCard'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
 
 /**
  * Derive status from reference data, trusting backend final statuses
@@ -62,9 +62,17 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
           case 'unverified':
             // Don't match refs currently showing as 'checking' (awaiting LLM check)
             if (status === 'checking') return false
-            return status === 'unverified' || status === 'hallucination' || ref.errors?.some(e => e.error_type === 'unverified')
+            if (status === 'unverified' || status === 'hallucination') return true
+            if (ref.errors?.some(e => e.error_type === 'unverified')) return true
+            // Also include refs flagged LIKELY by the hallucination LLM, even when
+            // error precedence would otherwise hide them, but skip cases where the
+            // LLM-found metadata actually matches the citation.
+            return ref.hallucination_assessment?.verdict === 'LIKELY' &&
+              !llmFoundMetadataMatchesCitation(ref)
           case 'hallucination':
-            return status === 'hallucination'
+            if (status === 'hallucination') return true
+            return ref.hallucination_assessment?.verdict === 'LIKELY' &&
+              !llmFoundMetadataMatchesCitation(ref)
           default:
             // For other statuses (pending, checking, unchecked), match exactly
             return status === filter

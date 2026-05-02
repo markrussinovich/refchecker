@@ -6,7 +6,7 @@ import {
   exportResultsAsBibtex,
   downloadAsFile 
 } from '../../utils/formatters'
-import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
 
 /**
  * Stats section showing reference check summary with clickable filters
@@ -122,14 +122,18 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         r.warnings?.length > 0 &&
         !r.errors?.some(e => e.error_type !== 'unverified')
       ).length,
-      withUnverified: finalized.filter(r =>
-        getEffectiveReferenceStatus(r, isComplete) === 'unverified' ||
-        getEffectiveReferenceStatus(r, isComplete) === 'hallucination' ||
-        r.errors?.some(e => e.error_type === 'unverified')
-      ).length,
-      hallucinated: finalized.filter(r =>
-        getEffectiveReferenceStatus(r, isComplete) === 'hallucination'
-      ).length,
+      withUnverified: finalized.filter(r => {
+        const s = getEffectiveReferenceStatus(r, isComplete)
+        const likelyHallucinated = r.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
+        return s === 'unverified' || s === 'hallucination' ||
+          r.errors?.some(e => e.error_type === 'unverified') ||
+          likelyHallucinated
+      }).length,
+      hallucinated: finalized.filter(r => {
+        const s = getEffectiveReferenceStatus(r, isComplete)
+        const likelyHallucinated = r.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
+        return s === 'hallucination' || likelyHallucinated
+      }).length,
       verified: finalized.filter(r => {
         const s = getEffectiveReferenceStatus(r, isComplete)
         return s === 'verified' || s === 'suggestion'

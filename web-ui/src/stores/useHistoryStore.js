@@ -590,20 +590,23 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryProgress called with no id')
       return
     }
+    const cleanPayload = Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined)
+    )
     set(state => {
       const nextCache = { ...state.detailCache }
       // Invalidate cached detail when progress/status changes for this check.
       if (nextCache[id] && (
-        payload.status !== undefined ||
-        payload.processed_refs !== undefined ||
-        payload.results !== undefined
+        cleanPayload.status !== undefined ||
+        cleanPayload.processed_refs !== undefined ||
+        cleanPayload.results !== undefined
       )) {
         delete nextCache[id]
       }
 
       return {
-        history: state.history.map(h => h.id === id ? { ...h, ...payload } : h),
-        selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...payload } : state.selectedCheck,
+        history: state.history.map(h => h.id === id ? { ...h, ...cleanPayload } : h),
+        selectedCheck: state.selectedCheck?.id === id ? { ...state.selectedCheck, ...cleanPayload } : state.selectedCheck,
         detailCache: nextCache,
       }
     })
@@ -615,26 +618,26 @@ export const useHistoryStore = create((set, get) => ({
       logger.warn('HistoryStore', 'updateHistoryReference called with invalid args', { checkId, refIndex })
       return
     }
+
+    const upsertReference = (item) => {
+      if (!item) return item
+      const size = Math.max(item.results?.length || 0, item.total_refs || 0, refIndex + 1)
+      const newResults = Array.from({ length: size }, (_, index) => item.results?.[index] || { index, status: 'pending' })
+      newResults[refIndex] = { ...newResults[refIndex], ...refData, index: refIndex }
+      return { ...item, results: newResults }
+    }
     
     set(state => {
       // Update in history array
       const newHistory = state.history.map(h => {
         if (h.id !== checkId) return h
-        if (!h.results || refIndex >= h.results.length) return h
-        
-        const newResults = [...h.results]
-        newResults[refIndex] = { ...newResults[refIndex], ...refData }
-        return { ...h, results: newResults }
+        return upsertReference(h)
       })
       
       // Update in selectedCheck if it matches
       let newSelectedCheck = state.selectedCheck
-      if (state.selectedCheck?.id === checkId && state.selectedCheck?.results) {
-        const newResults = [...state.selectedCheck.results]
-        if (refIndex < newResults.length) {
-          newResults[refIndex] = { ...newResults[refIndex], ...refData }
-          newSelectedCheck = { ...state.selectedCheck, results: newResults }
-        }
+      if (state.selectedCheck?.id === checkId) {
+        newSelectedCheck = upsertReference(state.selectedCheck)
       }
       
       return { history: newHistory, selectedCheck: newSelectedCheck }

@@ -30,6 +30,7 @@ export const useCheckStore = create((set, get) => ({
     refs_with_issues: 0,
     refs_with_errors: 0,
     refs_with_warnings_only: 0,
+    refs_with_suggestions_only: 0,
     refs_verified: 0,
     progress_percent: 0,
   },
@@ -71,6 +72,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
+        refs_with_suggestions_only: 0,
         refs_verified: 0,
         progress_percent: 0,
       },
@@ -120,6 +122,7 @@ export const useCheckStore = create((set, get) => ({
       refs_with_issues = 0,
       refs_with_errors: payloadRefsWithErrors,
       refs_with_warnings_only: payloadRefsWithWarningsOnly,
+      refs_with_suggestions_only: payloadRefsWithSuggestionsOnly,
       refs_verified: payloadRefsVerified,
     } = payload || {}
 
@@ -130,21 +133,24 @@ export const useCheckStore = create((set, get) => ({
     // Compute paper-level counts from results if not provided
     let refs_with_errors = payloadRefsWithErrors ?? 0
     let refs_with_warnings_only = payloadRefsWithWarningsOnly ?? 0
+    let refs_with_suggestions_only = payloadRefsWithSuggestionsOnly ?? 0
     let refs_verified = payloadRefsVerified ?? 0
 
     if (Array.isArray(results) && results.length > 0 && 
-        refs_with_errors === 0 && refs_with_warnings_only === 0 && refs_verified === 0) {
+        refs_with_errors === 0 && refs_with_warnings_only === 0 && refs_with_suggestions_only === 0 && refs_verified === 0) {
       results.forEach(ref => {
         const hasErrors = ref.errors?.some(e => e.error_type !== 'unverified')
         const hasWarnings = ref.warnings?.length > 0
+        const hasSuggestions = ref.suggestions?.length > 0
         const status = (ref.status || '').toLowerCase()
         
         if (status === 'error' || hasErrors) {
           refs_with_errors++
         } else if (status === 'warning' || hasWarnings) {
           refs_with_warnings_only++
+        } else if (status === 'suggestion' || hasSuggestions) {
+          refs_with_suggestions_only++
         } else if (status === 'verified' || status === 'suggestion') {
-          // Suggestion-only refs are considered verified (no errors or warnings)
           refs_verified++
         }
       })
@@ -175,6 +181,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues,
         refs_with_errors,
         refs_with_warnings_only,
+        refs_with_suggestions_only,
         refs_verified,
         progress_percent,
       },
@@ -332,6 +339,7 @@ export const useCheckStore = create((set, get) => ({
         refs_with_issues: 0,
         refs_with_errors: 0,
         refs_with_warnings_only: 0,
+        refs_with_suggestions_only: 0,
         refs_verified: 0,
         progress_percent: 0,
       },
@@ -422,6 +430,7 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
           })
           break
@@ -442,6 +451,7 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
             extraction_method: data.extraction_method,
             // Clear in-memory results so selectCheck fetches authoritative data from API
@@ -519,6 +529,9 @@ export const useCheckStore = create((set, get) => ({
             total_refs: data.total_refs,
             processed_refs: 0, // Reset to 0 when refs first extracted
             extraction_method: data.extraction_method,
+            results: Array.isArray(data.references)
+              ? data.references.map((ref, index) => ({ ...ref, index, status: ref.status || 'pending' }))
+              : undefined,
           })
         }
         // Store extraction_method in stats for real-time display
@@ -550,6 +563,10 @@ export const useCheckStore = create((set, get) => ({
               i === refIndex ? { ...ref, ...dataWithoutIndex, index: i, status: normalizedStatus } : ref
             )
           }))
+          useHistoryStore.getState().updateHistoryReference(store.currentCheckId, refIndex, {
+            ...dataWithoutIndex,
+            status: normalizedStatus,
+          })
         }
         break
         
@@ -574,6 +591,7 @@ export const useCheckStore = create((set, get) => ({
           verified_count: data.verified_count,
           refs_with_errors: data.refs_with_errors,
           refs_with_warnings_only: data.refs_with_warnings_only,
+          refs_with_suggestions_only: data.refs_with_suggestions_only,
           refs_verified: data.refs_verified,
         })
         break
@@ -605,6 +623,7 @@ export const useCheckStore = create((set, get) => ({
           verified_count: data.verified_count,
           refs_with_errors: data.refs_with_errors,
           refs_with_warnings_only: data.refs_with_warnings_only,
+          refs_with_suggestions_only: data.refs_with_suggestions_only,
           refs_verified: data.refs_verified,
           extraction_method: data.extraction_method,
         })
@@ -709,6 +728,7 @@ export const useCheckStore = create((set, get) => ({
             verified_count: data.verified_count,
             refs_with_errors: data.refs_with_errors,
             refs_with_warnings_only: data.refs_with_warnings_only,
+            refs_with_suggestions_only: data.refs_with_suggestions_only,
             refs_verified: data.refs_verified,
           }
           break
@@ -751,6 +771,12 @@ export const useCheckStore = create((set, get) => ({
     // Update history store once with the latest payload (not per-message)
     if (historyPayload && store.currentCheckId) {
       useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, historyPayload)
+    }
+    if (refPatches.size > 0 && store.currentCheckId) {
+      const historyStore = useHistoryStore.getState()
+      for (const [idx, patch] of refPatches) {
+        historyStore.updateHistoryReference(store.currentCheckId, idx, patch)
+      }
     }
   },
 }))

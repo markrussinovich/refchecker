@@ -947,7 +947,7 @@ class ProgressRefChecker:
             })
 
             # Process references in parallel
-            results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified, hallucination_count = \
+            results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count = \
                 await self._check_references_parallel(references, total_refs)
 
             # Step 4: Return final results
@@ -968,6 +968,7 @@ class ProgressRefChecker:
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_with_suggestions_only": refs_with_suggestions_only,
                     "refs_verified": refs_verified,
                     "progress_percent": 100.0,
                     "extraction_method": extraction_method
@@ -1471,6 +1472,7 @@ class ProgressRefChecker:
             'refs_verified': 0,
             'refs_with_errors': 0,
             'refs_with_warnings_only': 0,
+            'refs_with_suggestions_only': 0,
         }
 
         status = result.get('status', '')
@@ -1490,6 +1492,8 @@ class ProgressRefChecker:
             d['refs_with_errors'] = 1
         elif status == 'warning' or num_warnings > 0:
             d['refs_with_warnings_only'] = 1
+        elif status == 'suggestion' or num_suggestions > 0:
+            d['refs_with_suggestions_only'] = 1
 
         return d
 
@@ -1786,6 +1790,7 @@ class ProgressRefChecker:
         verified_count = 0
         refs_with_errors = 0
         refs_with_warnings_only = 0
+        refs_with_suggestions_only = 0
         refs_verified = 0
         processed_count = 0
         checked_count = 0  # Tracks refs that finished verification (including deferred ones)
@@ -1907,6 +1912,7 @@ class ProgressRefChecker:
                 refs_verified += d['refs_verified']
                 refs_with_errors += d['refs_with_errors']
                 refs_with_warnings_only += d['refs_with_warnings_only']
+                refs_with_suggestions_only += d['refs_with_suggestions_only']
 
                 # Emit result immediately.
                 # Use checked_count for progress so the UI shows verification
@@ -1928,6 +1934,7 @@ class ProgressRefChecker:
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_with_suggestions_only": refs_with_suggestions_only,
                     "refs_verified": refs_verified,
                     "progress_percent": round((checked_count / total_refs) * 100, 1)
                 })
@@ -1977,6 +1984,7 @@ class ProgressRefChecker:
                         refs_verified += d['refs_verified']
                         refs_with_errors += d['refs_with_errors']
                         refs_with_warnings_only += d['refs_with_warnings_only']
+                        refs_with_suggestions_only += d['refs_with_suggestions_only']
                         results[c_idx] = resolved
                         await self.emit_progress("reference_result", resolved)
                     elif outcome == 'skip':
@@ -2002,6 +2010,7 @@ class ProgressRefChecker:
                         "verified_count": verified_count,
                         "refs_with_errors": refs_with_errors,
                         "refs_with_warnings_only": refs_with_warnings_only,
+                        "refs_with_suggestions_only": refs_with_suggestions_only,
                         "refs_verified": refs_verified,
                         "progress_percent": round((checked_count / total_refs) * 100, 1),
                     })
@@ -2064,6 +2073,7 @@ class ProgressRefChecker:
                                         "verified_count": verified_count,
                                         "refs_with_errors": refs_with_errors,
                                         "refs_with_warnings_only": refs_with_warnings_only,
+                                        "refs_with_suggestions_only": refs_with_suggestions_only,
                                         "refs_verified": refs_verified,
                                         "progress_percent": round((checked_count / total_refs) * 100, 1),
                                     })
@@ -2082,6 +2092,7 @@ class ProgressRefChecker:
                             refs_verified += d['refs_verified']
                             refs_with_errors += d['refs_with_errors']
                             refs_with_warnings_only += d['refs_with_warnings_only']
+                            refs_with_suggestions_only += d['refs_with_suggestions_only']
 
                             results[ha_idx] = updated
                             # Emit ref update and summary so the UI updates progressively.
@@ -2097,6 +2108,7 @@ class ProgressRefChecker:
                                 "verified_count": verified_count,
                                 "refs_with_errors": refs_with_errors,
                                 "refs_with_warnings_only": refs_with_warnings_only,
+                                "refs_with_suggestions_only": refs_with_suggestions_only,
                                 "refs_verified": refs_verified,
                                 "progress_percent": round((checked_count / total_refs) * 100, 1),
                             })
@@ -2114,6 +2126,7 @@ class ProgressRefChecker:
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
+                    "refs_with_suggestions_only": refs_with_suggestions_only,
                     "refs_verified": refs_verified,
                     "progress_percent": round((checked_count / total_refs) * 100, 1),
                 })
@@ -2128,4 +2141,4 @@ class ProgressRefChecker:
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
         
-        return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_verified, hallucination_count
+        return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count

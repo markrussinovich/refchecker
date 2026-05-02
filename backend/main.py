@@ -1523,6 +1523,7 @@ async def run_check(
                             hallucination_count=data.get("hallucination_count", 0),
                             refs_with_errors=data.get("refs_with_errors", 0),
                             refs_with_warnings_only=data.get("refs_with_warnings_only", 0),
+                            refs_with_suggestions_only=data.get("refs_with_suggestions_only", 0),
                             refs_verified=data.get("refs_verified", 0),
                             results=accumulated_results
                         )
@@ -1606,6 +1607,7 @@ async def run_check(
             hallucination_count=result["summary"].get("hallucination_count", 0),
             refs_with_errors=result["summary"].get("refs_with_errors", 0),
             refs_with_warnings_only=result["summary"].get("refs_with_warnings_only", 0),
+            refs_with_suggestions_only=result["summary"].get("refs_with_suggestions_only", 0),
             refs_verified=result["summary"].get("refs_verified", 0),
             results=result["references"],
             status='completed',

@@ -130,6 +130,91 @@ def get_data_dir() -> Path:
     return data_dir
 
 
+def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
+    """Compute reference-level sidebar buckets from stored check results.
+
+    These counts are reference buckets (refs with errors/warnings/suggestions),
+    not raw issue-item totals.
+    """
+    refs_with_errors = 0
+    refs_with_warnings_only = 0
+    refs_with_suggestions_only = 0
+    unverified_count = 0
+    hallucination_count = 0
+
+    for ref in results:
+        status = str(ref.get("status") or "").strip().lower()
+        if not status or status in {"pending", "checking", "in_progress", "queued", "processing", "started"}:
+            continue
+        if ref.get("hallucination_check_pending") and not ref.get("hallucination_assessment"):
+            continue
+        if status == "unverified" and not ref.get("hallucination_assessment") and not is_complete:
+            continue
+
+        errors = ref.get("errors") or []
+        warnings = ref.get("warnings") or []
+        suggestions = ref.get("suggestions") or []
+
+        has_non_unverified_error = any((e or {}).get("error_type") != "unverified" for e in errors)
+        has_unverified_error = any((e or {}).get("error_type") == "unverified" for e in errors)
+        has_warning = len(warnings) > 0
+        has_suggestion = len(suggestions) > 0
+
+        assessment = ref.get("hallucination_assessment") or {}
+        verdict = str(assessment.get("verdict") or "").upper()
+        likely_hallucinated = verdict == "LIKELY"
+        if likely_hallucinated:
+            # Mirror the UI's llmFoundMetadataMatchesCitation override: when the LLM
+            # found a paper whose title and authors match the citation, we treat it
+            # as verified rather than hallucinated.
+            try:
+                cited_title = (ref.get("title") or "").strip().lower()
+                found_title = (assessment.get("found_title") or "").strip().lower()
+                cited_authors = ref.get("authors") or []
+                found_authors_text = str(assessment.get("found_authors") or "").lower()
+                cited_year = ref.get("year")
+                found_year = str(assessment.get("found_year") or "")
+
+                def _last_name(name: str) -> str:
+                    return (name or "").strip().split()[-1].lower() if name else ""
+
+                cited_last_names = [_last_name(a) for a in cited_authors if _last_name(a)]
+                title_matches = (
+                    cited_title and found_title and
+                    "".join(c for c in cited_title if c.isalnum()) ==
+                    "".join(c for c in found_title if c.isalnum())
+                )
+                authors_match = (
+                    cited_last_names and
+                    all(name in found_authors_text for name in cited_last_names)
+                )
+                year_matches = (not cited_year) or str(cited_year) in found_year
+                if assessment.get("link") and title_matches and authors_match and year_matches:
+                    likely_hallucinated = False
+            except Exception:
+                pass
+
+        if status == "error" or has_non_unverified_error:
+            refs_with_errors += 1
+        elif status == "warning" or has_warning:
+            refs_with_warnings_only += 1
+        elif status == "suggestion" or has_suggestion:
+            refs_with_suggestions_only += 1
+
+        if status in {"unverified", "hallucination"} or has_unverified_error or likely_hallucinated:
+            unverified_count += 1
+        if status == "hallucination" or likely_hallucinated:
+            hallucination_count += 1
+
+    return {
+        "refs_with_errors": refs_with_errors,
+        "refs_with_warnings_only": refs_with_warnings_only,
+        "refs_with_suggestions_only": refs_with_suggestions_only,
+        "unverified_count": unverified_count,
+        "hallucination_count": hallucination_count,
+    }
+
+
 class Database:
     """Handles SQLite database operations for check history and LLM configs"""
 
@@ -284,6 +369,10 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_errors INTEGER DEFAULT 0")
         if "refs_with_warnings_only" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_warnings_only INTEGER DEFAULT 0")
+        recompute_history_counts = False
+        if "refs_with_suggestions_only" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN refs_with_suggestions_only INTEGER DEFAULT 0")
+            recompute_history_counts = True
         if "refs_verified" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN refs_verified INTEGER DEFAULT 0")
         if "extraction_method" not in columns:
@@ -339,6 +428,9 @@ class Database:
             "UPDATE check_history SET started_at = COALESCE(started_at, timestamp) WHERE started_at IS NULL"
         )
 
+        if recompute_history_counts:
+            await self._recompute_history_counts(db)
+
         # Ensure user_id column in llm_configs
         async with db.execute("PRAGMA table_info(llm_configs)") as cursor:
             llm_columns = {row[1] async for row in cursor}
@@ -352,6 +444,52 @@ class Database:
             user_columns = {row[1] async for row in cursor}
         if "is_admin" not in user_columns:
             await db.execute("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT 0")
+
+    async def _recompute_history_counts(self, db: aiosqlite.Connection):
+        """Recompute aggregate count columns for existing check_history rows.
+
+        Used as a one-time migration when a new bucket column is added so that
+        previously saved entries match the reference-level totals derived from
+        their stored ``results_json``.
+        """
+        async with db.execute(
+            "SELECT id, status, results_json FROM check_history WHERE results_json IS NOT NULL AND results_json != ''"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        for row in rows:
+            check_id, status, raw_results = row
+            if not raw_results:
+                continue
+            try:
+                parsed = json.loads(raw_results)
+            except Exception:
+                continue
+            if not isinstance(parsed, list) or not parsed:
+                continue
+            buckets = _compute_reference_buckets_from_results(
+                parsed,
+                is_complete=status in {"completed", "cancelled", "error"},
+            )
+            await db.execute(
+                """
+                UPDATE check_history
+                   SET refs_with_errors = ?,
+                       refs_with_warnings_only = ?,
+                       refs_with_suggestions_only = ?,
+                       unverified_count = ?,
+                       hallucination_count = ?
+                 WHERE id = ?
+                """,
+                (
+                    buckets["refs_with_errors"],
+                    buckets["refs_with_warnings_only"],
+                    buckets["refs_with_suggestions_only"],
+                    buckets["unverified_count"],
+                    buckets["hallucination_count"],
+                    check_id,
+                ),
+            )
 
     async def _migrate_plaintext_secrets(self, db: aiosqlite.Connection):
         """Encrypt any legacy plaintext values left in secret storage columns."""
@@ -395,15 +533,17 @@ class Database:
                          llm_provider: Optional[str] = None,
                          llm_model: Optional[str] = None,
                          extraction_method: Optional[str] = None,
-                         hallucination_count: int = 0) -> int:
+                         hallucination_count: int = 0,
+                         refs_with_suggestions_only: int = 0) -> int:
         """Save a check result to database"""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("""
                 INSERT INTO check_history
                 (paper_title, paper_source, source_type, total_refs, errors_count, warnings_count,
                  suggestions_count, unverified_count, refs_with_errors, refs_with_warnings_only,
+                 refs_with_suggestions_only,
                  refs_verified, hallucination_count, results_json, llm_provider, llm_model, extraction_method)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_title,
                 paper_source,
@@ -415,6 +555,7 @@ class Database:
                 unverified_count,
                 refs_with_errors,
                 refs_with_warnings_only,
+                refs_with_suggestions_only,
                 refs_verified,
                 hallucination_count,
                 json.dumps(results),
@@ -435,11 +576,11 @@ class Database:
                     SELECT id, paper_title, paper_source, custom_label, timestamp,
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
-                           refs_with_errors, refs_with_warnings_only, refs_verified,
+                           refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified,
                               llm_provider, llm_model, hallucination_provider, hallucination_model,
                               status, source_type, batch_id, batch_label,
                               bibliography_source_kind,
-                           original_filename
+                           original_filename, results_json
                     FROM check_history
                     WHERE user_id = ?
                     ORDER BY timestamp DESC
@@ -451,11 +592,11 @@ class Database:
                     SELECT id, paper_title, paper_source, custom_label, timestamp,
                            total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
                            hallucination_count,
-                           refs_with_errors, refs_with_warnings_only, refs_verified,
+                           refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified,
                               llm_provider, llm_model, hallucination_provider, hallucination_model,
                               status, source_type, batch_id, batch_label,
                               bibliography_source_kind,
-                           original_filename
+                           original_filename, results_json
                     FROM check_history
                     ORDER BY timestamp DESC
                     LIMIT ?
@@ -463,7 +604,27 @@ class Database:
                 params = (limit,)
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                history = []
+                for row in rows:
+                    item = dict(row)
+                    raw_results = item.pop('results_json', None)
+                    item.setdefault('refs_with_suggestions_only', 0)
+
+                    if raw_results:
+                        try:
+                            parsed_results = json.loads(raw_results)
+                        except Exception:
+                            parsed_results = []
+                        if isinstance(parsed_results, list) and len(parsed_results) > 0:
+                            buckets = _compute_reference_buckets_from_results(
+                                parsed_results,
+                                is_complete=item.get('status') in {'completed', 'cancelled', 'error'},
+                            )
+                            item.update(buckets)
+
+                    history.append(item)
+
+                return history
 
     async def get_check_by_id(self, check_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Get specific check result by ID, optionally enforcing user ownership."""
@@ -602,7 +763,8 @@ class Database:
                                     issue_type_counts: Optional[Dict[str, int]] = None,
                                     cache_hit: Optional[bool] = None,
                                     bibliography_source_kind: Optional[str] = None,
-                                    failure_class: Optional[str] = None) -> bool:
+                                    failure_class: Optional[str] = None,
+                                    refs_with_suggestions_only: int = 0) -> bool:
         """Update a check with its results. If paper_title is None, don't update it."""
         async with aiosqlite.connect(self.db_path) as db:
             updates = []
@@ -621,6 +783,7 @@ class Database:
                 "hallucination_count = ?",
                 "refs_with_errors = ?",
                 "refs_with_warnings_only = ?",
+                "refs_with_suggestions_only = ?",
                 "refs_verified = ?",
                 "results_json = ?",
                 "status = ?",
@@ -635,6 +798,7 @@ class Database:
                 hallucination_count,
                 refs_with_errors,
                 refs_with_warnings_only,
+                refs_with_suggestions_only,
                 refs_verified,
                 json.dumps(results),
                 status,
@@ -688,7 +852,8 @@ class Database:
                                      refs_with_errors: int = 0,
                                      refs_with_warnings_only: int = 0,
                                      refs_verified: int = 0,
-                                     results: List[Dict[str, Any]] = None) -> bool:
+                                     results: List[Dict[str, Any]] = None,
+                                     refs_with_suggestions_only: int = 0) -> bool:
         """Incrementally update a check's results as references are verified.
         
         This is called after each reference is checked to persist progress,
@@ -701,7 +866,9 @@ class Database:
                 SET total_refs = ?, errors_count = ?, warnings_count = ?,
                     suggestions_count = ?, unverified_count = ?, hallucination_count = ?,
                     refs_with_errors = ?,
-                    refs_with_warnings_only = ?, refs_verified = ?, results_json = ?
+                    refs_with_warnings_only = ?,
+                    refs_with_suggestions_only = ?,
+                    refs_verified = ?, results_json = ?
                 WHERE id = ?
             """, (
                 total_refs,
@@ -712,6 +879,7 @@ class Database:
                 hallucination_count,
                 refs_with_errors,
                 refs_with_warnings_only,
+                refs_with_suggestions_only,
                 refs_verified,
                 json.dumps(results or []),
                 check_id

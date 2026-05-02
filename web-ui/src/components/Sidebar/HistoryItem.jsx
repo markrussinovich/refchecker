@@ -3,7 +3,7 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
-import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
+import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
 
 /**
@@ -86,15 +86,22 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
       refsWithSuggestionsOnly,
       unverifiedCount: finalized.filter(r => {
         const s = getEffectiveReferenceStatus(r, isComplete)
-        return s === 'unverified' || s === 'hallucination' || r?.errors?.some(e => e.error_type === 'unverified')
+        const likelyHallucinated = r?.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
+        return s === 'unverified' || s === 'hallucination' ||
+          r?.errors?.some(e => e.error_type === 'unverified') ||
+          likelyHallucinated
       }).length,
-      hallucinationCount: finalized.filter(r => getEffectiveReferenceStatus(r, isComplete) === 'hallucination').length,
+      hallucinationCount: finalized.filter(r => {
+        const s = getEffectiveReferenceStatus(r, isComplete)
+        const likelyHallucinated = r?.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)
+        return s === 'hallucination' || likelyHallucinated
+      }).length,
     }
   }, [item.results, isComplete])
 
   const refsWithErrors = derivedCounts?.refsWithErrors ?? item.refs_with_errors ?? 0
   const refsWithWarningsOnly = derivedCounts?.refsWithWarningsOnly ?? item.refs_with_warnings_only ?? 0
-  const refsWithSuggestionsOnly = derivedCounts?.refsWithSuggestionsOnly ?? 0
+  const refsWithSuggestionsOnly = derivedCounts?.refsWithSuggestionsOnly ?? item.refs_with_suggestions_only ?? 0
   const unverifiedCount = derivedCounts?.unverifiedCount ?? item.unverified_count ?? 0
   const hallucinationCount = derivedCounts?.hallucinationCount ?? item.hallucination_count ?? 0
 
