@@ -24,6 +24,7 @@ export const llmFoundMetadataMatchesCitation = (reference = {}) => {
 
 export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = false) => {
   const baseStatus = (reference.status || '').trim().toLowerCase()
+  const llmMatch = llmFoundMetadataMatchesCitation(reference)
 
   if (reference.hallucination_check_pending && !reference.hallucination_assessment) {
     return 'checking'
@@ -33,31 +34,27 @@ export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = fa
     return 'checking'
   }
 
-  // Check for errors, warnings, suggestions BEFORE applying llm override
-  // Warnings and errors should NOT be overridden, even if LLM assessment matches
-  const hasErrors = Array.isArray(reference.errors) && reference.errors.some(
+  // Explicit false-hallucination override: if LLM-found metadata clearly matches
+  // the citation, treat it as verified even when backend labeled hallucination.
+  if (baseStatus === 'hallucination' && llmMatch) {
+    return 'verified'
+  }
+
+  // Precedence: hallucination > error > warning > suggestion
+  if (baseStatus === 'hallucination') {
+    return 'hallucination'
+  }
+
+  const hasErrors = baseStatus === 'error' || (Array.isArray(reference.errors) && reference.errors.some(
     e => (e?.error_type || '').toLowerCase() !== 'unverified'
-  )
-  const hasWarnings = Array.isArray(reference.warnings) && reference.warnings.length > 0
-  const hasSuggestions = Array.isArray(reference.suggestions) && reference.suggestions.length > 0
+  ))
+  const hasWarnings = baseStatus === 'warning' || (Array.isArray(reference.warnings) && reference.warnings.length > 0)
+  const hasSuggestions = baseStatus === 'suggestion' || (Array.isArray(reference.suggestions) && reference.suggestions.length > 0)
 
-  // Hallucinated refs should display as hallucinated even when individual
-  // metadata errors are also present (the errors are evidence of the
-  // hallucination, not a separate problem). The LLM-match override
-  // (citation matches the LLM-found paper) still demotes to verified.
-  const llmMatch = llmFoundMetadataMatchesCitation(reference)
-  const isHallucinated = !llmMatch && (
-    baseStatus === 'hallucination'
-    || reference.hallucination_assessment?.verdict === 'LIKELY'
-  )
-  if (isHallucinated) return 'hallucination'
-
-  // Apply warnings/errors/suggestions priority BEFORE any other overrides
   if (hasErrors) return 'error'
   if (hasWarnings) return 'warning'
   if (hasSuggestions) return 'suggestion'
 
-  // Only apply llmFoundMetadataMatchesCitation override if no warnings/errors/suggestions
   if (llmMatch) {
     return 'verified'
   }

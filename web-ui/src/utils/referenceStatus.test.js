@@ -40,4 +40,33 @@ describe('referenceStatus', () => {
     expect(llmFoundMetadataMatchesCitation(reference)).toBe(false)
     expect(getEffectiveReferenceStatus(reference, true)).toBe('hallucination')
   })
+
+  it('prioritizes hallucination over errors and warnings', () => {
+    const reference = {
+      status: 'hallucination',
+      errors: [{ error_type: 'author', error_details: 'Author mismatch' }],
+      warnings: [{ error_type: 'year', error_details: 'Year mismatch' }],
+    }
+
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('hallucination')
+  })
+
+  it('prioritizes errors over warnings', () => {
+    const reference = {
+      status: 'verified',
+      errors: [{ error_type: 'author', error_details: 'Author mismatch' }],
+      warnings: [{ error_type: 'year', error_details: 'Year mismatch' }],
+    }
+
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('error')
+  })
+
+  it('returns warning when no hallucination or errors exist', () => {
+    const reference = {
+      status: 'verified',
+      warnings: [{ error_type: 'venue', error_details: 'Venue mismatch' }],
+    }
+
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('warning')
+  })
 })
