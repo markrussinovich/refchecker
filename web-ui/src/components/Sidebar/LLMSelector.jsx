@@ -56,10 +56,10 @@ export default function LLMSelector({ mode = 'extraction' }) {
 
   const selectedConfig = visibleConfigs.find(c => c.id === activeSelectedId && configHasKey(c))
 
-  // Format display name as provider-model
+  // Format display name as model (the configuration name field has been removed).
   const formatConfigName = (config) => {
     if (!config) return 'No LLM configured'
-    return config.name || `${config.provider}-${config.model || 'default'}`
+    return config.model || config.name || `${config.provider} (default)`
   }
 
   // Find a keyless config for the same provider to use as prefill when creating new configs

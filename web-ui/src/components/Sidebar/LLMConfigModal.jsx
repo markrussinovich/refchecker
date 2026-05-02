@@ -11,7 +11,7 @@ import { logger } from '../../utils/logger'
 const PROVIDERS = [
   { id: 'openai', name: 'OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, hallucinationCapable: true },
   { id: 'anthropic', name: 'Anthropic', defaultModel: 'claude-sonnet-4-6', requiresKey: true, hallucinationCapable: true },
-  { id: 'google', name: 'Google', defaultModel: 'gemini-2.5-flash', requiresKey: true, hallucinationCapable: true },
+  { id: 'google', name: 'Google', defaultModel: 'gemini-3.1-flash-lite-preview', requiresKey: true, hallucinationCapable: true },
   { id: 'azure', name: 'Azure OpenAI', defaultModel: 'gpt-4.1', requiresKey: true, requiresEndpoint: true, hallucinationCapable: true },
   { id: 'vllm', name: 'vLLM (Local)', defaultModel: 'meta-llama/Llama-3.1-8B-Instruct', requiresKey: false, requiresEndpoint: true, hallucinationCapable: false },
 ]
@@ -27,7 +27,6 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   const [error, setError] = useState(null)
 
   const [formData, setFormData] = useState({
-    name: '',
     provider: 'anthropic',
     model: '',
     api_key: '',
@@ -38,13 +37,10 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
   useEffect(() => {
     if (isOpen) {
       // When creating a new config with a prefillConfig (keyless config for same provider),
-      // use its name/model/provider so the user just needs to add the API key
+      // use its model/provider so the user just needs to add the API key
       const source = editConfig || prefillConfig
       const defaultProvider = source?.provider || 'anthropic'
-      const providerInfo = PROVIDERS.find(p => p.id === defaultProvider)
-      const defaultModel = providerInfo?.defaultModel || ''
       setFormData({
-        name: source?.name || defaultModel,
         provider: defaultProvider,
         model: source?.model || '',
         api_key: '',
@@ -79,53 +75,28 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         provider: fallbackProvider?.id || 'anthropic',
         model: '',
         endpoint: '',
-        name: (!prev.name || prev.name === 'meta-llama/Llama-3.1-8B-Instruct')
-          ? (fallbackProvider?.defaultModel || prev.name)
-          : prev.name,
       }))
     }
   }, [availableProviders, formData.provider, multiuser])
 
   const handleChange = (e) => {
     const { name, value } = e.target
-    setFormData(prev => {
-      const updated = { ...prev, [name]: value }
-      // Auto-update config name when model changes (only if name is empty or matches old model)
-      if (name === 'model' && !editConfig) {
-        const oldModel = prev.model || selectedProvider?.defaultModel || ''
-        if (!prev.name || prev.name === oldModel) {
-          updated.name = value || selectedProvider?.defaultModel || ''
-        }
-      }
-      return updated
-    })
+    setFormData(prev => ({ ...prev, [name]: value }))
     setError(null)
   }
 
   const handleProviderChange = (e) => {
     const provider = e.target.value
-    const providerInfo = availableProviders.find(p => p.id === provider)
-    setFormData(prev => {
-      const oldModel = prev.model || selectedProvider?.defaultModel || ''
-      const newDefaultModel = providerInfo?.defaultModel || ''
-      return {
-        ...prev,
-        provider,
-        model: '', // Reset model when provider changes
-        // Auto-update name if it was empty or matched the old model
-        name: (!prev.name || prev.name === oldModel) ? newDefaultModel : prev.name,
-        endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
-      }
-    })
+    setFormData(prev => ({
+      ...prev,
+      provider,
+      model: '', // Reset model when provider changes
+      endpoint: provider === 'vllm' ? 'http://localhost:8000' : prev.endpoint,
+    }))
     setError(null)
   }
 
   const validate = () => {
-    if (!formData.name.trim()) {
-      setError('Name is required')
-      return false
-    }
-
     if (selectedProvider?.requiresKey && !editConfig && !formData.api_key.trim() && !hasReusableProviderKey) {
       setError('API key is required')
       return false
@@ -148,10 +119,13 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
     setError(null)
 
     try {
+      const effectiveModel = formData.model.trim() || selectedProvider?.defaultModel || null
       const configData = {
-        name: formData.name.trim(),
+        // Name is no longer user-editable; use the model identifier so it
+        // shows up consistently in selectors and history rows.
+        name: effectiveModel || formData.provider,
         provider: formData.provider,
-        model: formData.model.trim() || selectedProvider?.defaultModel || null,
+        model: effectiveModel,
         endpoint: formData.endpoint.trim() || null,
       }
 
@@ -269,31 +243,6 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
       size="md"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Name */}
-        <div>
-          <label 
-            htmlFor="name"
-            className="block text-sm font-medium mb-1"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
-            Configuration Name
-          </label>
-          <input
-            type="text"
-            id="name"
-            name="name"
-            value={formData.name}
-            onChange={handleChange}
-            placeholder="e.g., My GPT-4"
-            className="w-full px-3 py-2 rounded-lg border focus:outline-none focus:ring-2"
-            style={{
-              backgroundColor: 'var(--color-bg-secondary)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
-            }}
-          />
-        </div>
-
         {/* Provider */}
         <div>
           <label 

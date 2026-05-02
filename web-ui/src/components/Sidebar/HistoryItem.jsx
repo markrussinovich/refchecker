@@ -318,8 +318,8 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
                             ? (totalRefs > 0 ? `${processedRefs}/${totalRefs}` : 'Extracting...') 
                             : `${totalRefs} refs`)))}
             </span>
-            {/* Show error/warning/suggestion counts with compact icons (including during in-progress) */}
-            {!isPlaceholder && (
+            {/* Show error/warning/suggestion counts with compact icons (only after refs start processing) */}
+            {!isPlaceholder && (processedRefs > 0 || isComplete) && (
               <>
                 {refsWithErrors > 0 && (
                   <span className="flex items-center flex-shrink-0" style={{ color: 'var(--color-error)' }} title={`${refsWithErrors} ref${refsWithErrors === 1 ? '' : 's'} with errors`}>

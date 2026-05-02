@@ -163,10 +163,12 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
         assessment = ref.get("hallucination_assessment") or {}
         verdict = str(assessment.get("verdict") or "").upper()
         likely_hallucinated = verdict == "LIKELY"
+        # Mirror the UI's llmFoundMetadataMatchesCitation override: when the LLM
+        # found a paper whose title and authors match the citation, treat the
+        # reference as verified rather than hallucinated/unverified, regardless
+        # of the engine's status field.
+        llm_match_overrides = False
         if likely_hallucinated:
-            # Mirror the UI's llmFoundMetadataMatchesCitation override: when the LLM
-            # found a paper whose title and authors match the citation, we treat it
-            # as verified rather than hallucinated.
             try:
                 cited_title = (ref.get("title") or "").strip().lower()
                 found_title = (assessment.get("found_title") or "").strip().lower()
@@ -191,6 +193,7 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
                 year_matches = (not cited_year) or str(cited_year) in found_year
                 if assessment.get("link") and title_matches and authors_match and year_matches:
                     likely_hallucinated = False
+                    llm_match_overrides = True
             except Exception:
                 pass
 
@@ -201,9 +204,11 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
         elif status == "suggestion" or has_suggestion:
             refs_with_suggestions_only += 1
 
-        if status in {"unverified", "hallucination"} or has_unverified_error or likely_hallucinated:
+        if not llm_match_overrides and (
+            status in {"unverified", "hallucination"} or has_unverified_error or likely_hallucinated
+        ):
             unverified_count += 1
-        if status == "hallucination" or likely_hallucinated:
+        if not llm_match_overrides and (status == "hallucination" or likely_hallucinated):
             hallucination_count += 1
 
     return {

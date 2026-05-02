@@ -54,7 +54,7 @@ def resolve_endpoint(provider: str, override: Optional[str] = None) -> Optional[
 DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-2.5-flash',
+    'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
     'vllm':      'meta-llama/Llama-3.1-8B-Instruct',
 }
@@ -62,7 +62,7 @@ DEFAULT_EXTRACTION_MODELS: Dict[str, str] = {
 DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-2.5-flash',
+    'google':    'gemini-3.1-flash-lite-preview',
     'azure':     'gpt-4.1',
     'vllm':      'gpt-4.1',
 }
@@ -70,7 +70,7 @@ DEFAULT_HALLUCINATION_MODELS: Dict[str, str] = {
 DEFAULT_WEB_SEARCH_MODELS: Dict[str, str] = {
     'openai':    'gpt-4.1',
     'anthropic': 'claude-sonnet-4-6',
-    'google':    'gemini-2.5-flash',
+    'google':    'gemini-3.1-flash-lite-preview',
 }
 
 # Providers that can perform hallucination checking (i.e. have web-search
