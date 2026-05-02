@@ -25,16 +25,30 @@ export const llmFoundMetadataMatchesCitation = (reference = {}) => {
 export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = false) => {
   const baseStatus = (reference.status || '').trim().toLowerCase()
 
-  if (llmFoundMetadataMatchesCitation(reference)) {
-    return 'verified'
-  }
-
   if (reference.hallucination_check_pending && !reference.hallucination_assessment) {
     return 'checking'
   }
 
   if (baseStatus === 'unverified' && !reference.hallucination_assessment && !isCheckComplete) {
     return 'checking'
+  }
+
+  // Check for errors, warnings, suggestions BEFORE applying llm override
+  // Warnings and errors should NOT be overridden, even if LLM assessment matches
+  const hasErrors = Array.isArray(reference.errors) && reference.errors.some(
+    e => (e?.error_type || '').toLowerCase() !== 'unverified'
+  )
+  const hasWarnings = Array.isArray(reference.warnings) && reference.warnings.length > 0
+  const hasSuggestions = Array.isArray(reference.suggestions) && reference.suggestions.length > 0
+
+  // Apply warnings/errors/suggestions priority BEFORE any other overrides
+  if (hasErrors) return 'error'
+  if (hasWarnings) return 'warning'
+  if (hasSuggestions) return 'suggestion'
+
+  // Only apply llmFoundMetadataMatchesCitation override if no warnings/errors/suggestions
+  if (llmFoundMetadataMatchesCitation(reference)) {
+    return 'verified'
   }
 
   if (FINAL_STATUSES.includes(baseStatus)) {
@@ -49,14 +63,5 @@ export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = fa
     return baseStatus === 'pending' ? 'pending' : 'checking'
   }
 
-  const hasErrors = Array.isArray(reference.errors) && reference.errors.some(
-    e => (e?.error_type || '').toLowerCase() !== 'unverified'
-  )
-  const hasWarnings = !hasErrors && Array.isArray(reference.warnings) && reference.warnings.length > 0
-  const hasSuggestions = !hasErrors && !hasWarnings && Array.isArray(reference.suggestions) && reference.suggestions.length > 0
-
-  if (hasErrors) return 'error'
-  if (hasWarnings) return 'warning'
-  if (hasSuggestions) return 'suggestion'
   return 'verified'
 }
