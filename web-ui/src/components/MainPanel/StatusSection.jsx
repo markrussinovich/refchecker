@@ -360,17 +360,8 @@ export default function StatusSection() {
   const displayLlmLabel = displayLlmModel 
     ? `${displayLlmProvider ? `${displayLlmProvider} / ` : ''}${displayLlmModel}`
     : null
-  const hallucinationCapableProviders = new Set(['openai', 'anthropic', 'google', 'azure'])
-  const inferredHallucinationProvider = displayHallucinationProvider || (
-    hallucinationCapableProviders.has(String(displayLlmProvider || '').toLowerCase())
-      ? displayLlmProvider
-      : null
-  )
-  const inferredHallucinationModel = displayHallucinationModel || (
-    inferredHallucinationProvider === displayLlmProvider ? displayLlmModel : null
-  )
-  const displayHallucinationLabel = inferredHallucinationModel
-    ? `${inferredHallucinationProvider ? `${inferredHallucinationProvider} / ` : ''}${inferredHallucinationModel}`
+  const displayHallucinationLabel = displayHallucinationModel
+    ? `${displayHallucinationProvider ? `${displayHallucinationProvider} / ` : ''}${displayHallucinationModel}`
     : null
   
   const sourceInfo = formatSource(displaySource, displayTitle, displaySourceType, selectedCheckId, displayOriginalFilename)

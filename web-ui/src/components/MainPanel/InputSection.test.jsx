@@ -174,6 +174,10 @@ describe('InputSection bulk mode', () => {
     expect(mocks.addToHistory).toHaveBeenCalledWith(expect.objectContaining({
       id: 42,
       paper_source: '2401.12345',
+      llm_provider: 'anthropic',
+      llm_model: 'claude-4',
+      hallucination_provider: 'google',
+      hallucination_model: 'gemini-2.5-flash',
       batch_id: 'batch-1',
       batch_label: '2401.12345',
     }))

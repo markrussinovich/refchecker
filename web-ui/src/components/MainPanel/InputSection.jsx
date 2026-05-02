@@ -183,6 +183,8 @@ export default function InputSection() {
         unverified_count: 0,
         llm_provider: config?.provider || null,
         llm_model: config?.model || null,
+        hallucination_provider: hallucinationConfig?.provider || null,
+        hallucination_model: hallucinationConfig?.model || null,
         status: 'in_progress',
         session_id: session_id,
       })
@@ -293,6 +295,8 @@ export default function InputSection() {
           unverified_count: 0,
           llm_provider: config?.provider || null,
           llm_model: config?.model || null,
+          hallucination_provider: hallucinationConfig?.provider || null,
+          hallucination_model: hallucinationConfig?.model || null,
           status: 'in_progress',
           session_id: check.session_id,
           batch_id: batch_id,
