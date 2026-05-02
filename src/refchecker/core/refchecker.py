@@ -6772,21 +6772,20 @@ class ArxivReferenceChecker:
     def _display_non_unverified_errors(self, errors, debug_mode, print_output):
         """Display all non-unverified errors and warnings"""
         if not debug_mode and print_output:
-            for error in errors:
-                if error.get('error_type') != 'unverified' and error.get('warning_type') != 'unverified' and error.get('info_type') != 'unverified':
-                    error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
-                    error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
-                    
-                    from refchecker.utils.error_utils import print_labeled_multiline
+            from refchecker.utils.error_utils import print_labeled_multiline, sort_issues_for_cli_display
 
-                    if error_type == 'arxiv_id':
-                        print(f"      ❌ {error_details}")
-                    elif 'error_type' in error:
-                        print_labeled_multiline("❌ Error", error_details)
-                    elif 'warning_type' in error:
-                        print_labeled_multiline("⚠️  Warning", error_details)
-                    else:
-                        print_labeled_multiline("ℹ️  Information", error_details)
+            for error in sort_issues_for_cli_display(errors):
+                error_type = error.get('error_type') or error.get('warning_type') or error.get('info_type')
+                error_details = error.get('error_details') or error.get('warning_details') or error.get('info_details', 'Unknown error')
+
+                if error_type == 'arxiv_id':
+                    print(f"      ❌ {error_details}")
+                elif 'warning_type' in error:
+                    print_labeled_multiline("⚠️  Warning", error_details)
+                elif 'error_type' in error:
+                    print_labeled_multiline("❌ Error", error_details)
+                else:
+                    print_labeled_multiline("ℹ️  Information", error_details)
 
     def _run_and_display_hallucination_assessment(
         self,

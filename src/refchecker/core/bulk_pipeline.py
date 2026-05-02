@@ -481,18 +481,16 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total
                 if detail:
                     _safe_print(f'         Subreason: {detail}')
 
-        for error in original_errors:
-            if (error.get('error_type') == 'unverified'
-                    or error.get('warning_type') == 'unverified'
-                    or error.get('info_type') == 'unverified'):
-                continue
+        from refchecker.utils.error_utils import sort_issues_for_cli_display
+
+        for error in sort_issues_for_cli_display(original_errors):
             error_details = (error.get('error_details')
                              or error.get('warning_details')
                              or error.get('info_details', 'Unknown error'))
-            if 'error_type' in error:
-                _safe_print_labeled('❌', error_details)
-            elif 'warning_type' in error:
+            if 'warning_type' in error:
                 _safe_print_labeled('⚠️ ', error_details)
+            elif 'error_type' in error:
+                _safe_print_labeled('❌', error_details)
             else:
                 _safe_print_labeled('ℹ️ ', error_details)
     else:

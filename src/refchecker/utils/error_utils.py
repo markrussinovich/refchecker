@@ -33,6 +33,38 @@ def print_labeled_multiline(label: str, text: str) -> None:
         print(fixed_indent + line)
 
 
+def is_unverified_issue(issue: Dict[str, Any]) -> bool:
+    """Return True when an error/warning/info entry represents unverified status."""
+    return (
+        issue.get('error_type') == 'unverified'
+        or issue.get('warning_type') == 'unverified'
+        or issue.get('info_type') == 'unverified'
+    )
+
+
+def sort_issues_for_cli_display(issues: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return non-unverified issues in CLI display order: warnings, errors, information."""
+    priority = {
+        'warning_type': 0,
+        'error_type': 1,
+        'info_type': 2,
+    }
+
+    def sort_key(item):
+        index, issue = item
+        for key, rank in priority.items():
+            if key in issue:
+                return rank, index
+        return len(priority), index
+
+    display_items = [
+        (index, issue)
+        for index, issue in enumerate(issues or [])
+        if not is_unverified_issue(issue)
+    ]
+    return [issue for _, issue in sorted(display_items, key=sort_key)]
+
+
 def format_three_line_mismatch(mismatch_type: str, left: str, right: str) -> str:
     """
     Format a three-line mismatch message with fixed indentation.

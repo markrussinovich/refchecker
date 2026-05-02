@@ -25,6 +25,7 @@ try:
         format_author_mismatch,
         format_first_author_mismatch,
         format_three_line_mismatch,
+        sort_issues_for_cli_display,
     )
     ERROR_UTILS_AVAILABLE = True
 except ImportError:
@@ -449,3 +450,17 @@ class TestAuthorMismatchFormatting:
         # Check values
         assert "2021" in lines[1], f"Cited year not found: {lines[1]}"
         assert "2020" in lines[2], f"Actual year not found: {lines[2]}"
+
+    def test_cli_display_orders_warnings_before_errors(self):
+        """CLI output should show warnings before errors while skipping unverified containers."""
+        issues = [
+            {'error_type': 'author', 'error_details': 'Author count mismatch'},
+            {'info_type': 'url', 'info_details': 'Reference could include URL'},
+            {'warning_type': 'year', 'warning_details': 'Year mismatch'},
+            {'error_type': 'unverified', 'error_details': 'Paper not found'},
+            {'error_type': 'title', 'error_details': 'Title mismatch'},
+        ]
+
+        ordered = sort_issues_for_cli_display(issues)
+
+        assert ordered == [issues[2], issues[0], issues[4], issues[1]]

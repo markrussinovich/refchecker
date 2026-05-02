@@ -7,6 +7,7 @@ import { logger } from '../../utils/logger'
 
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
+const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight: 600 }
 
 /**
  * Extract ArXiv ID from a URL or source string
@@ -154,13 +155,13 @@ function renderSourceMethodLine({
             target="_blank"
             rel="noopener noreferrer"
             className="hover:underline"
-            style={{ color: 'var(--color-link)' }}
+            style={extractionValueStyle}
             onClick={(e) => e.stopPropagation()}
           >
             {label}
           </a>
         ) : (
-          label
+          <span style={extractionValueStyle}>{label}</span>
         )}
       </p>
     )
@@ -172,7 +173,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Extraction: PDF extraction
+        Extraction: <span style={extractionValueStyle}>PDF extraction</span>
       </p>
     )
   }
@@ -183,7 +184,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Extraction: GROBID fallback
+        Extraction: <span style={extractionValueStyle}>GROBID fallback</span>
       </p>
     )
   }
@@ -194,7 +195,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Extraction: LLM extraction
+        Extraction: <span style={extractionValueStyle}>LLM extraction</span>
       </p>
     )
   }
@@ -211,7 +212,7 @@ function renderSourceMethodLine({
           target="_blank"
           rel="noopener noreferrer"
           className="hover:underline"
-          style={{ color: 'var(--color-link)' }}
+          style={extractionValueStyle}
           onClick={(e) => e.stopPropagation()}
         >
           Pasted text
@@ -226,7 +227,7 @@ function renderSourceMethodLine({
         className="text-sm"
         style={{ color: 'var(--color-text-muted)' }}
       >
-        Extraction: Cached bibliography
+        Extraction: <span style={extractionValueStyle}>Cached bibliography</span>
       </p>
     )
   }
@@ -865,7 +866,7 @@ export default function StatusSection() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:underline"
-                    style={{ color: 'var(--color-link)' }}
+                    style={extractionValueStyle}
                     onClick={(e) => e.stopPropagation()}
                   >
                     Pasted text
@@ -886,7 +887,7 @@ export default function StatusSection() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:underline"
-                    style={{ color: 'var(--color-link)' }}
+                    style={extractionValueStyle}
                     onClick={(e) => e.stopPropagation()}
                   >
                     Uploaded file
