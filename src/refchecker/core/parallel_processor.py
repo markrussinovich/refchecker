@@ -268,6 +268,8 @@ class ParallelReferenceProcessor:
                                         assessment,
                                         reference=current_result.reference,
                                         standard_refchecker=lambda found_ref: self.base_checker.verify_reference_standard(None, found_ref),
+                                        llm_client=getattr(self.base_checker.report_builder, 'llm_verifier', None),
+                                        web_searcher=getattr(self.base_checker.report_builder, 'web_searcher', None),
                                     )
                                     current_result.hallucination_assessment = tmp.get('hallucination_assessment', assessment)
                                     current_result.errors = tmp['errors']

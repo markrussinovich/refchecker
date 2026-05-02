@@ -6424,6 +6424,8 @@ class ArxivReferenceChecker:
                     assessment,
                     reference=reference,
                     standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                    llm_client=self.report_builder.llm_verifier,
+                    web_searcher=self.report_builder.web_searcher,
                 )
                 return applied.get('hallucination_assessment', assessment), applied
             
@@ -6514,6 +6516,8 @@ class ArxivReferenceChecker:
                     precomputed_hallucination,
                     reference=reference,
                     standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                    llm_client=self.report_builder.llm_verifier,
+                    web_searcher=self.report_builder.web_searcher,
                 )
                 precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
                 if error_entry_record is not None:
@@ -6836,6 +6840,8 @@ class ArxivReferenceChecker:
             assessment,
             reference=reference,
             standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+            llm_client=self.report_builder.llm_verifier,
+            web_searcher=self.report_builder.web_searcher,
         )
         assessment = applied.get('hallucination_assessment', assessment)
 

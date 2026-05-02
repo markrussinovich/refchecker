@@ -41,13 +41,24 @@ export const getEffectiveReferenceStatus = (reference = {}, isCheckComplete = fa
   const hasWarnings = Array.isArray(reference.warnings) && reference.warnings.length > 0
   const hasSuggestions = Array.isArray(reference.suggestions) && reference.suggestions.length > 0
 
+  // Hallucinated refs should display as hallucinated even when individual
+  // metadata errors are also present (the errors are evidence of the
+  // hallucination, not a separate problem). The LLM-match override
+  // (citation matches the LLM-found paper) still demotes to verified.
+  const llmMatch = llmFoundMetadataMatchesCitation(reference)
+  const isHallucinated = !llmMatch && (
+    baseStatus === 'hallucination'
+    || reference.hallucination_assessment?.verdict === 'LIKELY'
+  )
+  if (isHallucinated) return 'hallucination'
+
   // Apply warnings/errors/suggestions priority BEFORE any other overrides
   if (hasErrors) return 'error'
   if (hasWarnings) return 'warning'
   if (hasSuggestions) return 'suggestion'
 
   // Only apply llmFoundMetadataMatchesCitation override if no warnings/errors/suggestions
-  if (llmFoundMetadataMatchesCitation(reference)) {
+  if (llmMatch) {
     return 'verified'
   }
 

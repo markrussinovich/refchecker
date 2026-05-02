@@ -1261,11 +1261,94 @@ def _split_reverified_issues(issues: List[Dict[str, Any]]) -> tuple[List[Dict[st
     return errors, warnings
 
 
+_MAX_HALLUCINATION_ASSESSMENT_ROUNDS = 1
+
+
+def _rerun_hallucination_for_reverified_errors(
+    result: Dict[str, Any],
+    reference: Optional[Dict[str, Any]],
+    assessment: Dict[str, Any],
+    llm_client: Any,
+    web_searcher: Any,
+    standard_refchecker: Optional[Callable[[Dict[str, Any]], Any]],
+    assessment_round: int,
+) -> Optional[Dict[str, Any]]:
+    """Re-assess hallucination after re-verify produced new metadata errors.
+
+    When the LLM's first hallucination verdict was UNLIKELY but the
+    re-verify against the LLM-found metadata produced substantive
+    metadata mismatches (title or author errors), feed those new errors
+    back through the hallucination pipeline so the LLM can decide
+    whether the citation is in fact fabricated or merely abbreviated.
+
+    Returns a re-applied result dict, or None if no rerun was performed.
+    """
+    if (
+        llm_client is None
+        or reference is None
+        or assessment_round >= _MAX_HALLUCINATION_ASSESSMENT_ROUNDS
+    ):
+        return None
+
+    new_errors = [
+        e for e in result.get('errors', [])
+        if e.get('error_type') in ('title', 'author', 'doi', 'arxiv_id', 'arxiv', 'multiple', 'url')
+        and not e.get('is_suggestion')
+    ]
+    if not new_errors:
+        return None
+
+    verified_url = ''
+    auth_urls = result.get('authoritative_urls') or []
+    if auth_urls:
+        verified_url = auth_urls[0].get('url', '') or ''
+
+    error_entry = build_hallucination_error_entry(
+        new_errors, reference, verified_url=verified_url,
+    )
+    if error_entry is None:
+        return None
+
+    try:
+        new_assessment = run_hallucination_check(
+            error_entry,
+            llm_client=llm_client,
+            web_searcher=web_searcher,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug('Second-pass hallucination check failed: %s', exc)
+        return None
+
+    if not new_assessment:
+        return None
+
+    new_verdict = new_assessment.get('verdict')
+    prev_verdict = assessment.get('verdict')
+    # Only reapply when the verdict actually changes; otherwise the
+    # initial UNLIKELY decision (with its LLM-found metadata) stands.
+    if new_verdict == prev_verdict:
+        return None
+
+    new_assessment.setdefault('previous_verdict', prev_verdict)
+    return apply_hallucination_verdict(
+        result,
+        new_assessment,
+        reference=reference,
+        standard_refchecker=standard_refchecker,
+        llm_client=llm_client,
+        web_searcher=web_searcher,
+        _assessment_round=assessment_round + 1,
+    )
+
+
 def apply_hallucination_verdict(
     result: Dict[str, Any],
     assessment: Dict[str, Any],
     reference: Optional[Dict[str, Any]] = None,
     standard_refchecker: Optional[Callable[[Dict[str, Any]], Any]] = None,
+    llm_client: Any = None,
+    web_searcher: Any = None,
+    _assessment_round: int = 0,
 ) -> Dict[str, Any]:
     """Apply a hallucination assessment verdict to a reference result.
 
@@ -1385,6 +1468,13 @@ def apply_hallucination_verdict(
                 and not e.get('is_suggestion')
             ]
             result['status'] = 'error' if remaining_errors else 'verified'
+            if remaining_errors:
+                rerun = _rerun_hallucination_for_reverified_errors(
+                    result, reference, assessment, llm_client, web_searcher,
+                    standard_refchecker, _assessment_round,
+                )
+                if rerun is not None:
+                    return rerun
         elif ha_link and ha_link.startswith('http'):
             result['authoritative_urls'] = _authoritative_urls_with_once(
                 result.get('authoritative_urls', []), 'llm_verified', ha_link,
@@ -1458,6 +1548,13 @@ def apply_hallucination_verdict(
                     and not e.get('is_suggestion')
                 ]
                 result['status'] = 'error' if remaining_errors else 'verified'
+                if remaining_errors:
+                    rerun = _rerun_hallucination_for_reverified_errors(
+                        result, reference, assessment, llm_client, web_searcher,
+                        standard_refchecker, _assessment_round,
+                    )
+                    if rerun is not None:
+                        return rerun
         else:
             # No reference dict available — fall back to heuristic clearing.
             has_doi_mismatch = any(

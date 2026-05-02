@@ -1486,6 +1486,8 @@ def _finalize_hallucination_on_result(
                     assessment,
                     reference=reference,
                     standard_refchecker=lambda found_ref, checker=checker: checker.verify_reference_standard(None, found_ref),
+                    llm_client=getattr(checker.report_builder, 'llm_verifier', None) if hasattr(checker, 'report_builder') else None,
+                    web_searcher=getattr(checker.report_builder, 'web_searcher', None) if hasattr(checker, 'report_builder') else None,
                 )
                 error_entry['hallucination_assessment'] = applied.get('hallucination_assessment', assessment)
                 if applied.get('matched_database'):

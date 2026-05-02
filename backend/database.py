@@ -197,7 +197,16 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
             except Exception:
                 pass
 
-        if status == "error" or has_non_unverified_error:
+        is_hallucinated = (
+            (status == "hallucination" or likely_hallucinated)
+            and not llm_match_overrides
+        )
+
+        if is_hallucinated:
+            # Hallucinated refs are tracked in their own bucket; their
+            # accompanying errors/warnings are evidence, not separate issues.
+            pass
+        elif status == "error" or has_non_unverified_error:
             refs_with_errors += 1
         elif status == "warning" or has_warning:
             refs_with_warnings_only += 1
@@ -208,7 +217,7 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
             status in {"unverified", "hallucination"} or has_unverified_error or likely_hallucinated
         ):
             unverified_count += 1
-        if not llm_match_overrides and (status == "hallucination" or likely_hallucinated):
+        if is_hallucinated:
             hallucination_count += 1
 
     return {

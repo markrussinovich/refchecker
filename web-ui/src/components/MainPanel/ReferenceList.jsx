@@ -51,10 +51,14 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             // (suggestions are for verified papers that could be improved)
             return status === 'verified' || status === 'suggestion'
           case 'error':
-            // Has any error (non-unverified)
+            // Has any error (non-unverified), but exclude refs already
+            // classified as hallucinated — those errors are evidence of
+            // the hallucination, displayed under the hallucinated card.
+            if (status === 'hallucination') return false
             return ref.errors?.some(e => e.error_type !== 'unverified')
           case 'warning':
-            // Has any warning
+            // Has any warning, excluding hallucinated refs.
+            if (status === 'hallucination') return false
             return ref.warnings?.length > 0
           case 'suggestion':
             // Has any suggestion

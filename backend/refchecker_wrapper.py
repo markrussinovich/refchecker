@@ -1439,6 +1439,8 @@ class ProgressRefChecker:
                 assessment,
                 reference=reference,
                 standard_refchecker=self._standard_refcheck_for_hallucination,
+                llm_client=self.hallucination_verifier,
+                web_searcher=getattr(self, 'web_searcher', None),
             )
             return ('resolved', updated)
         elif outcome == 'skip':
@@ -1681,6 +1683,8 @@ class ProgressRefChecker:
             assessment,
             reference=reference,
             standard_refchecker=self._standard_refcheck_for_hallucination,
+            llm_client=self.hallucination_verifier,
+            web_searcher=getattr(self, 'web_searcher', None),
         )
         return result
 

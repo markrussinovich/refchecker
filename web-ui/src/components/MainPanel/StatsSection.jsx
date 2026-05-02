@@ -117,11 +117,14 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       errorsCount,
       warningsCount,
       suggestionsCount,
-      withErrors: finalized.filter(r => r.errors?.some(e => e.error_type !== 'unverified')).length,
-      withWarnings: finalized.filter(r =>
-        r.warnings?.length > 0 &&
-        !r.errors?.some(e => e.error_type !== 'unverified')
-      ).length,
+      withErrors: finalized.filter(r => {
+        const s = getEffectiveReferenceStatus(r, isComplete)
+        return s === 'error'
+      }).length,
+      withWarnings: finalized.filter(r => {
+        const s = getEffectiveReferenceStatus(r, isComplete)
+        return s === 'warning'
+      }).length,
       withUnverified: finalized.filter(r => {
         const s = getEffectiveReferenceStatus(r, isComplete)
         const likelyHallucinated = r.hallucination_assessment?.verdict === 'LIKELY' && !llmFoundMetadataMatchesCitation(r)

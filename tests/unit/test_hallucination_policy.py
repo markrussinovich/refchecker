@@ -319,6 +319,86 @@ def test_year_only_issue_should_not_be_checked():
     assert should_check_hallucination(entry) is False
 
 
+def test_unlikely_reverify_errors_trigger_second_hallucination_pass():
+    """When initial UNLIKELY assessment's reverify produces title+author errors,
+    the result should be fed back through hallucination_check so the LLM can
+    decide whether the citation is in fact fabricated."""
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Sharing icu patient data responsibly under the sccm/esicm joint initiative: Amsterdamumcdb',
+        'authors': [
+            'Peter J. Thoral', 'Jan M. Peppink', 'Rutger H. Driessen',
+            'Eric J. G. Sijbrands', 'Erwin J. O. Kompanje',
+        ],
+        'year': 2021,
+        'venue': 'Critical Care',
+    }
+    initial_assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found a different paper with similar topic.',
+        'link': 'https://example.org/wrong-paper',
+        'found_title': 'Some Completely Different Paper Title About Other Topic',
+        'found_authors': 'Different Author A, Different Author B',
+        'found_year': '2021',
+    }
+    second_assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'On second pass, the cited authors do not match.',
+        'link': None,
+    }
+    llm_client = MagicMock()
+    # Make run_hallucination_check return our second_assessment by mocking
+    # at the LLM-client level: pre_screen will route 'title'+'author' multiple
+    # error to needs_llm; the assess_hallucination call uses llm_client.assess.
+    llm_client.assess = MagicMock(return_value=second_assessment)
+    llm_client.cache_dir = None
+    llm_client.model = 'mock-model'
+
+    updated = apply_hallucination_verdict(
+        result,
+        initial_assessment,
+        reference=reference,
+        llm_client=llm_client,
+    )
+
+    # The second-pass assessment should have been applied
+    assert updated['hallucination_assessment']['verdict'] == 'LIKELY'
+    assert updated['status'] == 'hallucination'
+
+
+def test_unlikely_reverify_no_rerun_when_no_llm_client():
+    """Without an llm_client, the legacy behavior (status='error') is preserved."""
+    result = {
+        'status': 'unverified',
+        'errors': [{'error_type': 'unverified', 'error_details': 'Paper not found by any checker'}],
+    }
+    reference = {
+        'title': 'Sharing icu patient data responsibly under the sccm/esicm joint initiative: Amsterdamumcdb',
+        'authors': ['Peter J. Thoral'],
+        'year': 2021,
+    }
+    initial_assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'Found a different paper.',
+        'link': 'https://example.org/wrong-paper',
+        'found_title': 'Some Completely Different Paper Title About Other Topic',
+        'found_authors': 'Different Author A, Different Author B',
+        'found_year': '2021',
+    }
+
+    updated = apply_hallucination_verdict(
+        result,
+        initial_assessment,
+        reference=reference,
+    )
+
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['status'] == 'error'
+
+
 def test_warning_only_consolidated_issue_should_not_be_checked():
     entry = {
         'error_type': 'multiple',
