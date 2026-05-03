@@ -41,6 +41,34 @@ describe('referenceStatus', () => {
     expect(getEffectiveReferenceStatus(reference, true)).toBe('hallucination')
   })
 
+  it('does not treat last-name-only author overlap as matching LLM metadata', () => {
+    const reference = {
+      status: 'hallucination',
+      title: 'Cupy: A numpy-compatible library for nvidia gpu calculations',
+      authors: ['ROYUD Nishino', 'Shohei Hido Crissman Loomis'],
+      year: 2017,
+      errors: [{
+        error_type: 'author',
+        error_details: 'Author count mismatch: 2 cited vs 5 correct',
+      }],
+      matched_database: 'Semantic Scholar',
+      authoritative_urls: [{
+        type: 'semantic_scholar',
+        url: 'https://api.semanticscholar.org/CorpusID:41278748',
+      }],
+      hallucination_assessment: {
+        verdict: 'LIKELY',
+        link: 'https://api.semanticscholar.org/CorpusID:41278748',
+        found_title: 'CuPy: A NumPy-Compatible Library for NVIDIA GPU Calculations',
+        found_authors: 'Ryosuke Okuta, Yuya Unno, Daisuke Nishino, Shohei Hido, Crissman Loomis',
+        found_year: '2017',
+      },
+    }
+
+    expect(llmFoundMetadataMatchesCitation(reference)).toBe(false)
+    expect(getEffectiveReferenceStatus(reference, true)).toBe('hallucination')
+  })
+
   it('prioritizes hallucination over errors and warnings', () => {
     const reference = {
       status: 'hallucination',

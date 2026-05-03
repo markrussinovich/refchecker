@@ -9,16 +9,59 @@ export const lastNameTokens = (authors) => (authors || [])
   .map(author => String(author || '').trim().split(/\s+/).filter(Boolean).pop()?.toLowerCase())
   .filter(Boolean)
 
+const normalizeAuthorTokens = (value) => normalizeForMetadataComparison(value)
+  .split(' ')
+  .filter(Boolean)
+
+const parseFoundAuthors = (value) => {
+  const text = String(value || '').trim()
+  if (!text || text.toUpperCase() === 'NONE') return []
+
+  if (text.includes(';')) {
+    return text.split(';').map(author => author.trim()).filter(Boolean)
+  }
+
+  return text.split(',').map(author => author.trim()).filter(Boolean)
+}
+
+const authorMatches = (citedAuthor, foundAuthor) => {
+  const citedTokens = normalizeAuthorTokens(citedAuthor)
+  const foundTokens = normalizeAuthorTokens(foundAuthor)
+  if (citedTokens.length === 0 || foundTokens.length === 0) return false
+
+  const citedLast = citedTokens[citedTokens.length - 1]
+  const foundLast = foundTokens[foundTokens.length - 1]
+  if (citedLast !== foundLast) return false
+
+  const cited = citedTokens.join(' ')
+  const found = foundTokens.join(' ')
+  if (cited === found || cited.includes(found) || found.includes(cited)) return true
+
+  const citedGivenTokens = citedTokens.slice(0, -1).filter(token => token.length > 1)
+  const foundGivenTokens = new Set(foundTokens.slice(0, -1).filter(token => token.length > 1))
+  return citedGivenTokens.some(token => foundGivenTokens.has(token))
+}
+
+const authorsSubstantiallyMatch = (citedAuthors, foundAuthorsText) => {
+  const cited = (citedAuthors || []).filter(Boolean)
+  const found = parseFoundAuthors(foundAuthorsText)
+  if (cited.length === 0 || found.length === 0) return false
+
+  const matchedCount = cited.filter(citedAuthor => (
+    found.some(foundAuthor => authorMatches(citedAuthor, foundAuthor))
+  )).length
+
+  const requiredMatches = cited.length >= 3 ? cited.length - 1 : cited.length
+  return matchedCount >= requiredMatches
+}
+
 export const llmFoundMetadataMatchesCitation = (reference = {}) => {
   const assessment = reference.hallucination_assessment || {}
-  const foundAuthorsText = String(assessment.found_authors || '').toLowerCase()
-  const citedLastNames = lastNameTokens(reference.authors)
 
   return assessment.verdict === 'LIKELY'
     && Boolean(assessment.link)
     && normalizeForMetadataComparison(assessment.found_title) === normalizeForMetadataComparison(reference.title)
-    && citedLastNames.length > 0
-    && citedLastNames.every(name => foundAuthorsText.includes(name))
+    && authorsSubstantiallyMatch(reference.authors, assessment.found_authors)
     && (!reference.year || String(assessment.found_year || '').includes(String(reference.year)))
 }
 
