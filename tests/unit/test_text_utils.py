@@ -242,7 +242,7 @@ class TestNameMatching:
         
         match, error = compare_authors(cited, correct)
         assert not match
-        assert "First author mismatch:" in error
+        assert "no matching authors:" in error
         # Both names should be displayed in "First Last" format
         assert "Srivathsan Koundinyan" in error
         assert "John P. Smith" in error

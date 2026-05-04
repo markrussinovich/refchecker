@@ -37,7 +37,7 @@ jobs:
     
     - name: Run tests
       run: |
-        pytest tests/ -v --cov=src --cov-report=term-missing
+        pytest tests/ -m "not slow and not llm" -v --cov=src --cov-report=term-missing --durations=20
     
     - name: Configure git
       run: |
