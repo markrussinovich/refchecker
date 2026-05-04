@@ -6387,14 +6387,16 @@ class ArxivReferenceChecker:
             self._process_reference_result(paper, result.reference, result.errors, result.url,
                                          paper_errors, unverified_count, debug_mode, print_output=False,
                                          verified_data=result.verified_data,
-                                         precomputed_hallucination=result.hallucination_assessment)
+                                         precomputed_hallucination=result.hallucination_assessment,
+                                         precomputed_hallucination_applied=result.hallucination_verdict_applied)
         
         # Run parallel verification
         processor.verify_references_parallel(paper, bibliography, result_callback)
     
     def _process_reference_result(self, paper, reference, errors, reference_url, 
                                 paper_errors, unverified_count, debug_mode, print_output=True,
-                                verified_data=None, precomputed_hallucination=None):
+                                verified_data=None, precomputed_hallucination=None,
+                                precomputed_hallucination_applied=False):
         """
         Process the result of reference verification (shared by both sequential and parallel)
         
@@ -6408,6 +6410,7 @@ class ArxivReferenceChecker:
             debug_mode: Whether debug mode is enabled
             print_output: Whether to print output (False for parallel mode to avoid duplication)
             precomputed_hallucination: Pre-computed hallucination assessment from parallel printer (skip LLM re-call)
+            precomputed_hallucination_applied: Whether that assessment has already been applied to errors/status
         """
         # If errors found, add to dataset and optionally print details
         if errors:
@@ -6430,13 +6433,14 @@ class ArxivReferenceChecker:
                 return applied.get('hallucination_assessment', assessment), applied
             
             if has_unverified_error:
+                if precomputed_hallucination_applied:
+                    self.total_unverified_refs += 1
+                    self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
                 # Check if the URL was confirmed to contain the paper
-                url_references_paper = any(
+                elif any(
                     'url references paper' in (e.get('error_details') or '').lower()
                     for e in errors
-                )
-                
-                if url_references_paper:
+                ):
                     # URL contains the paper — ask the LLM to validate
                     # whether this is a real reference before recording an error.
                     url_assessment = precomputed_hallucination
@@ -6489,7 +6493,7 @@ class ArxivReferenceChecker:
                         self._display_unverified_error_with_subreason(reference, reference_url, errors, debug_mode, print_output)
                         if llm_assessment:
                             precomputed_hallucination = llm_assessment
-            
+
             # Add to dataset and handle all errors
             error_entry_record = self.add_error_to_dataset(paper, reference, errors, reference_url, verified_data)
             error_entry_index = len(self.errors) - 1 if error_entry_record is not None else None
@@ -6510,20 +6514,26 @@ class ArxivReferenceChecker:
             # If the parallel printer already ran the assessment, just store it
             # on the error record instead of re-calling the LLM.
             if precomputed_hallucination:
-                _has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
-                applied = apply_hallucination_verdict(
-                    {'status': 'unverified' if _has_unverified else 'error', 'errors': errors},
-                    precomputed_hallucination,
-                    reference=reference,
-                    standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
-                    llm_client=self.report_builder.llm_verifier,
-                    web_searcher=self.report_builder.web_searcher,
-                )
-                precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
-                if error_entry_record is not None:
-                    error_entry_record['hallucination_assessment'] = precomputed_hallucination
-                elif self.errors:
-                    self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
+                if precomputed_hallucination_applied:
+                    if error_entry_record is not None:
+                        error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                    elif self.errors:
+                        self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
+                else:
+                    _has_unverified = any(e.get('error_type') == 'unverified' for e in errors)
+                    applied = apply_hallucination_verdict(
+                        {'status': 'unverified' if _has_unverified else 'error', 'errors': errors},
+                        precomputed_hallucination,
+                        reference=reference,
+                        standard_refchecker=lambda found_ref: self.verify_reference_standard(None, found_ref),
+                        llm_client=self.report_builder.llm_verifier,
+                        web_searcher=self.report_builder.web_searcher,
+                    )
+                    precomputed_hallucination = applied.get('hallucination_assessment', precomputed_hallucination)
+                    if error_entry_record is not None:
+                        error_entry_record['hallucination_assessment'] = precomputed_hallucination
+                    elif self.errors:
+                        self.errors[-1]['hallucination_assessment'] = precomputed_hallucination
             else:
                 self._run_and_display_hallucination_assessment(
                     reference,

@@ -93,6 +93,21 @@ class TestAuthorCountDisplay(unittest.TestCase):
         self.assertIn("0 cited vs 0 correct", error_msg)
         self.assertIn("None", error_msg)
 
+    def test_no_matching_authors_error(self):
+        """Test that zero-overlap author lists get a dedicated error."""
+        from refchecker.utils.text_utils import compare_authors
+
+        cited_authors = ["Alice Example", "Bob Example"]
+        correct_authors = ["Carol Verified", "Dave Verified", "Eve Verified"]
+
+        match_result, error_msg = compare_authors(cited_authors, correct_authors)
+
+        self.assertFalse(match_result)
+        self.assertIn("no matching authors", error_msg)
+        self.assertIn("Alice Example, Bob Example", error_msg)
+        self.assertIn("Carol Verified, Dave Verified, Eve Verified", error_msg)
+        self.assertNotIn("Author count mismatch", error_msg)
+
 
 if __name__ == '__main__':
     unittest.main()

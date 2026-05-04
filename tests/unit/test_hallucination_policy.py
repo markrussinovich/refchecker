@@ -454,6 +454,154 @@ def test_warning_only_built_entry_should_not_call_llm():
     llm_client.assess.assert_not_called()
 
 
+def test_non_paper_dataset_source_should_not_call_llm():
+    entry = {
+        'error_type': 'author',
+        'error_details': 'Author mismatch against paper database result',
+        'ref_title': 'Image Segmentation',
+        'ref_authors_cited': 'Carla Brodley',
+        'ref_venue_cited': 'UCI Machine Learning Repository',
+        'original_reference': {
+            'title': 'Image Segmentation',
+            'authors': ['Carla Brodley'],
+            'venue': 'UCI Machine Learning Repository',
+            'raw_text': 'Carla Brodley#Image Segmentation#UCI Machine Learning Repository#1990#',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNLIKELY'
+    llm_client.assess.assert_not_called()
+
+
+def test_non_paper_zenodo_software_source_should_not_call_llm():
+    entry = {
+        'error_type': 'title',
+        'error_details': 'Title mismatch against paper database result',
+        'ref_title': 'The language model evaluation harness',
+        'ref_authors_cited': 'Leo Gao, Jonathan Tow, Baber Abbasi',
+        'ref_venue_cited': 'Zenodo',
+        'ref_url_cited': 'https://zenodo.org/records/12608602',
+        'original_reference': {
+            'title': 'The language model evaluation harness',
+            'authors': ['Leo Gao', 'Jonathan Tow', 'Baber Abbasi'],
+            'venue': 'Zenodo',
+            'url': 'https://zenodo.org/records/12608602',
+            'raw_text': 'Leo Gao*Jonathan Tow*Baber Abbasi#The language model evaluation harness#Zenodo#2024#https://zenodo.org/records/12608602',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNLIKELY'
+    llm_client.assess.assert_not_called()
+
+
+def test_isbn_title_parser_artifact_should_not_call_llm():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Title mismatch\nAuthor mismatch',
+        'ref_title': 'ISBN 9781450378451',
+        'ref_authors_cited': 'Association for Computing Machinery',
+        'ref_url_cited': 'https://doi.org/10.1145/1401132.1401152',
+        'original_reference': {
+            'title': 'ISBN 9781450378451',
+            'authors': ['Association for Computing Machinery'],
+            'url': 'https://doi.org/10.1145/1401132.1401152',
+            'raw_text': 'Association for Computing Machinery#ISBN 9781450378451#n.d.#n.d.#https://doi.org/10.1145/1401132.1401152',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNCERTAIN'
+    llm_client.assess.assert_not_called()
+
+
+def test_title_equals_venue_parser_artifact_should_not_call_llm():
+    entry = {
+        'error_type': 'unverified',
+        'error_details': 'Reference could not be verified',
+        'ref_title': 'The American Journal of Psychology',
+        'ref_authors_cited': 'Peter G. Polson',
+        'ref_venue_cited': 'The American Journal of Psychology',
+        'ref_url_cited': 'http://www.jstor.org/stable/1421672',
+        'original_reference': {
+            'title': 'The American Journal of Psychology',
+            'authors': ['Peter G. Polson'],
+            'venue': 'The American Journal of Psychology',
+            'url': 'http://www.jstor.org/stable/1421672',
+        },
+    }
+    llm_client = MagicMock()
+
+    assessment = run_hallucination_check(entry, llm_client=llm_client)
+
+    assert should_check_hallucination(entry) is False
+    assert assessment['verdict'] == 'UNCERTAIN'
+    llm_client.assess.assert_not_called()
+
+
+def test_exact_identifier_title_update_with_author_overlap_should_not_call_llm():
+    entry = {
+        'error_type': 'multiple',
+        'error_details': 'Title mismatch:\n       cited: Detecting harmful memes with decoupled understanding and guided cot reasoning\n       actual: Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection',
+        'ref_title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'ref_authors_cited': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        '_ref_authors_cited_list': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'ref_authors_correct': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        'ref_url_cited': 'http://arxiv.org/abs/2506.08477',
+        'ref_verified_url': 'https://arxiv.org/abs/2506.08477v1',
+        'original_reference': {
+            'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+            'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+            'url': 'http://arxiv.org/abs/2506.08477',
+        },
+    }
+    llm_client = MagicMock()
+
+    assert should_check_hallucination(entry) is False
+    assert run_hallucination_check(entry, llm_client=llm_client) is None
+    llm_client.assess.assert_not_called()
+
+
+def test_apply_likely_title_only_identifier_update_corrects_to_unlikely():
+    result = {
+        'status': 'error',
+        'errors': [{'error_type': 'title', 'error_details': 'Title mismatch'}],
+    }
+    reference = {
+        'title': 'Detecting harmful memes with decoupled understanding and guided cot reasoning',
+        'authors': ['Fengjun Pan', 'Anh Tuan Luu', 'Xiaobao Wu'],
+        'year': 2025,
+        'venue': 'arXiv',
+        'url': 'http://arxiv.org/abs/2506.08477',
+    }
+    assessment = {
+        'verdict': 'LIKELY',
+        'explanation': 'The cited title differs from the current arXiv title.',
+        'link': 'https://arxiv.org/abs/2506.08477',
+        'found_title': 'Read as You See: Guiding Unimodal LLMs for Low-Resource Explainable Harmful Meme Detection',
+        'found_authors': 'Fengjun Pan, Anh Tuan Luu, Xiaobao Wu',
+        'found_venue': 'arXiv',
+        'found_year': '2025',
+    }
+
+    updated = apply_hallucination_verdict(result, assessment, reference=reference)
+
+    assert updated['status'] == 'error'
+    assert updated['hallucination_assessment']['verdict'] == 'UNLIKELY'
+    assert updated['hallucination_assessment']['original_verdict'] == 'LIKELY'
+    assert updated['matched_database'] == 'LLM search'
+
+
 def test_arxiv_id_conflict_should_be_checked():
     entry = {
         'error_type': 'arxiv_id',

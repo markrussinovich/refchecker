@@ -691,9 +691,12 @@ def test_parallel_result_has_hallucination_field():
         reference={}, verified_data=None,
     )
     assert result.hallucination_assessment is None
+    assert result.hallucination_verdict_applied is False
 
     result.hallucination_assessment = {'verdict': 'LIKELY', 'explanation': 'test'}
+    result.hallucination_verdict_applied = True
     assert result.hallucination_assessment['verdict'] == 'LIKELY'
+    assert result.hallucination_verdict_applied is True
 
 
 def test_precomputed_hallucination_stored_on_error_record():

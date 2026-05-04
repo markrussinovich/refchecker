@@ -2585,6 +2585,13 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         and enhanced_name_match(cleaned_cited[0], correct_names[0])
     ):
         return True, "Authors match (collective authorship shorthand)"
+
+    def any_cited_author_matches():
+        return any(
+            enhanced_name_match(cited_author, correct_author)
+            for cited_author in cleaned_cited
+            for correct_author in correct_names
+        )
     
     # When "et al" is present, only compare the explicitly listed authors
     # The key insight: if the citation has "et al", we should only verify the listed authors
@@ -2619,6 +2626,11 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             return False
         single_word_count = sum(1 for author in authors_list if len(author.strip().split()) == 1)
         return single_word_count >= len(authors_list) * 0.7  # 70% or more are single words
+
+    if not any_cited_author_matches():
+        from refchecker.utils.error_utils import format_no_matching_authors
+        display_cited = [format_author_for_display(author) for author in cleaned_cited]
+        return False, format_no_matching_authors(display_cited, correct_names)
     
     # Normal case without "et al" - compare all authors
     if len(cleaned_cited) != len(correct_names):

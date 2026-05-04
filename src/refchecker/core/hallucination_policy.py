@@ -53,6 +53,21 @@ _SPLIT_WORD_SUFFIXES = frozenset({
     's', 'tion', 'tions', 'tive', 'ty', 'ust',
 })
 
+_NON_PAPER_SOURCE_HOSTS = frozenset({
+    'archive.ics.uci.edu', 'github.com', 'huggingface.co', 'zenodo.org',
+})
+
+_NON_PAPER_SOURCE_MARKERS = frozenset({
+    'code repository', 'dataset', 'datasets', 'documentation',
+    'hugging face dataset', 'huggingface dataset', 'model card', 'model cards',
+    'repository', 'software', 'software release', 'uci machine learning repository',
+})
+
+_PUBLISHER_ORG_AUTHORS = frozenset({
+    'acm', 'association for computing machinery', 'cambridge university press',
+    'ieee', 'springer', 'the mit press', 'wiley', 'zenodo',
+})
+
 
 def _looks_like_split_word_artifact(text: str) -> bool:
     """Return True if text contains obvious OCR/PDF intra-word spacing."""
@@ -92,6 +107,216 @@ def _looks_like_concatenated_word_artifact(text: str) -> bool:
         if any(0 < lowered.find(marker) < len(lowered) - len(marker) for marker in glued_markers):
             return True
     return False
+
+
+def _entry_text_bundle(error_entry: Dict[str, Any]) -> str:
+    orig = error_entry.get('original_reference') or {}
+    values = [
+        error_entry.get('ref_title'),
+        error_entry.get('ref_authors_cited'),
+        error_entry.get('ref_venue_cited'),
+        error_entry.get('ref_url_cited'),
+        error_entry.get('ref_verified_url'),
+        error_entry.get('error_details'),
+        orig.get('title'),
+        orig.get('venue'),
+        orig.get('journal'),
+        orig.get('booktitle'),
+        orig.get('url'),
+        orig.get('cited_url'),
+        orig.get('raw_text'),
+    ]
+    return ' '.join(one for one in (str(v or '') for v in values) if one).lower()
+
+
+def _hostname_from_url(url: str) -> str:
+    if not url:
+        return ''
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(str(url)).hostname or '').lower()
+    except Exception:
+        return ''
+    return host[4:] if host.startswith('www.') else host
+
+
+def _entry_hosts(error_entry: Dict[str, Any]) -> set[str]:
+    orig = error_entry.get('original_reference') or {}
+    urls = [
+        error_entry.get('ref_url_cited'),
+        error_entry.get('ref_verified_url'),
+        orig.get('url'),
+        orig.get('cited_url'),
+        orig.get('arxiv_url'),
+    ]
+    return {host for host in (_hostname_from_url(str(url or '')) for url in urls) if host}
+
+
+def _detect_non_paper_source(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Recognise real non-paper sources before paper-style hallucination checks."""
+    text = _entry_text_bundle(error_entry)
+    hosts = _entry_hosts(error_entry)
+    has_non_paper_host = any(
+        host == marker or host.endswith('.' + marker)
+        for host in hosts
+        for marker in _NON_PAPER_SOURCE_HOSTS
+    )
+    has_non_paper_marker = any(marker in text for marker in _NON_PAPER_SOURCE_MARKERS)
+
+    if not (has_non_paper_host or has_non_paper_marker):
+        return None
+
+    # Academic papers hosted on Zenodo/GitHub can still be real paper refs;
+    # only short-circuit when the citation itself looks source-like.
+    source_like = has_non_paper_marker or any(
+        token in text for token in ('release', 'record', 'dataset', 'repository', 'software')
+    )
+    if not source_like:
+        return None
+
+    return {
+        'verdict': 'UNLIKELY',
+        'explanation': (
+            'The reference appears to cite a dataset, software release, repository, '
+            'or other non-paper source. Paper-style author/title mismatch checks '
+            'should not be treated as hallucination evidence for this source type.'
+        ),
+        'web_search': None,
+    }
+
+
+def _detect_structural_parser_artifact(error_entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Detect field-shift/parser artifacts that should not become LIKELY flags."""
+    title = (error_entry.get('ref_title') or '').strip()
+    authors = (error_entry.get('ref_authors_cited') or '').strip()
+    orig = error_entry.get('original_reference') or {}
+    venue = (
+        error_entry.get('ref_venue_cited')
+        or orig.get('venue')
+        or orig.get('journal')
+        or orig.get('booktitle')
+        or ''
+    ).strip()
+    raw_text = (orig.get('raw_text') or '').strip()
+    url = error_entry.get('ref_url_cited') or orig.get('url') or orig.get('cited_url') or ''
+
+    title_lower = title.lower().strip(' .')
+    venue_lower = venue.lower().strip(' .')
+    authors_lower = authors.lower().strip(' .')
+    raw_lower = raw_text.lower()
+
+    if title and venue and title_lower == venue_lower:
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The parsed title is identical to the venue/source field, which '
+                'indicates a structural reference extraction error rather than '
+                'reliable evidence of a fabricated citation.'
+            ),
+            'web_search': None,
+        }
+
+    if re.fullmatch(r'(?:isbn\s*)?(?:97[89][\s-]?)?\d[\d\s-]{8,}[\dx]', title_lower):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The parsed title is an ISBN-like identifier, so the bibliography '
+                'fields are shifted or corrupted. This should be handled as a '
+                'parser issue, not a hallucinated reference.'
+            ),
+            'web_search': None,
+        }
+
+    if (
+        authors_lower in _PUBLISHER_ORG_AUTHORS
+        and ('isbn' in title_lower or 'isbn' in raw_lower or 'doi.org/' in str(url).lower())
+    ):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The parsed author is a publisher or organization and the title '
+                'field contains an identifier/DOI-like value. This is a structural '
+                'bibliography parsing error rather than a hallucination signal.'
+            ),
+            'web_search': None,
+        }
+
+    if re.search(r'\b(?:edited by|editor|editors|eds\.?|introduction by|foreword by)\b', raw_lower):
+        return {
+            'verdict': 'UNCERTAIN',
+            'explanation': (
+                'The reference text contains editor/introduction role markers, so '
+                'the apparent author mismatch may be role leakage from parsing. '
+                'Treat this as a citation-structure issue rather than hallucination.'
+            ),
+            'web_search': None,
+        }
+
+    return None
+
+
+def _extract_arxiv_ids(text: str) -> set[str]:
+    if not text:
+        return set()
+    return {
+        match.lower().rstrip('.')
+        for match in re.findall(r'(?:arxiv[:/\s]*|abs/)(\d{4}\.\d{4,5})(?:v\d+)?', text, flags=re.I)
+    }
+
+
+def _extract_dois(text: str) -> set[str]:
+    if not text:
+        return set()
+    return {
+        match.lower().rstrip('.,;')
+        for match in re.findall(r'10\.\d{4,9}/[^\s#|]+', text, flags=re.I)
+    }
+
+
+def _entry_has_identifier_match(error_entry: Dict[str, Any]) -> bool:
+    orig = error_entry.get('original_reference') or {}
+    cited_text = ' '.join(str(v or '') for v in [
+        error_entry.get('ref_url_cited'),
+        orig.get('url'),
+        orig.get('cited_url'),
+        orig.get('arxiv_url'),
+        orig.get('doi'),
+        orig.get('raw_text'),
+    ])
+    verified_text = ' '.join(str(v or '') for v in [
+        error_entry.get('ref_verified_url'),
+        error_entry.get('ref_url_correct'),
+        error_entry.get('verified_url'),
+        error_entry.get('error_details'),
+    ])
+    return bool(
+        _extract_arxiv_ids(cited_text) & _extract_arxiv_ids(verified_text)
+        or _extract_dois(cited_text) & _extract_dois(verified_text)
+    )
+
+
+def _title_only_identifier_with_author_overlap(error_entry: Dict[str, Any]) -> bool:
+    if not _entry_has_identifier_match(error_entry):
+        return False
+    details = (error_entry.get('error_details') or '').lower()
+    has_title_issue = any(kw in details for kw in ('title mismatch', 'inaccurate title'))
+    has_hard_issue = any(
+        kw in details
+        for kw in (
+            'incorrect arxiv id', 'arxiv id mismatch', 'doi mismatch',
+            'author count mismatch', 'first author mismatch', 'author mismatch',
+            'unverified', 'could not be verified', 'could not verify',
+            'does not reference', "doesn't reference",
+        )
+    )
+    if not has_title_issue or has_hard_issue:
+        return False
+    cited = error_entry.get('ref_authors_cited', '')
+    correct = error_entry.get('ref_authors_correct', '')
+    if not cited or not correct:
+        return False
+    overlap = _compute_author_overlap(cited, correct, cited_list=error_entry.get('_ref_authors_cited_list'))
+    return overlap is not None and overlap >= _AUTHOR_MATCH_THRESHOLD
 
 
 def has_real_errors(error_entry: Dict[str, Any]) -> bool:
@@ -568,6 +793,15 @@ def should_check_hallucination(error_entry: Dict[str, Any]) -> bool:
     ):
         return False
 
+    if _detect_non_paper_source(error_entry):
+        return False
+
+    if _detect_structural_parser_artifact(error_entry):
+        return False
+
+    if _title_only_identifier_with_author_overlap(error_entry):
+        return False
+
     if error_type in {'api_failure', 'processing_failed'}:
         return False
 
@@ -939,6 +1173,16 @@ def pre_screen_hallucination(
         logger.debug(f"pre_screen: resolved (garbled) ref={ref_title!r} verdict={garbled.get('verdict')}")
         return ('resolved', garbled)
 
+    non_paper = _detect_non_paper_source(error_entry)
+    if non_paper:
+        logger.debug(f"pre_screen: resolved (non_paper) ref={ref_title!r} verdict={non_paper.get('verdict')}")
+        return ('resolved', non_paper)
+
+    structural = _detect_structural_parser_artifact(error_entry)
+    if structural:
+        logger.debug(f"pre_screen: resolved (structural) ref={ref_title!r} verdict={structural.get('verdict')}")
+        return ('resolved', structural)
+
     author_result = check_author_hallucination(error_entry)
     if author_result:
         logger.debug(f"pre_screen: resolved (author) ref={ref_title!r} verdict={author_result.get('verdict')}")
@@ -1115,6 +1359,78 @@ def _parse_llm_author_names(author_text: str, cited_authors: Optional[List[str]]
             return paired
 
     return parts
+
+
+def _reference_assessment_identifier_match(
+    reference: Optional[Dict[str, Any]],
+    assessment: Dict[str, Any],
+) -> bool:
+    if not reference:
+        return False
+    reference_text = ' '.join(str(v or '') for v in [
+        reference.get('url'),
+        reference.get('cited_url'),
+        reference.get('arxiv_url'),
+        reference.get('doi'),
+        reference.get('raw_text'),
+    ])
+    assessment_text = ' '.join(str(v or '') for v in [
+        assessment.get('link'),
+        assessment.get('found_title'),
+        assessment.get('found_venue'),
+    ])
+    return bool(
+        _extract_arxiv_ids(reference_text) & _extract_arxiv_ids(assessment_text)
+        or _extract_dois(reference_text) & _extract_dois(assessment_text)
+    )
+
+
+def _reference_assessment_author_overlap(
+    reference: Optional[Dict[str, Any]],
+    assessment: Dict[str, Any],
+) -> Optional[float]:
+    if not reference or not assessment.get('found_authors'):
+        return None
+    cited_authors = reference.get('authors') or []
+    found_authors = _parse_llm_author_names(
+        assessment.get('found_authors') or '',
+        cited_authors,
+    )
+    if not cited_authors or not found_authors:
+        return None
+    return _compute_author_overlap(
+        ', '.join(cited_authors),
+        ', '.join(found_authors),
+        cited_list=list(cited_authors),
+    )
+
+
+def _is_title_only_identifier_version_issue(
+    reference: Optional[Dict[str, Any]],
+    assessment: Dict[str, Any],
+    issues: List[Dict[str, Any]],
+) -> bool:
+    if not issues:
+        return False
+    if not _reference_assessment_identifier_match(reference, assessment):
+        return False
+    overlap = _reference_assessment_author_overlap(reference, assessment)
+    if overlap is None or overlap < _AUTHOR_MATCH_THRESHOLD:
+        return False
+    hard_types = {'author', 'doi', 'arxiv', 'arxiv_id', 'unverified', 'url'}
+    hard_text = ('author mismatch', 'author count mismatch', 'first author mismatch')
+    for issue in issues:
+        issue_type = (issue.get('error_type') or issue.get('warning_type') or '').lower()
+        details = (issue.get('error_details') or issue.get('warning_details') or '').lower()
+        if issue_type in hard_types:
+            return False
+        if any(token in details for token in hard_text):
+            return False
+    return any(
+        (issue.get('error_type') or issue.get('warning_type') or '').lower() == 'title'
+        or 'title mismatch' in (issue.get('error_details') or issue.get('warning_details') or '').lower()
+        for issue in issues
+    )
 
 
 def _reverify_with_standard_refcheck(
@@ -1347,6 +1663,13 @@ def _rerun_hallucination_for_reverified_errors(
     if not new_errors:
         return None
 
+    if _is_title_only_identifier_version_issue(reference, assessment, new_errors):
+        logger.debug(
+            'Second-pass hallucination check skipped for title-only identifier/version issue: %s',
+            reference.get('title', '') if reference else '',
+        )
+        return None
+
     verified_url = ''
     auth_urls = result.get('authoritative_urls') or []
     if auth_urls:
@@ -1473,6 +1796,25 @@ def apply_hallucination_verdict(
                     and not e.get('is_suggestion')
                 ]
                 current_link = assessment.get('link') or ha_link
+                if _is_title_only_identifier_version_issue(reference, assessment, llm_issues):
+                    corrected_assessment = dict(assessment)
+                    corrected_assessment['original_verdict'] = verdict
+                    corrected_assessment['verdict'] = 'UNLIKELY'
+                    corrected_assessment['explanation'] = (
+                        'The cited identifier resolves to the same source and the '
+                        'authors match; the remaining title difference is a title '
+                        'update or metadata-version issue, not hallucination.'
+                    )
+                    result['hallucination_assessment'] = corrected_assessment
+                    result['errors'] = rechecked_errors
+                    result['warnings'] = rechecked_warnings
+                    if current_link and current_link.startswith('http'):
+                        result['authoritative_urls'] = _authoritative_urls_with_once(
+                            result.get('authoritative_urls', []), 'llm_verified', current_link,
+                        )
+                        result['matched_database'] = 'LLM search'
+                    result['status'] = 'error' if remaining_errors else ('warning' if rechecked_warnings else 'verified')
+                    return result
                 if not remaining_errors and current_link and current_link.startswith('http'):
                     corrected_assessment = dict(assessment)
                     corrected_assessment['original_verdict'] = verdict

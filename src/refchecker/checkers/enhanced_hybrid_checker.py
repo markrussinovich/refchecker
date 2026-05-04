@@ -577,7 +577,14 @@ class EnhancedHybridReferenceChecker:
             actual_str = error.get('ref_authors_correct', '')
             if not actual_str or not details:
                 continue
-            # Only flag if it says "not found in author list" (zero match)
+            # Only flag if it says no authors matched at all.
+            details_lower = details.lower()
+            if 'no matching authors' in details_lower:
+                logger.debug(
+                    "Enhanced Hybrid: Major author discrepancy — no cited authors overlap with actual '%s'",
+                    actual_str,
+                )
+                return True
             if 'not found in author list' not in details:
                 continue
             # Extract cited author name from the error details

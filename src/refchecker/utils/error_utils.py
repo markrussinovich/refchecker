@@ -484,6 +484,22 @@ def format_author_count_mismatch(cited_count: int, correct_count: int, cited_aut
     return format_three_line_mismatch(header, cited_list, correct_list)
 
 
+def format_no_matching_authors(cited_authors: list, correct_authors: list) -> str:
+    """
+    Format an author mismatch message for zero-overlap author lists.
+
+    Args:
+        cited_authors: List of cited author names
+        correct_authors: List of correct author names
+
+    Returns:
+        Formatted multi-line no-matching-authors message
+    """
+    cited_list = ", ".join(cited_authors) if cited_authors else "None"
+    correct_list = ", ".join(correct_authors) if correct_authors else "None"
+    return format_three_line_mismatch("no matching authors", cited_list, correct_list)
+
+
 def format_authors_list(authors: List[Dict[str, str]]) -> str:
     """
     Format a list of author dictionaries into a readable string.

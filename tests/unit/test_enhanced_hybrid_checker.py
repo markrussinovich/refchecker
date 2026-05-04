@@ -198,6 +198,22 @@ def test_verify_reference_records_matched_database_from_local_checker():
     assert verified_data["_matched_checker"] == "local_s2"
 
 
+def test_major_author_discrepancy_recognizes_no_matching_authors_error():
+    checker = _build_checker()
+
+    assert checker._has_major_author_discrepancy([
+        {
+            'error_type': 'author',
+            'error_details': (
+                'no matching authors:\n'
+                '       cited:  Alice Example, Bob Example\n'
+                '       actual: Carol Verified, Dave Verified'
+            ),
+            'ref_authors_correct': 'Carol Verified, Dave Verified',
+        }
+    ]) is True
+
+
 def test_shared_postprocess_converts_arxiv_version_mismatch_to_warnings():
     checker = _build_checker()
     checker.local_db = LocalArxivMismatchChecker()

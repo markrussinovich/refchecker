@@ -37,6 +37,7 @@ class ReferenceResult:
     reference: Dict[str, Any]
     verified_data: Optional[Dict[str, Any]] = None
     hallucination_assessment: Optional[Dict[str, Any]] = None
+    hallucination_verdict_applied: bool = False
 
 
 class ParallelReferenceProcessor:
@@ -273,6 +274,7 @@ class ParallelReferenceProcessor:
                                     )
                                     current_result.hallucination_assessment = tmp.get('hallucination_assessment', assessment)
                                     current_result.errors = tmp['errors']
+                                    current_result.hallucination_verdict_applied = True
                         
                         # Print the result using base checker's output methods
                         # (hallucination_assessment is now available for display decisions)
