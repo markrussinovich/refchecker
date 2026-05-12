@@ -181,6 +181,36 @@ class TestBibliographyEndDetection:
         assert "A. Missing Details" not in bibliography_text
         assert "This appendix content" not in bibliography_text
 
+    def test_bibliography_stops_at_dotted_appendix_after_page_header(self):
+        """PDF extraction may glue a page header before an appendix heading."""
+        sample_text = """
+        References
+        Zheng, T., Zhang, G., Shen, T., Liu, X., Lin, B. Y., Fu, J., Chen, W.,
+        and Yue, X. Opencodeinterpreter: Integrating code generation with execution
+        and refinement. arXiv preprint arXiv:2402.14658, 2024.
+
+        Zheng, Y., Zhang, R., Zhang, J., Ye, Y., Luo, Z., Feng, Z., and Ma, Y.
+        Llamafactory: Unified efficient fine-tuning of 100+ language models. In
+        Proceedings of the Association for Computational Linguistics, 2024.
+
+        14 CODE SYNC: Synchronizing Large Language Models with Dynamic Code Evolution at Scale A. Comprehensive Related Works
+        Deep Learning for Code Intelligence. Neural language models have made
+        progress in code intelligence (Wan et al., 2024), including code search
+        and code generation. This appendix prose should not be parsed as references.
+
+        B. Detailed Experiment Setups
+        Further appendix content.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Opencodeinterpreter" in bibliography_text
+        assert "Llamafactory" in bibliography_text
+        assert "A. Comprehensive Related Works" not in bibliography_text
+        assert "Deep Learning for Code Intelligence" not in bibliography_text
+        assert "B. Detailed Experiment Setups" not in bibliography_text
+
     def test_bibliography_stops_before_plural_supplementary_materials(self):
         sample_text = """
         References
@@ -1299,6 +1329,71 @@ class TestTitleCaseLetteredAppendix:
             assert "Body of the appendix" not in bib
             assert "useful paper title" in bib
 
+    def test_icml_lettered_dotted_appendix_headings(self):
+        """ICML-style dotted appendix headings should end the bibliography.
+
+        These headings appeared after references in ICML 2025 PDFs and caused
+        appendix prose/tables to be sent to the LLM as bibliography text.
+        """
+        cases = [
+            "A. Detailed Related Works",
+            "A. LLM Details.",
+            "B. Non-Transitivity in Preference",
+            "A. Assumptions",
+            "B. Estimation Details of the Dropout Propensity Model",
+            "C. A Brief Introduction to B-Spline and Wavelet Basis Functions",
+            "D. More on Simulations",
+            "A. Data and link prediction methods",
+            "B. AUC-ROC for the preferential attachment method",
+            "D. Decomposition analysis of AUC-ROC scores",
+            "A. Entropic estimation of OT maps",
+            "A. Prior Work",
+            "B. Justification of Section 4.2",
+            "C. Defense Methods Configurations",
+            "D. Surrogate Process of Gradient Computation",
+            "E. Adaptive White-box PGD+EOT Attack for SSNI",
+        ]
+        refs = (
+            "Smith, J. and Doe, A. A useful paper title. Journal of Things, 2024.\n"
+            "Brown, T. Another paper. ICML, 2023.\n"
+            "Wilson, P. Yet another paper for the regression suite. NeurIPS, 2022.\n"
+        )
+        for heading in cases:
+            text = (
+                "References\n"
+                f"{refs}\n"
+                f"{heading}\n"
+                "This appendix prose cites Smith et al. (2024) and includes tables, proofs, and formulas.\n"
+            )
+            bib = self.checker.find_bibliography_section(text)
+            assert bib is not None, heading
+            assert "useful paper title" in bib, heading
+            assert heading not in bib, heading
+            assert "This appendix prose" not in bib, heading
+
+    def test_fallback_path_stops_at_dotted_appendix_heading(self):
+        """Fallback bibliography start detection must share dotted-heading end detection."""
+        body = (
+            "1 Introduction\n"
+            "This paper contains numbered lists before the bibliography.\n"
+            "1. First body item.\n"
+            "2. Second body item.\n"
+            "Additional body text. " * 80
+        )
+        refs = (
+            "Smith, J. Neural network advances. Nature, 2020.\n"
+            "Jones, K. Deep learning methods. ICML, 2021.\n"
+            "Brown, A. and White, B. Optimization theory. NeurIPS, 2022.\n"
+        )
+        text = body + refs + "A. Prior Work\nThis appendix body must not be included.\n"
+
+        bib = self.checker.find_bibliography_section(text)
+
+        assert bib is not None
+        assert "Optimization theory" in bib
+        assert "A. Prior Work" not in bib
+        assert "appendix body" not in bib
+
     def test_lettered_dotted_does_not_match_author_names(self):
         """Author lines like 'A. Baranwal' must NOT be treated as appendix headers."""
         text = (
@@ -1320,6 +1415,26 @@ class TestTitleCaseLetteredAppendix:
         assert "Wilson" in bib
         assert "A. Additional Related Work" not in bib
         assert "discusses related literature" not in bib
+
+    def test_wrapped_author_initial_with_heading_keyword_not_truncated(self):
+        """Wrapped author initials can look like dotted appendix headings."""
+        text = (
+            "References\n"
+            "Liao, F., Liang, M., Dong, Y., Pang, T., Hu, X., and Zhu,\n"
+            "J. Defense-guided diffusion purification for adversarial robustness. ICML, 2023.\n"
+            "Smith, J. and Doe, A. Another useful paper title. Journal of Things, 2024.\n"
+            "\n"
+            "A. Detailed Related Work\n"
+            "This appendix discusses attacks and defenses in prose.\n"
+        )
+
+        bib = self.checker.find_bibliography_section(text)
+
+        assert bib is not None
+        assert "Defense-guided diffusion purification" in bib
+        assert "Another useful paper title" in bib
+        assert "A. Detailed Related Work" not in bib
+        assert "appendix discusses" not in bib
 
 
 class TestEndOfBibCaseInsensitive:

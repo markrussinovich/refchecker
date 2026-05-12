@@ -1535,6 +1535,29 @@ class ArxivReferenceChecker:
             r'\\end\{thebibliography\}',
             r'\\end\{document\}',
         ]
+
+        dotted_appendix_heading_keywords = (
+            r'(?:A\s+Brief|Additional|Supplementary|Supplemental|Extended|Comprehensive|Appendix|Extra|Further|'
+            r'Related|Background|Notation|Summary|Preliminaries|Proofs?|Details?|Detailed|'
+            r'Derivations?|Algorithms?|'
+            r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
+            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|'
+            r'Baselines|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|'
+            r'Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|'
+            r'Evaluation|Estimation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|'
+            r'Notation|Proof|Algorithm|Acknowledgment|Introduction|Literature|Non[\s\-]+Transitivity|'
+            r'Assumptions?|Data|AUC[\s\-]?ROC|Decomposition|Entropic|Prior|Justification|Defense|'
+            r'Surrogate|Adaptive|Brief|More|The\s+Central\s+Role|General\s+Topology|'
+            r'Cognitive\s+Framework|Frequently\s+Used\s+Notation|The\s+Unfolding\s+Procedure|'
+            r'Missing\s+Details)\b[^\n]*'
+        )
+        dotted_appendix_heading_pattern = (
+            r'(?i)\n\s*[A-Z]\.\s+' + dotted_appendix_heading_keywords
+        )
+        header_prefixed_dotted_appendix_heading_pattern = (
+            r'(?i)\n\s*\d{1,4}\s+[^\n]{0,180}?\s+[A-Z]\.\s+'
+            + dotted_appendix_heading_keywords
+        )
         
         # Collect all potential matches from all patterns
         # Use re.MULTILINE so ^ and $ match line boundaries, not just string start/end
@@ -1628,6 +1651,8 @@ class ArxivReferenceChecker:
             # ── Appendix section headers that look like "A Extended Work", "A1 Proofs" ──
             # These need special validation: only accept if NOT inside a reference entry
             appendix_section_patterns = [
+                dotted_appendix_heading_pattern,
+                header_prefixed_dotted_appendix_heading_pattern,
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                 # Numbered appendix sections with ALL-CAPS concatenated words from PDF extraction
@@ -1661,18 +1686,6 @@ class ArxivReferenceChecker:
             # All keyword-based patterns use (?i); the "[A-Z]{3,}" ALL-CAPS
             # heading pattern stays case-sensitive because casing IS the signal.
             heuristic_patterns = [
-                # Lettered appendix headings with a period whose first word is not
-                # in the broad appendix-vocabulary list below. These appeared in
-                # ICML-style PDFs where bibliography extraction otherwise ran into
-                # appendix prose and produced fabricated tail references.
-                r'(?i)\n\s*[A-Z]\.\s+(?:Preliminaries|More\s+on\s+Related\s+Work|Detailed\s+Discussion|The\s+Central\s+Role|General\s+Topology|Cognitive\s+Framework|Frequently\s+Used\s+Notation|The\s+Unfolding\s+Procedure|Missing\s+Details)(?:\b|\s)[^\n]*',
-                # Lettered appendix headings such as
-                # "A. Additional Related Work" / "B. Additional Experimental Results".
-                # Author lines like "A. Baranwal" cannot match because the keyword
-                # set after the period is restricted to appendix vocabulary.
-                # Placed first so it wins over fragile Table/Figure patterns that
-                # may match later content.
-                r'(?i)\n\s*[A-Z]\.\s+(?:Additional|Supplementary|Supplemental|Extended|Appendix|Extra|Further|Related|Background|Notation|Summary|Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|Evaluation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|Notation|Proof|Algorithm|Acknowledgment|Introduction|Literature)\b',
                 r'(?i)\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',
                 r'(?i)\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
                 r'(?i)\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
@@ -1708,6 +1721,16 @@ class ArxivReferenceChecker:
                     # as appendix body text often mentions authors and years.
                     after_match = text[start_pos + m.end():start_pos + m.end() + 200]
                     first_line = after_match.split('\n')[0] if after_match else ''
+                    heading_line = m.group(0).strip().split('\n')[0] if m.group(0) else ''
+                    before_match = text[start_pos:start_pos + m.start()]
+                    previous_lines = [line.strip() for line in before_match.splitlines() if line.strip()]
+                    previous_line = previous_lines[-1] if previous_lines else ''
+                    wraps_author_initial = bool(
+                        re.match(r'[A-Z]\.\s+', heading_line)
+                        and re.search(r'(?:,|\band)\s*$', previous_line)
+                    )
+                    if wraps_author_initial:
+                        continue
                     looks_like_ref = bool(re.match(
                         r'\s*(?:'
                         r'[A-Z][a-z]+,\s+[A-Z]\.'   # "Smith, J."
@@ -1804,6 +1827,8 @@ class ArxivReferenceChecker:
                                 logger.debug(f"Fallback end marker at {end_pos}: {repr(m.group(0).strip()[:60])}")
                     # Also check appendix section patterns (same validation as main path)
                     fallback_appendix_patterns = [
+                        dotted_appendix_heading_pattern,
+                        header_prefixed_dotted_appendix_heading_pattern,
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                         # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
@@ -1819,6 +1844,16 @@ class ArxivReferenceChecker:
                                 continue
                             after_match = text[line_start + m2.end():line_start + m2.end() + 200]
                             first_line = after_match.split('\n')[0] if after_match else ''
+                            heading_line = m2.group(0).strip().split('\n')[0] if m2.group(0) else ''
+                            before_match = text[line_start:line_start + m2.start()]
+                            previous_lines = [line.strip() for line in before_match.splitlines() if line.strip()]
+                            previous_line = previous_lines[-1] if previous_lines else ''
+                            wraps_author_initial = bool(
+                                re.match(r'[A-Z]\.\s+', heading_line)
+                                and re.search(r'(?:,|\band)\s*$', previous_line)
+                            )
+                            if wraps_author_initial:
+                                continue
                             looks_like_ref = bool(re.match(
                                 r'\s*(?:'
                                 r'[A-Z][a-z]+,\s+[A-Z]\.'

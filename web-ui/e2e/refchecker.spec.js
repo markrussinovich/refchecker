@@ -394,35 +394,54 @@ test.describe('RefChecker Web UI', () => {
     // Emit WebSocket messages to simulate check completion
     const sessionId = 'sess-counts-test';
 
-    // Emit stats_update with suggestions_count
-    await emit(sessionId, {
-      type: 'stats_update',
-      stats: {
-        total_refs: 4,
-        processed_refs: 4,
-        errors_count: 1,
-        warnings_count: 2,
-        suggestions_count: 1,
-        unverified_count: 0,
-        refs_with_errors: 1,
-        refs_with_warnings_only: 1,
-        refs_verified: 2,
-      }
-    });
-
-    // Emit reference results - results are in the details object after api mock processes them
     const results = [
       { index: 1, title: 'Verified Ref', status: 'verified', errors: [], warnings: [], suggestions: [], authoritative_urls: [] },
       { index: 2, title: 'Warning Only Ref', status: 'warning', errors: [], warnings: [{ warning_type: 'author', warning_details: 'Author mismatch' }], suggestions: [], authoritative_urls: [] },
       { index: 3, title: 'Error Ref', status: 'error', errors: [{ error_type: 'title', error_details: 'Title mismatch' }], warnings: [{ warning_type: 'year', warning_details: 'Year mismatch' }], suggestions: [], authoritative_urls: [] },
       { index: 4, title: 'Suggestion Ref', status: 'suggestion', errors: [], warnings: [], suggestions: [{ suggestion_type: 'url', suggestion_details: 'Reference could include arXiv URL: https://arxiv.org/abs/1234.5678' }], authoritative_urls: [] },
     ];
+
+    await emit(sessionId, {
+      type: 'references_extracted',
+      total_refs: 4,
+      count: 4,
+      references: results.map(({ index: _index, status: _status, errors: _errors, warnings: _warnings, suggestions: _suggestions, authoritative_urls: _authoritativeUrls, ...ref }) => ref),
+    });
+
+    // Emit summary_update with suggestions_count
+    await emit(sessionId, {
+      type: 'summary_update',
+      total_refs: 4,
+      processed_refs: 4,
+      errors_count: 1,
+      warnings_count: 2,
+      suggestions_count: 1,
+      unverified_count: 0,
+      refs_with_errors: 1,
+      refs_with_warnings_only: 1,
+      refs_with_suggestions_only: 1,
+      refs_verified: 2,
+    });
+
+    // Emit reference results using the real backend WebSocket payload shape.
     for (const ref of results) {
-      await emit(sessionId, { type: 'reference_result', result: ref });
+      await emit(sessionId, { type: 'reference_result', ...ref });
     }
 
     // Emit completion
-    await emit(sessionId, { type: 'complete' });
+    await emit(sessionId, {
+      type: 'completed',
+      total_refs: 4,
+      processed_refs: 4,
+      errors_count: 1,
+      warnings_count: 2,
+      suggestions_count: 1,
+      unverified_count: 0,
+      refs_with_errors: 1,
+      refs_with_warnings_only: 1,
+      refs_with_suggestions_only: 1,
+      refs_verified: 2,
+    });
 
     // Wait for summary to be visible
     await expect(page.getByText('Summary')).toBeVisible();

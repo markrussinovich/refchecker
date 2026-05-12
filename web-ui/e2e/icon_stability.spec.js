@@ -90,7 +90,7 @@ test('icons never regress: verified refs never show clock/unchecked', async ({ p
       errors: isUnverified
         ? [{ error_type: 'unverified', error_details: 'Not found' }]
         : (i % 3 === 1 ? [{ error_type: 'title', error_details: 'Mismatch' }] : []),
-      warnings: i % 3 === 2 ? [{ error_type: 'year', error_details: 'Year off' }] : [],
+      warnings: !isUnverified && i % 3 === 2 ? [{ error_type: 'year', error_details: 'Year off' }] : [],
       suggestions: [],
       authoritative_urls: [],
       _raw_errors: isUnverified ? [{ error_type: 'unverified' }] : (i % 3 !== 0 ? [{ error_type: 'other' }] : []),
