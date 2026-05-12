@@ -1486,48 +1486,51 @@ class ArxivReferenceChecker:
         
         # ── DEFINITIVE end markers: these always end the reference section ──
         # Defined here so both the main path and fallback path can use them.
+        # All keyword-based patterns use the (?i) inline flag so casing in the
+        # source PDF (APPENDIX vs Appendix vs appendix) does not matter.
         definitive_patterns = [
-            r'\n\s*(?:APPENDIX|Appendix)\b[A-Z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
-            r'\n\s*(?:APPENDIX|Appendix)\s*(?:CONTENTS|Contents)',  # "APPENDIXCONTENTS" (no space)
-            r'\n\s*(?:CONTENTS|Contents)\s*\n',  # Table of contents for appendix (any case)
+            r'(?i)\n\s*Appendix\b[A-Za-z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
+            r'(?i)\n\s*Appendix\s*Contents',  # "APPENDIXCONTENTS" (no space)
+            r'(?i)\n\s*Outline\s+of\s+the\s+Appendix\b[^\n]*\n',
+            r'(?i)\n\s*Contents\s*\n',  # Table of contents for appendix (any case)
             # PDF word-break: "APPENDIX" split into "A PPENDIX" or similar
-            r'\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
+            r'(?i)\n\s*[A-Z]\s+A\s*PPENDIX\b',  # e.g. "B A PPENDIX : D ETAILED DERIVATION"
             # Fully spaced-out APPENDIX: "AP P E N D I X" (each letter separated)
-            r'\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
-            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s+(?:MATERIAL|Material|INFORMATION|Information)\s*\n',
+            r'(?i)\nA\s*P\s+P\s*E\s*N\s*D\s*I\s*X\b',
+            r'(?i)\n\s*Supplementary\s+(?:Materials?|Information)\s*\n',
             # Collapsed PDF heading: "SUPPLEMENTARYMATERIAL: ..."
-            r'\n\s*(?:SUPPLEMENTARY|Supplementary)\s*(?:MATERIAL|Material|INFORMATION|Information)\b[^\n]*\n',
+            r'(?i)\n\s*Supplementary\s*(?:Materials?|Information)\b[^\n]*\n',
             # Letter-spaced PDF headings: "S UPPLEMENTARY M ATERIAL : ..."
-            r'\n\s*S\s+U\s*P\s*P\s*L\s*E\s*M\s*E\s*N\s*T\s*A\s*R\s*Y\s+M\s*A\s*T\s*E\s*R\s*I\s*A\s*L\b[^\n]*\n',
-            r'\n\s*(?:SUPPLEMENTAL|Supplemental)\s+(?:MATERIAL|Material)\s*\n',
+            r'(?i)\n\s*S\s+U\s*P\s*P\s*L\s*E\s*M\s*E\s*N\s*T\s*A\s*R\s*Y\s+M\s*A\s*T\s*E\s*R\s*I\s*A\s*L\b[^\n]*\n',
+            r'(?i)\n\s*Supplemental\s+Material\s*\n',
             # PDF extraction can collapse this heading: "TECHNICALAPPENDICES ANDSUPPLEMENTARYMATERIAL"
-            r'\n\s*(?:TECHNICAL\s*)?APPENDICES\s*(?:AND\s*)?SUPPLEMENTARY\s*MATERIAL\s*\n',
-            r'\n\s*(?:ACKNOWLEDGMENTS?|Acknowledgments?)\s*\n',
-            r'\n\s*(?:AUTHOR|Author)\s*(?:CONTRIBUTIONS?|Contributions?)\s*\n',
-            r'\n\s*(?:ETHICS|Ethics)\s*(?:STATEMENT|Statement)\s*\n',
-            r'\n\s*(?:DATA|Data|CODE|Code)\s+(?:AVAILABILITY|Availability)\s*\n',
-            r'\n\s*(?:COMPETING|Competing)\s+(?:INTERESTS|Interests)\s*\n',
-            r'\n\s*(?:FUNDING|Funding)\s+(?:INFORMATION|Information)\s*\n',
-            r'\n\s*(?:SUPPORTING|Supporting)\s+(?:INFORMATION|Information)\s*\n',
-            r'\n\s*(?:REVIEWER|Reviewer)\s+(?:SCORES?|Scores?)\s*:\s*\n',
+            r'(?i)\n\s*(?:Technical\s*)?Appendices\s*(?:And\s*)?Supplementary\s*Material\s*\n',
+            r'(?i)\n\s*Acknowledgments?\s*\n',
+            r'(?i)\n\s*Author\s*Contributions?\s*\n',
+            r'(?i)\n\s*Ethics\s*Statement\s*\n',
+            r'(?i)\n\s*(?:Data|Code)\s+Availability\s*\n',
+            r'(?i)\n\s*Competing\s+Interests\s*\n',
+            r'(?i)\n\s*Funding\s+Information\s*\n',
+            r'(?i)\n\s*Supporting\s+Information\s*\n',
+            r'(?i)\n\s*Reviewer\s+Scores?\s*:\s*\n',
             # Common post-bibliography headings (handle PDF concatenation with \s*)
-            r'\n\s*(?:LIMITATIONS?|Limitations?)\s*\n',
-            r'\n\s*(?:BROADER\s*)?(?:IMPACT|Impact)\s*(?:STATEMENT|Statement)?\s*\n',
-            r'\n\s*(?:REPRODUCIBILITY|Reproducibility)\s*(?:STATEMENT|Statement)?\s*\n',
-            r'\n\s*(?:RELATED|Related)\s*(?:WORKS?|Works?)\s*\n',
-            r'\n\s*(?:SOCIETAL|Societal)\s*(?:IMPACT|Impact)\s*\n',
-            r'\n\s*(?:LLM|CONTRIBUTION)\s*(?:CONTRIBUTION|STATEMENT)\s*(?:STATEMENT)?\s*\n',
+            r'(?i)\n\s*Limitations?\s*\n',
+            r'(?i)\n\s*(?:Broader\s*)?Impact\s*Statement?\s*\n',
+            r'(?i)\n\s*Reproducibility\s*Statement?\s*\n',
+            r'(?i)\n\s*Related\s*Works?\s*\n',
+            r'(?i)\n\s*Societal\s*Impact\s*\n',
+            r'(?i)\n\s*(?:LLM|Contribution)\s*(?:Contribution|Statement)\s*Statement?\s*\n',
             # Numbered post-ref sections (with period)
-            r'\n\s*\d+\.\s+(?:APPENDIX|CONCLUSION|SUPPLEMENTARY|ADDITIONAL)\b[A-Za-z\s]*\n',
+            r'(?i)\n\s*\d+\.\s+(?:Appendix|Conclusion|Supplementary|Additional)\b[A-Za-z\s]*\n',
             # Numbered post-ref sections (without period): "7 APPENDIX A", "9 APPENDIX C:"
-            r'\n\s*\d+\s+(?:APPENDIX|Appendix)\b',
+            r'(?i)\n\s*\d+\s+Appendix\b',
             # Numbered post-ref sections with PDF word-break: "7 A PPENDIX"
-            r'\n\s*\d+\s+A\s*PPENDIX\b',
+            r'(?i)\n\s*\d+\s+A\s*PPENDIX\b',
             # Numbered post-ref sections: "11 AUXILIARY RESULTS", "10 ADDITIONAL EXPERIMENTS"
-            r'\n\s*\d+\s+(?:ADDITIONAL|AUXILIARY|SUPPLEMENTARY)\b[A-Za-z\s]*\n',
+            r'(?i)\n\s*\d+\s+(?:Additional|Auxiliary|Supplementary)\b[A-Za-z\s]*\n',
             # Algorithm / Theorem / Lemma headers (appendix math content)
-            r'\nAlgorithm\s+\d+[:\s]',
-            r'\n(?:Theorem|Lemma|Proposition|Corollary)\s+\d+[.:\s]',
+            r'(?i)\nAlgorithm\s+\d+[:\s]',
+            r'(?i)\n(?:Theorem|Lemma|Proposition|Corollary)\s+\d+[.:\s]',
             # LaTeX end markers
             r'\\end\{thebibliography\}',
             r'\\end\{document\}',
@@ -1655,12 +1658,26 @@ class ArxivReferenceChecker:
             ]
             
             # ── HEURISTIC end markers: used only if no definitive marker found ──
+            # All keyword-based patterns use (?i); the "[A-Z]{3,}" ALL-CAPS
+            # heading pattern stays case-sensitive because casing IS the signal.
             heuristic_patterns = [
-                r'\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',
-                r'\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
-                r'\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
-                r'\n\s*[A-Z]\.\s+(?:ADDITIONAL|SUPPLEMENTARY|CONCLUSION|DISCUSSION|NOTATION|PROOF|ALGORITHM|ACKNOWLEDGMENT|EXPERIMENTAL|THEORETICAL|IMPLEMENTATION|COMPARISON|EVALUATION|RESULTS|ANALYSIS|METHODOLOGY|INTRODUCTION|BACKGROUND|LITERATURE)\b',
-                r'\n\s*\[\s*(?:APPENDIX|CONCLUSIONS?|ACKNOWLEDGMENTS?|SUPPLEMENTARY)\s*\]',
+                # Lettered appendix headings with a period whose first word is not
+                # in the broad appendix-vocabulary list below. These appeared in
+                # ICML-style PDFs where bibliography extraction otherwise ran into
+                # appendix prose and produced fabricated tail references.
+                r'(?i)\n\s*[A-Z]\.\s+(?:Preliminaries|More\s+on\s+Related\s+Work|Detailed\s+Discussion|The\s+Central\s+Role|General\s+Topology|Cognitive\s+Framework|Frequently\s+Used\s+Notation|The\s+Unfolding\s+Procedure|Missing\s+Details)(?:\b|\s)[^\n]*',
+                # Lettered appendix headings such as
+                # "A. Additional Related Work" / "B. Additional Experimental Results".
+                # Author lines like "A. Baranwal" cannot match because the keyword
+                # set after the period is restricted to appendix vocabulary.
+                # Placed first so it wins over fragile Table/Figure patterns that
+                # may match later content.
+                r'(?i)\n\s*[A-Z]\.\s+(?:Additional|Supplementary|Supplemental|Extended|Appendix|Extra|Further|Related|Background|Notation|Summary|Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|Evaluation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|Notation|Proof|Algorithm|Acknowledgment|Introduction|Literature)\b',
+                r'(?i)\n\s*(?:Relation|Table|Figure)\s*#?\s*(?:Samples|[0-9]+[:\.]?)\s+.*\n',
+                r'(?i)\n\s*[A-Za-z\s]+\s+#\s+[A-Za-z\s]+\s+[A-Za-z\s]+\s+[A-Za-z\s]+\n',
+                r'(?i)\n\s*\d+\.\d+\s+[A-Z][A-Za-z\s]+\n',
+                r'(?i)\n\s*\[\s*(?:Appendix|Conclusions?|Acknowledgments?|Supplementary)\s*\]',
+                # ALL-CAPS heading style — case-sensitive on purpose.
                 r'\n\s*[A-Z]{3,}\s*\n\s*[A-Z]{3,}\s*\n',
             ]
             
@@ -5197,6 +5214,85 @@ class ArxivReferenceChecker:
         
         return overlap >= 2 and overlap_ratio >= 0.5
     
+    def _merge_split_initial_authors(self, raw_authors):
+        """Merge consecutive (initial, surname) tokens that the LLM split apart.
+
+        Some LLM extractors emit "E*Jang*S*Gu*B*Poole" for the source
+        "Jang, E., Gu, S., and Poole, B.", which after splitting on '*'
+        gives ``['E', 'Jang', 'S', 'Gu', 'B', 'Poole']``.  Treating each as
+        a separate author produces single-letter "authors" that fail name
+        matching against the canonical metadata.
+
+        This helper walks the token list and recombines each
+        (initial_token, surname_token) pair into ``"Initial Surname"``.
+        Tokens that already look like full author entries (e.g.
+        ``"J. S. Hartford"`` or ``"Jang, E."``) are left untouched.
+        """
+        if not raw_authors or len(raw_authors) < 2:
+            return raw_authors
+
+        # An "initial token" is 1-3 chars of capital letters, optional
+        # periods, single hyphen (for compound initials like "H.-Y"),
+        # and no lowercase letters.  Examples: "E", "A. M", "P. A",
+        # "H.-Y", "W.-N".
+        initial_re = re.compile(r'^[A-Z](?:\.?[\s-]?[A-Z])*\.?$')
+
+        def is_initial_token(tok):
+            if not tok:
+                return False
+            tok = tok.strip()
+            if len(tok) > 5:
+                return False
+            return bool(initial_re.match(tok))
+
+        def is_surname_token(tok):
+            if not tok:
+                return False
+            tok = tok.strip()
+            # Surname: starts with capital, has at least one lowercase
+            # letter, allows internal hyphens/spaces/apostrophes.
+            # Reject anything containing a comma (already a full entry).
+            if ',' in tok:
+                return False
+            if len(tok) < 2:
+                return False
+            if not tok[0].isupper():
+                # Accept lowercase-prefix surnames typed lowercase
+                # ("marc lelarge"-style is left as-is below by surname check)
+                return False
+            return any(c.islower() for c in tok)
+
+        # Count how many tokens look like bare initials.  Only attempt the
+        # merge when at least two tokens are bare initials AND no token is
+        # already a "Surname, Initial" entry (those are well-formed).
+        bare_initials = sum(1 for t in raw_authors if is_initial_token(t))
+        if bare_initials < 2:
+            return raw_authors
+        if any(',' in t for t in raw_authors):
+            return raw_authors
+
+        merged = []
+        i = 0
+        while i < len(raw_authors):
+            tok = raw_authors[i].strip()
+            nxt = raw_authors[i + 1].strip() if i + 1 < len(raw_authors) else ''
+            if is_initial_token(tok) and is_surname_token(nxt):
+                # Normalise the initials: ensure each capital letter is
+                # followed by a period, single spaces between initials.
+                # "A M" -> "A. M.", "H.-Y" -> "H.-Y.", "E" -> "E."
+                norm = tok
+                # Add trailing period if missing on the last letter
+                if not norm.endswith('.') and norm[-1].isalpha():
+                    norm = norm + '.'
+                # Add periods after standalone letters separated by spaces
+                norm = re.sub(r'\b([A-Z])(?=\s+[A-Z])', r'\1.', norm)
+                merged.append(f"{norm} {nxt}")
+                i += 2
+            else:
+                merged.append(tok)
+                i += 1
+        return merged
+
     def _clean_llm_author_text(self, author_text):
         """
         Clean author text and parse authors properly
@@ -5208,7 +5304,14 @@ class ArxivReferenceChecker:
         if '*' in author_text:
             # Split on asterisks to get individual author entries
             raw_authors = [author.strip() for author in author_text.split('*') if author.strip()]
-            
+
+            # Repair split-initial artifacts: LLMs sometimes emit
+            # "E*Jang*S*Gu*B*Poole" when the source was "Jang, E., Gu, S., Poole, B."
+            # so an initial token like "E" lands as its own author and the surname
+            # "Jang" as the next.  Merge consecutive (initial, surname) pairs back
+            # into proper "Initial Surname" entries before further parsing.
+            raw_authors = self._merge_split_initial_authors(raw_authors)
+
             parsed_authors = []
             for author in raw_authors:
                 # Clean up the author entry and strip LaTeX commands

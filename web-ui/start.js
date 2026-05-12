@@ -16,7 +16,7 @@
 import { spawn, exec, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -86,7 +86,7 @@ async function isBackendRunning() {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 2000);
     
-    const response = await fetch('http://127.0.0.1:8000/api/history', {
+    const response = await fetch('http://127.0.0.1:8000/api/health', {
       signal: controller.signal
     });
     
@@ -156,6 +156,59 @@ function findPython() {
   }
   
   return isWindows ? 'python' : 'python3';
+}
+
+function parseNodeVersion(version) {
+  const match = String(version || '').match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function isViteCompatibleNode(versionName) {
+  const version = parseNodeVersion(versionName);
+  if (!version) return false;
+  return (version.major === 20 && version.minor >= 19) || version.major > 20;
+}
+
+function compareNodeVersions(leftName, rightName) {
+  const left = parseNodeVersion(leftName);
+  const right = parseNodeVersion(rightName);
+  if (!left || !right) return 0;
+  return (left.major - right.major) || (left.minor - right.minor) || (left.patch - right.patch);
+}
+
+function findFrontendNpm() {
+  if (isWindows) {
+    return 'npm';
+  }
+
+  const currentVersion = process.versions?.node;
+  if (isViteCompatibleNode(currentVersion)) {
+    return 'npm';
+  }
+
+  const nvmVersionsDir = join(process.env.HOME || '', '.nvm', 'versions', 'node');
+  try {
+    const versions = readdirSync(nvmVersionsDir)
+      .filter(isViteCompatibleNode)
+      .sort(compareNodeVersions)
+      .reverse();
+    for (const version of versions) {
+      const npmPath = join(nvmVersionsDir, version, 'bin', 'npm');
+      if (existsSync(npmPath)) {
+        log(`Using frontend npm from Node ${version}: ${npmPath}`, colors.blue);
+        return npmPath;
+      }
+    }
+  } catch (_e) {
+    // Fall back below.
+  }
+
+  return 'npm';
 }
 
 // Open browser
@@ -301,6 +354,7 @@ function startBackend() {
 // Start frontend server
 function startFrontend() {
   let frontend;
+  const npmCommand = findFrontendNpm();
   
   if (isWindows) {
     // On Windows, use cmd.exe explicitly to avoid PowerShell execution policy issues
@@ -312,10 +366,15 @@ function startFrontend() {
       windowsHide: true
     });
   } else {
-    frontend = spawn('npm', ['run', 'dev'], {
+    const frontendEnv = { ...process.env };
+    if (npmCommand !== 'npm') {
+      const separator = isWindows ? ';' : ':';
+      frontendEnv.PATH = `${dirname(npmCommand)}${separator}${frontendEnv.PATH || ''}`;
+    }
+    frontend = spawn(npmCommand, ['run', 'dev'], {
       cwd: __dirname,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: frontendEnv,
       detached: false
     });
   }
@@ -478,9 +537,10 @@ async function main() {
   openBrowser(`http://localhost:${frontendPort}`);
   console.log('');
   
-  // Keep the launcher alive so Ctrl+C can stop both services, including a
-  // backend that was already running before npm start.
-  if (backend || frontend || backendRunning || frontendRunning) {
+  // Keep the launcher alive only for services started by this process. If both
+  // servers were already running, exit after reporting their URLs so an extra
+  // launcher cannot later tear down unrelated processes on Ctrl+C/exit.
+  if (backend || frontend) {
     lifecycleManaged = true;
     keepAliveTimer = setInterval(() => {}, 60 * 60 * 1000);
     log('Press Ctrl+C to stop servers', colors.yellow);

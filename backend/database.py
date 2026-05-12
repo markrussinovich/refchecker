@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -147,17 +148,122 @@ def get_logs_dir() -> Path:
     return log_dir
 
 
-def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
-    """Compute reference-level sidebar buckets from stored check results.
+_FINAL_REFERENCE_STATUSES = {"error", "warning", "suggestion", "unverified", "verified", "hallucination"}
 
-    These counts are reference buckets (refs with errors/warnings/suggestions),
-    not raw issue-item totals.
+
+def _normalize_for_metadata_comparison(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _normalize_author_tokens(value: Any) -> List[str]:
+    return [token for token in _normalize_for_metadata_comparison(value).split(" ") if token]
+
+
+def _parse_found_authors(value: Any) -> List[str]:
+    text = str(value or "").strip()
+    if not text or text.upper() == "NONE":
+        return []
+    separator = ";" if ";" in text else ","
+    return [author.strip() for author in text.split(separator) if author.strip()]
+
+
+def _author_matches(cited_author: Any, found_author: Any) -> bool:
+    cited_tokens = _normalize_author_tokens(cited_author)
+    found_tokens = _normalize_author_tokens(found_author)
+    if not cited_tokens or not found_tokens:
+        return False
+
+    cited_last = cited_tokens[-1]
+    found_last = found_tokens[-1]
+    if cited_last != found_last:
+        return False
+
+    cited = " ".join(cited_tokens)
+    found = " ".join(found_tokens)
+    if cited == found or cited in found or found in cited:
+        return True
+
+    cited_given_tokens = [token for token in cited_tokens[:-1] if len(token) > 1]
+    found_given_tokens = {token for token in found_tokens[:-1] if len(token) > 1}
+    return any(token in found_given_tokens for token in cited_given_tokens)
+
+
+def _authors_substantially_match(cited_authors: Any, found_authors_text: Any) -> bool:
+    cited = [author for author in (cited_authors or []) if author]
+    found = _parse_found_authors(found_authors_text)
+    if not cited or not found:
+        return False
+
+    matched_count = sum(
+        1 for cited_author in cited
+        if any(_author_matches(cited_author, found_author) for found_author in found)
+    )
+    required_matches = len(cited) - 1 if len(cited) >= 3 else len(cited)
+    return matched_count >= required_matches
+
+
+def _llm_found_metadata_matches_citation(ref: Dict[str, Any]) -> bool:
+    assessment = ref.get("hallucination_assessment") or {}
+    return (
+        assessment.get("verdict") == "LIKELY"
+        and bool(assessment.get("link"))
+        and _normalize_for_metadata_comparison(assessment.get("found_title"))
+            == _normalize_for_metadata_comparison(ref.get("title"))
+        and _authors_substantially_match(ref.get("authors"), assessment.get("found_authors"))
+        and (not ref.get("year") or str(ref.get("year")) in str(assessment.get("found_year") or ""))
+    )
+
+
+def _get_effective_reference_status(ref: Dict[str, Any], is_complete: bool) -> str:
+    base_status = str(ref.get("status") or "").strip().lower()
+    llm_match = _llm_found_metadata_matches_citation(ref)
+
+    if ref.get("hallucination_check_pending") and not ref.get("hallucination_assessment"):
+        return "checking"
+    if base_status == "unverified" and not ref.get("hallucination_assessment") and not is_complete:
+        return "checking"
+    if base_status == "hallucination" and llm_match:
+        return "verified"
+    if base_status == "hallucination":
+        return "hallucination"
+    if llm_match:
+        return "suggestion" if ref.get("suggestions") else "verified"
+
+    errors = ref.get("errors") or []
+    warnings = ref.get("warnings") or []
+    suggestions = ref.get("suggestions") or []
+    has_errors = any(str((error or {}).get("error_type") or "").lower() != "unverified" for error in errors)
+    if has_errors:
+        return "error"
+    if warnings:
+        return "warning"
+    if suggestions:
+        return "suggestion"
+    if base_status in {"error", "warning", "suggestion"}:
+        return "verified"
+    if base_status in _FINAL_REFERENCE_STATUSES:
+        return base_status
+    if base_status in {"pending", "checking", "in_progress", "queued", "processing", "started"}:
+        return "unchecked" if is_complete else ("pending" if base_status == "pending" else "checking")
+    return "verified"
+
+
+def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_complete: bool) -> Dict[str, int]:
+    """Compute summary counters from stored check results.
+
+    This mirrors ``web-ui/src/utils/referenceStatus.js`` so history cards and
+    the selected-check Summary render the same numbers even if persisted
+    aggregate columns are stale from an older run.
     """
+    errors_count = 0
+    warnings_count = 0
+    suggestions_count = 0
     refs_with_errors = 0
     refs_with_warnings_only = 0
     refs_with_suggestions_only = 0
     unverified_count = 0
     hallucination_count = 0
+    refs_verified = 0
 
     for ref in results:
         status = str(ref.get("status") or "").strip().lower()
@@ -168,84 +274,52 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
         if status == "unverified" and not ref.get("hallucination_assessment") and not is_complete:
             continue
 
+        effective_status = _get_effective_reference_status(ref, is_complete)
+        llm_match = _llm_found_metadata_matches_citation(ref)
+        assessment = ref.get("hallucination_assessment") or {}
+        likely_hallucinated = assessment.get("verdict") == "LIKELY" and not llm_match
         errors = ref.get("errors") or []
         warnings = ref.get("warnings") or []
         suggestions = ref.get("suggestions") or []
 
-        has_non_unverified_error = any((e or {}).get("error_type") != "unverified" for e in errors)
-        has_unverified_error = any((e or {}).get("error_type") == "unverified" for e in errors)
-        has_warning = len(warnings) > 0
-        has_suggestion = len(suggestions) > 0
+        if effective_status != "hallucination" and not llm_match:
+            errors_count += sum(
+                1 for error in errors
+                if str((error or {}).get("error_type") or "").lower() != "unverified"
+            )
+            warnings_count += len(warnings)
+        if effective_status != "hallucination":
+            suggestions_count += len(suggestions)
 
-        assessment = ref.get("hallucination_assessment") or {}
-        verdict = str(assessment.get("verdict") or "").upper()
-        likely_hallucinated = verdict == "LIKELY"
-        # Mirror the UI's llmFoundMetadataMatchesCitation override: when the LLM
-        # found a paper whose title and authors match the citation, treat the
-        # reference as verified rather than hallucinated/unverified, regardless
-        # of the engine's status field.
-        llm_match_overrides = False
-        if likely_hallucinated:
-            try:
-                cited_title = (ref.get("title") or "").strip().lower()
-                found_title = (assessment.get("found_title") or "").strip().lower()
-                cited_authors = ref.get("authors") or []
-                found_authors_text = str(assessment.get("found_authors") or "").lower()
-                cited_year = ref.get("year")
-                found_year = str(assessment.get("found_year") or "")
-
-                def _last_name(name: str) -> str:
-                    return (name or "").strip().split()[-1].lower() if name else ""
-
-                cited_last_names = [_last_name(a) for a in cited_authors if _last_name(a)]
-                title_matches = (
-                    cited_title and found_title and
-                    "".join(c for c in cited_title if c.isalnum()) ==
-                    "".join(c for c in found_title if c.isalnum())
-                )
-                authors_match = (
-                    cited_last_names and
-                    all(name in found_authors_text for name in cited_last_names)
-                )
-                year_matches = (not cited_year) or str(cited_year) in found_year
-                if assessment.get("link") and title_matches and authors_match and year_matches:
-                    likely_hallucinated = False
-                    llm_match_overrides = True
-            except Exception:
-                pass
-
-        is_hallucinated = (
-            (status == "hallucination" or likely_hallucinated)
-            and not llm_match_overrides
-        )
-
-        if is_hallucinated:
-            # Hallucinated refs are tracked in their own bucket; their
-            # accompanying errors/warnings are evidence, not separate issues.
-            pass
-        elif llm_match_overrides:
-            if has_suggestion:
-                refs_with_suggestions_only += 1
-        elif has_non_unverified_error:
+        if effective_status == "error":
             refs_with_errors += 1
-        elif has_warning:
+        elif effective_status == "warning":
             refs_with_warnings_only += 1
-        elif has_suggestion:
+        elif effective_status == "suggestion":
             refs_with_suggestions_only += 1
 
-        if not llm_match_overrides and (
-            status in {"unverified", "hallucination"} or has_unverified_error or likely_hallucinated
+        if (
+            effective_status in {"unverified", "hallucination"}
+            or any(str((error or {}).get("error_type") or "").lower() == "unverified" for error in errors)
+            or likely_hallucinated
         ):
             unverified_count += 1
-        if is_hallucinated:
+        if effective_status == "hallucination" or likely_hallucinated:
             hallucination_count += 1
+        if effective_status in {"verified", "suggestion"}:
+            refs_verified += 1
 
     return {
+        "errors_count": errors_count,
+        "warnings_count": warnings_count,
+        "suggestions_count": suggestions_count,
         "refs_with_errors": refs_with_errors,
         "refs_with_warnings_only": refs_with_warnings_only,
         "refs_with_suggestions_only": refs_with_suggestions_only,
         "unverified_count": unverified_count,
         "hallucination_count": hallucination_count,
+        "verified_count": refs_verified,
+        "refs_verified": refs_verified,
     }
 
 
@@ -508,18 +582,26 @@ class Database:
             await db.execute(
                 """
                 UPDATE check_history
-                   SET refs_with_errors = ?,
+                   SET errors_count = ?,
+                       warnings_count = ?,
+                       suggestions_count = ?,
+                       unverified_count = ?,
+                       refs_with_errors = ?,
                        refs_with_warnings_only = ?,
                        refs_with_suggestions_only = ?,
-                       unverified_count = ?,
+                       refs_verified = ?,
                        hallucination_count = ?
                  WHERE id = ?
                 """,
                 (
+                    buckets["errors_count"],
+                    buckets["warnings_count"],
+                    buckets["suggestions_count"],
+                    buckets["unverified_count"],
                     buckets["refs_with_errors"],
                     buckets["refs_with_warnings_only"],
                     buckets["refs_with_suggestions_only"],
-                    buckets["unverified_count"],
+                    buckets["refs_verified"],
                     buckets["hallucination_count"],
                     check_id,
                 ),
@@ -678,6 +760,11 @@ class Database:
                     # Parse JSON results
                     if result['results_json']:
                         result['results'] = json.loads(result['results_json'])
+                        if isinstance(result['results'], list) and result['results']:
+                            result.update(_compute_reference_buckets_from_results(
+                                result['results'],
+                                is_complete=result.get('status') in {'completed', 'cancelled', 'error'},
+                            ))
                     if result.get('issue_type_counts_json'):
                         result['issue_type_counts'] = json.loads(result['issue_type_counts_json'])
                     return result

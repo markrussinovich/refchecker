@@ -298,6 +298,22 @@ class TestAuthorNameProcessing:
         assert len(parsed) == 5, f"Expected 5 authors but got {len(parsed)}: {parsed}"
         expected = ["Jiang, J", "Xia, G. G", "Carlton, D. B", "Anderson, C. N", "Miyakawa, R. H"]
         assert parsed == expected, f"Expected {expected} but got {parsed}"
+
+        # Regression for ACL Anthology/PDF extraction where "Yih, W.-t" was split into two authors.
+        factscore_authors = "S. Min, K. Krishna, X. Lyu, M. Lewis, Yih, W.-t, P. Koh, M. Iyyer, L. Zettlemoyer, H. Hajishirzi"
+        factscore_parsed = parse_authors_with_initials(factscore_authors)
+        factscore_expected = [
+            "S. Min", "K. Krishna", "X. Lyu", "M. Lewis", "Yih, W.-t",
+            "P. Koh", "M. Iyyer", "L. Zettlemoyer", "H. Hajishirzi",
+        ]
+        assert factscore_parsed == factscore_expected
+
+        factscore_correct = [
+            "Sewon Min", "Kalpesh Krishna", "Xinxi Lyu", "M. Lewis", "Wen-tau Yih",
+            "Pang Wei Koh", "Mohit Iyyer", "Luke Zettlemoyer", "Hannaneh Hajishirzi",
+        ]
+        result, error = compare_authors(factscore_parsed, factscore_correct)
+        assert result is True, f"Expected FActScore authors to match but got: {error}"
         
         # Test various initial formats
         test_cases = [
@@ -307,6 +323,27 @@ class TestAuthorNameProcessing:
         ]
         
         for input_authors, expected in test_cases:
+            result = parse_authors_with_initials(input_authors)
+            assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
+
+    def test_parse_compressed_lastname_initial_author_list(self):
+        """PDF extraction can drop commas after initials before the next surname."""
+        cases = [
+            (
+                "Kurutach, T. Clavera, I. Duan, Y. Tamar, A. Abbeel, P",
+                ["Kurutach, T.", "Clavera, I.", "Duan, Y.", "Tamar, A.", "Abbeel, P"],
+            ),
+            (
+                "Kim, G.-H. Lee, J. Jang, Y. Yang, H. Kim, K.-E",
+                ["Kim, G.-H.", "Lee, J.", "Jang, Y.", "Yang, H.", "Kim, K.-E"],
+            ),
+            (
+                "Osband, I. Van Roy, B",
+                ["Osband, I.", "Van Roy, B"],
+            ),
+        ]
+
+        for input_authors, expected in cases:
             result = parse_authors_with_initials(input_authors)
             assert result == expected, f"Expected {expected} but got {result} for '{input_authors}'"
     

@@ -479,6 +479,47 @@ def build_hallucination_error_entry(
     return error_entry
 
 
+def _repair_compressed_lastname_initial_parts(parts: List[str]) -> Optional[List[str]]:
+    """Repair ``Lastname, F. Other, G`` author parts.
+
+    Some parser paths preserve a pre-split list such as
+    ``["Kurutach", "T. Clavera", "I. Duan", "Y. Tamar", "A. Abbeel", "P"]``.
+    The overlap scorer must repair that list just like it repairs the raw
+    comma-joined string.
+    """
+    if len(parts) < 3:
+        return None
+
+    initial_unit = r'[A-Z]\.?(?:-[A-Z]\.?)?'
+    leading_initials_re = re.compile(
+        rf'^(?P<initials>{initial_unit}(?:\s+{initial_unit})*)\s+(?P<next_surname>.+)$'
+    )
+    terminal_initials_re = re.compile(rf'^{initial_unit}(?:\s+{initial_unit})*$')
+
+    authors: List[str] = []
+    current_surname = parts[0]
+    saw_compressed_boundary = False
+
+    for index, part in enumerate(parts[1:], start=1):
+        match = leading_initials_re.match(part)
+        if match and index < len(parts) - 1:
+            authors.append(f"{current_surname}, {match.group('initials').strip()}")
+            current_surname = match.group('next_surname').strip()
+            if not current_surname:
+                return None
+            saw_compressed_boundary = True
+            continue
+        if terminal_initials_re.match(part):
+            authors.append(f"{current_surname}, {part}")
+            current_surname = ''
+            continue
+        return None
+
+    if current_surname:
+        return None
+    return authors if saw_compressed_boundary and len(authors) >= 2 else None
+
+
 def _split_author_string(author_str: str) -> List[str]:
     """Split a comma-separated author string into individual author names.
 
@@ -488,6 +529,10 @@ def _split_author_string(author_str: str) -> List[str]:
     Also handles "FirstName LastName" format (no merging needed).
     """
     raw_parts = [p.strip() for p in author_str.split(',') if p.strip()]
+
+    compressed = _repair_compressed_lastname_initial_parts(raw_parts)
+    if compressed:
+        return compressed
 
     # Detect "LastName, Initials" format: look for parts that are purely
     # initials (single letters with optional periods/spaces, e.g. "I. J.", "Y.")
@@ -561,6 +606,7 @@ def _compute_author_overlap(
             if n.strip().lower().rstrip('.') not in
             ('et al', 'et al.', 'others', 'and others', '')
         ]
+        cited = _repair_compressed_lastname_initial_parts(cited) or cited
     else:
         cited = _split_author_string(cited_authors)
     correct = _split_author_string(correct_authors)

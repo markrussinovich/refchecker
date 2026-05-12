@@ -117,6 +117,117 @@ class TestBibliographyEndDetection:
         assert "[2] Second Author" in bibliography_text
         assert "[3] Third Author" in bibliography_text
 
+    def test_bibliography_stops_before_period_lettered_appendix_headings(self):
+        """Regression for ICML PDFs whose appendices start as 'A. ...'."""
+        appendix_patterns = [
+            "A. Preliminaries",
+            "A. More on Related Work",
+            "A. Detailed discussion of related work",
+            "A. The Central Role of Defect Detection in Code Review",
+            "A. General Topology",
+            "A. Cognitive Framework",
+            "A. Frequently Used Notation",
+            "A. The Unfolding Procedure",
+        ]
+
+        for pattern in appendix_patterns:
+            sample_text = f"""
+            References
+            Alon, N., Livni, R., Malliaris, M., and Moran, S. Private pac learning
+            implies finite littlestone dimension. In Proceedings of STOC, 2019.
+
+            Bun, M., Dwork, C., Rothblum, G. N., and Steinke, T. Composable and
+            versatile privacy via truncated CDP. In Proceedings of STOC, 2018.
+
+            Hopkins, M. and Moran, S. The role of randomness in stability.
+            International Conference on Machine Learning, 2025.
+
+            {pattern}
+            This appendix content contains citations (Bun et al., 2020), theorem
+            statements, and prose that should not become bibliography text.
+            """
+
+            bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+            assert bibliography_text is not None
+            assert "Composable and" in bibliography_text
+            assert pattern not in bibliography_text
+            assert "This appendix content" not in bibliography_text
+
+    def test_bibliography_does_not_stop_at_reference_title_starting_with_initial(self):
+        """A reference title may begin with 'A.' and should not be an end marker."""
+        sample_text = """
+        References
+        Rafailov, R., Sharma, A., Mitchell, E., Manning, C. D., Ermon, S., and Finn,
+        C. Direct preference optimization: Your language model is secretly a reward
+        model. Advances in Neural Information Processing Systems, 2023.
+
+        Lee, H., Phatale, S., Mansoor, H., Lu, K. R., Mesnard, T., Ferret, J.,
+        Bishop, C., Hall, E., Carbune, V., and Rastogi,
+        A. RLAIF: Scaling reinforcement learning from human feedback with ai feedback. 2023.
+
+        Huang, A., Zhan, W., Xie, T., Lee, J. D., Sun, W., Krishnamurthy, A., and
+        Foster, D. J. Correcting the mythos of kl-regularization. arXiv e-prints, 2024.
+
+        A. Missing Details in the Main Text
+        This appendix content should not be included.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "A. RLAIF: Scaling reinforcement learning" in bibliography_text
+        assert "Correcting the mythos" in bibliography_text
+        assert "A. Missing Details" not in bibliography_text
+        assert "This appendix content" not in bibliography_text
+
+    def test_bibliography_stops_before_plural_supplementary_materials(self):
+        sample_text = """
+        References
+        Liu, J., Shen, D., Zhang, Y., Dolan, B., Carin, L., and Chen, W. What makes
+        good in-context examples for gpt-3? arXiv preprint arXiv:2101.06804, 2021.
+
+        Rubin, O., Herzig, J., and Berant, J. Learning to retrieve prompts for
+        in-context learning. arXiv preprint arXiv:2112.08633, 2021.
+
+        Supplementary Materials: FEEDER
+        A2.2. Set Level Metrics
+        We extend definitions here; this is appendix content, not a reference.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Learning to retrieve prompts" in bibliography_text
+        assert "Supplementary Materials" not in bibliography_text
+        assert "Set Level Metrics" not in bibliography_text
+
+    def test_bibliography_stops_before_appendix_outline(self):
+        sample_text = """
+        References
+        Zhang, S., Yu, D., Sharma, H., Zhong, H., Liu, Z., Yang, Z., Wang, S.,
+        Hassan, H., and Wang, Z. Self-exploring language models: Active preference
+        elicitation for online alignment. arXiv preprint arXiv:2405.19332, 2024.
+
+        Ziebart, B. D., Maas, A. L., Bagnell, J. A., Dey, A. K., et al. Maximum
+        entropy inverse reinforcement learning. In AAAI, 2008.
+
+        Outline of the Appendix
+        • Appx. A: Frequently Used Notation.
+        • Appx. B: Missing Details in the Main Text.
+
+        A. Frequently Used Notation
+        Notation table content follows.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Maximum" in bibliography_text
+        assert "Outline of the Appendix" not in bibliography_text
+        assert "Appx. A" not in bibliography_text
+        assert "Notation table" not in bibliography_text
+
     def test_paper_2507_16814_specific_case(self):
         """Regression test for the specific paper that was failing"""
         # This test ensures the fix works for the exact pattern from paper 2507.16814
@@ -1121,3 +1232,153 @@ class TestICLRAppendixOverrun:
             assert "appendix content" not in bib
             assert "Vaswani" in bib
         assert "full derivation" not in bib
+
+class TestTitleCaseLetteredAppendix:
+    """Regression tests for Title-case lettered appendix headings.
+
+    Pattern: "A. Additional Related Work", "B. Additional Experimental Results"
+    where a single capital letter + period + space + title-case heading marks
+    the start of an appendix that was previously not detected.
+    """
+
+    def setup_method(self):
+        self.checker = ArxivReferenceChecker()
+
+    def test_paper_6XQOarhYF8_additional_related_work(self):
+        """Regression for ICML 2025 paper 6XQOarhYF8: 'A. Additional Related Work'."""
+        text = (
+            "Title\n\nAbstract.\n\n1 Introduction\nBody.\n\n"
+            "References\n"
+            "Z. Zhang, Y. Li, and S. Wang. Near-optimal online learning. "
+            "In ICLR, 2025.\n"
+            "P. Zhao and L. Lai. Distributed online algorithms. JMLR, 2024.\n"
+            "Q. Zhou, R. Smith, and T. Brown. Continuous optimization. "
+            "In NeurIPS, 2023.\n"
+            "Y. Zhu, X. Chen, and W. Liu. Submodular bandits. "
+            "Operations Research, 2024.\n"
+            "\n"
+            "A. Additional Related Work\n"
+            "Submodular maximization has been studied extensively under "
+            "diverse settings (Chen and Yu, 2024; Anonymous, 2205.00000).\n"
+            "B. Additional Experimental Results\n"
+            "We report runtime numbers in Table 5.\n"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        # Final true references must be retained
+        assert "Near-optimal online learning" in bib
+        assert "Y. Zhu" in bib
+        # Appendix content must be excluded
+        assert "A. Additional Related Work" not in bib
+        assert "Submodular maximization has been studied" not in bib
+        assert "B. Additional Experimental Results" not in bib
+
+    def test_lettered_dotted_appendix_variants(self):
+        """Title-case 'X. <Keyword>' headings end the bibliography."""
+        cases = [
+            "A. Additional Related Work",
+            "B. Additional Experimental Results",
+            "C. Implementation Details",
+            "D. Proofs of Main Theorems",
+            "E. Supplementary Discussion",
+        ]
+        for heading in cases:
+            text = (
+                "References\n"
+                "Smith, J. and Doe, A. A useful paper title. "
+                "Journal of Things, 2024.\n"
+                "Brown, T. Another paper. ICML, 2023.\n"
+                "Wilson, P. Yet another paper. NeurIPS, 2022.\n"
+                "\n"
+                f"{heading}\n"
+                "Body of the appendix that must not be included.\n"
+            )
+            bib = self.checker.find_bibliography_section(text)
+            assert bib is not None, heading
+            assert heading not in bib, heading
+            assert "Body of the appendix" not in bib
+            assert "useful paper title" in bib
+
+    def test_lettered_dotted_does_not_match_author_names(self):
+        """Author lines like 'A. Baranwal' must NOT be treated as appendix headers."""
+        text = (
+            "References\n"
+            "A. Baranwal, K. Fountoulakis, and A. Jagannath. Graph convolution. "
+            "In NeurIPS, 2021.\n"
+            "B. Smith and C. Jones. Another paper title here for testing. "
+            "In ICML, 2022.\n"
+            "D. Wilson. Yet another paper title for the regression suite. "
+            "In AAAI, 2023.\n"
+            "\n"
+            "A. Additional Related Work\n"
+            "This appendix discusses related literature in more depth.\n"
+        )
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Baranwal" in bib
+        assert "Smith" in bib
+        assert "Wilson" in bib
+        assert "A. Additional Related Work" not in bib
+        assert "discusses related literature" not in bib
+
+
+class TestEndOfBibCaseInsensitive:
+    """All keyword-driven end-of-bibliography heuristics should be case-insensitive.
+
+    The same heading word can appear as APPENDIX, Appendix, or appendix in different
+    PDFs. Casing must not affect detection.
+    """
+
+    def setup_method(self):
+        self.checker = ArxivReferenceChecker()
+
+    def _build(self, refs, after, header="References\n"):
+        return "Title\n\nAbstract.\n\n1 Introduction\nText.\n\n" + header + refs + "\n" + after
+
+    def test_lowercase_appendix_definitive(self):
+        text = self._build(MULTI_PAGE_REFS, "appendix\nLowercase appendix body content here.\n")
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "Lowercase appendix body" not in bib
+
+    def test_lowercase_acknowledgments_definitive(self):
+        text = self._build(MULTI_PAGE_REFS, "acknowledgments\nWe thank our colleagues.\n")
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "We thank our colleagues" not in bib
+
+    def test_lowercase_supplementary_material_definitive(self):
+        text = self._build(MULTI_PAGE_REFS, "supplementary material\nExtra results below.\n")
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "Vaswani" in bib
+        assert "Extra results below" not in bib
+
+    def test_lowercase_lettered_appendix_heuristic(self):
+        # Same Title-case appendix heading but with all-lowercase keyword
+        refs = (
+            "Smith, J. and Doe, A. A useful paper title. Journal of Things, 2024.\n"
+            "Brown, T. Another paper. ICML, 2023.\n"
+            "Wilson, P. Yet another paper for the test suite. NeurIPS, 2022.\n"
+        )
+        text = "References\n" + refs + "\nA. additional related work\nThe appendix prose.\n"
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "useful paper title" in bib
+        assert "A. additional related work" not in bib
+        assert "The appendix prose" not in bib
+
+    def test_uppercase_lettered_appendix_heuristic(self):
+        refs = (
+            "Smith, J. and Doe, A. A useful paper title. Journal of Things, 2024.\n"
+            "Brown, T. Another paper. ICML, 2023.\n"
+            "Wilson, P. Yet another paper for the test suite. NeurIPS, 2022.\n"
+        )
+        text = "References\n" + refs + "\nA. ADDITIONAL RELATED WORK\nThe appendix prose.\n"
+        bib = self.checker.find_bibliography_section(text)
+        assert bib is not None
+        assert "useful paper title" in bib
+        assert "A. ADDITIONAL RELATED WORK" not in bib
+        assert "The appendix prose" not in bib

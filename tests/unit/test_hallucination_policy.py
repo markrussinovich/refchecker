@@ -1806,6 +1806,80 @@ def test_unlikely_low_overlap_accepts_found_authors_when_found_title_matches_cit
     assert 'corrected' not in explanation
 
 
+def test_unlikely_author_guard_allows_compressed_lastname_initial_lists():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The paper exists with matching authors; the mismatch is citation formatting.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Model-ensemble trust-region policy optimization',
+            'ref_authors_cited': 'Kurutach, T. Clavera, I. Duan, Y. Tamar, A. Abbeel, P',
+            '_ref_authors_cited_list': ['Kurutach', 'T. Clavera', 'I. Duan', 'Y. Tamar', 'A. Abbeel', 'P'],
+            'ref_authors_correct': 'Thanard Kurutach, Ignasi Clavera, Yan Duan, Aviv Tamar, Pieter Abbeel',
+            'ref_verified_url': 'https://arxiv.org/abs/1802.10592',
+        },
+        ['https://arxiv.org/abs/1802.10592'],
+        {
+            'title': 'Model-Ensemble Trust-Region Policy Optimization',
+            'authors': 'Thanard Kurutach, Ignasi Clavera, Yan Duan, Aviv Tamar, Pieter Abbeel',
+            'year': '2018',
+        },
+        'https://arxiv.org/abs/1802.10592',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
+def test_unlikely_author_guard_allows_matching_authors_with_expanded_title():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The cited title is truncated, but the authors match the found source.',
+        {
+            'error_type': 'multiple',
+            'ref_title': 'Regularized rl',
+            'ref_authors_cited': 'D. Tiapkin, D. Belomestny, D. Calandriello, E. Moulines, A. Naumov, P. Perrault, M. Valko, P. Menard',
+            'ref_authors_correct': 'Nino Vieillard, Marcin Andrychowicz, Anton Raichuk, Olivier Pietquin, Matthieu Geist',
+            'ref_verified_url': 'https://openreview.net/forum?id=lF2aip4Scn',
+        },
+        ['https://openreview.net/forum?id=lF2aip4Scn'],
+        {
+            'title': 'Demonstration-Regularized RL',
+            'authors': 'Daniil Tiapkin, Denis Belomestny, Daniele Calandriello, Éric Moulines, Alexey Naumov, Pierre Perrault, Michal Valko, Pierre Ménard',
+            'year': '2024',
+        },
+        'https://openreview.net/forum?id=lF2aip4Scn',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
+def test_unlikely_author_guard_allows_matching_authors_with_book_subtitle():
+    verdict, explanation = LLMHallucinationVerifier._apply_unlikely_author_mismatch_guard(
+        'UNLIKELY',
+        'The cited title and authors match the online draft.',
+        {
+            'error_type': 'author',
+            'ref_title': 'Fairness and Machine Learning',
+            'ref_authors_cited': 'S. Barocas, M. Hardt, A. Narayanan',
+            'ref_authors_correct': 'Sarah Bird, Krishnaram Kenthapadi, Emre Kıcıman, Margaret Mitchell',
+            'ref_url_cited': 'http://www.fairmlbook.org',
+            'ref_verified_url': 'https://doi.org/10.1145/3289600.3291383',
+        },
+        ['https://fairmlbook.org/'],
+        {
+            'title': 'Fairness and Machine Learning: Limitations and Opportunities',
+            'authors': 'Solon Barocas, Moritz Hardt, Arvind Narayanan',
+            'year': '2019',
+        },
+        'https://fairmlbook.org/',
+    )
+
+    assert verdict == 'UNLIKELY'
+    assert 'real title with fabricated coauthors' not in explanation
+
+
 def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
     verifier = object.__new__(LLMHallucinationVerifier)
     verifier.model = 'gemini-test'

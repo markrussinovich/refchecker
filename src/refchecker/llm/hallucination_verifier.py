@@ -1058,6 +1058,8 @@ class LLMHallucinationVerifier:
 
             if compare_titles_with_latex_cleaning(cited_title, found_title) >= 0.9:
                 return False
+            if LLMHallucinationVerifier._titles_are_compatible_prefixes(cited_title, found_title):
+                return False
 
         checked_urls = [
             error_entry.get('ref_url_cited', ''),
@@ -1078,6 +1080,39 @@ class LLMHallucinationVerifier:
 
         found_correct_overlap = _compute_author_overlap(found_authors, correct)
         return found_correct_overlap is not None and found_correct_overlap < 0.6
+
+    @staticmethod
+    def _titles_are_compatible_prefixes(cited_title: str, found_title: str) -> bool:
+        """Return True for title expansions/truncations of the same source.
+
+        This covers cases like ``Regularized rl`` vs
+        ``Demonstration-Regularized RL`` and book subtitles such as
+        ``Fairness and Machine Learning`` vs
+        ``Fairness and Machine Learning: Limitations and Opportunities``.
+        The author-overlap guard calls this only after the found authors
+        substantially match the cited authors.
+        """
+        import re
+
+        def normalize(title: str) -> list[str]:
+            return [
+                token for token in re.sub(r'[^a-z0-9]+', ' ', (title or '').lower()).split()
+                if token not in {'a', 'an', 'the'}
+            ]
+
+        cited_tokens = normalize(cited_title)
+        found_tokens = normalize(found_title)
+        if len(cited_tokens) < 2 or len(found_tokens) < 2:
+            return False
+
+        cited_phrase = ' '.join(cited_tokens)
+        found_phrase = ' '.join(found_tokens)
+        if cited_phrase in found_phrase or found_phrase in cited_phrase:
+            return True
+
+        cited_set = set(cited_tokens)
+        found_set = set(found_tokens)
+        return len(cited_set) >= 2 and cited_set.issubset(found_set)
 
     @staticmethod
     def _same_reference_url(left: str, right: str) -> bool:

@@ -203,6 +203,61 @@ def parse_authors_with_initials(authors_text):
     
     # Fix "Nameet al" concatenation from PDF extraction (newline before "et al" collapsed)
     authors_text = re.sub(r'(\w)(et\s*al\.?)\s*$', r'\1 \2', authors_text)
+
+    def is_initial_token(part: str) -> bool:
+        return bool(re.match(r'^[A-Z]\.?(?:\s+[A-Z]\.?)*(?:-[A-Za-z]\.?)?$', part.strip()))
+
+    def split_compressed_lastname_initial_list(text: str):
+        """Parse lists where a comma after each initial was dropped.
+
+        PDF extraction sometimes turns ``Lastname, F., Other, G.`` into
+        ``Lastname, F. Other, G``.  A plain comma split then sees
+        ``F. Other`` as one author rather than the initial for ``Lastname``
+        followed by the next surname.  Reconstruct the intended
+        ``Lastname, F.`` entries when every comma-separated part follows that
+        pattern.
+        """
+        if ',' not in text or ' and ' in text.lower() or ';' in text:
+            return None
+
+        comma_parts = [part.strip() for part in text.split(',') if part.strip()]
+        if len(comma_parts) < 3:
+            return None
+
+        initial_unit = r'[A-Z]\.?(?:-[A-Z]\.?)?'
+        leading_initials_re = re.compile(
+            rf'^(?P<initials>{initial_unit}(?:\s+{initial_unit})*)\s+(?P<next_surname>.+)$'
+        )
+        terminal_initials_re = re.compile(rf'^{initial_unit}(?:\s+{initial_unit})*$')
+
+        authors = []
+        current_surname = comma_parts[0]
+        saw_compressed_boundary = False
+
+        for index, part in enumerate(comma_parts[1:], start=1):
+            match = leading_initials_re.match(part)
+            if match and index < len(comma_parts) - 1:
+                initials = match.group('initials').strip()
+                next_surname = match.group('next_surname').strip()
+                if not next_surname:
+                    return None
+                authors.append(f"{current_surname}, {initials}")
+                current_surname = next_surname
+                saw_compressed_boundary = True
+                continue
+
+            if terminal_initials_re.match(part):
+                authors.append(f"{current_surname}, {part}")
+                current_surname = ''
+                continue
+
+            return None
+
+        if current_surname:
+            return None
+        if saw_compressed_boundary and len(authors) >= 2:
+            return authors
+        return None
     
     # Special case: Handle single author followed by "et al" (e.g., "Mubashara Akhtar et al.")
     # This should be split into ["Mubashara Akhtar", "et al"]
@@ -212,6 +267,10 @@ def parse_authors_with_initials(authors_text):
         if base_author and not ' and ' in base_author and not ',' in base_author:
             # This is a simple "FirstName LastName et al" case
             return [base_author, 'et al']
+
+    compressed_authors = split_compressed_lastname_initial_list(authors_text)
+    if compressed_authors:
+        return compressed_authors
     
     # Check if this is a semicolon-separated format (e.g., "Hashimoto, K.; Saoud, A.; Kishida, M.")
     if ';' in authors_text:
@@ -252,12 +311,8 @@ def parse_authors_with_initials(authors_text):
                         surname, initials = comma_parts
                         # Surname should be capitalized word(s)
                         surname_pattern = r'^[A-Z][a-zA-Z\s\-\.\']+$'
-                        # Initials should be 1-3 capital letters with optional periods and spaces
-                        # Allow patterns like "K.", "D. V.", "A. B. C."
-                        initial_pattern = r'^[A-Z]\.?(\s+[A-Z]\.?)*\s*$'
-                        
                         if (re.match(surname_pattern, surname) and 
-                            re.match(initial_pattern, initials) and
+                            is_initial_token(initials) and
                             len(surname) >= 2 and len(initials.replace('.', '').replace(' ', '')) >= 1):
                             valid_authors.append(f"{surname}, {initials}")
                         else:
@@ -266,7 +321,6 @@ def parse_authors_with_initials(authors_text):
                 else:
                     # No comma, doesn't match expected format
                     break
-            
             # If we successfully parsed at least 2 authors, use this format
             if len(valid_authors) >= 2:
                 return valid_authors
@@ -407,7 +461,7 @@ def parse_authors_with_initials(authors_text):
                 # Check if this follows surname, given pattern
                 surname_matches = re.match(surname_pattern, surname_candidate)
                 is_full_given = re.match(full_given_pattern, given_candidate)
-                is_initial = re.match(initial_pattern, given_candidate)
+                is_initial = re.match(initial_pattern, given_candidate) or is_initial_token(given_candidate)
                 
                 # Accept if surname matches and given is either full name or initial
                 given_matches = is_full_given or is_initial
@@ -486,7 +540,7 @@ def parse_authors_with_initials(authors_text):
         elif current_author:
             # We're building an author name
             # Check if this part looks like an initial (1-3 characters, possibly with periods)
-            if re.match(r'^[A-Z]\.?\s*$', part) or re.match(r'^[A-Z]\.\s*[A-Z]\.?\s*$', part):
+            if is_initial_token(part):
                 # This is an initial, add to current author
                 current_author += f", {part}"
             else:
@@ -5669,8 +5723,8 @@ def normalize_venue_for_display(venue: str) -> str:
     
     # Strip leading editor name lists like "..., editors, Venue ..." or "..., eds., Venue ..."
     # This prevents author/editor lists from being treated as venue
-    # Match 'editors,' 'editor,' or 'eds.,' possibly after a comma; capture the remainder as venue
-    editors_match = re.search(r"(?:^|,)\s*(?:editors?|eds?\.?|editor)\s*,\s*(.+)$", venue_text, re.IGNORECASE)
+    # Match 'editors,', 'editor,', 'eds.,', or '(eds.),' and capture the remainder as venue
+    editors_match = re.search(r"(?:^|[\s,])\(?\s*(?:editors?|eds?\.?)\s*\)?\s*,\s*(.+)$", venue_text, re.IGNORECASE)
     if editors_match:
         venue_text = editors_match.group(1).strip()
     
@@ -5692,7 +5746,7 @@ def normalize_venue_for_display(venue: str) -> str:
         venue_text = re.sub(r"'\d{2}$", '', venue_text)  # Year suffixes like 'CVPR'16'
     venue_text = re.sub(r',?\s*(vol\.?\s*|volume\s*)\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Volume info
     venue_text = re.sub(r',?\s*\d+\s*\([^)]*\).*$', '', venue_text)  # Issue info with optional spaces
-    venue_text = re.sub(r',?\s*pp?\.\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
+    venue_text = re.sub(r',?\s*pp?\.?\s*\\?\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
     venue_text = re.sub(r'\s*\(print\).*$', '', venue_text, flags=re.IGNORECASE)  # Print designation
     venue_text = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_text, flags=re.IGNORECASE)  # Year.Print
     
@@ -5702,7 +5756,7 @@ def normalize_venue_for_display(venue: str) -> str:
         r'^\d{4}\s+',                     # "2024 "
     # Remove 'Proceedings of [the] [ORG]* [ordinal]*' only when followed by at least one word
     # This avoids cutting a venue down to just 'Proceedings of the'
-    r'^proceedings\s+of\s+(?!the\s*$)(?:the\s+)?(?:(?:acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(?:\d+(?:st|nd|rd|th)\s+)?',
+    r'^proceedings\s+of\s+(?!the\s*$)(?:the\s+)?(?:\d{4}\s+)?(?:(?:acm|ieee|usenix|aaai|sigcomm|sigkdd|sigmod|sigops|vldb|osdi|sosp|eurosys)\s+)*(?:\d+(?:st|nd|rd|th)\s+)?',
         r'^proc\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',        # "Proc. of the IEEE" (require "of")
         r'^procs\.\s+of\s+(the\s+)?(\d+(st|nd|rd|th)\s+)?(ieee\s+)?',       # "Procs. of the IEEE" (require "of")
         r'^in\s+',

@@ -1335,7 +1335,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description='Build or refresh a local RefChecker database')
     parser.add_argument('--database', required=True, choices=sorted(DATABASE_LABELS))
     parser.add_argument('--db-path', required=True, help='SQLite database path to build or refresh')
-    parser.add_argument('--api-key', help='Semantic Scholar API key for S2 refreshes')
+    parser.add_argument(
+        '--api-key',
+        default=os.environ.get('SEMANTIC_SCHOLAR_API_KEY'),
+        help='Semantic Scholar API key for S2 refreshes',
+    )
     parser.add_argument('--openalex-since', help='Only ingest OpenAlex partitions newer than YYYY-MM-DD')
     parser.add_argument('--openalex-min-year', type=int, help='Only ingest OpenAlex works published in this year or later')
     parser.add_argument('--dblp-source-file', help='Local dblp.xml.gz file to import instead of downloading')

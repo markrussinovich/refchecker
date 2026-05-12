@@ -308,9 +308,6 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
         "--db-path",
         str(db_path),
     ]
-    api_key = os.environ.get('SEMANTIC_SCHOLAR_API_KEY')
-    if db_name == 's2' and api_key:
-        command.extend(["--api-key", api_key])
     openalex_since = os.environ.get('REFCHECKER_OPENALEX_SINCE')
     if db_name == 'openalex' and openalex_since:
         command.extend(['--openalex-since', openalex_since])
@@ -344,6 +341,7 @@ async def _run_database_refresh_subprocess(db_name: str, db_path: Path) -> None:
         cwd=str(repo_root),
         stdout=log_handle,
         stderr=asyncio.subprocess.STDOUT,
+        env=os.environ.copy(),
     )
     try:
         return_code = await process.wait()
