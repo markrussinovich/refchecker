@@ -63,6 +63,25 @@ def test_parse_llm_response_splits_adjacent_four_part_references():
     ]
 
 
+def test_parse_llm_response_splits_fused_same_line_references_after_year():
+    provider = DummyLLMProvider()
+    content = (
+        'Tibbits et al.#An adaptive MCMC scheme to tune deterministic scan uniform slice sampling#n.d.#2014 '
+        'Neal#Slice sampling and adaptive Markov chain Monte Carlo#n.d.#2003 '
+        'Stiennon et al.#Learning to summarize with human feedback#n.d.#2020 '
+        'Chung et al.#Scaling instruction-finetuned language models#n.d.#2022'
+    )
+
+    references = provider._parse_llm_response(content)
+
+    assert references == [
+        'Tibbits et al.#An adaptive MCMC scheme to tune deterministic scan uniform slice sampling#n.d.#2014#',
+        'Neal#Slice sampling and adaptive Markov chain Monte Carlo#n.d.#2003#',
+        'Stiennon et al.#Learning to summarize with human feedback#n.d.#2020#',
+        'Chung et al.#Scaling instruction-finetuned language models#n.d.#2022',
+    ]
+
+
 def test_parse_llm_response_wrapped_line_does_not_hit_local_re_shadowing():
     provider = DummyLLMProvider()
     content = (

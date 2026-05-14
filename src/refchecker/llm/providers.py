@@ -244,8 +244,18 @@ class LLMProviderMixin:
                 return
             candidate = ' '.join(part for part in current_parts if part).strip()
             if candidate:
-                potential_refs.append(candidate)
+                potential_refs.extend(split_fused_same_line_references(candidate))
             current_parts.clear()
+
+        def split_fused_same_line_references(ref_text: str) -> List[str]:
+            """Split one physical line that contains adjacent structured refs."""
+            author_start = r'(?:[A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9.&\'’\-]*(?:\s+(?:et\s+al\.?|[A-Z][A-Za-zÀ-ÖØ-öø-ÿ0-9.&\'’\-]*)){0,8})'
+            split_before_next_author = re.compile(
+                r'#((?:19|20)\d{2}[a-z]?)(#?)\s+'
+                rf'(?={author_start}\s*#)'
+            )
+            ref_text = split_before_next_author.sub(r'#\1#\n', ref_text)
+            return [part.strip() for part in ref_text.splitlines() if part.strip()]
 
         def looks_like_complete_reference(ref_text: str) -> bool:
             segments = [segment.strip() for segment in ref_text.split('#') if segment.strip()]
@@ -363,7 +373,7 @@ class LLMProviderMixin:
             ref = re.sub(r'^(\d+\.|\[\d+\]|\(\d+\))\s*', '', ref)
 
             # Filter out very short lines (likely not complete references)
-            if len(ref) > 30:  # Minimum length for academic references
+            if len(ref) > 30 or looks_like_complete_reference(ref):
                 references.append(ref)
 
         return references
