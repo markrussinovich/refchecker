@@ -281,6 +281,33 @@ class TestBibliographyEndDetection:
         assert "The Appendix is structured" not in bibliography_text
         assert "PaLI scoring" not in bibliography_text
 
+    def test_bibliography_stops_at_collapsed_appendix_for_heading(self):
+        sample_text = """
+        References
+        Agarwal, A., Kakade, S., Krishnamurthy, A., and Sun, W. Flambe:
+        Structural complexity and representation learning of low rank mdps.
+        Advances in neural information processing systems, 2020.
+
+        Zhang, Y., Zhang, F., Yang, Z., and Wang, Z. What and how does
+        in-context learning learn? Bayesian model averaging, parameterization,
+        and generalization. arXiv preprint arXiv:2305.19420, 2023.
+
+        13
+        From Words to Actions: Unveiling the Theoretical Underpinnings of LLM-Driven Autonomous Systems
+        Appendixfor
+        “From Words to Actions: Unveiling the Theoretical Underpinnings of
+        LLM-Driven Autonomous Systems”
+        A.AdditionalBackgroundandRelatedWorks
+        Q-learning with language models should not be parsed as a title.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Flambe" in bibliography_text
+        assert "Appendixfor" not in bibliography_text
+        assert "Q-learning with language models" not in bibliography_text
+
     def test_bibliography_stops_before_plural_supplementary_materials(self):
         sample_text = """
         References

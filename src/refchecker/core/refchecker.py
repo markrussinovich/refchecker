@@ -1490,6 +1490,7 @@ class ArxivReferenceChecker:
         # source PDF (APPENDIX vs Appendix vs appendix) does not matter.
         definitive_patterns = [
             r'(?i)\n\s*Appendix\b[A-Za-z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
+            r'(?i)\n\s*Appendix\s*for\b[^\n]*\n',
             r'(?i)\n\s*The\s+Appendix\s+is\s+structured\b[^\n]*\n',
             r'(?i)\n\s*Appendix\s*Contents',  # "APPENDIXCONTENTS" (no space)
             r'(?i)\n\s*Outline\s+of\s+the\s+Appendix\b[^\n]*\n',
