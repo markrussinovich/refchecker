@@ -1490,6 +1490,7 @@ class ArxivReferenceChecker:
         # source PDF (APPENDIX vs Appendix vs appendix) does not matter.
         definitive_patterns = [
             r'(?i)\n\s*Appendix\b[A-Za-z\s]*\n',  # "Appendix", "APPENDIX", "Appendix A"
+            r'(?i)\n\s*The\s+Appendix\s+is\s+structured\b[^\n]*\n',
             r'(?i)\n\s*Appendix\s*Contents',  # "APPENDIXCONTENTS" (no space)
             r'(?i)\n\s*Outline\s+of\s+the\s+Appendix\b[^\n]*\n',
             r'(?i)\n\s*Contents\s*\n',  # Table of contents for appendix (any case)
@@ -1537,7 +1538,7 @@ class ArxivReferenceChecker:
         ]
 
         dotted_appendix_heading_keywords = (
-            r'(?:A\s+Brief|Additional|Supplementary|Supplemental|Extended|Comprehensive|Appendix|Extra|Further|'
+            r'(?:A\s+Brief|Additional|Supplementary|Supplemental|Extended|Comprehensive|Appendix|Extra|Further|Full|'
             r'Related|Background|Notation|Summary|Preliminaries|Proofs?|Details?|Detailed|'
             r'Derivations?|Algorithms?|'
             r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
@@ -1674,6 +1675,13 @@ class ArxivReferenceChecker:
                 r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
                 # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
                 r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
+                # Deeper numbered appendix subsections from PDF extraction,
+                # e.g. "A.2.1. M ODULE 2.1: A XIOMS OF UTILITY IN".
+                r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
+                # Generic dotted appendix headings, e.g. "B. S6 Parameterization"
+                # and "E. ATT-friendly adaptive MCMC schemes". Validation below
+                # rejects author-initial reference lines such as "D. Zhang, J.".
+                r'\n\s*[A-Z]\.\s+[A-Z0-9][^\n]{3,120}\n',
                 # Standalone appendix letter on its own line followed by a subsection:
                 # \nA\nA.1 ... or \nA\nA Extended ...
                 r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
@@ -1729,7 +1737,11 @@ class ArxivReferenceChecker:
                         re.match(r'[A-Z]\.\s+', heading_line)
                         and re.search(r'(?:,|\band)\s*$', previous_line)
                     )
-                    if wraps_author_initial:
+                    heading_looks_like_author = bool(re.match(
+                        r'^[A-Z]\.\s+[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                        heading_line,
+                    ))
+                    if wraps_author_initial or heading_looks_like_author:
                         continue
                     looks_like_ref = bool(re.match(
                         r'\s*(?:'
@@ -1833,6 +1845,8 @@ class ArxivReferenceChecker:
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                         # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
                         r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
+                        r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
+                        r'\n\s*[A-Z]\.\s+[A-Z0-9][^\n]{3,120}\n',
                         r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
@@ -1852,7 +1866,11 @@ class ArxivReferenceChecker:
                                 re.match(r'[A-Z]\.\s+', heading_line)
                                 and re.search(r'(?:,|\band)\s*$', previous_line)
                             )
-                            if wraps_author_initial:
+                            heading_looks_like_author = bool(re.match(
+                                r'^[A-Z]\.\s+[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                                heading_line,
+                            ))
+                            if wraps_author_initial or heading_looks_like_author:
                                 continue
                             looks_like_ref = bool(re.match(
                                 r'\s*(?:'

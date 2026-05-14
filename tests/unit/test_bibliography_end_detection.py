@@ -211,6 +211,76 @@ class TestBibliographyEndDetection:
         assert "Deep Learning for Code Intelligence" not in bibliography_text
         assert "B. Detailed Experiment Setups" not in bibliography_text
 
+    def test_bibliography_stops_before_icml_2024_appendix_edge_headings(self):
+        """Regression coverage for ICML 2024 appendix headings missed after references."""
+        appendix_cases = [
+            (
+                "B. Full Related Work",
+                "Cross-modal Understanding and Generation should not become a reference title.",
+            ),
+            (
+                "A.2.1. M ODULE 2.1: A XIOMS OF UTILITY IN\nDETERMINISTIC ENVIRONMENTS",
+                "Element 2.2.b (Avoidance of Endowment Effect) should not be parsed as a citation.",
+            ),
+            (
+                "B. S6 Parameterization",
+                "Corollary 3.3 then allows us to conclude appendix prose is not bibliography.",
+            ),
+            (
+                "E. ATT-friendly adaptive MCMC schemes",
+                "Tibbits et al. (2014) appendix prose should not become a cited title.",
+            ),
+        ]
+
+        for heading, appendix_prose in appendix_cases:
+            sample_text = f"""
+            References
+            Alon, N., Livni, R., Malliaris, M., and Moran, S. Private pac learning
+            implies finite littlestone dimension. In Proceedings of STOC, 2019.
+
+            Bun, M., Dwork, C., Rothblum, G. N., and Steinke, T. Composable and
+            versatile privacy via truncated CDP. In Proceedings of STOC, 2018.
+
+            Hopkins, M. and Moran, S. The role of randomness in stability.
+            International Conference on Machine Learning, 2025.
+
+            {heading}
+            {appendix_prose}
+            """
+
+            bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+            assert bibliography_text is not None
+            assert "Composable and" in bibliography_text
+            assert heading not in bibliography_text
+            assert appendix_prose not in bibliography_text
+
+    def test_bibliography_stops_at_appendix_structure_prose_after_references(self):
+        sample_text = """
+        References
+        Alayrac, J.-B., Donahue, J., Luc, P., Miech, A., Barr, I., Hasson, Y.,
+        Lenc, K., Mensch, A., Millican, K., Reynolds, M., et al. Flamingo: a
+        visual language model for few-shot learning. NeurIPS, 2022.
+
+        Chen, X., Wang, X., Changpinyo, S., Piergiovanni, A., Padlewski, P.,
+        Salz, D., Goodman, S., Grycner, A., Mustafa, B., Beyer, L., et al. Pali:
+        A jointly-scaled multilingual language-image model. ICLR, 2023.
+
+        Sun, C., Shrivastava, A., Singh, S., and Gupta, A. Revisiting unreasonable
+        effectiveness of data in deep learning era. ICCV, 2017.
+
+        The Appendix is structured as follows—we provide model
+        and dataset details in Sections B and C respectively.
+        PaLI scoring is length normalized and should not be parsed as a title.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Flamingo" in bibliography_text
+        assert "The Appendix is structured" not in bibliography_text
+        assert "PaLI scoring" not in bibliography_text
+
     def test_bibliography_stops_before_plural_supplementary_materials(self):
         sample_text = """
         References
