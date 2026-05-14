@@ -1244,6 +1244,85 @@ class TestICLRAppendixOverrun:
         assert "Combines personalized PageRank" not in bib
         assert "Adam optimizer" not in bib
 
+    def test_pypdf_references_heading_with_trailing_line_number(self):
+        """pypdf can append source line numbers to section headings.
+
+        A heading like ``References287`` must be treated as the real references
+        section rather than falling back to an earlier body citation such as
+        ``[2025]``.
+        """
+        text = """
+        Related work162
+        Prior work discusses online self-play [2025] and moving targets.163
+        More body text before the bibliography.164
+        8
+        References287
+        Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery,
+        Wes Gurnee, and Neel Nanda. Refusal in language models is mediated by a
+        single direction, 2024. URL https://arxiv.org/abs/2406.11717.290
+        Alex Beutel, Kai Xiao, Johannes Heidecke, and Lilian Weng. Diverse and
+        effective red teaming with auto-generated rewards and multi-step
+        reinforcement learning, 2024. URL https://arxiv.org/abs/2412.18693.293
+        Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, and many collaborators.
+        Deepseek-r1 incentivizes reasoning in llms through reinforcement learning.
+        Nature, 645(8081):633-638, September 2025. doi: 10.1038/s41586-025-09422-z.
+        URL http://dx.doi.org/10.1038/s41586-025-09422-z.321
+        S. S. Li, Shuang Zhou, Shaoqing Wu, Tao Yun, Tian Pei, Tianyu Sun,
+        T. Wang, Wangding Zeng, and Wen Liu. Continuation of the same long
+        author list should not be mistaken for an appendix heading.322
+        Seungju Han, Kavel Rao, Allyson Ettinger, Liwei Jiang, Bill Yuchen Lin,
+        Nathan Lambert, Yejin Choi, and Nouha Dziri. Wildguard: Open one-stop
+        moderation tools for safety risks, jailbreaks, and refusals of llms,
+        2024. URL https://arxiv.org/abs/2406.18495.365
+        11
+        A Reward function details425
+        This appendix content should not be included.
+        """
+
+        bib = self.checker.find_bibliography_section(text)
+
+        assert bib is not None
+        assert "Prior work discusses online self-play" not in bib
+        assert "Andy Arditi" in bib
+        assert "Deepseek-r1 incentivizes" in bib
+        assert "S. S. Li" in bib
+        assert "Wildguard" in bib
+        assert "Reward function details" not in bib
+        assert "appendix content" not in bib
+
+    def test_dotted_appendix_detection_does_not_truncate_multi_initial_authors(self):
+        """Generic dotted appendix headings must not match author initials.
+
+        This protects against regressions where a boundary rule for headings like
+        ``B. S6 Parameterization`` treats ``S. S. Li, ...`` inside a long author
+        list as the start of an appendix and drops all later references.
+        """
+        text = """
+        References
+        Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang,
+        R. J. Chen, R. L. Jin, Ruyi Chen, Shanghao Lu, Shangyan Zhou,
+        S. S. Li, Shuang Zhou, Shaoqing Wu, Tao Yun, Tian Pei, Tianyu Sun,
+        T. Wang, Wangding Zeng, Wen Liu, and Zhen Zhang. Deepseek-r1 incentivizes
+        reasoning in llms through reinforcement learning. Nature, 645(8081):633-638,
+        September 2025. doi: 10.1038/s41586-025-09422-z.
+        Seungju Han, Kavel Rao, Allyson Ettinger, Liwei Jiang, Bill Yuchen Lin,
+        Nathan Lambert, Yejin Choi, and Nouha Dziri. Wildguard: Open one-stop
+        moderation tools for safety risks, jailbreaks, and refusals of llms,
+        2024. URL https://arxiv.org/abs/2406.18495.
+
+        B Training hyperparameters
+        Appendix content starts here.
+        """
+
+        bib = self.checker.find_bibliography_section(text)
+
+        assert bib is not None
+        assert "S. S. Li" in bib
+        assert "T. Wang" in bib
+        assert "Wildguard" in bib
+        assert "Training hyperparameters" not in bib
+        assert "Appendix content starts here" not in bib
+
     def test_looks_like_ref_validation_not_too_broad(self):
         """Test that looks_like_ref doesn't reject valid appendix headers.
 

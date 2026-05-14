@@ -1458,6 +1458,7 @@ class ArxivReferenceChecker:
             # Matches "RE F E R E N C E S" or "R E F E R E N C E S"
             r'R\s*E\s*F\s*E\s*R\s*E\s*N\s*C\s*E\s*S\s*\n',
             # Standard reference patterns
+            r'(?i)^\s*(?:\d+\s*)?references\s*\d+\s*$',  # pypdf line-number artifact: "References287"
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
             r'(?i)works cited\s*\n',
@@ -1655,7 +1656,7 @@ class ArxivReferenceChecker:
             appendix_section_patterns = [
                 dotted_appendix_heading_pattern,
                 header_prefixed_dotted_appendix_heading_pattern,
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
+                r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward)\b[A-Za-z\s\-\d]*\n',
                 r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                 # Numbered appendix sections with ALL-CAPS concatenated words from PDF extraction
                 # artifacts, e.g. "A1 RELATEDWORKS", "A4 ABLATIONSTUDY", "A5.2 SCORINGCRITERIA".
@@ -1686,6 +1687,9 @@ class ArxivReferenceChecker:
                 # Standalone appendix letter on its own line followed by a subsection:
                 # \nA\nA.1 ... or \nA\nA Extended ...
                 r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
+                # Standalone appendix letter on one line followed by a title line,
+                # e.g. "A\nReward function details" from pypdf text extraction.
+                r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
                 # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                 # e.g. "A R E L AT E D WO R K S", "B E X P E R I M E N TA L ..."
                 r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
@@ -1739,7 +1743,7 @@ class ArxivReferenceChecker:
                         and re.search(r'(?:,|\band)\s*$', previous_line)
                     )
                     heading_looks_like_author = bool(re.match(
-                        r'^[A-Z]\.\s+[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                        r'^[A-Z]\.\s+(?:[A-Z]\.\s+)*[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
                         heading_line,
                     ))
                     if wraps_author_initial or heading_looks_like_author:
@@ -1842,12 +1846,13 @@ class ArxivReferenceChecker:
                     fallback_appendix_patterns = [
                         dotted_appendix_heading_pattern,
                         header_prefixed_dotted_appendix_heading_pattern,
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary)\b[A-Za-z\s\-]*\n',
+                        r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward)\b[A-Za-z\s\-\d]*\n',
                         r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                         # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
                         r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
                         r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
                         r'\n\s*[A-Z]\.\s+[A-Z0-9][^\n]{3,120}\n',
+                        r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
                         r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
@@ -1868,7 +1873,7 @@ class ArxivReferenceChecker:
                                 and re.search(r'(?:,|\band)\s*$', previous_line)
                             )
                             heading_looks_like_author = bool(re.match(
-                                r'^[A-Z]\.\s+[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
+                                r'^[A-Z]\.\s+(?:[A-Z]\.\s+)*[A-Z][a-z]+(?:[\.,]|\s+(?:and|&)\s+[A-Z]\.|\s+[A-Z]\.)',
                                 heading_line,
                             ))
                             if wraps_author_initial or heading_looks_like_author:
