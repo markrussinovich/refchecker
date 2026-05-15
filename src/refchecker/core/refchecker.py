@@ -1459,6 +1459,8 @@ class ArxivReferenceChecker:
             r'R\s*E\s*F\s*E\s*R\s*E\s*N\s*C\s*E\s*S\s*\n',
             # Standard reference patterns
             r'(?i)^\s*(?:\d+\s*)?references\s*\d+\s*$',  # pypdf line-number artifact: "References287"
+            r'\n[^\n]{0,240}\s{10,}References\b',  # Right-column heading with left-column body text
+            r'(?im)^\s*references\b',  # Two-column PDFs can put first reference on the same line
             r'(?i)references\s*\n',
             r'(?i)bibliography\s*\n',
             r'(?i)works cited\s*\n',
@@ -1542,17 +1544,18 @@ class ArxivReferenceChecker:
         dotted_appendix_heading_keywords = (
             r'(?:A\s+Brief|Additional|Supplementary|Supplemental|Extended|Comprehensive|Appendix|Extra|Further|Full|'
             r'Related|Background|Notation|Summary|Preliminaries|Proofs?|Details?|Detailed|'
-            r'Derivations?|Algorithms?|'
+            r'Derivations?|Algorithms?|Review|Methodological|Privacy|Choice|Parameterized|Expanded|'
             r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
-            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|'
+            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Program|'
             r'Baselines|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|'
             r'Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|'
             r'Evaluation|Estimation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|'
-            r'Notation|Proof|Algorithm|Acknowledgment|Introduction|Literature|Non[\s\-]+Transitivity|'
+            r'Notation|Proof|The\s+Proof|Algorithm|Acknowledgment|Introduction|Literature|Non[\s\-]+Transitivity|'
             r'Assumptions?|Data|AUC[\s\-]?ROC|Decomposition|Entropic|Prior|Justification|Defense|'
             r'Surrogate|Adaptive|Brief|More|The\s+Central\s+Role|General\s+Topology|'
             r'Cognitive\s+Framework|Frequently\s+Used\s+Notation|The\s+Unfolding\s+Procedure|'
-            r'Missing\s+Details)\b[^\n]*'
+            r'Missing\s+Details|New\s+Tasks?|Differential\s+Privacy|Frequency\s+Estimation|'
+            r'Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization)\b[^\n]*'
         )
         dotted_appendix_heading_pattern = (
             r'(?i)\n\s*[A-Z]\.\s+' + dotted_appendix_heading_keywords
@@ -1656,8 +1659,8 @@ class ArxivReferenceChecker:
             appendix_section_patterns = [
                 dotted_appendix_heading_pattern,
                 header_prefixed_dotted_appendix_heading_pattern,
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward)\b[A-Za-z\s\-\d]*\n',
-                r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Extended|Expanded|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward|Review|Methodological|Privacy|Choice|Parameterized|Program|Differential\s+Privacy|Frequency\s+Estimation|Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization|New\s+Tasks?)\b[A-Za-z\s\-\d]*\n',
+                r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Proofs?|The\s+Proof|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Baselines|Omitted|Technical|Auxiliary|Centered|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                 # Numbered appendix sections with ALL-CAPS concatenated words from PDF extraction
                 # artifacts, e.g. "A1 RELATEDWORKS", "A4 ABLATIONSTUDY", "A5.2 SCORINGCRITERIA".
                 # The digit after the letter and the ALL-CAPS requirement distinguish these
@@ -1668,7 +1671,7 @@ class ArxivReferenceChecker:
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
                 # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
                 # in section titles, e.g. "A Theoretical Arguments for Section 3"
-                r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                 # PDF word-break artifacts with parenthetical continuation markers,
                 # e.g. "A E XPERIMENTAL S ETTINGS (C ONT ' D )".
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?[A-Z]{2,}(?:\s+(?:[A-Z]\s+)?[A-Z]{2,})*(?:\s*\([A-Z0-9\s\'’\-]+\))?\s*\n',
@@ -1681,9 +1684,10 @@ class ArxivReferenceChecker:
                 # e.g. "A.2.1. M ODULE 2.1: A XIOMS OF UTILITY IN".
                 r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
                 # Generic dotted appendix headings, e.g. "B. S6 Parameterization"
-                # and "E. ATT-friendly adaptive MCMC schemes". Validation below
-                # rejects author-initial reference lines such as "D. Zhang, J.".
-                r'\n\s*[A-Z]\.\s+[A-Z0-9][^\n]{3,120}\n',
+                # and "E. ATT-friendly adaptive MCMC schemes". Keep this to
+                # acronym/code-like headings so author-initial reference lines
+                # such as "A. An accelerated..." are not treated as appendices.
+                r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
                 # Standalone appendix letter on its own line followed by a subsection:
                 # \nA\nA.1 ... or \nA\nA Extended ...
                 r'\n[A-Z]\n(?=[A-Z][\.\d\s])',
@@ -1809,22 +1813,49 @@ class ArxivReferenceChecker:
             
             # Last resort: look for patterns that might indicate references
             reference_indicators = [
-                r'\[\d+\]',  # [1], [2], etc.
-                r'\d+\.\s+[A-Z]',  # 1. Author
+                r'(?m)^\s*\[\d+\]',  # [1], [2], etc. at start of reference lines
+                r'(?m)^\s*\d+\.\s+(?:[A-Z][a-z]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][a-z]+|[A-Z][a-z]+\s+[A-Z]\.)',  # 1. Author
                 r'[A-Z][a-z]+,\s+[A-Z]\.',  # Smith, J.
             ]
             
             for indicator in reference_indicators:
                 matches = list(re.finditer(indicator, text))
-                if len(matches) > 5:  # If we find multiple matches, it might be a reference section
+                min_matches = 3 if '[A-Z][a-z]' in indicator else 6
+                if len(matches) >= min_matches:  # If we find multiple matches, it might be a reference section
                     # Prefer matches in the last 50% of the document to avoid
                     # matching body text (numbered lists, etc.)
                     half_pos = len(text) // 2
                     late_matches = [m for m in matches if m.start() >= half_pos]
-                    if late_matches:
-                        first_match = late_matches[0]
+                    candidate_matches = late_matches or matches
+                    def fallback_has_bib_evidence(candidate_match):
+                        window = text[candidate_match.start():candidate_match.start() + 3000]
+                        year_count = len(re.findall(r'\b(?:19|20)\d{2}\b', window))
+                        return year_count >= 2 or bool(re.search(
+                            r'https?://|doi[:\s]|arXiv',
+                            window,
+                            re.IGNORECASE,
+                        ))
+
+                    if indicator == r'(?m)^\s*\[\d+\]':
+                        # Bracketed numbers also appear in tables and tree rules
+                        # (e.g. "X[15]" or "[24719, 7841]"). Only use this
+                        # fallback when nearby markers look like a numbered
+                        # bibliography sequence.
+                        sequence_match = None
+                        for candidate_match in candidate_matches:
+                            window = text[candidate_match.start():candidate_match.start() + 3000]
+                            nums = [int(n) for n in re.findall(r'\[(\d{1,3})\]', window)]
+                            small_nums = {n for n in nums if 1 <= n <= 10}
+                            if len(small_nums) >= 3 and (1 in small_nums or 2 in small_nums) and fallback_has_bib_evidence(candidate_match):
+                                sequence_match = candidate_match
+                                break
+                        if sequence_match is None:
+                            continue
+                        first_match = sequence_match
                     else:
-                        first_match = matches[0]
+                        first_match = next((m for m in candidate_matches if fallback_has_bib_evidence(m)), None)
+                        if first_match is None:
+                            continue
                     # Look for the beginning of the line
                     line_start = text.rfind('\n', 0, first_match.start())
                     if line_start == -1:
@@ -1846,14 +1877,14 @@ class ArxivReferenceChecker:
                     fallback_appendix_patterns = [
                         dotted_appendix_heading_pattern,
                         header_prefixed_dotted_appendix_heading_pattern,
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Extended|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward)\b[A-Za-z\s\-\d]*\n',
-                        r'(?i)\n\s*[A-Z]\d*\s+(?:Proofs?|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
+                        r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Extended|Expanded|Additional|Supplementary|Appendix|Extra|Further|Related|Background|Notation|Summary|Reward|Review|Methodological|Privacy|Choice|Parameterized|Program|Differential\s+Privacy|Frequency\s+Estimation|Sparse\s+Oblivious\s+Subspace\s+Embeddings?|Tokenization|New\s+Tasks?)\b[A-Za-z\s\-\d]*\n',
+                        r'(?i)\n\s*[A-Z]\d*\.?\s+(?:Proofs?|The\s+Proof|Details?|Derivations?|Algorithms?|Implementation|Experiments?|Datasets?|Hyperparameters?|Ablation|Discussion|Overview|Comparison|Verification|Omitted|Technical|Auxiliary|Theoretical|Arguments?|Analysis|Conclusions?|Convergence|Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?)\b[A-Za-z\s\-\d]*\n',
                         # Numbered appendix with ALL-CAPS concatenated words (PDF artifact)
                         r'\n\s*[A-Z]\d+(?:\.\d+)?\s+[A-Z][A-Z]+[A-Za-z\-]*(?:\s+[A-Z][A-Za-z\-]*)*\s*\n',
                         r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
-                        r'\n\s*[A-Z]\.\s+[A-Z0-9][^\n]{3,120}\n',
+                        r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
                         r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
-                        r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                        r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
                     ]

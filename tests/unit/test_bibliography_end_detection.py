@@ -230,6 +230,50 @@ class TestBibliographyEndDetection:
                 "E. ATT-friendly adaptive MCMC schemes",
                 "Tibbits et al. (2014) appendix prose should not become a cited title.",
             ),
+            (
+                "A. Parameterized Complexity",
+                "For a complete introduction to parameterized complexity, appendix prose should not be parsed.",
+            ),
+            (
+                "A. The Proof of the Key Theoretical Results",
+                "In the main text, we present Lemma 3.2; this proof prose is not a reference.",
+            ),
+            (
+                "D. Choice of Sampling Strategy",
+                "We carefully selected the program sampling strategy; this is appendix prose.",
+            ),
+            (
+                "D. Privacy Proofs",
+                "Proof Sketch of Lemma 3.3 should not be parsed as bibliography text.",
+            ),
+            (
+                "A. New tasks: datasets, benchmarks, and code",
+                "Context-specific metrics and benchmark prose should not be parsed as citations.",
+            ),
+            (
+                "A. Differential Privacy Basics",
+                "Differential privacy definitions belong to appendix prose, not the bibliography.",
+            ),
+            (
+                "B. Frequency Estimation",
+                "Frequency-estimation appendix details should not be parsed as references.",
+            ),
+            (
+                "C. Sparse Oblivious Subspace Embeddings",
+                "Subspace embedding proof details should not be parsed as references.",
+            ),
+            (
+                "A. Expanded Related Works",
+                "Mechanistic-interpretability related-work prose should not be parsed as references.",
+            ),
+            (
+                "B. Program Structure",
+                "Program examples in the appendix should not be parsed as references.",
+            ),
+            (
+                "C. Tokenization Details",
+                "Tokenization appendix details should not be parsed as references.",
+            ),
         ]
 
         for heading, appendix_prose in appendix_cases:
@@ -254,6 +298,56 @@ class TestBibliographyEndDetection:
             assert "Composable and" in bibliography_text
             assert heading not in bibliography_text
             assert appendix_prose not in bibliography_text
+
+    def test_bibliography_stops_before_letter_digit_dotted_appendix_headings(self):
+        """ICML PDFs can use headings like A1. Review or A2. Additional after refs."""
+        appendix_cases = [
+            "A1. Review of Existing Conformal Inference Methods",
+            "A2. Additional Methodological Details",
+        ]
+
+        for heading in appendix_cases:
+            sample_text = f"""
+            References
+            Candès, E. J., Lei, L., and Ren, Z. Conformalized survival analysis.
+            Journal of the Royal Statistical Society, 2023.
+
+            Barber, R. F., Candès, E. J., Ramdas, A., and Tibshirani, R. J.
+            Conformal prediction beyond exchangeability. Annals of Statistics, 2023.
+
+            {heading}
+            Algorithm A1 outlines additional implementation details that are not references.
+            """
+
+            bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+            assert bibliography_text is not None
+            assert "Conformalized survival analysis" in bibliography_text
+            assert heading not in bibliography_text
+            assert "Algorithm A1" not in bibliography_text
+
+    def test_fallback_does_not_treat_isolated_bracketed_table_indices_as_refs(self):
+        """Fallback should not turn body/table markers like X[15] into bibliography."""
+        sample_text = """
+        1 Introduction
+        We analyze tree splits and report node statistics below.
+
+        X[15] <= 0.437
+        32560
+        [24719, 7841]
+        X[15] <= 0.159
+        25106
+        [22593, 2513]
+        True
+        X[14] <= 0.305
+
+        All proofs are postponed to the appendix. This paper does not expose a
+        bibliography heading in extracted PDF text.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is None
 
     def test_bibliography_stops_at_appendix_structure_prose_after_references(self):
         sample_text = """
