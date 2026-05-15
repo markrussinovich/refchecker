@@ -388,6 +388,7 @@ class TestBibliographyEndDetection:
 
         13
         From Words to Actions: Unveiling the Theoretical Underpinnings of LLM-Driven Autonomous Systems
+
         Appendixfor
         “From Words to Actions: Unveiling the Theoretical Underpinnings of
         LLM-Driven Autonomous Systems”
@@ -401,6 +402,47 @@ class TestBibliographyEndDetection:
         assert "Flambe" in bibliography_text
         assert "Appendixfor" not in bibliography_text
         assert "Q-learning with language models" not in bibliography_text
+
+    def test_inline_references_heading_before_author_year_entries(self):
+        """PDF extraction can put REFERENCES and the first author on one line."""
+        sample_text = """
+        Acknowledgments We thank the reviewers for helpful suggestions. REFERENCES Steven Bills, Nick Cammarata, Dan Mossing, Henk Tillman, Leo Gao, Gabriel Goh, Ilya Sutskever, Jan Leike, Jeff Wu, and William Saunders. Language models can explain neurons in language models, 2023.
+        Kevin Clark, Urvashi Khandelwal, Omer Levy, and Christopher D. Manning. What does BERT look at? An analysis of BERT's attention. In ACL, 2019.
+
+        A. Additional Experiments
+        Appendix prose must not be included.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Language models can explain neurons" in bibliography_text
+        assert "What does BERT look at" in bibliography_text
+        assert "Additional Experiments" not in bibliography_text
+        assert "Appendix prose" not in bibliography_text
+
+    def test_prefers_first_valid_references_over_later_appendix_example_section(self):
+        """Appendix examples can contain their own References section after the real bib."""
+        sample_text = """
+        Introduction text mentions references below without starting the bibliography.
+
+        REFERENCES Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson, Karel Lenc, Arthur Mensch, Katherine Millican, Malcolm Reynolds, et al. Flamingo: a visual language model for few-shot learning. Advances in Neural Information Processing Systems, 2022.
+        Arian Bakhtiarnia, Qi Zhang, and Alexandros Iosifidis. Multi-exit vision transformer for dynamic inference. arXiv preprint arXiv:2106.15183, 2021.
+        Tolga Bolukbasi, Joseph Wang, Ofer Dekel, and Venkatesh Saligrama. Adaptive neural networks. ICML, 2020.
+
+        A. Prompt Examples
+        The model writes the following analysis.
+        References Mengzhao Chen, Wenqi Shao, Peng Xu, Mingbao Lin, Kaipeng Zhang, Fei Chao, Rongrong Ji, Yu Qiao, and Ping Luo. Diffrate: Differentiable compression rate for efficient vision transformers. arXiv preprint arXiv:2305.17997, 2023.
+        Kaiming He, Xinlei Chen, Saining Xie, Yanghao Li, Piotr Dollar, and Ross Girshick. Masked autoencoders are scalable vision learners. CVPR, 2022.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Flamingo" in bibliography_text
+        assert "Adaptive neural networks" in bibliography_text
+        assert "Prompt Examples" not in bibliography_text
+        assert "Diffrate" not in bibliography_text
 
     def test_bibliography_stops_before_plural_supplementary_materials(self):
         sample_text = """

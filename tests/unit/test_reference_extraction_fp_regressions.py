@@ -1,6 +1,7 @@
 """Regression tests for targeted reference-extraction false positives."""
 
 from refchecker.llm.base import LLMProvider
+from refchecker.core.refchecker import ArxivReferenceChecker
 from refchecker.utils.url_utils import clean_url_punctuation
 
 
@@ -19,6 +20,28 @@ def test_clean_url_punctuation_preserves_encoded_spaces_before_pdf_suffix():
     url = 'https://example.com/reports/Claude%204%20System%20Card.pdf'
 
     assert clean_url_punctuation(url) == url
+
+
+def test_bibliography_stops_before_split_word_appendix_heading():
+    text = """
+Introduction
+This paper cites stochastic approximation literature.
+
+References
+David Aldous and James Allen Fill. Reversible markov chains and random walks on graphs, 2002.
+Sihan Zeng, Thinh T Doan, and Justin Romberg. A two-time-scale stochastic optimization framework
+with applications in control and reinforcement learning. arXiv preprint arXiv:2109.14756, 2021.
+13
+Published as a conference paper at ICLR 2024
+A E XAMPLES OF STOCHASTIC ALGORITHMS OF THE FORM (2).
+In the literature of stochastic optimizations, many SGD variants have been proposed.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert 'two-time-scale stochastic optimization framework' in bibliography
+    assert 'A E XAMPLES OF STOCHASTIC ALGORITHMS' not in bibliography
+    assert 'many SGD variants' not in bibliography
 
 
 def test_repair_truncated_arxiv_doi_from_source_bibliography():

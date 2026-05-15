@@ -264,16 +264,19 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
     unverified_count = 0
     hallucination_count = 0
     refs_verified = 0
+    latest_results_by_index: Dict[Any, Dict[str, Any]] = {}
 
-    for ref in results:
+    for fallback_index, ref in enumerate(results):
         status = str(ref.get("status") or "").strip().lower()
         if not status or status in {"pending", "checking", "in_progress", "queued", "processing", "started"}:
             continue
-        if ref.get("hallucination_check_pending") and not ref.get("hallucination_assessment"):
-            continue
-        if status == "unverified" and not ref.get("hallucination_assessment") and not is_complete:
-            continue
+        ref_index = ref.get("index")
+        if ref_index is None:
+            ref_index = fallback_index
+        latest_results_by_index[ref_index] = ref
 
+    for ref in latest_results_by_index.values():
+        status = str(ref.get("status") or "").strip().lower()
         effective_status = _get_effective_reference_status(ref, is_complete)
         llm_match = _llm_found_metadata_matches_citation(ref)
         assessment = ref.get("hallucination_assessment") or {}
@@ -310,6 +313,7 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
             refs_verified += 1
 
     return {
+        "processed_refs": len(latest_results_by_index),
         "errors_count": errors_count,
         "warnings_count": warnings_count,
         "suggestions_count": suggestions_count,

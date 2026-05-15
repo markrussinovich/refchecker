@@ -86,9 +86,10 @@ export const useHistoryStore = create((set, get) => ({
         try {
           const detail = (await api.getCheckDetail(item.id)).data
           
-          // Calculate processed_refs from results array (completed checks have status != pending/checking)
+          // Prefer backend progress; processed count is pipeline progress, not a
+          // status bucket. The fallback is only for older API responses.
           const results = Array.isArray(detail.results) ? detail.results : []
-          const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+          const processedRefs = detail.processed_refs ?? results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
           
           // Update the item with full progress info
           historyWorking = historyWorking.map(h => h.id === item.id
@@ -279,9 +280,10 @@ export const useHistoryStore = create((set, get) => ({
           try {
             const detail = (await api.getCheckDetail(item.id)).data
             
-            // Calculate processed_refs from results array
+            // Prefer backend progress; processed count is pipeline progress, not
+            // a status bucket. The fallback is only for older API responses.
             const results = Array.isArray(detail.results) ? detail.results : []
-            const processedRefs = results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
+            const processedRefs = detail.processed_refs ?? results.filter(r => r && r.status && r.status !== 'pending' && r.status !== 'checking').length
             
             // Update the item with full progress info
             historyWorking = historyWorking.map(h => h.id === item.id

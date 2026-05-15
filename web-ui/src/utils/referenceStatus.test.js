@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from './referenceStatus'
+import { buildReferenceSummary, computeReferenceStats, getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from './referenceStatus'
 
 describe('referenceStatus', () => {
   it('treats LLM-found matching metadata as verified, not hallucinated', () => {
@@ -136,5 +136,94 @@ describe('referenceStatus', () => {
 
     expect(llmFoundMetadataMatchesCitation(reference)).toBe(true)
     expect(getEffectiveReferenceStatus(reference, true)).toBe('suggestion')
+  })
+
+  it('counts unverified refs while hallucination checks are still pending', () => {
+    const stats = computeReferenceStats([
+      { status: 'verified', errors: [], warnings: [], suggestions: [] },
+      {
+        status: 'unverified',
+        errors: [{ error_type: 'unverified', error_details: 'Not found' }],
+        warnings: [],
+        suggestions: [],
+        hallucination_check_pending: true,
+      },
+    ], false)
+
+    expect(stats.totalProcessed).toBe(2)
+    expect(stats.count).toBe(1)
+    expect(stats.verified).toBe(1)
+    expect(stats.withUnverified).toBe(1)
+    expect(stats.hallucinated).toBe(0)
+  })
+
+  it('builds one display summary for progress, reference buckets, and issue totals', () => {
+    const summary = buildReferenceSummary({
+      stats: { total_refs: 9, processed_refs: 5, errors_count: 99 },
+      references: [
+        { status: 'verified', errors: [], warnings: [], suggestions: [] },
+        { status: 'error', errors: [{ error_type: 'author' }], warnings: [], suggestions: [] },
+        { status: 'warning', errors: [], warnings: [{ warning_type: 'year' }], suggestions: [] },
+        { status: 'suggestion', errors: [], warnings: [], suggestions: [{ suggestion_type: 'doi' }, { suggestion_type: 'url' }] },
+        { status: 'unverified', errors: [{ error_type: 'unverified' }], warnings: [], suggestions: [] },
+      ],
+      isComplete: false,
+    })
+
+    expect(summary.totalRefs).toBe(9)
+    expect(summary.processedRefs).toBe(5)
+    expect(summary.references).toMatchObject({
+      verified: 2,
+      errors: 1,
+      warnings: 1,
+      suggestions: 1,
+      unverified: 1,
+      hallucinated: 0,
+    })
+    expect(summary.issues).toMatchObject({
+      errors: 1,
+      warnings: 1,
+      suggestions: 2,
+      unverified: 1,
+      hallucinated: 0,
+    })
+  })
+
+  it('falls back to stored aggregate stats when references are unavailable', () => {
+    const summary = buildReferenceSummary({
+      stats: {
+        total_refs: 12,
+        processed_refs: 8,
+        refs_verified: 3,
+        refs_with_errors: 2,
+        refs_with_warnings_only: 1,
+        refs_with_suggestions_only: 4,
+        errors_count: 5,
+        warnings_count: 6,
+        suggestions_count: 7,
+        unverified_count: 8,
+        hallucination_count: 9,
+      },
+      references: [],
+      isComplete: false,
+    })
+
+    expect(summary.totalRefs).toBe(12)
+    expect(summary.processedRefs).toBe(8)
+    expect(summary.references).toMatchObject({
+      verified: 3,
+      errors: 2,
+      warnings: 1,
+      suggestions: 4,
+      unverified: 8,
+      hallucinated: 9,
+    })
+    expect(summary.issues).toMatchObject({
+      errors: 5,
+      warnings: 6,
+      suggestions: 7,
+      unverified: 8,
+      hallucinated: 9,
+    })
   })
 })

@@ -188,10 +188,10 @@ test.describe('Hallucination-pending ref lifecycle', () => {
     ];
 
     // Emit refs one at a time with summary updates (flat format, matching backend)
-    // Backend defers unverified refs from processed_count
+    // processed_refs tracks verification progress, independent of final status.
     for (let i = 0; i < refs.length; i++) {
       await emit(sessionId, { type: 'reference_result', ...refs[i] });
-      const processedSoFar = refs.slice(0, i + 1).filter(r => r.status !== 'unverified').length;
+      const processedSoFar = i + 1;
       await emit(sessionId, {
         type: 'summary_update',
         total_refs: 4,
@@ -233,14 +233,9 @@ test.describe('Hallucination-pending ref lifecycle', () => {
     expect(state.cards[3].hasSpinner).toBe(true);
     expect(state.cards[3].hasQuestionMark).toBe(false);
     expect(state.cards[3].hasUnverifiedMsg).toBe(false);
-    // Processed count: only 2 (verified + error), NOT 4
-    expect(state.ofText).toBe('2');
-    // No unverified badge during active check
-    expect(state.unverifiedBadge).toBe('');
-
-    // ── Assertion 2: Unverified filter should NOT match refs showing as checking ──
-    // Simulate clicking unverified filter
-    // The badge should not be visible while references are still checking.
+    // Processed count includes unverified refs awaiting hallucination.
+    expect(state.ofText).toBe('4');
+    expect(state.unverifiedBadge).toBe('2Unverified');
 
     // ── Phase 2: Hallucination phase starts ──
     // Backend marks unverified refs as hallucination_check_pending

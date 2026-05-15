@@ -3,7 +3,7 @@ import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { formatDate } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
-import { computeReferenceStats } from '../../utils/referenceStatus'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
 
 /**
@@ -46,30 +46,30 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
   const isPlaceholder = item.id === -1
   const isInProgress = item.status === 'in_progress'
   const isComplete = ['completed', 'cancelled', 'error'].includes(item.status)
-  
-  // Calculate progress percentage
-  const totalRefs = item.total_refs || 0
-  const processedRefs = item.processed_refs || 0
-  const progressPercent = totalRefs > 0 ? Math.min((processedRefs / totalRefs) * 100, 100) : 0
 
-  // Keep sidebar counts aligned with the Summary by deriving from the same
-  // shared helper.  When this item is the *active* selected check, prefer
-  // the live `references` from the check store so updates flow through in
-  // real time (item.results is only refreshed at completion).
   const isCurrentCheck = useCheckStore(state => state.currentCheckId === item.id)
   const liveReferences = useCheckStore(state => (isCurrentCheck ? state.references : null))
-  const derivedCounts = useMemo(() => {
+  const liveStats = useCheckStore(state => (isCurrentCheck ? state.stats : null))
+  const liveStatus = useCheckStore(state => (isCurrentCheck ? state.status : null))
+  const summaryCounts = useMemo(() => {
     const refs = Array.isArray(liveReferences) && liveReferences.length > 0
       ? liveReferences
       : (Array.isArray(item.results) ? item.results : [])
-    return computeReferenceStats(refs, isComplete)
-  }, [liveReferences, item.results, isComplete])
+    const stats = isCurrentCheck && liveStats ? liveStats : item
+    const summaryIsComplete = isCurrentCheck
+      ? ['completed', 'cancelled', 'error'].includes(liveStatus)
+      : isComplete
+    return buildReferenceSummary({ stats, references: refs, isComplete: summaryIsComplete })
+  }, [isCurrentCheck, liveStats, liveStatus, liveReferences, item, isComplete])
 
-  const refsWithErrors = derivedCounts?.withErrors ?? item.refs_with_errors ?? 0
-  const refsWithWarningsOnly = derivedCounts?.withWarnings ?? item.refs_with_warnings_only ?? 0
-  const refsWithSuggestionsOnly = derivedCounts?.withSuggestions ?? item.refs_with_suggestions_only ?? 0
-  const unverifiedCount = derivedCounts?.withUnverified ?? item.unverified_count ?? 0
-  const hallucinationCount = derivedCounts?.hallucinated ?? item.hallucination_count ?? 0
+  const totalRefs = summaryCounts.totalRefs
+  const processedRefs = summaryCounts.processedRefs
+  const progressPercent = summaryCounts.progressPercent
+  const refsWithErrors = summaryCounts.references.errors
+  const refsWithWarningsOnly = summaryCounts.references.warnings
+  const refsWithSuggestionsOnly = summaryCounts.references.suggestions
+  const unverifiedCount = summaryCounts.references.unverified
+  const hallucinationCount = summaryCounts.references.hallucinated
 
   const handleClick = () => {
     if (!isEditing && !isSelected) {

@@ -6,7 +6,7 @@ import {
   exportResultsAsBibtex,
   downloadAsFile 
 } from '../../utils/formatters'
-import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation, computeReferenceStats } from '../../utils/referenceStatus'
+import { buildReferenceSummary } from '../../utils/referenceStatus'
 
 /**
  * Stats section showing reference check summary with clickable filters
@@ -77,42 +77,31 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const activeFilterId = isFilterActive ? statusFilter[0] : null
   const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
-  // Compute inclusive badge counts from references using the shared helper
-  // so the sidebar history card and the Summary always agree.
-  const inclusiveCounts = useMemo(
-    () => computeReferenceStats(references, isComplete),
-    [references, isComplete]
+  const summaryCounts = useMemo(
+    () => buildReferenceSummary({ stats, references, isComplete }),
+    [stats, references, isComplete]
   )
 
-  // Use inclusive counts from references for badge breakdowns, backend stats for totals
-  const refsWithErrors = inclusiveCounts?.withErrors ?? stats.refs_with_errors ?? 0
-  const refsWithWarningsOnly = inclusiveCounts?.withWarnings ?? stats.refs_with_warnings_only ?? 0
-  const refsVerified = inclusiveCounts?.verified ?? stats.refs_verified ?? stats.verified_count ?? 0
-  const refsUnverified = inclusiveCounts?.withUnverified ?? stats.unverified_count ?? 0
-  const refsHallucinated = inclusiveCounts?.hallucinated ?? stats.hallucination_count ?? 0
-  // processedRefs: Use the count of finalized references from inclusiveCounts
-  // when available, since the backend defers counting refs pending hallucination
-  // checks.  Fall back to backend stats only when references aren't loaded yet.
-  // During active checks, unverified refs show as "checking" and should not
-  // count toward processed; inclusiveCounts.count excludes them correctly.
-  // Once complete, use totalProcessed to include all refs.
-  const processedRefs = isComplete
-    ? (inclusiveCounts?.totalProcessed ?? stats.processed_refs ?? 0)
-    : (inclusiveCounts?.count ?? stats.processed_refs ?? 0)
+  const refsWithErrors = summaryCounts.references.errors
+  const refsWithWarningsOnly = summaryCounts.references.warnings
+  const refsWithSuggestionsOnly = summaryCounts.references.suggestions
+  const refsVerified = summaryCounts.references.verified
+  const refsUnverified = summaryCounts.references.unverified
+  const refsHallucinated = summaryCounts.references.hallucinated
+  const processedRefs = summaryCounts.processedRefs
+  const totalRefs = summaryCounts.totalRefs
 
-  // Issue type filters for the chips
-  // Compute from reference objects (inclusiveCounts) when available so that
-  // counts stay correct even while refs are deferred for hallucination checks.
   const issueFilters = [
-    { ...allFilters.error, value: inclusiveCounts?.errorsCount ?? stats.errors_count ?? 0 },
-    { ...allFilters.warning, value: inclusiveCounts?.warningsCount ?? stats.warnings_count ?? 0 },
-    { ...allFilters.suggestion, value: inclusiveCounts?.suggestionsCount ?? stats.suggestions_count ?? 0 },
+    { ...allFilters.error, value: summaryCounts.issues.errors },
+    { ...allFilters.warning, value: summaryCounts.issues.warnings },
+    { ...allFilters.suggestion, value: summaryCounts.issues.suggestions },
     { ...allFilters.unverified, value: refsUnverified },
     { ...allFilters.hallucination, value: refsHallucinated },
   ]
   const isVerifiedSelected = statusFilter.includes('verified')
   const isErrorSelected = statusFilter.includes('error')
   const isWarningSelected = statusFilter.includes('warning')
+  const isSuggestionSelected = statusFilter.includes('suggestion')
   const isUnverifiedSelected = statusFilter.includes('unverified')
   const isHallucinationSelected = statusFilter.includes('hallucination')
 
@@ -154,12 +143,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           >
             Summary
           </h3>
-          {!isComplete && stats.processed_refs > 0 && stats.processed_refs < stats.total_refs && (
+          {!isComplete && processedRefs > 0 && processedRefs < totalRefs && (
             <span 
               className="text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              {stats.processed_refs}/{stats.total_refs} checked
+              {processedRefs}/{totalRefs} checked
             </span>
           )}
         </div>
@@ -336,6 +325,36 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           </svg>
           <span className="text-sm font-bold" style={{ color: refsWithWarningsOnly > 0 ? 'var(--color-warning)' : 'var(--color-text-muted)' }}>{refsWithWarningsOnly}</span>
         </button>
+
+        {/* Suggestions */}
+        {refsWithSuggestionsOnly > 0 && (
+          <button
+            onClick={() => handleFilterClick('suggestion')}
+            className={`flex items-center gap-1 px-2 py-1 rounded transition-all cursor-pointer hover:scale-105 hover:shadow-sm ${
+              isSuggestionSelected ? 'ring-1 shadow-sm' : ''
+            }`}
+            style={{
+              backgroundColor: isSuggestionSelected ? 'var(--color-suggestion-bg)' : 'transparent',
+              ringColor: 'var(--color-suggestion)',
+            }}
+            onMouseEnter={(e) => {
+              if (!isSuggestionSelected) {
+                e.currentTarget.style.backgroundColor = 'var(--color-suggestion-bg)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSuggestionSelected) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+            title={`${refsWithSuggestionsOnly} reference${refsWithSuggestionsOnly === 1 ? '' : 's'} with suggestions only`}
+          >
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" style={{ color: 'var(--color-suggestion)' }}>
+              <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1h4v1a2 2 0 11-4 0zM12 14c.015-.34.208-.646.477-.859a4 4 0 10-4.954 0c.27.213.462.519.476.859h4.002z" />
+            </svg>
+            <span className="text-sm font-bold" style={{ color: 'var(--color-suggestion)' }}>{refsWithSuggestionsOnly}</span>
+          </button>
+        )}
 
         {/* Unverified - only show if > 0 */}
         {refsUnverified > 0 && (

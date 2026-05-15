@@ -147,7 +147,7 @@ export default function MainPanel() {
       const resultsCount = displayRefs?.filter(r => 
         r.status && !['pending', 'checking'].includes(r.status.toLowerCase())
       ).length || 0
-      const processedRefs = selectedCheck.processed_refs || resultsCount || 0
+      const processedRefs = selectedCheck.processed_refs ?? (isInProgress ? resultsCount : totalRefs)
       const errorsCount = selectedCheck.errors_count || 0
       const warningsCount = selectedCheck.warnings_count || 0
       const suggestionsCount = selectedCheck.suggestions_count || 0
