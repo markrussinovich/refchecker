@@ -67,6 +67,63 @@ As mentioned in Section 1 of this paper, a large plethora of methods exists.
     assert 'large plethora of methods' not in bibliography
 
 
+def test_bibliography_strips_internal_pdf_page_headers():
+    text = """
+Introduction
+This paper cites reinforcement learning literature.
+
+REFERENCES
+Yasin Abbasi-Yadkori, David Pal, and Csaba Szepesvari. Improved algorithms for linear stochastic
+bandits. Advances in neural information processing systems, 24, 2011.
+10
+Published as a conference paper at ICLR 2024
+Zihan Zhang and Qiaomin Xie. Sharper model-free reinforcement learning for average-reward
+markov decision processes. In The Thirty Sixth Annual Conference on Learning Theory, pp.
+5476-5477. PMLR, 2023.
+11
+Published as a conference paper at ICLR 2024
+Dongruo Zhou, Jiafan He, and Quanquan Gu. Provably efficient reinforcement learning for dis-
+counted mdps with feature mapping. In International Conference on Machine Learning, pp.
+12793-12802. PMLR, 2021b.
+A BACKGROUNDS AND TECHNICAL NOVELTIES
+Appendix text should not be included.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert 'Published as a conference paper' not in bibliography
+    assert '10\n' not in bibliography
+    assert '11\n' not in bibliography
+    assert 'Improved algorithms for linear stochastic' in bibliography
+    assert 'Provably efficient reinforcement learning' in bibliography
+    assert 'A BACKGROUNDS AND TECHNICAL NOVELTIES' not in bibliography
+
+
+def test_bibliography_stops_before_split_question_appendix_heading():
+    text = """
+Introduction
+This paper cites time series classification literature.
+
+REFERENCES
+Matthew D. Zeiler and Rob Fergus. Visualizing and understanding convolutional networks. In Computer
+Vision-ECCV 2014: 13th European Conference, pp. 818-833. Springer, 2014.
+Bolei Zhou, Aditya Khosla, Agata Lapedriza, Aude Oliva, and Antonio Torralba. Learning deep features
+for discriminative localization. In Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition, pp. 2921-2929, 2016.
+Yuansheng Zhu, Weishi Shi, Deep Shankar Pandey, Yang Liu, Xiaofan Que, Daniel E. Krutz, and Qi Yu.
+Uncertainty-aware multiple instance learning from large-scale long time series data. In 2021 IEEE
+International Conference on Big Data, pp. 1772-1778. IEEE, 2021.
+A W HY MIL?
+Multiple instance learning discussion should not be included.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert 'Uncertainty-aware multiple instance learning' in bibliography
+    assert 'A W HY MIL?' not in bibliography
+    assert 'Multiple instance learning discussion' not in bibliography
+
+
 def test_repair_truncated_arxiv_doi_from_source_bibliography():
     refs = [
         'a*Ying Tang*et al.#DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning#arXiv preprint#2025#https://doi.org/10.48550/ARXIV.25'

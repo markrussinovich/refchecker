@@ -1434,6 +1434,29 @@ class ArxivReferenceChecker:
                 logger.error(f"Error extracting text with pdftotext: {str(e3)}")
             
             return None
+
+    @staticmethod
+    def _strip_pdf_page_headers_from_bibliography(bibliography_text):
+        """Remove PDF page headers that interrupt bibliography entries."""
+        if not bibliography_text:
+            return bibliography_text
+
+        lines = bibliography_text.splitlines()
+        cleaned_lines = []
+        header_pattern = re.compile(
+            r'^(?:Published|Accepted|Under review|Workshop paper)\b.*\b(?:paper|review)\b.*',
+            re.IGNORECASE,
+        )
+
+        for line in lines:
+            stripped = line.strip()
+            if header_pattern.match(stripped):
+                if cleaned_lines and re.fullmatch(r'\d{1,4}', cleaned_lines[-1].strip()):
+                    cleaned_lines.pop()
+                continue
+            cleaned_lines.append(line)
+
+        return '\n'.join(cleaned_lines)
     
     def find_bibliography_section(self, text):
         """
@@ -1681,8 +1704,8 @@ class ArxivReferenceChecker:
                 # e.g. "A E XPERIMENTAL S ETTINGS (C ONT ' D )".
                 r'\n\s*[A-Z]\s+(?:[A-Z]\s+)?[A-Z]{2,}(?:\s+(?:[A-Z]\s+)?[A-Z]{2,})*(?:\s*\([A-Z0-9\s\'’\-]+\))?\s*\n',
                 # PDF word-break artifacts where the first heading word is split,
-                # e.g. "A E XAMPLES OF ... (2)." or "C D ISCUSSION ... A3'".
-                r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().\-]+)*[ \t]*\n',
+                # e.g. "A E XAMPLES OF ... (2)." or "A W HY MIL?".
+                r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().?\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().?\-]+)*[ \t]*\n',
                 # All-caps concatenated appendix headings with optional parenthetical acronym,
                 # e.g. "A QUANTUMRANDOMACCESSMEMORY(QRAM)" from PDF text extraction.
                 r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
@@ -1806,7 +1829,7 @@ class ArxivReferenceChecker:
                 else:
                     break
             
-            bibliography_text = text[start_pos:end_pos]
+            bibliography_text = self._strip_pdf_page_headers_from_bibliography(text[start_pos:end_pos])
             logger.debug(f"FINAL BIBLIOGRAPHY: start_pos={start_pos}, end_pos={end_pos}, length={len(bibliography_text)}")
             
             # Check if we have a reasonable amount of text
@@ -1893,7 +1916,7 @@ class ArxivReferenceChecker:
                         r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
                         r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
                         r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
-                        r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().\-]+)*[ \t]*\n',
+                        r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().?\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().?\-]+)*[ \t]*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
                     ]
@@ -1935,7 +1958,7 @@ class ArxivReferenceChecker:
                                 logger.debug(f"Fallback appendix end at {end_pos}: {repr(m2.group(0).strip()[:60])}")
                             break
                     
-                    bibliography_text = text[line_start:end_pos]
+                    bibliography_text = self._strip_pdf_page_headers_from_bibliography(text[line_start:end_pos])
                     logger.info(f"Found potential bibliography section using indicator: {indicator}")
                     break
         
