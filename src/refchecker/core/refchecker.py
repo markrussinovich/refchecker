@@ -1448,15 +1448,85 @@ class ArxivReferenceChecker:
             re.IGNORECASE,
         )
 
-        for line in lines:
+        def has_bibliography_evidence(value):
+            return bool(re.search(
+                r'\b(?:19|20)\d{2}\b|https?://|\bdoi\b|\barxiv\b|\bpp\.|\bpages?\b|'
+                r'\b(?:proceedings|conference|journal|transactions|press|pmlr|ieee|acm|springer)\b',
+                value,
+                re.IGNORECASE,
+            ))
+
+        def looks_like_reference_start(value):
+            return bool(re.match(
+                r'(?:[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)',
+                value,
+            ))
+
+        def looks_like_title_header(value):
+            stripped = value.strip()
+            if not stripped or len(stripped) > 140:
+                return False
+            if has_bibliography_evidence(stripped) or looks_like_reference_start(stripped):
+                return False
+            if re.match(r'^[a-z]', stripped):
+                return False
+            return len(stripped.split()) >= 3
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
             stripped = line.strip()
             if header_pattern.match(stripped):
                 if cleaned_lines and re.fullmatch(r'\d{1,4}', cleaned_lines[-1].strip()):
                     cleaned_lines.pop()
+                i += 1
                 continue
+
+            if re.fullmatch(r'\d{1,4}', stripped):
+                block_start = len(cleaned_lines)
+                while block_start > 0 and cleaned_lines[block_start - 1].strip():
+                    block_start -= 1
+                preceding_block = [candidate.strip() for candidate in cleaned_lines[block_start:] if candidate.strip()]
+                if 0 < len(preceding_block) <= 3 and not any(
+                    has_bibliography_evidence(candidate) or looks_like_reference_start(candidate)
+                    for candidate in preceding_block
+                ):
+                    del cleaned_lines[block_start:]
+
+                i += 1
+                while i < len(lines) and not lines[i].strip():
+                    i += 1
+                skipped_header_lines = 0
+                while i < len(lines) and skipped_header_lines < 2:
+                    next_line = lines[i].strip()
+                    if not next_line:
+                        i += 1
+                        continue
+                    if looks_like_title_header(next_line):
+                        skipped_header_lines += 1
+                        i += 1
+                        continue
+                    break
+                continue
+
             cleaned_lines.append(line)
+            i += 1
 
         return '\n'.join(cleaned_lines)
+
+    @staticmethod
+    def _looks_like_pdf_page_header_boundary(heading_line, previous_lines):
+        """Return true when an appendix-looking heading is really a PDF page header."""
+        heading_line = (heading_line or '').strip()
+        if not heading_line or len(heading_line) > 140:
+            return False
+        if not previous_lines or not re.fullmatch(r'\d{1,4}', previous_lines[-1].strip()):
+            return False
+        if re.search(r'\b(?:19|20)\d{2}\b|https?://|\bdoi\b|\barxiv\b', heading_line, re.IGNORECASE):
+            return False
+        if re.match(r'(?:[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)', heading_line):
+            return False
+        return len(heading_line.split()) >= 3
     
     def find_bibliography_section(self, text):
         """
@@ -1571,7 +1641,7 @@ class ArxivReferenceChecker:
             r'Related|Background|Notation|Summary|Preliminaries|Proofs?|Details?|Detailed|'
             r'Derivations?|Algorithms?|Review|Methodological|Privacy|Choice|Parameterized|Expanded|Prompts?|'
             r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
-            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Program|'
+            r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Program|Formal|Definitions?|'
             r'Baselines|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|'
             r'Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|'
             r'Evaluation|Estimation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|'
@@ -1783,6 +1853,8 @@ class ArxivReferenceChecker:
                     ))
                     if wraps_author_initial or heading_looks_like_author:
                         continue
+                    if self._looks_like_pdf_page_header_boundary(heading_line, previous_lines):
+                        continue
                     looks_like_ref = bool(re.match(
                         r'\s*(?:'
                         r'[A-Z][a-z]+,\s+[A-Z]\.'   # "Smith, J."
@@ -1940,6 +2012,8 @@ class ArxivReferenceChecker:
                                 heading_line,
                             ))
                             if wraps_author_initial or heading_looks_like_author:
+                                continue
+                            if self._looks_like_pdf_page_header_boundary(heading_line, previous_lines):
                                 continue
                             looks_like_ref = bool(re.match(
                                 r'\s*(?:'

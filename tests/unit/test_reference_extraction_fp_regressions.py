@@ -99,6 +99,46 @@ Appendix text should not be included.
     assert 'A BACKGROUNDS AND TECHNICAL NOVELTIES' not in bibliography
 
 
+def test_bibliography_ignores_title_header_that_looks_like_appendix_heading():
+    text = """
+Introduction
+This paper studies backtracking counterfactual explanations.
+
+References
+Ates, E., Aksar, B., Leung, V. J., and Coskun, A. K. Counterfactual explanations for multivariate time series. In
+2021 International Conference on Applied Artificial In-
+
+Improving Backtracking Counterfactual Definitions: The
+current definition of backtracking counterfactuals does not
+9
+
+A Unified Causal Framework for Efficient Model Interpretability
+
+telligence (ICAPAI), pp. 1-8. IEEE, 2021.
+
+Chattopadhyay, A., Manupriya, P., Sarkar, A., and Balasubramanian, V. N. Neural network attributions: A causal
+perspective. In International Conference on Machine Learning, pp. 981-990. PMLR, 2019.
+
+Karimi, A.-H., Barthe, G., Balle, B., and Valera, I. Model-agnostic counterfactual explanations for consequential
+decisions. In International Conference on Artificial Intelligence and Statistics, pp. 895-905. PMLR, 2020.
+
+A. Formal Definition of Interventional and Backtracking Counterfactuals
+This appendix content should not be included in the bibliography.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert 'Counterfactual explanations for multivariate time series' in bibliography
+    assert 'telligence (ICAPAI)' in bibliography
+    assert 'Neural network attributions' in bibliography
+    assert 'Model-agnostic counterfactual explanations' in bibliography
+    assert 'Improving Backtracking Counterfactual Definitions' not in bibliography
+    assert 'A Unified Causal Framework for Efficient Model Interpretability' not in bibliography
+    assert 'Formal Definition of Interventional' not in bibliography
+    assert 'appendix content' not in bibliography
+    assert '\n9\n' not in bibliography
+
+
 def test_bibliography_stops_before_split_question_appendix_heading():
     text = """
 Introduction
