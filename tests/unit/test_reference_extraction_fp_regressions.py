@@ -44,6 +44,29 @@ In the literature of stochastic optimizations, many SGD variants have been propo
     assert 'many SGD variants' not in bibliography
 
 
+def test_bibliography_stops_before_colon_appendix_heading():
+    text = """
+Introduction
+This paper cites dimensionality reduction literature.
+
+References
+Peter Yianilos. Data structures and algorithms for nearest neighbor search in general metric spaces.
+In Proceedings of the ACM-SIAM Symposium on Discrete Algorithms, pp. 311-321, 1993.
+Shujian Yu, Hongmin Li, Sigurd Lokse, Robert Jenssen, and Jose Principe. The conditional
+cauchy-schwarz divergence with applications to time-series data and sequential decision making.
+arXiv preprint arXiv:2301.08970, 2023.
+APPENDIX A: F URTHER PERSPECTIVES ON T -SNE, UMAP, P ACMAP, AND
+VARIANTS
+As mentioned in Section 1 of this paper, a large plethora of methods exists.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert 'conditional' in bibliography
+    assert 'APPENDIX A:' not in bibliography
+    assert 'large plethora of methods' not in bibliography
+
+
 def test_repair_truncated_arxiv_doi_from_source_bibliography():
     refs = [
         'a*Ying Tang*et al.#DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning#arXiv preprint#2025#https://doi.org/10.48550/ARXIV.25'
