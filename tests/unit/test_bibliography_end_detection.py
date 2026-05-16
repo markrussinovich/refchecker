@@ -299,6 +299,341 @@ class TestBibliographyEndDetection:
             assert heading not in bibliography_text
             assert appendix_prose not in bibliography_text
 
+    def test_bibliography_stops_before_regressed_dotted_appendix_headings(self):
+        """Current >=3-flag reruns exposed dotted appendix headings after references."""
+        appendix_cases = [
+            (
+                "B. Interpretation of DMPMs",
+                "This appendix interpretation derives the forward Markov process and is not bibliography.",
+            ),
+            (
+                "C. Variational Bound",
+                "The reverse process is formalized here as appendix prose, not as a citation.",
+            ),
+            (
+                "A. Table of Notations and Definitions",
+                "Symbol definitions and notation tables should not be parsed as reference entries.",
+            ),
+            (
+                "A. Individual Dataset Details",
+                "Dataset descriptions and cohort statistics should not become unverified citations.",
+            ),
+            (
+                "A. The Algorithm of AESL",
+                "Algorithm details belong to the appendix and must not be included in the bibliography.",
+            ),
+            (
+                "A. Coloring the plane with seven colors",
+                "Grid diagrams and coloring construction details are appendix content.",
+            ),
+            (
+                "A. Broader Impacts and Limitations",
+                "Impact and limitation discussion after references should not be scanned as references.",
+            ),
+            (
+                "A. Other Related Works",
+                "Related-work appendix prose about B-Trees should not become bibliography.",
+            ),
+            (
+                "B. Examples of the DSP Issues",
+                "Example proof-step generation details belong in the appendix.",
+            ),
+            (
+                "A. Step-size Optimization for Different Choices of Base and Meta updates",
+                "Notation conventions in all appendices should not be parsed as references.",
+            ),
+            (
+                "A. The Effect of the Number of LoRAs on Semantic Convergence",
+                "Figure axes and LoRA counts after references should not be parsed.",
+            ),
+            (
+                "A. Existing works on diffusion-based generative models for discrete data",
+                "Embedding discrete structure in the continuous space is appendix prose, not bibliography.",
+            ),
+            (
+                "A. Gaussian Noise Distorts Angular Relationship",
+                "The following lemma establishes how Gaussian noise fails to maintain angular class structure.",
+            ),
+            (
+                "B. Class Separation using vMF",
+                "This result provides a theoretical foundation for setting kappa in appendix analysis.",
+            ),
+            (
+                "A. Continuity of the time-shift operator for ODEs",
+                "Continuity proofs for the time-shift operator should not be parsed as references.",
+            ),
+        ]
+
+        for heading, appendix_prose in appendix_cases:
+            sample_text = f"""
+            References
+            Alon, N., Livni, R., Malliaris, M., and Moran, S. Private pac learning
+            implies finite littlestone dimension. In Proceedings of STOC, 2019.
+
+            Bun, M., Dwork, C., Rothblum, G. N., and Steinke, T. Composable and
+            versatile privacy via truncated CDP. In Proceedings of STOC, 2018.
+
+            Hopkins, M. and Moran, S. The role of randomness in stability.
+            International Conference on Machine Learning, 2025.
+
+            {heading}
+            {appendix_prose}
+            """
+
+            bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+            assert bibliography_text is not None
+            assert "Composable and" in bibliography_text
+            assert heading not in bibliography_text
+            assert appendix_prose not in bibliography_text
+
+    def test_bibliography_stops_before_standalone_appendices_heading(self):
+        """Some PDFs use a standalone plural Appendices heading after references."""
+        sample_text = """
+        References
+        Asi, H. and Duchi, J. The importance of better models in stochastic optimization.
+        Proceedings of the National Academy of Sciences, 2019.
+
+        Franceschi, L., Donini, M., Frasconi, P., and Pontil, M. Bilevel programming
+        for hyperparameter optimization and meta-learning. In International Conference
+        on Machine Learning, 2018.
+
+        Young, K., Wang, B., and Taylor, M. E. Metatrace: Online step-size tuning by
+        meta-gradient descent for reinforcement learning control. arXiv preprint, 2018.
+
+        11
+        MetaOptimize
+        Appendices
+        A. Notation conventions
+        Appendix notation and experimental details should not be parsed as references.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Metatrace" in bibliography_text
+        assert "MetaOptimize" not in bibliography_text
+        assert "Appendices" not in bibliography_text
+        assert "Notation conventions" not in bibliography_text
+
+    def test_bibliography_stops_before_letter_digit_spaced_appendix_heading(self):
+        """PDF extraction can render appendix headings as 'A12 E XPERIMENT SETTINGS'."""
+        sample_text = """
+        References
+        Fan, Z., Li, J., and Chen, Y. Graph transformer models for circuit design.
+        Proceedings of the International Conference on Machine Learning, 2024.
+
+        Guo, J., Wang, L., and Zhang, T. Timing graph convolutional networks.
+        IEEE Transactions on Computer-Aided Design, 2022.
+
+        Xie, M., Lee, R., and Kumar, S. Net length prediction with graph attention.
+        In Proceedings of the ACM Design Automation Conference, 2021.
+
+        A12 E XPERIMENT SETTINGS
+        To overcome these limitations, recent works have developed GNN variants
+        specifically tailored for EDA tasks. This appendix prose is not a reference.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Timing graph convolutional networks" in bibliography_text
+        assert "A12 E XPERIMENT SETTINGS" not in bibliography_text
+        assert "specifically tailored for EDA tasks" not in bibliography_text
+
+    def test_bibliography_stops_before_regressed_collapsed_appendix_headings(self):
+        """ICLR PDFs can collapse appendix section letters into the heading text."""
+        sample_text = """
+        References
+        Schops, T., Schonberger, J. L., Galliani, S., Sattler, T., Schindler, K.,
+        Pollefeys, M., and Geiger, A. A multi-view stereo benchmark with high-resolution images
+        and multi-camera videos. In Proceedings of CVPR, 2017.
+
+        Shen, X., Cai, Z., Yin, W., and Wang, K. GL3D: A large-scale benchmark for
+        geometric learning. In Proceedings of Computer Vision and Pattern Recognition, 2018.
+
+        BPREVENTOVERFITTING
+        Preventing overfitting is crucial when training with large-scale video data.
+
+        CHANDLINGNOISYANDLOW-QUALITYDATA
+        Figure6: Sample video data and generated labels should not be bibliography.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "multi-view stereo benchmark" in bibliography_text
+        assert "BPREVENTOVERFITTING" not in bibliography_text
+        assert "Preventing overfitting" not in bibliography_text
+        assert "Figure6" not in bibliography_text
+
+    def test_bibliography_stops_before_spaced_caps_appendix_with_punctuation(self):
+        """Spaced all-caps appendix headings may contain punctuation and acronyms."""
+        sample_text = """
+        References
+        Zhang, T., Qiu, L., Guo, Q., Deng, C., and Zhou, T. Enhancing uncertainty-based
+        hallucination detection with stronger focus. In Proceedings of EMNLP, 2023.
+
+        Zhu, Q., Duan, J., Chen, C., Liu, S., and Li, X. Near-lossless acceleration
+        of long context llm inference with adaptive sparse attention. arXiv:2406.15486, 2024.
+
+        A F ULL BACKGROUND ON ATTENTION HEADS , FFN S, AND LOGIT LENS
+        The theoretical foundation of our work is grounded in mechanistic interpretability.
+        FFNl equations and residual stream details should not become bibliography.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Near-lossless acceleration" in bibliography_text
+        assert "F ULL BACKGROUND" not in bibliography_text
+        assert "mechanistic interpretability" not in bibliography_text
+        assert "FFNl equations" not in bibliography_text
+
+    def test_bibliography_stops_before_numbered_spaced_post_reference_headings(self):
+        """Post-reference sections can be numbered with PDF-spaced heading words."""
+        sample_text = """
+        References
+        Zhou, T., Niu, P., Sun, L., and Jin, R. One fits all: Power general time
+        series analysis by pretrained language models. NeurIPS, 2023.
+
+        Zhou, Y., Xiao, C., and Liu, Y. Multivariate time-series anomaly detection
+        via graph attention networks. In ICDM, pp. 841-850, 2020.
+
+        8 R EPRODUCIBILITY
+        We will make our dataset public through the project page.
+
+        9 E THICAL CONSIDERATIONS
+        This post-reference prose should not be in the bibliography.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "graph attention networks" in bibliography_text
+        assert "8 R EPRODUCIBILITY" not in bibliography_text
+        assert "make our dataset public" not in bibliography_text
+        assert "E THICAL" not in bibliography_text
+
+    def test_bibliography_stops_before_symbol_table_rows(self):
+        """Guardrail comparison tables after references should end bibliography extraction."""
+        sample_text = """
+        References
+        Zhao, R., Li, X., Joty, S., Qin, C., and Bing, L. Verify-and-edit: A
+        knowledge-enhanced chain-of-thought framework. arXiv:2305.03268, 2023.
+
+        Zou, A., Wang, Z., Kolter, J. Z., and Fredrikson, M. Universal and transferable
+        adversarial attacks on aligned language models. arXiv:2307.15043, 2023.
+
+        Monitoring rules ! ! !
+        Enforcement rules % ! !
+        Multi-modal support ! ! %
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Verify-and-edit" in bibliography_text
+        assert "Universal and transferable" in bibliography_text
+        assert "Monitoring rules" not in bibliography_text
+        assert "Multi-modal support" not in bibliography_text
+
+    def test_bibliography_uses_earliest_heuristic_end_marker(self):
+        """A later table caption must not win over an earlier symbol-table row."""
+        sample_text = """
+        References
+        Zhao, R., Li, X., Joty, S., Qin, C., and Bing, L. Verify-and-edit: A
+        knowledge-enhanced chain-of-thought framework. arXiv:2305.03268, 2023.
+
+        Zou, A., Wang, Z., Kolter, J. Z., and Fredrikson, M. Universal and transferable
+        adversarial attacks on aligned language models. arXiv:2307.15043, 2023.
+
+        Monitoring rules ! ! !
+        Enforcement rules % ! !
+        Table 2. Compared Results of Guardrail Frameworks under Qualitative Analysis Dimensions
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Universal and transferable" in bibliography_text
+        assert "Monitoring rules" not in bibliography_text
+        assert "Table 2" not in bibliography_text
+
+    def test_bibliography_trims_single_trailing_artifact_line(self):
+        """A single non-reference artifact after the final citation should be trimmed."""
+        sample_text = """
+        References
+        Zhi-Yi, C., Chieh-Ming, J., Ching-Chun, H., Pin-Yu, C., and Wei-Chen, C.
+        Prompting4debugging: Red-teaming text-to-image diffusion models by finding
+        problematic prompts. In ICML, pp. 8468-8486, 2024.
+
+        Zhou, Y., Liu, B., Zhu, Y., Yang, X., Chen, C., and Xu, J. Shifted diffusion
+        for text-to-image generation. In CVPR, pp. 10157-10166, 2023.
+
+        dasdsa
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Prompting4debugging" in bibliography_text
+        assert "Shifted diffusion" in bibliography_text
+        assert "dasdsa" not in bibliography_text
+
+    def test_bibliography_trims_artifact_after_pdf_page_header(self):
+        """A lowercase artifact after a PDF page header should not survive cleanup."""
+        sample_text = """
+        References
+        Zhi-Yi, C., Chieh-Ming, J., Ching-Chun, H., Pin-Yu, C., and Wei-Chen, C.
+        Prompting4debugging: Red-teaming text-to-image diffusion models by finding
+        problematic prompts. In ICML, pp. 8468-8486, 2024.
+
+        Zhou, Y., Liu, B., Zhu, Y., Yang, X., Chen, C., and Xu, J. Shifted diffusion
+        for text-to-image generation. In CVPR, pp. 10157-10166, 2023.
+        12
+        Collaborative Erasing Framework for Diffusion Models
+        dasdsa
+        Contents
+        A. Experimental Settings 14
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Shifted diffusion" in bibliography_text
+        assert "Collaborative Erasing Framework" not in bibliography_text
+        assert "dasdsa" not in bibliography_text
+        assert "Experimental Settings" not in bibliography_text
+
+    def test_bibliography_keeps_valid_reference_boundary_lookalikes(self):
+        """Lock correct cases that broad appendix guards might accidentally truncate."""
+        sample_text = """
+        References
+        Villani, C. Optimal transport: old and new, volume 338. Springer, 2009.
+
+        Waissi, G. R. Network flows: Theory, algorithms, and applications, 1994.
+
+        Zhang, X. and Lee, Y. Artificial intelligence for planning, Part II 16,
+        pp. 402-419. Springer, 2020.
+
+        Lee, H., Phatale, S., Mansoor, H., Lu, K. R., Mesnard, T., Ferret, J.,
+        Bishop, C., Hall, E., Carbune, V., and Rastogi,
+        A. RLAIF: Scaling reinforcement learning from human feedback with ai feedback. 2023.
+
+        A. Table of Notations and Definitions
+        Appendix notation content should not be included.
+        """
+
+        bibliography_text = self.checker.find_bibliography_section(sample_text)
+
+        assert bibliography_text is not None
+        assert "Optimal transport" in bibliography_text
+        assert "Part II 16" in bibliography_text
+        assert "A. RLAIF: Scaling reinforcement learning" in bibliography_text
+        assert "A. Table of Notations" not in bibliography_text
+        assert "Appendix notation content" not in bibliography_text
+
     def test_bibliography_stops_before_letter_digit_dotted_appendix_headings(self):
         """ICML PDFs can use headings like A1. Review or A2. Additional after refs."""
         appendix_cases = [
