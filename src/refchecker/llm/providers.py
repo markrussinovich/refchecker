@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .base import LLMProvider
+from .google_retry import call_google_with_retry
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_EXTRACTION_MODELS
 
 logger = logging.getLogger(__name__)
@@ -526,14 +527,17 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
-            response = self.client.models.generate_content(
-                model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
-                contents=prompt,
-                config={
-                    'system_instruction': self._get_system_prompt(),
-                    'max_output_tokens': self.max_tokens,
-                    'temperature': self.temperature,
-                },
+            response = call_google_with_retry(
+                lambda: self.client.models.generate_content(
+                    model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
+                    contents=prompt,
+                    config={
+                        'system_instruction': self._get_system_prompt(),
+                        'max_output_tokens': self.max_tokens,
+                        'temperature': self.temperature,
+                    },
+                ),
+                purpose='reference extraction',
             )
             
             # Handle empty responses (content safety filter or other issues)

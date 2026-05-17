@@ -15,11 +15,10 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-import time
 from typing import Any, Dict, List, Optional
 
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_HALLUCINATION_MODELS
+from refchecker.llm.google_retry import call_google_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -337,9 +336,6 @@ class LLMHallucinationVerifier:
 
     # Default models per provider (used when caller doesn't specify)
     _DEFAULT_MODELS = DEFAULT_HALLUCINATION_MODELS
-    _GOOGLE_RETRY_ATTEMPTS = 5
-    _GOOGLE_RETRY_INITIAL_DELAY_SECONDS = 1.0
-    _GOOGLE_RETRY_MAX_DELAY_SECONDS = 60.0
 
     def __init__(
         self,
@@ -625,49 +621,13 @@ class LLMHallucinationVerifier:
 
     def _google_generate_content_with_retry(self, *, contents: str, config: Any, purpose: str) -> Any:
         """Call Gemini with truncated exponential backoff for transient errors."""
-        attempts = self._GOOGLE_RETRY_ATTEMPTS
-        for attempt in range(attempts):
-            try:
-                return self.client.models.generate_content(
+        return call_google_with_retry(
+            lambda: self.client.models.generate_content(
                     model=self.model,
                     contents=contents,
                     config=config,
-                )
-            except Exception as exc:
-                if not self._is_google_retryable_error(exc) or attempt == attempts - 1:
-                    raise
-                wait_time = min(
-                    self._GOOGLE_RETRY_MAX_DELAY_SECONDS,
-                    self._GOOGLE_RETRY_INITIAL_DELAY_SECONDS * (2 ** attempt) + random.random(),
-                )
-                logger.debug(
-                    'Google %s transient error (%s); retrying in %.1fs (%d/%d)',
-                    purpose,
-                    exc,
-                    wait_time,
-                    attempt + 2,
-                    attempts,
-                )
-                time.sleep(wait_time)
-
-        raise RuntimeError('unreachable Google retry state')
-
-    @staticmethod
-    def _is_google_retryable_error(exc: Exception) -> bool:
-        text = str(exc).lower()
-        return (
-            '429' in text
-            or '408' in text
-            or '500' in text
-            or '502' in text
-            or '503' in text
-            or '504' in text
-            or 'resource_exhausted' in text
-            or 'rate limit' in text
-            or 'quota' in text
-            or 'timeout' in text
-            or 'temporarily unavailable' in text
-            or 'unavailable' in text
+            ),
+            purpose=purpose,
         )
 
     # ------------------------------------------------------------------
