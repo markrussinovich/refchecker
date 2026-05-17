@@ -345,3 +345,54 @@ def test_bulk_finalize_rechecks_against_llm_returned_match():
     assert result.errors[0]['hallucination_assessment']['verdict'] == 'UNLIKELY'
     assert result.errors[0]['hallucination_assessment']['original_verdict'] == 'LIKELY'
     assert result.errors[0]['matched_database'] == 'LLM search'
+
+
+def test_bulk_finalize_removes_unverified_entry_resolved_by_llm_url():
+    reference = {
+        'title': 'Success and scientific realism: considerations from the philosophy of simulation',
+        'authors': ['Eric Winsberg', 'Ali Mirza'],
+        'year': 2017,
+        'venue': 'The Routledge Handbook of Scientific Realism',
+    }
+    error_entry = {
+        'ref_title': reference['title'],
+        'original_reference': reference,
+        '_original_errors': [
+            {
+                'error_type': 'unverified',
+                'error_details': 'Paper not found by any checker',
+            }
+        ],
+    }
+    result = BulkPaperResult(
+        index=0,
+        input_spec='fixture://paper',
+        paper_id='paper',
+        title='Paper',
+        source_url='fixture://paper',
+        elapsed_seconds=1.0,
+        references_processed=1,
+        total_errors_found=0,
+        total_warnings_found=0,
+        total_info_found=0,
+        total_unverified_refs=1,
+        total_arxiv_refs=0,
+        total_non_arxiv_refs=1,
+        total_other_refs=0,
+        papers_with_errors=0,
+        papers_with_warnings=0,
+        papers_with_info=0,
+        errors=[error_entry],
+    )
+    assessment = {
+        'verdict': 'UNLIKELY',
+        'explanation': 'The cited book chapter exists.',
+        'link': 'https://www.routledge.com/The-Routledge-Handbook-of-Scientific-Realism/Saatsi/p/book/9780367572556',
+    }
+    future = SimpleNamespace(result=lambda timeout=None: assessment)
+    checker = SimpleNamespace(verify_reference_standard=MagicMock(return_value=(None, None, None)))
+
+    _finalize_hallucination_on_result(result, [(checker, error_entry, future)])
+
+    assert result.total_unverified_refs == 0
+    assert result.errors == []

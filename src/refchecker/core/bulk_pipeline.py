@@ -1493,6 +1493,13 @@ def _finalize_hallucination_on_result(
                 authoritative_urls = applied.get('authoritative_urls') or []
                 if authoritative_urls:
                     error_entry['ref_verified_url'] = authoritative_urls[0].get('url', error_entry.get('ref_verified_url', ''))
+                if (
+                    has_unverified
+                    and applied.get('status') == 'verified'
+                    and not applied.get('errors')
+                    and not applied.get('warnings')
+                ):
+                    error_entry['_resolved_unverified_by_hallucination'] = True
         except Exception as exc:
             logger.warning('Hallucination check failed for %s: %s',
                            error_entry.get('ref_title', '?')[:60], exc)
@@ -1508,11 +1515,13 @@ def _finalize_hallucination_on_result(
             or e.get('warning_type') == 'unverified'
             or e.get('info_type') == 'unverified'
             for e in raw_errors
-        )
+        ) or entry.get('_resolved_unverified_by_hallucination')
         if has_unverified and result.total_unverified_refs > 0:
             result.total_unverified_refs -= 1
 
-    # Remove URL-verified UNLIKELY entries
+    # Remove entries whose only issue was an unverified result resolved by the
+    # shared hallucination policy. Bulk output only lists problematic refs, so
+    # keeping these entries would print both a verified URL and "Could not verify".
     to_remove = []
     for i, entry in enumerate(result.errors):
         assessment = entry.get('hallucination_assessment') or {}
@@ -1527,7 +1536,7 @@ def _finalize_hallucination_on_result(
             'url references paper' in (e.get('error_details') or '').lower()
             for e in raw_errors
         )
-        if has_unverified and has_url_references:
+        if entry.get('_resolved_unverified_by_hallucination') or (has_unverified and has_url_references):
             to_remove.append(i)
     for i in reversed(to_remove):
         result.errors.pop(i)
