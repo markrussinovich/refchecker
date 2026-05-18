@@ -1889,8 +1889,8 @@ def test_google_rate_limit_retry_eventually_succeeds(monkeypatch):
     verifier.client = MagicMock()
     verifier.client.models.generate_content = generate_content
     sleeps = []
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.random.random', lambda: 0.25)
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleeps.append)
+    monkeypatch.setattr('refchecker.llm.google_retry.random.random', lambda: 0.25)
+    monkeypatch.setattr('refchecker.llm.google_retry.time.sleep', sleeps.append)
 
     result = verifier._google_generate_content_with_retry(
         contents='prompt',
@@ -1910,7 +1910,7 @@ def test_google_non_rate_limit_error_is_not_retried(monkeypatch):
     verifier.client = MagicMock()
     verifier.client.models.generate_content = generate_content
     sleep = MagicMock()
-    monkeypatch.setattr('refchecker.llm.hallucination_verifier.time.sleep', sleep)
+    monkeypatch.setattr('refchecker.llm.google_retry.time.sleep', sleep)
 
     try:
         verifier._google_generate_content_with_retry(
