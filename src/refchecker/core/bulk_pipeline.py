@@ -29,6 +29,7 @@ from refchecker.utils.arxiv_utils import get_bibtex_content
 from refchecker.utils.text_utils import detect_latex_bibliography_format, extract_latex_references
 
 logger = logging.getLogger(__name__)
+_PRINT_LOCK = threading.RLock()
 
 if TYPE_CHECKING:
     from refchecker.core.refchecker import ArxivReferenceChecker
@@ -37,13 +38,14 @@ if TYPE_CHECKING:
 def _safe_print(*args, **kwargs) -> None:
     """Print that falls back to ascii+replace when stdout can't handle Unicode."""
     import sys
-    try:
-        print(*args, **kwargs, flush=True)
-    except UnicodeEncodeError:
-        text = ' '.join(str(a) for a in args)
-        sys.stdout.buffer.write(text.encode('utf-8', errors='replace'))
-        sys.stdout.buffer.write(b'\n')
-        sys.stdout.buffer.flush()
+    with _PRINT_LOCK:
+        try:
+            print(*args, **kwargs, flush=True)
+        except UnicodeEncodeError:
+            text = ' '.join(str(a) for a in args)
+            sys.stdout.buffer.write(text.encode('utf-8', errors='replace'))
+            sys.stdout.buffer.write(b'\n')
+            sys.stdout.buffer.flush()
 
 
 def _safe_print_labeled(emoji: str, text: str) -> None:
@@ -432,6 +434,12 @@ def _print_bulk_reference_block(error_entry: Dict[str, Any], ref_idx: int, total
     ref_idx: 1-based index among error references for this paper.
     total_refs: total references in the paper (for context).
     """
+    with _PRINT_LOCK:
+        _print_bulk_reference_block_unlocked(error_entry, ref_idx, total_refs)
+
+
+def _print_bulk_reference_block_unlocked(error_entry: Dict[str, Any], ref_idx: int, total_refs: int) -> None:
+    """Print a bulk reference block while the caller holds _PRINT_LOCK."""
     ref_title = error_entry.get('ref_title', 'Untitled')
     ref_authors = error_entry.get('ref_authors_cited', '')
     ref_year = error_entry.get('ref_year_cited', '')
@@ -534,40 +542,41 @@ class BulkProgressReporter:
             # Paper ID is 1-based start order (result.index is 0-based)
             paper_id = result.index + 1
 
-            # ── Paper header ──
-            display_title = result.input_spec or result.paper_id or result.title
-            _safe_print(f'\n📄 {dt.datetime.now().strftime("%H:%M:%S")} [{paper_id}/{self.total_papers}] {display_title}')
-            if result.source_url and result.source_url != display_title:
-                _safe_print(f'   {result.source_url}')
+            with _PRINT_LOCK:
+                # ── Paper header ──
+                display_title = result.input_spec or result.paper_id or result.title
+                _safe_print(f'\n📄 {dt.datetime.now().strftime("%H:%M:%S")} [{paper_id}/{self.total_papers}] {display_title}')
+                if result.source_url and result.source_url != display_title:
+                    _safe_print(f'   {result.source_url}')
 
-            # ── Paper stats ──
-            flagged_entries = [
-                e for e in result.errors
-                if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
-            ]
-            flagged_count = len(flagged_entries)
-            paper_unverified = max(result.total_unverified_refs, flagged_count)
-            elapsed = f'{result.elapsed_seconds:.0f}s'
-            flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
-            _safe_print(
-                f'   refs={result.references_processed} '
-                f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
-                f'info={result.total_info_found} unverified={paper_unverified}'
-                f'{flag_note} '
-                f'({elapsed})'
-            )
+                # ── Paper stats ──
+                flagged_entries = [
+                    e for e in result.errors
+                    if e.get('hallucination_assessment', {}).get('verdict') == 'LIKELY'
+                ]
+                flagged_count = len(flagged_entries)
+                paper_unverified = max(result.total_unverified_refs, flagged_count)
+                elapsed = f'{result.elapsed_seconds:.0f}s'
+                flag_note = f' hallucinated={flagged_count}' if flagged_count else ''
+                _safe_print(
+                    f'   refs={result.references_processed} '
+                    f'errors={result.total_errors_found} warnings={result.total_warnings_found} '
+                    f'info={result.total_info_found} unverified={paper_unverified}'
+                    f'{flag_note} '
+                    f'({elapsed})'
+                )
 
-            # ── Show all references with errors/warnings ──
-            for ref_idx, error_entry in enumerate(result.errors, 1):
-                _safe_print('')
-                _print_bulk_reference_block(error_entry, ref_idx, result.references_processed)
+                # ── Show all references with errors/warnings ──
+                for ref_idx, error_entry in enumerate(result.errors, 1):
+                    _safe_print('')
+                    _print_bulk_reference_block(error_entry, ref_idx, result.references_processed)
 
-            # ── Running totals ──
-            _safe_print(
-                f'   Totals: refs={self.total_references} '
-                f'errors={self.total_errors} warnings={self.total_warnings} '
-                f'info={self.total_info} unverified={self.total_unverified}'
-            )
+                # ── Running totals ──
+                _safe_print(
+                    f'   Totals: refs={self.total_references} '
+                    f'errors={self.total_errors} warnings={self.total_warnings} '
+                    f'info={self.total_info} unverified={self.total_unverified}'
+                )
 
 
 @dataclass
