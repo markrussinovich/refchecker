@@ -1560,6 +1560,190 @@ class ArxivReferenceChecker:
         ):
             return True
         return False
+
+    @staticmethod
+    def _find_style_aware_bibliography_end(section_text):
+        """Find a safe end after the final reference when PDF text loses the next heading."""
+        if not section_text:
+            return None
+
+        def has_hard_reference_evidence(value):
+            return bool(re.search(
+                r'https?://|\bdoi\b|\barxiv\b|\bCoRR\b|\bISSN\b|\bISBN\b|'
+                r'\b(?:19|20)\d{2}\b|\bpages?\s+\d|:\d+[-–]\d+',
+                value,
+                re.IGNORECASE,
+            ))
+
+        def previous_line_can_end_reference(previous_nonempty_lines):
+            if not previous_nonempty_lines:
+                return False
+            previous_window = ' '.join(previous_nonempty_lines[-3:])
+            return has_hard_reference_evidence(previous_window) and bool(
+                re.search(r'[.!?)]\s*$', previous_nonempty_lines[-1])
+            )
+
+        def looks_like_explicit_tail_boundary(value):
+            stripped = value.strip()
+            if not stripped:
+                return True
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return True
+            if re.search(
+                r'(?i)\b(?:Paper\s+Checklist|Do\s+not\s+remove\s+the\s+checklist|'
+                r'checklist\s+should\s+follow\s+the\s+references)\b',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^(?:Question:|Answer:|Justification:|Guidelines:|Claims\b|Limitations\b)',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^\d{1,2}\.\s+(?:Claims|Limitations|Theory\s+assumptions|'
+                r'Experimental\s+result|Open\s+access|Code\s+of\s+ethics|Broader\s+impacts|'
+                r'Safeguards|Licenses|New\s+assets|Crowdsourcing|Institutional\s+review|'
+                r'Declaration\s+of\s+LLM\s+usage)\b',
+                stripped,
+            ):
+                return True
+            if re.match(r'^[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}$', stripped):
+                return True
+            if re.match(r'^[A-H]\s+[A-Z][A-Za-z]+(?:[.,]\s+|\s+and\s+)', stripped):
+                return False
+            if re.match(r'^[A-H]\s+[A-Z][A-Za-z][^\n]{3,140}$', stripped):
+                return True
+            return False
+
+        def looks_like_reference_continuation(value):
+            stripped = value.strip()
+            if not stripped:
+                return False
+            if re.match(
+                r'(?i)^(?:https?://|doi\b|url\b|arxiv\b|pages?\b|pp\.|vol\.|volume\b|'
+                r'in\s+(?:proceedings|advances|international|conference)|journal\b|'
+                r'proceedings\b|transactions\b|conference\b|available\b|retrieved\b)',
+                stripped,
+            ):
+                return True
+            if re.match(
+                r'(?i)^(?:[a-z0-9.-]+\.(?:org|com|net|edu|io|gov)(?:/|$)|'
+                r'(?:org|com|net|edu|io|gov|abs|html|pdf)/|10\.\d{4,9}/)',
+                stripped,
+            ):
+                return True
+            return has_hard_reference_evidence(stripped)
+
+        def looks_like_author_year_tail_boundary(value, following_text=''):
+            stripped = value.strip()
+            if not stripped:
+                return False
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return False
+            if looks_like_explicit_tail_boundary(stripped):
+                return True
+            if re.match(r'^[a-z]', stripped) and not looks_like_reference_continuation(stripped):
+                return not has_hard_reference_evidence(following_text)
+            return bool(re.match(
+                r'^(?:To|By|The|This|These|Those|Our|We|It|For\s+example|Case\s+\d+|Conclusion:)\b',
+                stripped,
+            )) and not looks_like_reference_continuation(stripped) and not has_hard_reference_evidence(following_text)
+
+        def looks_like_internal_pdf_header(value, raw_previous_nonempty_lines):
+            stripped = value.strip()
+            if not stripped:
+                return True
+            if re.fullmatch(r'\d{1,4}', stripped):
+                return True
+            if looks_like_explicit_tail_boundary(stripped):
+                return False
+            if 'Published as a conference paper' in stripped or 'Published as a workshop paper' in stripped:
+                return True
+            if re.sub(r'\s+', '', stripped).lower().startswith('publishedasaconferencepaper'):
+                return True
+            return ArxivReferenceChecker._looks_like_pdf_page_header_boundary(
+                stripped,
+                raw_previous_nonempty_lines,
+            )
+
+        def scan_from_reference_start(start_offset, boundary_predicate):
+            segment = section_text[start_offset:]
+            lines = segment.splitlines(keepends=True)
+            consumed = 0
+            seen_hard_reference_evidence = False
+            previous_nonempty_lines = []
+
+            for line_index, line in enumerate(lines):
+                stripped = line.strip()
+                line_start = start_offset + consumed
+                consumed += len(line)
+
+                if (
+                    line_index > 0
+                    and seen_hard_reference_evidence
+                    and previous_line_can_end_reference(previous_nonempty_lines)
+                    and boundary_predicate(stripped)
+                ):
+                    return line_start
+
+                if has_hard_reference_evidence(stripped):
+                    seen_hard_reference_evidence = True
+                if stripped:
+                    previous_nonempty_lines.append(stripped)
+
+            return None
+
+        bracket_reference_matches = list(re.finditer(r'(?m)^\s*\[(\d{1,3})\]\s+', section_text))
+        if len(bracket_reference_matches) >= 5:
+            reference_numbers = [int(match.group(1)) for match in bracket_reference_matches]
+            max_reference_number = max(reference_numbers)
+            if max_reference_number >= 5 and 1 in reference_numbers:
+                last_reference_match = next(
+                    match for match in reversed(bracket_reference_matches)
+                    if int(match.group(1)) == max_reference_number
+                )
+                bracket_end = scan_from_reference_start(
+                    last_reference_match.start(),
+                    looks_like_explicit_tail_boundary,
+                )
+                if bracket_end is not None:
+                    return bracket_end
+
+        if len(bracket_reference_matches) >= 5:
+            return None
+
+        lines = section_text.splitlines(keepends=True)
+        consumed = 0
+        previous_nonempty_lines = []
+        raw_previous_nonempty_lines = []
+        completed_reference_lines = 0
+
+        for line_index, line in enumerate(lines):
+            stripped = line.strip()
+            line_start = consumed
+            consumed += len(line)
+
+            if looks_like_internal_pdf_header(stripped, raw_previous_nonempty_lines):
+                if stripped:
+                    raw_previous_nonempty_lines.append(stripped)
+                continue
+
+            if (
+                line_index > 0
+                and completed_reference_lines >= 5
+                and previous_line_can_end_reference(previous_nonempty_lines)
+                and looks_like_author_year_tail_boundary(stripped, ''.join(lines[line_index:line_index + 12]))
+            ):
+                return line_start
+
+            if stripped:
+                raw_previous_nonempty_lines.append(stripped)
+                previous_nonempty_lines.append(stripped)
+                if previous_line_can_end_reference(previous_nonempty_lines):
+                    completed_reference_lines += 1
+
+        return None
     
     def find_bibliography_section(self, text):
         """
@@ -1647,6 +1831,9 @@ class ArxivReferenceChecker:
             r'(?i)\n\s*Funding\s+Information\s*\n',
             r'(?i)\n\s*Supporting\s+Information\s*\n',
             r'(?i)\n\s*Reviewer\s+Scores?\s*:\s*\n',
+            r'(?i)\n\s*(?:NeurIPS\s+)?Paper\s+Checklist\s*\n',
+            r'(?i)\n[^\n]{0,180}\bDo\s+not\s+remove\s+the\s+checklist\b[^\n]*\n',
+            r'(?i)\n[^\n]{0,180}\bchecklist\s+should\s+follow\s+the\s+references\b[^\n]*\n',
             # Common post-bibliography headings (handle PDF concatenation with \s*)
             r'(?i)\n\s*Limitations?\s*\n',
             r'(?i)\n\s*(?:Broader\s*)?Impact\s*Statement?\s*\n',
@@ -1679,6 +1866,7 @@ class ArxivReferenceChecker:
             r'Implementation|Experiments?|Experimental|Datasets?|Hyperparameters?|Ablation|Discussion|'
             r'Overview|LLM|Usage|Declaration|Comparison|Verification|Setup|Training|Architecture|Program|Formal|Definitions?|'
             r'Existing|Gaussian|Class\s+Separation|Continuity|Interpretation|Variational|Table|Individual|Coloring|Broader|Impacts?|Other|Examples?|Step[\s\-]?size|Optimization|Effect|'
+            r'Spurious|'
             r'Baselines|Omitted|Technical|Auxiliary|Theoretical|Analysis|Conclusions?|Convergence|'
             r'Formulation|Guarantees?|Remarks?|Bounds?|Complexity|Visualization|Limitations?|Methodology|'
             r'Evaluation|Estimation|Results|Properties|Stochastic|Stationary[\s\-]?Point|Conclusion|Discussion|'
@@ -1812,6 +2000,7 @@ class ArxivReferenceChecker:
                 # word, e.g. "A I NTRODUCTORY MATERIAL" (INTRODUCTORY broken into I + NTRODUCTORY)
                 # Allow lowercase connecting words (for/of/the/in/on/and/with/to/a/an) and digits
                 # in section titles, e.g. "A Theoretical Arguments for Section 3"
+                r'(?i)\n\s*[A-H]\s+(?:Background|Spurious\s+Correlation)\b[^\n]*:\s*[^\n]*\n',
                 r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
                 # PDF word-break artifacts with parenthetical continuation markers,
                 # e.g. "A E XPERIMENTAL S ETTINGS (C ONT ' D )".
@@ -1824,6 +2013,9 @@ class ArxivReferenceChecker:
                 r'\n\s*[A-Z]\s+[A-Z][A-Z0-9\-]{5,}(?:\([A-Z0-9\-]+\))?(?:\s+[A-Z][A-Z0-9\-]{2,}(?:\([A-Z0-9\-]+\))?)*\s*\n',
                 # Numbered appendix subsections: "A.1 RELATED WORK", "B.2 Implementation Details"
                 r'\n\s*[A-Z]\.\d+\s+[A-Z][A-Za-z\s\-]+\n',
+                # Multi-level appendix subsections without a trailing dot, e.g.
+                # "A.0.1 Feature Decomposition".
+                r'\n\s*[A-Z](?:\.\d+){2,}\s+[A-Z0-9][^\n]{3,140}\n',
                 # Deeper numbered appendix subsections from PDF extraction,
                 # e.g. "A.2.1. M ODULE 2.1: A XIOMS OF UTILITY IN".
                 r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
@@ -1934,6 +2126,13 @@ class ArxivReferenceChecker:
             if heuristic_end is not None:
                 end_pos = heuristic_end
                 logger.debug(f"Using heuristic end marker at {end_pos}")
+
+            style_aware_end = self._find_style_aware_bibliography_end(text[start_pos:end_pos])
+            if style_aware_end is not None:
+                candidate = start_pos + style_aware_end
+                if candidate > start_pos + 100 and candidate < end_pos:
+                    end_pos = candidate
+                    logger.debug(f"Bibliography truncated by style-aware tail guard at {end_pos}")
             
             # Trim trailing whitespace / page numbers / conference headers at the boundary
             while end_pos > start_pos + 100:
@@ -2041,7 +2240,9 @@ class ArxivReferenceChecker:
                         r'\n\s*[A-Z](?:\.\d+){1,}\.\s+[A-Z0-9][^\n]{3,140}\n',
                         r'\n\s*[A-Z]\.\s+(?:[A-Z][A-Z0-9\-]{2,}|S\d)\b[^\n]{0,120}\n',
                         r'\n[A-Z]\s*\n\s*\n?(?=[A-Z][A-Za-z0-9][^\n]{3,120}\n)',
+                        r'(?i)\n\s*[A-H]\s+(?:Background|Spurious\s+Correlation)\b[^\n]*:\s*[^\n]*\n',
                         r'\n\s*[A-H]\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+)(?:\s+(?:[A-Z]\s+)?(?:[A-Z]{2,}|[A-Z][a-z]+|[a-z]+|\d+(?:\.\d+)?))*\s*\n',
+                        r'\n\s*[A-Z](?:\.\d+){2,}\s+[A-Z0-9][^\n]{3,140}\n',
                         r'\n[ \t]*[A-Z][ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z0-9\'’′().?,:;\-]*(?:[ \t]+(?:[A-Z][ \t]+)?[A-Za-z0-9\'’′().?,:;\-]+)*[ \t]*\n',
                         # Fully spaced-out appendix heading from PDF letter-spacing artifacts
                         r'\n[A-Z]\s+(?:[A-Z]{1,3}\s+){3,}[A-Z]{1,3}\s*\n',
@@ -2085,6 +2286,13 @@ class ArxivReferenceChecker:
                                 end_pos = candidate
                                 logger.debug(f"Fallback appendix end at {end_pos}: {repr(m2.group(0).strip()[:60])}")
                             break
+
+                    style_aware_end = self._find_style_aware_bibliography_end(text[line_start:end_pos])
+                    if style_aware_end is not None:
+                        candidate = line_start + style_aware_end
+                        if candidate > line_start + 100 and candidate < end_pos:
+                            end_pos = candidate
+                            logger.debug(f"Fallback truncated by style-aware tail guard at {end_pos}")
 
                     while end_pos > line_start + 100:
                         trailing_start = text.rfind('\n', line_start, end_pos - 1)
