@@ -167,6 +167,29 @@ jobs:
           codesign --verify --verbose=2 "$BIN"
 
       # ---------------------------------------------------------------
+      # Validate the updater signing key BEFORE handing it to tauri build.
+      # Tauri hard-fails if TAURI_SIGNING_PRIVATE_KEY is set but malformed
+      # (e.g. user pasted only the base64 body without the
+      # "untrusted comment:" header). We'd rather degrade to an unsigned
+      # build than fail the whole release pipeline on a paste mistake.
+      # ---------------------------------------------------------------
+      - name: Validate Tauri updater signing key
+        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          decoded=$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 -d 2>/dev/null || true)
+          if [[ "$decoded" == *"untrusted comment:"* && "$decoded" == *"rsign"* ]]; then
+            echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid (rsign secret key)"
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key. Disabling updater signing for this build — fix the secret to re-enable."
+            # Clearing in $GITHUB_ENV unsets it for subsequent steps in this job.
+            echo "TAURI_SIGNING_PRIVATE_KEY=" >> "$GITHUB_ENV"
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+          fi
+
+      # ---------------------------------------------------------------
       # Tauri build (writes signed updater artifacts when
       # TAURI_SIGNING_PRIVATE_KEY is set; falls back to unsigned otherwise)
       # ---------------------------------------------------------------
