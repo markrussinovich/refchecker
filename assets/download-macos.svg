@@ -2,16 +2,16 @@
   <title>Download for macOS</title>
   <rect width="200" height="60" rx="10" fill="#0a0a0a"/>
   <!--
-    Apple logo. The source path lives in a 24x24 box; we translate to
-    (14,14) and scale 1.35x so the glyph reads ~32px tall, vertically
-    centered in the 60px button.
+    Apple logo. Source path is in a 24x24 box. We translate to (16,16)
+    and scale 1.15x so the glyph reads ~28px tall — visually matched
+    to the four 13x13 squares of the Windows button.
   -->
-  <path fill="#ffffff" transform="translate(14 14) scale(1.35)"
+  <path fill="#ffffff" transform="translate(16 16) scale(1.15)"
         d="M16.365 1.43c0 1.14-.493 2.27-1.177 3.08-.744.9-1.99 1.57-2.987 1.57-.12 0-.23-.02-.3-.03-.01-.06-.04-.22-.04-.39 0-1.15.572-2.27 1.206-2.98C13.87.722 15.208.022 16.314-.018c.03.13.051.28.051.43v1.018zM20.93 17.14c-.03-3.05 2.49-4.51 2.6-4.58-1.42-2.06-3.62-2.34-4.39-2.37-1.87-.19-3.65 1.1-4.6 1.1-.95 0-2.4-1.07-3.95-1.04-2.04.03-3.91 1.19-4.96 3.04-2.11 3.65-.54 9.06 1.52 12.04 1 1.46 2.2 3.1 3.78 3.04 1.51-.06 2.09-.97 3.93-.97 1.84 0 2.35.97 3.96.94 1.63-.03 2.66-1.49 3.66-2.95 1.15-1.69 1.63-3.34 1.66-3.43-.04-.01-3.18-1.22-3.21-4.83z"/>
-  <text x="68" y="26" fill="#cfcfcf"
+  <text x="62" y="26" fill="#cfcfcf"
         font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif"
         font-size="10" font-weight="500" letter-spacing="0.8">DOWNLOAD FOR</text>
-  <text x="68" y="46" fill="#ffffff"
+  <text x="62" y="46" fill="#ffffff"
         font-family="-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif"
         font-size="20" font-weight="700">macOS</text>
 </svg>
