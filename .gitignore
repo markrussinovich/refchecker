@@ -123,6 +123,17 @@ semantic_scholar_db/
 !tests/fixtures/hallucination_llm_benchmark/**
 backend/uploads/
 
+# Tauri desktop wrapper — needs to be tracked despite globs above
+!tauri-app/package.json
+!tauri-app/package-lock.json
+!tauri-app/src-tauri/tauri.conf.json
+!tauri-app/src-tauri/capabilities/*.json
+!tauri-app/src-tauri/icons/**/*.json
+!tauri-app/python/*.spec
+
+# Local secrets stash — never committed
+secretsme/
+
 # Temporary files
 temp/
 tmp/

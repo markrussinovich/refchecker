@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { 
-  exportResultsAsMarkdown, 
-  exportResultsAsPlainText, 
+  exportResultsAsMarkdown,
+  exportResultsAsPlainText,
   exportResultsAsBibtex,
-  downloadAsFile 
+  exportResultsAsJsonl,
+  exportResultsAsCsv,
+  downloadAsFile
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 
@@ -123,6 +125,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       case 'bibtex':
         downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
         break
+      case 'jsonl':
+        downloadAsFile(exportResultsAsJsonl(exportData), `${baseFilename}.jsonl`, 'application/x-ndjson')
+        break
+      case 'csv':
+        downloadAsFile(exportResultsAsCsv(exportData), `${baseFilename}.csv`, 'text/csv')
+        break
     }
   }
 
@@ -154,17 +162,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         </div>
         {/* Right side controls */}
         <div className="flex items-center gap-2">
-          {/* Filter indicator */}
-          {isFilterActive && activeFilter && (
+          {/* Filter indicator — single 'Clear filters' chip whenever any
+              of the multi-select Summary chips is active. */}
+          {isFilterActive && (
             <button
-              onClick={() => handleFilterClick(activeFilterId)}
+              onClick={() => useCheckStore.getState().clearStatusFilter()}
               className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium transition-opacity hover:opacity-80"
-              style={{ 
-                backgroundColor: activeFilter.bgColor,
-                color: activeFilter.color,
+              style={{
+                backgroundColor: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-primary)',
+                border: '1px solid var(--color-border)',
               }}
+              title="Clear all active filters"
             >
-              <span>Showing {activeFilter.label.toLowerCase()}</span>
+              <span>
+                Filtered: {statusFilter.join(', ')}
+              </span>
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -225,6 +238,20 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   📚 BibTeX (.bib)
+                </button>
+                <button
+                  onClick={() => handleExport('jsonl')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  🧾 JSONL (.jsonl)
+                </button>
+                <button
+                  onClick={() => handleExport('csv')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📊 CSV (.csv)
                 </button>
               </div>
             )}

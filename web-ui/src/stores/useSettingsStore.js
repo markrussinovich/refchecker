@@ -14,12 +14,16 @@ export const useSettingsStore = create((set, get) => ({
   isLoading: false,
   error: null,
   isSettingsOpen: false,
+  // Optional initial section name read by SettingsPanel when it opens
+  // (set by callers that want to deep-link, e.g. the OnboardingBanner).
+  initialSection: null,
 
   /**
-   * Open the settings panel
+   * Open the settings panel. Pass a section name ('General', 'LLM',
+   * 'API Keys', ...) to deep-link.
    */
-  openSettings: () => {
-    set({ isSettingsOpen: true })
+  openSettings: (section) => {
+    set({ isSettingsOpen: true, initialSection: section || null })
     // Fetch latest settings when opening
     get().fetchSettings()
     get().fetchVersion()

@@ -1,4 +1,5 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
+import { fetchOpenReviewList } from '../../utils/api'
 
 /**
  * Bulk input component for multiple URLs or file uploads
@@ -55,6 +56,35 @@ export default function BulkInputZone({
   }, [setBulkFiles])
 
   const urlCount = bulkUrls.split('\n').filter(u => u.trim()).length
+
+  // OpenReview venue scanner — wraps the CLI's --openreview flow.
+  const [orVenue, setOrVenue] = useState('')
+  const [orStatus, setOrStatus] = useState('accepted')
+  const [orFetching, setOrFetching] = useState(false)
+  const [orError, setOrError] = useState(null)
+  const [orResult, setOrResult] = useState(null)
+  const handleOpenReviewFetch = useCallback(async () => {
+    setOrError(null); setOrResult(null)
+    const venue = orVenue.trim()
+    if (!venue) { setOrError('Enter a venue (e.g. iclr2024)'); return }
+    setOrFetching(true)
+    try {
+      const res = await fetchOpenReviewList(venue, orStatus)
+      const data = res.data
+      const all = data.papers || []
+      const limited = all.slice(0, 50) // existing batch endpoint cap
+      setBulkUrls(limited.join('\n'))
+      setOrResult({
+        count: all.length,
+        used: limited.length,
+        display_name: data.display_name,
+      })
+    } catch (e) {
+      setOrError(e.response?.data?.detail || e.message || 'Failed to fetch')
+    } finally {
+      setOrFetching(false)
+    }
+  }, [orVenue, orStatus, setBulkUrls])
 
   return (
     <div className="space-y-4">
@@ -125,6 +155,72 @@ export default function BulkInputZone({
       {/* URLs input */}
       {bulkMode === 'urls' && (
         <div>
+          {/* OpenReview venue scanner — replaces the textarea with the
+              fetched list (capped at 50, the batch limit). */}
+          <div
+            className="mb-3 p-3 rounded-lg border"
+            style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}
+          >
+            <div className="text-xs font-medium mb-2" style={{ color: 'var(--color-text-primary)' }}>
+              Scan an OpenReview venue
+            </div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <input
+                type="text"
+                value={orVenue}
+                onChange={(e) => setOrVenue(e.target.value)}
+                placeholder="iclr2024, icml2025, aistats2025, uai2025, corl2025"
+                disabled={disabled || orFetching}
+                className="flex-1 px-3 py-1.5 rounded border text-xs font-mono"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                  minWidth: '180px',
+                }}
+              />
+              <select
+                value={orStatus}
+                onChange={(e) => setOrStatus(e.target.value)}
+                disabled={disabled || orFetching}
+                className="px-2 py-1.5 rounded border text-xs"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+              >
+                <option value="accepted">accepted</option>
+                <option value="submitted">submitted</option>
+              </select>
+              <button
+                onClick={handleOpenReviewFetch}
+                disabled={disabled || orFetching}
+                className="px-3 py-1.5 rounded text-xs font-medium"
+                style={{
+                  backgroundColor: 'var(--color-accent, #3b82f6)',
+                  color: 'white',
+                  opacity: orFetching ? 0.6 : 1,
+                }}
+              >
+                {orFetching ? 'Fetching…' : 'Fetch papers'}
+              </button>
+            </div>
+            {orError && (
+              <div className="text-xs mt-2" style={{ color: 'var(--color-error, #ef4444)' }}>{orError}</div>
+            )}
+            {orResult && (
+              <div className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                {orResult.display_name}: fetched {orResult.count} papers,
+                loaded {orResult.used} into the list below
+                {orResult.count > orResult.used && (
+                  <> (capped at 50 per batch — run multiple batches for full coverage)</>
+                )}
+                .
+              </div>
+            )}
+          </div>
+
           <textarea
             value={bulkUrls}
             onChange={(e) => setBulkUrls(e.target.value)}

@@ -196,14 +196,15 @@ export const useCheckStore = create((set, get) => ({
   },
 
   setStatusFilter: (filter) => {
+    // Multi-select toggle: clicking a chip adds it to the active set;
+    // clicking it again removes it. An empty array means "show all".
+    // Both the References list and the Corrections tab read this state,
+    // so the summary chips drive whichever tab is currently visible.
     const currentFilters = get().statusFilter
-    // Single-select: clicking active filter clears it, clicking another sets only that one
-    if (currentFilters.includes(filter) && currentFilters.length === 1) {
-      // Clicking the only active filter clears it
-      set({ statusFilter: [] })
+    if (currentFilters.includes(filter)) {
+      set({ statusFilter: currentFilters.filter(f => f !== filter) })
     } else {
-      // Set only this filter (single-select)
-      set({ statusFilter: [filter] })
+      set({ statusFilter: [...currentFilters, filter] })
     }
   },
 

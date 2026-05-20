@@ -3821,6 +3821,322 @@ async def clear_database(current_user: UserInfo = Depends(require_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Local database downloader — user-triggered build of S2/DBLP/OpenAlex
+# databases via the existing local_database_updater script. Used by the
+# desktop app's settings panel to onboard users who want offline checks
+# without dropping to the CLI.
+# ---------------------------------------------------------------------------
+
+class _DBDownloadTask:
+    __slots__ = ("task", "started_at", "finished_at", "status", "error", "log_path")
+
+    def __init__(self, task: asyncio.Task, log_path: Path):
+        self.task = task
+        self.started_at = time.time()
+        self.finished_at: Optional[float] = None
+        self.status: str = "running"  # running | success | failed | cancelled
+        self.error: Optional[str] = None
+        self.log_path = log_path
+
+
+_DB_DOWNLOAD_TASKS: Dict[str, _DBDownloadTask] = {}
+_DB_DOWNLOAD_SUPPORTED = ("s2", "dblp", "openalex")
+
+
+class _DBDownloadRequest(BaseModel):
+    databases: list[str]
+    directory: Optional[str] = None
+    openalex_min_year: Optional[int] = None
+
+
+def _resolve_download_directory(directory: Optional[str]) -> Path:
+    """Pick the target directory for downloaded DBs. Persists to settings."""
+    candidate: Optional[Path] = None
+    if directory:
+        candidate = Path(directory).expanduser()
+    else:
+        configured = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+        if configured:
+            candidate = Path(configured).expanduser()
+        else:
+            candidate = get_data_dir() / "databases"
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+async def _start_db_download(db_name: str, db_path: Path, openalex_min_year: Optional[int]) -> None:
+    """Wrap _run_database_refresh_subprocess with state tracking."""
+    prior = _DB_DOWNLOAD_TASKS.get(db_name)
+    if prior and prior.status == "running":
+        return  # idempotent: don't start a second copy
+    if db_name == "openalex" and openalex_min_year:
+        os.environ["REFCHECKER_OPENALEX_MIN_YEAR"] = str(openalex_min_year)
+
+    log_path = get_logs_dir() / f"database-refresh-{db_name}.log"
+    task = asyncio.create_task(
+        _run_database_refresh_subprocess(db_name, db_path),
+        name=f"db-download-{db_name}",
+    )
+    state = _DBDownloadTask(task=task, log_path=log_path)
+    _DB_DOWNLOAD_TASKS[db_name] = state
+
+    def _on_done(t: asyncio.Task) -> None:
+        state.finished_at = time.time()
+        if t.cancelled():
+            state.status = "cancelled"
+        elif t.exception() is not None:
+            state.status = "failed"
+            state.error = str(t.exception())
+        else:
+            state.status = "success"
+
+    task.add_done_callback(_on_done)
+
+
+def _read_log_tail(path: Path, lines: int = 25) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    text = data.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-lines:])
+
+
+class _ListModelsRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+    endpoint: Optional[str] = None
+
+
+_STATIC_MODEL_FALLBACK = {
+    "openai": [
+        "gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3", "o3-mini", "o1", "o1-mini",
+    ],
+    "anthropic": [
+        "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5",
+        "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest",
+    ],
+    "google": [
+        "gemini-3.1-flash-lite-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+        "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash",
+    ],
+    "azure": [
+        "gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
+    ],
+    "vllm": [
+        "meta-llama/Llama-3.3-70B-Instruct", "meta-llama/Llama-3.1-8B-Instruct",
+        "mistralai/Mistral-7B-Instruct-v0.3", "Qwen/Qwen2.5-7B-Instruct",
+    ],
+}
+
+
+@app.post("/api/llm-configs/models")
+async def list_llm_models(req: _ListModelsRequest, current_user: UserInfo = Depends(require_user)):
+    """Return the model list available to the given provider+key combo.
+
+    Tries the provider's live /models endpoint first (so users see whatever
+    they have access to, e.g. fine-tunes or new model IDs that aren't in
+    the codebase yet). Falls back to a curated static list when the live
+    lookup fails or isn't supported — the UI exposes the same field as a
+    free-text input too, so an unfamiliar model can always be typed in.
+    """
+    provider = (req.provider or "").lower().strip()
+    if provider in ("gemini",):
+        provider = "google"
+    api_key = (req.api_key or "").strip() or None
+    endpoint = (req.endpoint or "").strip() or None
+
+    source = "fallback"
+    models: list[str] = []
+    error: Optional[str] = None
+    try:
+        if provider == "openai" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+        elif provider == "anthropic" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+        elif provider == "google" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": api_key}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                seen = set()
+                for m in r.json().get("models", []):
+                    name = (m.get("name") or "").replace("models/", "")
+                    if name and name not in seen:
+                        seen.add(name)
+                models = sorted(seen)
+                source = "live"
+        elif provider == "vllm" and endpoint:
+            import httpx
+            url = endpoint.rstrip("/") + "/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            r = await asyncio.to_thread(httpx.get, url, headers=headers, timeout=6.0)
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+    except Exception as e:
+        error = str(e)
+        logger.info("Live model lookup failed for %s: %s", provider, e)
+
+    if not models:
+        models = list(_STATIC_MODEL_FALLBACK.get(provider, []))
+
+    return {"provider": provider, "source": source, "models": models, "error": error}
+
+
+class _AutoPathRequest(BaseModel):
+    setting: str  # "cache_dir" | "db_path"
+
+
+@app.post("/api/settings/auto-create-path")
+async def auto_create_path_setting(req: _AutoPathRequest, current_user: UserInfo = Depends(require_user)):
+    """One-click 'use the default location' for cache_dir / db_path.
+
+    Picks the canonical path under the per-user data dir, creates the
+    directory if it doesn't exist, persists it as the named setting, and
+    returns the resolved path. Pairs with the 'Use default' button in the
+    desktop app's Settings panel so the user doesn't have to know where
+    Application Support / %APPDATA% / XDG_DATA_HOME live.
+    """
+    _require_admin(current_user)
+    key = (req.setting or "").strip()
+    if key not in ("cache_dir", "db_path"):
+        raise HTTPException(status_code=400, detail="`setting` must be 'cache_dir' or 'db_path'")
+    base = get_data_dir()
+    target = base / ("cache" if key == "cache_dir" else "databases")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not create {target}: {e}")
+    try:
+        await db.set_setting(key, str(target))
+    except Exception as e:
+        logger.exception("Failed to persist %s setting", key)
+        raise HTTPException(status_code=500, detail=str(e))
+    if key == "db_path":
+        os.environ["REFCHECKER_DATABASE_DIRECTORY"] = str(target)
+    return {"setting": key, "path": str(target)}
+
+
+class _OpenReviewListRequest(BaseModel):
+    venue: str
+    status: str = "accepted"  # accepted | submitted
+
+
+@app.post("/api/openreview/list")
+async def fetch_openreview_list(req: _OpenReviewListRequest, current_user: UserInfo = Depends(require_user)):
+    """Return the URL list for an OpenReview venue so the frontend can feed
+    it into the existing batch-check flow. Wraps prepare_openreview_paper_specs
+    from the CLI module so the in-app UI matches `--openreview <venue>`."""
+    venue = (req.venue or "").strip()
+    if not venue:
+        raise HTTPException(status_code=400, detail="`venue` is required (e.g. iclr2024)")
+    status = (req.status or "accepted").lower()
+    if status not in ("accepted", "submitted"):
+        raise HTTPException(status_code=400, detail="`status` must be 'accepted' or 'submitted'")
+
+    try:
+        from refchecker.core.refchecker import prepare_openreview_paper_specs
+        loop = asyncio.get_event_loop()
+        paper_specs, list_path, venue_info = await loop.run_in_executor(
+            None,
+            lambda: prepare_openreview_paper_specs(venue, status=status, output_dir=str(get_data_dir() / "openreview")),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("OpenReview list fetch failed")
+        raise HTTPException(status_code=500, detail=f"OpenReview lookup failed: {e}")
+
+    return {
+        "venue": venue_info.get("slug", venue),
+        "display_name": venue_info.get("display_name", venue),
+        "status": status,
+        "paper_count": len(paper_specs),
+        "papers": paper_specs,
+        "list_path": list_path,
+    }
+
+
+@app.post("/api/databases/download")
+async def trigger_database_download(req: _DBDownloadRequest, current_user: UserInfo = Depends(require_user)):
+    """Kick off background downloads for the requested local databases."""
+    _require_admin(current_user)
+
+    requested = [d for d in (req.databases or []) if d in _DB_DOWNLOAD_SUPPORTED]
+    if not requested:
+        raise HTTPException(status_code=400, detail=f"databases must be a non-empty subset of {_DB_DOWNLOAD_SUPPORTED}")
+
+    target_dir = _resolve_download_directory(req.directory)
+    # Persist the directory so check runs find the DBs after they're built.
+    try:
+        await db.set_setting("db_path", str(target_dir))
+    except Exception:
+        logger.warning("Could not persist db_path setting", exc_info=True)
+    os.environ["REFCHECKER_DATABASE_DIRECTORY"] = str(target_dir)
+
+    started: list[str] = []
+    for db_name in requested:
+        filename = DATABASE_FILE_ALIASES[db_name][0]
+        await _start_db_download(db_name, target_dir / filename, req.openalex_min_year)
+        started.append(db_name)
+
+    return {
+        "started": started,
+        "directory": str(target_dir),
+        "openalex_min_year": req.openalex_min_year,
+    }
+
+
+@app.get("/api/databases/download/status")
+async def get_database_download_status(current_user: UserInfo = Depends(require_user)):
+    """Return current state of in-flight and recently-finished downloads."""
+    _require_admin(current_user)
+    tasks: Dict[str, Dict[str, object]] = {}
+    for name, state in _DB_DOWNLOAD_TASKS.items():
+        tasks[name] = {
+            "status": state.status,
+            "started_at": state.started_at,
+            "finished_at": state.finished_at,
+            "error": state.error,
+            "log_tail": _read_log_tail(state.log_path),
+        }
+    return {"tasks": tasks, "supported": list(_DB_DOWNLOAD_SUPPORTED)}
+
+
+@app.post("/api/databases/download/cancel")
+async def cancel_database_download(payload: Dict[str, str] = Body(...), current_user: UserInfo = Depends(require_user)):
+    """Cancel a running database download."""
+    _require_admin(current_user)
+    db_name = payload.get("database")
+    if not db_name:
+        raise HTTPException(status_code=400, detail="`database` is required")
+    state = _DB_DOWNLOAD_TASKS.get(db_name)
+    if not state or state.status != "running":
+        return {"cancelled": False, "reason": "no running task"}
+    state.task.cancel()
+    return {"cancelled": True}
+
+
 # Mount static files for bundled frontend (if available)
 # This must be after all API routes to avoid conflicts
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():

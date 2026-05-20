@@ -180,13 +180,50 @@ function parseErrorDetailsForMarkdown(details) {
  * @param {object} ref - Reference object with errors/warnings
  * @returns {object} Corrected reference data
  */
+/**
+ * Render a single error/warning/suggestion object as a human string.
+ *
+ * Backend ships issues as `{error_type, error_details, actual_value, ...}`
+ * objects. Naive `e.message || String(e)` falls through to `String(obj)`
+ * which produces "[object Object]". Walk the known fields in priority
+ * order; fall back to a safely stringified JSON last so we never render
+ * literal `[object Object]`.
+ */
+export function formatIssueLine(issue) {
+  if (!issue) return ''
+  if (typeof issue === 'string') return issue
+  if (typeof issue !== 'object') return String(issue)
+  if (issue.message) return String(issue.message)
+  if (issue.error_details) return String(issue.error_details)
+  if (issue.detail) return String(issue.detail)
+  if (issue.text) return String(issue.text)
+  if (issue.error_type) {
+    const t = String(issue.error_type)
+    if (issue.actual_value !== undefined && issue.cited !== undefined) {
+      return `${t}: cited '${issue.cited}', actual '${issue.actual_value}'`
+    }
+    if (issue.actual_value !== undefined) return `${t} → ${issue.actual_value}`
+    return t
+  }
+  try { return JSON.stringify(issue) } catch { return '(unrenderable issue)' }
+}
+
 function getCorrectedReferenceData(ref) {
+  // Verifier may attach typed URLs (doi, arxiv, journal) in
+  // authoritative_urls. Surface them so the URL picker can prefer DOI
+  // and arxiv over Semantic Scholar paper pages.
+  const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
+  const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
+  const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
   const corrected = {
     title: ref.title,
     authors: ref.authors,
     year: ref.year,
     venue: ref.venue,
-    url: ref.authoritative_urls?.[0]?.url || ref.cited_url
+    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
+    citedUrl: ref.cited_url || null,
+    url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
   }
   
   // Check errors and warnings for 'actual' values
@@ -669,9 +706,75 @@ export function exportResultsAsBibtex({ references }) {
   if (!references || references.length === 0) {
     return '% No references found'
   }
-  
+
   const entries = references.map((ref, index) => exportReferenceAsBibtex(ref, index))
   return entries.join('\n\n')
+}
+
+/**
+ * Flatten a reference into a single JSON record suitable for line-delimited
+ * JSON or row-based CSV consumption. Matches the structured fields the CLI
+ * --report-format json/jsonl produces so downstream consumers see the same
+ * shape regardless of which path produced the report.
+ */
+function _flattenReferenceForReport(ref, index, paperTitle, paperSource) {
+  const errors = (ref.errors || []).map(formatIssueLine)
+  const warnings = (ref.warnings || []).map(formatIssueLine)
+  return {
+    index,
+    paper_title: paperTitle || '',
+    paper_source: paperSource || '',
+    cited_title: ref.title || '',
+    cited_authors: ref.authors || '',
+    cited_year: ref.year || '',
+    cited_venue: ref.venue || '',
+    cited_doi: ref.doi || '',
+    cited_arxiv_id: ref.arxiv_id || '',
+    cited_url: ref.cited_url || '',
+    matched_db: ref.matched_db || '',
+    verified_url: ref.verified_url || '',
+    status: ref.status || '',
+    error_count: errors.length,
+    warning_count: warnings.length,
+    errors,
+    warnings,
+    hallucination_verdict: ref.hallucination_assessment?.verdict || '',
+    hallucination_explanation: ref.hallucination_assessment?.explanation || '',
+    hallucination_link: ref.hallucination_assessment?.link || '',
+  }
+}
+
+export function exportResultsAsJsonl({ paperTitle, paperSource, references }) {
+  if (!references || references.length === 0) return ''
+  return references
+    .map((ref, i) => JSON.stringify(_flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)))
+    .join('\n')
+}
+
+function _csvField(value) {
+  if (value === null || value === undefined) return ''
+  let s = Array.isArray(value) ? value.join(' | ') : String(value)
+  if (/[,"\n]/.test(s)) {
+    s = '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+export function exportResultsAsCsv({ paperTitle, paperSource, references }) {
+  const columns = [
+    'index', 'paper_title', 'paper_source',
+    'cited_title', 'cited_authors', 'cited_year', 'cited_venue', 'cited_doi',
+    'cited_arxiv_id', 'cited_url', 'matched_db', 'verified_url', 'status',
+    'error_count', 'warning_count', 'errors', 'warnings',
+    'hallucination_verdict', 'hallucination_explanation', 'hallucination_link',
+  ]
+  const header = columns.join(',')
+  if (!references || references.length === 0) return header
+  const rows = references.map((ref, i) => {
+    const flat = _flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)
+    return columns.map(c => _csvField(flat[c])).join(',')
+  })
+  return [header, ...rows].join('\n')
 }
 
 /**
@@ -712,13 +815,239 @@ export function exportReferenceAsPlainText(ref) {
     citation += '.'
   }
   
-  // Add arXiv URL if suggested, otherwise use authoritative URL
-  const url = corrected.arxivUrl || corrected.url
+  // Append a publishable URL: DOI > ArXiv > original cited URL. Skips
+  // the Semantic Scholar / OpenAlex lookup URLs that show up in the
+  // verifier's authoritative_urls field — those aren't valid citations.
+  const url = _preferredCitationUrl(corrected)
   if (url) {
     citation += ` ${url}`
   }
-  
+
   return citation
+}
+
+/**
+ * Pick the URL that actually belongs in a published citation.
+ *
+ * Verifier-internal URLs (Semantic Scholar paper pages, OpenAlex API
+ * endpoints) match RefChecker's lookup record but they're not what an
+ * author would put in a bibliography. Prefer, in order:
+ *   1. DOI URL              — canonical, used by every modern style
+ *   2. ArXiv URL            — when the work is a preprint
+ *   3. Original cited URL   — if the author already had a non-S2/non-OA URL
+ *   4. Verifier URL         — fallback only
+ *
+ * Returns `null` when no useful URL exists, so style formatters can skip
+ * the URL field entirely instead of emitting a junk Semantic Scholar link.
+ */
+function _preferredCitationUrl(corrected) {
+  const looksInternal = (u) => {
+    if (!u) return true
+    const s = String(u).toLowerCase()
+    return s.includes('semanticscholar.org/paper') ||
+           s.includes('api.openalex.org') ||
+           s.includes('openalex.org/works')
+  }
+  if (corrected.doi) {
+    const doi = String(corrected.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim()
+    if (doi) return `https://doi.org/${doi}`
+  }
+  if (corrected.arxivUrl) return corrected.arxivUrl
+  if (corrected.arxivId) return `https://arxiv.org/abs/${String(corrected.arxivId).replace(/^arxiv:/i, '').trim()}`
+  if (corrected.citedUrl && !looksInternal(corrected.citedUrl)) return corrected.citedUrl
+  if (corrected.url && !looksInternal(corrected.url)) return corrected.url
+  return null
+}
+
+/* -------------------------------------------------------------------------
+ * Citation-style formatters.
+ *
+ * Approximate, not pedantic. Goal: produce a string the user can paste into
+ * their bibliography and tidy up by hand. Each style operates on the
+ * corrected metadata (post-verification) so the output already incorporates
+ * RefChecker's fixes.
+ * -----------------------------------------------------------------------*/
+
+function _splitAuthorName(rawName) {
+  if (!rawName) return { first: '', last: '', initials: '' }
+  const name = String(rawName).trim().replace(/\s+/g, ' ')
+  // "Lastname, Firstname Middle" form
+  if (name.includes(',')) {
+    const [last, rest] = name.split(',', 2).map(s => s.trim())
+    const givenParts = (rest || '').split(/\s+/).filter(Boolean)
+    const initials = givenParts.map(p => p[0] ? p[0].toUpperCase() + '.' : '').join(' ')
+    return { first: rest || '', last, initials }
+  }
+  // "Firstname Middle Lastname" form
+  const parts = name.split(/\s+/)
+  if (parts.length === 1) return { first: '', last: parts[0], initials: '' }
+  const last = parts.pop()
+  const first = parts.join(' ')
+  const initials = parts.map(p => (p[0] || '').toUpperCase() + '.').join(' ')
+  return { first, last, initials }
+}
+
+function _authorsArray(authors) {
+  if (!authors) return []
+  if (Array.isArray(authors)) return authors.filter(Boolean)
+  // Some refs ship authors as a single comma-separated string.
+  return String(authors).split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map(s => s.trim()).filter(Boolean)
+}
+
+function _formatAuthorsAPA(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last}, ${initials}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return `${list[0]}, & ${list[1]}`
+  if (list.length <= 20) return list.slice(0, -1).join(', ') + ', & ' + list.slice(-1)
+  return list.slice(0, 19).join(', ') + ', ... ' + list[list.length - 1]
+}
+
+function _formatAuthorsMLA(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length === 2) return `${first}, and ${list[1]}`
+  return `${first}, et al`
+}
+
+function _formatAuthorsIEEE(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${initials} ${last}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsVancouver(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last} ${initials.replace(/\./g, '').replace(/\s+/g, '')}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsChicago(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length <= 10) return `${first}, ` + list.slice(1).join(', ')
+  return `${first}, et al.`
+}
+
+/**
+ * Citation styles supported by the Corrections tab.
+ */
+export const CITATION_STYLES = [
+  { id: 'bibtex', label: 'BibTeX' },
+  { id: 'plaintext', label: 'Plain text (ACM)' },
+  { id: 'apa', label: 'APA 7th' },
+  { id: 'mla', label: 'MLA 9th' },
+  { id: 'chicago', label: 'Chicago author-date' },
+  { id: 'ieee', label: 'IEEE' },
+  { id: 'vancouver', label: 'Vancouver' },
+  { id: 'bibitem', label: 'LaTeX \\bibitem' },
+]
+
+export function exportReferenceAsStyle(ref, style, index = 0) {
+  const corrected = getCorrectedReferenceData(ref)
+  const url = _preferredCitationUrl(corrected)
+  const venue = corrected.venue || ''
+  const title = corrected.title || ''
+  const year = corrected.year || ''
+
+  switch (style) {
+    case 'bibtex':
+      return exportReferenceAsBibtex(ref, index)
+    case 'plaintext':
+      return exportReferenceAsPlainText(ref)
+    case 'apa': {
+      // Author, F. M. (Year). Title. Venue. URL
+      const authors = _formatAuthorsAPA(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}${authors.endsWith('.') ? '' : '.'}`)
+      if (year) parts.push(`(${year}).`)
+      if (title) parts.push(`${title}${title.endsWith('.') ? '' : '.'}`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'mla': {
+      // Author. "Title." Venue, Year, URL.
+      const authors = _formatAuthorsMLA(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`"${title}."`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'chicago': {
+      // Last, First, and Co Author. Year. "Title." Venue. URL.
+      const authors = _formatAuthorsChicago(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (year) parts.push(`${year}.`)
+      if (title) parts.push(`"${title}."`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'ieee': {
+      // F. M. Last, "Title," Venue, Year. [Online]. Available: URL
+      const authors = _formatAuthorsIEEE(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors},`)
+      if (title) parts.push(`"${title},"`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(`[Online]. Available: ${url}`)
+      return parts.join(' ')
+    }
+    case 'vancouver': {
+      // Last FM, Co N. Title. Venue. Year. URL
+      const authors = _formatAuthorsVancouver(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`${title}.`)
+      if (venue) parts.push(`${venue}.`)
+      if (year) parts.push(`${year}.`)
+      if (url) parts.push(`Available from: ${url}`)
+      return parts.join(' ')
+    }
+    case 'bibitem': {
+      // \bibitem{key} F. M. Last, "Title," Venue, Year.
+      const key = (ref.bibtex_key || `ref${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '')
+      const authors = _formatAuthorsIEEE(corrected.authors)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      const body = [authors && `${authors},`, title && `"${title},"`, tail && `${tail}.`, url].filter(Boolean).join(' ')
+      return `\\bibitem{${key}} ${body}`
+    }
+    default:
+      return exportReferenceAsPlainText(ref)
+  }
+}
+
+export function exportResultsAsStyle(references, style) {
+  if (!references || references.length === 0) return ''
+  if (style === 'bibtex') return exportResultsAsBibtex({ references })
+  return references.map((r, i) => exportReferenceAsStyle(r, style, i)).join('\n\n')
 }
 
 /**

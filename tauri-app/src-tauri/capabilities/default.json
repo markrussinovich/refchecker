@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/capability",
+  "identifier": "default",
+  "description": "Default capability set for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:event:default",
+    "core:resources:default",
+    "core:menu:default",
+    "core:tray:default",
+    "core:webview:allow-internal-toggle-devtools",
+    "shell:default",
+    "shell:allow-open",
+    "dialog:default",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-install",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart"
+  ]
+}

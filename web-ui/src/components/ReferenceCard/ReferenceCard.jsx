@@ -10,6 +10,19 @@ import {
   getEffectiveReferenceStatus,
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
+import { openExternal, isTauri } from '../../utils/tauriBridge'
+
+// Click handler that routes link clicks through Tauri's shell plugin when
+// running inside the desktop app. Belt-and-braces alongside the global
+// capture-phase handler in main.jsx — if the global one is somehow
+// missed (e.g. by an earlier listener calling stopImmediatePropagation),
+// the explicit onClick here still does the right thing.
+const handleExternalClick = (url) => (e) => {
+  if (!isTauri()) return // let the browser handle it normally
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+  e.preventDefault()
+  openExternal(url)
+}
 
 const urlPattern = /https?:\/\/[^\s]+/g
 
@@ -614,7 +627,11 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             })
 
             return filteredUrls.map((urlObj, i) => (
-              <div key={i} className="flex">
+              <div
+                key={i}
+                className="flex gap-2"
+                style={{ minWidth: 0 }}
+              >
                 <span
                   className="flex-shrink-0"
                   style={{ color: 'var(--color-text-secondary)', width: '120px' }}
@@ -625,8 +642,15 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   href={urlObj.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hover:underline mobile-break-url"
-                  style={{ color: 'var(--color-link)' }}
+                  onClick={handleExternalClick(urlObj.url)}
+                  className="hover:underline"
+                  style={{
+                    color: 'var(--color-link)',
+                    overflowWrap: 'anywhere',
+                    wordBreak: 'break-all',
+                    minWidth: 0,
+                    flex: '1 1 auto',
+                  }}
                 >
                   {urlObj.url}
                 </a>

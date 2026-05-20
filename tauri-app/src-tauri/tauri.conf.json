@@ -1,0 +1,93 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RefChecker",
+  "version": "../package.json",
+  "identifier": "com.ariomoniri.refchecker",
+  "build": {
+    "frontendDist": "../frontend",
+    "devUrl": "http://localhost:1430",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "RefChecker",
+        "label": "main",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": true,
+      "capabilities": [
+        "default"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "copyright": "Copyright (c) 2026 Ario Moniri. Based on RefChecker by Mark Russinovich (MIT).",
+    "shortDescription": "Validate academic paper references",
+    "longDescription": "Desktop wrapper around RefChecker. Validates citations against Semantic Scholar, OpenAlex, CrossRef, DBLP, and ACL Anthology, and uses LLM-powered search to detect likely fabricated references.",
+    "externalBin": [
+      "binaries/refchecker-server"
+    ],
+    "resources": [],
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "11.0",
+      "exceptionDomain": "",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": "entitlements.plist"
+    },
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": {
+        "language": "en-US"
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": "^https?://"
+    },
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/markrussinovich/refchecker/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
+}

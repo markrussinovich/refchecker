@@ -5,22 +5,34 @@ import { useAuthStore } from '../../stores/useAuthStore'
 import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { invokeTauri, isTauri, openExternal } from '../../utils/tauriBridge'
+
+const REPO_URL = 'https://github.com/markrussinovich/refchecker'
 
 /**
  * Settings panel component - ChatGPT-style with left navigation
  */
 export default function SettingsPanel({ theme, onThemeChange }) {
-  const { 
-    settings, 
-    isLoading, 
+  const {
+    settings,
+    isLoading,
     version,
-    isSettingsOpen, 
-    closeSettings, 
+    isSettingsOpen,
+    closeSettings,
     updateSetting,
-    fetchSettings
+    fetchSettings,
+    initialSection,
   } = useSettingsStore()
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
+
+  // Honor deep-links from the onboarding banner (and anywhere else that
+  // calls openSettings(section)) by jumping to the requested pane.
+  useEffect(() => {
+    if (isSettingsOpen && initialSection) {
+      setActiveSection(initialSection)
+    }
+  }, [isSettingsOpen, initialSection])
 
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
@@ -46,6 +58,53 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirError, setCacheDirError] = useState(null)
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
+
+  // Tauri auto-updater UI state. The web-ui is also served outside the
+  // desktop wrapper (Docker, plain pip install), so we avoid pulling
+  // @tauri-apps/plugin-updater as a build-time dep and instead invoke
+  // its commands at runtime via the global Tauri IPC bridge. The plugin
+  // is registered Rust-side and covered by the `updater:default` and
+  // `process:default` capability permissions.
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState(null) // { kind, text }
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus(null)
+    if (!isTauri()) {
+      setUpdateStatus({ kind: 'info', text: 'Update checks only work inside the desktop app.' })
+      return
+    }
+    setUpdateChecking(true)
+    try {
+      // Returns null when no update, or { available, current_version, version, ... }
+      const update = await invokeTauri('plugin:updater|check')
+      if (!update || update.available === false) {
+        setUpdateStatus({ kind: 'ok', text: "You're on the latest version." })
+        return
+      }
+      setUpdateStatus({ kind: 'info', text: `Downloading ${update.version || 'update'}…` })
+      // download_and_install streams progress events back, but we don't
+      // need to subscribe — Tauri's dialog config handles the prompt.
+      await invokeTauri('plugin:updater|download_and_install', { onEvent: null })
+      setUpdateStatus({ kind: 'ok', text: `Update ${update.version || ''} installed — restarting…` })
+      setTimeout(() => { invokeTauri('plugin:process|restart').catch(() => {}) }, 600)
+    } catch (err) {
+      const msg = (err && (err.message || err.toString && err.toString())) || 'Update check failed.'
+      setUpdateStatus({ kind: 'error', text: msg })
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
+  const handleShowReleaseNotes = () => openExternal(`${REPO_URL}/releases/latest`)
+
+  // Local DB downloader state — drives the "Build local databases" inline
+  // section under the db_path field. Selected DBs run via the existing
+  // local_database_updater script through /api/databases/download.
+  const [dbBuildOpen, setDbBuildOpen] = useState(false)
+  const [dbBuildPick, setDbBuildPick] = useState({ s2: true, dblp: true, openalex: true })
+  const [dbBuildMinYear, setDbBuildMinYear] = useState('2020')
+  const [dbBuildStatus, setDbBuildStatus] = useState({}) // { s2: {status, log_tail, error}, ... }
+  const [dbBuildStarting, setDbBuildStarting] = useState(false)
+  const [dbBuildError, setDbBuildError] = useState(null)
 
   // Sync local db path when settings are fetched from the server
   useEffect(() => {
@@ -82,6 +141,88 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setDbPathError(err.message || 'Failed to save')
     } finally {
       setDbPathSaving(false)
+    }
+  }
+
+  // Poll download status while the panel is open AND any task is running.
+  useEffect(() => {
+    if (!dbBuildOpen) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await api.getDatabaseDownloadStatus()
+        if (cancelled) return
+        setDbBuildStatus(res.data.tasks || {})
+      } catch (e) {
+        // settings panel can stay open in multiuser mode where caller isn't admin
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dbBuildOpen])
+
+  const handleDbBuildStart = async () => {
+    setDbBuildError(null)
+    const databases = Object.entries(dbBuildPick).filter(([, v]) => v).map(([k]) => k)
+    if (!databases.length) {
+      setDbBuildError('Pick at least one database to build.')
+      return
+    }
+    setDbBuildStarting(true)
+    try {
+      const payload = { databases }
+      const minYear = parseInt(dbBuildMinYear, 10)
+      if (!Number.isNaN(minYear) && minYear >= 1900 && minYear <= 2100) {
+        payload.openalex_min_year = minYear
+      }
+      if (dbPathLocal && dbPathLocal.trim()) {
+        payload.directory = dbPathLocal.trim()
+      }
+      const res = await api.triggerDatabaseDownload(payload)
+      if (res.data?.directory && !dbPathLocal) {
+        setDbPathLocal(res.data.directory)
+      }
+      fetchSettings()
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message
+      setDbBuildError(detail || 'Failed to start')
+    } finally {
+      setDbBuildStarting(false)
+    }
+  }
+
+  const handleDbBuildCancel = async (dbName) => {
+    try {
+      await api.cancelDatabaseDownload(dbName)
+    } catch (e) {
+      // ignore — UI will reflect the next poll
+    }
+  }
+
+  // One-click "use default location" — backend resolves the canonical
+  // path under the per-user data dir, creates it, and persists the
+  // setting in a single round-trip.
+  const handleAutoCreate = async (setting) => {
+    try {
+      const res = await api.autoCreatePath(setting)
+      const path = res.data?.path
+      if (!path) return
+      if (setting === 'cache_dir') {
+        setCacheDirLocal(path)
+        setCacheDirError(null)
+        setCacheDirSuccess('Default cache directory created.')
+        updateSetting('cache_dir', path)
+      } else if (setting === 'db_path') {
+        setDbPathLocal(path)
+        setDbPathError(null)
+        setDbPathSuccess('Default database directory created.')
+      }
+      fetchSettings()
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Failed to auto-create'
+      if (setting === 'cache_dir') setCacheDirError(msg)
+      else setDbPathError(msg)
     }
   }
 
@@ -240,6 +381,61 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderGeneralSection = () => (
     <div className="space-y-1">
+      {/* App updates — only meaningful inside the Tauri desktop app */}
+      {isTauri() && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div>
+              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>App updates</div>
+              <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {version?.app ? `Currently on ${version.app}` : 'Check the manifest for a newer signed build.'}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCheckForUpdates}
+                disabled={updateChecking}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                style={{
+                  backgroundColor: 'var(--color-accent, #3b82f6)',
+                  color: 'white',
+                  opacity: updateChecking ? 0.6 : 1,
+                }}
+                type="button"
+              >
+                {updateChecking ? 'Checking…' : 'Check for updates'}
+              </button>
+              <button
+                onClick={handleShowReleaseNotes}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                type="button"
+              >
+                Show changes
+              </button>
+            </div>
+          </div>
+          {updateStatus && (
+            <div
+              className="text-xs"
+              style={{
+                color: updateStatus.kind === 'ok'
+                  ? 'var(--color-success, #22c55e)'
+                  : updateStatus.kind === 'error'
+                    ? 'var(--color-error, #ef4444)'
+                    : 'var(--color-text-secondary)',
+              }}
+            >
+              {updateStatus.text}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Theme Setting */}
       <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>
@@ -338,6 +534,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             >
               {dbPathSaving ? '...' : 'Save'}
             </button>
+            <button
+              onClick={() => handleAutoCreate('db_path')}
+              disabled={dbPathSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default database directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
+            </button>
           </div>
           {dbPathError && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{dbPathError}</div>
@@ -348,6 +558,161 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           {settings.db_path?.value && settings.db_path?.current_snapshot && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
               Current Semantic Scholar snapshot: {settings.db_path.current_snapshot}
+            </div>
+          )}
+
+          {/* Build local databases — only useful in the single-user desktop
+              flow, so it sits inside the same single-user-gated section. */}
+          <div className="mt-3">
+            <button
+              onClick={() => setDbBuildOpen((v) => !v)}
+              className="text-xs underline"
+              style={{ color: 'var(--color-accent, #3b82f6)' }}
+              type="button"
+            >
+              {dbBuildOpen ? 'Hide local database builder' : 'Build local databases (Semantic Scholar, DBLP, OpenAlex)'}
+            </button>
+          </div>
+
+          {dbBuildOpen && (
+            <div
+              className="mt-3 p-3 rounded-lg border"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
+            >
+              <div className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                Runs the bundled <code>local_database_updater</code> against the directory above (or
+                a default under the app data dir if blank). First builds can be large (multi-GB) and
+                run in the background — close this panel anytime, status persists.
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                {[
+                  ['s2', 'Semantic Scholar'],
+                  ['dblp', 'DBLP'],
+                  ['openalex', 'OpenAlex'],
+                ].map(([key, label]) => {
+                  const state = dbBuildStatus[key]
+                  return (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 text-sm"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!dbBuildPick[key]}
+                        onChange={(e) => setDbBuildPick({ ...dbBuildPick, [key]: e.target.checked })}
+                      />
+                      <span className="flex-1">{label}</span>
+                      {state && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor:
+                              state.status === 'success' ? 'var(--color-success, #22c55e)' :
+                              state.status === 'failed' ? 'var(--color-error, #ef4444)' :
+                              state.status === 'cancelled' ? 'var(--color-warning, #f59e0b)' :
+                              'var(--color-accent, #3b82f6)',
+                            color: 'white',
+                          }}
+                        >
+                          {state.status}
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 mb-3">
+                <label className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  OpenAlex minimum year
+                </label>
+                <input
+                  type="number"
+                  min="1900"
+                  max="2100"
+                  step="1"
+                  value={dbBuildMinYear}
+                  onChange={(e) => setDbBuildMinYear(e.target.value)}
+                  className="px-2 py-1 rounded border text-sm"
+                  style={{
+                    width: '90px',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                />
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  (caps OpenAlex partitions to keep the dump manageable)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDbBuildStart}
+                  disabled={dbBuildStarting}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-accent, #3b82f6)',
+                    color: 'white',
+                    opacity: dbBuildStarting ? 0.6 : 1,
+                  }}
+                  type="button"
+                >
+                  {dbBuildStarting ? 'Starting…' : 'Start build'}
+                </button>
+                {Object.entries(dbBuildStatus).some(([, s]) => s.status === 'running') && (
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    Building in background. Cancel a job from its tag above —
+                    {' '}
+                    {Object.entries(dbBuildStatus)
+                      .filter(([, s]) => s.status === 'running')
+                      .map(([k]) => (
+                        <button
+                          key={k}
+                          onClick={() => handleDbBuildCancel(k)}
+                          className="underline ml-1"
+                          style={{ color: 'var(--color-accent, #3b82f6)' }}
+                          type="button"
+                        >
+                          cancel {k}
+                        </button>
+                      ))}
+                  </span>
+                )}
+              </div>
+
+              {dbBuildError && (
+                <div className="text-xs mt-2" style={{ color: 'var(--color-error, #ef4444)' }}>
+                  {dbBuildError}
+                </div>
+              )}
+
+              {Object.entries(dbBuildStatus).some(([, s]) => s.log_tail) && (
+                <details className="mt-3">
+                  <summary
+                    className="text-xs cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    Show last log lines per database
+                  </summary>
+                  {Object.entries(dbBuildStatus).map(([k, s]) =>
+                    s.log_tail ? (
+                      <div key={k} className="mt-2">
+                        <div className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{k}</div>
+                        <pre
+                          className="text-xs p-2 rounded overflow-x-auto"
+                          style={{
+                            backgroundColor: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >{s.log_tail}</pre>
+                      </div>
+                    ) : null
+                  )}
+                </details>
+              )}
             </div>
           )}
         </div>
@@ -389,6 +754,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               }}
             >
               {cacheDirSaving ? '...' : 'Save'}
+            </button>
+            <button
+              onClick={() => handleAutoCreate('cache_dir')}
+              disabled={cacheDirSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default cache directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
             </button>
           </div>
           {cacheDirError && (

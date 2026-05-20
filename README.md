@@ -14,6 +14,28 @@
   <a href="#deployment">Deployment</a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
+    <img alt="Download for macOS" src="assets/download-macos.svg" height="56">
+  </a>
+  &nbsp;
+  <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
+    <img alt="Download for Windows" src="assets/download-windows.svg" height="56">
+  </a>
+</p>
+
+<p align="center">
+  <sub>
+    Linux: <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
+    <a href="https://github.com/markrussinovich/refchecker/releases/latest">all builds</a>
+  </sub>
+</p>
+
+<p align="center">
+  <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
+</p>
+
 RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*

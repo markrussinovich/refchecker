@@ -91,6 +91,23 @@ export const recheck = (id) => api.post(`/recheck/${id}`)
 export const clearCache = () => api.delete('/admin/cache')
 export const clearDatabase = () => api.delete('/admin/database')
 
+// Local database downloader (used by the desktop app's first-run flow)
+export const triggerDatabaseDownload = (payload) => api.post('/databases/download', payload)
+export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')
+export const cancelDatabaseDownload = (database) => api.post('/databases/download/cancel', { database })
+
+// OpenReview venue scanning
+export const fetchOpenReviewList = (venue, status = 'accepted') =>
+  api.post('/openreview/list', { venue, status })
+
+// One-click "use default location" for cache_dir / db_path
+export const autoCreatePath = (setting) =>
+  api.post('/settings/auto-create-path', { setting })
+
+// Live model lookup for the LLM config modal (combobox source)
+export const listLLMModels = (provider, api_key, endpoint) =>
+  api.post('/llm-configs/models', { provider, api_key, endpoint })
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
