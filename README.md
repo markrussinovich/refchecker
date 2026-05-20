@@ -15,13 +15,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ArioMoniri/refchecker/releases/latest">
+  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-macos-arm64.dmg">
     <img alt="Download for macOS" src="assets/download-macos.svg" height="56">
   </a>
   &nbsp;
-  <a href="https://github.com/ArioMoniri/refchecker/releases/latest">
+  <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-windows-x64.msi">
     <img alt="Download for Windows" src="assets/download-windows.svg" height="56">
   </a>
+</p>
+
+<p align="center">
+  <sub>
+    Linux: <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.AppImage">.AppImage</a> ·
+    <a href="https://github.com/ArioMoniri/refchecker/releases/latest/download/RefChecker-linux-x64.deb">.deb</a> ·
+    <a href="https://github.com/ArioMoniri/refchecker/releases/latest">all builds</a>
+  </sub>
 </p>
 
 <p align="center">

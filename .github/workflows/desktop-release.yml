@@ -372,6 +372,26 @@ jobs:
           mkdir -p release-files
           # Copy everything from artifacts into a flat dir
           find artifacts -type f -exec cp {} release-files/ \;
+          # Add stable per-platform aliases so README download buttons can
+          # point at /releases/latest/download/<stable-name> and keep working
+          # across version bumps. Glob over what was actually produced.
+          cd release-files
+          for f in RefChecker_*_aarch64.dmg; do
+            [ -f "$f" ] && cp "$f" "RefChecker-macos-arm64.dmg"
+          done
+          for f in RefChecker_*_x64_en-US.msi; do
+            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64.msi"
+          done
+          for f in RefChecker_*_x64-setup.exe; do
+            [ -f "$f" ] && cp "$f" "RefChecker-windows-x64-setup.exe"
+          done
+          for f in RefChecker_*_amd64.AppImage; do
+            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.AppImage"
+          done
+          for f in RefChecker_*_amd64.deb; do
+            [ -f "$f" ] && cp "$f" "RefChecker-linux-x64.deb"
+          done
+          cd ..
           # Then add the manifest
           cp latest.json release-files/
           ls -la release-files
