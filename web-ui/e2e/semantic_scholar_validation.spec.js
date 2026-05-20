@@ -48,7 +48,10 @@ async function openApiKeysPanel(page) {
 
   await page.locator('aside.sidebar-desktop').getByRole('button', { name: 'Settings' }).click();
   await page.waitForTimeout(300);
-  await page.getByText('API Keys').click();
+  // Use exact match so we hit the Settings side-nav 'API Keys' item, not the
+  // onboarding banner's 'Settings → API Keys' deep-link button on the
+  // main page that ALSO contains the substring 'API Keys'.
+  await page.getByText('API Keys', { exact: true }).click();
   await page.waitForTimeout(300);
 }
 
