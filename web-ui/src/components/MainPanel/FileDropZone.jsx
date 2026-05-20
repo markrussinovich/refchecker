@@ -53,7 +53,7 @@ export default function FileDropZone({
           ref={inputRef}
           type="file"
           onChange={onFileSelect}
-          accept=".pdf,.txt,.tex,.latex,.bib"
+          accept=".pdf,.txt,.tex,.latex,.bib,.bbl,.docx,.odt,.rtf,.md,.markdown,.html,.htm"
           className="hidden"
           disabled={disabled}
         />

@@ -65,9 +65,45 @@
         "role": "Viewer"
       },
       {
-        "ext": ["tex"],
+        "ext": ["tex", "latex"],
         "name": "LaTeX Source",
         "description": "Open this LaTeX file in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Open this Word document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["odt"],
+        "name": "OpenDocument Text",
+        "description": "Open this ODT document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["rtf"],
+        "name": "Rich Text",
+        "description": "Open this RTF document in RefChecker to validate its references",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["md", "markdown"],
+        "name": "Markdown",
+        "description": "Open this Markdown file in RefChecker",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["html", "htm"],
+        "name": "HTML",
+        "description": "Open this HTML file in RefChecker",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Plain Text",
+        "description": "Open this text file in RefChecker",
         "role": "Viewer"
       }
     ],

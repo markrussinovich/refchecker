@@ -631,6 +631,76 @@ async def _save_upload_file(upload: UploadFile, dest_path: Path, max_bytes: int)
     return total_bytes
 
 
+def _maybe_convert_to_text(source_path: Path) -> Optional[Path]:
+    """Convert office/markup formats to plain text so the existing PDF /
+    BibTeX / LaTeX / TXT pipeline can handle them.
+
+    Returns the path to a sibling .txt file when conversion succeeded,
+    or None when the file is already a supported native format (no
+    conversion needed) OR the format isn't recognised (let the pipeline
+    fail with a clearer error downstream).
+    """
+    suffix = source_path.suffix.lower()
+    if suffix not in {".docx", ".odt", ".rtf", ".md", ".markdown", ".html", ".htm"}:
+        return None
+    out = source_path.with_suffix(source_path.suffix + ".txt")
+    try:
+        text: Optional[str] = None
+        if suffix == ".docx":
+            try:
+                import zipfile
+                import xml.etree.ElementTree as ET
+                with zipfile.ZipFile(source_path) as zf:
+                    with zf.open("word/document.xml") as f:
+                        tree = ET.parse(f)
+                ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+                paras = []
+                for p in tree.getroot().iter(f"{{{ns['w']}}}p"):
+                    chunks = [t.text or "" for t in p.iter(f"{{{ns['w']}}}t")]
+                    paras.append("".join(chunks))
+                text = "\n".join(paras)
+            except Exception as e:
+                logger.warning("DOCX extraction failed for %s: %s", source_path.name, e)
+        elif suffix == ".rtf":
+            raw = source_path.read_text(encoding="utf-8", errors="ignore")
+            # Strip RTF control words conservatively — enough to surface
+            # citation strings to the LLM/regex parsers.
+            import re as _re
+            text = _re.sub(r"\\[a-z]+-?\d*\s?", "", raw)
+            text = _re.sub(r"[{}]", "", text)
+        elif suffix in (".md", ".markdown"):
+            text = source_path.read_text(encoding="utf-8", errors="ignore")
+        elif suffix in (".html", ".htm"):
+            raw = source_path.read_text(encoding="utf-8", errors="ignore")
+            try:
+                from bs4 import BeautifulSoup
+                text = BeautifulSoup(raw, "html.parser").get_text("\n")
+            except Exception:
+                import re as _re
+                text = _re.sub(r"<[^>]+>", "", raw)
+        elif suffix == ".odt":
+            try:
+                import zipfile
+                import xml.etree.ElementTree as ET
+                with zipfile.ZipFile(source_path) as zf:
+                    with zf.open("content.xml") as f:
+                        tree = ET.parse(f)
+                # Concatenate every text node.
+                chunks = [(el.text or "") for el in tree.getroot().iter() if el.text]
+                text = "\n".join(c for c in chunks if c.strip())
+            except Exception as e:
+                logger.warning("ODT extraction failed for %s: %s", source_path.name, e)
+
+        if not text:
+            return None
+        out.write_text(text, encoding="utf-8")
+        logger.info("Converted %s -> %s (%d chars)", source_path.name, out.name, len(text))
+        return out
+    except Exception as e:
+        logger.warning("Conversion failed for %s: %s", source_path.name, e)
+        return None
+
+
 def _extract_zip_batch_files(zip_path: Path, uploads_dir: Path, batch_id: str, max_batch_size: int) -> list[dict[str, str]]:
     """Extract supported files from a ZIP archive with strict file-count and byte caps."""
     import zipfile
@@ -646,7 +716,10 @@ def _extract_zip_batch_files(zip_path: Path, uploads_dir: Path, batch_id: str, m
                     continue
 
                 lower_name = name.lower()
-                if not any(lower_name.endswith(ext) for ext in ['.pdf', '.txt', '.tex', '.bib', '.bbl']):
+                if not any(lower_name.endswith(ext) for ext in [
+                    '.pdf', '.txt', '.tex', '.latex', '.bib', '.bbl',
+                    '.docx', '.odt', '.rtf', '.md', '.markdown', '.html', '.htm',
+                ]):
                     continue
                 if len(files_to_process) >= max_batch_size:
                     break
@@ -1299,6 +1372,15 @@ async def start_check(
             paper_source = str(file_path)
             paper_title = file.filename
             original_filename = file.filename  # Store original filename
+
+            # Office/markup formats: convert to plain text in-place so the
+            # downstream pipeline (which only knows pdf / tex / bib / txt)
+            # sees something it can parse. The original upload stays on
+            # disk under its real name for history; processing reads the
+            # generated .txt alongside it.
+            converted = _maybe_convert_to_text(file_path)
+            if converted is not None:
+                paper_source = str(converted)
         elif source_type == "text":
             if not source_text:
                 raise HTTPException(status_code=400, detail="No text provided")

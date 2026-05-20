@@ -9,8 +9,20 @@ const ALLOWED_TYPES = [
   'text/x-tex',
   'application/x-tex',
   'application/x-latex',
+  'application/x-bibtex',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+  'application/vnd.oasis.opendocument.text', // odt
+  'application/rtf',
+  'text/markdown',
+  'text/html',
 ]
-const ALLOWED_EXTENSIONS = ['.pdf', '.txt', '.tex', '.latex', '.bib']
+// Accepted by the upload endpoint directly (.pdf/.txt/.tex/.bib/.bbl) or
+// converted to text server-side before being routed through the pipeline
+// (.docx/.odt/.rtf/.md/.html — see backend _maybe_convert_to_text).
+const ALLOWED_EXTENSIONS = [
+  '.pdf', '.txt', '.tex', '.latex', '.bib', '.bbl',
+  '.docx', '.odt', '.rtf', '.md', '.markdown', '.html', '.htm',
+]
 
 /**
  * Hook for file upload with drag-and-drop support

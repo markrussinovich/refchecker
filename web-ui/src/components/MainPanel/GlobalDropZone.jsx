@@ -22,7 +22,10 @@ import { isTauri } from '../../utils/tauriBridge'
  * only fires when invoke is available.
  */
 
-const SUPPORTED_EXTS = ['.pdf', '.bib', '.bbl', '.tex', '.txt']
+const SUPPORTED_EXTS = [
+  '.pdf', '.bib', '.bbl', '.tex', '.latex', '.txt',
+  '.docx', '.odt', '.rtf', '.md', '.markdown', '.html', '.htm',
+]
 
 function looksLikeAcceptedFile(name) {
   if (!name) return false
@@ -51,7 +54,12 @@ async function tauriPathToFile(path) {
   const lower = filename.toLowerCase()
   const mime = lower.endsWith('.pdf') ? 'application/pdf'
     : lower.endsWith('.bib') || lower.endsWith('.bbl') ? 'application/x-bibtex'
-    : lower.endsWith('.tex') ? 'application/x-tex'
+    : lower.endsWith('.tex') || lower.endsWith('.latex') ? 'application/x-tex'
+    : lower.endsWith('.docx') ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : lower.endsWith('.odt') ? 'application/vnd.oasis.opendocument.text'
+    : lower.endsWith('.rtf') ? 'application/rtf'
+    : lower.endsWith('.html') || lower.endsWith('.htm') ? 'text/html'
+    : lower.endsWith('.md') || lower.endsWith('.markdown') ? 'text/markdown'
     : 'text/plain'
   return new File([u8], filename, { type: mime })
 }
@@ -185,7 +193,7 @@ export default function GlobalDropZone() {
         <div style={{ fontSize: 36, marginBottom: 8 }}>📎</div>
         <div style={{ fontSize: 18, fontWeight: 600 }}>Drop a paper to verify</div>
         <div style={{ fontSize: 12, marginTop: 4, color: 'var(--color-text-secondary)' }}>
-          PDF · BibTeX (.bib / .bbl) · LaTeX (.tex) · plain text
+          PDF · DOCX · ODT · RTF · BibTeX (.bib / .bbl) · LaTeX (.tex) · Markdown · HTML · plain text
         </div>
       </div>
     </div>

@@ -20,9 +20,14 @@ export default function BulkInputZone({
     // Filter to only supported file types
     const validFiles = files.filter(f => {
       const ext = f.name.toLowerCase()
-      return ext.endsWith('.pdf') || ext.endsWith('.txt') || 
-             ext.endsWith('.tex') || ext.endsWith('.bib') || 
-             ext.endsWith('.bbl') || ext.endsWith('.zip')
+      return ext.endsWith('.pdf') || ext.endsWith('.txt') ||
+             ext.endsWith('.tex') || ext.endsWith('.latex') ||
+             ext.endsWith('.bib') || ext.endsWith('.bbl') ||
+             ext.endsWith('.docx') || ext.endsWith('.odt') ||
+             ext.endsWith('.rtf') ||
+             ext.endsWith('.md') || ext.endsWith('.markdown') ||
+             ext.endsWith('.html') || ext.endsWith('.htm') ||
+             ext.endsWith('.zip')
     })
     setBulkFiles(prev => [...prev, ...validFiles].slice(0, 50)) // Max 50 files
   }, [setBulkFiles])
@@ -35,9 +40,14 @@ export default function BulkInputZone({
     const files = Array.from(e.dataTransfer?.files || [])
     const validFiles = files.filter(f => {
       const ext = f.name.toLowerCase()
-      return ext.endsWith('.pdf') || ext.endsWith('.txt') || 
-             ext.endsWith('.tex') || ext.endsWith('.bib') || 
-             ext.endsWith('.bbl') || ext.endsWith('.zip')
+      return ext.endsWith('.pdf') || ext.endsWith('.txt') ||
+             ext.endsWith('.tex') || ext.endsWith('.latex') ||
+             ext.endsWith('.bib') || ext.endsWith('.bbl') ||
+             ext.endsWith('.docx') || ext.endsWith('.odt') ||
+             ext.endsWith('.rtf') ||
+             ext.endsWith('.md') || ext.endsWith('.markdown') ||
+             ext.endsWith('.html') || ext.endsWith('.htm') ||
+             ext.endsWith('.zip')
     })
     setBulkFiles(prev => [...prev, ...validFiles].slice(0, 50))
   }, [disabled, setBulkFiles])
@@ -266,7 +276,7 @@ export default function BulkInputZone({
               ref={fileInputRef}
               type="file"
               multiple
-              accept=".pdf,.txt,.tex,.bib,.bbl,.zip"
+              accept=".pdf,.txt,.tex,.latex,.bib,.bbl,.docx,.odt,.rtf,.md,.markdown,.html,.htm,.zip"
               onChange={handleFileChange}
               className="hidden"
               disabled={disabled}
