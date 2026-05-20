@@ -8,6 +8,7 @@ use once_cell::sync::OnceCell;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// Holds the running sidecar child so we can kill it on shutdown.
 static SIDECAR: OnceCell<Mutex<Option<CommandChild>>> = OnceCell::new();
@@ -17,9 +18,6 @@ fn sidecar_slot() -> &'static Mutex<Option<CommandChild>> {
 }
 
 /// Spawn the PyInstaller-built sidecar and return the port it's listening on.
-///
-/// The sidecar is invoked with `--port <N>` where N is an OS-picked free port.
-/// We then poll `/api/health` until it responds (or time out).
 fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
     let port = portpicker::pick_unused_port()
         .ok_or_else(|| "Could not find a free TCP port".to_string())?;
@@ -41,10 +39,8 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
         .spawn()
         .map_err(|e| format!("Failed to spawn sidecar: {e}"))?;
 
-    // Store child handle for shutdown.
     *sidecar_slot().lock().unwrap() = Some(child);
 
-    // Drain stdout/stderr into our logger on a background task.
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
@@ -108,6 +104,56 @@ fn kill_sidecar() {
     }
 }
 
+/// Check for an available release on the configured updater endpoint and,
+/// if the user accepts, download + install it and restart the app.
+///
+/// Runs on a background async task so it never blocks the sidecar boot.
+/// Failures (no network, bad signature, manifest 404) are logged and
+/// swallowed — the user can still keep using the current install.
+async fn check_for_update(app: AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("Updater unavailable: {e}");
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!(
+                "Update available: {} → {} ({})",
+                update.current_version,
+                update.version,
+                update.date.map(|d| d.to_string()).unwrap_or_default()
+            );
+
+            let mut downloaded: u64 = 0;
+            let result = update
+                .download_and_install(
+                    |chunk, total| {
+                        downloaded += chunk as u64;
+                        if let Some(total) = total {
+                            log::info!("Updater: {downloaded}/{total} bytes");
+                        }
+                    },
+                    || log::info!("Updater: download complete"),
+                )
+                .await;
+
+            match result {
+                Ok(()) => {
+                    log::info!("Update installed. Restarting…");
+                    app.restart();
+                }
+                Err(e) => log::error!("Update install failed: {e}"),
+            }
+        }
+        Ok(None) => log::info!("Already on the latest version"),
+        Err(e) => log::warn!("Update check failed: {e}"),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
@@ -117,17 +163,25 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // Spawn the sidecar on a worker thread so we don't block the UI.
+            // Background update check — does not block sidecar start.
+            // The native "An update is available" dialog (configured via
+            // plugins.updater.dialog in tauri.conf.json) handles user prompt.
+            let update_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                check_for_update(update_handle).await;
+            });
+
+            // Spawn the Python sidecar on a worker thread.
             std::thread::spawn(move || {
                 match spawn_sidecar(&handle) {
                     Ok(port) => {
                         let url = format!("http://127.0.0.1:{port}/");
                         log::info!("Loading frontend from {url}");
 
-                        // Replace the placeholder window with one pointing at the live server.
                         if let Some(main) = handle.get_webview_window("main") {
                             if let Err(e) = main.eval(&format!(
                                 "window.location.replace('{url}');"
@@ -135,7 +189,6 @@ pub fn run() {
                                 log::error!("Failed to navigate main window: {e}");
                             }
                         } else {
-                            // Fallback: build a new window if the configured one isn't there.
                             let _ = WebviewWindowBuilder::new(
                                 &handle,
                                 "main",

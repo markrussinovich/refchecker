@@ -1,9 +1,14 @@
 name: Desktop release
 
-# Builds the Tauri desktop app for macOS (universal), Windows, and Linux.
-# On macOS the bundle is signed + notarized when the Apple secrets are
-# present; if they aren't, the workflow still produces an unsigned build
-# so the PR / fork case keeps working.
+# Builds the Tauri desktop app for macOS (arm64 + x86_64), Windows, and Linux.
+# On a `desktop-v*` tag push it also generates a Tauri updater `latest.json`
+# manifest and attaches everything to a draft GitHub Release.
+#
+# Signing:
+#   - macOS code-sign / notarize when APPLE_* secrets are present.
+#   - Tauri updater signature when TAURI_SIGNING_PRIVATE_KEY is present.
+# Without the secrets the workflow still builds unsigned artifacts so forks
+# and PRs from contributors without your keys keep working.
 
 on:
   push:
@@ -11,8 +16,8 @@ on:
       - "desktop-v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag to create (e.g. desktop-v0.1.0). Leave blank for a draft-only build."
+      version:
+        description: "Override version (e.g. 0.1.0). Leave blank to use package.json."
         required: false
         default: ""
   pull_request:
@@ -31,14 +36,42 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - { name: "macos-arm64",  os: "macos-14", rust_target: "aarch64-apple-darwin",     python_arch: "arm64" }
-          - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64" }
-          - { name: "windows",      os: "windows-latest", rust_target: "x86_64-pc-windows-msvc", python_arch: "x64" }
-          - { name: "linux",        os: "ubuntu-22.04",   rust_target: "x86_64-unknown-linux-gnu", python_arch: "x64" }
+          - { name: "macos-arm64",  os: "macos-14", rust_target: "aarch64-apple-darwin",     python_arch: "arm64", updater_target: "darwin-aarch64" }
+          - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64", updater_target: "darwin-x86_64" }
+          - { name: "windows",      os: "windows-latest", rust_target: "x86_64-pc-windows-msvc", python_arch: "x64", updater_target: "windows-x86_64" }
+          - { name: "linux",        os: "ubuntu-22.04",   rust_target: "x86_64-unknown-linux-gnu", python_arch: "x64", updater_target: "linux-x86_64" }
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref_name }}" == desktop-v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#desktop-v}"
+          elif [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="$(node -p "require('./tauri-app/package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync version into tauri-app/package.json
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          node -e "
+            const fs=require('fs');
+            const f='tauri-app/package.json';
+            const j=JSON.parse(fs.readFileSync(f,'utf8'));
+            j.version='$VERSION';
+            fs.writeFileSync(f, JSON.stringify(j,null,2)+'\n');
+            console.log('Set tauri-app/package.json version =>', '$VERSION');
+          "
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -95,17 +128,7 @@ jobs:
         run: npm ci
 
       # ---------------------------------------------------------------
-      # macOS signing & notarization secrets
-      # ---------------------------------------------------------------
-      # Set these in repo Settings → Secrets and variables → Actions:
-      #   APPLE_CERTIFICATE          base64 of your Developer ID Application .p12
-      #   APPLE_CERTIFICATE_PASSWORD password for that .p12
-      #   APPLE_SIGNING_IDENTITY     e.g. "Developer ID Application: Your Name (TEAMID)"
-      #   APPLE_ID                   Apple ID email
-      #   APPLE_PASSWORD             app-specific password (https://appleid.apple.com)
-      #   APPLE_TEAM_ID              10-character team ID
-      #   KEYCHAIN_PASSWORD          any random string (used only inside the runner)
-      # See tauri-app/docs/SIGNING.md for the full how-to.
+      # Apple signing (only runs when APPLE_CERTIFICATE secret is set)
       # ---------------------------------------------------------------
       - name: Import Apple signing certificate
         if: startsWith(matrix.platform.os, 'macos') && env.APPLE_CERTIFICATE != ''
@@ -143,33 +166,47 @@ jobs:
             "$BIN"
           codesign --verify --verbose=2 "$BIN"
 
+      # ---------------------------------------------------------------
+      # Tauri build (writes signed updater artifacts when
+      # TAURI_SIGNING_PRIVATE_KEY is set; falls back to unsigned otherwise)
+      # ---------------------------------------------------------------
       - name: Build Tauri bundle
         working-directory: tauri-app
         env:
-          # Tauri picks these up automatically for macOS signing/notarization.
-          APPLE_SIGNING_IDENTITY:       ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID:                     ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD:               ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID:                ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE:            ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD:   ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY:             ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                           ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:                     ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:                      ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE:                  ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD:         ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          TAURI_SIGNING_PRIVATE_KEY:          ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           CI: "true"
         run: npx tauri build --target ${{ matrix.platform.rust_target }}
 
       - name: Collect artifacts
+        id: collect
         shell: bash
         run: |
           OUT="dist-${{ matrix.platform.name }}"
           mkdir -p "$OUT"
           BUNDLE_DIR=tauri-app/src-tauri/target/${{ matrix.platform.rust_target }}/release/bundle
           if [ -d "$BUNDLE_DIR" ]; then
+            # Installer/regular bundles
             find "$BUNDLE_DIR" -type f \
-              \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.app.zip" \
-                 -o -name "*.msi" -o -name "*.exe" -o -name "*.nsis.zip" \
+              \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \
                  -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
+              -exec cp {} "$OUT"/ \;
+            # Updater artifacts + their .sig signatures
+            find "$BUNDLE_DIR" -type f \
+              \( -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \
+                 -o -name "*.msi.zip" -o -name "*.msi.zip.sig" \
+                 -o -name "*.nsis.zip" -o -name "*.nsis.zip.sig" \
+                 -o -name "*.AppImage.tar.gz" -o -name "*.AppImage.tar.gz.sig" \) \
               -exec cp {} "$OUT"/ \;
           fi
           ls -la "$OUT" || true
+          echo "version=${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -184,16 +221,94 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#desktop-v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
+      - name: Build Tauri updater manifest (latest.json)
+        id: manifest
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Map per-platform updater artifact patterns to Tauri's updater target IDs.
+          declare -A TARGETS=(
+            ["darwin-aarch64"]="refchecker-desktop-macos-arm64"
+            ["darwin-x86_64"]="refchecker-desktop-macos-x86_64"
+            ["windows-x86_64"]="refchecker-desktop-windows"
+            ["linux-x86_64"]="refchecker-desktop-linux"
+          )
+
+          PLATFORMS_JSON='{}'
+
+          for target in "${!TARGETS[@]}"; do
+            DIR="artifacts/${TARGETS[$target]}"
+            if [ ! -d "$DIR" ]; then
+              echo "::warning::No artifacts dir for $target ($DIR)"
+              continue
+            fi
+            # Find the updater bundle (NOT the .sig). Prefer .app.tar.gz / .AppImage.tar.gz / .msi.zip / .nsis.zip
+            BUNDLE=$(find "$DIR" -maxdepth 1 -type f \
+              \( -name "*.app.tar.gz" -o -name "*.AppImage.tar.gz" -o -name "*.msi.zip" -o -name "*.nsis.zip" \) \
+              ! -name "*.sig" | head -n1 || true)
+            if [ -z "$BUNDLE" ]; then
+              echo "::warning::No updater bundle found for $target"
+              continue
+            fi
+            SIGFILE="${BUNDLE}.sig"
+            if [ ! -f "$SIGFILE" ]; then
+              echo "::warning::No signature for $BUNDLE (TAURI_SIGNING_PRIVATE_KEY missing?). Skipping $target."
+              continue
+            fi
+            SIG=$(cat "$SIGFILE")
+            FNAME=$(basename "$BUNDLE")
+            URL="https://github.com/${REPO}/releases/download/${TAG}/${FNAME}"
+            echo "▶ $target → $URL"
+            PLATFORMS_JSON=$(jq --arg t "$target" --arg url "$URL" --arg sig "$SIG" \
+              '. + {($t): {url: $url, signature: $sig}}' <<< "$PLATFORMS_JSON")
+          done
+
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --argjson platforms "$PLATFORMS_JSON" \
+            '{version: $version, notes: ("RefChecker Desktop " + $version), pub_date: $pub_date, platforms: $platforms}' \
+            > latest.json
+
+          echo "--- latest.json ---"
+          cat latest.json
+
+      - name: Stage release files
+        shell: bash
+        run: |
+          mkdir -p release-files
+          # Copy everything from artifacts into a flat dir
+          find artifacts -type f -exec cp {} release-files/ \;
+          # Then add the manifest
+          cp latest.json release-files/
+          ls -la release-files
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: RefChecker Desktop ${{ github.ref_name }}
+          name: RefChecker Desktop ${{ steps.version.outputs.version }}
           generate_release_notes: true
           draft: true
-          files: artifacts/**/*
+          files: release-files/*

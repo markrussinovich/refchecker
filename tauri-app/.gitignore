@@ -16,7 +16,7 @@ python/build/
 python/dist/
 python/*.spec.bak
 
-# Signing
+# Signing — code signing certs
 *.p12
 *.pfx
 *.cer
@@ -24,3 +24,9 @@ python/*.spec.bak
 AuthKey_*.p8
 .env
 .env.local
+
+# Tauri updater private key (public key lives in tauri.conf.json)
+refchecker-updater.key
+refchecker-updater.key.pub
+*-updater.key
+*-updater.key.pub

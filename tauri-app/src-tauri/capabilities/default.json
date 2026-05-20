@@ -15,6 +15,7 @@
     "core:webview:allow-internal-toggle-devtools",
     "shell:default",
     "shell:allow-open",
-    "dialog:default"
+    "dialog:default",
+    "updater:default"
   ]
 }
