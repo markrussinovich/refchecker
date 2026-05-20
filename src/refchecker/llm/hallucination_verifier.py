@@ -18,7 +18,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_HALLUCINATION_MODELS
-from refchecker.llm.google_retry import call_google_with_retry
+from refchecker.llm.google_retry import call_google_with_retry, extract_google_response_text
 
 logger = logging.getLogger(__name__)
 
@@ -578,12 +578,7 @@ class LLMHallucinationVerifier:
     @staticmethod
     def _extract_google_grounding(resp) -> tuple:
         """Extract response text and grounding URLs from a Gemini response."""
-        try:
-            text = resp.text or ''
-        except (TypeError, ValueError, AttributeError):
-            # resp.text can raise when the response has no text parts
-            # (e.g. only function_call parts, or content blocked by safety)
-            text = ''
+        text = extract_google_response_text(resp)
         web_urls: List[str] = []
         for candidate in getattr(resp, 'candidates', []):
             grounding = getattr(candidate, 'grounding_metadata', None)
@@ -617,7 +612,7 @@ class LLMHallucinationVerifier:
             ),
             purpose='hallucination chat fallback',
         )
-        return (resp.text or '').strip(), []
+        return extract_google_response_text(resp).strip(), []
 
     def _google_generate_content_with_retry(self, *, contents: str, config: Any, purpose: str) -> Any:
         """Call Gemini with truncated exponential backoff for transient errors."""

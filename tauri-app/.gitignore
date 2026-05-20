@@ -14,6 +14,7 @@ src-tauri/Cargo.lock
 src-tauri/binaries/
 python/build/
 python/dist/
+python/pyi-runtime/
 python/*.spec.bak
 
 # Signing — code signing certs

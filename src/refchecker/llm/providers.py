@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from .base import LLMProvider
-from .google_retry import call_google_with_retry
+from .google_retry import call_google_with_retry, extract_google_response_text
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_EXTRACTION_MODELS
 
 logger = logging.getLogger(__name__)
@@ -545,7 +545,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
                 logger.warning("Google API returned empty candidates (possibly content filtered)")
                 return ""
             
-            return response.text or ""
+            return extract_google_response_text(response)
             
         except Exception as e:
             logger.error(f"Google API call failed: {e}")

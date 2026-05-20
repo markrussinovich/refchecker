@@ -11,6 +11,7 @@ from typing import Optional
 import asyncio
 
 from refchecker.utils.cache_utils import get_cached_artifact_path
+from refchecker.utils.arxiv_utils import download_arxiv_paper_pdf, get_arxiv_paper_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -314,15 +315,16 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     if pdf_path.exists() and pdf_path.stat().st_size > 0:
         return True
 
-    import arxiv as arxiv_lib
     import time as _time
 
-    search = arxiv_lib.Search(id_list=[arxiv_id])
-    paper = next(search.results())
+    paper = get_arxiv_paper_by_id(arxiv_id)
+    if not paper:
+        logger.error(f"ArXiv paper not found for thumbnail: {arxiv_id}")
+        return False
 
     for attempt in range(3):
         try:
-            paper.download_pdf(filename=str(pdf_path))
+            download_arxiv_paper_pdf(paper, str(pdf_path), arxiv_id)
             if pdf_path.exists() and pdf_path.stat().st_size > 0:
                 return True
         except Exception as e:

@@ -99,6 +99,54 @@ Appendix text should not be included.
     assert 'A BACKGROUNDS AND TECHNICAL NOVELTIES' not in bibliography
 
 
+def test_bibliography_keeps_numbered_reference_after_page_number():
+    text = """
+Introduction
+This paper cites bibliometrics literature.
+
+References
+[1] A. Author, "First cited work," Journal of Tests, vol. 1, no. 1, pp. 1-9, 2020.
+[2] J. H. Sweetland, "Errors in bibliographic citations: A continuing prob-
+lem," The Library Quarterly, vol. 59, no. 4, pp. 291-304, 1989.
+14
+[3] M. V. Simkin and V. P. Roychowdhury, "Stochastic modeling of citation
+slips," Scientometrics, vol. 62, no. 3, pp. 367-384, 2005.
+[4] E. M. Bender, T. Gebru, A. McMillan-Major, and S. Shmitchell, "On the dangers
+of stochastic parrots," in Proceedings of FAccT, 2021, pp. 610-623.
+[5] B. Author, "Final cited work," Conference on Tests, 2022.
+"""
+
+    bibliography = ArxivReferenceChecker().find_bibliography_section(text)
+
+    assert '[3] M. V. Simkin' in bibliography
+    assert 'slips," Scientometrics' in bibliography
+    assert '\n14\n' not in bibliography
+
+
+def test_parse_references_falls_back_when_llm_skips_numbered_entries():
+    bibliography = """
+[1] A. Author, "First cited work," Journal of Tests, vol. 1, no. 1, pp. 1-9, 2020.
+[2] B. Author, "Second cited work," Conference on Tests, pp. 10-19, 2021.
+[3] C. Author, "Third cited work," Transactions on Tests, vol. 3, pp. 20-29, 2022.
+[4] D. Author, "Fourth cited work," Symposium on Tests, pp. 30-39, 2023.
+"""
+
+    class SkippingLLMExtractor:
+        def extract_references(self, bibliography_text, progress_callback=None):
+            return [
+                'A. Author#First cited work#Journal of Tests#2020#',
+                'D. Author#Fourth cited work#Symposium on Tests#2023#',
+            ]
+
+    checker = ArxivReferenceChecker()
+    checker.llm_extractor = SkippingLLMExtractor()
+
+    references = checker.parse_references(bibliography)
+
+    assert len(references) == 4
+    assert [reference['year'] for reference in references] == [2020, 2021, 2022, 2023]
+
+
 def test_bibliography_ignores_title_header_that_looks_like_appendix_heading():
     text = """
 Introduction
