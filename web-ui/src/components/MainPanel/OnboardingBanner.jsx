@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
+import { useAuthStore } from '../../stores/useAuthStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 
 /**
- * First-launch guidance for the desktop app.
+ * First-launch guidance for the app.
  *
  * Shown above the input section when:
  *  - the user hasn't dismissed it in this browser, AND
- *  - they're either missing an LLM config OR have no local database
- *    directory configured (the two things that meaningfully change what
- *    RefChecker can do).
+ *  - they're missing an LLM config, or in single-user/local mode have no
+ *    local database directory configured.
  *
  * Dismissed state persists per-browser via localStorage.
  */
@@ -19,6 +19,7 @@ const DISMISS_KEY = 'refchecker.onboarding.dismissed.v1'
 export default function OnboardingBanner({ onOpenSettings }) {
   const configs = useConfigStore(s => s.configs)
   const settings = useSettingsStore(s => s.settings)
+  const multiuser = useAuthStore(s => s.multiuser)
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) === '1' } catch { return false }
   })
@@ -32,7 +33,7 @@ export default function OnboardingBanner({ onOpenSettings }) {
 
   const hasLlm = Array.isArray(configs) && configs.some(c => c.has_key || c.id)
   const dbPathSet = !!settings?.db_path?.value
-  const allDone = hasLlm && dbPathSet
+  const allDone = hasLlm && (multiuser || dbPathSet)
   if (allDone) return null
 
   const dismiss = () => {
@@ -51,12 +52,12 @@ export default function OnboardingBanner({ onOpenSettings }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="font-semibold mb-1" style={{ color: 'var(--color-text-primary)' }}>
-            Welcome to RefChecker Desktop
+            Welcome to RefChecker
           </div>
           <p className="text-sm mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-            Two quick things will make it noticeably faster and more accurate.
-            Both are optional — you can paste an ArXiv ID right now and it'll work
-            out of the box using public APIs.
+            {multiuser
+              ? 'Adding an LLM API key will make bibliography parsing and hallucination checks more accurate. You can paste an ArXiv ID right now and it will still work using public APIs.'
+              : 'Two quick things will make it noticeably faster and more accurate. Both are optional — you can paste an ArXiv ID right now and it will work out of the box using public APIs.'}
           </p>
 
           <ol className="space-y-3 text-sm" style={{ color: 'var(--color-text-primary)' }}>
@@ -77,36 +78,40 @@ export default function OnboardingBanner({ onOpenSettings }) {
                 </div>
                 <div style={{ color: 'var(--color-text-secondary)' }}>
                   Needed for accurate bibliography parsing and for the hallucination check.
-                  OpenAI, Anthropic, Google, Azure, or a local vLLM server are supported.
+                  {multiuser
+                    ? ' OpenAI, Anthropic, Google, or Azure are supported.'
+                    : ' OpenAI, Anthropic, Google, Azure, or a local vLLM server are supported.'}
                   Open <button type="button" onClick={() => onOpenSettings?.('LLM')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → LLM</button>{' '}
                   to paste your key — click <b>Test connection</b> first, then Save.
                 </div>
               </div>
             </li>
 
-            <li className="flex items-start gap-2">
-              <span
-                className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
-                style={{
-                  width: 22, height: 22, flexShrink: 0,
-                  backgroundColor: dbPathSet ? 'var(--color-success, #22c55e)' : 'var(--color-accent, #3b82f6)',
-                  color: 'white',
-                }}
-              >
-                {dbPathSet ? '✓' : '2'}
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium">
-                  (Optional) Download the offline database pack {dbPathSet && <span style={{ color: 'var(--color-success, #22c55e)' }}>— directory configured</span>}
+            {!multiuser && (
+              <li className="flex items-start gap-2">
+                <span
+                  className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
+                  style={{
+                    width: 22, height: 22, flexShrink: 0,
+                    backgroundColor: dbPathSet ? 'var(--color-success, #22c55e)' : 'var(--color-accent, #3b82f6)',
+                    color: 'white',
+                  }}
+                >
+                  {dbPathSet ? '✓' : '2'}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium">
+                    (Optional) Download the offline database pack {dbPathSet && <span style={{ color: 'var(--color-success, #22c55e)' }}>— directory configured</span>}
+                  </div>
+                  <div style={{ color: 'var(--color-text-secondary)' }}>
+                    Speeds up verification 5–10× and lets you check papers without an internet round-trip.
+                    Open <button type="button" onClick={() => onOpenSettings?.('General')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → General</button>,
+                    click <b>Use default</b> next to <i>Local Database Directory</i>, then{' '}
+                    <b>Build local databases</b> below it (Semantic Scholar, DBLP, OpenAlex).
+                  </div>
                 </div>
-                <div style={{ color: 'var(--color-text-secondary)' }}>
-                  Speeds up verification 5–10× and lets you check papers without an internet round-trip.
-                  Open <button type="button" onClick={() => onOpenSettings?.('General')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → General</button>,
-                  click <b>Use default</b> next to <i>Local Database Directory</i>, then{' '}
-                  <b>Build local databases</b> below it (Semantic Scholar, DBLP, OpenAlex).
-                </div>
-              </div>
-            </li>
+              </li>
+            )}
 
             <li className="flex items-start gap-2">
               <span
