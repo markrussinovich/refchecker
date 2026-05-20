@@ -300,7 +300,11 @@ export default function MainPanel() {
                 isCheckComplete={isComplete}
               />
             ) : (
-              <CorrectionsView references={displayRefs} />
+              <CorrectionsView
+                references={displayRefs}
+                isCheckComplete={isComplete}
+                paperSource={displayPaperSource}
+              />
             )}
           </div>
         )}

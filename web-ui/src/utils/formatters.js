@@ -180,6 +180,34 @@ function parseErrorDetailsForMarkdown(details) {
  * @param {object} ref - Reference object with errors/warnings
  * @returns {object} Corrected reference data
  */
+/**
+ * Render a single error/warning/suggestion object as a human string.
+ *
+ * Backend ships issues as `{error_type, error_details, actual_value, ...}`
+ * objects. Naive `e.message || String(e)` falls through to `String(obj)`
+ * which produces "[object Object]". Walk the known fields in priority
+ * order; fall back to a safely stringified JSON last so we never render
+ * literal `[object Object]`.
+ */
+export function formatIssueLine(issue) {
+  if (!issue) return ''
+  if (typeof issue === 'string') return issue
+  if (typeof issue !== 'object') return String(issue)
+  if (issue.message) return String(issue.message)
+  if (issue.error_details) return String(issue.error_details)
+  if (issue.detail) return String(issue.detail)
+  if (issue.text) return String(issue.text)
+  if (issue.error_type) {
+    const t = String(issue.error_type)
+    if (issue.actual_value !== undefined && issue.cited !== undefined) {
+      return `${t}: cited '${issue.cited}', actual '${issue.actual_value}'`
+    }
+    if (issue.actual_value !== undefined) return `${t} → ${issue.actual_value}`
+    return t
+  }
+  try { return JSON.stringify(issue) } catch { return '(unrenderable issue)' }
+}
+
 function getCorrectedReferenceData(ref) {
   // Verifier may attach typed URLs (doi, arxiv, journal) in
   // authoritative_urls. Surface them so the URL picker can prefer DOI
@@ -690,8 +718,8 @@ export function exportResultsAsBibtex({ references }) {
  * shape regardless of which path produced the report.
  */
 function _flattenReferenceForReport(ref, index, paperTitle, paperSource) {
-  const errors = (ref.errors || []).map(e => e.message || String(e))
-  const warnings = (ref.warnings || []).map(w => w.message || String(w))
+  const errors = (ref.errors || []).map(formatIssueLine)
+  const warnings = (ref.warnings || []).map(formatIssueLine)
   return {
     index,
     paper_title: paperTitle || '',

@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CITATION_STYLES,
   exportReferenceAsStyle,
   exportResultsAsStyle,
   downloadAsFile,
+  formatIssueLine,
 } from '../../utils/formatters'
 import { wordDiff } from '../../utils/wordDiff'
 import { useCheckStore } from '../../stores/useCheckStore'
+import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
 
 /**
  * Mirrors the chip ids exposed by the Summary panel above the tab.
@@ -21,15 +23,24 @@ const CATEGORY_META = {
   suggestion:    { label: 'Suggestions',   color: 'var(--color-suggestion, #3b82f6)' },
 }
 
-function classifyReference(ref) {
+function classifyReference(ref, isCheckComplete) {
+  // Use the same single-category resolver the References list and the
+  // Summary chip counts use, so a ref with both an error and a warning
+  // is counted as an error in both places — not as both. The Set return
+  // type stays for backward compatibility with the filter/badge code.
   const tags = new Set()
-  if ((ref.errors || []).length > 0) tags.add('error')
-  if ((ref.warnings || []).length > 0) tags.add('warning')
-  if (ref.status === 'unverified') tags.add('unverified')
-  if (ref.status === 'hallucinated' || ref.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
+  const status = getEffectiveReferenceStatus(ref, isCheckComplete)
+  if (status === 'error') tags.add('error')
+  else if (status === 'warning') tags.add('warning')
+  else if (status === 'suggestion') tags.add('suggestion')
+  else if (status === 'unverified') tags.add('unverified')
+  else if (status === 'hallucinated' || status === 'hallucination') tags.add('hallucination')
+  // Hallucination is an extra signal that can co-exist with errors when the
+  // verifier confirms it — keep both tags so the filter can find it via
+  // either chip.
+  if (ref.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
     tags.add('hallucination')
   }
-  if (ref.status === 'suggestion' || (ref.suggestions || []).length > 0) tags.add('suggestion')
   return tags
 }
 
@@ -85,8 +96,32 @@ const STYLE_EXT = {
   bibitem: { ext: 'tex', mime: 'application/x-tex' },
 }
 
-export default function CorrectionsView({ references }) {
-  const [format, setFormat] = useState('bibtex')
+/**
+ * Pick a sensible default citation style based on the paper source. A
+ * .bib input wants BibTeX back; a .tex input wants \bibitem; otherwise
+ * BibTeX is a fine universal default. The user can still override via
+ * the dropdown.
+ */
+function detectDefaultStyle(paperSource) {
+  if (!paperSource) return 'bibtex'
+  const lower = String(paperSource).toLowerCase()
+  if (lower.endsWith('.bib') || lower.endsWith('.bbl')) return 'bibtex'
+  if (lower.endsWith('.tex')) return 'bibitem'
+  if (lower.endsWith('.txt')) return 'plaintext'
+  return 'bibtex'
+}
+
+export default function CorrectionsView({ references, isCheckComplete = false, paperSource = null }) {
+  const [format, setFormat] = useState(() => detectDefaultStyle(paperSource))
+  const lastSourceRef = useRef(paperSource)
+  useEffect(() => {
+    // Re-pick the default when navigating to a different check / new input
+    // so a .bib file doesn't keep showing as APA after a previous APA check.
+    if (lastSourceRef.current !== paperSource) {
+      lastSourceRef.current = paperSource
+      setFormat(detectDefaultStyle(paperSource))
+    }
+  }, [paperSource])
   const [copiedKey, setCopiedKey] = useState(null)
   const [showDiff, setShowDiff] = useState(true)
 
@@ -102,14 +137,14 @@ export default function CorrectionsView({ references }) {
 
   const categorized = useMemo(() => {
     return (references || [])
-      .map(ref => ({ ref, tags: classifyReference(ref) }))
+      .map(ref => ({ ref, tags: classifyReference(ref, isCheckComplete) }))
       .filter(({ tags }) => tags.size > 0)
       .sort((a, b) => {
         const ai = typeof a.ref?.index === 'number' ? a.ref.index : 999999
         const bi = typeof b.ref?.index === 'number' ? b.ref.index : 999999
         return ai - bi
       })
-  }, [references])
+  }, [references, isCheckComplete])
 
   const filtered = useMemo(() => {
     if (!summaryActive) return categorized
@@ -358,7 +393,7 @@ export default function CorrectionsView({ references }) {
                   {(ref.errors || []).length > 0 && (
                     <ul className="mt-2 text-[11px] list-disc list-inside" style={{ color: 'var(--color-error, #ef4444)' }}>
                       {(ref.errors || []).slice(0, 4).map((e, j) => (
-                        <li key={j}>{e.message || String(e)}</li>
+                        <li key={j}>{formatIssueLine(e)}</li>
                       ))}
                     </ul>
                   )}
