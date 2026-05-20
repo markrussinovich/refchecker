@@ -36,8 +36,11 @@ jobs:
       fail-fast: false
       matrix:
         platform:
+          # Apple Silicon — covers M1/M2/M3+ Macs natively, and Intel Macs via Rosetta 2.
           - { name: "macos-arm64",  os: "macos-14", rust_target: "aarch64-apple-darwin",     python_arch: "arm64", updater_target: "darwin-aarch64" }
-          - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64", updater_target: "darwin-x86_64" }
+          # Re-enable when you want a native Intel build. GH's free macos-13 runner pool
+          # queues for 30-90 min — pinning it back here will slow every release by ~1h.
+          # - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64", updater_target: "darwin-x86_64" }
           - { name: "windows",      os: "windows-latest", rust_target: "x86_64-pc-windows-msvc", python_arch: "x64", updater_target: "windows-x86_64" }
           - { name: "linux",        os: "ubuntu-22.04",   rust_target: "x86_64-unknown-linux-gnu", python_arch: "x64", updater_target: "linux-x86_64" }
 
@@ -307,7 +310,6 @@ jobs:
           # Map per-platform updater artifact patterns to Tauri's updater target IDs.
           declare -A TARGETS=(
             ["darwin-aarch64"]="refchecker-desktop-macos-arm64"
-            ["darwin-x86_64"]="refchecker-desktop-macos-x86_64"
             ["windows-x86_64"]="refchecker-desktop-windows"
             ["linux-x86_64"]="refchecker-desktop-linux"
           )
