@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/useAuthStore'
 import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
-import { invokeTauri, isTauri, openExternal } from '../../utils/tauriBridge'
+import { invokeTauri, isTauri, openExternal, getAppVersion } from '../../utils/tauriBridge'
 import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
 
 const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
@@ -59,6 +59,19 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirError, setCacheDirError] = useState(null)
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
+
+  // Dynamic Tauri bundle version. Falls back to the backend's CLI
+  // version when running outside the desktop wrapper.
+  const [appVersion, setAppVersion] = useState(null)
+  useEffect(() => {
+    let mounted = true
+    if (isTauri()) {
+      getAppVersion()
+        .then((v) => { if (mounted) setAppVersion(v) })
+        .catch(() => {})
+    }
+    return () => { mounted = false }
+  }, [])
 
   // Tauri auto-updater UI state. The web-ui is also served outside the
   // desktop wrapper (Docker, plain pip install), so we avoid pulling
@@ -434,7 +447,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             <div>
               <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>App updates</div>
               <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                {version?.app ? `Currently on ${version.app}` : 'Check the manifest for a newer signed build.'}
+                {appVersion ? `Currently on v${appVersion}` : 'Check the manifest for a newer signed build.'}
               </div>
             </div>
             <div className="flex gap-2">

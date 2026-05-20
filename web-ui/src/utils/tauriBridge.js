@@ -40,6 +40,23 @@ export async function openExternal(url) {
 }
 
 /**
+ * Read the bundled app version (from tauri.conf.json → version, which
+ * itself reads from tauri-app/package.json). Returns null outside of
+ * Tauri so the Settings UI can fall back to the backend's CLI version.
+ */
+export async function getAppVersion() {
+  if (!isTauri()) return null
+  try {
+    if (window.__TAURI_INTERNALS__?.invoke) {
+      return await window.__TAURI_INTERNALS__.invoke('plugin:app|version')
+    }
+  } catch (e) {
+    console.warn('[tauriBridge] plugin:app|version failed', e)
+  }
+  return null
+}
+
+/**
  * Invoke a Rust-side Tauri command. Returns `null` outside of Tauri so
  * callers can render a graceful fallback in plain-browser dev mode.
  */
