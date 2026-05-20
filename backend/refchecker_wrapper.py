@@ -1461,7 +1461,7 @@ class ProgressRefChecker:
             return ('needs_async', None)
 
     @staticmethod
-    def _compute_ref_stats(result: Dict[str, Any]) -> Dict[str, int]:
+    def _compute_ref_stats(result: Dict[str, Any], is_complete: bool = True) -> Dict[str, int]:
         """Compute the stat contribution of a single reference result.
 
         Returns a dict of stat counters (all non-negative) representing
@@ -1497,10 +1497,24 @@ class ProgressRefChecker:
         has_unverified_error = any(
             e.get('error_type') == 'unverified' for e in result.get('errors', [])
         )
+        has_pending_hallucination_check = (
+            result.get('hallucination_check_pending')
+            and not result.get('hallucination_assessment')
+        )
+        is_transient_unverified = (
+            status == 'unverified'
+            and not result.get('hallucination_assessment')
+            and not is_complete
+        )
+        can_count_unverified = not has_pending_hallucination_check and not is_transient_unverified
 
         if status == 'hallucination' and not llm_match_overrides:
             d['hallucination_count'] = 1
-        if not llm_match_overrides and (status in ('unverified', 'hallucination') or has_unverified_error):
+        if (
+            not llm_match_overrides
+            and can_count_unverified
+            and (status in ('unverified', 'hallucination') or has_unverified_error)
+        ):
             d['unverified_count'] = 1
         if (
             llm_match_overrides
@@ -1520,7 +1534,7 @@ class ProgressRefChecker:
         return d
 
     @staticmethod
-    def _compute_deferred_ref_deltas(result: Dict[str, Any], old_result: Dict[str, Any] = None) -> Dict[str, int]:
+    def _compute_deferred_ref_deltas(result: Dict[str, Any], old_result: Dict[str, Any] = None, is_complete: bool = True) -> Dict[str, int]:
         """Compute stat counter deltas for a ref whose status changed.
 
         When ``old_result`` is provided, returns the *difference* between
@@ -1528,10 +1542,10 @@ class ProgressRefChecker:
         adjust running totals incrementally.  When ``old_result`` is None,
         returns the absolute contribution of *result* (legacy behaviour).
         """
-        new_d = ProgressRefChecker._compute_ref_stats(result)
+        new_d = ProgressRefChecker._compute_ref_stats(result, is_complete=is_complete)
         if old_result is None:
             return new_d
-        old_d = ProgressRefChecker._compute_ref_stats(old_result)
+        old_d = ProgressRefChecker._compute_ref_stats(old_result, is_complete=is_complete)
         return {k: new_d[k] - old_d.get(k, 0) for k in new_d}
 
     def _run_hallucination_check_sync(self, result: Dict[str, Any], reference: Dict[str, Any]) -> Dict[str, Any]:
@@ -1800,7 +1814,7 @@ class ProgressRefChecker:
                 # Use the shared _compute_ref_stats to avoid duplicated logic.
                 checked_count += 1
                 processed_count += 1
-                d = self._compute_ref_stats(result)
+                d = self._compute_ref_stats(result, is_complete=False)
                 errors_count += d['errors_count']
                 warnings_count += d['warnings_count']
                 suggestions_count += d['suggestions_count']
@@ -1872,7 +1886,7 @@ class ProgressRefChecker:
                     if outcome == 'resolved':
                         resolved['hallucination_check_pending'] = False
                         # Adjust stats: subtract old contribution, add new
-                        d = self._compute_deferred_ref_deltas(resolved, c_result)
+                        d = self._compute_deferred_ref_deltas(resolved, c_result, is_complete=False)
                         errors_count += d['errors_count']
                         warnings_count += d['warnings_count']
                         suggestions_count += d['suggestions_count']
@@ -1980,7 +1994,7 @@ class ProgressRefChecker:
                             updated['hallucination_check_pending'] = False
 
                             # Adjust stats: subtract old contribution, add new
-                            d = self._compute_deferred_ref_deltas(updated, old_result)
+                            d = self._compute_deferred_ref_deltas(updated, old_result, is_complete=False)
                             errors_count += d['errors_count']
                             warnings_count += d['warnings_count']
                             suggestions_count += d['suggestions_count']

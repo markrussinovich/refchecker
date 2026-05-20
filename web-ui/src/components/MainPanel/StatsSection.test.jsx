@@ -120,6 +120,8 @@ describe('StatsSection hallucination count', () => {
 
     expect(screen.getByText('50/59 checked')).toBeTruthy()
     expect(screen.getByText('of 50')).toBeTruthy()
+    expect(screen.queryByTitle(/could not be verified/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /unverified/i })).toBeNull()
   })
 
   it('does not count LLM-found matching metadata as hallucinated', () => {

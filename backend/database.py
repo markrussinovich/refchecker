@@ -303,7 +303,10 @@ def _compute_reference_buckets_from_results(results: List[Dict[str, Any]], is_co
 
         if (
             effective_status in {"unverified", "hallucination"}
-            or any(str((error or {}).get("error_type") or "").lower() == "unverified" for error in errors)
+            or (
+                effective_status != "checking"
+                and any(str((error or {}).get("error_type") or "").lower() == "unverified" for error in errors)
+            )
             or likely_hallucinated
         ):
             unverified_count += 1
