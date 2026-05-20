@@ -604,12 +604,9 @@ class LLMHallucinationVerifier:
 
     def _call_google_chat(self, system_prompt: str, user_prompt: str) -> tuple:
         """Google Gemini without web search."""
-        from google.genai import types
         resp = self._google_generate_content_with_retry(
             contents=user_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-            ),
+            config={'system_instruction': system_prompt},
             purpose='hallucination chat fallback',
         )
         return extract_google_response_text(resp).strip(), []
