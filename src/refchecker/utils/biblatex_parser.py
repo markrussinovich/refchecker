@@ -317,6 +317,18 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
     content = _handle_hyphenated_line_breaks(content)
     # Then normalize all other whitespace
     content = re.sub(r'\s+', ' ', content.strip())
+
+    book_style_authors_text = ""
+    book_style_match = re.search(
+        r'^((?:[A-Z]\.\s*){1,5}[A-Z][A-Za-z\'-]+(?:\s+[A-Z][A-Za-z\'-]+)*),'
+        r'\s*([A-Z][^.]{8,}?)\.\s+([^,]{3,}),\s+((?:19|20)\d{2})\.\s*$',
+        content,
+    )
+    if book_style_match:
+        book_style_authors_text = book_style_match.group(1).strip()
+        title = clean_title(book_style_match.group(2).strip())
+        journal = book_style_match.group(3).strip()
+        year = int(book_style_match.group(4))
     
     # Pattern matching for different biblatex formats:
     
@@ -326,7 +338,7 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
     if title_match:
         raw_title = title_match.group(1)
         title = clean_title(raw_title)
-    else:
+    elif not title:
         # If no quoted title, look for title after author names
         # Pattern: "FirstAuthor et al. Title Goes Here. Year." or "Author. Title. Year."
         # Order matters: more specific patterns first
@@ -401,7 +413,7 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
             url = url_match.group(0).rstrip('.,')  # Remove trailing punctuation
     
     # 6. Extract authors - improved to handle various biblatex patterns
-    authors_text = ""
+    authors_text = book_style_authors_text
     
     # The key insight is that authors come first, then title (often in quotes), then venue/year
     # Examples we need to handle:
@@ -429,33 +441,34 @@ def parse_biblatex_entry_content(entry_num: str, content: str) -> Dict[str, Any]
         r'^([^.]+?)\.\s*[A-Z]',  # Allow no space after period
     ]
     
-    for i, pattern in enumerate(author_patterns):
-        author_match = re.search(pattern, content)
-        if author_match:
-            potential_authors = author_match.group(1).strip()
-            
-            # For patterns that also capture title, extract it
-            if i == 2 and not title and len(author_match.groups()) > 2:
-                # Pattern 2 (book format) captures authors, title, and subtitle
-                title_part = author_match.group(2).strip()
-                subtitle_part = author_match.group(3).strip()
-                combined_title = f"{title_part}: {subtitle_part}" if subtitle_part else title_part
-                if len(combined_title) > 2:
-                    title = clean_title(combined_title)
-            elif (i == 3 or i == 4) and not title and len(author_match.groups()) > 1:
-                # Pattern 3 (missing space, index 3) and Pattern 4 (with space, index 4) capture both authors and title
-                potential_title = author_match.group(2).strip()
-                if len(potential_title) > 2 and not re.match(r'^[A-Z][a-z]+,', potential_title):
-                    title = clean_title(potential_title)
-            
-            # Validate that this looks like authors
-            if (potential_authors and 
-                not potential_authors.startswith(('http', 'DOI', 'arXiv', 'In:')) and
-                len(potential_authors) < 300 and
-                # Should contain at least one name-like pattern
-                re.search(r'[A-Z][a-z]+', potential_authors)):
-                authors_text = potential_authors
-                break
+    if not authors_text:
+        for i, pattern in enumerate(author_patterns):
+            author_match = re.search(pattern, content)
+            if author_match:
+                potential_authors = author_match.group(1).strip()
+
+                # For patterns that also capture title, extract it
+                if i == 2 and not title and len(author_match.groups()) > 2:
+                    # Pattern 2 (book format) captures authors, title, and subtitle
+                    title_part = author_match.group(2).strip()
+                    subtitle_part = author_match.group(3).strip()
+                    combined_title = f"{title_part}: {subtitle_part}" if subtitle_part else title_part
+                    if len(combined_title) > 2:
+                        title = clean_title(combined_title)
+                elif (i == 3 or i == 4) and not title and len(author_match.groups()) > 1:
+                    # Pattern 3 (missing space, index 3) and Pattern 4 (with space, index 4) capture both authors and title
+                    potential_title = author_match.group(2).strip()
+                    if len(potential_title) > 2 and not re.match(r'^[A-Z][a-z]+,', potential_title):
+                        title = clean_title(potential_title)
+
+                # Validate that this looks like authors
+                if (potential_authors and
+                    not potential_authors.startswith(('http', 'DOI', 'arXiv', 'In:')) and
+                    len(potential_authors) < 300 and
+                    # Should contain at least one name-like pattern
+                    re.search(r'[A-Z][a-z]+', potential_authors)):
+                    authors_text = potential_authors
+                    break
     
     # Remove trailing punctuation and clean up
     authors_text = re.sub(r'[.,;:]$', '', authors_text.strip())

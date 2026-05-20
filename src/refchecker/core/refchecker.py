@@ -2574,6 +2574,24 @@ class ArxivReferenceChecker:
             if authors and title:
                 return authors, title
         
+        # Handle book-style references where PDF extraction drops the space
+        # after the author comma, e.g.
+        # "R. K. Merton,The sociology of science: ... University Press, 1973."
+        book_publisher_year_match = re.search(
+            r'^((?:[A-Z]\.\s*){1,5}[A-Z][A-Za-z\'-]+(?:\s+[A-Z][A-Za-z\'-]+)*),'
+            r'\s*([A-Z][^.]{8,}?)\.\s+[^,]{3,},\s+(19|20)\d{2}\.?\s*$',
+            cleaned_ref,
+        )
+        if book_publisher_year_match:
+            authors_text = book_publisher_year_match.group(1).strip()
+            title = book_publisher_year_match.group(2).strip()
+
+            authors = self.extract_authors_list(authors_text)
+            title = clean_title(title)
+
+            if authors and title:
+                return authors, title
+
         # Try to find the pattern for references with years at the end
         # Pattern: "Authors. Title, YEAR." - but NOT "Authors. Title. Journal, Volume:Pages, YEAR." 
         # and NOT "Authors. Title. In Conference, pages X-Y, YEAR."
@@ -2622,7 +2640,7 @@ class ArxivReferenceChecker:
             
             if authors and title:
                 return authors, title
-        
+
         # Second try: Look for patterns with common academic reference formats
         # Pattern 1: Authors ending with initials and common last names before title
         author_name_patterns = [

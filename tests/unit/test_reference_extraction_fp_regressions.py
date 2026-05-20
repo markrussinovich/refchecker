@@ -147,6 +147,18 @@ def test_parse_references_falls_back_when_llm_skips_numbered_entries():
     assert [reference['year'] for reference in references] == [2020, 2021, 2022, 2023]
 
 
+def test_numbered_book_reference_without_space_after_author_comma_is_parsed():
+    raw_reference = (
+        '[34] R. K. Merton,The sociology of science: Theoretical and empirical '
+        'investigations. University of Chicago press, 1973.'
+    )
+
+    authors, title = ArxivReferenceChecker().extract_authors_title_from_academic_format(raw_reference)
+
+    assert authors == ['R. K. Merton']
+    assert title == 'The sociology of science: Theoretical and empirical investigations'
+
+
 def test_bibliography_ignores_title_header_that_looks_like_appendix_heading():
     text = """
 Introduction
