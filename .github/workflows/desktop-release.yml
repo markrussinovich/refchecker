@@ -1,0 +1,199 @@
+name: Desktop release
+
+# Builds the Tauri desktop app for macOS (universal), Windows, and Linux.
+# On macOS the bundle is signed + notarized when the Apple secrets are
+# present; if they aren't, the workflow still produces an unsigned build
+# so the PR / fork case keeps working.
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. desktop-v0.1.0). Leave blank for a draft-only build."
+        required: false
+        default: ""
+  pull_request:
+    paths:
+      - "tauri-app/**"
+      - ".github/workflows/desktop-release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { name: "macos-arm64",  os: "macos-14", rust_target: "aarch64-apple-darwin",     python_arch: "arm64" }
+          - { name: "macos-x86_64", os: "macos-13", rust_target: "x86_64-apple-darwin",      python_arch: "x86_64" }
+          - { name: "windows",      os: "windows-latest", rust_target: "x86_64-pc-windows-msvc", python_arch: "x64" }
+          - { name: "linux",        os: "ubuntu-22.04",   rust_target: "x86_64-unknown-linux-gnu", python_arch: "x64" }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.platform.python_arch }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.rust_target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tauri-app/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ matrix.platform.rust_target }}-${{ hashFiles('tauri-app/src-tauri/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.platform.rust_target }}-
+
+      - name: Install Linux deps
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Build sidecar (macOS / Linux)
+        if: matrix.platform.os != 'windows-latest'
+        env:
+          TARGET: ${{ matrix.platform.rust_target }}
+        run: bash tauri-app/scripts/build-sidecar.sh
+
+      - name: Build sidecar (Windows)
+        if: matrix.platform.os == 'windows-latest'
+        env:
+          TARGET: ${{ matrix.platform.rust_target }}
+        shell: pwsh
+        run: tauri-app/scripts/build-sidecar.ps1
+
+      - name: Install tauri-app deps
+        working-directory: tauri-app
+        run: npm ci
+
+      # ---------------------------------------------------------------
+      # macOS signing & notarization secrets
+      # ---------------------------------------------------------------
+      # Set these in repo Settings → Secrets and variables → Actions:
+      #   APPLE_CERTIFICATE          base64 of your Developer ID Application .p12
+      #   APPLE_CERTIFICATE_PASSWORD password for that .p12
+      #   APPLE_SIGNING_IDENTITY     e.g. "Developer ID Application: Your Name (TEAMID)"
+      #   APPLE_ID                   Apple ID email
+      #   APPLE_PASSWORD             app-specific password (https://appleid.apple.com)
+      #   APPLE_TEAM_ID              10-character team ID
+      #   KEYCHAIN_PASSWORD          any random string (used only inside the runner)
+      # See tauri-app/docs/SIGNING.md for the full how-to.
+      # ---------------------------------------------------------------
+      - name: Import Apple signing certificate
+        if: startsWith(matrix.platform.os, 'macos') && env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | xargs)
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Pre-sign PyInstaller sidecar (macOS)
+        if: startsWith(matrix.platform.os, 'macos') && env.APPLE_SIGNING_IDENTITY != ''
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          BIN=$(find tauri-app/src-tauri/binaries -name "refchecker-server-*" -type f | head -n1)
+          echo "Signing sidecar: $BIN"
+          codesign --force --options runtime --timestamp \
+            --entitlements tauri-app/src-tauri/entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" \
+            "$BIN"
+          codesign --verify --verbose=2 "$BIN"
+
+      - name: Build Tauri bundle
+        working-directory: tauri-app
+        env:
+          # Tauri picks these up automatically for macOS signing/notarization.
+          APPLE_SIGNING_IDENTITY:       ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                     ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:               ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:                ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE:            ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD:   ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          CI: "true"
+        run: npx tauri build --target ${{ matrix.platform.rust_target }}
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          OUT="dist-${{ matrix.platform.name }}"
+          mkdir -p "$OUT"
+          BUNDLE_DIR=tauri-app/src-tauri/target/${{ matrix.platform.rust_target }}/release/bundle
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f \
+              \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.app.zip" \
+                 -o -name "*.msi" -o -name "*.exe" -o -name "*.nsis.zip" \
+                 -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
+              -exec cp {} "$OUT"/ \;
+          fi
+          ls -la "$OUT" || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: refchecker-desktop-${{ matrix.platform.name }}
+          path: dist-${{ matrix.platform.name }}/**
+          if-no-files-found: warn
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: RefChecker Desktop ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: true
+          files: artifacts/**/*

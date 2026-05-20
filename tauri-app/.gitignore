@@ -1,0 +1,26 @@
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Rust / Tauri build artifacts
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# PyInstaller sidecar output (rebuilt by CI / local script)
+src-tauri/binaries/
+python/build/
+python/dist/
+python/*.spec.bak
+
+# Signing
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+AuthKey_*.p8
+.env
+.env.local
