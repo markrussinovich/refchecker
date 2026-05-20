@@ -3582,6 +3582,14 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "max": 20,
                 "section": "Performance"
             },
+            "extraction_mode": {
+                "default": "cascade",
+                "type": "select",
+                "label": "Reference Extraction",
+                "description": "Cascade: try regex/BibTeX/GROBID first and only fall back to LLM for messy or unrecognized entries (uses fewer tokens). LLM-only: send every reference to the LLM unconditionally.",
+                "options": ["cascade", "llm-only"],
+                "section": "Performance"
+            },
         }
 
         # db_path and cache_dir are only available in single-user mode (server-local resources)
@@ -3646,7 +3654,7 @@ async def update_setting(
     try:
         _require_admin(current_user)
         # Validate the setting key
-        valid_keys = {"max_concurrent_checks", "db_path", "cache_dir"}
+        valid_keys = {"max_concurrent_checks", "db_path", "cache_dir", "extraction_mode"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
         
@@ -3669,7 +3677,16 @@ async def update_setting(
                 return {"key": setting_key, "value": str(value), "message": "Setting updated"}
             except ValueError:
                 raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
-        
+
+        if setting_key == "extraction_mode":
+            mode = (update.value or "").strip().lower()
+            if mode not in ("cascade", "llm-only"):
+                raise HTTPException(status_code=400, detail="extraction_mode must be 'cascade' or 'llm-only'")
+            await db.set_setting(setting_key, mode)
+            os.environ["REFCHECKER_EXTRACTION_MODE"] = mode
+            logger.info(f"Updated extraction_mode -> {mode}")
+            return {"key": setting_key, "value": mode, "message": "Setting updated"}
+
         if setting_key == "db_path":
             path = update.value.strip()
             if not path:
@@ -3985,6 +4002,260 @@ def _read_log_tail(path: Path, lines: int = 25) -> str:
         return ""
     text = data.decode("utf-8", errors="replace")
     return "\n".join(text.splitlines()[-lines:])
+
+
+class _AddReferenceRequest(BaseModel):
+    title: Optional[str] = None
+    authors: Optional[list] = None
+    year: Optional[int] = None
+    venue: Optional[str] = None
+    doi: Optional[str] = None
+    arxiv_id: Optional[str] = None
+    cited_url: Optional[str] = None
+
+
+@app.post("/api/history/{check_id}/references")
+async def add_reference_to_check(
+    check_id: int,
+    payload: _AddReferenceRequest,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Append a new reference to an existing check. Status starts as
+    'pending'; the frontend can show it greyed out and the user can
+    trigger a re-verify or rerun the check to validate it for real."""
+    user_id = get_user_id_filter(current_user)
+    refs = await db.get_check_references(check_id, user_id=user_id)
+    if refs is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+    new_ref = {
+        "id": f"manual-{int(time.time() * 1000)}",
+        "index": (max((r.get("index") or 0) for r in refs) + 1) if refs else 1,
+        "title": payload.title,
+        "authors": payload.authors,
+        "year": payload.year,
+        "venue": payload.venue,
+        "doi": payload.doi,
+        "arxiv_id": payload.arxiv_id,
+        "cited_url": payload.cited_url,
+        "status": "pending",
+        "errors": [],
+        "warnings": [],
+        "suggestions": [{"message": "Added manually — re-run the check or click Verify to validate.", "error_type": "manual"}],
+    }
+    refs.append(new_ref)
+    ok = await db.replace_check_references(check_id, refs, user_id=user_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to persist reference")
+    return {"reference": new_ref, "total_refs": len(refs)}
+
+
+@app.delete("/api/history/{check_id}/references/{ref_id}")
+async def remove_reference_from_check(
+    check_id: int,
+    ref_id: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Remove a reference from a check (and recompute the rolled-up
+    counters so the history sidebar stays in sync)."""
+    user_id = get_user_id_filter(current_user)
+    refs = await db.get_check_references(check_id, user_id=user_id)
+    if refs is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+    before = len(refs)
+    refs = [r for r in refs if str(r.get("id")) != ref_id and str(r.get("index")) != ref_id]
+    if len(refs) == before:
+        raise HTTPException(status_code=404, detail="Reference not found in check")
+    ok = await db.replace_check_references(check_id, refs, user_id=user_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to persist removal")
+    return {"removed": True, "total_refs": len(refs)}
+
+
+@app.post("/api/history/{check_id}/references/{ref_id}/suggest-alternative")
+async def suggest_alternative_reference(
+    check_id: int,
+    ref_id: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """For a likely-hallucinated reference, surface real candidates the
+    user might have meant. Strategy: query Semantic Scholar's title
+    search with the cited title and return the top match by title
+    similarity. Lightweight (no LLM round-trip) so the user can preview
+    candidates before deciding to swap."""
+    user_id = get_user_id_filter(current_user)
+    refs = await db.get_check_references(check_id, user_id=user_id)
+    if refs is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+    target = next((r for r in refs if str(r.get("id")) == ref_id or str(r.get("index")) == ref_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Reference not found in check")
+    title = (target.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Reference has no title to search on")
+
+    import httpx
+    api_key = await _resolve_semantic_scholar_api_key(None)
+    headers = {"x-api-key": api_key} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                "https://api.semanticscholar.org/graph/v1/paper/search",
+                params={"query": title, "limit": 5, "fields": "paperId,title,authors,year,externalIds,url"},
+                headers=headers,
+            )
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Lookup failed: {e}")
+
+    suggestions = []
+    for p in (data.get("data") or [])[:5]:
+        ext = p.get("externalIds") or {}
+        suggestions.append({
+            "title": p.get("title"),
+            "authors": [a.get("name") for a in (p.get("authors") or []) if a.get("name")],
+            "year": p.get("year"),
+            "doi": ext.get("DOI"),
+            "arxiv_id": ext.get("ArXiv"),
+            "url": p.get("url"),
+            "paperId": p.get("paperId"),
+        })
+    return {"reference_id": ref_id, "cited_title": title, "candidates": suggestions}
+
+
+class _SimilarPapersRequest(BaseModel):
+    references: list  # list of {title, doi?, arxiv_id?, authors?}
+    paper_title: Optional[str] = None
+    paper_id: Optional[str] = None  # arXiv ID or DOI of the SOURCE paper
+    limit: int = 5
+
+
+@app.post("/api/papers/similar")
+async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo = Depends(require_user)):
+    """Surface up to N papers that share the most references with the
+    given paper. Combines two strategies and merges by S2 paper ID:
+
+      1. Direct: ask Semantic Scholar for the SOURCE paper's
+         related-papers / recommendations endpoint when an ID is known.
+      2. Co-citation: for each reference the user gave us, ask
+         Semantic Scholar `/paper/<id>/citations` for papers that cite
+         it; tally how many of the user's refs each candidate also
+         cites. Top tally wins.
+
+    The S2 calls go through the same SS API key the rest of the app
+    uses (settings → API Keys). Falls back to a smaller, lower-quality
+    set when no key is configured — S2's free tier rate-limits but
+    still responds.
+    """
+    refs = req.references or []
+    if not refs:
+        raise HTTPException(status_code=400, detail="`references` must be a non-empty list")
+
+    import httpx
+    api_key = await _resolve_semantic_scholar_api_key(None)
+    headers = {"x-api-key": api_key} if api_key else {}
+    timeout = 10.0
+    limit = max(1, min(20, int(req.limit or 5)))
+
+    def s2_id_of(ref: dict) -> Optional[str]:
+        # Build the most specific S2 identifier we can.
+        if ref.get("doi"):
+            return f"DOI:{ref['doi']}"
+        if ref.get("arxiv_id"):
+            return f"arXiv:{ref['arxiv_id']}"
+        return None
+
+    seen_ids = set()
+    tally: Dict[str, Dict[str, Any]] = {}
+
+    async def _fetch(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Optional[dict]:
+        try:
+            r = await client.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            logger.debug("S2 fetch failed for %s: %s", url, e)
+        return None
+
+    async with httpx.AsyncClient() as client:
+        # Strategy 1: direct recommendations on the source paper
+        if req.paper_id:
+            data = await _fetch(
+                client,
+                f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{req.paper_id}",
+                params={"fields": "paperId,title,authors,year,externalIds", "limit": 20},
+            )
+            for p in (data or {}).get("recommendedPapers", []) or []:
+                pid = p.get("paperId")
+                if not pid or pid in seen_ids:
+                    continue
+                seen_ids.add(pid)
+                tally[pid] = {"paper": p, "shared": 0, "via": "recommendations"}
+
+        # Strategy 2: co-citation tally — limit how many user refs we walk
+        # so a 200-ref bibliography doesn't fan out into 200 API calls.
+        for ref in refs[:30]:
+            ident = s2_id_of(ref)
+            if not ident:
+                continue
+            data = await _fetch(
+                client,
+                f"https://api.semanticscholar.org/graph/v1/paper/{ident}/citations",
+                params={"fields": "citingPaper.paperId,citingPaper.title,citingPaper.year,citingPaper.authors,citingPaper.externalIds", "limit": 30},
+            )
+            for item in (data or {}).get("data", []) or []:
+                cp = item.get("citingPaper") or {}
+                pid = cp.get("paperId")
+                if not pid:
+                    continue
+                if pid not in tally:
+                    tally[pid] = {"paper": cp, "shared": 0, "via": "co-cited"}
+                tally[pid]["shared"] += 1
+
+    # Score & rank: shared > 1 is meaningful; recommendations baseline is 1.
+    candidates = sorted(
+        tally.values(),
+        key=lambda v: (v["shared"], v["via"] == "recommendations"),
+        reverse=True,
+    )[:limit]
+
+    out = []
+    for c in candidates:
+        p = c["paper"] or {}
+        ext = p.get("externalIds") or {}
+        authors = [a.get("name") for a in (p.get("authors") or []) if a.get("name")]
+        out.append({
+            "paperId": p.get("paperId"),
+            "title": p.get("title"),
+            "year": p.get("year"),
+            "authors": authors,
+            "doi": ext.get("DOI"),
+            "arxiv_id": ext.get("ArXiv"),
+            "shared_with_source": c["shared"],
+            "via": c["via"],
+            "semantic_scholar_url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,
+        })
+    return {"source_paper": req.paper_title, "candidates": out}
+
+
+@app.get("/api/references/seen")
+async def list_seen_references(
+    limit: int = 200,
+    offset: int = 0,
+    q: Optional[str] = None,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Page through the global identity-keyed reference cache.
+
+    Powers the 'Seen References' tab: every reference RefChecker has ever
+    verified, deduped by DOI / ArXiv / normalized title, with how many
+    times it's been seen across checks. `q` does a substring match on
+    title/authors/doi when supplied."""
+    limit = max(1, min(1000, int(limit or 200)))
+    offset = max(0, int(offset or 0))
+    rows = await db.list_verified_references(limit=limit, offset=offset, q=q)
+    total = await db.count_verified_references()
+    return {"total": total, "limit": limit, "offset": offset, "items": rows}
 
 
 class _ListModelsRequest(BaseModel):

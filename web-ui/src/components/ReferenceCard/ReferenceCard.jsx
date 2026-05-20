@@ -607,6 +607,29 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
+          {reference.citation_context && (
+            <div className="flex mb-1" style={{ minWidth: 0 }}>
+              <span
+                className="flex-shrink-0"
+                style={{ color: 'var(--color-text-secondary)', width: '120px' }}
+              >
+                Context:
+              </span>
+              <span
+                style={{
+                  color: 'var(--color-text)',
+                  fontStyle: 'italic',
+                  flex: '1 1 auto',
+                  minWidth: 0,
+                  overflowWrap: 'anywhere',
+                }}
+                title="Sentence around the citation marker in the source paper"
+              >
+                {reference.citation_context}
+              </span>
+            </div>
+          )}
+
           {/* Authoritative URLs - deduplicate arxiv URLs (prefer abs over pdf) */}
           {(() => {
             const urls = displayUrls

@@ -6,6 +6,12 @@ import {
   downloadAsFile,
   formatIssueLine,
 } from '../../utils/formatters'
+import {
+  addReferenceToCheck,
+  removeReferenceFromCheck,
+  suggestAlternativeReference,
+} from '../../utils/api'
+import { useHistoryStore } from '../../stores/useHistoryStore'
 import { wordDiff } from '../../utils/wordDiff'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
@@ -156,6 +162,62 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   const [decisions, setDecisions] = useState({})
   const [editingKey, setEditingKey] = useState(null)
   const [editBuffer, setEditBuffer] = useState('')
+
+  // Add / Remove / Suggest server actions. selectedCheckId comes from
+  // the history store so we know which check to mutate.
+  const selectedCheckId = useHistoryStore(s => s.selectedCheckId)
+  const [busyKey, setBusyKey] = useState(null)
+  const [showAdd, setShowAdd] = useState(false)
+  const [newRef, setNewRef] = useState({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
+  const [suggestFor, setSuggestFor] = useState(null) // { ref_id, candidates }
+  const handleAddRef = async () => {
+    if (!selectedCheckId) return
+    setBusyKey('__add__')
+    try {
+      await addReferenceToCheck(selectedCheckId, {
+        title: newRef.title.trim() || null,
+        authors: newRef.authors.trim() ? newRef.authors.split(',').map(s => s.trim()).filter(Boolean) : null,
+        year: newRef.year ? parseInt(newRef.year, 10) : null,
+        doi: newRef.doi.trim() || null,
+        arxiv_id: newRef.arxiv_id.trim() || null,
+      })
+      setShowAdd(false)
+      setNewRef({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
+      // Tell the parent to re-fetch — easiest: dispatch a window event
+      // the MainPanel already listens to nothing of, so reload history.
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || 'Add failed')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+  const handleRemoveRef = async (ref, i) => {
+    if (!selectedCheckId) return
+    const ident = String(ref.id ?? ref.index ?? i)
+    setBusyKey(ident)
+    try {
+      await removeReferenceFromCheck(selectedCheckId, ident)
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || 'Remove failed')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+  const handleSuggestAlt = async (ref, i) => {
+    if (!selectedCheckId) return
+    const ident = String(ref.id ?? ref.index ?? i)
+    setBusyKey(ident)
+    try {
+      const res = await suggestAlternativeReference(selectedCheckId, ident)
+      setSuggestFor({ ref_id: ident, candidates: res.data?.candidates || [] })
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || 'Suggest failed')
+    } finally {
+      setBusyKey(null)
+    }
+  }
 
   const statusFilter = useCheckStore(s => s.statusFilter)
   const summaryActive = statusFilter.length > 0
@@ -327,8 +389,86 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
             type="button"
             title="Download just the corrections you applied, in the selected style"
           >Export changed list ({appliedCount})</button>
+          <button onClick={() => setShowAdd(v => !v)} disabled={!selectedCheckId}
+            className="px-3 py-1 rounded text-xs font-medium border"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              opacity: selectedCheckId ? 1 : 0.5,
+            }}
+            type="button"
+            title="Add a new reference to this check"
+          >+ Add reference</button>
         </div>
       </div>
+
+      {suggestFor && (
+        <div className="p-3 rounded-lg border space-y-2"
+          style={{ borderColor: 'var(--color-hallucination, #a855f7)', backgroundColor: 'rgba(168,85,247,0.06)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              Real-paper candidates for the flagged reference
+              <span style={{ color: 'var(--color-text-secondary)' }}> (top {suggestFor.candidates.length} from Semantic Scholar)</span>
+            </div>
+            <button onClick={() => setSuggestFor(null)} className="text-xs px-2 py-0.5 rounded border"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} type="button">×</button>
+          </div>
+          {suggestFor.candidates.length === 0 ? (
+            <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              No candidates found — the cited title may be too generic or genuinely fabricated.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {suggestFor.candidates.map((c, j) => (
+                <div key={j} className="flex items-start justify-between gap-2 p-2 rounded border"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{c.title}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      {(c.authors || []).slice(0, 4).join(', ')}{(c.authors || []).length > 4 ? ', et al.' : ''}
+                      {c.year ? ` · ${c.year}` : ''}{c.doi ? ` · ${c.doi}` : ''}
+                    </div>
+                  </div>
+                  {c.url && (
+                    <a href={c.url} target="_blank" rel="noreferrer"
+                      className="text-xs px-2 py-0.5 rounded flex-shrink-0"
+                      style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: 'white' }}>
+                      Open
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {showAdd && (
+        <div className="p-3 rounded-lg border space-y-2"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            Adds a new reference to this check with status <code>pending</code>. Re-run the check to fully verify it.
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <input type="text" placeholder="Title" value={newRef.title} onChange={(e) => setNewRef({ ...newRef, title: e.target.value })} className="px-2 py-1 rounded border text-xs" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} />
+            <input type="text" placeholder="Authors (comma-separated)" value={newRef.authors} onChange={(e) => setNewRef({ ...newRef, authors: e.target.value })} className="px-2 py-1 rounded border text-xs" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} />
+            <input type="number" placeholder="Year" value={newRef.year} onChange={(e) => setNewRef({ ...newRef, year: e.target.value })} className="px-2 py-1 rounded border text-xs" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} />
+            <input type="text" placeholder="DOI (10.xxxx/xxxx)" value={newRef.doi} onChange={(e) => setNewRef({ ...newRef, doi: e.target.value })} className="px-2 py-1 rounded border text-xs" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} />
+            <input type="text" placeholder="arXiv ID" value={newRef.arxiv_id} onChange={(e) => setNewRef({ ...newRef, arxiv_id: e.target.value })} className="px-2 py-1 rounded border text-xs" style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }} />
+          </div>
+          <div className="flex gap-2">
+            <button onClick={handleAddRef} disabled={busyKey === '__add__'}
+              className="px-3 py-1 rounded text-xs font-medium"
+              style={{ backgroundColor: 'var(--color-success, #22c55e)', color: 'white', opacity: busyKey === '__add__' ? 0.5 : 1 }}
+              type="button"
+            >{busyKey === '__add__' ? 'Adding…' : 'Save reference'}</button>
+            <button onClick={() => setShowAdd(false)} className="px-3 py-1 rounded text-xs font-medium border" type="button"
+              style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
 
       {/* Rows */}
       <div className="space-y-2">
@@ -408,6 +548,25 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
                     type="button"
                   >{copiedKey === key ? '✓' : 'Copy'}</button>
+                  {tags.has('hallucination') && (
+                    <button onClick={() => handleSuggestAlt(ref, i)} disabled={busyKey === String(ref.id ?? ref.index ?? i) || !selectedCheckId}
+                      className="px-2 py-0.5 rounded text-xs"
+                      style={{ backgroundColor: 'var(--color-hallucination, #a855f7)', color: 'white', opacity: !selectedCheckId ? 0.5 : 1 }}
+                      type="button"
+                      title="Search Semantic Scholar for real papers matching this title"
+                    >Suggest alternative</button>
+                  )}
+                  <button onClick={() => handleRemoveRef(ref, i)} disabled={busyKey === String(ref.id ?? ref.index ?? i) || !selectedCheckId}
+                    className="px-2 py-0.5 rounded text-xs"
+                    style={{
+                      backgroundColor: 'var(--color-bg-primary)',
+                      color: 'var(--color-error, #ef4444)',
+                      border: '1px solid var(--color-border)',
+                      opacity: !selectedCheckId ? 0.5 : 1,
+                    }}
+                    type="button"
+                    title="Drop this reference from the check (counters update live)"
+                  >Remove</button>
                 </div>
               </div>
 

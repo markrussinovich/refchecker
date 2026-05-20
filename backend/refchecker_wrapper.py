@@ -131,6 +131,46 @@ def _make_cli_checker(llm_provider):
     return cli_checker
 
 
+def _attach_citation_contexts(references, paper_text):
+    """Find the sentence that introduces each reference in the paper.
+
+    Cheap heuristic only — looks for the bare `[N]` marker matching each
+    reference's index, captures the surrounding sentence-boundary text,
+    and attaches it as `citation_context` on the ref. Skips references
+    that don't have a numeric index or aren't mentioned in-text. No LLM
+    call — runs at parse time and adds maybe 5 ms per reference for a
+    typical paper.
+    """
+    if not references or not paper_text:
+        return
+    import re
+    # Pre-split into sentences once. Crude period-based split is fine —
+    # we just need a window the user can read.
+    sentences = re.split(r"(?<=[.!?])\s+", paper_text)
+    # Index citations: which sentences contain `[N]` for each N?
+    by_index = {}
+    for sent in sentences:
+        for m in re.finditer(r"\[\s*(\d{1,3})(?:[\-–,\s]\d{1,3})*\s*\]", sent):
+            for num in re.findall(r"\d{1,3}", m.group(0)):
+                idx = int(num)
+                by_index.setdefault(idx, [])
+                if sent not in by_index[idx]:
+                    by_index[idx].append(sent)
+    for ref in references:
+        try:
+            idx = int(ref.get("index") or 0)
+        except Exception:
+            continue
+        if idx <= 0:
+            continue
+        hits = by_index.get(idx, [])
+        if not hits:
+            continue
+        # Keep up to 2 representative sentences, trimmed.
+        context = " … ".join(s.strip()[:240] for s in hits[:2])
+        ref["citation_context"] = context
+
+
 def _extract_pdf_text_cli_style(pdf_path: str, llm_provider) -> str:
     """Extract PDF text using the same method as the CLI checker.
 
@@ -919,6 +959,10 @@ class ProgressRefChecker:
                 # Save to disk cache
                 if references:
                     cache_bibliography(self.cache_dir, paper_source, references, bibliography_cache_identity)
+                # Attach citation contexts (sentence around [N] in the
+                # source text) so the UI can show 'context: "as
+                # demonstrated in [12]..."' on each reference card.
+                _attach_citation_contexts(references, paper_text)
 
             if not references:
                 await self.emit_progress("completed", {
@@ -1240,15 +1284,30 @@ class ProgressRefChecker:
 
     async def _extract_references_from_bibtex(self, bibtex_content: str) -> tuple:
         """Extract references from BibTeX/BBL content (from ArXiv source files).
-        
-        This mirrors the CLI's extract_bibliography logic for handling BibTeX content.
-        
-        Returns:
-            Tuple of (references list, extraction_method string)
-            extraction_method is one of: 'bbl', 'bib', 'llm', or None if extraction failed
+
+        Honors the user-set extraction_mode:
+          - 'cascade' (default): try the deterministic LaTeX/BibTeX parser
+            first; only fall back to the LLM when the parser fails OR the
+            parsed output looks low-quality (validate_parsed_references).
+          - 'llm-only': skip the deterministic parser entirely and send
+            the raw content straight to the LLM. Costs more tokens but
+            handles weirdly-formatted .bib files the parser chokes on.
+
+        Returns (references list, extraction_method) where extraction_method
+        is one of 'bbl', 'bib', 'llm', or None.
         """
         try:
             cli_checker = _make_cli_checker(self.llm)
+            extraction_mode = (os.environ.get('REFCHECKER_EXTRACTION_MODE') or 'cascade').lower()
+            if extraction_mode == 'llm-only' and self.llm:
+                logger.info("extraction_mode=llm-only: bypassing deterministic bibtex/bbl parser")
+                try:
+                    llm_refs = await asyncio.to_thread(cli_checker.llm_extractor.extract_references, bibtex_content)
+                    if llm_refs:
+                        processed = await asyncio.to_thread(cli_checker._process_llm_extracted_references, llm_refs)
+                        return processed, 'llm'
+                except Exception as e:
+                    logger.warning(f"llm-only extraction failed, falling back to cascade: {e}")
             
             # Check if this is LaTeX thebibliography format (e.g., from .bbl files)
             if '\\begin{thebibliography}' in bibtex_content and '\\bibitem' in bibtex_content:
@@ -1815,6 +1874,14 @@ class ProgressRefChecker:
                 # Use checked_count for progress so the UI shows verification
                 # advancing in real-time.
                 emit_start = time.time()
+                # Persist to the global identity-keyed cache so future
+                # checks (any paper, any user, any session) can reuse
+                # this verification by DOI / ArXiv / normalized title.
+                try:
+                    from .database import db as _db
+                    await _db.upsert_verified_reference(result)
+                except Exception as _e:
+                    logger.debug("Skipping verified-reference upsert: %s", _e)
                 await self.emit_progress("reference_result", result)
                 await self.emit_progress("progress", {
                     "current": checked_count,

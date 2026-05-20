@@ -108,6 +108,22 @@ export const autoCreatePath = (setting) =>
 export const listLLMModels = (provider, api_key, endpoint) =>
   api.post('/llm-configs/models', { provider, api_key, endpoint })
 
+// Global identity-keyed reference cache ("Seen References" tab)
+export const listSeenReferences = (limit = 200, offset = 0, q = null) =>
+  api.get('/references/seen', { params: { limit, offset, ...(q ? { q } : {}) } })
+
+// Similar-papers recommendations + co-citation tally
+export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5 }) =>
+  api.post('/papers/similar', { references, paper_title, paper_id, limit })
+
+// Per-check edit endpoints (Add/Remove citation, regenerate health stats)
+export const addReferenceToCheck = (checkId, payload) =>
+  api.post(`/history/${checkId}/references`, payload)
+export const removeReferenceFromCheck = (checkId, refId) =>
+  api.delete(`/history/${checkId}/references/${encodeURIComponent(refId)}`)
+export const suggestAlternativeReference = (checkId, refId) =>
+  api.post(`/history/${checkId}/references/${encodeURIComponent(refId)}/suggest-alternative`)
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

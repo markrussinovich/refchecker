@@ -528,6 +528,34 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         </div>
       </div>
 
+      {/* Reference Extraction Mode */}
+      {settings.extraction_mode && (
+        <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex-1 mr-3">
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              {settings.extraction_mode.label || 'Reference Extraction'}
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              {settings.extraction_mode.description}
+            </div>
+          </div>
+          <select
+            value={settings.extraction_mode.value || 'cascade'}
+            onChange={(e) => handleSettingChange('extraction_mode', e.target.value)}
+            className="px-3 py-2 rounded-lg border text-sm cursor-pointer"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              minWidth: '140px',
+            }}
+          >
+            <option value="cascade">Cascade (cheap-first)</option>
+            <option value="llm-only">LLM only</option>
+          </select>
+        </div>
+      )}
+
       {/* Concurrency Setting (single-user only) */}
       {!multiuser && (
       <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>

@@ -425,6 +425,34 @@ class Database:
                 )
             """)
 
+            # Identity-keyed reference table. The verification_cache above is
+            # keyed by the verbatim reference string a paper used; this one
+            # lives alongside it, keyed by canonical identifiers (DOI / ArXiv
+            # ID / normalized title). Lets the app reuse verifications across
+            # checks regardless of how a given paper happened to cite the
+            # source, and powers the "Seen References" tab.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS verified_reference_identity (
+                    identity_key TEXT PRIMARY KEY,
+                    title TEXT,
+                    authors TEXT,
+                    year INTEGER,
+                    doi TEXT,
+                    arxiv_id TEXT,
+                    venue TEXT,
+                    verified_url TEXT,
+                    matched_db TEXT,
+                    status TEXT,
+                    result_json TEXT NOT NULL,
+                    times_seen INTEGER DEFAULT 1,
+                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_doi ON verified_reference_identity(doi)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_arxiv ON verified_reference_identity(arxiv_id)")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_last_seen ON verified_reference_identity(last_seen DESC)")
+
             # Users table (for multi-user mode)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -1550,12 +1578,221 @@ class Database:
             await db.commit()
             return True
 
+    async def get_check_references(self, check_id: int, user_id: Optional[int] = None) -> Optional[List[Dict[str, Any]]]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if user_id is None:
+                cursor = await db.execute("SELECT results_json FROM check_history WHERE id = ?", (check_id,))
+            else:
+                cursor = await db.execute("SELECT results_json FROM check_history WHERE id = ? AND user_id = ?", (check_id, user_id))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            try:
+                return json.loads(row["results_json"] or "[]")
+            except Exception:
+                return []
+
+    async def replace_check_references(self, check_id: int, results: List[Dict[str, Any]], user_id: Optional[int] = None) -> bool:
+        """Persist a mutated reference list back into a check_history row,
+        recomputing the rolled-up counters in lockstep so the history
+        sidebar / Seen Refs tab don't drift from the actual results."""
+        total = len(results)
+        refs_with_errors = sum(1 for r in results if (r.get("errors") or []))
+        refs_with_warnings_only = sum(1 for r in results if not (r.get("errors") or []) and (r.get("warnings") or []))
+        refs_with_suggestions_only = sum(1 for r in results if not (r.get("errors") or []) and not (r.get("warnings") or []) and (r.get("suggestions") or []))
+        refs_verified = sum(1 for r in results if (r.get("status") == "verified"))
+        errors_count = sum(len(r.get("errors") or []) for r in results)
+        warnings_count = sum(len(r.get("warnings") or []) for r in results)
+        suggestions_count = sum(len(r.get("suggestions") or []) for r in results)
+        unverified_count = sum(1 for r in results if r.get("status") == "unverified")
+        hallucination_count = sum(1 for r in results if r.get("status") == "hallucinated" or (r.get("hallucination_assessment") or {}).get("verdict", "").upper() == "LIKELY")
+
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            params = [
+                json.dumps(results, default=str),
+                total, errors_count, warnings_count, suggestions_count, unverified_count,
+                refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only,
+                refs_verified, hallucination_count,
+                check_id,
+            ]
+            if user_id is None:
+                cursor = await db.execute(
+                    """UPDATE check_history SET results_json = ?, total_refs = ?, errors_count = ?,
+                       warnings_count = ?, suggestions_count = ?, unverified_count = ?,
+                       refs_with_errors = ?, refs_with_warnings_only = ?, refs_with_suggestions_only = ?,
+                       refs_verified = ?, hallucination_count = ?
+                       WHERE id = ?""",
+                    params,
+                )
+            else:
+                params.append(user_id)
+                cursor = await db.execute(
+                    """UPDATE check_history SET results_json = ?, total_refs = ?, errors_count = ?,
+                       warnings_count = ?, suggestions_count = ?, unverified_count = ?,
+                       refs_with_errors = ?, refs_with_warnings_only = ?, refs_with_suggestions_only = ?,
+                       refs_verified = ?, hallucination_count = ?
+                       WHERE id = ? AND user_id = ?""",
+                    params,
+                )
+            await db.commit()
+            return cursor.rowcount > 0
+
     async def clear_verification_cache(self) -> int:
         """Clear all cached verification results. Returns count of deleted entries."""
         async with aiosqlite.connect(self.db_path) as db:
             cursor = await db.execute("DELETE FROM verification_cache")
             await db.commit()
             return cursor.rowcount
+
+    # ---------------------------------------------------------------
+    # Identity-keyed reference cache (DOI / ArXiv / normalized title)
+    # ---------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_title(title: Optional[str]) -> str:
+        if not title:
+            return ""
+        # Collapse whitespace, lowercase, strip non-alphanumerics for fuzzy
+        # equivalence ("BERT: Pre-training..." == "BERT Pre training").
+        import re
+        return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+    @classmethod
+    def reference_identity_key(cls, ref: Dict[str, Any]) -> Optional[str]:
+        """Pick the canonical identity key for a reference.
+
+        Order: DOI -> ArXiv ID -> (normalized title + year). Returns None
+        when no identifier is good enough to safely dedupe on (e.g. just a
+        title with no year).
+        """
+        if not isinstance(ref, dict):
+            return None
+        doi = (ref.get("doi") or "").strip().lower()
+        if doi:
+            return f"doi:{doi}"
+        arxiv = (ref.get("arxiv_id") or "").strip().lower()
+        if arxiv:
+            return f"arxiv:{arxiv}"
+        title = cls._normalize_title(ref.get("title"))
+        year = ref.get("year")
+        if title and year:
+            return f"title:{title}:{year}"
+        return None
+
+    async def upsert_verified_reference(self, ref: Dict[str, Any]) -> Optional[str]:
+        """Persist a single verified reference into the global identity index.
+
+        Idempotent — repeated calls for the same identity bump `times_seen`
+        and refresh `last_seen` without touching first_seen. Skips refs
+        without a safe identity key.
+        """
+        ident = self.reference_identity_key(ref)
+        if not ident:
+            return None
+        status = ref.get("status") or ""
+        # Don't cache hallucinated / unverified — those should re-check.
+        if status in ("hallucinated", "error"):
+            return None
+        result = json.dumps(ref, default=str)
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            await db.execute(
+                """
+                INSERT INTO verified_reference_identity
+                    (identity_key, title, authors, year, doi, arxiv_id, venue,
+                     verified_url, matched_db, status, result_json,
+                     times_seen, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(identity_key) DO UPDATE SET
+                    title = excluded.title,
+                    authors = excluded.authors,
+                    year = excluded.year,
+                    venue = excluded.venue,
+                    verified_url = excluded.verified_url,
+                    matched_db = excluded.matched_db,
+                    status = excluded.status,
+                    result_json = excluded.result_json,
+                    times_seen = verified_reference_identity.times_seen + 1,
+                    last_seen = CURRENT_TIMESTAMP
+                """,
+                (
+                    ident,
+                    ref.get("title"),
+                    ref.get("authors") if isinstance(ref.get("authors"), str) else json.dumps(ref.get("authors") or [], default=str),
+                    int(ref.get("year")) if str(ref.get("year") or "").isdigit() else None,
+                    (ref.get("doi") or "").strip() or None,
+                    (ref.get("arxiv_id") or "").strip() or None,
+                    ref.get("venue"),
+                    ref.get("verified_url"),
+                    ref.get("matched_db"),
+                    status,
+                    result_json,
+                ),
+            )
+            await db.commit()
+        return ident
+
+    async def lookup_verified_reference(self, ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Return the cached identity record for a reference, or None."""
+        ident = self.reference_identity_key(ref)
+        if not ident:
+            return None
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT * FROM verified_reference_identity WHERE identity_key = ?",
+                (ident,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            data = dict(row)
+            try:
+                data["result"] = json.loads(data.get("result_json") or "{}")
+            except Exception:
+                data["result"] = {}
+            return data
+
+    async def list_verified_references(self, limit: int = 200, offset: int = 0, q: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Page through the identity-keyed reference table for the Seen Refs tab."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            if q:
+                like = f"%{q.lower()}%"
+                cursor = await db.execute(
+                    """
+                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue,
+                           verified_url, matched_db, status, times_seen,
+                           first_seen, last_seen
+                    FROM verified_reference_identity
+                    WHERE LOWER(title) LIKE ? OR LOWER(authors) LIKE ? OR LOWER(doi) LIKE ?
+                    ORDER BY last_seen DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (like, like, like, limit, offset),
+                )
+            else:
+                cursor = await db.execute(
+                    """
+                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue,
+                           verified_url, matched_db, status, times_seen,
+                           first_seen, last_seen
+                    FROM verified_reference_identity
+                    ORDER BY last_seen DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                )
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def count_verified_references(self) -> int:
+        async with aiosqlite.connect(self.db_path) as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM verified_reference_identity")
+            row = await cursor.fetchone()
+            return int(row[0] if row else 0)
 
     # Batch operations
 

@@ -6,6 +6,10 @@ import ReferenceList from './ReferenceList'
 import CorrectionsView from './CorrectionsView'
 import OnboardingBanner from './OnboardingBanner'
 import GlobalDropZone from './GlobalDropZone'
+import SeenReferencesView from './SeenReferencesView'
+import GraphView from './GraphView'
+import SimilarPapersPanel from './SimilarPapersPanel'
+import HealthBadge from './HealthBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -20,7 +24,8 @@ export default function MainPanel() {
   const contentRef = useRef(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [buttonLeft, setButtonLeft] = useState(null)
-  const [resultsTab, setResultsTab] = useState('references') // references | corrections
+  const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
+  const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
   
   const { 
     status: checkStoreStatus, 
@@ -230,6 +235,38 @@ export default function MainPanel() {
       <GlobalDropZone />
 
       <div ref={contentRef} className="max-w-4xl mx-auto p-4 space-y-4 lg:p-6 lg:space-y-6">
+        {/* Global view toggle — switches the whole panel between the
+            check view and the Seen References library. */}
+        <div className="flex items-center gap-2 text-xs">
+          <button
+            onClick={() => setGlobalView(null)}
+            className="px-2 py-1 rounded border"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: globalView == null ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+              backgroundColor: globalView == null ? 'var(--color-bg-secondary)' : 'transparent',
+              fontWeight: globalView == null ? 600 : 400,
+            }}
+            type="button"
+          >Current check</button>
+          <button
+            onClick={() => setGlobalView('seen')}
+            className="px-2 py-1 rounded border"
+            style={{
+              borderColor: 'var(--color-border)',
+              color: globalView === 'seen' ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+              backgroundColor: globalView === 'seen' ? 'var(--color-bg-secondary)' : 'transparent',
+              fontWeight: globalView === 'seen' ? 600 : 400,
+            }}
+            type="button"
+            title="Every reference RefChecker has ever verified, across all checks"
+          >Seen References (library)</button>
+        </div>
+
+        {globalView === 'seen' ? (
+          <SeenReferencesView />
+        ) : (
+        <>
         {/* First-launch guidance — only renders when something's missing */}
         {showInput && (
           <OnboardingBanner
@@ -256,6 +293,10 @@ export default function MainPanel() {
           />
         )}
 
+        {/* Live health badge — updates whenever the references list
+            changes (auto-checks, Apply Fix, Add/Remove, etc.) */}
+        {showContent && <HealthBadge references={displayRefs} />}
+
         {/* References / Corrections tabs */}
         {showContent && (
           <div>
@@ -268,6 +309,8 @@ export default function MainPanel() {
               {[
                 ['references', 'References', displayRefs?.length || 0],
                 ['corrections', 'Corrections', (displayRefs || []).filter(r => (r.errors || []).length || (r.warnings || []).length || r.status === 'unverified' || r.status === 'hallucinated').length],
+                ['graph', 'Graph', displayRefs?.length || 0],
+                ['similar', 'Similar Papers', null],
               ].map(([key, label, count]) => {
                 const active = resultsTab === key
                 return (
@@ -285,15 +328,17 @@ export default function MainPanel() {
                     type="button"
                   >
                     {label}
-                    <span
-                      className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
-                      style={{
-                        backgroundColor: active ? 'var(--color-accent-muted, rgba(59,130,246,0.15))' : 'var(--color-bg-tertiary)',
-                        color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
-                      }}
-                    >
-                      {count}
-                    </span>
+                    {count != null && (
+                      <span
+                        className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
+                        style={{
+                          backgroundColor: active ? 'var(--color-accent-muted, rgba(59,130,246,0.15))' : 'var(--color-bg-tertiary)',
+                          color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+                        }}
+                      >
+                        {count}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -304,14 +349,23 @@ export default function MainPanel() {
                 isLoading={isLoadingDetail}
                 isCheckComplete={isComplete}
               />
-            ) : (
+            ) : resultsTab === 'corrections' ? (
               <CorrectionsView
                 references={displayRefs}
                 isCheckComplete={isComplete}
                 paperSource={displayPaperSource}
               />
+            ) : resultsTab === 'graph' ? (
+              <GraphView references={displayRefs} paperTitle={displayPaperTitle} />
+            ) : (
+              <SimilarPapersPanel
+                references={displayRefs}
+                paperTitle={displayPaperTitle}
+              />
             )}
           </div>
+        )}
+        </>
         )}
       </div>
 

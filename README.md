@@ -36,6 +36,19 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
+### What the desktop app adds (v0.6.0)
+
+- **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
+- **Global reference library.** Every verified reference, deduped by DOI / arXiv / normalized title, is kept across checks. New *Seen References (library)* view at the top of the main panel; future checks reuse the same identity instantly.
+- **Find similar papers.** After a check, the *Similar Papers* tab surfaces up to 5 candidates from Semantic Scholar that share the most references with the current paper. One click checks them too.
+- **Citation graph view.** Obsidian-style force-directed view of the paper's references; co-citation edges between refs that share authors. Click a node for details, double-click to open the verified source.
+- **Citation context.** Each reference card shows the sentence in the paper where it's cited (e.g. *"as demonstrated in [12], the architecture achieves..."*).
+- **Live citation health badge.** Score recomputes on every edit (Apply Fix / Add / Remove). Copy as Markdown for a README badge.
+- **Add / Remove / Suggest alternative.** Curate a check after the fact — drop a reference, add one by hand, or get real-paper candidates from Semantic Scholar for a suspected hallucination.
+- **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
+
+---
+
 RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **CrossRef**, **DBLP**, and **ACL Anthology**, and uses LLM-powered deep web search to flag likely fabricated references. When the LLM finds a more likely source than the first database match, RefChecker re-verifies the citation against the LLM-found metadata before deciding whether it is an error or a hallucination. It supports single papers, bulk batches, and automated scanning of entire OpenReview venues.
 
 *Built by Mark Russinovich with AI assistants (Cursor, GitHub Copilot, Claude Code). [Watch the deep dive video](https://www.youtube.com/watch?v=n929Alz-fjo).*
