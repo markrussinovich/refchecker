@@ -91,6 +91,19 @@ class TestBiblatexParsing(unittest.TestCase):
         self.assertEqual(len(ref['authors']), 1)
         self.assertEqual(ref['authors'][0], 'Author Name')
         self.assertEqual(ref['year'], 2023)
+
+    def test_parse_book_title_without_space_after_author_comma(self):
+        """Test parsing book entries where PDF extraction drops space after author comma"""
+        content = '[34] R. K. Merton,The sociology of science: Theoretical and empirical investigations. University of Chicago press, 1973.'
+
+        refs = parse_biblatex_references(content)
+        self.assertEqual(len(refs), 1)
+
+        ref = refs[0]
+        self.assertEqual(ref['title'], 'The sociology of science: Theoretical and empirical investigations')
+        self.assertEqual(ref['authors'], ['R. K. Merton'])
+        self.assertEqual(ref['year'], 1973)
+        self.assertEqual(ref['journal'], 'University of Chicago press')
         
     def test_parse_arxiv_url_extraction(self):
         """Test extraction of ArXiv URLs"""

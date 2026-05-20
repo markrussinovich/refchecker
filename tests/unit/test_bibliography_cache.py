@@ -40,13 +40,13 @@ def test_bibliography_cache_ignores_legacy_unscoped_file(tmp_path):
 
 
 def test_bibliography_cache_filename_is_llm_specific():
-    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v2") != bibliography_cache_filename("OpenAIProvider:gpt-4o:refparse-v2")
-    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v2").startswith("bibliography_")
+    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v3") != bibliography_cache_filename("OpenAIProvider:gpt-4o:refparse-v3")
+    assert bibliography_cache_filename("OpenAIProvider:gpt-4.1:refparse-v3").startswith("bibliography_")
 
 
 def test_llm_cache_identity_from_extractor_includes_provider_model_and_endpoint():
-    assert llm_cache_identity_from_extractor(_Extractor()) == "_Provider:gpt-4.1:https://api.example.test/v1:refparse-v2"
-    assert llm_cache_identity_from_extractor(None) == "no_llm:refparse-v2"
+    assert llm_cache_identity_from_extractor(_Extractor()) == "_Provider:gpt-4.1:https://api.example.test/v1:refparse-v3"
+    assert llm_cache_identity_from_extractor(None) == "no_llm:refparse-v3"
 
 
 def test_bibliography_cache_ignores_previous_extraction_version(tmp_path):
