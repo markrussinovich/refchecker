@@ -5,28 +5,31 @@ import {
   exportResultsAsStyle,
 } from '../../utils/formatters'
 import { wordDiff } from '../../utils/wordDiff'
+import { useCheckStore } from '../../stores/useCheckStore'
 
 /**
- * Treat each issue type as an independent toggle. Default = all on, so the
- * tab shows every flagged reference. Users can mix and match (e.g. "show
- * only errors and unverified, hide warnings").
+ * The chip categories the Summary panel exposes, mirrored here only so
+ * the Corrections tab can label per-row badges. The actual selected
+ * filter set lives in useCheckStore.statusFilter — set from the
+ * Summary chips above this tab — so both tabs filter consistently.
  */
-const FILTER_CATEGORIES = [
-  { id: 'error', label: 'Errors', color: 'var(--color-error, #ef4444)' },
-  { id: 'warning', label: 'Warnings', color: 'var(--color-warning, #f59e0b)' },
-  { id: 'unverified', label: 'Unverified', color: 'var(--color-text-secondary)' },
-  { id: 'hallucinated', label: 'Hallucinated', color: 'var(--color-hallucination, #a855f7)' },
-  { id: 'suggestion', label: 'Suggestions', color: 'var(--color-suggestion, #3b82f6)' },
-]
+const CATEGORY_META = {
+  error:         { label: 'Errors',        color: 'var(--color-error, #ef4444)' },
+  warning:       { label: 'Warnings',      color: 'var(--color-warning, #f59e0b)' },
+  unverified:    { label: 'Unverified',    color: 'var(--color-text-secondary)' },
+  hallucination: { label: 'Hallucinated',  color: 'var(--color-hallucination, #a855f7)' },
+  suggestion:    { label: 'Suggestions',   color: 'var(--color-suggestion, #3b82f6)' },
+}
 
 function classifyReference(ref) {
-  // Returns the set of categories this reference belongs to.
+  // Returns the set of categories this reference belongs to. Keys match
+  // the Summary chip ids so the global statusFilter applies cleanly.
   const tags = new Set()
   if ((ref.errors || []).length > 0) tags.add('error')
   if ((ref.warnings || []).length > 0) tags.add('warning')
   if (ref.status === 'unverified') tags.add('unverified')
   if (ref.status === 'hallucinated' || ref.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
-    tags.add('hallucinated')
+    tags.add('hallucination')
   }
   if (ref.status === 'suggestion' || (ref.suggestions || []).length > 0) tags.add('suggestion')
   return tags
@@ -102,19 +105,12 @@ function DiffSide({ ops, side }) {
 export default function CorrectionsView({ references }) {
   const [format, setFormat] = useState('bibtex')
   const [copiedKey, setCopiedKey] = useState(null)
-  const [activeFilters, setActiveFilters] = useState(
-    () => new Set(FILTER_CATEGORIES.map(c => c.id))
-  )
   const [showDiff, setShowDiff] = useState(true)
 
-  const toggleFilter = (id) => {
-    setActiveFilters(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  // Single source of truth for "what's filtered": the Summary chips above
+  // both tabs. Empty array = no filter applied (show every flagged ref).
+  const statusFilter = useCheckStore(s => s.statusFilter)
+  const summaryActive = statusFilter.length > 0
 
   const categorized = useMemo(() => {
     return (references || [])
@@ -128,12 +124,12 @@ export default function CorrectionsView({ references }) {
   }, [references])
 
   const filtered = useMemo(() => {
-    if (activeFilters.size === 0) return []
+    if (!summaryActive) return categorized
     return categorized.filter(({ tags }) => {
-      for (const t of tags) if (activeFilters.has(t)) return true
+      for (const t of tags) if (statusFilter.includes(t)) return true
       return false
     })
-  }, [categorized, activeFilters])
+  }, [categorized, statusFilter, summaryActive])
 
   const renderCorrected = (ref, i) => {
     try { return exportReferenceAsStyle(ref, format, i) } catch { return '(could not render)' }
@@ -171,89 +167,50 @@ export default function CorrectionsView({ references }) {
 
   return (
     <div className="space-y-3">
-      {/* Toolbar — filter chips + style + copy all */}
+      {/* Toolbar — style + copy all. Filtering is driven by the Summary
+          chips above the tabs (useCheckStore.statusFilter), so both
+          tabs stay in sync. */}
       <div
-        className="p-3 rounded-lg border space-y-2"
+        className="p-3 rounded-lg border flex items-center justify-between flex-wrap gap-2"
         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}
       >
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            <strong style={{ color: 'var(--color-text-primary)' }}>{filtered.length}</strong>{' '}
-            of {categorized.length} flagged reference{categorized.length === 1 ? '' : 's'} shown
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-              <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
-              Highlight diff
-            </label>
-            <select
-              value={format}
-              onChange={(e) => setFormat(e.target.value)}
-              className="px-2 py-1 rounded border text-xs"
-              style={{
-                backgroundColor: 'var(--color-bg-primary)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-primary)',
-              }}
-              title="Citation style"
-            >
-              {CITATION_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-            <button
-              onClick={copyAll}
-              disabled={filtered.length === 0}
-              className="px-2 py-1 rounded text-xs font-medium"
-              style={{
-                backgroundColor: 'var(--color-accent, #3b82f6)',
-                color: 'white',
-                opacity: filtered.length === 0 ? 0.5 : 1,
-              }}
-              type="button"
-            >
-              {copiedKey === '__all__' ? '✓ Copied all' : 'Copy all'}
-            </button>
-          </div>
+        <div className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          <strong style={{ color: 'var(--color-text-primary)' }}>{filtered.length}</strong>{' '}
+          of {categorized.length} flagged reference{categorized.length === 1 ? '' : 's'} shown
+          {summaryActive && (
+            <span className="ml-1">— filtered by {statusFilter.join(', ')} (Summary chips)</span>
+          )}
         </div>
-
-        {/* Multi-select filter chips */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {FILTER_CATEGORIES.map(cat => {
-            const active = activeFilters.has(cat.id)
-            const count = categorized.filter(({ tags }) => tags.has(cat.id)).length
-            return (
-              <button
-                key={cat.id}
-                onClick={() => toggleFilter(cat.id)}
-                className="px-2 py-0.5 rounded-full text-xs font-medium border transition-all"
-                style={{
-                  backgroundColor: active ? cat.color : 'transparent',
-                  color: active ? 'white' : cat.color,
-                  borderColor: cat.color,
-                  opacity: count === 0 ? 0.4 : 1,
-                  cursor: count === 0 ? 'default' : 'pointer',
-                }}
-                type="button"
-                disabled={count === 0}
-              >
-                {cat.label} <span style={{ opacity: 0.85 }}>({count})</span>
-              </button>
-            )
-          })}
+        <div className="flex items-center gap-2">
+          <label className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
+            Highlight diff
+          </label>
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            className="px-2 py-1 rounded border text-xs"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+            }}
+            title="Citation style"
+          >
+            {CITATION_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
           <button
-            onClick={() => setActiveFilters(new Set(FILTER_CATEGORIES.map(c => c.id)))}
-            className="text-xs underline ml-1"
-            style={{ color: 'var(--color-accent, #3b82f6)' }}
+            onClick={copyAll}
+            disabled={filtered.length === 0}
+            className="px-2 py-1 rounded text-xs font-medium"
+            style={{
+              backgroundColor: 'var(--color-accent, #3b82f6)',
+              color: 'white',
+              opacity: filtered.length === 0 ? 0.5 : 1,
+            }}
             type="button"
           >
-            all
-          </button>
-          <button
-            onClick={() => setActiveFilters(new Set())}
-            className="text-xs underline"
-            style={{ color: 'var(--color-text-secondary)' }}
-            type="button"
-          >
-            none
+            {copiedKey === '__all__' ? '✓ Copied all' : 'Copy all'}
           </button>
         </div>
       </div>
@@ -265,7 +222,9 @@ export default function CorrectionsView({ references }) {
           const correctedStr = renderCorrected(ref, i)
           const citedStr = renderCited(ref, i)
           const ops = showDiff ? wordDiff(citedStr, correctedStr) : null
-          const tagBadges = FILTER_CATEGORIES.filter(c => tags.has(c.id))
+          const tagBadges = Object.entries(CATEGORY_META)
+            .filter(([id]) => tags.has(id))
+            .map(([id, meta]) => ({ id, ...meta }))
           return (
             <div
               key={key}
