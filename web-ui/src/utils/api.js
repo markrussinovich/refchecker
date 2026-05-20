@@ -91,6 +91,11 @@ export const recheck = (id) => api.post(`/recheck/${id}`)
 export const clearCache = () => api.delete('/admin/cache')
 export const clearDatabase = () => api.delete('/admin/database')
 
+// Local database downloader (used by the desktop app's first-run flow)
+export const triggerDatabaseDownload = (payload) => api.post('/databases/download', payload)
+export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')
+export const cancelDatabaseDownload = (database) => api.post('/databases/download/cancel', { database })
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

@@ -3821,6 +3821,150 @@ async def clear_database(current_user: UserInfo = Depends(require_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ---------------------------------------------------------------------------
+# Local database downloader — user-triggered build of S2/DBLP/OpenAlex
+# databases via the existing local_database_updater script. Used by the
+# desktop app's settings panel to onboard users who want offline checks
+# without dropping to the CLI.
+# ---------------------------------------------------------------------------
+
+class _DBDownloadTask:
+    __slots__ = ("task", "started_at", "finished_at", "status", "error", "log_path")
+
+    def __init__(self, task: asyncio.Task, log_path: Path):
+        self.task = task
+        self.started_at = time.time()
+        self.finished_at: Optional[float] = None
+        self.status: str = "running"  # running | success | failed | cancelled
+        self.error: Optional[str] = None
+        self.log_path = log_path
+
+
+_DB_DOWNLOAD_TASKS: Dict[str, _DBDownloadTask] = {}
+_DB_DOWNLOAD_SUPPORTED = ("s2", "dblp", "openalex")
+
+
+class _DBDownloadRequest(BaseModel):
+    databases: list[str]
+    directory: Optional[str] = None
+    openalex_min_year: Optional[int] = None
+
+
+def _resolve_download_directory(directory: Optional[str]) -> Path:
+    """Pick the target directory for downloaded DBs. Persists to settings."""
+    candidate: Optional[Path] = None
+    if directory:
+        candidate = Path(directory).expanduser()
+    else:
+        configured = os.environ.get("REFCHECKER_DATABASE_DIRECTORY")
+        if configured:
+            candidate = Path(configured).expanduser()
+        else:
+            candidate = get_data_dir() / "databases"
+    candidate.mkdir(parents=True, exist_ok=True)
+    return candidate
+
+
+async def _start_db_download(db_name: str, db_path: Path, openalex_min_year: Optional[int]) -> None:
+    """Wrap _run_database_refresh_subprocess with state tracking."""
+    prior = _DB_DOWNLOAD_TASKS.get(db_name)
+    if prior and prior.status == "running":
+        return  # idempotent: don't start a second copy
+    if db_name == "openalex" and openalex_min_year:
+        os.environ["REFCHECKER_OPENALEX_MIN_YEAR"] = str(openalex_min_year)
+
+    log_path = get_logs_dir() / f"database-refresh-{db_name}.log"
+    task = asyncio.create_task(
+        _run_database_refresh_subprocess(db_name, db_path),
+        name=f"db-download-{db_name}",
+    )
+    state = _DBDownloadTask(task=task, log_path=log_path)
+    _DB_DOWNLOAD_TASKS[db_name] = state
+
+    def _on_done(t: asyncio.Task) -> None:
+        state.finished_at = time.time()
+        if t.cancelled():
+            state.status = "cancelled"
+        elif t.exception() is not None:
+            state.status = "failed"
+            state.error = str(t.exception())
+        else:
+            state.status = "success"
+
+    task.add_done_callback(_on_done)
+
+
+def _read_log_tail(path: Path, lines: int = 25) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return ""
+    text = data.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-lines:])
+
+
+@app.post("/api/databases/download")
+async def trigger_database_download(req: _DBDownloadRequest, current_user: UserInfo = Depends(require_user)):
+    """Kick off background downloads for the requested local databases."""
+    _require_admin(current_user)
+
+    requested = [d for d in (req.databases or []) if d in _DB_DOWNLOAD_SUPPORTED]
+    if not requested:
+        raise HTTPException(status_code=400, detail=f"databases must be a non-empty subset of {_DB_DOWNLOAD_SUPPORTED}")
+
+    target_dir = _resolve_download_directory(req.directory)
+    # Persist the directory so check runs find the DBs after they're built.
+    try:
+        await db.set_setting("db_path", str(target_dir))
+    except Exception:
+        logger.warning("Could not persist db_path setting", exc_info=True)
+    os.environ["REFCHECKER_DATABASE_DIRECTORY"] = str(target_dir)
+
+    started: list[str] = []
+    for db_name in requested:
+        filename = DATABASE_FILE_ALIASES[db_name][0]
+        await _start_db_download(db_name, target_dir / filename, req.openalex_min_year)
+        started.append(db_name)
+
+    return {
+        "started": started,
+        "directory": str(target_dir),
+        "openalex_min_year": req.openalex_min_year,
+    }
+
+
+@app.get("/api/databases/download/status")
+async def get_database_download_status(current_user: UserInfo = Depends(require_user)):
+    """Return current state of in-flight and recently-finished downloads."""
+    _require_admin(current_user)
+    tasks: Dict[str, Dict[str, object]] = {}
+    for name, state in _DB_DOWNLOAD_TASKS.items():
+        tasks[name] = {
+            "status": state.status,
+            "started_at": state.started_at,
+            "finished_at": state.finished_at,
+            "error": state.error,
+            "log_tail": _read_log_tail(state.log_path),
+        }
+    return {"tasks": tasks, "supported": list(_DB_DOWNLOAD_SUPPORTED)}
+
+
+@app.post("/api/databases/download/cancel")
+async def cancel_database_download(payload: Dict[str, str] = Body(...), current_user: UserInfo = Depends(require_user)):
+    """Cancel a running database download."""
+    _require_admin(current_user)
+    db_name = payload.get("database")
+    if not db_name:
+        raise HTTPException(status_code=400, detail="`database` is required")
+    state = _DB_DOWNLOAD_TASKS.get(db_name)
+    if not state or state.status != "running":
+        return {"cancelled": False, "reason": "no running task"}
+    state.task.cancel()
+    return {"cancelled": True}
+
+
 # Mount static files for bundled frontend (if available)
 # This must be after all API routes to avoid conflicts
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():

@@ -47,6 +47,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
 
+  // Local DB downloader state — drives the "Build local databases" inline
+  // section under the db_path field. Selected DBs run via the existing
+  // local_database_updater script through /api/databases/download.
+  const [dbBuildOpen, setDbBuildOpen] = useState(false)
+  const [dbBuildPick, setDbBuildPick] = useState({ s2: true, dblp: true, openalex: true })
+  const [dbBuildMinYear, setDbBuildMinYear] = useState('2020')
+  const [dbBuildStatus, setDbBuildStatus] = useState({}) // { s2: {status, log_tail, error}, ... }
+  const [dbBuildStarting, setDbBuildStarting] = useState(false)
+  const [dbBuildError, setDbBuildError] = useState(null)
+
   // Sync local db path when settings are fetched from the server
   useEffect(() => {
     if (settings.db_path?.value !== undefined) {
@@ -82,6 +92,62 @@ export default function SettingsPanel({ theme, onThemeChange }) {
       setDbPathError(err.message || 'Failed to save')
     } finally {
       setDbPathSaving(false)
+    }
+  }
+
+  // Poll download status while the panel is open AND any task is running.
+  useEffect(() => {
+    if (!dbBuildOpen) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await api.getDatabaseDownloadStatus()
+        if (cancelled) return
+        setDbBuildStatus(res.data.tasks || {})
+      } catch (e) {
+        // settings panel can stay open in multiuser mode where caller isn't admin
+      }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [dbBuildOpen])
+
+  const handleDbBuildStart = async () => {
+    setDbBuildError(null)
+    const databases = Object.entries(dbBuildPick).filter(([, v]) => v).map(([k]) => k)
+    if (!databases.length) {
+      setDbBuildError('Pick at least one database to build.')
+      return
+    }
+    setDbBuildStarting(true)
+    try {
+      const payload = { databases }
+      const minYear = parseInt(dbBuildMinYear, 10)
+      if (!Number.isNaN(minYear) && minYear >= 1900 && minYear <= 2100) {
+        payload.openalex_min_year = minYear
+      }
+      if (dbPathLocal && dbPathLocal.trim()) {
+        payload.directory = dbPathLocal.trim()
+      }
+      const res = await api.triggerDatabaseDownload(payload)
+      if (res.data?.directory && !dbPathLocal) {
+        setDbPathLocal(res.data.directory)
+      }
+      fetchSettings()
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.message
+      setDbBuildError(detail || 'Failed to start')
+    } finally {
+      setDbBuildStarting(false)
+    }
+  }
+
+  const handleDbBuildCancel = async (dbName) => {
+    try {
+      await api.cancelDatabaseDownload(dbName)
+    } catch (e) {
+      // ignore — UI will reflect the next poll
     }
   }
 
@@ -348,6 +414,161 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           {settings.db_path?.value && settings.db_path?.current_snapshot && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
               Current Semantic Scholar snapshot: {settings.db_path.current_snapshot}
+            </div>
+          )}
+
+          {/* Build local databases — only useful in the single-user desktop
+              flow, so it sits inside the same single-user-gated section. */}
+          <div className="mt-3">
+            <button
+              onClick={() => setDbBuildOpen((v) => !v)}
+              className="text-xs underline"
+              style={{ color: 'var(--color-accent, #3b82f6)' }}
+              type="button"
+            >
+              {dbBuildOpen ? 'Hide local database builder' : 'Build local databases (Semantic Scholar, DBLP, OpenAlex)'}
+            </button>
+          </div>
+
+          {dbBuildOpen && (
+            <div
+              className="mt-3 p-3 rounded-lg border"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-primary)' }}
+            >
+              <div className="text-xs mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                Runs the bundled <code>local_database_updater</code> against the directory above (or
+                a default under the app data dir if blank). First builds can be large (multi-GB) and
+                run in the background — close this panel anytime, status persists.
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                {[
+                  ['s2', 'Semantic Scholar'],
+                  ['dblp', 'DBLP'],
+                  ['openalex', 'OpenAlex'],
+                ].map(([key, label]) => {
+                  const state = dbBuildStatus[key]
+                  return (
+                    <label
+                      key={key}
+                      className="flex items-center gap-2 text-sm"
+                      style={{ color: 'var(--color-text-primary)' }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!dbBuildPick[key]}
+                        onChange={(e) => setDbBuildPick({ ...dbBuildPick, [key]: e.target.checked })}
+                      />
+                      <span className="flex-1">{label}</span>
+                      {state && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor:
+                              state.status === 'success' ? 'var(--color-success, #22c55e)' :
+                              state.status === 'failed' ? 'var(--color-error, #ef4444)' :
+                              state.status === 'cancelled' ? 'var(--color-warning, #f59e0b)' :
+                              'var(--color-accent, #3b82f6)',
+                            color: 'white',
+                          }}
+                        >
+                          {state.status}
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="flex items-center gap-2 mb-3">
+                <label className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  OpenAlex minimum year
+                </label>
+                <input
+                  type="number"
+                  min="1900"
+                  max="2100"
+                  step="1"
+                  value={dbBuildMinYear}
+                  onChange={(e) => setDbBuildMinYear(e.target.value)}
+                  className="px-2 py-1 rounded border text-sm"
+                  style={{
+                    width: '90px',
+                    backgroundColor: 'var(--color-bg-primary)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-primary)',
+                  }}
+                />
+                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  (caps OpenAlex partitions to keep the dump manageable)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleDbBuildStart}
+                  disabled={dbBuildStarting}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-accent, #3b82f6)',
+                    color: 'white',
+                    opacity: dbBuildStarting ? 0.6 : 1,
+                  }}
+                  type="button"
+                >
+                  {dbBuildStarting ? 'Starting…' : 'Start build'}
+                </button>
+                {Object.entries(dbBuildStatus).some(([, s]) => s.status === 'running') && (
+                  <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    Building in background. Cancel a job from its tag above —
+                    {' '}
+                    {Object.entries(dbBuildStatus)
+                      .filter(([, s]) => s.status === 'running')
+                      .map(([k]) => (
+                        <button
+                          key={k}
+                          onClick={() => handleDbBuildCancel(k)}
+                          className="underline ml-1"
+                          style={{ color: 'var(--color-accent, #3b82f6)' }}
+                          type="button"
+                        >
+                          cancel {k}
+                        </button>
+                      ))}
+                  </span>
+                )}
+              </div>
+
+              {dbBuildError && (
+                <div className="text-xs mt-2" style={{ color: 'var(--color-error, #ef4444)' }}>
+                  {dbBuildError}
+                </div>
+              )}
+
+              {Object.entries(dbBuildStatus).some(([, s]) => s.log_tail) && (
+                <details className="mt-3">
+                  <summary
+                    className="text-xs cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    Show last log lines per database
+                  </summary>
+                  {Object.entries(dbBuildStatus).map(([k, s]) =>
+                    s.log_tail ? (
+                      <div key={k} className="mt-2">
+                        <div className="text-xs font-medium" style={{ color: 'var(--color-text-primary)' }}>{k}</div>
+                        <pre
+                          className="text-xs p-2 rounded overflow-x-auto"
+                          style={{
+                            backgroundColor: 'var(--color-bg-secondary)',
+                            color: 'var(--color-text-secondary)',
+                          }}
+                        >{s.log_tail}</pre>
+                      </div>
+                    ) : null
+                  )}
+                </details>
+              )}
             </div>
           )}
         </div>
