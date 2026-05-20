@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="64" viewBox="0 0 220 64" role="img" aria-label="Download for macOS">
+  <title>Download for macOS</title>
+  <rect width="220" height="64" rx="12" fill="#0a0a0a"/>
+  <!-- Apple logo (white) -->
+  <g fill="#fff" transform="translate(18,12) scale(0.085)">
+    <path d="M349.5 121.5c-1.2 19.5-9.7 38.6-23.5 52.4-13.3 13.3-31.1 22.3-50.2 23.2-1.8-19.4 6.1-39.3 19.2-53 13.9-14.4 32.5-24.1 54.5-22.6zm-30 195.5c-15.8 0-31.4-9.1-49.5-9.1-18.9 0-35.8 9.4-49.4 9.4-30.1.4-71.5-44.9-71.5-110.4 0-65 41-99.4 79.7-100 16.2-.3 31.4 10.9 41.5 10.9 10.6 0 36.8-13.5 60.9-11.4 10.1.4 38.5 4.1 56.7 30.9-1.5.9-33.9 19.7-33.6 58.8.4 46.7 41 62.3 41.5 62.5-.4 1.1-6.3 22-21 43-12.7 18.1-25.9 36.1-46.8 36.3-19.2-.4-25.3-12.5-49.2-12.5z"/>
+  </g>
+  <text x="76" y="28" fill="#cfcfcf" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="11" font-weight="500" letter-spacing="0.6">DOWNLOAD FOR</text>
+  <text x="76" y="48" fill="#ffffff" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="700">macOS</text>
+</svg>

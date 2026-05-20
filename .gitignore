@@ -125,6 +125,7 @@ backend/uploads/
 
 # Tauri desktop wrapper — needs to be tracked despite globs above
 !tauri-app/package.json
+!tauri-app/package-lock.json
 !tauri-app/src-tauri/tauri.conf.json
 !tauri-app/src-tauri/capabilities/*.json
 !tauri-app/src-tauri/icons/**/*.json
