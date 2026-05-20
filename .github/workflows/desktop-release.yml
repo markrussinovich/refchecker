@@ -253,14 +253,19 @@ jobs:
           mkdir -p "$OUT"
           BUNDLE_DIR=tauri-app/src-tauri/target/${{ matrix.platform.rust_target }}/release/bundle
           if [ -d "$BUNDLE_DIR" ]; then
-            # Installer/regular bundles
+            # End-user installer/disk-image bundles
             find "$BUNDLE_DIR" -type f \
               \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \
                  -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
               -exec cp {} "$OUT"/ \;
-            # Updater artifacts + their .sig signatures
+            # Tauri 2.x updater signs the installers directly, so .sig files
+            # live next to each one. Also cover the macOS .app.tar.gz format
+            # and the legacy .msi.zip / .nsis.zip / .AppImage.tar.gz from
+            # older Tauri versions just in case.
             find "$BUNDLE_DIR" -type f \
               \( -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \
+                 -o -name "*.msi.sig" -o -name "*.exe.sig" \
+                 -o -name "*.AppImage.sig" -o -name "*.deb.sig" -o -name "*.rpm.sig" \
                  -o -name "*.msi.zip" -o -name "*.msi.zip.sig" \
                  -o -name "*.nsis.zip" -o -name "*.nsis.zip.sig" \
                  -o -name "*.AppImage.tar.gz" -o -name "*.AppImage.tar.gz.sig" \) \
@@ -316,26 +321,33 @@ jobs:
 
           PLATFORMS_JSON='{}'
 
+          # Per-target preference list — first existing (bundle, sig) pair
+          # found wins. Names that the Tauri updater can consume directly.
+          declare -A PREFERRED=(
+            ["darwin-aarch64"]="*.app.tar.gz"
+            ["windows-x86_64"]="*.msi *.nsis.zip *.msi.zip *-setup.exe"
+            ["linux-x86_64"]="*.AppImage *.deb *.rpm *.AppImage.tar.gz"
+          )
+
           for target in "${!TARGETS[@]}"; do
             DIR="artifacts/${TARGETS[$target]}"
             if [ ! -d "$DIR" ]; then
               echo "::warning::No artifacts dir for $target ($DIR)"
               continue
             fi
-            # Find the updater bundle (NOT the .sig). Prefer .app.tar.gz / .AppImage.tar.gz / .msi.zip / .nsis.zip
-            BUNDLE=$(find "$DIR" -maxdepth 1 -type f \
-              \( -name "*.app.tar.gz" -o -name "*.AppImage.tar.gz" -o -name "*.msi.zip" -o -name "*.nsis.zip" \) \
-              ! -name "*.sig" | head -n1 || true)
+            BUNDLE=""
+            for pat in ${PREFERRED[$target]}; do
+              BUNDLE=$(find "$DIR" -maxdepth 1 -type f -name "$pat" ! -name "*.sig" | head -n1 || true)
+              if [ -n "$BUNDLE" ] && [ -f "${BUNDLE}.sig" ]; then
+                break
+              fi
+              BUNDLE=""
+            done
             if [ -z "$BUNDLE" ]; then
-              echo "::warning::No updater bundle found for $target"
+              echo "::warning::No signed updater bundle found for $target — skipping"
               continue
             fi
-            SIGFILE="${BUNDLE}.sig"
-            if [ ! -f "$SIGFILE" ]; then
-              echo "::warning::No signature for $BUNDLE (TAURI_SIGNING_PRIVATE_KEY missing?). Skipping $target."
-              continue
-            fi
-            SIG=$(cat "$SIGFILE")
+            SIG=$(cat "${BUNDLE}.sig")
             FNAME=$(basename "$BUNDLE")
             URL="https://github.com/${REPO}/releases/download/${TAG}/${FNAME}"
             echo "▶ $target → $URL"
