@@ -5,6 +5,9 @@ import { useAuthStore } from '../../stores/useAuthStore'
 import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { invokeTauri, isTauri, openExternal } from '../../utils/tauriBridge'
+
+const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
 
 /**
  * Settings panel component - ChatGPT-style with left navigation
@@ -46,6 +49,35 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirError, setCacheDirError] = useState(null)
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
+
+  // Tauri auto-updater UI state
+  const [updateChecking, setUpdateChecking] = useState(false)
+  const [updateStatus, setUpdateStatus] = useState(null) // { kind, text }
+  const handleCheckForUpdates = async () => {
+    setUpdateStatus(null)
+    setUpdateChecking(true)
+    try {
+      const res = await invokeTauri('check_for_update_now')
+      if (!res) {
+        setUpdateStatus({ kind: 'info', text: 'Update checks only work inside the desktop app.' })
+        return
+      }
+      if (res.status === 'no-update') {
+        setUpdateStatus({ kind: 'ok', text: `You're on the latest version (${res.current_version || 'unknown'}).` })
+      } else if (res.status === 'installed') {
+        setUpdateStatus({ kind: 'ok', text: `Update ${res.available_version} installed — restarting…` })
+      } else if (res.status === 'error') {
+        setUpdateStatus({ kind: 'error', text: res.message || 'Update check failed.' })
+      } else {
+        setUpdateStatus({ kind: 'info', text: res.message || res.status })
+      }
+    } catch (err) {
+      setUpdateStatus({ kind: 'error', text: err?.toString() || 'Update check failed.' })
+    } finally {
+      setUpdateChecking(false)
+    }
+  }
+  const handleShowReleaseNotes = () => openExternal(`${REPO_URL}/releases/latest`)
 
   // Local DB downloader state — drives the "Build local databases" inline
   // section under the db_path field. Selected DBs run via the existing
@@ -306,6 +338,61 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderGeneralSection = () => (
     <div className="space-y-1">
+      {/* App updates — only meaningful inside the Tauri desktop app */}
+      {isTauri() && (
+        <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+            <div>
+              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>App updates</div>
+              <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {version?.app ? `Currently on ${version.app}` : 'Check the manifest for a newer signed build.'}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleCheckForUpdates}
+                disabled={updateChecking}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                style={{
+                  backgroundColor: 'var(--color-accent, #3b82f6)',
+                  color: 'white',
+                  opacity: updateChecking ? 0.6 : 1,
+                }}
+                type="button"
+              >
+                {updateChecking ? 'Checking…' : 'Check for updates'}
+              </button>
+              <button
+                onClick={handleShowReleaseNotes}
+                className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                type="button"
+              >
+                Show changes
+              </button>
+            </div>
+          </div>
+          {updateStatus && (
+            <div
+              className="text-xs"
+              style={{
+                color: updateStatus.kind === 'ok'
+                  ? 'var(--color-success, #22c55e)'
+                  : updateStatus.kind === 'error'
+                    ? 'var(--color-error, #ef4444)'
+                    : 'var(--color-text-secondary)',
+              }}
+            >
+              {updateStatus.text}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Theme Setting */}
       <div className="flex items-center justify-between py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>

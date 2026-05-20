@@ -5,10 +5,93 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use once_cell::sync::OnceCell;
+use serde::Serialize;
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
+
+#[derive(Serialize)]
+struct UpdateCheckOutcome {
+    status: &'static str, // "no-update" | "installed" | "error" | "unavailable"
+    current_version: Option<String>,
+    available_version: Option<String>,
+    message: Option<String>,
+}
+
+/// JS-callable wrapper around the updater. Triggers the same flow as the
+/// startup auto-check but returns a structured outcome so the Settings
+/// panel can show "You're on the latest version" / "Update installed,
+/// restarting…" without having to listen for separate events.
+#[tauri::command]
+async fn check_for_update_now(app: AppHandle) -> UpdateCheckOutcome {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            return UpdateCheckOutcome {
+                status: "unavailable",
+                current_version: None,
+                available_version: None,
+                message: Some(format!("Updater unavailable: {e}")),
+            };
+        }
+    };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            let current = update.current_version.clone();
+            let next = update.version.clone();
+            let mut downloaded: u64 = 0;
+            let result = update
+                .download_and_install(
+                    |chunk, total| {
+                        downloaded += chunk as u64;
+                        if let Some(total) = total {
+                            log::info!("Updater: {downloaded}/{total} bytes");
+                        }
+                    },
+                    || log::info!("Updater: download complete"),
+                )
+                .await;
+            match result {
+                Ok(()) => {
+                    log::info!("Update installed. Restarting…");
+                    // Spawn the restart on a worker thread so this command
+                    // returns first and the JS toast renders before the
+                    // process exits.
+                    let handle = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(800));
+                        handle.restart();
+                    });
+                    UpdateCheckOutcome {
+                        status: "installed",
+                        current_version: Some(current),
+                        available_version: Some(next),
+                        message: Some("Update installed. Restarting…".into()),
+                    }
+                }
+                Err(e) => UpdateCheckOutcome {
+                    status: "error",
+                    current_version: Some(current),
+                    available_version: Some(next),
+                    message: Some(format!("Install failed: {e}")),
+                },
+            }
+        }
+        Ok(None) => UpdateCheckOutcome {
+            status: "no-update",
+            current_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            available_version: None,
+            message: None,
+        },
+        Err(e) => UpdateCheckOutcome {
+            status: "error",
+            current_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            available_version: None,
+            message: Some(format!("Update check failed: {e}")),
+        },
+    }
+}
 
 /// Holds the running sidecar child so we can kill it on shutdown.
 static SIDECAR: OnceCell<Mutex<Option<CommandChild>>> = OnceCell::new();
@@ -163,6 +246,7 @@ fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![check_for_update_now])
         .setup(|app| {
             let handle = app.handle().clone();
 

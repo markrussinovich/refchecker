@@ -40,6 +40,26 @@ export async function openExternal(url) {
 }
 
 /**
+ * Invoke a Rust-side Tauri command. Returns `null` outside of Tauri so
+ * callers can render a graceful fallback in plain-browser dev mode.
+ */
+export async function invokeTauri(cmd, payload) {
+  if (!isTauri()) return null
+  try {
+    if (window.__TAURI_INTERNALS__?.invoke) {
+      return await window.__TAURI_INTERNALS__.invoke(cmd, payload || {})
+    }
+    if (window.__TAURI__?.invoke) {
+      return await window.__TAURI__.invoke(cmd, payload || {})
+    }
+  } catch (err) {
+    console.warn(`[tauriBridge] invoke ${cmd} failed`, err)
+    throw err
+  }
+  return null
+}
+
+/**
  * Install a single capture-phase click handler that turns every
  *   <a href="https://..."> (and mailto:, file:) into shell.open.
  *
