@@ -183,6 +183,32 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
   }
 
+  // One-click "use default location" — backend resolves the canonical
+  // path under the per-user data dir, creates it, and persists the
+  // setting in a single round-trip.
+  const handleAutoCreate = async (setting) => {
+    try {
+      const res = await api.autoCreatePath(setting)
+      const path = res.data?.path
+      if (!path) return
+      if (setting === 'cache_dir') {
+        setCacheDirLocal(path)
+        setCacheDirError(null)
+        setCacheDirSuccess('Default cache directory created.')
+        updateSetting('cache_dir', path)
+      } else if (setting === 'db_path') {
+        setDbPathLocal(path)
+        setDbPathError(null)
+        setDbPathSuccess('Default database directory created.')
+      }
+      fetchSettings()
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Failed to auto-create'
+      if (setting === 'cache_dir') setCacheDirError(msg)
+      else setDbPathError(msg)
+    }
+  }
+
   const handleCacheDirSave = async () => {
     setCacheDirError(null)
     setCacheDirSuccess(null)
@@ -491,6 +517,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             >
               {dbPathSaving ? '...' : 'Save'}
             </button>
+            <button
+              onClick={() => handleAutoCreate('db_path')}
+              disabled={dbPathSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default database directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
+            </button>
           </div>
           {dbPathError && (
             <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{dbPathError}</div>
@@ -697,6 +737,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               }}
             >
               {cacheDirSaving ? '...' : 'Save'}
+            </button>
+            <button
+              onClick={() => handleAutoCreate('cache_dir')}
+              disabled={cacheDirSaving}
+              className="px-3 py-2 rounded-lg text-sm font-medium border"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+              title="Create the default cache directory under the app data dir and save it as the setting"
+              type="button"
+            >
+              Use default
             </button>
           </div>
           {cacheDirError && (

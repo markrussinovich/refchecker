@@ -100,6 +100,10 @@ export const cancelDatabaseDownload = (database) => api.post('/databases/downloa
 export const fetchOpenReviewList = (venue, status = 'accepted') =>
   api.post('/openreview/list', { venue, status })
 
+// One-click "use default location" for cache_dir / db_path
+export const autoCreatePath = (setting) =>
+  api.post('/settings/auto-create-path', { setting })
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

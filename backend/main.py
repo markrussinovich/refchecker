@@ -3905,6 +3905,40 @@ def _read_log_tail(path: Path, lines: int = 25) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+class _AutoPathRequest(BaseModel):
+    setting: str  # "cache_dir" | "db_path"
+
+
+@app.post("/api/settings/auto-create-path")
+async def auto_create_path_setting(req: _AutoPathRequest, current_user: UserInfo = Depends(require_user)):
+    """One-click 'use the default location' for cache_dir / db_path.
+
+    Picks the canonical path under the per-user data dir, creates the
+    directory if it doesn't exist, persists it as the named setting, and
+    returns the resolved path. Pairs with the 'Use default' button in the
+    desktop app's Settings panel so the user doesn't have to know where
+    Application Support / %APPDATA% / XDG_DATA_HOME live.
+    """
+    _require_admin(current_user)
+    key = (req.setting or "").strip()
+    if key not in ("cache_dir", "db_path"):
+        raise HTTPException(status_code=400, detail="`setting` must be 'cache_dir' or 'db_path'")
+    base = get_data_dir()
+    target = base / ("cache" if key == "cache_dir" else "databases")
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not create {target}: {e}")
+    try:
+        await db.set_setting(key, str(target))
+    except Exception as e:
+        logger.exception("Failed to persist %s setting", key)
+        raise HTTPException(status_code=500, detail=str(e))
+    if key == "db_path":
+        os.environ["REFCHECKER_DATABASE_DIRECTORY"] = str(target)
+    return {"setting": key, "path": str(target)}
+
+
 class _OpenReviewListRequest(BaseModel):
     venue: str
     status: str = "accepted"  # accepted | submitted
