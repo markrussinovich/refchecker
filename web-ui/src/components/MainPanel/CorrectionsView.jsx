@@ -49,9 +49,12 @@ function citedShell(ref) {
   return { ...ref, errors: [], warnings: [], suggestions: [], authoritative_urls: [] }
 }
 
-function DiffSide({ ops, side }) {
+function DiffSide({ ops, side, fontFamily }) {
   return (
-    <pre className="text-xs whitespace-pre-wrap break-words m-0" style={{ fontFamily: 'inherit' }}>
+    <pre
+      className="text-xs whitespace-pre-wrap break-words m-0"
+      style={{ fontFamily: fontFamily || 'inherit' }}
+    >
       {ops.map((op, idx) => {
         if (op.type === 'eq') return <span key={idx}>{op.word + op.sep}</span>
         if (side === 'cited' && op.type === 'del') {
@@ -94,6 +97,28 @@ const STYLE_EXT = {
   ieee: { ext: 'txt', mime: 'text/plain' },
   vancouver: { ext: 'txt', mime: 'text/plain' },
   bibitem: { ext: 'tex', mime: 'application/x-tex' },
+}
+
+/**
+ * Font stack matched to each citation style's printed convention.
+ *
+ *   APA 7 / MLA 9 / Chicago / IEEE / Vancouver / plain text → serif
+ *     (every major style guide prints in Times-class fonts; using a
+ *     serif here lets the user preview what the citation will look
+ *     like once it lands in their document.)
+ *   BibTeX / \bibitem → monospace
+ *     (both are source code, not running text; rendering them in a
+ *     proportional font hides field alignment.)
+ */
+const STYLE_FONT = {
+  bibtex:    "'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+  bibitem:   "'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace",
+  apa:       "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
+  mla:       "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
+  chicago:   "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
+  ieee:      "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
+  vancouver: "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
+  plaintext: "'Charter', 'Iowan Old Style', 'Palatino Linotype', Palatino, 'Times New Roman', Times, Georgia, serif",
 }
 
 /**
@@ -197,6 +222,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     setEditingKey(null); setEditBuffer('')
   }
   const cancelEdit = () => { setEditingKey(null); setEditBuffer('') }
+
+  // Font matched to the citation style (serif for narrative styles,
+  // monospace for BibTeX/\bibitem). Applied to both diff sides + the
+  // edit textarea so the preview matches what'll land in the document.
+  const styleFont = STYLE_FONT[format] || 'inherit'
+  const isMonoStyle = format === 'bibtex' || format === 'bibitem'
 
   const acceptedRefs = useMemo(() => {
     // Order respects the displayed (filtered + sorted) order so the
@@ -386,8 +417,8 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     As cited
                   </div>
                   <div style={{ color: 'var(--color-text-primary)' }}>
-                    {ops ? <DiffSide ops={ops} side="cited" /> : (
-                      <pre className="text-xs whitespace-pre-wrap break-words m-0" style={{ fontFamily: 'inherit' }}>{citedStr}</pre>
+                    {ops ? <DiffSide ops={ops} side="cited" fontFamily={styleFont} /> : (
+                      <pre className="text-xs whitespace-pre-wrap break-words m-0" style={{ fontFamily: styleFont }}>{citedStr}</pre>
                     )}
                   </div>
                   {(ref.errors || []).length > 0 && (
@@ -409,11 +440,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                         value={editBuffer}
                         onChange={(e) => setEditBuffer(e.target.value)}
                         rows={Math.min(12, Math.max(4, editBuffer.split('\n').length + 1))}
-                        className="w-full p-2 rounded text-xs font-mono"
+                        className={`w-full p-2 rounded text-xs ${isMonoStyle ? 'font-mono' : ''}`}
                         style={{
                           backgroundColor: 'var(--color-bg-primary)',
                           color: 'var(--color-text-primary)',
                           border: '1px solid var(--color-border)',
+                          fontFamily: styleFont,
                         }}
                       />
                       <div className="flex gap-2">
@@ -434,8 +466,8 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                       backgroundColor: 'var(--color-bg-primary)',
                       color: 'var(--color-text-primary)',
                     }}>
-                      {ops ? <DiffSide ops={ops} side="corrected" /> : (
-                        <pre className="text-xs whitespace-pre-wrap break-words m-0" style={{ fontFamily: 'inherit' }}>{correctedStr}</pre>
+                      {ops ? <DiffSide ops={ops} side="corrected" fontFamily={styleFont} /> : (
+                        <pre className="text-xs whitespace-pre-wrap break-words m-0" style={{ fontFamily: styleFont }}>{correctedStr}</pre>
                       )}
                     </div>
                   )}
