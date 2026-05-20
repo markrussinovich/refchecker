@@ -47,6 +47,8 @@ from urllib.parse import parse_qs, urlparse
 
 logger = logging.getLogger(__name__)
 
+BIBLIOGRAPHY_EXTRACTION_CACHE_VERSION = 'refparse-v2'
+
 
 def cache_key_for_spec(input_spec: str) -> str:
     """Derive a stable, filesystem-safe cache key from a paper spec.
@@ -111,12 +113,12 @@ def llm_cache_identity_from_extractor(llm_extractor: Any) -> str:
     """Return a stable bibliography-cache identity for the extraction LLM."""
     provider = getattr(llm_extractor, 'llm_provider', None) if llm_extractor else None
     if not provider:
-        return 'no_llm'
+        return f'no_llm:{BIBLIOGRAPHY_EXTRACTION_CACHE_VERSION}'
 
     provider_name = provider.__class__.__name__
     model = getattr(provider, 'model', None) or getattr(provider, 'model_name', None) or 'default'
     endpoint = getattr(provider, 'endpoint', None) or getattr(provider, 'server_url', None) or ''
-    return f'{provider_name}:{model}:{endpoint}'
+    return f'{provider_name}:{model}:{endpoint}:{BIBLIOGRAPHY_EXTRACTION_CACHE_VERSION}'
 
 
 def _safe_cache_component(value: str, max_prefix: int = 48) -> str:
