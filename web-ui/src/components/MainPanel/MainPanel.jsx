@@ -5,6 +5,7 @@ import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
 import CorrectionsView from './CorrectionsView'
 import OnboardingBanner from './OnboardingBanner'
+import GlobalDropZone from './GlobalDropZone'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -224,6 +225,10 @@ export default function MainPanel() {
       className="flex-1 relative"
       style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
+      {/* Window-wide drag/drop overlay — handles both HTML5 drops AND
+          Tauri's 'Open With → RefChecker' file-open events. */}
+      <GlobalDropZone />
+
       <div ref={contentRef} className="max-w-4xl mx-auto p-4 space-y-4 lg:p-6 lg:space-y-6">
         {/* First-launch guidance — only renders when something's missing */}
         {showInput && (

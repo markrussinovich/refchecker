@@ -22,6 +22,8 @@
     "updater:allow-install",
     "updater:allow-download-and-install",
     "process:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "fs:default",
+    "fs:allow-read-file"
   ]
 }

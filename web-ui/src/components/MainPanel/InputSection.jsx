@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Button from '../common/Button'
 import FileDropZone from './FileDropZone'
 import BulkInputZone from './BulkInputZone'
@@ -42,6 +42,7 @@ function sanitizeUrlInput(input) {
 export default function InputSection() {
   const [inputMode, setInputMode] = useState('url') // url, file, text, bulk
   const [inputValue, setInputValue] = useState('')
+  const [pendingAutoSubmit, setPendingAutoSubmit] = useState(false)
   const [textValue, setTextValue] = useState('')
   const [bulkUrls, setBulkUrls] = useState('')
   const [bulkFiles, setBulkFiles] = useState([])
@@ -64,6 +65,33 @@ export default function InputSection() {
   const { fetchHistory, clearSelection, selectCheck } = useHistoryStore()
   
   const fileUpload = useFileUpload()
+
+  // Drag-drop on the whole window + "Open With → RefChecker" from the OS
+  // both push the file in via this DOM event so we don't duplicate the
+  // submit pipeline.
+  useEffect(() => {
+    const onOpenFile = (e) => {
+      const f = e.detail?.file
+      if (!f) return
+      setInputMode('file')
+      const ok = fileUpload.handleFile(f)
+      // Flag for auto-submit once the file lands in state. We don't call
+      // handleSubmit synchronously because the new file isn't yet
+      // visible in the closure.
+      if (ok) setPendingAutoSubmit(true)
+    }
+    window.addEventListener('refchecker:open-file', onOpenFile)
+    return () => window.removeEventListener('refchecker:open-file', onOpenFile)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && fileUpload.file && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
 
   const handleSubmit = async () => {
     // Validate input

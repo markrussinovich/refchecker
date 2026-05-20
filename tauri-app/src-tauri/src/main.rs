@@ -5,10 +5,36 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use once_cell::sync::OnceCell;
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
+
+/// Inspect launch args for files the OS told us to open (Open With,
+/// `refchecker file.pdf`, drag-onto-dock). Returns absolute paths.
+fn extract_files_from_argv(argv: &[String]) -> Vec<String> {
+    argv.iter()
+        .skip(1) // argv[0] is the binary path
+        .filter(|a| {
+            !a.starts_with("--") && !a.starts_with("-") && !a.starts_with("tauri://")
+        })
+        .map(|s| s.to_string())
+        .filter(|p| std::path::Path::new(p).is_file())
+        .collect()
+}
+
+/// Push a list of file paths to the WebView. The frontend listens on
+/// `refchecker://open-files` and routes each path through the same flow
+/// the drag-drop + Open With handlers use.
+fn emit_open_files(app: &AppHandle, paths: Vec<String>) {
+    if paths.is_empty() {
+        return;
+    }
+    log::info!("Emitting open-files event with {} path(s)", paths.len());
+    if let Err(e) = app.emit("refchecker://open-files", paths) {
+        log::warn!("Failed to emit open-files event: {e}");
+    }
+}
 
 // The Settings panel's "Check for updates" button now calls the
 // @tauri-apps/plugin-updater JS API directly (covered by the
@@ -167,12 +193,42 @@ fn run() {
         .init();
 
     tauri::Builder::default()
+        // Single-instance: when the user double-clicks a PDF (or right-clicks
+        // → Open With → RefChecker) while the app is already running, the OS
+        // launches a second copy. This callback picks the file paths out of
+        // the second copy's argv and forwards them to the running window
+        // before the second copy exits.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let files = extract_files_from_argv(&argv);
+            log::info!("Second instance launched with {} file arg(s)", files.len());
+            // Focus the existing window before delivering files.
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            emit_open_files(app, files);
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             let handle = app.handle().clone();
+
+            // First-launch Open With: argv may already contain a file path
+            // (e.g. the user right-clicked a PDF and the OS launched the
+            // app fresh). Wait a tick so the WebView has time to install
+            // its event listener, then emit.
+            let initial_argv: Vec<String> = std::env::args().collect();
+            let initial_files = extract_files_from_argv(&initial_argv);
+            if !initial_files.is_empty() {
+                let h = handle.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    emit_open_files(&h, initial_files);
+                });
+            }
 
             // Background update check — does not block sidecar start.
             // The native "An update is available" dialog (configured via

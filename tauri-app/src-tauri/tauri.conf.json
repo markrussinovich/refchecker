@@ -22,7 +22,8 @@
         "fullscreen": false,
         "decorations": true,
         "transparent": false,
-        "url": "index.html"
+        "url": "index.html",
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -50,6 +51,26 @@
       "binaries/refchecker-server"
     ],
     "resources": [],
+    "fileAssociations": [
+      {
+        "ext": ["pdf"],
+        "name": "PDF Document",
+        "description": "Open this PDF in RefChecker to validate its citations",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["bib", "bbl"],
+        "name": "BibTeX Bibliography",
+        "description": "Open this bibliography in RefChecker to verify each entry",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["tex"],
+        "name": "LaTeX Source",
+        "description": "Open this LaTeX file in RefChecker to validate its references",
+        "role": "Viewer"
+      }
+    ],
     "macOS": {
       "frameworks": [],
       "minimumSystemVersion": "11.0",
