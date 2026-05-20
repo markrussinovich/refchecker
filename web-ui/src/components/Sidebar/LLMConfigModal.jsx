@@ -19,8 +19,8 @@ const PROVIDERS = [
 /**
  * Modal for adding/editing LLM configurations
  */
-export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null }) {
-  const { addConfig, updateConfig, configs } = useConfigStore()
+export default function LLMConfigModal({ isOpen, onClose, editConfig = null, prefillConfig = null, selectionMode = 'extraction' }) {
+  const { addConfig, updateConfig, configs, selectHallucinationConfig, selectConfig } = useConfigStore()
   const multiuser = useAuthStore(state => state.multiuser)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isValidating, setIsValidating] = useState(false)
@@ -281,11 +281,14 @@ export default function LLMConfigModal({ isOpen, onClose, editConfig = null, pre
         savedConfig = await updateConfig(prefillConfig.id, configData)
         // Re-fetch configs to get updated has_key flags from backend
         await useConfigStore.getState().fetchConfigs()
-        // Auto-select the newly keyed config
-        await useConfigStore.getState().selectConfig(prefillConfig.id)
+        if (selectionMode === 'hallucination') {
+          selectHallucinationConfig(prefillConfig.id)
+        } else {
+          await selectConfig(prefillConfig.id)
+        }
         logger.info('LLMConfigModal', 'Keyless config updated with key')
       } else {
-        savedConfig = await addConfig(configData)
+        savedConfig = await addConfig(configData, { selectFor: selectionMode })
         logger.info('LLMConfigModal', 'Config created')
       }
 

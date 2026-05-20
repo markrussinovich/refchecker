@@ -378,6 +378,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
         }}
         editConfig={editConfig}
         prefillConfig={!editConfig ? findPrefillConfig() : null}
+        selectionMode={mode}
       />
     </div>
   )
