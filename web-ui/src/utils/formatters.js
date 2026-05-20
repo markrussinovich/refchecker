@@ -181,12 +181,21 @@ function parseErrorDetailsForMarkdown(details) {
  * @returns {object} Corrected reference data
  */
 function getCorrectedReferenceData(ref) {
+  // Verifier may attach typed URLs (doi, arxiv, journal) in
+  // authoritative_urls. Surface them so the URL picker can prefer DOI
+  // and arxiv over Semantic Scholar paper pages.
+  const typedUrls = Array.isArray(ref.authoritative_urls) ? ref.authoritative_urls : []
+  const doiFromUrls = typedUrls.find(u => u && u.type === 'doi')?.url
+  const arxivFromUrls = typedUrls.find(u => u && u.type === 'arxiv')?.url
   const corrected = {
     title: ref.title,
     authors: ref.authors,
     year: ref.year,
     venue: ref.venue,
-    url: ref.authoritative_urls?.[0]?.url || ref.cited_url
+    doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
+    arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
+    citedUrl: ref.cited_url || null,
+    url: ref.authoritative_urls?.[0]?.url || ref.cited_url,
   }
   
   // Check errors and warnings for 'actual' values
@@ -778,13 +787,48 @@ export function exportReferenceAsPlainText(ref) {
     citation += '.'
   }
   
-  // Add arXiv URL if suggested, otherwise use authoritative URL
-  const url = corrected.arxivUrl || corrected.url
+  // Append a publishable URL: DOI > ArXiv > original cited URL. Skips
+  // the Semantic Scholar / OpenAlex lookup URLs that show up in the
+  // verifier's authoritative_urls field — those aren't valid citations.
+  const url = _preferredCitationUrl(corrected)
   if (url) {
     citation += ` ${url}`
   }
-  
+
   return citation
+}
+
+/**
+ * Pick the URL that actually belongs in a published citation.
+ *
+ * Verifier-internal URLs (Semantic Scholar paper pages, OpenAlex API
+ * endpoints) match RefChecker's lookup record but they're not what an
+ * author would put in a bibliography. Prefer, in order:
+ *   1. DOI URL              — canonical, used by every modern style
+ *   2. ArXiv URL            — when the work is a preprint
+ *   3. Original cited URL   — if the author already had a non-S2/non-OA URL
+ *   4. Verifier URL         — fallback only
+ *
+ * Returns `null` when no useful URL exists, so style formatters can skip
+ * the URL field entirely instead of emitting a junk Semantic Scholar link.
+ */
+function _preferredCitationUrl(corrected) {
+  const looksInternal = (u) => {
+    if (!u) return true
+    const s = String(u).toLowerCase()
+    return s.includes('semanticscholar.org/paper') ||
+           s.includes('api.openalex.org') ||
+           s.includes('openalex.org/works')
+  }
+  if (corrected.doi) {
+    const doi = String(corrected.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').trim()
+    if (doi) return `https://doi.org/${doi}`
+  }
+  if (corrected.arxivUrl) return corrected.arxivUrl
+  if (corrected.arxivId) return `https://arxiv.org/abs/${String(corrected.arxivId).replace(/^arxiv:/i, '').trim()}`
+  if (corrected.citedUrl && !looksInternal(corrected.citedUrl)) return corrected.citedUrl
+  if (corrected.url && !looksInternal(corrected.url)) return corrected.url
+  return null
 }
 
 /* -------------------------------------------------------------------------
@@ -894,7 +938,7 @@ export const CITATION_STYLES = [
 
 export function exportReferenceAsStyle(ref, style, index = 0) {
   const corrected = getCorrectedReferenceData(ref)
-  const url = corrected.arxivUrl || corrected.url
+  const url = _preferredCitationUrl(corrected)
   const venue = corrected.venue || ''
   const title = corrected.title || ''
   const year = corrected.year || ''
