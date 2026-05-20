@@ -361,6 +361,15 @@ export default function MainPanel() {
               <SimilarPapersPanel
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
+                onCheckPaper={(source) => {
+                  // Switch UI to "New refcheck" so the input panel is visible,
+                  // then dispatch the URL to InputSection which auto-submits.
+                  useHistoryStore.getState().selectCheck?.(-1)
+                  const url = String(source || '').match(/^https?:\/\//)
+                    ? source
+                    : `https://arxiv.org/abs/${source}`
+                  window.dispatchEvent(new CustomEvent('refchecker:check-url', { detail: { url } }))
+                }}
               />
             )}
           </div>

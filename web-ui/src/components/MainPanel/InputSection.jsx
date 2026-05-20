@@ -81,7 +81,20 @@ export default function InputSection() {
       if (ok) setPendingAutoSubmit(true)
     }
     window.addEventListener('refchecker:open-file', onOpenFile)
-    return () => window.removeEventListener('refchecker:open-file', onOpenFile)
+
+    const onCheckUrl = (e) => {
+      const url = e.detail?.url
+      if (!url) return
+      setInputMode('url')
+      setInputValue(url)
+      setPendingAutoSubmit(true)
+    }
+    window.addEventListener('refchecker:check-url', onCheckUrl)
+
+    return () => {
+      window.removeEventListener('refchecker:open-file', onOpenFile)
+      window.removeEventListener('refchecker:check-url', onCheckUrl)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -92,6 +105,14 @@ export default function InputSection() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAutoSubmit, fileUpload.file, isSubmitting])
+
+  useEffect(() => {
+    if (pendingAutoSubmit && inputMode === 'url' && inputValue && !isSubmitting) {
+      setPendingAutoSubmit(false)
+      handleSubmit()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAutoSubmit, inputMode, inputValue, isSubmitting])
 
   const handleSubmit = async () => {
     // Validate input

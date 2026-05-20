@@ -103,6 +103,11 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                     {(c.authors || []).length > 3 ? ', et al.' : ''}
                     {c.year ? ` · ${c.year}` : ''}
                     {c.via === 'recommendations' ? ' · recommended' : c.shared_with_source ? ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}` : ''}
+                    {c.pre_verified && (
+                      <span style={{ color: 'var(--color-success, #16a34a)', marginLeft: 6 }}>
+                        · ✓ verified in cache{c.times_seen > 1 ? ` (×${c.times_seen})` : ''}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-1 flex-shrink-0">

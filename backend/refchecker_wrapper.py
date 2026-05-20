@@ -1381,10 +1381,24 @@ class ProgressRefChecker:
     async def _check_reference(self, reference: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Check a single reference and format result"""
         try:
+            # Global cache short-circuit: if this reference has been verified
+            # before (DOI / arXiv / title+year match), reuse the stored result
+            # rather than re-hitting external APIs.
+            try:
+                from .database import db as _db
+                cached = await _db.lookup_verified_reference(reference)
+                if cached and isinstance(cached.get("result"), dict) and cached["result"]:
+                    cached_result = dict(cached["result"])
+                    cached_result["index"] = index
+                    cached_result["from_cache"] = True
+                    return cached_result
+            except Exception as _e:
+                logger.debug("Global cache lookup skipped: %s", _e)
+
             # Use the hybrid checker with timeout protection
             import asyncio
             loop = asyncio.get_event_loop()
-            
+
             # Run verification in a thread with timeout
             try:
                 verified_data, errors, url = await asyncio.wait_for(
@@ -1669,7 +1683,19 @@ class ProgressRefChecker:
                 "title": reference.get("title") or reference.get("cited_url") or reference.get("url") or "Unknown Title",
                 "total": total_refs
             })
-            
+
+            # Global cache short-circuit before kicking off network checks
+            try:
+                from .database import db as _db
+                cached = await _db.lookup_verified_reference(reference)
+                if cached and isinstance(cached.get("result"), dict) and cached["result"]:
+                    cached_result = dict(cached["result"])
+                    cached_result["index"] = idx + 1
+                    cached_result["from_cache"] = True
+                    return cached_result
+            except Exception as _e:
+                logger.debug("Global cache lookup skipped: %s", _e)
+
             try:
                 # Run the sync check in a thread
                 result = await asyncio.wait_for(

@@ -2,6 +2,12 @@ import { useMemo } from 'react'
 import ReferenceCard from '../ReferenceCard/ReferenceCard'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
+import useReferenceActions from '../../hooks/useReferenceActions'
+import {
+  AddReferencePanel,
+  SuggestAltPanel,
+  ReferenceRowActions,
+} from './ReferenceActionsBar'
 
 /**
  * Derive status from reference data, trusting backend final statuses
@@ -17,6 +23,20 @@ const computeDerivedStatus = (ref, isCheckComplete = false) => {
  */
 export default function ReferenceList({ references, isLoading, isCheckComplete = false }) {
   const statusFilter = useCheckStore(s => s.statusFilter)
+  const {
+    selectedCheckId,
+    busyKey,
+    showAdd,
+    setShowAdd,
+    newRef,
+    setNewRef,
+    suggestFor,
+    setSuggestFor,
+    handleAddRef,
+    handleRemoveRef,
+    handleSuggestAlt,
+    handleReverify,
+  } = useReferenceActions()
 
   // Memoize all derived data to ensure consistency within a render
   const { sortedReferences, filteredReferences } = useMemo(() => {
@@ -157,38 +177,78 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
         className="px-4 py-3 border-b flex items-center justify-between relative"
         style={{ borderColor: 'var(--color-border)', minHeight: '48px' }}
       >
-        <h3 
+        <h3
           className="font-semibold"
           style={{ color: 'var(--color-text-primary)' }}
         >
           References ({sortedReferences.length})
         </h3>
-        {statusFilter.length > 0 && (
-          <span 
-            className="absolute right-4 text-sm px-2 py-1 rounded"
-            style={{ 
-              backgroundColor: 'var(--color-bg-tertiary)',
-              color: 'var(--color-text-secondary)' 
-            }}
-          >
-            Showing {filteredReferences.length} ({statusFilter.join(', ')})
-          </span>
-        )}
+        <div className="flex items-center gap-3 absolute right-4">
+          {statusFilter.length > 0 && (
+            <span
+              className="text-sm px-2 py-1 rounded"
+              style={{
+                backgroundColor: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-secondary)'
+              }}
+            >
+              Showing {filteredReferences.length} ({statusFilter.join(', ')})
+            </span>
+          )}
+          {selectedCheckId && (
+            <button
+              onClick={() => setShowAdd(v => !v)}
+              className="text-xs px-2 py-1 rounded"
+              style={{
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg-tertiary)',
+                color: 'var(--color-text-secondary)',
+              }}
+              title="Add a missing reference and verify it"
+            >
+              {showAdd ? 'Cancel' : '+ Add reference'}
+            </button>
+          )}
+        </div>
       </div>
 
-      <div 
+      {showAdd && (
+        <AddReferencePanel
+          newRef={newRef}
+          setNewRef={setNewRef}
+          busyKey={busyKey}
+          onSave={handleAddRef}
+          onCancel={() => setShowAdd(false)}
+        />
+      )}
+
+      <SuggestAltPanel suggestFor={suggestFor} onClose={() => setSuggestFor(null)} />
+
+      <div
         className="divide-y"
         style={{ borderColor: 'var(--color-border)' }}
       >
         {filteredReferences.map((ref, displayIndex) => (
-            <ReferenceCard 
-              key={`ref-${ref.index ?? displayIndex}-${displayIndex}`} 
-              reference={ref} 
-              index={ref.index ?? displayIndex}
-              displayIndex={displayIndex}
-              totalRefs={sortedReferences.length}
-              isCheckComplete={isCheckComplete}
-            />
+            <div key={`ref-${ref.index ?? displayIndex}-${displayIndex}`}>
+              <ReferenceCard
+                reference={ref}
+                index={ref.index ?? displayIndex}
+                displayIndex={displayIndex}
+                totalRefs={sortedReferences.length}
+                isCheckComplete={isCheckComplete}
+              />
+              {selectedCheckId && (
+                <ReferenceRowActions
+                  reference={ref}
+                  displayIndex={displayIndex}
+                  busyKey={busyKey}
+                  selectedCheckId={selectedCheckId}
+                  onSuggest={handleSuggestAlt}
+                  onRemove={handleRemoveRef}
+                  onReverify={handleReverify}
+                />
+              )}
+            </div>
         ))}
       </div>
     </div>

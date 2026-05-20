@@ -4071,6 +4071,118 @@ async def remove_reference_from_check(
     return {"removed": True, "total_refs": len(refs)}
 
 
+@app.post("/api/history/{check_id}/references/{ref_id}/verify")
+async def verify_single_reference(
+    check_id: int,
+    ref_id: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Run the verifier on a single reference and persist the result.
+
+    Lets the user re-verify a manually-added or edited reference without
+    rerunning the whole check. We instantiate EnhancedHybridReferenceChecker
+    directly (cheap — no LLM init) and replace the stored ref in-place.
+    """
+    user_id = get_user_id_filter(current_user)
+    refs = await db.get_check_references(check_id, user_id=user_id)
+    if refs is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+    idx = None
+    for i, r in enumerate(refs):
+        if str(r.get("id")) == ref_id or str(r.get("index")) == ref_id:
+            idx = i
+            break
+    if idx is None:
+        raise HTTPException(status_code=404, detail="Reference not found in check")
+    target = refs[idx]
+
+    # Try the global identity cache first — same shortcut the live pipeline
+    # uses. If we hit, we skip the network call entirely.
+    cached = None
+    try:
+        cached = await db.lookup_verified_reference(target)
+    except Exception:
+        cached = None
+    if cached and isinstance(cached.get("result"), dict) and cached["result"]:
+        updated = dict(cached["result"])
+        updated["id"] = target.get("id")
+        updated["index"] = target.get("index")
+        updated["from_cache"] = True
+        refs[idx] = updated
+        ok = await db.replace_check_references(check_id, refs, user_id=user_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to persist verified reference")
+        return {"reference": updated, "from_cache": True}
+
+    # Run a fresh verification against the hybrid checker.
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+
+        ss_api_key = await _resolve_semantic_scholar_api_key(None)
+        checker = EnhancedHybridReferenceChecker(
+            semantic_scholar_api_key=ss_api_key,
+            debug_mode=False,
+        )
+        import asyncio
+        verified_data, errors, url = await asyncio.to_thread(
+            checker.verify_reference, dict(target)
+        )
+    except Exception as e:
+        logger.exception("Per-ref verify failed")
+        raise HTTPException(status_code=500, detail=f"Verify failed: {e}")
+
+    # Assemble a verified result on top of the existing ref so the row
+    # keeps its id/index but picks up the new status/errors/url.
+    sanitized = []
+    for err in (errors or []):
+        e_type = err.get('error_type') or err.get('warning_type') or err.get('info_type')
+        details = err.get('error_details') or err.get('warning_details') or err.get('info_details')
+        if not e_type and not details:
+            continue
+        sanitized.append({"error_type": e_type, "error_details": details})
+
+    has_error = any((s.get('error_type') and s.get('error_type') != 'unverified') for s in sanitized)
+    if verified_data and not has_error:
+        status = "verified"
+    elif verified_data:
+        status = "warning"
+    elif sanitized:
+        status = "unverified"
+    else:
+        status = "unverified"
+
+    updated = dict(target)
+    updated["status"] = status
+    updated["errors"] = [s for s in sanitized if s.get('error_type') and s.get('error_type') != 'unverified']
+    updated["warnings"] = []  # warnings come back through error_type for now
+    updated["verified_url"] = url
+    if verified_data:
+        # Merge the canonical metadata from the verified_data back over the
+        # stored ref so the UI surfaces it.
+        for key in ("title", "authors", "year", "venue", "doi", "arxiv_id"):
+            if verified_data.get(key):
+                updated[key] = verified_data[key]
+        updated["matched_db"] = verified_data.get("source") or updated.get("matched_db")
+        updated["authoritative_urls"] = [{"url": url}] if url else []
+
+    refs[idx] = updated
+    ok = await db.replace_check_references(check_id, refs, user_id=user_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to persist verified reference")
+
+    # Push the freshly-verified ref into the global identity cache so the
+    # next check that touches it gets an instant hit.
+    try:
+        await db.upsert_verified_reference(updated)
+    except Exception:
+        pass
+
+    return {"reference": updated, "from_cache": False}
+
+
 @app.post("/api/history/{check_id}/references/{ref_id}/suggest-alternative")
 async def suggest_alternative_reference(
     check_id: int,
@@ -4119,8 +4231,100 @@ async def suggest_alternative_reference(
             "arxiv_id": ext.get("ArXiv"),
             "url": p.get("url"),
             "paperId": p.get("paperId"),
+            "source": "semantic_scholar",
         })
-    return {"reference_id": ref_id, "cited_title": title, "candidates": suggestions}
+
+    # LLM augmentation: ask the user's configured default LLM what real
+    # paper the cited reference probably is. Often it can resolve cases
+    # where S2 title-search misses (e.g. mangled author lists, wrong
+    # year, hallucinated venue).
+    llm_candidates = []
+    try:
+        default_cfg = await db.get_default_llm_config(user_id=user_id)
+        if default_cfg and default_cfg.get("provider"):
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+            from refchecker.llm.base import create_llm_provider
+
+            llm_config = {}
+            if default_cfg.get("model"):
+                llm_config["model"] = default_cfg["model"]
+            if default_cfg.get("api_key"):
+                llm_config["api_key"] = default_cfg["api_key"]
+            if default_cfg.get("endpoint"):
+                llm_config["endpoint"] = default_cfg["endpoint"]
+            provider = create_llm_provider(default_cfg["provider"], llm_config)
+            if provider and (not hasattr(provider, "is_available") or provider.is_available()):
+                authors = target.get("authors")
+                if isinstance(authors, list):
+                    authors_str = ", ".join(str(a) for a in authors[:10])
+                else:
+                    authors_str = str(authors or "")
+                prompt = (
+                    "You are helping resolve a likely-hallucinated academic citation.\n"
+                    "Given the (possibly wrong) reference below, identify up to 3 REAL "
+                    "papers the author probably meant. For each, return strict JSON "
+                    "with fields: title, authors (array of strings), year (int), "
+                    "venue, doi (or null), arxiv_id (or null), reason (one short "
+                    "sentence on why this is the likely match).\n\n"
+                    f"Title: {title}\n"
+                    f"Authors: {authors_str}\n"
+                    f"Year: {target.get('year') or 'unknown'}\n"
+                    f"Venue: {target.get('venue') or 'unknown'}\n\n"
+                    "Respond with ONLY a JSON array of objects, no prose, no markdown."
+                )
+                try:
+                    raw = provider._call_llm(prompt)
+                except Exception as e:
+                    logger.debug("LLM suggest-alt call failed: %s", e)
+                    raw = None
+                if raw:
+                    import json as _json, re as _re
+                    text = raw.strip()
+                    # Strip code fences if present
+                    m = _re.search(r"\[.*\]", text, _re.DOTALL)
+                    if m:
+                        text = m.group(0)
+                    try:
+                        parsed = _json.loads(text)
+                        if isinstance(parsed, list):
+                            for item in parsed[:3]:
+                                if not isinstance(item, dict):
+                                    continue
+                                t = item.get("title")
+                                if not t:
+                                    continue
+                                doi_v = item.get("doi")
+                                arxiv_v = item.get("arxiv_id")
+                                url_v = None
+                                if doi_v:
+                                    url_v = f"https://doi.org/{doi_v}"
+                                elif arxiv_v:
+                                    url_v = f"https://arxiv.org/abs/{arxiv_v}"
+                                llm_candidates.append({
+                                    "title": t,
+                                    "authors": item.get("authors") or [],
+                                    "year": item.get("year"),
+                                    "venue": item.get("venue"),
+                                    "doi": doi_v,
+                                    "arxiv_id": arxiv_v,
+                                    "url": url_v,
+                                    "reason": item.get("reason"),
+                                    "source": "llm",
+                                })
+                    except Exception as e:
+                        logger.debug("Failed to parse LLM suggest-alt output: %s", e)
+    except Exception as e:
+        logger.debug("LLM suggest-alt augmentation skipped: %s", e)
+
+    # Put LLM candidates first when present (they typically explain themselves
+    # with `reason`), then fall back to S2 title-search matches.
+    return {
+        "reference_id": ref_id,
+        "cited_title": title,
+        "candidates": llm_candidates + suggestions,
+    }
 
 
 class _SimilarPapersRequest(BaseModel):
@@ -4224,6 +4428,20 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
         p = c["paper"] or {}
         ext = p.get("externalIds") or {}
         authors = [a.get("name") for a in (p.get("authors") or []) if a.get("name")]
+        # Pre-verify the candidate against the global identity cache so the
+        # UI can show a "✓ already verified" badge before the user clicks
+        # Check this too.
+        probe = {
+            "doi": ext.get("DOI"),
+            "arxiv_id": ext.get("ArXiv"),
+            "title": p.get("title"),
+            "year": p.get("year"),
+        }
+        cached = None
+        try:
+            cached = await db.lookup_verified_reference(probe)
+        except Exception:
+            cached = None
         out.append({
             "paperId": p.get("paperId"),
             "title": p.get("title"),
@@ -4234,8 +4452,161 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             "shared_with_source": c["shared"],
             "via": c["via"],
             "semantic_scholar_url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,
+            "pre_verified": bool(cached),
+            "verified_status": (cached or {}).get("status") if cached else None,
+            "times_seen": (cached or {}).get("times_seen") if cached else 0,
         })
     return {"source_paper": req.paper_title, "candidates": out}
+
+
+class _CitationGraphRequest(BaseModel):
+    references: list  # list of {id?, title, doi?, arxiv_id?, authors?}
+    paper_title: Optional[str] = None
+
+
+@app.post("/api/papers/citation-graph")
+async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = Depends(require_user)):
+    """Real citation-graph edges between the references the user gave us.
+
+    For each ref with a DOI / arXiv ID, look it up on Semantic Scholar's
+    graph API to get (a) its citationCount (used for node size) and
+    (b) the paperIds it cites itself. Then an edge ``A -> B`` exists
+    iff A's reference list contains B's paperId. That gives genuine
+    inter-citation structure inside the bibliography, instead of the
+    author-overlap proxy.
+
+    Returns ``{nodes: [{id, paperId, citationCount}], edges: [{source, target}]}``.
+    """
+    refs = req.references or []
+    if not refs:
+        return {"nodes": [], "edges": []}
+
+    import httpx
+    api_key = await _resolve_semantic_scholar_api_key(None)
+    headers = {"x-api-key": api_key} if api_key else {}
+    timeout = 10.0
+
+    def s2_id_of(ref: dict) -> Optional[str]:
+        if ref.get("doi"):
+            return f"DOI:{ref['doi']}"
+        if ref.get("arxiv_id"):
+            return f"arXiv:{ref['arxiv_id']}"
+        return None
+
+    async def _fetch(client, url, params=None):
+        try:
+            r = await client.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            logger.debug("S2 fetch failed for %s: %s", url, e)
+        return None
+
+    # Cap at 60 — beyond that S2 rate-limits hard and the graph is unreadable.
+    refs = refs[:60]
+    nodes_out = []
+    paperid_to_local = {}  # S2 paperId -> our local ref id
+
+    async with httpx.AsyncClient() as client:
+        # Fetch each ref's citationCount + outgoing references list. We do
+        # this sequentially to be polite to the free-tier rate limit.
+        ref_details = []
+        for i, ref in enumerate(refs):
+            local_id = str(ref.get("id") or ref.get("index") or f"ref-{i}")
+            ident = s2_id_of(ref)
+            paper = None
+            references_list = []
+            if ident:
+                data = await _fetch(
+                    client,
+                    f"https://api.semanticscholar.org/graph/v1/paper/{ident}",
+                    params={"fields": "paperId,citationCount,references.paperId"},
+                )
+                if data:
+                    paper = data
+                    references_list = [r.get("paperId") for r in (data.get("references") or []) if r.get("paperId")]
+            pid = (paper or {}).get("paperId")
+            citation_count = (paper or {}).get("citationCount") or 0
+            ref_details.append({
+                "local_id": local_id,
+                "paperId": pid,
+                "citationCount": citation_count,
+                "references": references_list,
+            })
+            if pid:
+                paperid_to_local[pid] = local_id
+            nodes_out.append({
+                "id": local_id,
+                "paperId": pid,
+                "citationCount": citation_count,
+            })
+
+        edges = []
+        seen_edges = set()
+        for det in ref_details:
+            src = det["local_id"]
+            for tgt_pid in det["references"]:
+                tgt = paperid_to_local.get(tgt_pid)
+                if not tgt or tgt == src:
+                    continue
+                key = f"{src}->{tgt}"
+                if key in seen_edges:
+                    continue
+                seen_edges.add(key)
+                edges.append({"source": src, "target": tgt})
+
+    return {"nodes": nodes_out, "edges": edges}
+
+
+class _ExpandRequest(BaseModel):
+    paper_id: str  # S2 paperId or "DOI:..." / "arXiv:..." identifier
+    limit: int = 8
+
+
+@app.post("/api/papers/expand")
+async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(require_user)):
+    """One-hop expansion for the graph view: list a paper's most-cited
+    outgoing references so the user can pull them into the graph."""
+    import httpx
+    api_key = await _resolve_semantic_scholar_api_key(None)
+    headers = {"x-api-key": api_key} if api_key else {}
+    timeout = 12.0
+    limit = max(1, min(25, int(req.limit or 8)))
+    pid = req.paper_id
+    if not pid:
+        raise HTTPException(status_code=400, detail="paper_id required")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(
+                f"https://api.semanticscholar.org/graph/v1/paper/{pid}/references",
+                params={
+                    "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
+                    "limit": min(50, limit * 4),
+                },
+                headers=headers,
+                timeout=timeout,
+            )
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"S2 expand failed: {e}")
+
+    items = []
+    for entry in (data.get("data") or []):
+        p = entry.get("citedPaper") or {}
+        ext = p.get("externalIds") or {}
+        items.append({
+            "paperId": p.get("paperId"),
+            "title": p.get("title"),
+            "year": p.get("year"),
+            "citationCount": p.get("citationCount") or 0,
+            "authors": [a.get("name") for a in (p.get("authors") or []) if a.get("name")],
+            "doi": ext.get("DOI"),
+            "arxiv_id": ext.get("ArXiv"),
+        })
+    items.sort(key=lambda x: x["citationCount"] or 0, reverse=True)
+    return {"paper_id": pid, "items": items[:limit]}
 
 
 @app.get("/api/references/seen")

@@ -116,6 +116,14 @@ export const listSeenReferences = (limit = 200, offset = 0, q = null) =>
 export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5 }) =>
   api.post('/papers/similar', { references, paper_title, paper_id, limit })
 
+// Real inter-reference citation graph via Semantic Scholar
+export const fetchCitationGraph = ({ references, paper_title }) =>
+  api.post('/papers/citation-graph', { references, paper_title })
+
+// One-hop expand: a paper's outgoing references for the graph view
+export const expandPaper = ({ paper_id, limit = 8 }) =>
+  api.post('/papers/expand', { paper_id, limit })
+
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>
   api.post(`/history/${checkId}/references`, payload)
@@ -123,6 +131,8 @@ export const removeReferenceFromCheck = (checkId, refId) =>
   api.delete(`/history/${checkId}/references/${encodeURIComponent(refId)}`)
 export const suggestAlternativeReference = (checkId, refId) =>
   api.post(`/history/${checkId}/references/${encodeURIComponent(refId)}/suggest-alternative`)
+export const verifyReferenceInCheck = (checkId, refId) =>
+  api.post(`/history/${checkId}/references/${encodeURIComponent(refId)}/verify`)
 
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
