@@ -197,7 +197,7 @@ export const computeReferenceStats = (references = [], isCheckComplete = false) 
 
     if (
       s === 'unverified' || s === 'hallucination' ||
-      r?.errors?.some(e => e.error_type === 'unverified') ||
+      (s !== 'checking' && r?.errors?.some(e => e.error_type === 'unverified')) ||
       likelyHallucinated
     ) {
       withUnverified += 1

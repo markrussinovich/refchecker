@@ -138,7 +138,7 @@ describe('referenceStatus', () => {
     expect(getEffectiveReferenceStatus(reference, true)).toBe('suggestion')
   })
 
-  it('counts unverified refs while hallucination checks are still pending', () => {
+  it('does not count transient unverified refs while hallucination checks are still pending', () => {
     const stats = computeReferenceStats([
       { status: 'verified', errors: [], warnings: [], suggestions: [] },
       {
@@ -153,8 +153,25 @@ describe('referenceStatus', () => {
     expect(stats.totalProcessed).toBe(2)
     expect(stats.count).toBe(1)
     expect(stats.verified).toBe(1)
-    expect(stats.withUnverified).toBe(1)
+    expect(stats.withUnverified).toBe(0)
     expect(stats.hallucinated).toBe(0)
+  })
+
+  it('counts unverified refs after the check is complete', () => {
+    const stats = computeReferenceStats([
+      { status: 'verified', errors: [], warnings: [], suggestions: [] },
+      {
+        status: 'unverified',
+        errors: [{ error_type: 'unverified', error_details: 'Not found' }],
+        warnings: [],
+        suggestions: [],
+      },
+    ], true)
+
+    expect(stats.totalProcessed).toBe(2)
+    expect(stats.count).toBe(2)
+    expect(stats.verified).toBe(1)
+    expect(stats.withUnverified).toBe(1)
   })
 
   it('builds one display summary for progress, reference buckets, and issue totals', () => {
@@ -167,7 +184,7 @@ describe('referenceStatus', () => {
         { status: 'suggestion', errors: [], warnings: [], suggestions: [{ suggestion_type: 'doi' }, { suggestion_type: 'url' }] },
         { status: 'unverified', errors: [{ error_type: 'unverified' }], warnings: [], suggestions: [] },
       ],
-      isComplete: false,
+      isComplete: true,
     })
 
     expect(summary.totalRefs).toBe(9)
