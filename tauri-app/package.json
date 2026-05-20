@@ -11,6 +11,7 @@
     "build:sidecar:win": "powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1"
   },
   "dependencies": {
+    "@tauri-apps/plugin-process": "^2.0.0",
     "@tauri-apps/plugin-updater": "^2.0.0"
   },
   "devDependencies": {

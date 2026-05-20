@@ -50,29 +50,37 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const [cacheDirSuccess, setCacheDirSuccess] = useState(null)
   const [cacheDirSaving, setCacheDirSaving] = useState(false)
 
-  // Tauri auto-updater UI state
+  // Tauri auto-updater UI state. The web-ui is also served outside the
+  // desktop wrapper (Docker, plain pip install), so we avoid pulling
+  // @tauri-apps/plugin-updater as a build-time dep and instead invoke
+  // its commands at runtime via the global Tauri IPC bridge. The plugin
+  // is registered Rust-side and covered by the `updater:default` and
+  // `process:default` capability permissions.
   const [updateChecking, setUpdateChecking] = useState(false)
   const [updateStatus, setUpdateStatus] = useState(null) // { kind, text }
   const handleCheckForUpdates = async () => {
     setUpdateStatus(null)
+    if (!isTauri()) {
+      setUpdateStatus({ kind: 'info', text: 'Update checks only work inside the desktop app.' })
+      return
+    }
     setUpdateChecking(true)
     try {
-      const res = await invokeTauri('check_for_update_now')
-      if (!res) {
-        setUpdateStatus({ kind: 'info', text: 'Update checks only work inside the desktop app.' })
+      // Returns null when no update, or { available, current_version, version, ... }
+      const update = await invokeTauri('plugin:updater|check')
+      if (!update || update.available === false) {
+        setUpdateStatus({ kind: 'ok', text: "You're on the latest version." })
         return
       }
-      if (res.status === 'no-update') {
-        setUpdateStatus({ kind: 'ok', text: `You're on the latest version (${res.current_version || 'unknown'}).` })
-      } else if (res.status === 'installed') {
-        setUpdateStatus({ kind: 'ok', text: `Update ${res.available_version} installed — restarting…` })
-      } else if (res.status === 'error') {
-        setUpdateStatus({ kind: 'error', text: res.message || 'Update check failed.' })
-      } else {
-        setUpdateStatus({ kind: 'info', text: res.message || res.status })
-      }
+      setUpdateStatus({ kind: 'info', text: `Downloading ${update.version || 'update'}…` })
+      // download_and_install streams progress events back, but we don't
+      // need to subscribe — Tauri's dialog config handles the prompt.
+      await invokeTauri('plugin:updater|download_and_install', { onEvent: null })
+      setUpdateStatus({ kind: 'ok', text: `Update ${update.version || ''} installed — restarting…` })
+      setTimeout(() => { invokeTauri('plugin:process|restart').catch(() => {}) }, 600)
     } catch (err) {
-      setUpdateStatus({ kind: 'error', text: err?.toString() || 'Update check failed.' })
+      const msg = (err && (err.message || err.toString && err.toString())) || 'Update check failed.'
+      setUpdateStatus({ kind: 'error', text: msg })
     } finally {
       setUpdateChecking(false)
     }
