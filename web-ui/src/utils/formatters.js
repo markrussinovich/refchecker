@@ -787,6 +787,197 @@ export function exportReferenceAsPlainText(ref) {
   return citation
 }
 
+/* -------------------------------------------------------------------------
+ * Citation-style formatters.
+ *
+ * Approximate, not pedantic. Goal: produce a string the user can paste into
+ * their bibliography and tidy up by hand. Each style operates on the
+ * corrected metadata (post-verification) so the output already incorporates
+ * RefChecker's fixes.
+ * -----------------------------------------------------------------------*/
+
+function _splitAuthorName(rawName) {
+  if (!rawName) return { first: '', last: '', initials: '' }
+  const name = String(rawName).trim().replace(/\s+/g, ' ')
+  // "Lastname, Firstname Middle" form
+  if (name.includes(',')) {
+    const [last, rest] = name.split(',', 2).map(s => s.trim())
+    const givenParts = (rest || '').split(/\s+/).filter(Boolean)
+    const initials = givenParts.map(p => p[0] ? p[0].toUpperCase() + '.' : '').join(' ')
+    return { first: rest || '', last, initials }
+  }
+  // "Firstname Middle Lastname" form
+  const parts = name.split(/\s+/)
+  if (parts.length === 1) return { first: '', last: parts[0], initials: '' }
+  const last = parts.pop()
+  const first = parts.join(' ')
+  const initials = parts.map(p => (p[0] || '').toUpperCase() + '.').join(' ')
+  return { first, last, initials }
+}
+
+function _authorsArray(authors) {
+  if (!authors) return []
+  if (Array.isArray(authors)) return authors.filter(Boolean)
+  // Some refs ship authors as a single comma-separated string.
+  return String(authors).split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/).map(s => s.trim()).filter(Boolean)
+}
+
+function _formatAuthorsAPA(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last}, ${initials}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return `${list[0]}, & ${list[1]}`
+  if (list.length <= 20) return list.slice(0, -1).join(', ') + ', & ' + list.slice(-1)
+  return list.slice(0, 19).join(', ') + ', ... ' + list[list.length - 1]
+}
+
+function _formatAuthorsMLA(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length === 2) return `${first}, and ${list[1]}`
+  return `${first}, et al`
+}
+
+function _formatAuthorsIEEE(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${initials} ${last}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsVancouver(authors) {
+  const list = _authorsArray(authors).map(a => {
+    const { last, initials } = _splitAuthorName(a)
+    return last ? `${last} ${initials.replace(/\./g, '').replace(/\s+/g, '')}`.trim() : a
+  })
+  if (list.length === 0) return ''
+  if (list.length <= 6) return list.join(', ')
+  return list.slice(0, 6).join(', ') + ', et al.'
+}
+
+function _formatAuthorsChicago(authors) {
+  const list = _authorsArray(authors)
+  if (list.length === 0) return ''
+  const first = (() => {
+    const { first, last } = _splitAuthorName(list[0])
+    return last ? `${last}, ${first}`.trim() : list[0]
+  })()
+  if (list.length === 1) return first
+  if (list.length <= 10) return `${first}, ` + list.slice(1).join(', ')
+  return `${first}, et al.`
+}
+
+/**
+ * Citation styles supported by the Corrections tab.
+ */
+export const CITATION_STYLES = [
+  { id: 'bibtex', label: 'BibTeX' },
+  { id: 'plaintext', label: 'Plain text (ACM)' },
+  { id: 'apa', label: 'APA 7th' },
+  { id: 'mla', label: 'MLA 9th' },
+  { id: 'chicago', label: 'Chicago author-date' },
+  { id: 'ieee', label: 'IEEE' },
+  { id: 'vancouver', label: 'Vancouver' },
+  { id: 'bibitem', label: 'LaTeX \\bibitem' },
+]
+
+export function exportReferenceAsStyle(ref, style, index = 0) {
+  const corrected = getCorrectedReferenceData(ref)
+  const url = corrected.arxivUrl || corrected.url
+  const venue = corrected.venue || ''
+  const title = corrected.title || ''
+  const year = corrected.year || ''
+
+  switch (style) {
+    case 'bibtex':
+      return exportReferenceAsBibtex(ref, index)
+    case 'plaintext':
+      return exportReferenceAsPlainText(ref)
+    case 'apa': {
+      // Author, F. M. (Year). Title. Venue. URL
+      const authors = _formatAuthorsAPA(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}${authors.endsWith('.') ? '' : '.'}`)
+      if (year) parts.push(`(${year}).`)
+      if (title) parts.push(`${title}${title.endsWith('.') ? '' : '.'}`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'mla': {
+      // Author. "Title." Venue, Year, URL.
+      const authors = _formatAuthorsMLA(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`"${title}."`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'chicago': {
+      // Last, First, and Co Author. Year. "Title." Venue. URL.
+      const authors = _formatAuthorsChicago(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (year) parts.push(`${year}.`)
+      if (title) parts.push(`"${title}."`)
+      if (venue) parts.push(`${venue}.`)
+      if (url) parts.push(url)
+      return parts.join(' ')
+    }
+    case 'ieee': {
+      // F. M. Last, "Title," Venue, Year. [Online]. Available: URL
+      const authors = _formatAuthorsIEEE(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors},`)
+      if (title) parts.push(`"${title},"`)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      if (tail) parts.push(`${tail}.`)
+      if (url) parts.push(`[Online]. Available: ${url}`)
+      return parts.join(' ')
+    }
+    case 'vancouver': {
+      // Last FM, Co N. Title. Venue. Year. URL
+      const authors = _formatAuthorsVancouver(corrected.authors)
+      const parts = []
+      if (authors) parts.push(`${authors}.`)
+      if (title) parts.push(`${title}.`)
+      if (venue) parts.push(`${venue}.`)
+      if (year) parts.push(`${year}.`)
+      if (url) parts.push(`Available from: ${url}`)
+      return parts.join(' ')
+    }
+    case 'bibitem': {
+      // \bibitem{key} F. M. Last, "Title," Venue, Year.
+      const key = (ref.bibtex_key || `ref${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '')
+      const authors = _formatAuthorsIEEE(corrected.authors)
+      const tail = [venue, year].filter(Boolean).join(', ')
+      const body = [authors && `${authors},`, title && `"${title},"`, tail && `${tail}.`, url].filter(Boolean).join(' ')
+      return `\\bibitem{${key}} ${body}`
+    }
+    default:
+      return exportReferenceAsPlainText(ref)
+  }
+}
+
+export function exportResultsAsStyle(references, style) {
+  if (!references || references.length === 0) return ''
+  if (style === 'bibtex') return exportResultsAsBibtex({ references })
+  return references.map((r, i) => exportReferenceAsStyle(r, style, i)).join('\n\n')
+}
+
 /**
  * Export a single reference as Markdown with elements on separate lines
  * Uses corrected values from verification when available

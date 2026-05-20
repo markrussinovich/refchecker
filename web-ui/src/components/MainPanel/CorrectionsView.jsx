@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import {
-  exportReferenceAsPlainText,
-  exportReferenceAsBibtex,
-  exportResultsAsBibtex,
+  CITATION_STYLES,
+  exportReferenceAsStyle,
+  exportResultsAsStyle,
 } from '../../utils/formatters'
 
 /**
@@ -15,7 +15,7 @@ import {
  * authors copy the corrected entry straight into their bibliography.
  */
 export default function CorrectionsView({ references }) {
-  const [format, setFormat] = useState('bibtex') // bibtex | plaintext
+  const [format, setFormat] = useState('bibtex')
   const [copiedKey, setCopiedKey] = useState(null)
 
   const flagged = useMemo(() => {
@@ -46,10 +46,9 @@ export default function CorrectionsView({ references }) {
     return parts.join('. ').replace(/\.\.+/g, '.')
   }
 
-  const renderCorrected = (ref) => {
+  const renderCorrected = (ref, i) => {
     try {
-      if (format === 'bibtex') return exportReferenceAsBibtex(ref, ref.index ?? 0)
-      return exportReferenceAsPlainText(ref)
+      return exportReferenceAsStyle(ref, format, i)
     } catch (e) {
       return '(could not render correction)'
     }
@@ -66,9 +65,7 @@ export default function CorrectionsView({ references }) {
   }
 
   const copyAll = async () => {
-    const text = format === 'bibtex'
-      ? exportResultsAsBibtex({ references: flagged })
-      : flagged.map(r => exportReferenceAsPlainText(r)).join('\n\n')
+    const text = exportResultsAsStyle(flagged, format)
     await copy('__all__', text)
   }
 
@@ -109,9 +106,11 @@ export default function CorrectionsView({ references }) {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-primary)',
             }}
+            title="Citation style"
           >
-            <option value="bibtex">BibTeX</option>
-            <option value="plaintext">Plain text (ACM)</option>
+            {CITATION_STYLES.map(s => (
+              <option key={s.id} value={s.id}>{s.label}</option>
+            ))}
           </select>
           <button
             onClick={copyAll}
@@ -131,7 +130,7 @@ export default function CorrectionsView({ references }) {
       <div className="space-y-2">
         {flagged.map((ref, i) => {
           const key = ref.id || `ref-${i}`
-          const corrected = renderCorrected(ref)
+          const corrected = renderCorrected(ref, i)
           return (
             <div
               key={key}
