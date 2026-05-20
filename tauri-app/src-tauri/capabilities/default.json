@@ -16,6 +16,7 @@
     "shell:default",
     "shell:allow-open",
     "dialog:default",
-    "updater:default"
+    "updater:default",
+    "check_for_update_now"
   ]
 }
