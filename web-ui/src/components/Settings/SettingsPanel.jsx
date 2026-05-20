@@ -6,6 +6,7 @@ import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
 import { invokeTauri, isTauri, openExternal } from '../../utils/tauriBridge'
+import { collectDiagnostics, diagnosticsToText } from '../../utils/diagnostics'
 
 const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
 
@@ -95,6 +96,51 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
   }
   const handleShowReleaseNotes = () => openExternal(`${REPO_URL}/releases/latest`)
+
+  // Diagnostics state
+  const [diagBuilding, setDiagBuilding] = useState(false)
+  const [diagReport, setDiagReport] = useState(null)
+  const [diagCopied, setDiagCopied] = useState(false)
+  const handleBuildDiagnostics = async () => {
+    setDiagBuilding(true)
+    setDiagCopied(false)
+    try {
+      const report = await collectDiagnostics()
+      setDiagReport(report)
+    } catch (err) {
+      setDiagReport({ error: err?.message || String(err) })
+    } finally {
+      setDiagBuilding(false)
+    }
+  }
+  const handleCopyDiagnostics = async () => {
+    if (!diagReport) return
+    try {
+      await navigator.clipboard.writeText(diagnosticsToText(diagReport))
+      setDiagCopied(true)
+      setTimeout(() => setDiagCopied(false), 1500)
+    } catch { /* clipboard unavailable */ }
+  }
+  const handleDownloadDiagnostics = () => {
+    if (!diagReport) return
+    const text = diagnosticsToText(diagReport)
+    const blob = new Blob([text], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `refchecker-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+  const handleOpenIssueWithDiagnostics = () => {
+    const body = diagReport
+      ? '## What I expected\n\n\n## What happened\n\n\n## Diagnostic report\n\n```json\n' + diagnosticsToText(diagReport) + '\n```\n'
+      : '## What I expected\n\n\n## What happened\n\n'
+    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(body)}`
+    openExternal(url)
+  }
 
   // Local DB downloader state — drives the "Build local databases" inline
   // section under the db_path field. Selected DBs run via the existing
@@ -778,6 +824,73 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           )}
         </div>
       )}
+
+      {/* Diagnostics — Settings → General → bottom. Builds a sanitized
+          JSON report (env, backend health, settings, recent console)
+          that the user can paste into a GitHub issue. */}
+      <div className="py-3" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="mb-2">
+          <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Diagnostics</div>
+          <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            Build a sanitized report of the running environment for bug reports. API keys, secrets, and paths are redacted before display.
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleBuildDiagnostics}
+            disabled={diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium"
+            style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: 'white', opacity: diagBuilding ? 0.6 : 1 }}
+            type="button"
+          >
+            {diagBuilding ? 'Collecting…' : 'Generate report'}
+          </button>
+          <button
+            onClick={handleCopyDiagnostics}
+            disabled={!diagReport || diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagReport && !diagBuilding ? 1 : 0.5 }}
+            type="button"
+          >
+            {diagCopied ? '✓ Copied' : 'Copy JSON'}
+          </button>
+          <button
+            onClick={handleDownloadDiagnostics}
+            disabled={!diagReport || diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagReport && !diagBuilding ? 1 : 0.5 }}
+            type="button"
+          >
+            Download
+          </button>
+          <button
+            onClick={handleOpenIssueWithDiagnostics}
+            disabled={diagBuilding}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+            style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', opacity: diagBuilding ? 0.5 : 1 }}
+            type="button"
+            title="Open a new GitHub issue with the report prefilled"
+          >
+            Open issue with report
+          </button>
+        </div>
+        {diagReport && (
+          <details className="mt-3">
+            <summary className="text-xs cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+              Preview report (click to expand)
+            </summary>
+            <pre
+              className="text-[11px] p-2 mt-2 rounded overflow-auto"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                color: 'var(--color-text-secondary)',
+                maxHeight: '300px',
+                border: '1px solid var(--color-border)',
+              }}
+            >{diagnosticsToText(diagReport)}</pre>
+          </details>
+        )}
+      </div>
     </div>
   )
 

@@ -77,7 +77,7 @@
   },
   "plugins": {
     "shell": {
-      "open": "^https?://"
+      "open": true
     },
     "updater": {
       "active": true,
