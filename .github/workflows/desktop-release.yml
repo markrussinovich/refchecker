@@ -179,30 +179,40 @@ jobs:
       # NOT reference secrets.TAURI_SIGNING_PRIVATE_KEY in its env: block,
       # so this step is the single source of truth for whether updater
       # signing is enabled in this run.
+      #
+      # Also emits `updater_enabled` (true|false) so the build step can
+      # disable bundle.createUpdaterArtifacts when no key is available —
+      # Tauri hard-fails when artifacts are requested but no private key
+      # is present, even if a public key is configured in tauri.conf.json.
       - name: Validate Tauri updater signing key
+        id: updater_key
         env:
           UPDATER_KEY_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           UPDATER_PWD_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: bash
         run: |
-          if [[ -z "$UPDATER_KEY_INPUT" ]]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY not set — building unsigned (no auto-updater signatures)"
-            exit 0
-          fi
-          decoded=$(printf '%s' "$UPDATER_KEY_INPUT" | base64 -d 2>/dev/null || true)
-          if [[ "$decoded" == *"untrusted comment:"* && "$decoded" == *"rsign"* ]]; then
-            echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid — enabling updater signing"
-            {
-              echo "TAURI_SIGNING_PRIVATE_KEY<<__RC_EOF__"
-              printf '%s\n' "$UPDATER_KEY_INPUT"
-              echo "__RC_EOF__"
-              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__RC_EOF__"
-              printf '%s\n' "$UPDATER_PWD_INPUT"
-              echo "__RC_EOF__"
-            } >> "$GITHUB_ENV"
+          set -e
+          enabled=false
+          if [[ -n "$UPDATER_KEY_INPUT" ]]; then
+            decoded=$(printf '%s' "$UPDATER_KEY_INPUT" | base64 -d 2>/dev/null || true)
+            if [[ "$decoded" == *"untrusted comment:"* && "$decoded" == *"rsign"* ]]; then
+              echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid — enabling updater signing"
+              enabled=true
+              {
+                echo "TAURI_SIGNING_PRIVATE_KEY<<__RC_EOF__"
+                printf '%s\n' "$UPDATER_KEY_INPUT"
+                echo "__RC_EOF__"
+                echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__RC_EOF__"
+                printf '%s\n' "$UPDATER_PWD_INPUT"
+                echo "__RC_EOF__"
+              } >> "$GITHUB_ENV"
+            else
+              echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key. Building without updater artifacts this run — fix the secret to re-enable."
+            fi
           else
-            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key (expected 'untrusted comment: rsign...' after base64 decode). Building unsigned this run — fix the secret to re-enable updater signing."
+            echo "TAURI_SIGNING_PRIVATE_KEY not set — building without updater artifacts"
           fi
+          echo "enabled=$enabled" >> "$GITHUB_OUTPUT"
 
       # ---------------------------------------------------------------
       # Tauri build (writes signed updater artifacts when
@@ -219,9 +229,18 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           # TAURI_SIGNING_PRIVATE_KEY / _PASSWORD are exported in $GITHUB_ENV
           # by the previous step ONLY when the key parses, so a malformed
-          # secret doesn't block the build.
+          # or missing secret doesn't block the build.
           CI: "true"
-        run: npx tauri build --target ${{ matrix.platform.rust_target }}
+        shell: bash
+        run: |
+          # If no valid updater key is available, disable updater-artifact
+          # generation for this build (Tauri refuses to build otherwise).
+          EXTRA_CONFIG=""
+          if [[ "${{ steps.updater_key.outputs.enabled }}" != "true" ]]; then
+            EXTRA_CONFIG='--config {"bundle":{"createUpdaterArtifacts":false}}'
+            echo "Updater signing disabled this run — passing --config to skip updater artifacts."
+          fi
+          npx tauri build --target ${{ matrix.platform.rust_target }} $EXTRA_CONFIG
 
       - name: Collect artifacts
         id: collect

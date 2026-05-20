@@ -131,6 +131,9 @@ backend/uploads/
 !tauri-app/src-tauri/icons/**/*.json
 !tauri-app/python/*.spec
 
+# Local secrets stash — never committed
+secretsme/
+
 # Temporary files
 temp/
 tmp/
