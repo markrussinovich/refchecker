@@ -46,7 +46,7 @@ from refchecker.core.hallucination_policy import (
     run_hallucination_check,
     should_defer_likely_to_llm,
 )
-from refchecker.utils.arxiv_utils import get_bibtex_content
+from refchecker.utils.arxiv_utils import download_arxiv_paper_pdf, get_arxiv_paper_by_id, get_bibtex_content
 from refchecker.utils.cache_utils import (
     cache_bibliography,
     cached_bibliography,
@@ -850,14 +850,11 @@ class ProgressRefChecker:
                     # Newer arxiv lib (>=2.0) removed Search.results() — use the
                     # Client.results(search) idiom instead.
                     def fetch_arxiv():
-                        search = arxiv.Search(id_list=[arxiv_id])
-                        try:
-                            client = arxiv.Client()
-                            return next(client.results(search))
-                        except AttributeError:
-                            return next(search.results())
+                        return get_arxiv_paper_by_id(arxiv_id)
                     
                     paper = await asyncio.to_thread(fetch_arxiv)
+                    if not paper:
+                        raise ValueError(f"ArXiv paper not found: {arxiv_id}")
                     paper_title = paper.title
                     await update_title_if_needed(paper_title)
 
@@ -891,8 +888,7 @@ class ProgressRefChecker:
                         # off the Result and run it through our own downloader instead.
                         pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
                         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
-                            pdf_url = getattr(paper, 'pdf_url', None) or f"https://arxiv.org/pdf/{arxiv_id}"
-                            await asyncio.to_thread(download_pdf, pdf_url, pdf_path)
+                            await asyncio.to_thread(download_arxiv_paper_pdf, paper, pdf_path, arxiv_id)
 
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')

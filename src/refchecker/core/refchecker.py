@@ -1458,13 +1458,15 @@ class ArxivReferenceChecker:
 
         def looks_like_reference_start(value):
             return bool(re.match(
-                r'(?:[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)',
+                r'(?:\[\d{1,4}\]\s+|[A-Z][A-Za-z\'\.-]+,\s+[A-Z]\.|[A-Z]\.\s+[A-Z][A-Za-z\'\.-]+)',
                 value,
             ))
 
         def looks_like_title_header(value):
             stripped = value.strip()
             if not stripped or len(stripped) > 140:
+                return False
+            if re.match(r'^\[\d{1,4}\]\s+', stripped):
                 return False
             if has_bibliography_evidence(stripped) or looks_like_reference_start(stripped):
                 return False
@@ -4753,6 +4755,60 @@ class ArxivReferenceChecker:
         # Default to False for safety
         return False
 
+    def _split_numbered_reference_entries(self, bibliography_text):
+        """Split a bracket-numbered bibliography into raw reference entries."""
+        if not bibliography_text:
+            return []
+
+        matches = list(re.finditer(r'(?m)^\s*\[(\d{1,4})\]\s+', bibliography_text))
+        if len(matches) < 3:
+            return []
+
+        numbers = [int(match.group(1)) for match in matches]
+        if min(numbers) > 2:
+            return []
+
+        entries = []
+        for index, match in enumerate(matches):
+            end = matches[index + 1].start() if index + 1 < len(matches) else len(bibliography_text)
+            entry = bibliography_text[match.start():end].strip()
+            if self._is_likely_reference(entry):
+                entries.append(entry)
+
+        return entries if len(entries) >= 3 else []
+
+    def _extract_numbered_references_with_llm_chunks(self, numbered_entries):
+        """Retry LLM extraction in small numbered-reference groups."""
+        if not numbered_entries or not self.llm_extractor:
+            return []
+
+        extracted = []
+        chunk = []
+        chunk_chars = 0
+
+        def flush_chunk():
+            nonlocal chunk, chunk_chars
+            if not chunk:
+                return
+            chunk_text = '\n'.join(chunk)
+            try:
+                chunk_refs = self.llm_extractor.extract_references(chunk_text)
+                if chunk_refs:
+                    extracted.extend(chunk_refs)
+            except Exception as exc:
+                logger.warning(f"Chunked LLM reference extraction failed: {exc}")
+            chunk = []
+            chunk_chars = 0
+
+        for entry in numbered_entries:
+            if chunk and (len(chunk) >= 8 or chunk_chars + len(entry) > 3000):
+                flush_chunk()
+            chunk.append(entry)
+            chunk_chars += len(entry)
+
+        flush_chunk()
+        return extracted
+
     def parse_references(self, bibliography_text, progress_callback=None):
         """
         Parse references from bibliography text
@@ -4765,17 +4821,55 @@ class ArxivReferenceChecker:
         bib_sample = bibliography_text[:500] + "..." if len(bibliography_text) > 500 else bibliography_text
         logger.debug(f"Bibliography sample: {bib_sample}")
 
+        from refchecker.utils.bibtex_parser import detect_bibtex_format
+        if detect_bibtex_format(bibliography_text):
+            logger.info("Detected BibTeX format, using deterministic BibTeX parser")
+            return self._parse_bibtex_references(bibliography_text)
+
+        numbered_entries = self._split_numbered_reference_entries(bibliography_text)
+        expected_numbered_count = len(numbered_entries)
+
         if self.llm_extractor:
             try:
                 logger.info("Using LLM-based reference extraction")
                 references = self.llm_extractor.extract_references(bibliography_text, progress_callback=progress_callback)
                 if references:
                     logger.debug(f"Parsed {len(references)} references")
-                    return self._process_llm_extracted_references(references)
+                    processed_references = self._process_llm_extracted_references(references)
+                    if expected_numbered_count and len(processed_references) < expected_numbered_count:
+                        logger.warning(
+                            "LLM extracted fewer references than numbered bibliography entries "
+                            f"({len(processed_references)} of {expected_numbered_count}); retrying in smaller chunks"
+                        )
+                        chunked_references = self._extract_numbered_references_with_llm_chunks(numbered_entries)
+                        if chunked_references:
+                            chunked_processed = self._process_llm_extracted_references(chunked_references)
+                            if len(chunked_processed) >= expected_numbered_count:
+                                return chunked_processed
+                            if len(chunked_processed) > len(processed_references):
+                                processed_references = chunked_processed
+
+                        deterministic_references = self._parse_references_regex('\n'.join(numbered_entries))
+                        if len(deterministic_references) > len(processed_references):
+                            logger.warning(
+                                "Using deterministic numbered-reference fallback "
+                                f"({len(deterministic_references)} references) after LLM under-extraction"
+                            )
+                            return deterministic_references
+                    return processed_references
                 else:
                     logger.warning("LLM reference extraction returned no results")
             except Exception as e:
                 logger.warning(f"LLM reference extraction failed: {e}")
+
+        if expected_numbered_count:
+            deterministic_references = self._parse_references_regex('\n'.join(numbered_entries))
+            if deterministic_references:
+                logger.warning(
+                    "Using deterministic numbered-reference extraction "
+                    f"({len(deterministic_references)} references)"
+                )
+                return deterministic_references
         
         if not self.llm_extractor:
             logger.warning("No LLM extractor configured for reference extraction")
@@ -4995,15 +5089,6 @@ class ArxivReferenceChecker:
                 return []
             else:
                 return biblatex_refs
-        
-        # No recognized format — cannot parse without LLM
-        logger.error("Cannot parse PDF bibliography without an LLM. "
-                     "Use --llm-provider to enable LLM-based extraction.")
-        if not self.debug_mode:
-            print("\n  ❌  Cannot parse this bibliography format without an LLM.")
-            print("      Use --llm-provider openai (or anthropic/google) to enable LLM-based extraction.")
-        self.fatal_error = True
-        return []
         
         # --- IMPROVED SPLITTING: handle concatenated references like [3]... [4]... ---
         # First, normalize the bibliography text to handle multi-line references
@@ -6370,14 +6455,8 @@ class ArxivReferenceChecker:
             if arxiv_id_match:
                 arxiv_id = arxiv_id_match.group(1)
                 try:
-                    import arxiv
-                    search = arxiv.Search(id_list=[arxiv_id])
-                    # arxiv>=2.0 removed Search.results() — fall through to Client.
-                    try:
-                        client = arxiv.Client()
-                        paper = next(iter(client.results(search)), None)
-                    except AttributeError:
-                        paper = next(iter(search.results()), None)
+                    from refchecker.utils.arxiv_utils import get_arxiv_paper_by_id
+                    paper = get_arxiv_paper_by_id(arxiv_id)
                     if paper and paper.published:
                         correct_year = paper.published.year
                         logger.debug(f"Corrected year from ArXiv API: {year} -> {correct_year} for {arxiv_id}")

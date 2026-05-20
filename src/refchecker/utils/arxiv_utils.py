@@ -18,6 +18,57 @@ import tarfile
 logger = logging.getLogger(__name__)
 
 
+def get_arxiv_paper_by_id(arxiv_id):
+    """Fetch one ArXiv paper by ID across arxiv package API versions."""
+    import arxiv
+
+    search = arxiv.Search(id_list=[arxiv_id])
+    if hasattr(arxiv, 'Client'):
+        results = arxiv.Client().results(search)
+    else:
+        results = search.results()
+    return next(iter(results), None)
+
+
+def get_arxiv_pdf_url(paper, arxiv_id=None):
+    """Return a PDF URL for an ArXiv result across package API versions."""
+    pdf_url = getattr(paper, 'pdf_url', None)
+    if pdf_url:
+        return pdf_url
+    short_id = arxiv_id
+    if not short_id and hasattr(paper, 'get_short_id'):
+        short_id = paper.get_short_id()
+    if not short_id:
+        entry_id = getattr(paper, 'entry_id', '') or ''
+        match = re.search(r'arxiv\.org/abs/([^?#]+)', entry_id)
+        if match:
+            short_id = match.group(1)
+    if not short_id:
+        raise ValueError('ArXiv result does not include a PDF URL or ID')
+    return f"https://arxiv.org/pdf/{short_id}.pdf"
+
+
+def download_arxiv_paper_pdf(paper, dest_path, arxiv_id=None):
+    """Download an ArXiv result PDF to ``dest_path`` without SDK helpers."""
+    from refchecker.utils.url_utils import download_pdf_bytes
+
+    pdf_url = get_arxiv_pdf_url(paper, arxiv_id)
+    data = download_pdf_bytes(pdf_url)
+    dir_name = os.path.dirname(dest_path) or '.'
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.pdf.tmp')
+    try:
+        os.write(fd, data)
+        os.close(fd)
+        os.replace(tmp_path, dest_path)
+    except Exception:
+        os.close(fd)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 def extract_arxiv_id_from_paper(paper):
     """
     Extract ArXiv ID from a paper object.

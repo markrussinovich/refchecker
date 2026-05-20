@@ -11,6 +11,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 REPO_ROOT = Path(os.environ.get("REFCHECKER_REPO_ROOT", os.getcwd())).resolve()
+RUNTIME_TMPDIR = os.environ.get("PYINSTALLER_RUNTIME_TMPDIR") or None
 
 ENTRY_SCRIPT = str(REPO_ROOT / "tauri-app" / "python" / "server_entry.py")
 
@@ -120,7 +121,7 @@ exe = EXE(
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
+    runtime_tmpdir=RUNTIME_TMPDIR,
     console=True,
     disable_windowed_traceback=False,
     target_arch=None,

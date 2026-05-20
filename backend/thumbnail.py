@@ -11,6 +11,7 @@ from typing import Optional
 import asyncio
 
 from refchecker.utils.cache_utils import get_cached_artifact_path
+from refchecker.utils.arxiv_utils import download_arxiv_paper_pdf, get_arxiv_paper_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -314,16 +315,12 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     if pdf_path.exists() and pdf_path.stat().st_size > 0:
         return True
 
-    import arxiv as arxiv_lib
     import time as _time
 
-    search = arxiv_lib.Search(id_list=[arxiv_id])
-    # arxiv>=2.0 removed Search.results() — go through Client.
-    try:
-        client = arxiv_lib.Client()
-        paper = next(client.results(search))
-    except AttributeError:
-        paper = next(search.results())
+    paper = get_arxiv_paper_by_id(arxiv_id)
+    if not paper:
+        logger.error(f"ArXiv paper not found for thumbnail: {arxiv_id}")
+        return False
 
     # Result.download_pdf is deprecated in newer arxiv lib ("use result.pdf_url
     # directly"). Drop down to urlretrieve so we don't depend on a moving target.
@@ -331,10 +328,7 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     pdf_url = getattr(paper, 'pdf_url', None) or f"https://arxiv.org/pdf/{arxiv_id}"
     for attempt in range(3):
         try:
-            req = urllib.request.Request(pdf_url, headers={"User-Agent": "RefChecker/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                pdf_bytes = resp.read()
-            pdf_path.write_bytes(pdf_bytes)
+            download_arxiv_paper_pdf(paper, str(pdf_path), arxiv_id)
             if pdf_path.exists() and pdf_path.stat().st_size > 0:
                 return True
         except Exception as e:
