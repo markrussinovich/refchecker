@@ -3905,6 +3905,46 @@ def _read_log_tail(path: Path, lines: int = 25) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+class _OpenReviewListRequest(BaseModel):
+    venue: str
+    status: str = "accepted"  # accepted | submitted
+
+
+@app.post("/api/openreview/list")
+async def fetch_openreview_list(req: _OpenReviewListRequest, current_user: UserInfo = Depends(require_user)):
+    """Return the URL list for an OpenReview venue so the frontend can feed
+    it into the existing batch-check flow. Wraps prepare_openreview_paper_specs
+    from the CLI module so the in-app UI matches `--openreview <venue>`."""
+    venue = (req.venue or "").strip()
+    if not venue:
+        raise HTTPException(status_code=400, detail="`venue` is required (e.g. iclr2024)")
+    status = (req.status or "accepted").lower()
+    if status not in ("accepted", "submitted"):
+        raise HTTPException(status_code=400, detail="`status` must be 'accepted' or 'submitted'")
+
+    try:
+        from refchecker.core.refchecker import prepare_openreview_paper_specs
+        loop = asyncio.get_event_loop()
+        paper_specs, list_path, venue_info = await loop.run_in_executor(
+            None,
+            lambda: prepare_openreview_paper_specs(venue, status=status, output_dir=str(get_data_dir() / "openreview")),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("OpenReview list fetch failed")
+        raise HTTPException(status_code=500, detail=f"OpenReview lookup failed: {e}")
+
+    return {
+        "venue": venue_info.get("slug", venue),
+        "display_name": venue_info.get("display_name", venue),
+        "status": status,
+        "paper_count": len(paper_specs),
+        "papers": paper_specs,
+        "list_path": list_path,
+    }
+
+
 @app.post("/api/databases/download")
 async def trigger_database_download(req: _DBDownloadRequest, current_user: UserInfo = Depends(require_user)):
     """Kick off background downloads for the requested local databases."""

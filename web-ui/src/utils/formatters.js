@@ -669,9 +669,75 @@ export function exportResultsAsBibtex({ references }) {
   if (!references || references.length === 0) {
     return '% No references found'
   }
-  
+
   const entries = references.map((ref, index) => exportReferenceAsBibtex(ref, index))
   return entries.join('\n\n')
+}
+
+/**
+ * Flatten a reference into a single JSON record suitable for line-delimited
+ * JSON or row-based CSV consumption. Matches the structured fields the CLI
+ * --report-format json/jsonl produces so downstream consumers see the same
+ * shape regardless of which path produced the report.
+ */
+function _flattenReferenceForReport(ref, index, paperTitle, paperSource) {
+  const errors = (ref.errors || []).map(e => e.message || String(e))
+  const warnings = (ref.warnings || []).map(w => w.message || String(w))
+  return {
+    index,
+    paper_title: paperTitle || '',
+    paper_source: paperSource || '',
+    cited_title: ref.title || '',
+    cited_authors: ref.authors || '',
+    cited_year: ref.year || '',
+    cited_venue: ref.venue || '',
+    cited_doi: ref.doi || '',
+    cited_arxiv_id: ref.arxiv_id || '',
+    cited_url: ref.cited_url || '',
+    matched_db: ref.matched_db || '',
+    verified_url: ref.verified_url || '',
+    status: ref.status || '',
+    error_count: errors.length,
+    warning_count: warnings.length,
+    errors,
+    warnings,
+    hallucination_verdict: ref.hallucination_assessment?.verdict || '',
+    hallucination_explanation: ref.hallucination_assessment?.explanation || '',
+    hallucination_link: ref.hallucination_assessment?.link || '',
+  }
+}
+
+export function exportResultsAsJsonl({ paperTitle, paperSource, references }) {
+  if (!references || references.length === 0) return ''
+  return references
+    .map((ref, i) => JSON.stringify(_flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)))
+    .join('\n')
+}
+
+function _csvField(value) {
+  if (value === null || value === undefined) return ''
+  let s = Array.isArray(value) ? value.join(' | ') : String(value)
+  if (/[,"\n]/.test(s)) {
+    s = '"' + s.replace(/"/g, '""') + '"'
+  }
+  return s
+}
+
+export function exportResultsAsCsv({ paperTitle, paperSource, references }) {
+  const columns = [
+    'index', 'paper_title', 'paper_source',
+    'cited_title', 'cited_authors', 'cited_year', 'cited_venue', 'cited_doi',
+    'cited_arxiv_id', 'cited_url', 'matched_db', 'verified_url', 'status',
+    'error_count', 'warning_count', 'errors', 'warnings',
+    'hallucination_verdict', 'hallucination_explanation', 'hallucination_link',
+  ]
+  const header = columns.join(',')
+  if (!references || references.length === 0) return header
+  const rows = references.map((ref, i) => {
+    const flat = _flattenReferenceForReport(ref, i + 1, paperTitle, paperSource)
+    return columns.map(c => _csvField(flat[c])).join(',')
+  })
+  return [header, ...rows].join('\n')
 }
 
 /**

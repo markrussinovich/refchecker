@@ -96,6 +96,10 @@ export const triggerDatabaseDownload = (payload) => api.post('/databases/downloa
 export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')
 export const cancelDatabaseDownload = (database) => api.post('/databases/download/cancel', { database })
 
+// OpenReview venue scanning
+export const fetchOpenReviewList = (venue, status = 'accepted') =>
+  api.post('/openreview/list', { venue, status })
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

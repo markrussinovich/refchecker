@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { 
-  exportResultsAsMarkdown, 
-  exportResultsAsPlainText, 
+  exportResultsAsMarkdown,
+  exportResultsAsPlainText,
   exportResultsAsBibtex,
-  downloadAsFile 
+  exportResultsAsJsonl,
+  exportResultsAsCsv,
+  downloadAsFile
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 
@@ -123,6 +125,12 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
       case 'bibtex':
         downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
         break
+      case 'jsonl':
+        downloadAsFile(exportResultsAsJsonl(exportData), `${baseFilename}.jsonl`, 'application/x-ndjson')
+        break
+      case 'csv':
+        downloadAsFile(exportResultsAsCsv(exportData), `${baseFilename}.csv`, 'text/csv')
+        break
     }
   }
 
@@ -225,6 +233,20 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   📚 BibTeX (.bib)
+                </button>
+                <button
+                  onClick={() => handleExport('jsonl')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  🧾 JSONL (.jsonl)
+                </button>
+                <button
+                  onClick={() => handleExport('csv')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                >
+                  📊 CSV (.csv)
                 </button>
               </div>
             )}

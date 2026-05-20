@@ -3,6 +3,7 @@ import InputSection from './InputSection'
 import StatusSection from './StatusSection'
 import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
+import CorrectionsView from './CorrectionsView'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -16,6 +17,7 @@ export default function MainPanel() {
   const contentRef = useRef(null)
   const [showScrollTop, setShowScrollTop] = useState(false)
   const [buttonLeft, setButtonLeft] = useState(null)
+  const [resultsTab, setResultsTab] = useState('references') // references | corrections
   
   const { 
     status: checkStoreStatus, 
@@ -240,13 +242,58 @@ export default function MainPanel() {
           />
         )}
 
-        {/* References List */}
+        {/* References / Corrections tabs */}
         {showContent && (
-          <ReferenceList 
-            references={displayRefs}
-            isLoading={isLoadingDetail}
-            isCheckComplete={isComplete}
-          />
+          <div>
+            <div
+              className="flex items-center gap-1 mb-3 border-b"
+              style={{ borderColor: 'var(--color-border)' }}
+              role="tablist"
+              aria-label="Results view"
+            >
+              {[
+                ['references', 'References', displayRefs?.length || 0],
+                ['corrections', 'Corrections', (displayRefs || []).filter(r => (r.errors || []).length || (r.warnings || []).length || r.status === 'unverified' || r.status === 'hallucinated').length],
+              ].map(([key, label, count]) => {
+                const active = resultsTab === key
+                return (
+                  <button
+                    key={key}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setResultsTab(key)}
+                    className="px-3 py-1.5 text-sm font-medium transition-colors"
+                    style={{
+                      color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+                      borderBottom: active ? '2px solid var(--color-accent, #3b82f6)' : '2px solid transparent',
+                      marginBottom: '-1px',
+                    }}
+                    type="button"
+                  >
+                    {label}
+                    <span
+                      className="ml-1.5 text-xs px-1.5 py-0.5 rounded-full"
+                      style={{
+                        backgroundColor: active ? 'var(--color-accent-muted, rgba(59,130,246,0.15))' : 'var(--color-bg-tertiary)',
+                        color: active ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {resultsTab === 'references' ? (
+              <ReferenceList
+                references={displayRefs}
+                isLoading={isLoadingDetail}
+                isCheckComplete={isComplete}
+              />
+            ) : (
+              <CorrectionsView references={displayRefs} />
+            )}
+          </div>
         )}
       </div>
 
