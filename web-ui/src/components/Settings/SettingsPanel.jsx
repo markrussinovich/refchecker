@@ -13,17 +13,26 @@ const REPO_URL = 'https://github.com/ArioMoniri/refchecker'
  * Settings panel component - ChatGPT-style with left navigation
  */
 export default function SettingsPanel({ theme, onThemeChange }) {
-  const { 
-    settings, 
-    isLoading, 
+  const {
+    settings,
+    isLoading,
     version,
-    isSettingsOpen, 
-    closeSettings, 
+    isSettingsOpen,
+    closeSettings,
     updateSetting,
-    fetchSettings
+    fetchSettings,
+    initialSection,
   } = useSettingsStore()
   const panelRef = useRef(null)
   const [activeSection, setActiveSection] = useState('General')
+
+  // Honor deep-links from the onboarding banner (and anywhere else that
+  // calls openSettings(section)) by jumping to the requested pane.
+  useEffect(() => {
+    if (isSettingsOpen && initialSection) {
+      setActiveSection(initialSection)
+    }
+  }, [isSettingsOpen, initialSection])
 
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()

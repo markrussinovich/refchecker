@@ -3905,6 +3905,104 @@ def _read_log_tail(path: Path, lines: int = 25) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+class _ListModelsRequest(BaseModel):
+    provider: str
+    api_key: Optional[str] = None
+    endpoint: Optional[str] = None
+
+
+_STATIC_MODEL_FALLBACK = {
+    "openai": [
+        "gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3", "o3-mini", "o1", "o1-mini",
+    ],
+    "anthropic": [
+        "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5",
+        "claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest",
+    ],
+    "google": [
+        "gemini-3.1-flash-lite-preview", "gemini-2.5-pro", "gemini-2.5-flash",
+        "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash",
+    ],
+    "azure": [
+        "gpt-4.1", "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
+    ],
+    "vllm": [
+        "meta-llama/Llama-3.3-70B-Instruct", "meta-llama/Llama-3.1-8B-Instruct",
+        "mistralai/Mistral-7B-Instruct-v0.3", "Qwen/Qwen2.5-7B-Instruct",
+    ],
+}
+
+
+@app.post("/api/llm-configs/models")
+async def list_llm_models(req: _ListModelsRequest, current_user: UserInfo = Depends(require_user)):
+    """Return the model list available to the given provider+key combo.
+
+    Tries the provider's live /models endpoint first (so users see whatever
+    they have access to, e.g. fine-tunes or new model IDs that aren't in
+    the codebase yet). Falls back to a curated static list when the live
+    lookup fails or isn't supported — the UI exposes the same field as a
+    free-text input too, so an unfamiliar model can always be typed in.
+    """
+    provider = (req.provider or "").lower().strip()
+    if provider in ("gemini",):
+        provider = "google"
+    api_key = (req.api_key or "").strip() or None
+    endpoint = (req.endpoint or "").strip() or None
+
+    source = "fallback"
+    models: list[str] = []
+    error: Optional[str] = None
+    try:
+        if provider == "openai" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key}"}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+        elif provider == "anthropic" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+        elif provider == "google" and api_key:
+            import httpx
+            r = await asyncio.to_thread(
+                httpx.get, "https://generativelanguage.googleapis.com/v1beta/models",
+                params={"key": api_key}, timeout=8.0,
+            )
+            if r.status_code == 200:
+                seen = set()
+                for m in r.json().get("models", []):
+                    name = (m.get("name") or "").replace("models/", "")
+                    if name and name not in seen:
+                        seen.add(name)
+                models = sorted(seen)
+                source = "live"
+        elif provider == "vllm" and endpoint:
+            import httpx
+            url = endpoint.rstrip("/") + "/v1/models"
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            r = await asyncio.to_thread(httpx.get, url, headers=headers, timeout=6.0)
+            if r.status_code == 200:
+                models = sorted({m["id"] for m in r.json().get("data", []) if m.get("id")})
+                source = "live"
+    except Exception as e:
+        error = str(e)
+        logger.info("Live model lookup failed for %s: %s", provider, e)
+
+    if not models:
+        models = list(_STATIC_MODEL_FALLBACK.get(provider, []))
+
+    return {"provider": provider, "source": source, "models": models, "error": error}
+
+
 class _AutoPathRequest(BaseModel):
     setting: str  # "cache_dir" | "db_path"
 

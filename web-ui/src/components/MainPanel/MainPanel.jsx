@@ -4,6 +4,8 @@ import StatusSection from './StatusSection'
 import StatsSection from './StatsSection'
 import ReferenceList from './ReferenceList'
 import CorrectionsView from './CorrectionsView'
+import OnboardingBanner from './OnboardingBanner'
+import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -223,6 +225,13 @@ export default function MainPanel() {
       style={{ backgroundColor: 'var(--color-bg-primary)', overflowY: 'scroll' }}
     >
       <div ref={contentRef} className="max-w-4xl mx-auto p-4 space-y-4 lg:p-6 lg:space-y-6">
+        {/* First-launch guidance — only renders when something's missing */}
+        {showInput && (
+          <OnboardingBanner
+            onOpenSettings={(section) => useSettingsStore.getState().openSettings(section)}
+          />
+        )}
+
         {/* Input Section */}
         {showInput && <InputSection />}
 

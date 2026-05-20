@@ -104,6 +104,10 @@ export const fetchOpenReviewList = (venue, status = 'accepted') =>
 export const autoCreatePath = (setting) =>
   api.post('/settings/auto-create-path', { setting })
 
+// Live model lookup for the LLM config modal (combobox source)
+export const listLLMModels = (provider, api_key, endpoint) =>
+  api.post('/llm-configs/models', { provider, api_key, endpoint })
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
