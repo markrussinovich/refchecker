@@ -173,20 +173,35 @@ jobs:
       # "untrusted comment:" header). We'd rather degrade to an unsigned
       # build than fail the whole release pipeline on a paste mistake.
       # ---------------------------------------------------------------
+      # Read the secret under a different name, validate it, then only
+      # re-export it to $GITHUB_ENV under the real TAURI_SIGNING_PRIVATE_KEY
+      # name if it parses. The Build Tauri bundle step deliberately does
+      # NOT reference secrets.TAURI_SIGNING_PRIVATE_KEY in its env: block,
+      # so this step is the single source of truth for whether updater
+      # signing is enabled in this run.
       - name: Validate Tauri updater signing key
-        if: env.TAURI_SIGNING_PRIVATE_KEY != ''
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_KEY_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER_PWD_INPUT: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: bash
         run: |
-          decoded=$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 -d 2>/dev/null || true)
+          if [[ -z "$UPDATER_KEY_INPUT" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY not set — building unsigned (no auto-updater signatures)"
+            exit 0
+          fi
+          decoded=$(printf '%s' "$UPDATER_KEY_INPUT" | base64 -d 2>/dev/null || true)
           if [[ "$decoded" == *"untrusted comment:"* && "$decoded" == *"rsign"* ]]; then
-            echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid (rsign secret key)"
+            echo "✅ TAURI_SIGNING_PRIVATE_KEY looks valid — enabling updater signing"
+            {
+              echo "TAURI_SIGNING_PRIVATE_KEY<<__RC_EOF__"
+              printf '%s\n' "$UPDATER_KEY_INPUT"
+              echo "__RC_EOF__"
+              echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD<<__RC_EOF__"
+              printf '%s\n' "$UPDATER_PWD_INPUT"
+              echo "__RC_EOF__"
+            } >> "$GITHUB_ENV"
           else
-            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key. Disabling updater signing for this build — fix the secret to re-enable."
-            # Clearing in $GITHUB_ENV unsets it for subsequent steps in this job.
-            echo "TAURI_SIGNING_PRIVATE_KEY=" >> "$GITHUB_ENV"
-            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> "$GITHUB_ENV"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is set but does not decode to a Tauri rsign secret key (expected 'untrusted comment: rsign...' after base64 decode). Building unsigned this run — fix the secret to re-enable updater signing."
           fi
 
       # ---------------------------------------------------------------
@@ -196,14 +211,15 @@ jobs:
       - name: Build Tauri bundle
         working-directory: tauri-app
         env:
-          APPLE_SIGNING_IDENTITY:             ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID:                           ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD:                     ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID:                      ${{ secrets.APPLE_TEAM_ID }}
-          APPLE_CERTIFICATE:                  ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD:         ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          TAURI_SIGNING_PRIVATE_KEY:          ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY:     ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID:                   ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD:             ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID:              ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE:          ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # TAURI_SIGNING_PRIVATE_KEY / _PASSWORD are exported in $GITHUB_ENV
+          # by the previous step ONLY when the key parses, so a malformed
+          # secret doesn't block the build.
           CI: "true"
         run: npx tauri build --target ${{ matrix.platform.rust_target }}
 
