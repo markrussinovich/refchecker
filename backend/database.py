@@ -1662,31 +1662,83 @@ class Database:
         import re
         return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
 
+    @staticmethod
+    def _doi_from_authoritative_urls(ref: Dict[str, Any]) -> Optional[str]:
+        """Pull a canonical DOI out of the result's authoritative_urls list.
+        The main check pipeline writes verified DOIs there (not into
+        ``ref["doi"]``), so without this the identity key can't see them
+        and the reference is silently dropped from the Seen Refs cache.
+        URL-decode so the same DOI cited as percent-encoded and decoded
+        ("10.1000%2Ffoo" vs "10.1000/foo") collapses to one identity.
+        """
+        from urllib.parse import unquote
+        for u in (ref.get("authoritative_urls") or []):
+            url = (u or {}).get("url") or ""
+            if "doi.org/" in url:
+                doi = url.split("doi.org/", 1)[1].split("?", 1)[0].split("#", 1)[0]
+                return unquote(doi).strip().lower()
+        return None
+
+    @staticmethod
+    def _arxiv_from_authoritative_urls(ref: Dict[str, Any]) -> Optional[str]:
+        """Pull a canonical arXiv id out of authoritative_urls. Strips
+        query, fragment, and trailing version suffix so 2310.02238v1 and
+        2310.02238v2 dedupe to the same paper (versions are listed by
+        arXiv as updates to one record, not distinct papers)."""
+        import re as _re
+        for u in (ref.get("authoritative_urls") or []):
+            url = (u or {}).get("url") or ""
+            if "arxiv.org/abs/" in url:
+                aid = url.split("arxiv.org/abs/", 1)[1]
+                aid = aid.split("?", 1)[0].split("#", 1)[0].strip().lower()
+                # Drop the version tag (vN) so all versions cache as one.
+                return _re.sub(r"v\d+$", "", aid)
+        return None
+
     @classmethod
     def reference_identity_key(cls, ref: Dict[str, Any]) -> Optional[str]:
         """Pick the canonical identity key for a reference.
 
         Order: DOI -> ArXiv ID -> (normalized title + year) ->
-        normalized title alone (must be at least 12 chars to be useful).
-        Title-only fallback is intentionally permissive so medical /
-        humanities papers that cite without DOIs still populate the
-        Seen References library; collisions on a very short title are
-        worth less than coverage on a long, specific one.
+        (normalized title alone, when title is substantial).
+
+        Falls back to ``authoritative_urls`` when the result dict
+        doesn't carry top-level doi/arxiv_id, since the main check
+        pipeline only surfaces verified ids through that list.
+
+        The title-only fallback is intentionally permissive enough to
+        populate the Seen References library for medical / humanities
+        papers cited without DOIs, but tight enough to avoid
+        false-dedupe across distinct papers that happen to share a
+        short generic title like "Deep Learning". Verifier-B flagged
+        the false-dedupe risk explicitly; we require 30 normalized
+        characters AND 3+ tokens, which still covers a wide range of
+        real titles.
         """
         if not isinstance(ref, dict):
             return None
-        doi = (ref.get("doi") or "").strip().lower()
+        doi = (
+            (ref.get("doi") or "").strip().lower()
+            or (ref.get("verified_doi") or "").strip().lower()
+            or (cls._doi_from_authoritative_urls(ref) or "")
+        )
         if doi:
             return f"doi:{doi}"
-        arxiv = (ref.get("arxiv_id") or "").strip().lower()
+        arxiv = (
+            (ref.get("arxiv_id") or "").strip().lower()
+            or (ref.get("verified_arxiv_id") or "").strip().lower()
+            or (cls._arxiv_from_authoritative_urls(ref) or "")
+        )
         if arxiv:
             return f"arxiv:{arxiv}"
-        title = cls._normalize_title(ref.get("title"))
-        year = ref.get("year")
+        title = cls._normalize_title(ref.get("title") or ref.get("verified_title"))
+        year = ref.get("year") or ref.get("verified_year")
         if title and year:
             return f"title:{title}:{year}"
-        if title and len(title) >= 12:
-            return f"title:{title}"
+        # Last-ditch title-only fallback. Threshold guards against
+        # generic short-title collisions.
+        if title and len(title) >= 30 and len(title.split()) >= 3:
+            return f"title:{title}:_"
         return None
 
     async def upsert_verified_reference(self, ref: Dict[str, Any]) -> Optional[str]:
