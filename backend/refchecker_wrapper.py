@@ -134,12 +134,12 @@ def _make_cli_checker(llm_provider):
 def _attach_citation_contexts(references, paper_text):
     """Find the sentence that introduces each reference in the paper.
 
-    Cheap heuristic only — looks for the bare `[N]` marker matching each
-    reference's index, captures the surrounding sentence-boundary text,
-    and attaches it as `citation_context` on the ref. Skips references
-    that don't have a numeric index or aren't mentioned in-text. No LLM
-    call — runs at parse time and adds maybe 5 ms per reference for a
-    typical paper.
+    Two heuristics — numeric ``[N]`` markers (IEEE / ACM style) and
+    author-year markers like ``(Smith et al., 2020)`` / ``Smith (2020)``
+    (APA / Chicago style). For each reference we capture up to two
+    sentence-bounded windows where it's mentioned and attach them as
+    ``citation_context``. Cheap — no LLM call — typically <10 ms per
+    paper. Skips refs we can't identify either way.
     """
     if not references or not paper_text:
         return
@@ -147,26 +147,70 @@ def _attach_citation_contexts(references, paper_text):
     # Pre-split into sentences once. Crude period-based split is fine —
     # we just need a window the user can read.
     sentences = re.split(r"(?<=[.!?])\s+", paper_text)
-    # Index citations: which sentences contain `[N]` for each N?
-    by_index = {}
+
+    # ── Numeric citations ──────────────────────────────────────────
+    by_index: Dict[int, List[str]] = {}
     for sent in sentences:
         for m in re.finditer(r"\[\s*(\d{1,3})(?:[\-–,\s]\d{1,3})*\s*\]", sent):
             for num in re.findall(r"\d{1,3}", m.group(0)):
                 idx = int(num)
-                by_index.setdefault(idx, [])
-                if sent not in by_index[idx]:
+                if sent not in by_index.setdefault(idx, []):
                     by_index[idx].append(sent)
+
+    # ── Author-year citations ──────────────────────────────────────
+    # Build {(first_surname_lower, year_str): [sentences]} from the
+    # patterns "(Smith, 2020)", "(Smith et al., 2020)", "Smith (2020)",
+    # "Smith et al. (2020)". Surnames are matched case-insensitively;
+    # the first surname in a multi-author citation is enough for a
+    # cheap mapping back to the reference.
+    by_author_year: Dict[tuple, List[str]] = {}
+    paren_pat = re.compile(r"\(([A-Z][A-Za-z\-']{1,30})(?:\s+et\s+al\.?| and [A-Z][A-Za-z\-']{1,30})?\s*,?\s*(\d{4})\)")
+    narrative_pat = re.compile(r"\b([A-Z][A-Za-z\-']{1,30})(?:\s+et\s+al\.?| and [A-Z][A-Za-z\-']{1,30})?\s*\(\s*(\d{4})\s*\)")
+    for sent in sentences:
+        for pat in (paren_pat, narrative_pat):
+            for m in pat.finditer(sent):
+                key = (m.group(1).lower(), m.group(2))
+                if sent not in by_author_year.setdefault(key, []):
+                    by_author_year[key].append(sent)
+
+    def first_surname(authors) -> Optional[str]:
+        """Best-effort: pluck a surname from authors of any common shape."""
+        if not authors:
+            return None
+        if isinstance(authors, list):
+            first = next((str(a) for a in authors if a), None)
+        else:
+            first = str(authors).split(",", 1)[0].split(";", 1)[0]
+        if not first:
+            return None
+        # Strip "F." initials and trailing punctuation, keep the longest token
+        parts = [p.strip(".,;") for p in re.split(r"\s+", first) if p.strip(".,;")]
+        if not parts:
+            return None
+        # Prefer the longest token (usually the surname, not the initial)
+        return max(parts, key=len).lower()
+
     for ref in references:
+        hits: List[str] = []
+        # Try numeric index first
         try:
             idx = int(ref.get("index") or 0)
         except Exception:
-            continue
-        if idx <= 0:
-            continue
-        hits = by_index.get(idx, [])
+            idx = 0
+        if idx > 0:
+            hits.extend(by_index.get(idx, []))
+
+        # Then author-year
+        surname = first_surname(ref.get("authors"))
+        year = ref.get("year")
+        if surname and year:
+            ay_key = (surname, str(year))
+            for s in by_author_year.get(ay_key, []):
+                if s not in hits:
+                    hits.append(s)
+
         if not hits:
             continue
-        # Keep up to 2 representative sentences, trimmed.
         context = " … ".join(s.strip()[:240] for s in hits[:2])
         ref["citation_context"] = context
 
@@ -589,7 +633,26 @@ class ProgressRefChecker:
         }
 
     async def emit_progress(self, event_type: str, data: Dict[str, Any]):
-        """Emit progress event to callback"""
+        """Emit progress event to callback.
+
+        Side effect for ``reference_result`` events: persist the verified
+        reference into the global identity cache (DOI / arXiv / normalized
+        title key) BEFORE emitting. Every code path that surfaces a
+        verified ref to the UI flows through here, so this single hook
+        guarantees the cache stays in sync no matter which downstream
+        rewriter (hallucination resolver / context attacher / etc.) was
+        the last to touch the result.
+        """
+        if event_type == "reference_result" and isinstance(data, dict):
+            try:
+                from .database import db as _db
+                upsert_key = await _db.upsert_verified_reference(data)
+                if upsert_key is not None:
+                    if not hasattr(self, "_global_cache_writes"):
+                        self._global_cache_writes = 0
+                    self._global_cache_writes += 1
+            except Exception as _e:
+                logger.warning("Global cache upsert failed in emit_progress: %s", _e)
         logger.info(f"Emitting progress: {event_type} - {str(data)[:200]}")
         if self.progress_callback:
             await self.progress_callback(event_type, data)
@@ -1902,30 +1965,10 @@ class ProgressRefChecker:
                 refs_with_warnings_only += d['refs_with_warnings_only']
                 refs_with_suggestions_only += d['refs_with_suggestions_only']
 
-                # Emit result immediately.
-                # Use checked_count for progress so the UI shows verification
-                # advancing in real-time.
+                # Emit result immediately. emit_progress() now upserts
+                # the verified ref into the global identity cache as a
+                # side effect, so we no longer need to do it here.
                 emit_start = time.time()
-                # Persist to the global identity-keyed cache so future
-                # checks (any paper, any user, any session) can reuse
-                # this verification by DOI / ArXiv / normalized title.
-                try:
-                    from .database import db as _db
-                    upsert_key = await _db.upsert_verified_reference(result)
-                    if upsert_key is None:
-                        logger.debug(
-                            "Skipping verified-reference upsert (no identity key) — "
-                            "title=%r year=%r status=%r doi=%r arxiv=%r",
-                            result.get("title"), result.get("year"),
-                            result.get("status"), result.get("doi"), result.get("arxiv_id"),
-                        )
-                    else:
-                        # Track success count so we can surface it in the UI
-                        if not hasattr(self, "_global_cache_writes"):
-                            self._global_cache_writes = 0
-                        self._global_cache_writes += 1
-                except Exception as _e:
-                    logger.warning("Verified-reference upsert failed: %s", _e)
                 await self.emit_progress("reference_result", result)
                 await self.emit_progress("progress", {
                     "current": checked_count,

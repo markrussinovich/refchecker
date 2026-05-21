@@ -6,6 +6,9 @@ import {
   exportResultsAsBibtex,
   exportResultsAsJsonl,
   exportResultsAsCsv,
+  exportResultsAsRIS,
+  sortReferencesForExport,
+  REFERENCE_SORT_MODES,
   downloadAsFile
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
@@ -18,6 +21,7 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const statusFilter = useCheckStore(s => s.statusFilter)
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
+  const [sortMode, setSortMode] = useState('citation')
   const exportMenuRef = useRef(null)
 
   // Close export menu when clicking outside
@@ -113,8 +117,9 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   // Export handlers
   const handleExport = (format) => {
     setShowExportMenu(false)
-    const exportData = { paperTitle, paperSource, stats, references }
-    
+    const sortedRefs = sortReferencesForExport(references, sortMode)
+    const exportData = { paperTitle, paperSource, stats, references: sortedRefs }
+
     switch (format) {
       case 'markdown':
         downloadAsFile(exportResultsAsMarkdown(exportData), `${baseFilename}.md`, 'text/markdown')
@@ -124,6 +129,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         break
       case 'bibtex':
         downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
+        break
+      case 'ris':
+        // RIS imports directly into Zotero / Mendeley / EndNote / Rayyan / Papers.
+        downloadAsFile(exportResultsAsRIS(exportData), `${baseFilename}.ris`, 'application/x-research-info-systems')
         break
       case 'jsonl':
         downloadAsFile(exportResultsAsJsonl(exportData), `${baseFilename}.jsonl`, 'application/x-ndjson')
@@ -212,14 +221,30 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
               </svg>
             </button>
             {showExportMenu && (
-              <div 
+              <div
                 className="absolute right-0 top-full mt-1 py-1 rounded-lg border shadow-lg z-50"
                 style={{
                   backgroundColor: 'var(--color-bg-primary)',
                   borderColor: 'var(--color-border)',
-                  minWidth: '140px',
+                  minWidth: '220px',
                 }}
               >
+                <div className="px-3 py-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    Sort
+                  </div>
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-full px-2 py-1 rounded text-xs border"
+                    style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                  >
+                    {REFERENCE_SORT_MODES.map(m => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   onClick={() => handleExport('markdown')}
                   className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
@@ -240,6 +265,14 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   📚 BibTeX (.bib)
+                </button>
+                <button
+                  onClick={() => handleExport('ris')}
+                  className="w-full px-3 py-1.5 text-xs text-left transition-colors cursor-pointer hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: 'var(--color-text-primary)' }}
+                  title="Imports directly into Zotero, EndNote, Mendeley, Rayyan, Papers, RefWorks"
+                >
+                  🔖 RIS (.ris) — Zotero / EndNote / Rayyan
                 </button>
                 <button
                   onClick={() => handleExport('jsonl')}

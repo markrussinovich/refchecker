@@ -1175,3 +1175,94 @@ export function exportReferenceAsMarkdown(ref) {
   
   return lines.join('\n')
 }
+
+// ── RIS / Zotero / Mendeley / EndNote / Rayyan import format ───────────
+// RIS is the de-facto interchange format for reference managers. Every
+// major tool (Zotero, EndNote, Mendeley, Rayyan, RefWorks, Papers, etc.)
+// can import it directly via "File → Import" / drag-drop.
+
+function _risTypeFor(ref) {
+  const venue = (ref.venue || '').toLowerCase()
+  if (ref.arxiv_id || venue.includes('arxiv')) return 'GEN'
+  if (venue.includes('proceedings') || venue.includes('workshop') || venue.includes('conference')) return 'CPAPER'
+  if (venue.includes('thesis') || venue.includes('dissertation')) return 'THES'
+  if (venue.includes('book')) return 'BOOK'
+  return 'JOUR'
+}
+
+function _risAuthorList(authors) {
+  if (!authors) return []
+  if (Array.isArray(authors)) return authors.filter(Boolean)
+  return String(authors)
+    .split(/\s+and\s+|;|,(?![\w\s]+\.\s*[A-Z])/i)
+    .map(a => a.trim())
+    .filter(Boolean)
+}
+
+export function exportReferenceAsRIS(ref, index = 0) {
+  const corrected = getCorrectedReferenceData(ref)
+  const type = _risTypeFor(corrected)
+  const lines = [`TY  - ${type}`]
+  if (corrected.title) lines.push(`TI  - ${corrected.title}`)
+  for (const a of _risAuthorList(corrected.authors)) {
+    lines.push(`AU  - ${a}`)
+  }
+  if (corrected.year) lines.push(`PY  - ${corrected.year}`)
+  if (corrected.venue) lines.push(type === 'JOUR' ? `JO  - ${corrected.venue}` : `T2  - ${corrected.venue}`)
+  if (corrected.doi) lines.push(`DO  - ${corrected.doi}`)
+  if (corrected.arxiv_id) lines.push(`AN  - arXiv:${corrected.arxiv_id}`)
+  const url = _preferredCitationUrl(corrected)
+  if (url) lines.push(`UR  - ${url}`)
+  // ID is what Rayyan/EndNote use for de-dup; index is a fine fallback
+  lines.push(`ID  - ref-${index + 1}`)
+  lines.push('ER  - ')
+  return lines.join('\n')
+}
+
+export function exportResultsAsRIS({ references }) {
+  if (!references || references.length === 0) return ''
+  return references.map((r, i) => exportReferenceAsRIS(r, i)).join('\n\n') + '\n'
+}
+
+// ── Sort modes for any "export the bibliography" path ─────────────────
+
+export const REFERENCE_SORT_MODES = [
+  { id: 'citation', label: 'Citation order (as cited in paper)' },
+  { id: 'alphabetical', label: 'Alphabetical (by first author)' },
+  { id: 'year-desc', label: 'Year (newest first)' },
+  { id: 'year-asc', label: 'Year (oldest first)' },
+]
+
+function _firstAuthorKey(ref) {
+  const corrected = getCorrectedReferenceData(ref)
+  const a = corrected.authors
+  let first = ''
+  if (Array.isArray(a)) first = a[0] || ''
+  else if (typeof a === 'string') first = a.split(/,|;|\s+and\s+/i)[0] || ''
+  // Pull the longest token (usually surname). Strip diacritics for sort.
+  const parts = first.split(/\s+/).filter(Boolean)
+  const surname = parts.length ? parts.reduce((acc, p) => (p.length > acc.length ? p : acc), '') : ''
+  return surname.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+export function sortReferencesForExport(references, mode = 'citation') {
+  const arr = (references || []).slice()
+  switch (mode) {
+    case 'alphabetical':
+      return arr.sort((a, b) => {
+        const ak = _firstAuthorKey(a)
+        const bk = _firstAuthorKey(b)
+        if (ak && bk && ak !== bk) return ak < bk ? -1 : 1
+        if (ak && !bk) return -1
+        if (!ak && bk) return 1
+        return (a.index || 0) - (b.index || 0)
+      })
+    case 'year-desc':
+      return arr.sort((a, b) => (Number(b.year || 0)) - (Number(a.year || 0)))
+    case 'year-asc':
+      return arr.sort((a, b) => (Number(a.year || 0)) - (Number(b.year || 0)))
+    case 'citation':
+    default:
+      return arr.sort((a, b) => (a.index || 0) - (b.index || 0))
+  }
+}
