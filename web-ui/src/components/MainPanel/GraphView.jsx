@@ -186,14 +186,80 @@ export default function GraphView({ references, paperTitle }) {
     }
   }
 
+  // ── 2nd-level auto-expansion ─────────────────────────────────────
+  // Expand every verified reference one hop in parallel (capped at 4 in
+  // flight) so the user sees the references-of-references tree without
+  // having to double-click each node. Heavy on the S2 API — gated behind
+  // an explicit toggle.
+  const [autoExpanding, setAutoExpanding] = useState(false)
+  const [autoExpanded, setAutoExpanded] = useState(false)
+  const eligibleNodes = useMemo(() => (
+    Object.values(serverGraph?.byId || {}).filter(n => n?.paperId)
+  ), [serverGraph])
+
+  const runAutoExpand = async () => {
+    if (autoExpanding || !eligibleNodes.length) return
+    setAutoExpanding(true)
+    try {
+      const queue = eligibleNodes.slice(0, 25)  // hard cap for sanity
+      const worker = async () => {
+        while (queue.length) {
+          const node = queue.shift()
+          try {
+            const res = await expandPaper({ paper_id: node.paperId, limit: 4 })
+            const items = res.data?.items || []
+            const additions = items
+              .filter(it => it.paperId)
+              .map(it => ({
+                id: `exp:${node.id}:${it.paperId}`,
+                parent: node.id,
+                paperId: it.paperId,
+                title: it.title,
+                year: it.year,
+                authors: it.authors,
+                citationCount: it.citationCount,
+                doi: it.doi,
+                arxiv_id: it.arxiv_id,
+                verified_url: it.doi ? `https://doi.org/${it.doi}` : (it.arxiv_id ? `https://arxiv.org/abs/${it.arxiv_id}` : `https://www.semanticscholar.org/paper/${it.paperId}`),
+              }))
+            setExpandedNodes(prev => {
+              const seen = new Set(prev.map(p => p.id))
+              return [...prev, ...additions.filter(a => !seen.has(a.id))]
+            })
+          } catch { /* skip this one */ }
+        }
+      }
+      await Promise.all([worker(), worker(), worker(), worker()])
+      setAutoExpanded(true)
+    } finally {
+      setAutoExpanding(false)
+    }
+  }
+
   return (
     <div ref={containerRef} className="rounded-lg border overflow-hidden relative"
       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', minHeight: 420 }}>
       <div
-        className="absolute top-2 left-2 z-10 text-xs px-2 py-1 rounded"
+        className="absolute top-2 left-2 z-10 text-xs px-2 py-1 rounded flex items-center gap-2 flex-wrap"
         style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
       >
         {loadingGraph ? 'Fetching S2 citation graph…' : 'Double-click a node to expand one hop'}
+        {eligibleNodes.length > 0 && (
+          <button
+            onClick={runAutoExpand}
+            disabled={autoExpanding}
+            className="ml-1 px-2 py-0.5 rounded"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg-secondary)',
+              color: autoExpanded ? 'var(--color-success, #16a34a)' : 'var(--color-text-secondary)',
+              opacity: autoExpanding ? 0.6 : 1,
+            }}
+            title={`Pre-fetch each verified ref's own references (up to 25 refs × 4 children each)`}
+          >
+            {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ 2nd-level expanded' : 'Expand all verified refs (2nd level)'}
+          </button>
+        )}
         {expandedNodes.length > 0 && (
           <button
             onClick={() => setExpandedNodes([])}

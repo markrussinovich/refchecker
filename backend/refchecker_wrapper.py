@@ -1041,10 +1041,15 @@ class ProgressRefChecker:
                 # Save to disk cache
                 if references:
                     cache_bibliography(self.cache_dir, paper_source, references, bibliography_cache_identity)
-                # Attach citation contexts (sentence around [N] in the
-                # source text) so the UI can show 'context: "as
-                # demonstrated in [12]..."' on each reference card.
+                # Attach citation contexts (sentence around [N] / author-year
+                # patterns in the source text) so the UI can show
+                # 'context: "as demonstrated in [12]..."' on each ref card.
                 _attach_citation_contexts(references, paper_text)
+                _ctx_attached = sum(1 for r in (references or []) if r.get("citation_context"))
+                logger.info(
+                    "Citation contexts: %d/%d refs got an inline sentence (paper_text=%d chars)",
+                    _ctx_attached, len(references or []), len(paper_text or ""),
+                )
 
             if not references:
                 await self.emit_progress("completed", {
