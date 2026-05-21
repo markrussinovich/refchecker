@@ -87,30 +87,60 @@ export function installLinkHandler() {
   if (_installed || typeof document === 'undefined') return
   _installed = true
 
+  const isExternalAnchor = (link) => {
+    if (!link) return false
+    const href = link.getAttribute('href') || ''
+    return /^(https?:|mailto:|tel:|file:)/i.test(href)
+  }
+
+  // Left-click: route through shell.open
   document.addEventListener(
     'click',
     (e) => {
-      // Respect modifier-clicks (copy-link, open-in-new-tab from devtools)
       if (e.defaultPrevented || e.button !== 0) return
-
       const link = e.target?.closest?.('a[href]')
       if (!link) return
-
       const href = link.getAttribute('href')
       if (!href) return
-
-      // Internal SPA routes / anchors are left alone.
       if (href.startsWith('#') || href.startsWith('/')) return
-      if (!/^(https?:|mailto:|file:)/i.test(href)) return
-
-      // In a normal browser, only intercept target="_blank" so we don't
-      // hijack same-tab navigations. In Tauri, intercept everything
-      // external because the WebView won't navigate to https://... anyway.
+      if (!isExternalAnchor(link)) return
       const target = link.getAttribute('target')
       if (!isTauri() && target !== '_blank') return
-
       e.preventDefault()
       openExternal(href)
+    },
+    true,
+  )
+
+  // Inside Tauri, WebKit's native right-click menu ("Open Link" / "Open
+  // Link in New Window" / "Download Linked File") tries to navigate the
+  // in-app WebView. Tauri's navigation policy silently blocks external
+  // URLs, so the menu items appear to no-op. Block the menu entirely on
+  // external anchors and treat the right-click as an open-in-system-
+  // browser action.
+  document.addEventListener(
+    'contextmenu',
+    (e) => {
+      if (!isTauri()) return
+      const link = e.target?.closest?.('a[href]')
+      if (!link || !isExternalAnchor(link)) return
+      e.preventDefault()
+      const href = link.getAttribute('href')
+      if (href) openExternal(href)
+    },
+    true,
+  )
+
+  // Middle-click ("open in new tab") also fires through auxclick.
+  document.addEventListener(
+    'auxclick',
+    (e) => {
+      if (e.button !== 1) return
+      const link = e.target?.closest?.('a[href]')
+      if (!link || !isExternalAnchor(link)) return
+      e.preventDefault()
+      const href = link.getAttribute('href')
+      if (href) openExternal(href)
     },
     true,
   )

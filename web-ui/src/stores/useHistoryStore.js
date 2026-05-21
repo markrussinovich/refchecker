@@ -565,6 +565,40 @@ export const useHistoryStore = create((set, get) => ({
     set({ selectedCheckId: null, selectedCheck: null })
   },
 
+  /**
+   * Optimistically mark a reference as "verified" in the currently
+   * selected check, merging the verifier's `corrected_reference` into
+   * the stored metadata and clearing the existing errors/warnings.
+   * Used by Apply Fix so the health-badge moves immediately, before
+   * the slower /verify roundtrip lands. The /verify call afterwards
+   * is the authoritative update; this just keeps the UI snappy.
+   */
+  optimisticApplyCorrection: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    const findHit = (r, i) => (
+      String(r.id ?? '') === idStr ||
+      String(r.index ?? '') === idStr ||
+      String(i) === idStr
+    )
+    const nextResults = selectedCheck.results.map((r, i) => {
+      if (!findHit(r, i)) return r
+      const corrected = r.corrected_reference || {}
+      const merged = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
+          merged[k] = corrected[k]
+        }
+      }
+      merged.status = 'verified'
+      merged.errors = []
+      merged.warnings = []
+      return merged
+    })
+    set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
   updateLabel: async (id, label) => {
     if (id === -1) return // don't persist or label the placeholder
     try {

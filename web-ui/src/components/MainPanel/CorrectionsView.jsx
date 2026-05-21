@@ -313,11 +313,15 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     const k = keyFor(ref, i)
     setDecision(k, { status: 'applied' })
     if (selectedCheckId) {
+      // Optimistically flip status + merge corrected metadata locally so
+      // the citation-health chip moves the moment Apply Fix is clicked,
+      // not after the network roundtrip completes.
+      useHistoryStore.getState().optimisticApplyCorrection?.(String(ref.id ?? ref.index ?? i))
       try {
         await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true })
         await useHistoryStore.getState().selectCheck?.(selectedCheckId)
       } catch (e) {
-        /* re-verify is best-effort; the apply still stands */
+        /* re-verify is best-effort; the optimistic update stands */
       }
     }
   }
@@ -336,6 +340,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       return next
     })
     if (selectedCheckId && targets.length) {
+      // Optimistic local flip so the badge climbs immediately for every
+      // accepted correction; /verify confirms in the background.
+      const histStore = useHistoryStore.getState()
+      for (const { ref, i } of targets) {
+        histStore.optimisticApplyCorrection?.(String(ref.id ?? ref.index ?? i))
+      }
       // Re-verify the applied refs in parallel (cap 4) so the badge updates.
       const queue = targets.slice()
       const worker = async () => {

@@ -230,11 +230,12 @@ export default function GraphView({ references, paperTitle }) {
           nodeCanvasObject={(node, ctx, globalScale) => {
             const label = node.label || ''
             const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
+            const isHovered = hovered?.id === node.id
+            const isSelected = selected?.id === node.id
             // Soft outline ring on hover / selection so the user knows which
             // node they're targeting.
-            const isFocus = hovered?.id === node.id || selected?.id === node.id
-            if (isFocus) {
-              ctx.fillStyle = 'rgba(255,255,255,0.18)'
+            if (isHovered || isSelected) {
+              ctx.fillStyle = isHovered ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)'
               ctx.beginPath()
               ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false)
               ctx.fill()
@@ -243,15 +244,13 @@ export default function GraphView({ references, paperTitle }) {
             ctx.beginPath()
             ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false)
             ctx.fill()
-            // Render labels sparingly so the canvas stays readable:
-            //   • always show the source node label
-            //   • show the hovered + selected node labels
-            //   • show other labels only when zoomed in past 2.5×
-            const shouldShowLabel =
-              node.type === 'source' ||
-              isFocus ||
-              globalScale > 2.5
-            if (!shouldShowLabel) return
+            // Single-label rule: the hovered node wins. If no hover, the
+            // source node always shows its label so the user has at least
+            // one orientation anchor. Past 2.5× zoom, render every label.
+            const showLabel = isHovered
+              || (!hovered && node.type === 'source')
+              || globalScale > 2.5
+            if (!showLabel) return
             const fontSize = Math.max(10, 12 / globalScale)
             ctx.font = `${fontSize}px -apple-system, sans-serif`
             const text = label.slice(0, 48)
@@ -260,7 +259,7 @@ export default function GraphView({ references, paperTitle }) {
             const ty = node.y
             const w = ctx.measureText(text).width + padX * 2
             const h = fontSize + 4
-            ctx.fillStyle = 'rgba(15,23,42,0.85)'
+            ctx.fillStyle = 'rgba(15,23,42,0.92)'
             ctx.fillRect(tx - padX, ty - h / 2, w, h)
             ctx.fillStyle = 'rgba(255,255,255,0.96)'
             ctx.textAlign = 'left'
