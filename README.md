@@ -36,12 +36,12 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.1)
+### What the desktop app adds (v0.6.2)
 
 - **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
 - **Global reference library (read + write).** Every verified reference, deduped by DOI / arXiv / normalized title, is kept across checks AND consulted automatically by future verifications — repeat references resolve instantly, no API call. New *Seen References (library)* view at the top of the main panel.
-- **Find similar papers, with verification preview.** After a check, the *Similar Papers* tab surfaces up to 5 candidates from Semantic Scholar that share the most references with the current paper. Each is pre-checked against the global cache so you can see at a glance which ones RefChecker has already verified. *Check this too* re-uses the existing input pipeline.
-- **Real citation graph.** Force-directed view of the paper's references, edges drawn from the real Semantic Scholar citation graph (ref A → ref B iff A cites B), nodes sized by citationCount. Double-click any node to expand one hop further — pulls in that paper's top outgoing references as new nodes.
+- **Find similar papers — multi-source, actively verified.** Pulls candidates from **Semantic Scholar** (recommendations + co-citation), **OpenAlex** (DOI-resolved co-citation), the user's configured **web-search provider** (OpenAI / Anthropic / Gemini), and the user's default **LLM** ("what else should I read?"). Candidates are deduped across sources, each row shows a source badge, and any cache-miss candidate is actively re-verified through the hybrid checker before display — so you see real ✓ verified or ? unconfirmed, not just metadata.
+- **Real citation graph.** Force-directed view of the paper's references, edges drawn from the real Semantic Scholar citation graph (ref A → ref B iff A cites B), **nodes sized by in-paper in-degree** (how many other refs in the same bibliography cite each one). Double-click any node to expand one hop further — pulls in that paper's top outgoing references as new nodes.
 - **Citation context.** Each reference card shows the sentence in the paper where it's cited (e.g. *"as demonstrated in [12], the architecture achieves..."*).
 - **Live citation health badge.** Score recomputes on every edit (Apply Fix / Add / Remove). Copy as Markdown for a README badge.
 - **Add / Remove / Suggest alternative — everywhere.** Now in both the References tab and the Corrections tab. Newly-added references are re-verified live (no need to rerun the whole check). *Suggest alternative* combines an LLM-backed "what real paper did the author probably mean?" with Semantic Scholar title-search.

@@ -4334,55 +4334,93 @@ class _SimilarPapersRequest(BaseModel):
     limit: int = 5
 
 
+def _candidate_key(title: Optional[str], doi: Optional[str], arxiv: Optional[str]) -> str:
+    """Build a dedup key across S2/OpenAlex/web/LLM source variation."""
+    if doi:
+        return f"doi:{doi.strip().lower()}"
+    if arxiv:
+        return f"arxiv:{arxiv.strip().lower()}"
+    if title:
+        import re as _re
+        norm = _re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
+        return f"title:{norm}"
+    return f"ghost:{id(title)}"
+
+
 @app.post("/api/papers/similar")
 async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo = Depends(require_user)):
-    """Surface up to N papers that share the most references with the
-    given paper. Combines two strategies and merges by S2 paper ID:
+    """Surface up to N papers similar to the current one across four
+    sources, then actively verify the survivors so each candidate row
+    arrives with a known real/fake status, not just metadata.
 
-      1. Direct: ask Semantic Scholar for the SOURCE paper's
-         related-papers / recommendations endpoint when an ID is known.
-      2. Co-citation: for each reference the user gave us, ask
-         Semantic Scholar `/paper/<id>/citations` for papers that cite
-         it; tally how many of the user's refs each candidate also
-         cites. Top tally wins.
+    Sources, in order:
 
-    The S2 calls go through the same SS API key the rest of the app
-    uses (settings → API Keys). Falls back to a smaller, lower-quality
-    set when no key is configured — S2's free tier rate-limits but
-    still responds.
+      1. **Semantic Scholar** — recommendations endpoint when a paperId
+         is known, plus a co-citation tally over the user's references
+         (papers that cite many of the same refs).
+      2. **OpenAlex** — for each user ref with a DOI we can resolve to
+         an OpenAlex Work, query Works that *cite* it; tally overlap
+         the same way (true co-citation, OpenAlex side).
+      3. **Web search** — runs the user's configured web-search
+         provider (OpenAI / Anthropic / Gemini) on the paper title
+         plus "related papers"; cited URLs become candidates.
+      4. **LLM** — asks the default LLM "given these references,
+         suggest 5 papers that build on or sit alongside this work."
+
+    After dedup (by DOI / arXiv / normalized title), each candidate is
+    cross-checked against the global identity cache. Cache misses are
+    actively verified through the hybrid checker (capped at 5 in
+    parallel) so the UI can show a real verification status, not just
+    'unknown'.
     """
+    user_id = get_user_id_filter(current_user)
     refs = req.references or []
     if not refs:
         raise HTTPException(status_code=400, detail="`references` must be a non-empty list")
 
     import httpx
+    import asyncio
     api_key = await _resolve_semantic_scholar_api_key(None)
     headers = {"x-api-key": api_key} if api_key else {}
     timeout = 10.0
     limit = max(1, min(20, int(req.limit or 5)))
 
     def s2_id_of(ref: dict) -> Optional[str]:
-        # Build the most specific S2 identifier we can.
         if ref.get("doi"):
             return f"DOI:{ref['doi']}"
         if ref.get("arxiv_id"):
             return f"arXiv:{ref['arxiv_id']}"
         return None
 
-    seen_ids = set()
     tally: Dict[str, Dict[str, Any]] = {}
 
-    async def _fetch(client: httpx.AsyncClient, url: str, params: Optional[dict] = None) -> Optional[dict]:
+    def _merge(cand: Dict[str, Any], source: str, shared: int = 0):
+        key = _candidate_key(cand.get("title"), cand.get("doi"), cand.get("arxiv_id"))
+        if key in tally:
+            entry = tally[key]
+            entry["shared"] += shared
+            if source not in entry["sources"]:
+                entry["sources"].append(source)
+            # Backfill missing fields
+            for k in ("doi", "arxiv_id", "year", "paperId", "url", "venue", "openalex_id"):
+                if not entry["paper"].get(k) and cand.get(k):
+                    entry["paper"][k] = cand[k]
+            if not entry["paper"].get("authors") and cand.get("authors"):
+                entry["paper"]["authors"] = cand["authors"]
+        else:
+            tally[key] = {"paper": dict(cand), "shared": shared, "sources": [source]}
+
+    async def _fetch(client: httpx.AsyncClient, url: str, params: Optional[dict] = None, hdrs: Optional[dict] = None) -> Optional[dict]:
         try:
-            r = await client.get(url, params=params, headers=headers, timeout=timeout)
+            r = await client.get(url, params=params, headers=hdrs if hdrs is not None else headers, timeout=timeout)
             if r.status_code == 200:
                 return r.json()
         except Exception as e:
-            logger.debug("S2 fetch failed for %s: %s", url, e)
+            logger.debug("Fetch failed for %s: %s", url, e)
         return None
 
     async with httpx.AsyncClient() as client:
-        # Strategy 1: direct recommendations on the source paper
+        # ── Source 1: Semantic Scholar ──────────────────────────────
         if req.paper_id:
             data = await _fetch(
                 client,
@@ -4390,14 +4428,17 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
                 params={"fields": "paperId,title,authors,year,externalIds", "limit": 20},
             )
             for p in (data or {}).get("recommendedPapers", []) or []:
-                pid = p.get("paperId")
-                if not pid or pid in seen_ids:
-                    continue
-                seen_ids.add(pid)
-                tally[pid] = {"paper": p, "shared": 0, "via": "recommendations"}
+                ext = p.get("externalIds") or {}
+                _merge({
+                    "title": p.get("title"),
+                    "year": p.get("year"),
+                    "authors": [a.get("name") for a in (p.get("authors") or []) if a.get("name")],
+                    "doi": ext.get("DOI"),
+                    "arxiv_id": ext.get("ArXiv"),
+                    "paperId": p.get("paperId"),
+                    "url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,
+                }, "semantic_scholar")
 
-        # Strategy 2: co-citation tally — limit how many user refs we walk
-        # so a 200-ref bibliography doesn't fan out into 200 API calls.
         for ref in refs[:30]:
             ident = s2_id_of(ref)
             if not ident:
@@ -4409,31 +4450,220 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             )
             for item in (data or {}).get("data", []) or []:
                 cp = item.get("citingPaper") or {}
-                pid = cp.get("paperId")
-                if not pid:
+                ext = cp.get("externalIds") or {}
+                if not cp.get("paperId"):
                     continue
-                if pid not in tally:
-                    tally[pid] = {"paper": cp, "shared": 0, "via": "co-cited"}
-                tally[pid]["shared"] += 1
+                _merge({
+                    "title": cp.get("title"),
+                    "year": cp.get("year"),
+                    "authors": [a.get("name") for a in (cp.get("authors") or []) if a.get("name")],
+                    "doi": ext.get("DOI"),
+                    "arxiv_id": ext.get("ArXiv"),
+                    "paperId": cp.get("paperId"),
+                    "url": f"https://www.semanticscholar.org/paper/{cp.get('paperId')}",
+                }, "semantic_scholar", shared=1)
 
-    # Score & rank: shared > 1 is meaningful; recommendations baseline is 1.
-    candidates = sorted(
+        # ── Source 2: OpenAlex ──────────────────────────────────────
+        # Resolve user refs with DOIs to OpenAlex Work IDs, then ask
+        # OpenAlex for Works that cite each of them. Co-citation overlap
+        # is the same signal we use for S2.
+        try:
+            openalex_ids = []
+            for ref in refs[:20]:
+                doi = ref.get("doi")
+                if not doi:
+                    continue
+                doi_clean = doi.strip().lstrip("doi:").strip("/")
+                wdata = await _fetch(
+                    client,
+                    f"https://api.openalex.org/works/doi:{doi_clean}",
+                    params={"select": "id"},
+                    hdrs={},
+                )
+                if wdata and wdata.get("id"):
+                    openalex_ids.append(wdata["id"].rsplit("/", 1)[-1])
+
+            for oa_id in openalex_ids[:15]:
+                # Works that cite this ref
+                citing = await _fetch(
+                    client,
+                    "https://api.openalex.org/works",
+                    params={"filter": f"cites:{oa_id}", "per-page": 20, "select": "id,title,doi,publication_year,authorships,ids"},
+                    hdrs={},
+                )
+                for w in (citing or {}).get("results", []) or []:
+                    doi_v = (w.get("doi") or "").replace("https://doi.org/", "") or None
+                    ids = w.get("ids") or {}
+                    _merge({
+                        "title": w.get("title"),
+                        "year": w.get("publication_year"),
+                        "authors": [a.get("author", {}).get("display_name") for a in (w.get("authorships") or []) if a.get("author", {}).get("display_name")],
+                        "doi": doi_v,
+                        "arxiv_id": None,
+                        "openalex_id": (w.get("id") or "").rsplit("/", 1)[-1] or None,
+                        "url": w.get("id"),
+                    }, "openalex", shared=1)
+        except Exception as e:
+            logger.debug("OpenAlex similar-papers source failed: %s", e)
+
+    # ── Source 3: web search (uses user's configured provider) ──────
+    try:
+        from refchecker.checkers.web_search import OpenAISearchProvider, AnthropicSearchProvider, GeminiSearchProvider
+
+        default_cfg = await db.get_default_llm_config(user_id=user_id)
+        web_provider = None
+        if default_cfg:
+            prov = (default_cfg.get("provider") or "").lower()
+            key = default_cfg.get("api_key")
+            try:
+                if prov == "openai":
+                    web_provider = OpenAISearchProvider(api_key=key)
+                elif prov == "anthropic":
+                    web_provider = AnthropicSearchProvider(api_key=key)
+                elif prov in ("google", "gemini"):
+                    web_provider = GeminiSearchProvider(api_key=key)
+            except Exception as e:
+                logger.debug("Web search provider init failed: %s", e)
+
+        if web_provider and getattr(web_provider, "available", False) and req.paper_title:
+            query = (
+                f"Find 5 academic papers strongly related to: \"{req.paper_title}\". "
+                "Return titles and links to peer-reviewed sources (arXiv, DOI, ACL, IEEE) where possible."
+            )
+            try:
+                results = await asyncio.to_thread(web_provider.search, query, 8)
+            except Exception as e:
+                logger.debug("Web search call failed: %s", e)
+                results = []
+            for r in (results or [])[:8]:
+                link = r.get("link") or ""
+                title = r.get("title") or ""
+                if not title and not link:
+                    continue
+                # Best-effort: pull DOI / arXiv ID out of the URL
+                doi_v, arxiv_v = None, None
+                import re as _re
+                m_doi = _re.search(r"10\.\d{4,9}/[\w.\-;()/:]+", link)
+                if m_doi:
+                    doi_v = m_doi.group(0).rstrip(".)")
+                m_arx = _re.search(r"arxiv\.org/abs/([\w.\-/]+)", link)
+                if m_arx:
+                    arxiv_v = m_arx.group(1)
+                _merge({
+                    "title": title or link,
+                    "doi": doi_v,
+                    "arxiv_id": arxiv_v,
+                    "url": link,
+                }, "web", shared=0)
+    except Exception as e:
+        logger.debug("Web search source skipped: %s", e)
+
+    # ── Source 4: LLM ───────────────────────────────────────────────
+    try:
+        default_cfg = await db.get_default_llm_config(user_id=user_id)
+        if default_cfg and default_cfg.get("provider"):
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+            from refchecker.llm.base import create_llm_provider
+
+            llm_config = {}
+            if default_cfg.get("model"):
+                llm_config["model"] = default_cfg["model"]
+            if default_cfg.get("api_key"):
+                llm_config["api_key"] = default_cfg["api_key"]
+            if default_cfg.get("endpoint"):
+                llm_config["endpoint"] = default_cfg["endpoint"]
+            provider = create_llm_provider(default_cfg["provider"], llm_config)
+            if provider and (not hasattr(provider, "is_available") or provider.is_available()):
+                # Give the LLM the 10 strongest user refs as priming
+                top_refs = []
+                for r in refs[:10]:
+                    bits = [r.get("title"), str(r.get("year") or "")]
+                    a = r.get("authors")
+                    if isinstance(a, list):
+                        bits.append(", ".join(a[:3]))
+                    top_refs.append(" — ".join(b for b in bits if b))
+                prompt = (
+                    f"Source paper title: {req.paper_title or '(unknown)'}\n\n"
+                    "Its bibliography includes:\n"
+                    + "\n".join(f"- {t}" for t in top_refs)
+                    + "\n\nSuggest up to 5 OTHER real academic papers that build on, "
+                      "extend, or are commonly cited alongside this work. Return strict "
+                      "JSON array of objects with: title, authors (array), year (int), "
+                      "venue, doi (or null), arxiv_id (or null), reason (one short "
+                      "sentence). Respond with ONLY the JSON array, no prose or markdown."
+                )
+                try:
+                    raw = await asyncio.to_thread(provider._call_llm, prompt)
+                except Exception as e:
+                    logger.debug("LLM similar-papers call failed: %s", e)
+                    raw = None
+                if raw:
+                    import json as _json
+                    import re as _re
+                    text = raw.strip()
+                    m = _re.search(r"\[.*\]", text, _re.DOTALL)
+                    if m:
+                        text = m.group(0)
+                    try:
+                        parsed = _json.loads(text)
+                        if isinstance(parsed, list):
+                            for item in parsed[:5]:
+                                if not isinstance(item, dict) or not item.get("title"):
+                                    continue
+                                doi_v = item.get("doi")
+                                arxiv_v = item.get("arxiv_id")
+                                url_v = None
+                                if doi_v:
+                                    url_v = f"https://doi.org/{doi_v}"
+                                elif arxiv_v:
+                                    url_v = f"https://arxiv.org/abs/{arxiv_v}"
+                                _merge({
+                                    "title": item.get("title"),
+                                    "authors": item.get("authors") or [],
+                                    "year": item.get("year"),
+                                    "venue": item.get("venue"),
+                                    "doi": doi_v,
+                                    "arxiv_id": arxiv_v,
+                                    "url": url_v,
+                                    "reason": item.get("reason"),
+                                }, "llm", shared=0)
+                    except Exception as e:
+                        logger.debug("Failed to parse LLM similar-papers output: %s", e)
+    except Exception as e:
+        logger.debug("LLM similar-papers source skipped: %s", e)
+
+    # ── Rank: shared first, multi-source as tiebreak, then llm/web ──
+    ranked = sorted(
         tally.values(),
-        key=lambda v: (v["shared"], v["via"] == "recommendations"),
+        key=lambda v: (v["shared"], len(v["sources"]), "semantic_scholar" in v["sources"], "openalex" in v["sources"]),
         reverse=True,
     )[:limit]
 
-    out = []
-    for c in candidates:
-        p = c["paper"] or {}
-        ext = p.get("externalIds") or {}
-        authors = [a.get("name") for a in (p.get("authors") or []) if a.get("name")]
-        # Pre-verify the candidate against the global identity cache so the
-        # UI can show a "✓ already verified" badge before the user clicks
-        # Check this too.
+    # ── Active verification of cache-miss candidates ────────────────
+    # Cap to `limit` candidates and verify in parallel (sem limits concurrency).
+    out: list = []
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+        from refchecker.checkers.enhanced_hybrid_checker import EnhancedHybridReferenceChecker
+        checker = EnhancedHybridReferenceChecker(
+            semantic_scholar_api_key=api_key,
+            debug_mode=False,
+        )
+    except Exception as e:
+        logger.debug("Could not init checker for similar-papers verification: %s", e)
+        checker = None
+
+    sem = asyncio.Semaphore(4)
+
+    async def _enrich(entry):
+        p = entry["paper"]
         probe = {
-            "doi": ext.get("DOI"),
-            "arxiv_id": ext.get("ArXiv"),
+            "doi": p.get("doi"),
+            "arxiv_id": p.get("arxiv_id"),
             "title": p.get("title"),
             "year": p.get("year"),
         }
@@ -4442,21 +4672,101 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             cached = await db.lookup_verified_reference(probe)
         except Exception:
             cached = None
+
+        verification_status = (cached or {}).get("status") if cached else None
+        pre_verified = bool(cached)
+        was_verified = pre_verified
+
+        # Cache miss: actively verify if we have any identifier or title
+        if not pre_verified and checker is not None and (p.get("doi") or p.get("arxiv_id") or p.get("title")):
+            async with sem:
+                try:
+                    verified_data, errors, url = await asyncio.to_thread(
+                        checker.verify_reference,
+                        {
+                            "title": p.get("title"),
+                            "authors": p.get("authors"),
+                            "year": p.get("year"),
+                            "doi": p.get("doi"),
+                            "arxiv_id": p.get("arxiv_id"),
+                            "venue": p.get("venue"),
+                        },
+                    )
+                    if verified_data:
+                        verification_status = "verified"
+                        was_verified = True
+                        # Backfill identifiers we may have missed
+                        if not p.get("doi") and verified_data.get("doi"):
+                            p["doi"] = verified_data["doi"]
+                        if not p.get("arxiv_id") and verified_data.get("arxiv_id"):
+                            p["arxiv_id"] = verified_data["arxiv_id"]
+                        if not p.get("url") and url:
+                            p["url"] = url
+                        # Persist to global cache so the next request is instant
+                        try:
+                            await db.upsert_verified_reference({
+                                **p,
+                                "status": "verified",
+                                "verified_url": url,
+                                "matched_db": (verified_data.get("source") if isinstance(verified_data, dict) else None),
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        # No data found — likely fake or just missing
+                        verification_status = "unverified"
+                except Exception as e:
+                    logger.debug("Active verification failed for candidate: %s", e)
+                    verification_status = "unknown"
+
         out.append({
             "paperId": p.get("paperId"),
+            "openalex_id": p.get("openalex_id"),
             "title": p.get("title"),
             "year": p.get("year"),
-            "authors": authors,
-            "doi": ext.get("DOI"),
-            "arxiv_id": ext.get("ArXiv"),
-            "shared_with_source": c["shared"],
-            "via": c["via"],
+            "authors": p.get("authors") or [],
+            "doi": p.get("doi"),
+            "arxiv_id": p.get("arxiv_id"),
+            "venue": p.get("venue"),
+            "reason": p.get("reason"),
+            "shared_with_source": entry["shared"],
+            "sources": entry["sources"],
+            "via": entry["sources"][0] if entry["sources"] else None,
             "semantic_scholar_url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,
-            "pre_verified": bool(cached),
-            "verified_status": (cached or {}).get("status") if cached else None,
+            "url": p.get("url"),
+            "pre_verified": pre_verified,
+            "was_verified": was_verified,
+            "verified_status": verification_status,
             "times_seen": (cached or {}).get("times_seen") if cached else 0,
         })
-    return {"source_paper": req.paper_title, "candidates": out}
+
+    # Run enrichment in parallel — sem caps concurrent verifications
+    await asyncio.gather(*[_enrich(e) for e in ranked])
+
+    # Keep candidates that actually verified or hit cache OR have multi-source backing.
+    # Filter out lone-web/LLM ghosts that nobody could confirm at all.
+    keep = []
+    for o in out:
+        if o["was_verified"]:
+            keep.append(o)
+        elif len(o["sources"]) >= 2:
+            keep.append(o)
+        elif (o["shared_with_source"] or 0) > 0:
+            keep.append(o)
+    # If filtering wiped everything, fall back to all of them so the UI shows
+    # something (with verified_status='unverified' the user can still inspect).
+    final = keep if keep else out
+
+    # Re-rank: verified first, then shared, then multi-source
+    final.sort(
+        key=lambda o: (
+            1 if o["was_verified"] else 0,
+            o["shared_with_source"] or 0,
+            len(o["sources"]),
+        ),
+        reverse=True,
+    )
+    return {"source_paper": req.paper_title, "candidates": final[:limit]}
 
 
 class _CitationGraphRequest(BaseModel):

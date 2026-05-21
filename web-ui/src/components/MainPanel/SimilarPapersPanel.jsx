@@ -102,13 +102,56 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                     {(c.authors || []).slice(0, 3).join(', ')}
                     {(c.authors || []).length > 3 ? ', et al.' : ''}
                     {c.year ? ` · ${c.year}` : ''}
-                    {c.via === 'recommendations' ? ' · recommended' : c.shared_with_source ? ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}` : ''}
-                    {c.pre_verified && (
-                      <span style={{ color: 'var(--color-success, #16a34a)', marginLeft: 6 }}>
-                        · ✓ verified in cache{c.times_seen > 1 ? ` (×${c.times_seen})` : ''}
-                      </span>
-                    )}
+                    {c.shared_with_source ? ` · shares ${c.shared_with_source} ref${c.shared_with_source === 1 ? '' : 's'}` : ''}
                   </div>
+                  <div className="text-xs mt-0.5 flex flex-wrap gap-1">
+                    {(c.sources || []).map((s) => (
+                      <span
+                        key={s}
+                        className="px-1.5 py-0.5 rounded"
+                        style={{
+                          background: 'var(--color-bg-tertiary)',
+                          color: 'var(--color-text-secondary)',
+                          fontSize: '0.7rem',
+                          border: '1px solid var(--color-border)',
+                        }}
+                      >
+                        {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
+                      </span>
+                    ))}
+                    {c.was_verified ? (
+                      <span
+                        className="px-1.5 py-0.5 rounded"
+                        style={{
+                          background: 'rgba(34,197,94,0.12)',
+                          color: 'var(--color-success, #16a34a)',
+                          fontSize: '0.7rem',
+                          border: '1px solid rgba(34,197,94,0.35)',
+                        }}
+                      >
+                        {c.pre_verified ? '✓ in cache' : '✓ just verified'}
+                        {c.times_seen > 1 ? ` ×${c.times_seen}` : ''}
+                      </span>
+                    ) : c.verified_status === 'unverified' ? (
+                      <span
+                        className="px-1.5 py-0.5 rounded"
+                        style={{
+                          background: 'rgba(239,68,68,0.1)',
+                          color: 'var(--color-error, #ef4444)',
+                          fontSize: '0.7rem',
+                          border: '1px solid rgba(239,68,68,0.35)',
+                        }}
+                        title="Couldn't confirm this paper against any database"
+                      >
+                        ? unconfirmed
+                      </span>
+                    ) : null}
+                  </div>
+                  {c.reason && (
+                    <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                      {c.reason}
+                    </div>
+                  )}
                 </div>
                 <div className="flex gap-1 flex-shrink-0">
                   {(doiUrl || arxivUrl || url) && (

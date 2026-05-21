@@ -89,14 +89,26 @@ export default function GraphView({ references, paperTitle }) {
     const edges = []
     const localById = {}
 
-    // Use server graph for citationCount when available, else fall back to 0
+    // First pass: count in-paper in-degree (how many other refs in this
+    // same bibliography cite each target). That's the size signal the
+    // user wants — not S2's global citationCount.
+    const inPaperInDegree = {}
+    if (serverGraph?.edges?.length) {
+      for (const e of serverGraph.edges) {
+        inPaperInDegree[e.target] = (inPaperInDegree[e.target] || 0) + 1
+      }
+    }
+
     refs.forEach((r, i) => {
       const id = String(r.id ?? r.index ?? `ref-${i}`)
       const status = getEffectiveReferenceStatus(r, true)
       const serverNode = serverGraph?.byId?.[id]
       const citationCount = serverNode?.citationCount || 0
-      // Log-scaled node size: 1 citation → ~3, 100 → ~9, 10000 → ~18
-      const val = Math.max(4, Math.log10(citationCount + 1) * 5 + 4)
+      const inDegree = inPaperInDegree[id] || 0
+      // Size by in-paper in-degree (primary), with a small log-scaled
+      // boost from global citationCount so orphan-but-famous refs still
+      // read at a glance.
+      const val = 4 + inDegree * 2.5 + Math.log10(citationCount + 1) * 0.8
       const node = {
         id,
         label: (r.title || '(no title)').slice(0, 80),
@@ -105,6 +117,7 @@ export default function GraphView({ references, paperTitle }) {
         ref: r,
         paperId: serverNode?.paperId,
         citationCount,
+        inDegree,
         val,
         color: STATUS_COLOR[status] || STATUS_COLOR.pending,
       }
@@ -246,8 +259,11 @@ export default function GraphView({ references, paperTitle }) {
             <div style={{ color: 'var(--color-text-secondary)' }}>
               {selected.ref.authors ? <div>{Array.isArray(selected.ref.authors) ? selected.ref.authors.join(', ') : selected.ref.authors}</div> : null}
               {selected.ref.year ? <div>{selected.ref.year}{selected.ref.venue ? ` · ${selected.ref.venue}` : ''}</div> : null}
+              {typeof selected.inDegree === 'number' && selected.inDegree > 0 && (
+                <div>Cited by {selected.inDegree} other ref{selected.inDegree === 1 ? '' : 's'} in this paper</div>
+              )}
               {typeof selected.citationCount === 'number' && selected.citationCount > 0 && (
-                <div>Cited by {selected.citationCount.toLocaleString()} papers</div>
+                <div style={{ opacity: 0.7 }}>{selected.citationCount.toLocaleString()} total citations on Semantic Scholar</div>
               )}
               {selected.status && (
                 <div className="mt-1" style={{ color: STATUS_COLOR[selected.status] || STATUS_COLOR.pending }}>
