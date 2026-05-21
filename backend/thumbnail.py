@@ -325,9 +325,16 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     except AttributeError:
         paper = next(search.results())
 
+    # Result.download_pdf is deprecated in newer arxiv lib ("use result.pdf_url
+    # directly"). Drop down to urlretrieve so we don't depend on a moving target.
+    import urllib.request
+    pdf_url = getattr(paper, 'pdf_url', None) or f"https://arxiv.org/pdf/{arxiv_id}"
     for attempt in range(3):
         try:
-            paper.download_pdf(filename=str(pdf_path))
+            req = urllib.request.Request(pdf_url, headers={"User-Agent": "RefChecker/1.0"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                pdf_bytes = resp.read()
+            pdf_path.write_bytes(pdf_bytes)
             if pdf_path.exists() and pdf_path.stat().st_size > 0:
                 return True
         except Exception as e:

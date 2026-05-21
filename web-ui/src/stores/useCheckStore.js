@@ -41,6 +41,9 @@ export const useCheckStore = create((set, get) => ({
   // Actions
   startCheck: (sessionId, checkId = null, paperSource = null, sourceType = null, paperTitle = null) => {
     logger.info('CheckStore', `Starting check with session ${sessionId}, checkId ${checkId}, sourceType ${sourceType}, paperTitle ${paperTitle}`)
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:check-started', { detail: { sessionId, checkId } }))
+    } catch { /* SSR guard */ }
     // Record session→check mapping before overwriting state
     const prevMap = get().sessionToCheckMap
     const newMap = checkId ? { ...prevMap, [sessionId]: checkId } : prevMap

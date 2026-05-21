@@ -37,9 +37,18 @@ export default function UsageChip() {
 
   useEffect(() => {
     reload()
-    const onCheckDone = () => reload()
-    window.addEventListener('refchecker:check-completed', onCheckDone)
-    return () => window.removeEventListener('refchecker:check-completed', onCheckDone)
+    // Refresh on every check boundary AND poll while one is running.
+    const refresh = () => reload()
+    window.addEventListener('refchecker:check-started', refresh)
+    window.addEventListener('refchecker:check-completed', refresh)
+    // Light polling — the backend resets counters on each new check, so the
+    // chip needs to climb visibly during the run.
+    const poll = setInterval(reload, 5000)
+    return () => {
+      window.removeEventListener('refchecker:check-started', refresh)
+      window.removeEventListener('refchecker:check-completed', refresh)
+      clearInterval(poll)
+    }
   }, [])
 
   if (!snap || !snap.totals || snap.totals.calls === 0) return null

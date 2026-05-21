@@ -676,6 +676,15 @@ class ProgressRefChecker:
             Dictionary with paper title, references, and results
         """
         try:
+            # Reset per-check counters so the UI token meter reflects what
+            # THIS check spent, not lifetime totals across the session.
+            try:
+                from . import usage_tracker as _usage
+                _usage.reset_usage()
+            except Exception as _e:
+                logger.debug("Could not reset usage tracker: %s", _e)
+            self._global_cache_writes = 0
+
             # Step 1: Get paper content
             await self.emit_progress("started", {
                 "message": "Starting reference check...",
@@ -876,10 +885,14 @@ class ProgressRefChecker:
                     
                     # Fall back to PDF extraction if no references from source files
                     if not arxiv_source_references:
-                        # Download PDF - run in thread (use cross-platform temp directory)
+                        # Download PDF - run in thread (use cross-platform temp directory).
+                        # arxiv lib's Result.download_pdf has been deprecated/removed in
+                        # newer versions ("Use result.pdf_url directly"). Pull the URL
+                        # off the Result and run it through our own downloader instead.
                         pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
                         if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
-                            await asyncio.to_thread(paper.download_pdf, filename=pdf_path)
+                            pdf_url = getattr(paper, 'pdf_url', None) or f"https://arxiv.org/pdf/{arxiv_id}"
+                            await asyncio.to_thread(download_pdf, pdf_url, pdf_path)
 
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')
