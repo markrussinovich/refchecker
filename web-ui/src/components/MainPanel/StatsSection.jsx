@@ -7,6 +7,9 @@ import {
   exportResultsAsJsonl,
   exportResultsAsCsv,
   exportResultsAsRIS,
+  exportDiffAsMarkdown,
+  exportDiffAsCsv,
+  exportCorrectedListAsStyle,
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
   downloadAsFile
@@ -22,6 +25,10 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
   const [sortMode, setSortMode] = useState('citation')
+  // 'original' = export references as RefChecker saw them (the "report" view)
+  // 'corrected' = apply every verifier suggestion before exporting
+  // 'diff' = side-by-side original-vs-corrected listing
+  const [exportMode, setExportMode] = useState('original')
   const exportMenuRef = useRef(null)
 
   // Close export menu when clicking outside
@@ -120,25 +127,50 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     const sortedRefs = sortReferencesForExport(references, sortMode)
     const exportData = { paperTitle, paperSource, stats, references: sortedRefs }
 
+    // 'diff' mode short-circuits format: there are only two file shapes
+    // (markdown and csv) that make sense for a side-by-side report.
+    if (exportMode === 'diff') {
+      if (format === 'csv') {
+        downloadAsFile(exportDiffAsCsv({ references: sortedRefs }), `${baseFilename}-diff.csv`, 'text/csv')
+      } else {
+        downloadAsFile(exportDiffAsMarkdown({ paperTitle, references: sortedRefs }), `${baseFilename}-diff.md`, 'text/markdown')
+      }
+      return
+    }
+
+    // 'corrected' mode rewrites each ref with the verifier's accepted
+    // suggestion before formatting in the chosen style.
+    const correctedRefs = exportMode === 'corrected'
+      ? sortedRefs.map(r => {
+          const c = r.corrected_reference
+          if (!c || typeof c !== 'object') return r
+          const next = { ...r }
+          for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+            if (c[k] != null && c[k] !== '') next[k] = c[k]
+          }
+          return next
+        })
+      : sortedRefs
+    const data = { paperTitle, paperSource, stats, references: correctedRefs }
+
     switch (format) {
       case 'markdown':
-        downloadAsFile(exportResultsAsMarkdown(exportData), `${baseFilename}.md`, 'text/markdown')
+        downloadAsFile(exportResultsAsMarkdown(data), `${baseFilename}.md`, 'text/markdown')
         break
       case 'text':
-        downloadAsFile(exportResultsAsPlainText(exportData), `${baseFilename}.txt`, 'text/plain')
+        downloadAsFile(exportResultsAsPlainText(data), `${baseFilename}.txt`, 'text/plain')
         break
       case 'bibtex':
-        downloadAsFile(exportResultsAsBibtex(exportData), `${baseFilename}.bib`, 'application/x-bibtex')
+        downloadAsFile(exportResultsAsBibtex(data), `${baseFilename}.bib`, 'application/x-bibtex')
         break
       case 'ris':
-        // RIS imports directly into Zotero / Mendeley / EndNote / Rayyan / Papers.
-        downloadAsFile(exportResultsAsRIS(exportData), `${baseFilename}.ris`, 'application/x-research-info-systems')
+        downloadAsFile(exportResultsAsRIS(data), `${baseFilename}.ris`, 'application/x-research-info-systems')
         break
       case 'jsonl':
-        downloadAsFile(exportResultsAsJsonl(exportData), `${baseFilename}.jsonl`, 'application/x-ndjson')
+        downloadAsFile(exportResultsAsJsonl(data), `${baseFilename}.jsonl`, 'application/x-ndjson')
         break
       case 'csv':
-        downloadAsFile(exportResultsAsCsv(exportData), `${baseFilename}.csv`, 'text/csv')
+        downloadAsFile(exportResultsAsCsv(data), `${baseFilename}.csv`, 'text/csv')
         break
     }
   }
@@ -229,21 +261,39 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
                   minWidth: '220px',
                 }}
               >
-                <div className="px-3 py-1 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                    Sort
+                <div className="px-3 py-1 border-b space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                      What to export
+                    </div>
+                    <select
+                      value={exportMode}
+                      onChange={(e) => setExportMode(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full px-2 py-1 rounded text-xs border"
+                      style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                    >
+                      <option value="original">Original bibliography (as cited)</option>
+                      <option value="corrected">Corrected bibliography (verifier-fixed)</option>
+                      <option value="diff">Side-by-side diff (cited vs corrected)</option>
+                    </select>
                   </div>
-                  <select
-                    value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-full px-2 py-1 rounded text-xs border"
-                    style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
-                  >
-                    {REFERENCE_SORT_MODES.map(m => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                      Sort
+                    </div>
+                    <select
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-full px-2 py-1 rounded text-xs border"
+                      style={{ background: 'var(--color-bg-secondary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                    >
+                      {REFERENCE_SORT_MODES.map(m => (
+                        <option key={m.id} value={m.id}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <button
                   onClick={() => handleExport('markdown')}

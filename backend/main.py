@@ -5016,7 +5016,15 @@ async def list_seen_references(
     offset = max(0, int(offset or 0))
     rows = await db.list_verified_references(limit=limit, offset=offset, q=q)
     total = await db.count_verified_references()
-    return {"total": total, "limit": limit, "offset": offset, "items": rows}
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": rows,
+        # Expose where the cache lives so users can spot a path mismatch
+        # between an old install's cache_dir and the new install.
+        "db_path": str(getattr(db, "db_path", "")),
+    }
 
 
 @app.delete("/api/references/seen")

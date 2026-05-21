@@ -14,6 +14,7 @@ import { openExternal } from '../../utils/tauriBridge'
 export default function SeenReferencesView() {
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
+  const [dbPath, setDbPath] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [q, setQ] = useState('')
@@ -27,6 +28,7 @@ export default function SeenReferencesView() {
       const res = await listSeenReferences(PAGE, override.offset ?? offset, override.q ?? q)
       setItems(res.data.items || [])
       setTotal(res.data.total || 0)
+      setDbPath(res.data.db_path || '')
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Load failed')
       setItems([])
@@ -94,6 +96,11 @@ export default function SeenReferencesView() {
           <strong style={{ color: 'var(--color-text-primary)' }}>{total}</strong> unique references seen
           {q ? ` (filtered: ${items.length} shown)` : items.length < total ? ` (showing ${items.length})` : ''}
           {' · '}<span style={{ color: 'var(--color-success, #22c55e)' }}>{verifiedCount} verified on this page</span>
+          {dbPath && (
+            <div style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
+              <span title={dbPath}>Cache file: <code>{dbPath.split('/').slice(-2).join('/')}</code></span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input

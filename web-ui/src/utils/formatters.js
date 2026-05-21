@@ -1305,3 +1305,90 @@ export function sortReferencesForExport(references, mode = 'citation') {
       return arr.sort((a, b) => (a.index || 0) - (b.index || 0))
   }
 }
+
+// ── Original-vs-corrected diff exports ──────────────────────────────
+// Side-by-side view of "as cited" → "corrected" for every reference
+// that the verifier suggested a fix for. Useful when handing the
+// list to a co-author or to a journal-side editor.
+
+function _citedShellForDiff(ref) {
+  return {
+    title: ref.title,
+    authors: ref.authors,
+    year: ref.year,
+    venue: ref.venue,
+    doi: ref.doi,
+    arxiv_id: ref.arxiv_id,
+    cited_url: ref.cited_url,
+  }
+}
+
+function _correctedShellForDiff(ref) {
+  const c = ref.corrected_reference || {}
+  return {
+    title: c.title || ref.title,
+    authors: c.authors || ref.authors,
+    year: c.year || ref.year,
+    venue: c.venue || ref.venue,
+    doi: c.doi || ref.doi,
+    arxiv_id: c.arxiv_id || ref.arxiv_id,
+  }
+}
+
+function _refHasCorrection(ref) {
+  const c = ref.corrected_reference
+  if (!c || typeof c !== 'object') return false
+  return Object.keys(c).some(k => c[k] != null && c[k] !== '')
+}
+
+export function exportDiffAsMarkdown({ paperTitle, references, style = 'apa', options = null }) {
+  const lines = []
+  if (paperTitle) lines.push(`# Reference corrections for "${paperTitle}"\n`)
+  let n = 0
+  for (let i = 0; i < (references || []).length; i++) {
+    const r = references[i]
+    if (!_refHasCorrection(r)) continue
+    n += 1
+    const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
+    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+    lines.push(`## [${i + 1}]`)
+    lines.push(`**As cited:** ${cited}`)
+    lines.push('')
+    lines.push(`**Corrected:** ${corrected}`)
+    if ((r.errors || []).length) {
+      const issues = r.errors.map(e => e.error_details || e.error_type).filter(Boolean).join('; ')
+      if (issues) lines.push(`\n_Issues: ${issues}_`)
+    }
+    lines.push('')
+  }
+  if (n === 0) lines.push('_No corrections to export — every reference verified clean._')
+  return lines.join('\n')
+}
+
+export function exportDiffAsCsv({ references, style = 'apa', options = null }) {
+  const header = ['index', 'status', 'as_cited', 'corrected', 'issues'].join(',')
+  const rows = [header]
+  for (let i = 0; i < (references || []).length; i++) {
+    const r = references[i]
+    if (!_refHasCorrection(r)) continue
+    const cited = exportReferenceAsStyle(_citedShellForDiff(r), style, i, options)
+    const corrected = exportReferenceAsStyle(_correctedShellForDiff(r), style, i, options)
+    const issues = (r.errors || []).map(e => e.error_details || e.error_type).filter(Boolean).join(' | ')
+    rows.push([i + 1, r.status || '', _csvField(cited), _csvField(corrected), _csvField(issues)].join(','))
+  }
+  return rows.join('\n')
+}
+
+export function exportCorrectedListAsStyle(references, style, options = null) {
+  // The "corrected list" is the bibliography rewritten with every accepted
+  // verifier suggestion applied — used for the "I trust the fixes, give
+  // me the fixed bib" export.
+  return (references || [])
+    .map((r, i) => exportReferenceAsStyle(
+      _refHasCorrection(r) ? { ...r, ..._correctedShellForDiff(r) } : r,
+      style,
+      i,
+      options,
+    ))
+    .join('\n\n')
+}

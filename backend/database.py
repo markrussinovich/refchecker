@@ -1663,9 +1663,12 @@ class Database:
     def reference_identity_key(cls, ref: Dict[str, Any]) -> Optional[str]:
         """Pick the canonical identity key for a reference.
 
-        Order: DOI -> ArXiv ID -> (normalized title + year). Returns None
-        when no identifier is good enough to safely dedupe on (e.g. just a
-        title with no year).
+        Order: DOI -> ArXiv ID -> (normalized title + year) ->
+        normalized title alone (must be at least 12 chars to be useful).
+        Title-only fallback is intentionally permissive so medical /
+        humanities papers that cite without DOIs still populate the
+        Seen References library; collisions on a very short title are
+        worth less than coverage on a long, specific one.
         """
         if not isinstance(ref, dict):
             return None
@@ -1679,6 +1682,8 @@ class Database:
         year = ref.get("year")
         if title and year:
             return f"title:{title}:{year}"
+        if title and len(title) >= 12:
+            return f"title:{title}"
         return None
 
     async def upsert_verified_reference(self, ref: Dict[str, Any]) -> Optional[str]:
