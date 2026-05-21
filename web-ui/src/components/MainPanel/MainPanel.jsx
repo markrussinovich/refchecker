@@ -15,6 +15,7 @@ import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
+import { applyStatusFilter } from '../../utils/referenceStatus'
 
 /**
  * Main panel containing input, status, stats, and references
@@ -28,18 +29,20 @@ export default function MainPanel() {
   const [resultsTab, setResultsTab] = useState('references') // references | corrections | graph
   const [globalView, setGlobalView] = useState(null) // 'seen' | null — overrides the per-check views when set
   
-  const { 
-    status: checkStoreStatus, 
-    references: checkStoreRefs, 
-    stats: checkStoreStats, 
+  const {
+    status: checkStoreStatus,
+    references: checkStoreRefs,
+    stats: checkStoreStats,
     currentCheckId,
-    clearStatusFilter 
+    clearStatusFilter,
+    statusFilter,
   } = useCheckStore(useShallow(s => ({
     status: s.status,
     references: s.references,
     stats: s.stats,
     currentCheckId: s.currentCheckId,
     clearStatusFilter: s.clearStatusFilter,
+    statusFilter: s.statusFilter,
   })))
   const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
 
@@ -305,12 +308,25 @@ export default function MainPanel() {
               role="tablist"
               aria-label="Results view"
             >
-              {[
-                ['references', 'References', displayRefs?.length || 0],
-                ['corrections', 'Corrections', (displayRefs || []).filter(r => (r.errors || []).length || (r.warnings || []).length || r.status === 'unverified' || r.status === 'hallucinated').length],
-                ['graph', 'Graph', displayRefs?.length || 0],
-                ['similar', 'Similar Papers', null],
-              ].map(([key, label, count]) => {
+              {(() => {
+                // Reflect the active Summary-chip filter in the tab pill
+                // counts, not just in the in-page header.
+                const refsForCount = (statusFilter || []).length
+                  ? applyStatusFilter(displayRefs, statusFilter, isComplete)
+                  : (displayRefs || [])
+                const correctionsCount = (refsForCount || []).filter(r =>
+                  (r.errors || []).length ||
+                  (r.warnings || []).length ||
+                  r.status === 'unverified' ||
+                  r.status === 'hallucinated'
+                ).length
+                return [
+                  ['references', 'References', refsForCount.length],
+                  ['corrections', 'Corrections', correctionsCount],
+                  ['graph', 'Graph', refsForCount.length],
+                  ['similar', 'Similar Papers', null],
+                ]
+              })().map(([key, label, count]) => {
                 const active = resultsTab === key
                 return (
                   <button

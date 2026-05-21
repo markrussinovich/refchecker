@@ -41,18 +41,57 @@ export function formatDate(date) {
  * @param {string[]} authors - Array of author names
  * @returns {string} Formatted author string
  */
+/**
+ * Coerce an author entry of unknown shape into a display string.
+ * Backends return a mix of bare strings ("Smith, J."), dicts
+ * ({name: "..."}), and OpenAlex-style nested dicts ({author: {display_name}}).
+ * Without this, .join(', ') on dict entries produces "[object Object]".
+ */
+function _authorToString(a) {
+  if (a == null) return ''
+  if (typeof a === 'string') return a
+  if (typeof a !== 'object') return String(a)
+  if (typeof a.name === 'string') return a.name
+  if (typeof a.full_name === 'string') return a.full_name
+  if (typeof a.display_name === 'string') return a.display_name
+  if (a.author && typeof a.author === 'object') {
+    if (typeof a.author.display_name === 'string') return a.author.display_name
+    if (typeof a.author.name === 'string') return a.author.name
+  }
+  // Family + given (CSL JSON style)
+  if (a.family || a.given) return [a.given, a.family].filter(Boolean).join(' ')
+  return ''
+}
+
+export function normalizeAuthors(authors) {
+  if (!authors) return []
+  if (typeof authors === 'string') {
+    // Sometimes backend returns a JSON-string of an array
+    if (authors.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(authors)
+        if (Array.isArray(parsed)) return parsed.map(_authorToString).filter(Boolean)
+      } catch { /* fall through to comma split */ }
+    }
+    return authors.split(/,\s*|\s+and\s+/i).map(s => s.trim()).filter(Boolean)
+  }
+  if (!Array.isArray(authors)) return []
+  return authors.map(_authorToString).filter(Boolean)
+}
+
 export function formatAuthors(authors, truncate = false) {
-  if (!authors || authors.length === 0) return 'Unknown authors'
-  if (authors.length === 1) return authors[0]
-  if (authors.length === 2) return `${authors[0]} and ${authors[1]}`
+  const list = normalizeAuthors(authors)
+  if (list.length === 0) return 'Unknown authors'
+  if (list.length === 1) return list[0]
+  if (list.length === 2) return `${list[0]} and ${list[1]}`
   if (truncate) {
-    return `${authors[0]} et al.`
+    return `${list[0]} et al.`
   }
   // Show all authors with "et al." suffix if list is very long
-  if (authors.length > 10) {
-    return `${authors.slice(0, 10).join(', ')}, et al.`
+  if (list.length > 10) {
+    return `${list.slice(0, 10).join(', ')}, et al.`
   }
-  return authors.join(', ')
+  return list.join(', ')
 }
 
 /**

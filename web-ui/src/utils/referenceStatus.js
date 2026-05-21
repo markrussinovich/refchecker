@@ -268,3 +268,44 @@ export const buildReferenceSummary = ({ stats = {}, references = [], isComplete 
     },
   }
 }
+/**
+ * Apply the multi-select status filter (the Summary chips) to a list of
+ * references and return the subset that matches.
+ *
+ * Shared between the References tab (so the tab pill count matches the
+ * inline "Showing X" label) and the per-tab content list.
+ */
+export function applyStatusFilter(references, statusFilter, isCheckComplete = false) {
+  const filters = (statusFilter || []).map(f => String(f).toLowerCase())
+  if (filters.length === 0) return references || []
+  return (references || []).filter(ref => {
+    const status = (getEffectiveReferenceStatus(ref, isCheckComplete) || '').toLowerCase()
+    const hasMetaMatch = llmFoundMetadataMatchesCitation(ref)
+    return filters.some(filter => {
+      switch (filter) {
+        case 'verified':
+          return status === 'verified' || status === 'suggestion'
+        case 'error':
+          if (status === 'hallucination') return false
+          if (hasMetaMatch) return false
+          return (ref.errors || []).some(e => e.error_type !== 'unverified')
+        case 'warning':
+          if (status === 'hallucination') return false
+          if (hasMetaMatch) return false
+          return (ref.warnings || []).length > 0
+        case 'suggestion':
+          return (ref.suggestions || []).length > 0
+        case 'unverified':
+          if (status === 'checking') return false
+          if (status === 'unverified' || status === 'hallucination') return true
+          if ((ref.errors || []).some(e => e.error_type === 'unverified')) return true
+          return ref.hallucination_assessment?.verdict === 'LIKELY' && !hasMetaMatch
+        case 'hallucination':
+          if (status === 'hallucination') return true
+          return ref.hallucination_assessment?.verdict === 'LIKELY' && !hasMetaMatch
+        default:
+          return status === filter
+      }
+    })
+  })
+}

@@ -1,9 +1,12 @@
 import { useState, useRef, useEffect, memo } from 'react'
 import {
   formatAuthors,
+  normalizeAuthors,
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
   exportReferenceAsBibtex,
+  exportReferenceAsStyle,
+  CITATION_STYLE_DEFAULTS,
   copyToClipboard
 } from '../../utils/formatters'
 import {
@@ -11,6 +14,7 @@ import {
   llmFoundMetadataMatchesCitation,
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import { useStyleStore } from '../../stores/useStyleStore'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -211,6 +215,11 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   const assessment = reference.hallucination_assessment || {}
   const foundMetadataMatchesCitation = llmFoundMetadataMatchesCitation(reference)
   const status = getEffectiveReferenceStatus(reference, isCheckComplete)
+
+  // Subscribe to the shared citation-style store so the card re-renders
+  // when the user changes the style picker on the References tab.
+  const activeFormat = useStyleStore(s => s.format)
+  const activeStyleOptions = useStyleStore(s => s.styleOptions)
 
   // Export menu state
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -538,8 +547,38 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           </div>
 
+          {/* Styled citation preview — shown only when the user picked a
+              non-default style on the References tab. Renders the reference
+              once in the chosen format (APA / IEEE / BibTeX / custom) so
+              the picker is actually visibly active. The structured
+              author/venue/year rows below stay as-is so the per-field
+              status badges keep working. */}
+          {(() => {
+            if (!activeFormat || activeFormat === 'plaintext') return null
+            const styleDefaults = CITATION_STYLE_DEFAULTS[activeFormat] || {}
+            const effectiveOpts = { ...styleDefaults, ...(activeStyleOptions || {}) }
+            let rendered = ''
+            try { rendered = exportReferenceAsStyle(reference, activeFormat, index, effectiveOpts) } catch { return null }
+            if (!rendered) return null
+            return (
+              <div
+                className="mt-1 mb-1 px-2 py-1 rounded text-xs"
+                style={{
+                  background: 'var(--color-bg-tertiary)',
+                  border: '1px solid var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  fontFamily: activeFormat === 'bibtex' || activeFormat === 'bibitem' ? 'ui-monospace, monospace' : undefined,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {rendered}
+              </div>
+            )
+          })()}
+
           {/* Authors */}
-          {reference.authors?.length > 0 && (
+          {normalizeAuthors(reference.authors).length > 0 && (
             <div
               style={{ color: 'var(--color-text-secondary)' }}
             >

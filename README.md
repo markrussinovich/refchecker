@@ -36,7 +36,7 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.7)
+### What the desktop app adds (v0.6.8)
 
 - **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
 - **Global reference library (read + write, every code path).** Every verified reference — including ones that flow through post-processing rewriters like the hallucination resolver — is now persisted to the global identity cache (DOI / arXiv / normalized title key) via a single `emit_progress` hook. Previous builds only persisted along one of six code paths, which left a lot of refs uncached. Future verifications consult the cache automatically for instant matches. New *Seen References (library)* view at the top of the main panel.
@@ -56,6 +56,9 @@
 - **Token meter shows per-kind breakdown + cascade savings hint.** Hover the chip for tokens grouped by call kind (extraction / hallucination / suggest-alt / web-search). When cascade saved measurable cost vs an LLM-only path, the savings are estimated and surfaced at the bottom of the tooltip.
 - **Desktop version visible in Settings.** Settings → footer now shows both the desktop bundle version (e.g. `Desktop v0.6.6`) and the underlying Python engine version separately so you can tell at a glance which build you're on.
 - **Reference-manager export (RIS).** New *Export → RIS* option produces a `.ris` file that imports directly into **Zotero**, **EndNote**, **Mendeley**, **Rayyan**, **Papers**, and **RefWorks** — including the verifier's corrected metadata (DOI, arXiv ID, fixed authors) instead of the wrong-as-cited values. The export menu also gets a *Sort* control: citation order, alphabetical (first author), or year ascending/descending.
+- **References tab honors the citation-style picker live.** Pick APA / IEEE / BibTeX / your custom template in the References-tab header and each card renders a styled preview line above the structured metadata. Title / authors / venue rows stay below so per-field badges keep working.
+- **Tab pill counts respect Summary filters.** Click "Errors" in the Summary chips and the References tab pill drops to "3" instead of staying at the full bibliography count — so the tab header matches the in-page header.
+- **Author rendering no longer leaks `[object Object]`.** `formatAuthors` now normalises every author shape we've seen from upstream (bare strings, `{name}`, `{display_name}`, OpenAlex `{author:{display_name}}`, CSL JSON `{family, given}`, JSON-encoded arrays).
 - **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
 
 ---
