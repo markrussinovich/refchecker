@@ -3,6 +3,12 @@
   "identifier": "default",
   "description": "Default capability set for the main window",
   "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
   "permissions": [
     "core:default",
     "core:window:default",
@@ -15,13 +21,14 @@
     "core:menu:default",
     "core:tray:default",
     "core:webview:allow-internal-toggle-devtools",
+    "shell:default",
     {
       "identifier": "shell:allow-open",
       "allow": [
-        { "url": "https://**" },
-        { "url": "http://**" },
-        { "url": "mailto:**" },
-        { "url": "tel:**" }
+        { "url": "^https?://.+" },
+        { "url": "^mailto:.+" },
+        { "url": "^tel:.+" },
+        { "url": "^file://.+" }
       ]
     },
     "dialog:default",

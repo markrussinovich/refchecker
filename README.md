@@ -36,7 +36,7 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.18)
+### What the desktop app adds (v0.6.19)
 
 - **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
 - **Global reference library (read + write, every code path).** Every verified reference — including ones that flow through post-processing rewriters like the hallucination resolver — is now persisted to the global identity cache (DOI / arXiv / normalized title key) via a single `emit_progress` hook. Previous builds only persisted along one of six code paths, which left a lot of refs uncached. Future verifications consult the cache automatically for instant matches. New *Seen References (library)* view at the top of the main panel.
