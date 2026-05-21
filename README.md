@@ -36,7 +36,7 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.5)
+### What the desktop app adds (v0.6.6)
 
 - **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
 - **Global reference library (read + write).** Every verified reference, deduped by DOI / arXiv / normalized title, is kept across checks AND consulted automatically by future verifications — repeat references resolve instantly, no API call. New *Seen References (library)* view at the top of the main panel.
@@ -50,6 +50,11 @@
 - **Seen References — live + clearable.** The library auto-refreshes whenever a check finishes (newly-verified refs appear immediately) and a *Clear cache* button wipes the whole identity table when you need a fresh start.
 - **LLM token + cost meter.** Inline chip in the Summary header tracks total tokens and an estimated USD cost across every provider you've used (OpenAI / Anthropic / Gemini) with a per-provider breakdown on hover. Counters persist across restarts via `llm_usage.json`. Cost rates are list-price USD-per-1K-tokens, hand-curated per model.
 - **Smoother citation graph.** Labels are now hover-on-demand (one node at a time, source always labelled) so the canvas stays readable; hovered node gets a soft outline ring. Slower force-cooldown lets the network breathe.
+- **Bullet-proof external links.** *Open in browser* / GitHub / DOI / arXiv buttons now use an explicit `shell:allow-open` scope (`https://**`, `http://**`, `mailto:**`, `tel:**`) so the Tauri shell plugin actually opens them — the default scope was silently empty.
+- **Apply Fix actually moves the citation-health chip.** Accepting a correction now merges the verifier's suggested metadata back into the stored reference before re-verifying, so the ref flips to *verified* and the badge updates in real time. Apply-all-visible parallelises the re-verifies at 4 in flight.
+- **Better "Similar Papers" diagnostics.** When nothing comes back, the panel now shows which sources were tried and how many candidates each produced, and explicit hints for the common causes (rate limits, refs without DOIs, no web-search-capable LLM provider).
+- **Token meter shows per-kind breakdown + cascade savings hint.** Hover the chip for tokens grouped by call kind (extraction / hallucination / suggest-alt / web-search). When cascade saved measurable cost vs an LLM-only path, the savings are estimated and surfaced at the bottom of the tooltip.
+- **Desktop version visible in Settings.** Settings → footer now shows both the desktop bundle version (e.g. `Desktop v0.6.6`) and the underlying Python engine version separately so you can tell at a glance which build you're on.
 - **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
 
 ---

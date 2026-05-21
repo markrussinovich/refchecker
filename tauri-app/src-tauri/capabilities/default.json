@@ -15,8 +15,15 @@
     "core:menu:default",
     "core:tray:default",
     "core:webview:allow-internal-toggle-devtools",
-    "shell:default",
-    "shell:allow-open",
+    {
+      "identifier": "shell:allow-open",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "http://**" },
+        { "url": "mailto:**" },
+        { "url": "tel:**" }
+      ]
+    },
     "dialog:default",
     "dialog:allow-message",
     "dialog:allow-ask",

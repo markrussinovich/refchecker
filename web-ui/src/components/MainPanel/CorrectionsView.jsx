@@ -314,7 +314,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     setDecision(k, { status: 'applied' })
     if (selectedCheckId) {
       try {
-        await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i))
+        await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true })
         await useHistoryStore.getState().selectCheck?.(selectedCheckId)
       } catch (e) {
         /* re-verify is best-effort; the apply still stands */
@@ -341,7 +341,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       const worker = async () => {
         while (queue.length) {
           const { ref, i } = queue.shift()
-          try { await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i)) } catch {}
+          try { await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true }) } catch {}
         }
       }
       await Promise.all([worker(), worker(), worker(), worker()])

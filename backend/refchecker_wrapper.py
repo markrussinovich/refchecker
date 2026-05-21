@@ -1919,6 +1919,11 @@ class ProgressRefChecker:
                             result.get("title"), result.get("year"),
                             result.get("status"), result.get("doi"), result.get("arxiv_id"),
                         )
+                    else:
+                        # Track success count so we can surface it in the UI
+                        if not hasattr(self, "_global_cache_writes"):
+                            self._global_cache_writes = 0
+                        self._global_cache_writes += 1
                 except Exception as _e:
                     logger.warning("Verified-reference upsert failed: %s", _e)
                 await self.emit_progress("reference_result", result)

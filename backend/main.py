@@ -4108,10 +4108,19 @@ async def remove_reference_from_check(
     return {"removed": True, "total_refs": len(refs)}
 
 
+class _VerifySingleRequest(BaseModel):
+    # When true, merge ``corrected_reference`` fields into the stored ref
+    # before re-verifying. The Corrections-tab "Apply fix" button hits
+    # this path so the verifier runs against the FIXED metadata (and the
+    # ref typically flips to verified, which moves the health badge).
+    apply_correction: bool = False
+
+
 @app.post("/api/history/{check_id}/references/{ref_id}/verify")
 async def verify_single_reference(
     check_id: int,
     ref_id: str,
+    body: Optional[_VerifySingleRequest] = None,
     current_user: UserInfo = Depends(require_user),
 ):
     """Run the verifier on a single reference and persist the result.
@@ -4119,6 +4128,11 @@ async def verify_single_reference(
     Lets the user re-verify a manually-added or edited reference without
     rerunning the whole check. We instantiate EnhancedHybridReferenceChecker
     directly (cheap — no LLM init) and replace the stored ref in-place.
+
+    When called with ``apply_correction: true``, the stored ref's metadata
+    is first overwritten with its ``corrected_reference`` (the verifier's
+    own suggestion) — that way re-verifying produces the metadata the user
+    just accepted, and the citation-health score moves accordingly.
     """
     user_id = get_user_id_filter(current_user)
     refs = await db.get_check_references(check_id, user_id=user_id)
@@ -4128,6 +4142,18 @@ async def verify_single_reference(
     if idx is None:
         raise HTTPException(status_code=404, detail="Reference not found in check")
     target = refs[idx]
+
+    if body and body.apply_correction:
+        corrected = target.get("corrected_reference") or {}
+        if isinstance(corrected, dict) and corrected:
+            for k in ("title", "authors", "year", "venue", "doi", "arxiv_id"):
+                v = corrected.get(k)
+                if v not in (None, "", []):
+                    target[k] = v
+            # Drop the cached "errors / warnings" from the previous run so
+            # the badge isn't penalised by stale issues that the fix resolved.
+            target["errors"] = []
+            target["warnings"] = []
 
     # Try the global identity cache first — same shortcut the live pipeline
     # uses. If we hit, we skip the network call entirely.
@@ -4796,19 +4822,11 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
 
     # Keep candidates that actually verified or hit cache OR have multi-source backing.
     # Filter out lone-web/LLM ghosts that nobody could confirm at all.
-    keep = []
-    for o in out:
-        if o["was_verified"]:
-            keep.append(o)
-        elif len(o["sources"]) >= 2:
-            keep.append(o)
-        elif (o["shared_with_source"] or 0) > 0:
-            keep.append(o)
-    # If filtering wiped everything, fall back to all of them so the UI shows
-    # something (with verified_status='unverified' the user can still inspect).
-    final = keep if keep else out
-
-    # Re-rank: verified first, then shared, then multi-source
+    # Always show candidates if we got any — even unverified single-source
+    # results are useful for "what else should I read?". The previous
+    # filter dropped lone-LLM/web ghosts but that left users with an empty
+    # tab when no source could be cross-verified, which is worse.
+    final = list(out)
     final.sort(
         key=lambda o: (
             1 if o["was_verified"] else 0,
@@ -4817,7 +4835,18 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
         ),
         reverse=True,
     )
-    return {"source_paper": req.paper_title, "candidates": final[:limit]}
+    # Tell the UI which sources actually produced anything, so the user
+    # can spot a misconfigured key instead of an empty mystery list.
+    source_counts: Dict[str, int] = {}
+    for o in out:
+        for s in (o.get("sources") or []):
+            source_counts[s] = source_counts.get(s, 0) + 1
+    return {
+        "source_paper": req.paper_title,
+        "candidates": final[:limit],
+        "source_counts": source_counts,
+        "total_candidates": len(out),
+    }
 
 
 class _CitationGraphRequest(BaseModel):

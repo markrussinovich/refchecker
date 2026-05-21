@@ -14,6 +14,7 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [candidates, setCandidates] = useState([])
+  const [sourceCounts, setSourceCounts] = useState({})
   const [loaded, setLoaded] = useState(false)
 
   const refsForRequest = (references || [])
@@ -29,6 +30,7 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
         limit: 5,
       })
       setCandidates(res.data?.candidates || [])
+      setSourceCounts(res.data?.source_counts || {})
       setLoaded(true)
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Lookup failed')
@@ -79,9 +81,38 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
       )}
 
       {loaded && candidates.length === 0 && !loading && (
-        <div className="text-xs p-3 rounded border text-center"
+        <div className="text-xs p-3 rounded border"
           style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}>
-          Nothing surfaced — try again after a Semantic Scholar API key is configured (Settings → API Keys).
+          <div className="mb-1">Nothing surfaced from any source.</div>
+          {Object.keys(sourceCounts).length === 0 ? (
+            <div style={{ color: 'var(--color-text-muted)' }}>
+              All four sources returned empty. Common causes:
+              <ul className="list-disc pl-5 mt-1 space-y-0.5">
+                <li>Semantic Scholar / OpenAlex rate-limited — set <code>SEMANTIC_SCHOLAR_API_KEY</code> in Settings → API Keys for faster, ungated calls</li>
+                <li>Your references don't carry DOIs / arXiv IDs that S2 or OpenAlex can resolve</li>
+                <li>The configured LLM provider doesn't have web-search enabled (Anthropic / OpenAI / Gemini only)</li>
+              </ul>
+            </div>
+          ) : (
+            <div style={{ color: 'var(--color-text-muted)' }}>
+              Sources tried:{' '}
+              {Object.entries(sourceCounts).map(([s, n]) => (
+                <span key={s} className="mr-2">
+                  {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}: {n}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {loaded && candidates.length > 0 && Object.keys(sourceCounts).length > 0 && (
+        <div className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>
+          Pulled from:{' '}
+          {Object.entries(sourceCounts).map(([s, n], i) => (
+            <span key={s}>
+              {i > 0 ? ' · ' : ''}{s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s} ({n})
+            </span>
+          ))}
         </div>
       )}
 

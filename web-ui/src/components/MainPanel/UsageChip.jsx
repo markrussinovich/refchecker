@@ -47,11 +47,48 @@ export default function UsageChip() {
   const { totals, providers = [] } = snap
   const tokens = (totals.input_tokens || 0) + (totals.output_tokens || 0)
   const cost = fmtUsd(totals.cost_usd)
-  const tooltip = providers.map(p => {
+  const tooltipLines = []
+  for (const p of providers) {
     const total = (p.input_tokens || 0) + (p.output_tokens || 0)
     const c = fmtUsd(p.cost_usd)
-    return `${p.provider}/${p.model}: ${fmtTokens(total)} tokens${c ? ` · ${c}` : ' · cost unknown'} (${p.calls} calls)`
-  }).join('\n')
+    tooltipLines.push(`${p.provider}/${p.model}: ${fmtTokens(total)} tokens${c ? ` · ${c}` : ' · cost unknown'} (${p.calls} calls)`)
+    const byKind = p.by_kind || {}
+    for (const [kind, k] of Object.entries(byKind)) {
+      const kt = (k.input || 0) + (k.output || 0)
+      tooltipLines.push(`  • ${kind}: ${fmtTokens(kt)} tok / ${k.calls} call${k.calls === 1 ? '' : 's'}`)
+    }
+  }
+  // Rough "what would LLM-only mode have cost" estimate: the extraction
+  // path is the one cascade saves on. If extraction tokens are well
+  // below total (because cascade skipped the deterministic refs), we
+  // approximate the LLM-only would have sent the whole bibliography
+  // through the LLM at roughly the same per-ref rate as the cascade
+  // tail did. This is a heuristic, not an exact figure.
+  let savingsHint = null
+  if (totals.cost_usd && totals.cost_usd > 0) {
+    // Assume cascade saved roughly 2-4× the current spend on extraction.
+    const extractionCost = providers.reduce((acc, p) => {
+      const ext = p.by_kind?.extraction
+      if (!ext || !p.rate_known) return acc
+      // We don't expose per-kind cost; approximate from extraction's token share
+      const total = (p.input_tokens || 0) + (p.output_tokens || 0)
+      if (!total) return acc
+      const extToks = (ext.input || 0) + (ext.output || 0)
+      const share = extToks / total
+      return acc + (p.cost_usd || 0) * share
+    }, 0)
+    if (extractionCost > 0) {
+      // LLM-only would touch every ref → assume ~3× extraction tokens
+      const wouldveBeen = totals.cost_usd + extractionCost * 2
+      const saved = wouldveBeen - totals.cost_usd
+      if (saved > 0.001) {
+        savingsHint = `~${fmtUsd(saved)} saved vs LLM-only (cascade)`
+        tooltipLines.push('')
+        tooltipLines.push(savingsHint)
+      }
+    }
+  }
+  const tooltip = tooltipLines.join('\n')
 
   return (
     <span

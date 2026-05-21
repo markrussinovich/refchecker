@@ -1124,8 +1124,15 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             ))}
           </nav>
 
-          <div className="px-4 mt-6 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Version {version || '—'}
+          <div className="px-4 mt-6 text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+            {appVersion && (
+              <div>
+                Desktop <span style={{ color: 'var(--color-text-secondary)' }}>v{appVersion}</span>
+              </div>
+            )}
+            <div>
+              {appVersion ? 'Engine' : 'Version'} {version || '—'}
+            </div>
           </div>
         </div>
 
