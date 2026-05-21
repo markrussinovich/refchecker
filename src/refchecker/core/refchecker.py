@@ -6354,7 +6354,12 @@ class ArxivReferenceChecker:
                 try:
                     import arxiv
                     search = arxiv.Search(id_list=[arxiv_id])
-                    paper = next(iter(search.results()), None)
+                    # arxiv>=2.0 removed Search.results() — fall through to Client.
+                    try:
+                        client = arxiv.Client()
+                        paper = next(iter(client.results(search)), None)
+                    except AttributeError:
+                        paper = next(iter(search.results()), None)
                     if paper and paper.published:
                         correct_year = paper.published.year
                         logger.debug(f"Corrected year from ArXiv API: {year} -> {correct_year} for {arxiv_id}")

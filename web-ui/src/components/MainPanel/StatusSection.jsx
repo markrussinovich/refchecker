@@ -1005,11 +1005,11 @@ export default function StatusSection() {
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}
           onClick={() => setShowThumbnailOverlay(false)}
         >
-          <div className="relative w-full h-full flex items-center justify-center p-8">
+          <div className="relative w-full h-full flex items-start justify-center p-8 overflow-auto">
             <button
               type="button"
               onClick={() => setShowThumbnailOverlay(false)}
-              className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-10"
+              className="fixed top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-50"
               title="Close (Esc)"
             >
               <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1019,8 +1019,13 @@ export default function StatusSection() {
             <img
               src={previewUrl || thumbnailUrl}
               alt="Paper preview"
-              style={{ maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain' }}
-              className="rounded-lg shadow-2xl"
+              style={{
+                maxWidth: '95vw',
+                width: 'auto',
+                height: 'auto',
+                display: 'block',
+              }}
+              className="rounded-lg shadow-2xl my-4"
               onClick={(e) => e.stopPropagation()}
               onError={(e) => {
                 // Fall back to thumbnail if preview fails

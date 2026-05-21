@@ -36,7 +36,7 @@
   <sub>Native desktop builds powered by <a href="tauri-app/">Tauri</a> · Built and signed by GitHub Actions on every release tag.</sub>
 </p>
 
-### What the desktop app adds (v0.6.3)
+### What the desktop app adds (v0.6.4)
 
 - **Cascade extraction (token saver).** Settings → *Reference Extraction* picks between *cascade* (regex/BibTeX/GROBID first, LLM only on the messy or unrecognized entries) and *LLM-only*. Default is cascade — typically uses 60–90% fewer LLM tokens on well-formatted papers.
 - **Global reference library (read + write).** Every verified reference, deduped by DOI / arXiv / normalized title, is kept across checks AND consulted automatically by future verifications — repeat references resolve instantly, no API call. New *Seen References (library)* view at the top of the main panel.
@@ -48,6 +48,8 @@
 - **Minimal Grammarly-style citation-health chip** sits inline in the Summary header — color-coded, hover for breakdown, recomputes on every edit. No copy / download clutter; the score follows you.
 - **Tunable citation styles + custom-style builder.** APA / IEEE / Vancouver / etc. now expose Max-authors, et-al threshold, and Include-URL toggles. Need a journal-specific format? *Customize style → New custom style* lets you save a template like `{authors} ({year}). {title}. {venue}. {doi}` and pick it from the dropdown forever after.
 - **Seen References — live + clearable.** The library auto-refreshes whenever a check finishes (newly-verified refs appear immediately) and a *Clear cache* button wipes the whole identity table when you need a fresh start.
+- **LLM token + cost meter.** Inline chip in the Summary header tracks total tokens and an estimated USD cost across every provider you've used (OpenAI / Anthropic / Gemini) with a per-provider breakdown on hover. Counters persist across restarts via `llm_usage.json`. Cost rates are list-price USD-per-1K-tokens, hand-curated per model.
+- **Smoother citation graph.** Labels are now hover-on-demand (one node at a time, source always labelled) so the canvas stays readable; hovered node gets a soft outline ring. Slower force-cooldown lets the network breathe.
 - **Drag-and-drop + Open With.** Drop a PDF / DOCX / ODT / RTF / Markdown / HTML / BibTeX / LaTeX / plain text on the window — or right-click any of those in Finder/Explorer and pick RefChecker — and the check starts immediately.
 
 ---

@@ -138,6 +138,10 @@ export const verifyReferenceInCheck = (checkId, refId) =>
 export const clearSeenReferences = () =>
   api.delete('/references/seen')
 
+// Per-provider LLM token + cost totals
+export const fetchUsageTotals = () => api.get('/usage/totals')
+export const resetUsageTotals = () => api.delete('/usage/totals')
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

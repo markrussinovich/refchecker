@@ -828,6 +828,12 @@ async def _run_startup_tasks() -> None:
     """Initialize persistent services used by the API."""
     await db.init_db()
     logger.info(f"Usage telemetry log file: {get_usage_log_path()}")
+    # Persist LLM token/cost counters across process restarts
+    try:
+        from . import usage_tracker
+        usage_tracker.configure_persistence(get_data_dir() / "llm_usage.json")
+    except Exception as e:
+        logger.debug("Failed to set up LLM usage persistence: %s", e)
 
     if is_multiuser_mode():
         try:
@@ -4990,6 +4996,32 @@ async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     button on the Seen Refs tab."""
     removed = await db.clear_verified_references()
     return {"removed": removed}
+
+
+@app.get("/api/usage/totals")
+async def usage_totals(current_user: UserInfo = Depends(require_user)):
+    """Per-provider LLM usage + cost-estimate snapshot.
+
+    Tokens are captured from each provider's response on the way through
+    the extractor / hallucination / web-search paths. Cost is derived
+    from a hand-curated per-provider/per-model rate table; rows without
+    a known rate report `cost_usd: null` and the grand total falls back
+    to null too so the UI doesn't claim 'free' for unknown models."""
+    from . import usage_tracker
+    snapshot = usage_tracker.get_usage_totals()
+    # Persist on every read so totals survive a crash even if no explicit flush ran.
+    try: usage_tracker.flush_persistence()
+    except Exception: pass
+    return snapshot
+
+
+@app.delete("/api/usage/totals")
+async def reset_usage_totals(current_user: UserInfo = Depends(require_user)):
+    """Reset the per-provider counters to zero."""
+    from . import usage_tracker
+    usage_tracker.reset_usage()
+    usage_tracker.flush_persistence()
+    return {"reset": True}
 
 
 class _ListModelsRequest(BaseModel):

@@ -15,6 +15,30 @@ from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAUL
 
 logger = logging.getLogger(__name__)
 
+# Soft import — usage tracker only exists when running under the WebUI/desktop
+# backend. The CLI is unaffected; tracker calls become no-ops.
+try:
+    from backend import usage_tracker as _usage_tracker
+except Exception:  # pragma: no cover
+    _usage_tracker = None
+
+
+def _record_provider_usage(provider: str, model: str, response, kind: str):
+    if _usage_tracker is None:
+        return
+    try:
+        if provider == "openai":
+            u = _usage_tracker.extract_openai_usage(response)
+        elif provider == "anthropic":
+            u = _usage_tracker.extract_anthropic_usage(response)
+        elif provider in ("google", "gemini"):
+            u = _usage_tracker.extract_gemini_usage(response)
+        else:
+            return
+        _usage_tracker.record_usage(provider, model, u["input_tokens"], u["output_tokens"], kind)
+    except Exception as e:
+        logger.debug("usage tracking failed for %s: %s", provider, e)
+
 
 def _openai_token_kwargs(model: str, max_tokens: int) -> dict:
     """Return the right max-token kwarg for OpenAI models.
@@ -428,9 +452,10 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
             if not _is_openai_reasoning_model(_model):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
-            
+            _record_provider_usage("openai", _model, response, "extraction")
+
             return response.choices[0].message.content or ""
-            
+
         except Exception as e:
             logger.error(f"OpenAI API call failed: {e}")
             raise
@@ -460,8 +485,9 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Anthropic API call and return the response text"""
         try:
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['anthropic']
             response = self.client.messages.create(
-                model=self.model or DEFAULT_EXTRACTION_MODELS['anthropic'],
+                model=_model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 system=[{
@@ -473,7 +499,8 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                     {"role": "user", "content": prompt}
                 ]
             )
-            
+            _record_provider_usage("anthropic", _model, response, "extraction")
+
             logger.debug(f"Anthropic response type: {type(response.content)}")
             logger.debug(f"Anthropic response content: {response.content}")
             
@@ -527,9 +554,10 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
     def _call_llm(self, prompt: str) -> str:
         """Make the actual Google API call and return the response text"""
         try:
+            _model = self.model or DEFAULT_EXTRACTION_MODELS['google']
             response = call_google_with_retry(
                 lambda: self.client.models.generate_content(
-                    model=self.model or DEFAULT_EXTRACTION_MODELS['google'],
+                    model=_model,
                     contents=prompt,
                     config={
                         'system_instruction': self._get_system_prompt(),
@@ -539,12 +567,13 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
                 ),
                 purpose='reference extraction',
             )
-            
+            _record_provider_usage("google", _model, response, "extraction")
+
             # Handle empty responses (content safety filter or other issues)
             if not response.candidates:
                 logger.warning("Google API returned empty candidates (possibly content filtered)")
                 return ""
-            
+
             return response.text or ""
             
         except Exception as e:

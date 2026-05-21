@@ -318,7 +318,12 @@ def _download_arxiv_pdf(arxiv_id: str, pdf_path: str) -> bool:
     import time as _time
 
     search = arxiv_lib.Search(id_list=[arxiv_id])
-    paper = next(search.results())
+    # arxiv>=2.0 removed Search.results() — go through Client.
+    try:
+        client = arxiv_lib.Client()
+        paper = next(client.results(search))
+    except AttributeError:
+        paper = next(search.results())
 
     for attempt in range(3):
         try:

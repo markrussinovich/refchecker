@@ -774,10 +774,16 @@ class ProgressRefChecker:
                         "message": f"Fetching ArXiv paper {arxiv_id}..."
                     })
 
-                    # Download from ArXiv - run in thread to avoid blocking event loop
+                    # Download from ArXiv - run in thread to avoid blocking event loop.
+                    # Newer arxiv lib (>=2.0) removed Search.results() — use the
+                    # Client.results(search) idiom instead.
                     def fetch_arxiv():
                         search = arxiv.Search(id_list=[arxiv_id])
-                        return next(search.results())
+                        try:
+                            client = arxiv.Client()
+                            return next(client.results(search))
+                        except AttributeError:
+                            return next(search.results())
                     
                     paper = await asyncio.to_thread(fetch_arxiv)
                     paper_title = paper.title
@@ -1905,9 +1911,16 @@ class ProgressRefChecker:
                 # this verification by DOI / ArXiv / normalized title.
                 try:
                     from .database import db as _db
-                    await _db.upsert_verified_reference(result)
+                    upsert_key = await _db.upsert_verified_reference(result)
+                    if upsert_key is None:
+                        logger.debug(
+                            "Skipping verified-reference upsert (no identity key) — "
+                            "title=%r year=%r status=%r doi=%r arxiv=%r",
+                            result.get("title"), result.get("year"),
+                            result.get("status"), result.get("doi"), result.get("arxiv_id"),
+                        )
                 except Exception as _e:
-                    logger.debug("Skipping verified-reference upsert: %s", _e)
+                    logger.warning("Verified-reference upsert failed: %s", _e)
                 await self.emit_progress("reference_result", result)
                 await self.emit_progress("progress", {
                     "current": checked_count,

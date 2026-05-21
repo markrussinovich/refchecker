@@ -10,6 +10,7 @@ import SeenReferencesView from './SeenReferencesView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
 import HealthBadge from './HealthBadge'
+import UsageChip from './UsageChip'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -291,6 +292,7 @@ export default function MainPanel() {
             paperTitle={displayPaperTitle}
             paperSource={displayPaperSource}
             healthBadge={<HealthBadge references={displayRefs} />}
+            usageChip={<UsageChip />}
           />
         )}
 

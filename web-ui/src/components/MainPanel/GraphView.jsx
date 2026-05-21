@@ -35,6 +35,7 @@ export default function GraphView({ references, paperTitle }) {
   const fgRef = useRef(null)
   const [dims, setDims] = useState({ w: 800, h: 560 })
   const [selected, setSelected] = useState(null)
+  const [hovered, setHovered] = useState(null)
   const [serverGraph, setServerGraph] = useState(null) // { byId: {local_id: {paperId, citationCount}}, edges: [{source,target}] }
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
@@ -220,23 +221,51 @@ export default function GraphView({ references, paperTitle }) {
           linkWidth={(l) => l.citation ? 1.6 : 0.8}
           linkDirectionalArrowLength={(l) => l.citation ? 3 : 0}
           linkDirectionalArrowRelPos={1}
-          cooldownTicks={120}
+          cooldownTicks={140}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.4}
           onNodeClick={(n) => setSelected(n)}
           onNodeDoubleClick={(n) => handleExpand(n)}
+          onNodeHover={(n) => setHovered(n || null)}
           nodeCanvasObject={(node, ctx, globalScale) => {
             const label = node.label || ''
-            const fontSize = 12 / globalScale
+            const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
+            // Soft outline ring on hover / selection so the user knows which
+            // node they're targeting.
+            const isFocus = hovered?.id === node.id || selected?.id === node.id
+            if (isFocus) {
+              ctx.fillStyle = 'rgba(255,255,255,0.18)'
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false)
+              ctx.fill()
+            }
             ctx.fillStyle = node.color || '#888'
             ctx.beginPath()
-            ctx.arc(node.x, node.y, Math.max(3, Math.sqrt(node.val) * 1.5), 0, 2 * Math.PI, false)
+            ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false)
             ctx.fill()
-            if (globalScale > 1.0 || node.type === 'source') {
-              ctx.fillStyle = 'rgba(255,255,255,0.85)'
-              ctx.font = `${fontSize}px -apple-system, sans-serif`
-              ctx.textAlign = 'left'
-              ctx.textBaseline = 'middle'
-              ctx.fillText(label.slice(0, 40), node.x + 6, node.y)
-            }
+            // Render labels sparingly so the canvas stays readable:
+            //   • always show the source node label
+            //   • show the hovered + selected node labels
+            //   • show other labels only when zoomed in past 2.5×
+            const shouldShowLabel =
+              node.type === 'source' ||
+              isFocus ||
+              globalScale > 2.5
+            if (!shouldShowLabel) return
+            const fontSize = Math.max(10, 12 / globalScale)
+            ctx.font = `${fontSize}px -apple-system, sans-serif`
+            const text = label.slice(0, 48)
+            const padX = 4
+            const tx = node.x + radius + 6
+            const ty = node.y
+            const w = ctx.measureText(text).width + padX * 2
+            const h = fontSize + 4
+            ctx.fillStyle = 'rgba(15,23,42,0.85)'
+            ctx.fillRect(tx - padX, ty - h / 2, w, h)
+            ctx.fillStyle = 'rgba(255,255,255,0.96)'
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(text, tx, ty)
           }}
         />
       </Suspense>

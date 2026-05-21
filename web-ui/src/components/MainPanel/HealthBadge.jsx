@@ -43,10 +43,32 @@ function colorFor(score) {
 
 export default function HealthBadge({ references, compact = true }) {
   const stats = useMemo(() => computeScore(references), [references])
+  // When there are no references yet, an inflated "100%" score is misleading
+  // (the user sees a green pill on an empty check). Render a neutral "—"
+  // pill instead until we have data to score.
+  if (!stats.total) {
+    return (
+      <span
+        title="No references checked yet"
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium"
+        style={{
+          border: '1px solid var(--color-border)',
+          background: 'var(--color-bg-tertiary)',
+          color: 'var(--color-text-muted)',
+        }}
+      >
+        <span
+          className="inline-block rounded-full"
+          style={{ width: 8, height: 8, background: 'var(--color-text-muted)' }}
+        />
+        Citation health
+        <span style={{ fontWeight: 600 }}>—</span>
+      </span>
+    )
+  }
+
   const color = colorFor(stats.score)
-  const tooltip = stats.total === 0
-    ? 'No references yet'
-    : `${stats.verified || 0} verified · ${stats.warnings || 0} warning${stats.warnings === 1 ? '' : 's'} · ${stats.errors || 0} error${stats.errors === 1 ? '' : 's'}${stats.halluc ? ` · ${stats.halluc} likely hallucinated` : ''} · ${stats.total} total`
+  const tooltip = `${stats.verified || 0} verified · ${stats.warnings || 0} warning${stats.warnings === 1 ? '' : 's'} · ${stats.errors || 0} error${stats.errors === 1 ? '' : 's'}${stats.halluc ? ` · ${stats.halluc} likely hallucinated` : ''} · ${stats.total} total`
 
   return (
     <span
