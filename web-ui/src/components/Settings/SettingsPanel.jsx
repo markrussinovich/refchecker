@@ -539,20 +539,32 @@ export default function SettingsPanel({ theme, onThemeChange }) {
               {settings.extraction_mode.description}
             </div>
           </div>
-          <select
-            value={settings.extraction_mode.value || 'cascade'}
-            onChange={(e) => handleSettingChange('extraction_mode', e.target.value)}
-            className="px-3 py-2 rounded-lg border text-sm cursor-pointer"
-            style={{
-              backgroundColor: 'var(--color-bg-primary)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-primary)',
-              minWidth: '140px',
-            }}
-          >
-            <option value="cascade">Cascade (cheap-first)</option>
-            <option value="llm-only">LLM only</option>
-          </select>
+          <div className="relative">
+            <select
+              value={settings.extraction_mode.value || 'cascade'}
+              onChange={(e) => handleSettingChange('extraction_mode', e.target.value)}
+              className="appearance-none px-4 py-2 pr-8 rounded-lg border text-sm cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-bg-primary)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-primary)',
+                colorScheme: 'light dark',
+                minWidth: '180px',
+              }}
+            >
+              <option value="cascade" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>Cascade (cheap-first)</option>
+              <option value="llm-only" style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)' }}>LLM only</option>
+            </select>
+            <svg
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              style={{ color: 'var(--color-text-secondary)' }}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
         </div>
       )}
 

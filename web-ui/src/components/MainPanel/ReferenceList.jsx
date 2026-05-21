@@ -137,31 +137,41 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
   }
 
   if (!references || references.length === 0) {
+    // Differentiate "still extracting" from "extractor finished and found
+    // nothing" — the latter case used to look identical to a working check
+    // mid-extraction, which confused users into thinking the tool had hung.
+    const finished = !!isCheckComplete
     return (
-      <div 
+      <div
         className="rounded-lg border p-8 text-center"
         style={{
           backgroundColor: 'var(--color-bg-secondary)',
-          borderColor: 'var(--color-border)',
+          borderColor: finished ? 'var(--color-warning, #f59e0b)' : 'var(--color-border)',
         }}
       >
-        <svg 
-          className="w-12 h-12 mx-auto mb-3 opacity-50" 
-          fill="none" 
-          viewBox="0 0 24 24" 
+        <svg
+          className="w-12 h-12 mx-auto mb-3 opacity-60"
+          fill="none"
+          viewBox="0 0 24 24"
           stroke="currentColor"
-          style={{ color: 'var(--color-text-muted)' }}
+          style={{ color: finished ? 'var(--color-warning, #f59e0b)' : 'var(--color-text-muted)' }}
         >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          {finished ? (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          )}
         </svg>
-        <p style={{ color: 'var(--color-text-muted)' }}>
-          No references extracted yet
+        <p style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+          {finished ? 'No references found in this document' : 'No references extracted yet'}
         </p>
-        <p 
+        <p
           className="text-sm mt-1"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          References will appear here as they are found
+          {finished
+            ? 'The extractor finished but produced zero references. The file may have no bibliography, the wrong format, or the extraction mode may need to be changed (Settings → Reference Extraction).'
+            : 'References will appear here as they are found.'}
         </p>
       </div>
     )

@@ -402,7 +402,8 @@ export const useHistoryStore = create((set, get) => ({
     }, 5000)
   },
 
-  selectCheck: async (id) => {
+  selectCheck: async (id, opts) => {
+    const force = !!(opts && opts.force)
     // Special placeholder for starting a new check without hitting the API
     if (id === -1) {
       set({ selectedCheckId: -1, selectedCheck: null, isLoadingDetail: false, error: null })
@@ -414,13 +415,15 @@ export const useHistoryStore = create((set, get) => ({
     const cachedDetail = stateSnapshot.detailCache[id]
     const cacheIsFresh = !!(cachedDetail && (Date.now() - cachedDetail.fetchedAt) < DETAIL_CACHE_TTL_MS)
 
-    // If user re-selects the currently shown check, avoid unnecessary work.
-    if (stateSnapshot.selectedCheckId === id && stateSnapshot.selectedCheck && !stateSnapshot.isLoadingDetail) {
+    // If user re-selects the currently shown check, avoid unnecessary work —
+    // unless caller forces a refetch (e.g. after Apply Fix / Re-verify, where
+    // the live results must update the badge + summary tiles).
+    if (!force && stateSnapshot.selectedCheckId === id && stateSnapshot.selectedCheck && !stateSnapshot.isLoadingDetail) {
       return
     }
 
     // Fast-path for recently loaded completed/cancelled/error checks.
-    if (cacheIsFresh && cachedDetail?.check?.status !== 'in_progress') {
+    if (!force && cacheIsFresh && cachedDetail?.check?.status !== 'in_progress') {
       set({ selectedCheckId: id, selectedCheck: cachedDetail.check, isLoadingDetail: false, error: null })
       return
     }

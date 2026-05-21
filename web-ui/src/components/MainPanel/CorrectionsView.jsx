@@ -228,17 +228,20 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       })
       setShowAdd(false)
       setNewRef({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
-      // Spec requires newly-added refs to get verified — kick off /verify on
-      // the new ref id immediately so it doesn't sit on 'pending' forever.
-      // (The References-tab Add path already did this through
-      // useReferenceActions; this duplicate handler was skipping it.)
+      // Kick off /verify on the new ref id immediately so it doesn't sit
+      // on 'pending' forever. (The References-tab Add path already did
+      // this through useReferenceActions; this duplicate handler was
+      // skipping it.) Pass `{ force: true }` to selectCheck so the
+      // post-mutation reload bypasses the same-id short-circuit and
+      // the Citation health badge + Summary tiles recompute against
+      // the freshly-added ref.
       const addedId = res?.data?.reference?.id ?? res?.data?.id ?? null
       if (addedId != null) {
         try {
           await verifyReferenceInCheck(selectedCheckId, String(addedId))
         } catch { /* best-effort */ }
       }
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Add failed')
     } finally {
@@ -251,7 +254,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     setBusyKey(ident)
     try {
       await removeReferenceFromCheck(selectedCheckId, ident)
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Remove failed')
     } finally {
@@ -327,7 +330,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       useHistoryStore.getState().optimisticApplyCorrection?.(String(ref.id ?? ref.index ?? i))
       try {
         await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true })
-        await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+        await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
       } catch (e) {
         /* re-verify is best-effort; the optimistic update stands */
       }
@@ -363,7 +366,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         }
       }
       await Promise.all([worker(), worker(), worker(), worker()])
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
     }
   }
   const resetDecisions = () => setDecisions({})
