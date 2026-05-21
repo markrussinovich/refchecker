@@ -21,13 +21,24 @@ export function isTauri() {
 export async function openExternal(url) {
   if (!url) return
   if (isTauri()) {
+    // Try Rust-side `open_external` first — it's a custom command we
+    // ship that shells out to the native OS opener (open / start /
+    // xdg-open). Doesn't depend on the shell plugin's scope, so it
+    // works on builds where shell:allow-open was misconfigured.
     try {
-      // Tauri 2.x exposes the shell plugin via __TAURI_INTERNALS__.invoke.
+      if (window.__TAURI_INTERNALS__?.invoke) {
+        await window.__TAURI_INTERNALS__.invoke('open_external', { url })
+        return
+      }
+    } catch (err) {
+      console.warn('[tauriBridge] open_external failed, trying shell plugin', err)
+    }
+    // Fallback: shell plugin (works on builds with a correct ACL scope)
+    try {
       if (window.__TAURI_INTERNALS__?.invoke) {
         await window.__TAURI_INTERNALS__.invoke('plugin:shell|open', { path: url })
         return
       }
-      // Older Tauri 1.x shape, retained for safety.
       if (window.__TAURI__?.shell?.open) {
         await window.__TAURI__.shell.open(url)
         return

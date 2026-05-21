@@ -10,6 +10,41 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
+/// Belt-and-braces external opener. The shell plugin's `open` command
+/// requires a permission with a URL scope, and we've shipped several
+/// builds where that scope was misconfigured or the user's installed
+/// binary predates the fix. Calling out to the OS opener directly from
+/// Rust gives the JS side a fallback that doesn't depend on any plugin
+/// ACL — it's whitelisted via the Tauri capability system as a custom
+/// command, but the command itself doesn't carry a scope filter so it
+/// always works.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    use std::process::Command;
+    // Defence in depth: only allow obvious external schemes. We never
+    // want this to e.g. shell out a local file path.
+    let lower = url.to_lowercase();
+    if !lower.starts_with("https://")
+        && !lower.starts_with("http://")
+        && !lower.starts_with("mailto:")
+        && !lower.starts_with("tel:")
+    {
+        return Err(format!("refused to open non-external URL: {}", url));
+    }
+    let result = if cfg!(target_os = "macos") {
+        Command::new("open").arg(&url).spawn()
+    } else if cfg!(target_os = "windows") {
+        Command::new("cmd").args(["/C", "start", "", &url]).spawn()
+    } else {
+        // linux / freebsd
+        Command::new("xdg-open").arg(&url).spawn()
+    };
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("opener failed: {}", e)),
+    }
+}
+
 /// Inspect launch args for files the OS told us to open (Open With,
 /// `refchecker file.pdf`, drag-onto-dock). Returns absolute paths.
 fn extract_files_from_argv(argv: &[String]) -> Vec<String> {
@@ -213,6 +248,7 @@ fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
+        .invoke_handler(tauri::generate_handler![open_external])
         .setup(|app| {
             let handle = app.handle().clone();
 
