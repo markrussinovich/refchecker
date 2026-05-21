@@ -219,7 +219,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     if (!selectedCheckId) return
     setBusyKey('__add__')
     try {
-      await addReferenceToCheck(selectedCheckId, {
+      const res = await addReferenceToCheck(selectedCheckId, {
         title: newRef.title.trim() || null,
         authors: newRef.authors.trim() ? newRef.authors.split(',').map(s => s.trim()).filter(Boolean) : null,
         year: newRef.year ? parseInt(newRef.year, 10) : null,
@@ -228,8 +228,16 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       })
       setShowAdd(false)
       setNewRef({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
-      // Tell the parent to re-fetch — easiest: dispatch a window event
-      // the MainPanel already listens to nothing of, so reload history.
+      // Spec requires newly-added refs to get verified — kick off /verify on
+      // the new ref id immediately so it doesn't sit on 'pending' forever.
+      // (The References-tab Add path already did this through
+      // useReferenceActions; this duplicate handler was skipping it.)
+      const addedId = res?.data?.reference?.id ?? res?.data?.id ?? null
+      if (addedId != null) {
+        try {
+          await verifyReferenceInCheck(selectedCheckId, String(addedId))
+        } catch { /* best-effort */ }
+      }
       await useHistoryStore.getState().selectCheck?.(selectedCheckId)
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Add failed')

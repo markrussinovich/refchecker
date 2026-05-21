@@ -4294,6 +4294,57 @@ async def suggest_alternative_reference(
             "source": "semantic_scholar",
         })
 
+    # ── Co-citation overlap pass ─────────────────────────────────────
+    # For each title-search hit, ask Semantic Scholar for its reference
+    # list and count how many entries match other references in the
+    # current paper's bibliography (by paperId, when known). The candidate
+    # that shares the most refs with the rest of the bibliography is
+    # almost always the paper the author actually meant — this is the
+    # signal the user described as "algorithms of overlap".
+    import re as _re_overlap
+    try:
+        # Build a paperId set for the rest of the bibliography
+        other_pids: set = set()
+        for r in refs:
+            if r is target:
+                continue
+            for url_obj in (r.get("authoritative_urls") or []):
+                u = url_obj.get("url") or ""
+                m = _re_overlap.search(r"semanticscholar\.org/paper/([0-9a-f]+)", u, _re_overlap.IGNORECASE)
+                if m:
+                    other_pids.add(m.group(1).lower())
+        if other_pids and suggestions:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                for cand in suggestions:
+                    pid = cand.get("paperId")
+                    if not pid:
+                        cand["overlap"] = 0
+                        continue
+                    try:
+                        rr = await client.get(
+                            f"https://api.semanticscholar.org/graph/v1/paper/{pid}/references",
+                            params={"fields": "citedPaper.paperId", "limit": 100},
+                            headers=headers,
+                        )
+                        if rr.status_code != 200:
+                            cand["overlap"] = 0
+                            continue
+                        rd = rr.json()
+                        cited_ids = {
+                            (entry.get("citedPaper", {}) or {}).get("paperId", "").lower()
+                            for entry in (rd.get("data") or [])
+                        }
+                        cand["overlap"] = len(cited_ids & other_pids)
+                    except Exception:
+                        cand["overlap"] = 0
+            # Re-rank: candidates with bibliography overlap float to the top.
+            suggestions.sort(key=lambda c: c.get("overlap", 0), reverse=True)
+            # Mark the overlap winner so the UI can label it
+            if suggestions and suggestions[0].get("overlap", 0) > 0:
+                suggestions[0]["overlap_winner"] = True
+    except Exception as e:
+        logger.debug("Suggest-alt overlap pass skipped: %s", e)
+
     # LLM augmentation: ask the user's configured default LLM what real
     # paper the cited reference probably is. Often it can resolve cases
     # where S2 title-search misses (e.g. mangled author lists, wrong

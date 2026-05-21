@@ -163,6 +163,20 @@ export function SuggestAltPanel({ suggestFor, onClose }) {
                       {c.source === 'llm' ? 'LLM' : c.source === 'semantic_scholar' ? 'S2' : c.source}
                     </span>
                   )}
+                  {typeof c.overlap === 'number' && c.overlap > 0 && (
+                    <span
+                      className="px-1.5 py-0.5 rounded"
+                      style={{
+                        background: 'rgba(34,197,94,0.12)',
+                        color: 'var(--color-success, #16a34a)',
+                        border: '1px solid rgba(34,197,94,0.35)',
+                      }}
+                      title="Shares N other references with this paper's bibliography (co-citation overlap)"
+                    >
+                      shares {c.overlap} ref{c.overlap === 1 ? '' : 's'}
+                      {c.overlap_winner ? ' · best match' : ''}
+                    </span>
+                  )}
                   {c.url && (
                     <a
                       href={c.url}
