@@ -547,14 +547,14 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           </div>
 
-          {/* Styled citation preview — shown only when the user picked a
-              non-default style on the References tab. Renders the reference
-              once in the chosen format (APA / IEEE / BibTeX / custom) so
-              the picker is actually visibly active. The structured
-              author/venue/year rows below stay as-is so the per-field
-              status badges keep working. */}
+          {/* When a non-default citation style is picked, render the
+              reference once in that style and hide the duplicated
+              structured rows below. With Plain text (ACM) selected
+              we fall through to the structured authors / venue / year
+              / cited-url layout which is the original behaviour. */}
           {(() => {
-            if (!activeFormat || activeFormat === 'plaintext') return null
+            const stylePicked = activeFormat && activeFormat !== 'plaintext'
+            if (!stylePicked) return null
             const styleDefaults = CITATION_STYLE_DEFAULTS[activeFormat] || {}
             const effectiveOpts = { ...styleDefaults, ...(activeStyleOptions || {}) }
             let rendered = ''
@@ -566,7 +566,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                 style={{
                   background: 'var(--color-bg-tertiary)',
                   border: '1px solid var(--color-border)',
-                  color: 'var(--color-text-secondary)',
+                  color: 'var(--color-text-primary)',
                   fontFamily: activeFormat === 'bibtex' || activeFormat === 'bibitem' ? 'ui-monospace, monospace' : undefined,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
@@ -577,46 +577,53 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             )
           })()}
 
-          {/* Authors */}
-          {normalizeAuthors(reference.authors).length > 0 && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {formatAuthors(reference.authors)}
-            </div>
-          )}
+          {/* Structured rows — only shown when the style picker is on Plain
+              text (ACM). With APA / IEEE / BibTeX / etc. picked, the
+              styled preview block above already contains all this. */}
+          {(activeFormat === 'plaintext' || !activeFormat) && (
+            <>
+              {/* Authors */}
+              {normalizeAuthors(reference.authors).length > 0 && (
+                <div
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {formatAuthors(reference.authors)}
+                </div>
+              )}
 
-          {/* Venue */}
-          {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {reference.venue}
-            </div>
-          )}
+              {/* Venue */}
+              {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
+                <div
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {reference.venue}
+                </div>
+              )}
 
-          {/* Year */}
-          {reference.year && reference.year !== 0 && reference.year !== '0' && (
-            <div
-              style={{ color: 'var(--color-text-secondary)' }}
-            >
-              {reference.year}
-            </div>
-          )}
+              {/* Year */}
+              {reference.year && reference.year !== 0 && reference.year !== '0' && (
+                <div
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {reference.year}
+                </div>
+              )}
 
-          {/* Cited URL */}
-          {reference.cited_url && (
-            <div>
-              <a
-                href={reference.cited_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline mobile-break-url"
-                style={{ color: 'var(--color-link)' }}
-              >
-                {reference.cited_url}
-              </a>
-            </div>
+              {/* Cited URL */}
+              {reference.cited_url && (
+                <div>
+                  <a
+                    href={reference.cited_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:underline mobile-break-url"
+                    style={{ color: 'var(--color-link)' }}
+                  >
+                    {reference.cited_url}
+                  </a>
+                </div>
+              )}
+            </>
           )}
 
           {/* Divider before verification results */}
