@@ -131,88 +131,221 @@ def _make_cli_checker(llm_provider):
     return cli_checker
 
 
+_NUMERIC_MARKER_RE = None
+
+# Common abbreviations whose trailing "." is NOT a sentence terminator —
+# kept lowercase for case-insensitive comparison against the last token
+# in a candidate split.
+_ABBREVIATIONS = frozenset({
+    "e.g.", "i.e.", "et al.", "fig.", "eq.", "tab.", "sec.", "app.",
+    "ref.", "cf.", "vs.", "no.", "st.", "mr.", "dr.", "mrs.", "ms.",
+    "jr.", "sr.", "inc.", "co.", "ltd.", "prof.", "univ.", "dept.",
+})
+
+
+def _sentence_tokenize(text):
+    """Sentence-split with abbreviation guards. Python's stdlib `re` only
+    supports fixed-width lookbehind, so we split aggressively on
+    `[.!?] [A-Z(]` then merge any neighbouring pair whose left half ends
+    with one of the known abbreviations (or a single-capital initial like
+    'U.'). Good enough for grouping a citation marker with its
+    surrounding clause; avoids pulling in a regex backport just for this.
+
+    Multi-word abbreviation check uses the trailing two tokens so phrases
+    like "et al." (whose single last token is just "al.") still merge.
+    """
+    import re
+    raw = re.split(r"(?<=[.!?])\s+(?=[A-Z\(])", text)
+    if len(raw) <= 1:
+        return raw
+    merged = [raw[0]]
+    for piece in raw[1:]:
+        prev = merged[-1]
+        # Find the last whitespace-separated token in prev — that's the
+        # candidate "word." that triggered the split.
+        last_token = prev.rsplit(" ", 1)[-1] if " " in prev else prev
+        lt_lower = last_token.lower()
+        tail_two = " ".join(prev.rsplit(" ", 2)[-2:]).lower() if " " in prev else ""
+        is_abbrev = lt_lower in _ABBREVIATIONS or tail_two in _ABBREVIATIONS
+        # Single-capital + period (initials in author names: "J. Smith").
+        is_initial = (
+            len(last_token) >= 2
+            and last_token[-1] == "."
+            and last_token[-2].isalpha()
+            and last_token[:-1].isupper()
+            and len(last_token) <= 3
+        )
+        if is_abbrev or is_initial:
+            merged[-1] = prev + " " + piece
+        else:
+            merged.append(piece)
+    return merged
+
+
 def _attach_citation_contexts(references, paper_text):
-    """Find the sentence that introduces each reference in the paper.
+    """Find the sentences in the paper where each reference is cited.
 
     Two heuristics — numeric ``[N]`` markers (IEEE / ACM style) and
     author-year markers like ``(Smith et al., 2020)`` / ``Smith (2020)``
-    (APA / Chicago style). For each reference we capture up to two
-    sentence-bounded windows where it's mentioned and attach them as
-    ``citation_context``. Cheap — no LLM call — typically <10 ms per
-    paper. Skips refs we can't identify either way.
+    (APA / Chicago style).
+
+    For every reference whose `index` matches a `[N]` marker (or whose
+    (first-author surname, year) matches an author-year marker) in the
+    body text, attaches:
+
+    - ``citation_count``  — how many times the ref is cited
+    - ``citation_contexts`` — list of ``{sentence, marker, before, after}``
+      where each entry is one occurrence with its surrounding clause and
+      the literal marker text (so the frontend can render it bold). Up to
+      3 occurrences per ref.
+    - ``citation_context`` — legacy single-string field, kept so older UI
+      paths that haven't migrated still render something. Joined with " … ".
+
+    Heuristic only — no LLM call, runs in O(sentences × markers) and adds
+    a few ms per reference for a typical paper. The sentence tokenizer
+    guards against fragmenting on "et al.", "e.g.", initials, etc., so
+    citation contexts read naturally instead of cutting mid-clause.
     """
     if not references or not paper_text:
         return
     import re
-    # Pre-split into sentences once. Crude period-based split is fine —
-    # we just need a window the user can read.
-    sentences = re.split(r"(?<=[.!?])\s+", paper_text)
+    global _NUMERIC_MARKER_RE
+    if _NUMERIC_MARKER_RE is None:
+        # Match `[12]`, `[12, 14]`, `[12-15]`, `[12–15]`, including
+        # space tolerance. The outer match's group(0) is the whole marker
+        # so we can highlight it; inner findall pulls the numbers out.
+        _NUMERIC_MARKER_RE = re.compile(
+            r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
+        )
 
-    # ── Numeric citations ──────────────────────────────────────────
-    by_index: Dict[int, List[str]] = {}
-    for sent in sentences:
-        for m in re.finditer(r"\[\s*(\d{1,3})(?:[\-–,\s]\d{1,3})*\s*\]", sent):
-            for num in re.findall(r"\d{1,3}", m.group(0)):
-                idx = int(num)
-                if sent not in by_index.setdefault(idx, []):
-                    by_index[idx].append(sent)
+    sentences = _sentence_tokenize(paper_text)
 
-    # ── Author-year citations ──────────────────────────────────────
-    # Build {(first_surname_lower, year_str): [sentences]} from the
-    # patterns "(Smith, 2020)", "(Smith et al., 2020)", "Smith (2020)",
-    # "Smith et al. (2020)". Surnames are matched case-insensitively;
-    # the first surname in a multi-author citation is enough for a
-    # cheap mapping back to the reference.
-    by_author_year: Dict[tuple, List[str]] = {}
-    paren_pat = re.compile(r"\(([A-Z][A-Za-z\-']{1,30})(?:\s+et\s+al\.?| and [A-Z][A-Za-z\-']{1,30})?\s*,?\s*(\d{4})\)")
-    narrative_pat = re.compile(r"\b([A-Z][A-Za-z\-']{1,30})(?:\s+et\s+al\.?| and [A-Z][A-Za-z\-']{1,30})?\s*\(\s*(\d{4})\s*\)")
-    for sent in sentences:
-        for pat in (paren_pat, narrative_pat):
-            for m in pat.finditer(sent):
-                key = (m.group(1).lower(), m.group(2))
-                if sent not in by_author_year.setdefault(key, []):
-                    by_author_year[key].append(sent)
+    # For each numeric index N, collect a list of
+    #   {sentence, marker, before, after}
+    # entries — one per occurrence, with surrounding sentences trimmed
+    # so the UI has a small context window without spilling the whole
+    # paragraph.
+    by_index = {}
+    for i, sent in enumerate(sentences):
+        stripped = sent.strip()
+        if not stripped:
+            continue
+        for m in _NUMERIC_MARKER_RE.finditer(stripped):
+            marker_text = m.group(0)
+            nums_in_marker = [int(n) for n in re.findall(r"\d{1,3}", marker_text)]
+            # Expand `[12-15]` and `[12–15]` into a contiguous range so
+            # the readers see the citation even for inclusive ranges.
+            expanded = set()
+            range_match = re.match(r"\s*(\d+)\s*[\-–]\s*(\d+)\s*$", marker_text.strip("[]"))
+            if range_match:
+                lo, hi = sorted((int(range_match.group(1)), int(range_match.group(2))))
+                # Cap the expansion so a typo `[1-999]` doesn't blow up.
+                if hi - lo <= 50:
+                    expanded.update(range(lo, hi + 1))
+            for n in nums_in_marker:
+                expanded.add(n)
+            # Trim the sentence aggressively but keep enough on either
+            # side of the marker that the citation reads naturally.
+            sent_clean = re.sub(r"\s+", " ", stripped)[:420]
+            before = (sentences[i - 1].strip()[:160] + " ") if i > 0 else ""
+            after = (" " + sentences[i + 1].strip()[:160]) if i + 1 < len(sentences) else ""
+            for n in expanded:
+                lst = by_index.setdefault(n, [])
+                if len(lst) >= 3:
+                    continue
+                lst.append({
+                    "sentence": sent_clean,
+                    "marker": marker_text,
+                    "before": before.strip(),
+                    "after": after.strip(),
+                })
 
-    def first_surname(authors) -> Optional[str]:
-        """Best-effort: pluck a surname from authors of any common shape."""
-        if not authors:
-            return None
-        if isinstance(authors, list):
-            first = next((str(a) for a in authors if a), None)
-        else:
-            first = str(authors).split(",", 1)[0].split(";", 1)[0]
+    # Second pass: author-year markers (APA / Chicago / natbib).
+    # Handles "(Smith et al., 2024)", "Smith et al. (2024)", "(Smith and
+    # Jones, 2024)", "(Smith, 2024)", "Smith (2024)". Many papers use
+    # these instead of [N] markers, and the original numeric-only
+    # extractor silently returned zero contexts for them. Lookup builds
+    # a {(last_name_lower, year_int): ref_index} table from the
+    # references list, then scans body sentences for the patterns.
+    author_year_lookup = {}
+    for ref in references:
+        try:
+            ref_idx = int(ref.get("index") or 0)
+        except Exception:
+            continue
+        if ref_idx <= 0:
+            continue
+        authors = ref.get("authors") or []
+        if not isinstance(authors, list) or not authors:
+            continue
+        year = ref.get("year")
+        try:
+            year_int = int(year) if year else 0
+        except Exception:
+            year_int = 0
+        if not year_int:
+            continue
+        first = (authors[0] or "").strip()
         if not first:
-            return None
-        # Strip "F." initials and trailing punctuation, keep the longest token
-        parts = [p.strip(".,;") for p in re.split(r"\s+", first) if p.strip(".,;")]
-        if not parts:
-            return None
-        # Prefer the longest token (usually the surname, not the initial)
-        return max(parts, key=len).lower()
+            continue
+        if "," in first:
+            last_name = first.split(",", 1)[0].strip()
+        else:
+            last_name = first.split()[-1] if first.split() else first
+        last_name = re.sub(r"[^A-Za-z\-]", "", last_name).lower()
+        if len(last_name) < 2:
+            continue
+        key = (last_name, year_int)
+        if key not in author_year_lookup or ref_idx < author_year_lookup[key]:
+            author_year_lookup[key] = ref_idx
+
+    if author_year_lookup:
+        au_yr_patterns = [
+            re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
+            re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*\((\d{4})[a-z]?\)"),
+        ]
+        for i, sent in enumerate(sentences):
+            stripped = sent.strip()
+            if not stripped:
+                continue
+            for pat in au_yr_patterns:
+                for m in pat.finditer(stripped):
+                    name = re.sub(r"[^A-Za-z\-]", "", m.group(1)).lower()
+                    try:
+                        yr = int(m.group(2))
+                    except Exception:
+                        continue
+                    ref_idx = author_year_lookup.get((name, yr))
+                    if not ref_idx:
+                        continue
+                    sent_clean = re.sub(r"\s+", " ", stripped)[:420]
+                    lst = by_index.setdefault(ref_idx, [])
+                    if len(lst) >= 3:
+                        continue
+                    if any(existing.get("sentence") == sent_clean for existing in lst):
+                        continue
+                    lst.append({
+                        "sentence": sent_clean,
+                        "marker": m.group(0),
+                        "before": (sentences[i - 1].strip()[:160] if i > 0 else "").strip(),
+                        "after": (sentences[i + 1].strip()[:160] if i + 1 < len(sentences) else "").strip(),
+                    })
 
     for ref in references:
-        hits: List[str] = []
-        # Try numeric index first
         try:
             idx = int(ref.get("index") or 0)
         except Exception:
-            idx = 0
-        if idx > 0:
-            hits.extend(by_index.get(idx, []))
-
-        # Then author-year
-        surname = first_surname(ref.get("authors"))
-        year = ref.get("year")
-        if surname and year:
-            ay_key = (surname, str(year))
-            for s in by_author_year.get(ay_key, []):
-                if s not in hits:
-                    hits.append(s)
-
+            continue
+        if idx <= 0:
+            continue
+        hits = by_index.get(idx)
         if not hits:
             continue
-        context = " … ".join(s.strip()[:240] for s in hits[:2])
-        ref["citation_context"] = context
+        ref["citation_contexts"] = hits
+        ref["citation_count"] = len(hits)
+        # Legacy single-string field — kept so consumers that don't yet
+        # know about citation_contexts still see something useful.
+        ref["citation_context"] = " … ".join(h["sentence"][:240] for h in hits[:2])
 
 
 def _extract_pdf_text_cli_style(pdf_path: str, llm_provider) -> str:
@@ -675,6 +808,17 @@ class ProgressRefChecker:
         Returns:
             Dictionary with paper title, references, and results
         """
+        # Reset the per-check LLM usage accumulator so the $ badge starts
+        # at zero for this run, then bind this check_id to the current
+        # thread so provider-level usage records attribute correctly.
+        try:
+            from refchecker.llm import usage_tracker
+            if self.check_id is not None:
+                usage_tracker.reset(self.check_id)
+                usage_tracker.set_current_check(self.check_id)
+        except Exception:
+            pass
+
         try:
             # Reset per-check counters so the UI token meter reflects what
             # THIS check spent, not lifetime totals across the session.
@@ -1329,8 +1473,18 @@ class ProgressRefChecker:
                         loop,
                     )
 
-            # Step 2: parse references (CLI logic, including LLM and post-processing) - run in thread
-            refs = await asyncio.to_thread(cli_checker.parse_references, bib_section, progress_callback=_chunk_progress)
+            # Step 2: parse references (CLI logic, including LLM and post-processing) - run in thread.
+            # Tag any LLM calls under the 'extract' flow so the $ badge attributes correctly.
+            from refchecker.llm import usage_tracker as _usage_tracker
+            _check_id_for_thread = self.check_id
+
+            def _parse_with_scope():
+                if _check_id_for_thread is not None:
+                    _usage_tracker.set_current_check(str(_check_id_for_thread))
+                with _usage_tracker.FlowScope("extract"):
+                    return cli_checker.parse_references(bib_section, progress_callback=_chunk_progress)
+
+            refs = await asyncio.to_thread(_parse_with_scope)
             if cli_checker.fatal_error:
                 logger.error("Reference parsing failed (CLI fatal_error)")
                 return []
@@ -1506,6 +1660,19 @@ class ProgressRefChecker:
         Returns (verified_data, errors, url) — same contract as
         ``EnhancedHybridReferenceChecker.verify_reference``.
         """
+        # Tag every LLM call made anywhere inside this verification
+        # (hybrid checker title-match LLM, etc.) under the "verify" flow
+        # so the $ badge's per-flow breakdown actually populates the
+        # verify bucket instead of "other". asyncio.to_thread reused this
+        # worker thread for many refs, so the check id + flow must be
+        # rebound on every call.
+        from refchecker.llm import usage_tracker as _usage_tracker
+        if self.check_id is not None:
+            _usage_tracker.set_current_check(str(self.check_id))
+        with _usage_tracker.FlowScope("verify"):
+            return self._verify_reference_body(reference)
+
+    def _verify_reference_body(self, reference: Dict[str, Any]):
         # GitHub references bypass the hybrid checker (same as CLI's
         # verify_reference_standard → verify_github_reference).
         github_url = None
@@ -1720,11 +1887,19 @@ class ProgressRefChecker:
         if error_entry is None:
             return result
 
-        assessment = run_hallucination_check(
-            error_entry,
-            llm_client=self.hallucination_verifier,
-            web_searcher=getattr(self, 'web_searcher', None),
-        )
+        # Tag any LLM calls made by the hallucination verifier under the
+        # "hallucination" flow so the $ badge breakdown attributes
+        # correctly. asyncio.to_thread runs us on a fresh worker, so the
+        # check id + flow must be (re)bound here.
+        from refchecker.llm import usage_tracker as _usage_tracker
+        if self.check_id is not None:
+            _usage_tracker.set_current_check(str(self.check_id))
+        with _usage_tracker.FlowScope("hallucination"):
+            assessment = run_hallucination_check(
+                error_entry,
+                llm_client=self.hallucination_verifier,
+                web_searcher=getattr(self, 'web_searcher', None),
+            )
         if not assessment:
             return result
 
@@ -1741,14 +1916,15 @@ class ProgressRefChecker:
         if has_url_refs_paper and assessment.get('verdict') == 'UNLIKELY':
             return result
 
-        result = apply_hallucination_verdict(
-            result,
-            assessment,
-            reference=reference,
-            standard_refchecker=self._standard_refcheck_for_hallucination,
-            llm_client=self.hallucination_verifier,
-            web_searcher=getattr(self, 'web_searcher', None),
-        )
+        with _usage_tracker.FlowScope("hallucination"):
+            result = apply_hallucination_verdict(
+                result,
+                assessment,
+                reference=reference,
+                standard_refchecker=self._standard_refcheck_for_hallucination,
+                llm_client=self.hallucination_verifier,
+                web_searcher=getattr(self, 'web_searcher', None),
+            )
         return result
 
     async def _check_single_reference_with_limit(

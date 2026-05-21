@@ -653,25 +653,76 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             </div>
           )}
 
-          {reference.citation_context && (
+          {/* Citation context — the actual passage(s) in the paper body
+              where this reference is cited. Renders one row per
+              occurrence (up to 3) with the citation marker highlighted
+              so the user can spot misattributions at a glance. Falls
+              back to the legacy single-string `citation_context` field
+              if the backend hasn't populated the new `citation_contexts`
+              array yet. */}
+          {(reference.citation_contexts?.length > 0 || reference.citation_context) && (
             <div className="flex mb-1" style={{ minWidth: 0 }}>
               <span
                 className="flex-shrink-0"
                 style={{ color: 'var(--color-text-secondary)', width: '120px' }}
               >
-                Context:
+                {reference.citation_count > 1
+                  ? `Context (${reference.citation_count}×):`
+                  : 'Context:'}
               </span>
               <span
                 style={{
-                  color: 'var(--color-text)',
-                  fontStyle: 'italic',
                   flex: '1 1 auto',
                   minWidth: 0,
                   overflowWrap: 'anywhere',
                 }}
-                title="Sentence around the citation marker in the source paper"
               >
-                {reference.citation_context}
+                {reference.citation_contexts?.length > 0 ? (
+                  <span style={{ display: 'block' }}>
+                    {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
+                      // Split the sentence at the marker so we can style
+                      // the marker bold without using dangerouslySetInnerHTML.
+                      const marker = ctx.marker || ''
+                      const sent = ctx.sentence || ''
+                      const markerAt = marker ? sent.indexOf(marker) : -1
+                      const head = markerAt >= 0 ? sent.slice(0, markerAt) : sent
+                      const tail = markerAt >= 0 ? sent.slice(markerAt + marker.length) : ''
+                      return (
+                        <span
+                          key={i}
+                          style={{
+                            display: 'block',
+                            color: 'var(--color-text)',
+                            fontStyle: 'italic',
+                            marginBottom: i < reference.citation_contexts.length - 1 ? 4 : 0,
+                          }}
+                          title="Sentence around the citation marker in the source paper"
+                        >
+                          {head}
+                          {markerAt >= 0 && (
+                            <span
+                              style={{
+                                fontStyle: 'normal',
+                                fontWeight: 700,
+                                color: 'var(--color-accent, #3b82f6)',
+                              }}
+                            >
+                              {marker}
+                            </span>
+                          )}
+                          {tail}
+                        </span>
+                      )
+                    })}
+                  </span>
+                ) : (
+                  <span
+                    style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
+                    title="Sentence around the citation marker in the source paper"
+                  >
+                    {reference.citation_context}
+                  </span>
+                )}
               </span>
             </div>
           )}

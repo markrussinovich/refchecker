@@ -11,6 +11,11 @@ import logging
 
 from .base import LLMProvider
 from .google_retry import call_google_with_retry, extract_google_response_text
+# Per-check token tracker (FlowScope tagging) — drives the $ badge's
+# per-flow breakdown (extract / verify / hallucination / suggest /
+# graph / reverify). Distinct from backend/usage_tracker.py, which
+# tracks cumulative process-wide totals.
+from . import usage_tracker as _check_usage_tracker
 from refchecker.config.settings import resolve_api_key, resolve_endpoint, DEFAULT_EXTRACTION_MODELS
 
 logger = logging.getLogger(__name__)
@@ -38,6 +43,70 @@ def _record_provider_usage(provider: str, model: str, response, kind: str):
         _usage_tracker.record_usage(provider, model, u["input_tokens"], u["output_tokens"], kind)
     except Exception as e:
         logger.debug("usage tracking failed for %s: %s", provider, e)
+
+
+def _safe_int(v) -> int:
+    try:
+        n = int(v)
+        return n if n >= 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _track_openai_usage(response, model: str) -> None:
+    """Pull token counts off an OpenAI/Azure ChatCompletion response and
+    record them. Safe against missing / partial usage objects so the
+    badge never crashes the actual extraction call."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt_t = _safe_int(getattr(usage, "prompt_tokens", 0))
+        out_t = _safe_int(getattr(usage, "completion_tokens", 0))
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=prompt_t,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover - never break the call path
+        logger.debug(f"usage_tracker (openai) skipped: {e}")
+
+
+def _track_anthropic_usage(response, model: str) -> None:
+    """Pull input/output token counts off an Anthropic Messages response."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        in_t = _safe_int(getattr(usage, "input_tokens", 0))
+        out_t = _safe_int(getattr(usage, "output_tokens", 0))
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=in_t,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"usage_tracker (anthropic) skipped: {e}")
+
+
+def _track_google_usage(response, model: str) -> None:
+    """Pull prompt/candidates token counts off a Google GenAI response."""
+    try:
+        meta = getattr(response, "usage_metadata", None)
+        if meta is None:
+            return
+        in_t = _safe_int(getattr(meta, "prompt_token_count", 0))
+        out_t = _safe_int(getattr(meta, "candidates_token_count", 0))
+        _check_usage_tracker.record(
+            model=model,
+            input_tokens=in_t,
+            output_tokens=out_t,
+            flow=_check_usage_tracker.get_current_flow(),
+        )
+    except Exception as e:  # pragma: no cover
+        logger.debug(f"usage_tracker (google) skipped: {e}")
 
 
 def _openai_token_kwargs(model: str, max_tokens: int) -> dict:
@@ -453,7 +522,7 @@ class OpenAIProvider(LLMProviderMixin, LLMProvider):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
             _record_provider_usage("openai", _model, response, "extraction")
-
+            _track_openai_usage(response, _model)
             return response.choices[0].message.content or ""
 
         except Exception as e:
@@ -500,7 +569,7 @@ class AnthropicProvider(LLMProviderMixin, LLMProvider):
                 ]
             )
             _record_provider_usage("anthropic", _model, response, "extraction")
-
+            _track_anthropic_usage(response, _model)
             logger.debug(f"Anthropic response type: {type(response.content)}")
             logger.debug(f"Anthropic response content: {response.content}")
             
@@ -568,7 +637,7 @@ class GoogleProvider(LLMProviderMixin, LLMProvider):
                 purpose='reference extraction',
             )
             _record_provider_usage("google", _model, response, "extraction")
-
+            _track_google_usage(response, _model)
             # Handle empty responses (content safety filter or other issues)
             if not response.candidates:
                 logger.warning("Google API returned empty candidates (possibly content filtered)")
@@ -630,9 +699,9 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
             if not _is_openai_reasoning_model(_model):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
-            
+            _track_openai_usage(response, _model)
             return response.choices[0].message.content or ""
-            
+
         except Exception as e:
             logger.error(f"Azure API call failed: {e}")
             raise
@@ -1100,9 +1169,13 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
                 temperature=self.temperature,
                 stop=None  # Let the model use its default stop tokens
             )
-            
+
+            # vLLM exposes the same `usage` shape as OpenAI when running in
+            # OpenAI-compatible server mode, so the same helper works.
+            _track_openai_usage(response, self.model_name)
+
             content = response.choices[0].message.content
-            
+
             logger.debug(f"Received response from vLLM server:")
             logger.debug(f"  Length: {len(content)}")
             logger.debug(f"  First 200 chars: {content[:200]}...")

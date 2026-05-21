@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { openExternal } from '../../utils/tauriBridge'
 import { useStyleStore } from '../../stores/useStyleStore'
 import {
@@ -5,51 +6,196 @@ import {
   CITATION_STYLES,
   exportReferenceAsStyle,
 } from '../../utils/formatters'
+import { resolveDoi } from '../../utils/api'
 
 export function AddReferencePanel({ newRef, setNewRef, busyKey, onSave, onCancel }) {
   const disabled = busyKey === '__add__'
+  // Two entry modes:
+  //   'doi'    — paste a DOI, click Resolve, all fields auto-fill from CrossRef.
+  //   'manual' — fill in title/authors/year/etc. by hand (the original form).
+  // We default to 'doi' because that's the path the user explicitly asked
+  // for ("Automated reference adding by only doi"); the manual form stays
+  // available for cases where CrossRef doesn't have the paper.
+  const [mode, setMode] = useState('doi')
+  const [doiInput, setDoiInput] = useState(newRef.doi || '')
+  const [resolving, setResolving] = useState(false)
+  const [resolveError, setResolveError] = useState(null)
+  const [resolved, setResolved] = useState(null) // { title, authors, year, venue }
+
+  const handleResolve = async () => {
+    const value = (doiInput || '').trim()
+    if (!value) { setResolveError('Enter a DOI first'); return }
+    setResolving(true); setResolveError(null); setResolved(null)
+    try {
+      const res = await resolveDoi(value)
+      const meta = res?.data || {}
+      const authorsText = Array.isArray(meta.authors) ? meta.authors.join(', ') : (meta.authors || '')
+      setNewRef({
+        ...newRef,
+        title: meta.title || '',
+        authors: authorsText,
+        year: meta.year ? String(meta.year) : '',
+        doi: meta.doi || value,
+        arxiv_id: newRef.arxiv_id || '',
+      })
+      setResolved(meta)
+    } catch (e) {
+      setResolveError(e?.response?.data?.detail || e?.message || 'Resolution failed')
+    } finally {
+      setResolving(false)
+    }
+  }
+
+  const handleAddAndResolve = async () => {
+    // Convenience: if the user clicks Add reference with only a DOI typed
+    // but never clicked Resolve, the backend will still fall back to
+    // CrossRef inside the add endpoint — so just forward what we have.
+    // setNewRef is async (React state batch), so we can't depend on
+    // newRef.doi being updated by the time onSave reads it; pass the
+    // typed DOI through onSave's override path instead. The parent's
+    // handleAddRef accepts a patch and merges it over its closure of
+    // newRef before building the request body.
+    if (mode === 'doi' && doiInput && !newRef.doi) {
+      const trimmed = doiInput.trim()
+      setNewRef({ ...newRef, doi: trimmed })
+      onSave({ doi: trimmed })
+      return
+    }
+    onSave()
+  }
+
+  const switchMode = (next) => {
+    setMode(next)
+    setResolveError(null)
+  }
+
+  const fieldStyle = { borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }
+
   return (
     <div
       className="px-4 py-3 border-t text-sm"
       style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-tertiary)' }}
     >
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          className="px-2 py-1 rounded border"
-          placeholder="Title"
-          value={newRef.title}
-          onChange={e => setNewRef({ ...newRef, title: e.target.value })}
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-        />
-        <input
-          className="px-2 py-1 rounded border"
-          placeholder="Authors (comma-separated)"
-          value={newRef.authors}
-          onChange={e => setNewRef({ ...newRef, authors: e.target.value })}
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-        />
-        <input
-          className="px-2 py-1 rounded border"
-          placeholder="Year"
-          value={newRef.year}
-          onChange={e => setNewRef({ ...newRef, year: e.target.value })}
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-        />
-        <input
-          className="px-2 py-1 rounded border"
-          placeholder="DOI"
-          value={newRef.doi}
-          onChange={e => setNewRef({ ...newRef, doi: e.target.value })}
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-        />
-        <input
-          className="px-2 py-1 rounded border col-span-2"
-          placeholder="arXiv ID (e.g. 2401.12345)"
-          value={newRef.arxiv_id}
-          onChange={e => setNewRef({ ...newRef, arxiv_id: e.target.value })}
-          style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-secondary)' }}
-        />
+      {/* Mode toggle — tab strip */}
+      <div className="flex items-center gap-1 mb-3 text-xs">
+        <button
+          onClick={() => switchMode('doi')}
+          className="px-2 py-1 rounded font-medium"
+          style={{
+            background: mode === 'doi' ? 'var(--color-accent)' : 'transparent',
+            color: mode === 'doi' ? '#fff' : 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          By DOI (auto-fill)
+        </button>
+        <button
+          onClick={() => switchMode('manual')}
+          className="px-2 py-1 rounded font-medium"
+          style={{
+            background: mode === 'manual' ? 'var(--color-accent)' : 'transparent',
+            color: mode === 'manual' ? '#fff' : 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          Manual entry
+        </button>
       </div>
+
+      {mode === 'doi' ? (
+        <div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-2 py-1 rounded border"
+              placeholder="DOI (e.g. 10.1038/s41586-023-06924-6) or https://doi.org/..."
+              value={doiInput}
+              onChange={e => setDoiInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !resolving) handleResolve() }}
+              style={fieldStyle}
+            />
+            <button
+              onClick={handleResolve}
+              disabled={resolving || !doiInput.trim()}
+              className="px-3 py-1 rounded text-sm font-medium"
+              style={{
+                background: 'var(--color-accent)',
+                color: '#fff',
+                opacity: (resolving || !doiInput.trim()) ? 0.6 : 1,
+              }}
+            >
+              {resolving ? 'Resolving…' : 'Resolve'}
+            </button>
+          </div>
+          {resolveError && (
+            <div className="mt-2 text-xs" style={{ color: 'var(--color-error, #ef4444)' }}>
+              {resolveError}
+            </div>
+          )}
+          {resolved && (
+            <div
+              className="mt-2 p-2 rounded text-xs"
+              style={{
+                background: 'var(--color-bg-secondary)',
+                border: '1px solid var(--color-border)',
+                color: 'var(--color-text-primary)',
+              }}
+            >
+              <div style={{ fontWeight: 600 }}>{resolved.title || '(no title)'}</div>
+              {(resolved.authors || []).length > 0 && (
+                <div style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  {(resolved.authors || []).slice(0, 6).join(', ')}
+                  {(resolved.authors || []).length > 6 ? ', …' : ''}
+                </div>
+              )}
+              <div style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+                {resolved.venue || '—'}{resolved.year ? ` · ${resolved.year}` : ''}
+              </div>
+            </div>
+          )}
+          <div className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            Paste a DOI and we'll fill in title, authors, year, and venue from CrossRef.
+            If you skip Resolve, we'll still try when you click Add.
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            className="px-2 py-1 rounded border"
+            placeholder="Title"
+            value={newRef.title}
+            onChange={e => setNewRef({ ...newRef, title: e.target.value })}
+            style={fieldStyle}
+          />
+          <input
+            className="px-2 py-1 rounded border"
+            placeholder="Authors (comma-separated)"
+            value={newRef.authors}
+            onChange={e => setNewRef({ ...newRef, authors: e.target.value })}
+            style={fieldStyle}
+          />
+          <input
+            className="px-2 py-1 rounded border"
+            placeholder="Year"
+            value={newRef.year}
+            onChange={e => setNewRef({ ...newRef, year: e.target.value })}
+            style={fieldStyle}
+          />
+          <input
+            className="px-2 py-1 rounded border"
+            placeholder="DOI"
+            value={newRef.doi}
+            onChange={e => setNewRef({ ...newRef, doi: e.target.value })}
+            style={fieldStyle}
+          />
+          <input
+            className="px-2 py-1 rounded border col-span-2"
+            placeholder="arXiv ID (e.g. 2401.12345)"
+            value={newRef.arxiv_id}
+            onChange={e => setNewRef({ ...newRef, arxiv_id: e.target.value })}
+            style={fieldStyle}
+          />
+        </div>
+      )}
       <div className="mt-2 flex gap-2 justify-end">
         <button
           onClick={onCancel}
@@ -59,7 +205,7 @@ export function AddReferencePanel({ newRef, setNewRef, busyKey, onSave, onCancel
           Cancel
         </button>
         <button
-          onClick={onSave}
+          onClick={handleAddAndResolve}
           disabled={disabled}
           className="px-3 py-1 rounded text-sm"
           style={{ background: 'var(--color-accent)', color: '#fff', opacity: disabled ? 0.6 : 1 }}

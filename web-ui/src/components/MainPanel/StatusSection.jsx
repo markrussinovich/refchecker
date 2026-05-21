@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -8,6 +8,189 @@ import { logger } from '../../utils/logger'
 // API base URL for thumbnails - use empty string to use relative URLs via Vite proxy
 const API_BASE = ''
 const extractionValueStyle = { color: 'var(--color-text-secondary)', fontWeight: 600 }
+
+/**
+ * Multi-page scrollable preview overlay.
+ *
+ *   - Fetches `/api/preview/:id/page-count` once.
+ *   - If count > 1, renders a vertical scroll column with one <img> per
+ *     page lazily loaded from `/api/preview/:id/page/:n`.
+ *   - If count is 0 (non-PDF source) or 1, falls back to the existing
+ *     single-image preview so text/HTML/legacy checks still get a
+ *     usable overlay.
+ *   - Page jump strip: top-left chip "Page N / total" plus prev/next.
+ */
+function ThumbnailOverlay({ checkId, previewUrl, thumbnailUrl, onClose }) {
+  const [pageCount, setPageCount] = useState(null)
+  const [activePage, setActivePage] = useState(0)
+  const scrollRef = useRef(null)
+  const pageRefs = useRef([])
+
+  useEffect(() => {
+    let cancelled = false
+    setPageCount(null)
+    setActivePage(0)
+    if (!checkId || checkId === -1) return undefined
+    ;(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/preview/${checkId}/page-count`, {
+          credentials: 'include',
+        })
+        if (cancelled) return
+        if (!res.ok) { setPageCount(0); return }
+        const data = await res.json()
+        setPageCount(Number(data?.count || 0))
+      } catch {
+        if (!cancelled) setPageCount(0)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [checkId])
+
+  // Track which page is centered in the viewport so the "Page N / total"
+  // chip updates as the user scrolls. Uses IntersectionObserver for
+  // O(1) per scroll-tick rather than scroll-position math.
+  useEffect(() => {
+    if (!pageCount || pageCount <= 1 || !scrollRef.current) return undefined
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Pick the entry with the largest intersectionRatio.
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+        if (visible) {
+          const idx = Number(visible.target.dataset.pageIndex)
+          if (!Number.isNaN(idx)) setActivePage(idx)
+        }
+      },
+      { root: scrollRef.current, threshold: [0.25, 0.5, 0.75] },
+    )
+    pageRefs.current.forEach((el) => el && observer.observe(el))
+    return () => observer.disconnect()
+  }, [pageCount])
+
+  const jumpToPage = (n) => {
+    const el = pageRefs.current[n]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // Close on Esc — the parent already wires this for the legacy single
+  // image case, but the multi-page list is its own component so it
+  // needs its own listener.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      else if (e.key === 'ArrowDown' || e.key === 'PageDown') {
+        if (pageCount > 1) jumpToPage(Math.min(activePage + 1, pageCount - 1))
+      } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+        if (pageCount > 1) jumpToPage(Math.max(activePage - 1, 0))
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [activePage, pageCount]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const multiPage = pageCount && pageCount > 1
+
+  return (
+    <div
+      className="fixed inset-0 z-50"
+      style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}
+      onClick={onClose}
+    >
+      {/* Close button */}
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-20"
+        title="Close (Esc)"
+      >
+        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+
+      {/* Page indicator + navigation (only when multi-page) */}
+      {multiPage && (
+        <div
+          className="absolute top-4 left-4 z-20 flex items-center gap-2 px-3 py-1.5 rounded-full text-sm text-white"
+          style={{ background: 'rgba(255,255,255,0.12)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => jumpToPage(Math.max(activePage - 1, 0))}
+            disabled={activePage <= 0}
+            className="w-7 h-7 rounded-full hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"
+            title="Previous page"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <span>Page {activePage + 1} / {pageCount}</span>
+          <button
+            type="button"
+            onClick={() => jumpToPage(Math.min(activePage + 1, pageCount - 1))}
+            disabled={activePage >= pageCount - 1}
+            className="w-7 h-7 rounded-full hover:bg-white/15 disabled:opacity-30 flex items-center justify-center"
+            title="Next page"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Pages */}
+      <div
+        ref={scrollRef}
+        className="w-full h-full overflow-y-auto"
+        style={{ scrollBehavior: 'smooth' }}
+        onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      >
+        {multiPage ? (
+          <div
+            className="flex flex-col items-center gap-3 py-8 px-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {Array.from({ length: pageCount }, (_, i) => (
+              <img
+                key={i}
+                ref={(el) => { pageRefs.current[i] = el }}
+                data-page-index={i}
+                src={`${API_BASE}/api/preview/${checkId}/page/${i}`}
+                alt={`Page ${i + 1} of ${pageCount}`}
+                loading="lazy"
+                style={{ maxWidth: '95vw', maxHeight: '92vh', objectFit: 'contain' }}
+                className="rounded-lg shadow-2xl bg-white"
+              />
+            ))}
+          </div>
+        ) : (
+          // Single-image fallback (text checks, page-count probe failed)
+          <div
+            className="w-full h-full flex items-center justify-center p-8"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={previewUrl || thumbnailUrl}
+              alt="Paper preview"
+              style={{ maxWidth: '95vw', maxHeight: '95vh', objectFit: 'contain' }}
+              className="rounded-lg shadow-2xl"
+              onError={(e) => {
+                if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
+                  e.target.src = thumbnailUrl
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 /**
  * Extract ArXiv ID from a URL or source string
@@ -110,15 +293,37 @@ function formatSource(source, title, sourceType, checkId, originalFilename) {
     }
   }
   
-  // If it's a URL, show it as a link (full URL, will word-wrap in display)
-  if (source.startsWith('http://') || source.startsWith('https://')) {
-    return { type: 'url', value: source, display: source }
+  // If it's a URL, show it as a link styled like an inline reference —
+  // prefer the document title, then a short citation-style label
+  // ("arxiv.org/abs/2310.02238"), avoiding the raw protocol + querystring.
+  const friendlyUrlLabel = (u) => {
+    try {
+      const parsed = new URL(u)
+      const host = parsed.hostname.replace(/^www\./, '')
+      const path = parsed.pathname.replace(/\/$/, '')
+      const tail = path ? path : ''
+      const label = `${host}${tail}`
+      // Keep things compact: trim long paths but keep the last segment.
+      if (label.length > 60) {
+        const segs = label.split('/').filter(Boolean)
+        return segs.length > 2
+          ? `${segs[0]}/…/${segs[segs.length - 1]}`
+          : label.slice(0, 57) + '…'
+      }
+      return label
+    } catch {
+      return u
+    }
   }
-  // ArXiv IDs - show full URL (handles both "2310.02238" and "arXiv:2310.02238" formats)
+
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    return { type: 'url', value: source, display: title || friendlyUrlLabel(source) }
+  }
+  // ArXiv IDs - show as "arXiv:<id>" style
   const arxivMatch = source.match(/^(?:arXiv:)?(\d{4}\.\d{4,5}(?:v\d+)?)$/i)
   if (arxivMatch) {
     const fullUrl = `https://arxiv.org/abs/${arxivMatch[1]}`
-    return { type: 'url', value: fullUrl, display: fullUrl }
+    return { type: 'url', value: fullUrl, display: title || `arXiv:${arxivMatch[1]}` }
   }
   // Filename or other
   return { type: 'text', value: source, display: source }
@@ -998,44 +1203,17 @@ export default function StatusSection() {
         </div>
       )}
 
-      {/* Thumbnail overlay modal */}
+      {/* Thumbnail overlay modal — scrollable, one image per page.
+          When the backend reports page-count > 1 we render a vertical
+          scroll list; otherwise we fall back to the single-image preview
+          so text/HTML/etc. checks still get a usable overlay. */}
       {showThumbnailOverlay && (previewUrl || thumbnailUrl) && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.9)' }}
-          onClick={() => setShowThumbnailOverlay(false)}
-        >
-          <div className="relative w-full h-full flex items-start justify-center p-8 overflow-auto">
-            <button
-              type="button"
-              onClick={() => setShowThumbnailOverlay(false)}
-              className="fixed top-4 right-4 w-10 h-10 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors z-50"
-              title="Close (Esc)"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            <img
-              src={previewUrl || thumbnailUrl}
-              alt="Paper preview"
-              style={{
-                maxWidth: '95vw',
-                width: 'auto',
-                height: 'auto',
-                display: 'block',
-              }}
-              className="rounded-lg shadow-2xl my-4"
-              onClick={(e) => e.stopPropagation()}
-              onError={(e) => {
-                // Fall back to thumbnail if preview fails
-                if (previewUrl && thumbnailUrl && e.target.src !== thumbnailUrl) {
-                  e.target.src = thumbnailUrl
-                }
-              }}
-            />
-          </div>
-        </div>
+        <ThumbnailOverlay
+          checkId={selectedCheckId}
+          previewUrl={previewUrl}
+          thumbnailUrl={thumbnailUrl}
+          onClose={() => setShowThumbnailOverlay(false)}
+        />
       )}
     </div>
   )

@@ -40,6 +40,11 @@ export default function GraphView({ references, paperTitle }) {
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
+  // Filters / display modes. When `hideSourceSpokes` is on we drop the
+  // source-paper -> ref edges so the actual co-citation structure
+  // between refs reads cleanly (otherwise everything spokes off the
+  // centre node and the inter-ref edges drown).
+  const [hideSourceSpokes, setHideSourceSpokes] = useState(false)
 
   useEffect(() => {
     const el = containerRef.current
@@ -100,12 +105,24 @@ export default function GraphView({ references, paperTitle }) {
       }
     }
 
+    // Out-degree too — used along with in-degree to detect orphans
+    // (refs with no co-citation links at all) so they can be styled and
+    // visually pushed to the rim.
+    const inPaperOutDegree = {}
+    if (serverGraph?.edges?.length) {
+      for (const e of serverGraph.edges) {
+        inPaperOutDegree[e.source] = (inPaperOutDegree[e.source] || 0) + 1
+      }
+    }
+
     refs.forEach((r, i) => {
       const id = String(r.id ?? r.index ?? `ref-${i}`)
       const status = getEffectiveReferenceStatus(r, true)
       const serverNode = serverGraph?.byId?.[id]
       const citationCount = serverNode?.citationCount || 0
       const inDegree = inPaperInDegree[id] || 0
+      const outDegree = inPaperOutDegree[id] || 0
+      const isOrphan = inDegree === 0 && outDegree === 0
       // Size by in-paper in-degree (primary), with a small log-scaled
       // boost from global citationCount so orphan-but-famous refs still
       // read at a glance.
@@ -119,12 +136,19 @@ export default function GraphView({ references, paperTitle }) {
         paperId: serverNode?.paperId,
         citationCount,
         inDegree,
+        outDegree,
+        isOrphan,
         val,
         color: STATUS_COLOR[status] || STATUS_COLOR.pending,
       }
       nodes.push(node)
       localById[id] = node
-      edges.push({ source: '__source__', target: id })
+      // The source-paper spoke is optional — hiding it lets the
+      // co-citation structure read clearly without the centre node
+      // dragging everything into a rosette.
+      if (!hideSourceSpokes) {
+        edges.push({ source: '__source__', target: id, spoke: true })
+      }
     })
 
     // Real inter-reference citation edges
@@ -135,7 +159,11 @@ export default function GraphView({ references, paperTitle }) {
       }
     }
 
-    // Expanded one-hop nodes (from double-click)
+    // Expanded one-hop nodes (from double-click). Sized by the
+    // expanded paper's S2 citation count so the user can pick out
+    // landmark-influential refs at a glance. Coloured cyan so they're
+    // visually distinct from the in-paper refs (which carry verify-
+    // status colours).
     for (const ex of expandedNodes) {
       nodes.push({
         id: ex.id,
@@ -144,14 +172,39 @@ export default function GraphView({ references, paperTitle }) {
         ref: ex,
         paperId: ex.paperId,
         citationCount: ex.citationCount,
-        val: Math.max(3, Math.log10((ex.citationCount || 0) + 1) * 4 + 3),
+        val: Math.max(4, Math.log10((ex.citationCount || 0) + 1) * 4.5 + 4),
         color: '#0ea5e9',
       })
       if (ex.parent) edges.push({ source: ex.parent, target: ex.id, expanded: true })
     }
 
     return { nodes, links: edges }
-  }, [references, paperTitle, serverGraph, expandedNodes])
+  }, [references, paperTitle, serverGraph, expandedNodes, hideSourceSpokes])
+
+  // Tune the force-graph engine: orphans (refs with no co-citation
+  // edges) should drift outward so they cluster at the rim — that's the
+  // visual cue the user asked for ("hallucinated refs land there
+  // visually"). We do this by overriding the charge force per-node so
+  // orphans repel everyone harder than well-connected nodes.
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg || typeof fg.d3Force !== 'function') return
+    try {
+      const charge = fg.d3Force('charge')
+      if (charge && typeof charge.strength === 'function') {
+        charge.strength((node) => {
+          if (node.type === 'source') return -180
+          if (node.isOrphan) return -260
+          // Connected refs pull each other inward more gently.
+          return -60 - Math.min(8, (node.inDegree || 0)) * 12
+        })
+      }
+      // Re-heat the simulation so the new strengths take effect.
+      if (typeof fg.d3ReheatSimulation === 'function') fg.d3ReheatSimulation()
+    } catch {
+      /* d3Force not yet wired — next data update will re-trigger */
+    }
+  }, [graphData])
 
   const handleExpand = async (node) => {
     if (!node || !node.paperId) return
@@ -243,7 +296,18 @@ export default function GraphView({ references, paperTitle }) {
         className="absolute top-2 left-2 z-10 text-xs px-2 py-1 rounded flex items-center gap-2 flex-wrap"
         style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
       >
-        {loadingGraph ? 'Fetching S2 citation graph…' : 'Double-click a node to expand one hop'}
+        <span>
+          {loadingGraph ? 'Fetching S2 citation graph…' : 'Double-click a node to expand one hop'}
+        </span>
+        <label className="inline-flex items-center gap-1 cursor-pointer" title="Hide source-paper spokes so the co-citation structure between refs reads clearly. Orphan refs drift to the rim.">
+          <input
+            type="checkbox"
+            checked={hideSourceSpokes}
+            onChange={(e) => setHideSourceSpokes(e.target.checked)}
+            style={{ accentColor: 'var(--color-accent, #3b82f6)' }}
+          />
+          <span>Hide source spokes</span>
+        </label>
         {eligibleNodes.length > 0 && (
           <button
             onClick={runAutoExpand}
@@ -263,10 +327,10 @@ export default function GraphView({ references, paperTitle }) {
         {expandedNodes.length > 0 && (
           <button
             onClick={() => setExpandedNodes([])}
-            className="ml-2 underline"
+            className="underline"
             style={{ color: 'var(--color-accent, #3b82f6)' }}
           >
-            Clear ({expandedNodes.length})
+            Clear expanded ({expandedNodes.length})
           </button>
         )}
       </div>
@@ -283,9 +347,19 @@ export default function GraphView({ references, paperTitle }) {
           backgroundColor="transparent"
           nodeRelSize={4}
           nodeColor={(n) => n.color}
-          linkColor={(l) => l.citation ? 'rgba(59,130,246,0.55)' : (l.expanded ? 'rgba(14,165,233,0.45)' : 'rgba(148,163,184,0.35)')}
-          linkWidth={(l) => l.citation ? 1.6 : 0.8}
-          linkDirectionalArrowLength={(l) => l.citation ? 3 : 0}
+          // Co-citation edges (inter-ref) are the load-bearing signal,
+          // so they get the loudest stroke. Expanded one-hop edges are
+          // cyan to match their nodes. Source-spoke edges (when shown)
+          // are subdued so they fade behind the co-citation structure.
+          linkColor={(l) =>
+            l.citation
+              ? 'rgba(59,130,246,0.7)'
+              : l.expanded
+                ? 'rgba(14,165,233,0.75)'
+                : 'rgba(148,163,184,0.22)'
+          }
+          linkWidth={(l) => (l.citation ? 1.8 : l.expanded ? 1.5 : 0.6)}
+          linkDirectionalArrowLength={(l) => (l.citation || l.expanded ? 3 : 0)}
           linkDirectionalArrowRelPos={1}
           cooldownTicks={140}
           d3AlphaDecay={0.02}
@@ -298,7 +372,7 @@ export default function GraphView({ references, paperTitle }) {
             const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
             const isHovered = hovered?.id === node.id
             const isSelected = selected?.id === node.id
-            // Soft outline ring on hover / selection so the user knows which
+            // Soft halo on hover / selection so the user knows which
             // node they're targeting.
             if (isHovered || isSelected) {
               ctx.fillStyle = isHovered ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)'
@@ -306,10 +380,34 @@ export default function GraphView({ references, paperTitle }) {
               ctx.arc(node.x, node.y, radius + 4, 0, 2 * Math.PI, false)
               ctx.fill()
             }
+            // Filled disc — primary node visual.
             ctx.fillStyle = node.color || '#888'
             ctx.beginPath()
             ctx.arc(node.x, node.y, radius, 0, 2 * Math.PI, false)
             ctx.fill()
+            // Status-aware emphasis rings. Orphan refs that also carry a
+            // problem status (hallucinated, error, unverified) get a
+            // ring in the node's own status colour — the rim position
+            // already conveys "isolated", the ring layers on top to
+            // call attention to the refs reviewers should look at
+            // first. Verified orphans intentionally get no ring so we
+            // don't visually conflate them with hallucinated colour.
+            // Expanded (one-hop) nodes get a faint white ring to mark
+            // them as 2nd-degree.
+            const problemStatuses = new Set(['hallucinated', 'error', 'unverified'])
+            if (node.isOrphan && node.type === 'reference' && problemStatuses.has(node.status)) {
+              ctx.strokeStyle = node.color || 'rgba(168, 85, 247, 0.8)'
+              ctx.lineWidth = Math.max(1.4, 1.8 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 2.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            } else if (node.type === 'expanded') {
+              ctx.strokeStyle = 'rgba(255,255,255,0.6)'
+              ctx.lineWidth = Math.max(1, 1.2 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 1.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            }
             // Single-label rule: the hovered node wins. If no hover, the
             // source node always shows its label so the user has at least
             // one orientation anchor. Past 2.5× zoom, render every label.

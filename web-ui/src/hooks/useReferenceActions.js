@@ -18,21 +18,31 @@ export default function useReferenceActions() {
 
   const reloadCheck = async () => {
     if (!selectedCheckId) return
-    await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+    // Force refetch — the store short-circuits same-id selects, but after an
+    // Apply Fix / Re-verify we need the freshly-updated reference list so the
+    // HealthBadge + Summary tiles recompute against the new statuses.
+    await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
   }
 
-  const handleAddRef = async () => {
+  const handleAddRef = async (override) => {
     if (!selectedCheckId) return null
     setBusyKey('__add__')
+    // Accept an optional override patch so callers can pass in fields
+    // that the parent's `newRef` state hasn't received yet (the "Add by
+    // DOI" panel resolves a DOI on click — setNewRef is async, so by
+    // the time handleAddRef reads its closure of `newRef`, the new DOI
+    // hasn't landed yet. The override merges deterministically over the
+    // closure's `newRef`, closing that race).
+    const eff = { ...newRef, ...(override || {}) }
     try {
       const res = await addReferenceToCheck(selectedCheckId, {
-        title: newRef.title.trim() || null,
-        authors: newRef.authors.trim()
-          ? newRef.authors.split(',').map(s => s.trim()).filter(Boolean)
+        title: (eff.title || '').trim() || null,
+        authors: (eff.authors || '').trim()
+          ? eff.authors.split(',').map(s => s.trim()).filter(Boolean)
           : null,
-        year: newRef.year ? parseInt(newRef.year, 10) : null,
-        doi: newRef.doi.trim() || null,
-        arxiv_id: newRef.arxiv_id.trim() || null,
+        year: eff.year ? parseInt(eff.year, 10) : null,
+        doi: (eff.doi || '').trim() || null,
+        arxiv_id: (eff.arxiv_id || '').trim() || null,
       })
       const addedId = res?.data?.id ?? res?.data?.reference?.id ?? null
       setShowAdd(false)

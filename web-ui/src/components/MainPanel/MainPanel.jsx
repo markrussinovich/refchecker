@@ -11,6 +11,7 @@ import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
 import HealthBadge from './HealthBadge'
 import UsageChip from './UsageChip'
+import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
@@ -294,7 +295,12 @@ export default function MainPanel() {
             references={displayRefs}
             paperTitle={displayPaperTitle}
             paperSource={displayPaperSource}
-            healthBadge={<HealthBadge references={displayRefs} />}
+            healthBadge={
+              <>
+                <HealthBadge references={displayRefs} />
+                <LLMUsageBadge checkId={selectedCheckId} isComplete={isComplete} />
+              </>
+            }
             usageChip={<UsageChip />}
           />
         )}

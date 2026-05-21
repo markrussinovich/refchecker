@@ -63,6 +63,8 @@ from .thumbnail import (
     generate_arxiv_preview_async,
     generate_pdf_thumbnail_async,
     generate_pdf_preview_async,
+    generate_pdf_page_preview_async,
+    get_pdf_page_count_async,
     get_pdf_storage_path,
     get_text_thumbnail_async,
     get_text_preview_async,
@@ -2186,6 +2188,106 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _resolve_pdf_path_for_check(check: Dict[str, Any], cache_dir: str) -> Optional[str]:
+    """Resolve a check record to a local PDF path on disk.
+
+    Mirrors the same source-type cascade /api/preview uses (direct PDF
+    URL → arXiv abstract URL → uploaded file) so the new per-page
+    endpoints don't drift from the single-page preview's resolution
+    logic. Returns None when the source can't be rendered as a PDF
+    (text checks, non-PDF uploads, missing files).
+    """
+    paper_source = check.get("paper_source") or ""
+    source_type = check.get("source_type") or "url"
+    if "openreview.net/forum" in paper_source.lower():
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(paper_source)
+        params = parse_qs(parsed.query)
+        or_id = params.get("id", [None])[0]
+        if or_id:
+            paper_source = f"https://openreview.net/pdf?id={or_id}"
+    import re as _re
+    arxiv_match = _re.search(r"(\d{4}\.\d{4,5})(v\d+)?", paper_source)
+    is_direct_pdf_url = (
+        source_type == "url"
+        and (paper_source.lower().endswith(".pdf") or "openreview.net/pdf" in paper_source.lower())
+        and "arxiv.org" not in paper_source.lower()
+    )
+    if is_direct_pdf_url:
+        from backend.refchecker_wrapper import download_pdf
+        pdf_path = get_pdf_storage_path(paper_source, cache_dir=cache_dir)
+        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            try:
+                await asyncio.to_thread(download_pdf, paper_source, pdf_path)
+            except Exception as e:
+                logger.debug(f"download_pdf failed for page render: {e}")
+                return None
+        return pdf_path if os.path.exists(pdf_path) else None
+    if arxiv_match:
+        # Use the same cache-key + download helper that
+        # `generate_arxiv_preview` uses (`source_identifier="arxiv_<id>"`
+        # + `_download_arxiv_pdf`). Otherwise opening this overlay on an
+        # arXiv check after the single-page preview has already cached
+        # the PDF triggers a wasted second download keyed by a different
+        # source_identifier, and the existing first-page cache wouldn't
+        # be reused by the per-page renderer either.
+        from .thumbnail import _download_arxiv_pdf
+        arxiv_id = arxiv_match.group(1)
+        source_identifier = f"arxiv_{arxiv_id}"
+        pdf_path = get_pdf_storage_path(source_identifier, cache_dir=cache_dir)
+        if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+            ok = await asyncio.to_thread(_download_arxiv_pdf, arxiv_id, pdf_path)
+            if not ok:
+                return None
+        return pdf_path if os.path.exists(pdf_path) else None
+    if source_type == "file" and paper_source.lower().endswith(".pdf"):
+        return paper_source if os.path.exists(paper_source) else None
+    return None
+
+
+@app.get("/api/preview/{check_id}/page-count")
+async def get_preview_page_count(check_id: int, current_user: UserInfo = Depends(require_user)):
+    """Number of pages in the paper backing this check. Powers the
+    multi-page scrollable preview overlay so the frontend knows how many
+    page slots to render. Returns 0 for non-PDF sources (text/HTML/etc),
+    which the frontend treats as "fall back to single preview"."""
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        return {"count": 0}
+    count = await get_pdf_page_count_async(pdf_path)
+    return {"count": count}
+
+
+@app.get("/api/preview/{check_id}/page/{page_index}")
+async def get_preview_page(
+    check_id: int,
+    page_index: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Render and return a single PDF page as a PNG. Pages are cached
+    per-source so the overlay scroll feels instant after the first
+    fetch. `page_index` is 0-based."""
+    if page_index < 0 or page_index > 9999:
+        raise HTTPException(status_code=400, detail="page_index out of range")
+    check = await _get_owned_check_or_404(check_id, current_user)
+    cache_dir = await _get_configured_cache_dir()
+    pdf_path = await _resolve_pdf_path_for_check(check, cache_dir)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="No PDF source for this check")
+    page_path = await generate_pdf_page_preview_async(
+        pdf_path, page_index, source_identifier=pdf_path, cache_dir=cache_dir,
+    )
+    if not page_path or not os.path.exists(page_path):
+        raise HTTPException(status_code=404, detail="Page not available")
+    return FileResponse(
+        page_path,
+        media_type="image/png",
+        headers=_private_artifact_headers(),
+    )
+
+
 @app.get("/api/text/{check_id}")
 async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
@@ -4051,6 +4153,86 @@ class _AddReferenceRequest(BaseModel):
     cited_url: Optional[str] = None
 
 
+async def _resolve_doi_via_crossref(doi: str) -> Optional[Dict[str, Any]]:
+    """Hit CrossRef for a DOI and return a normalized metadata dict.
+
+    Used by the "Add by DOI" flow: the user types a single DOI and the
+    backend fills in title/authors/year/venue so they don't have to. Best
+    effort — we return None on any failure so the caller can fall back to
+    inserting just the DOI and letting Verify pick up the rest.
+    """
+    doi = (doi or "").strip()
+    if not doi:
+        return None
+    # Accept https://doi.org/..., http://dx.doi.org/..., and bare 10.* —
+    # strip the prefix. Also strip ?query / #fragment / trailing whitespace
+    # so the user pasting `https://doi.org/10.1038/foo#section` still works.
+    if doi.lower().startswith("http"):
+        if "doi.org/" in doi:
+            doi = doi.split("doi.org/", 1)[1]
+        else:
+            return None
+    doi = doi.split("?", 1)[0].split("#", 1)[0].strip()
+    if not doi.lower().startswith("10."):
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.get(
+                f"https://api.crossref.org/works/{doi}",
+                headers={
+                    # Polite-pool: identify ourselves so CrossRef can throttle
+                    # us by user rather than IP.
+                    "User-Agent": "RefChecker/desktop (https://github.com/ArioMoniri/refchecker)",
+                },
+            )
+            r.raise_for_status()
+            data = (r.json() or {}).get("message") or {}
+    except Exception as e:
+        logger.debug(f"CrossRef DOI lookup failed for {doi}: {e}")
+        return None
+    titles = data.get("title") or []
+    title = titles[0] if isinstance(titles, list) and titles else None
+    authors = []
+    for a in (data.get("author") or []):
+        full = " ".join(p for p in (a.get("given"), a.get("family")) if p) or a.get("name")
+        if full:
+            authors.append(full)
+    year = None
+    for k in ("published-print", "published-online", "published", "issued", "created"):
+        parts = ((data.get(k) or {}).get("date-parts") or [[]])[0]
+        if parts and isinstance(parts[0], int):
+            year = parts[0]
+            break
+    venue = None
+    cts = data.get("container-title") or []
+    if isinstance(cts, list) and cts:
+        venue = cts[0]
+    return {
+        "doi": doi,
+        "title": title,
+        "authors": authors,
+        "year": year,
+        "venue": venue,
+        "cited_url": f"https://doi.org/{doi}",
+        "source": "crossref",
+    }
+
+
+@app.get("/api/doi/resolve")
+async def resolve_doi(
+    doi: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Resolve a DOI to title/authors/year/venue via CrossRef. Powers the
+    'Add by DOI' one-field input on the References tab so the user can
+    add a citation by pasting just the DOI."""
+    meta = await _resolve_doi_via_crossref(doi)
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Could not resolve DOI: {doi}")
+    return meta
+
+
 @app.post("/api/history/{check_id}/references")
 async def add_reference_to_check(
     check_id: int,
@@ -4059,21 +4241,45 @@ async def add_reference_to_check(
 ):
     """Append a new reference to an existing check. Status starts as
     'pending'; the frontend can show it greyed out and the user can
-    trigger a re-verify or rerun the check to validate it for real."""
+    trigger a re-verify or rerun the check to validate it for real.
+
+    When the payload contains a DOI but no title (the "Add by DOI" flow),
+    we resolve via CrossRef so the row shows up with real metadata
+    instead of an empty placeholder."""
     user_id = get_user_id_filter(current_user)
     refs = await db.get_check_references(check_id, user_id=user_id)
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
+
+    title = payload.title
+    authors = payload.authors
+    year = payload.year
+    venue = payload.venue
+    cited_url = payload.cited_url
+    doi_value = payload.doi
+    # If the user gave us a DOI without other metadata, fill it in. Best
+    # effort: if CrossRef is down we still insert the DOI as a pending
+    # reference that can be re-verified once the network is back.
+    if doi_value and not (title or (authors and len(authors) > 0)):
+        meta = await _resolve_doi_via_crossref(doi_value)
+        if meta:
+            title = title or meta.get("title")
+            authors = authors or meta.get("authors")
+            year = year or meta.get("year")
+            venue = venue or meta.get("venue")
+            cited_url = cited_url or meta.get("cited_url")
+            doi_value = meta.get("doi") or doi_value
+
     new_ref = {
         "id": f"manual-{int(time.time() * 1000)}",
         "index": (max((r.get("index") or 0) for r in refs) + 1) if refs else 1,
-        "title": payload.title,
-        "authors": payload.authors,
-        "year": payload.year,
-        "venue": payload.venue,
-        "doi": payload.doi,
+        "title": title,
+        "authors": authors,
+        "year": year,
+        "venue": venue,
+        "doi": doi_value,
         "arxiv_id": payload.arxiv_id,
-        "cited_url": payload.cited_url,
+        "cited_url": cited_url,
         "status": "pending",
         "errors": [],
         "warnings": [],
@@ -4114,6 +4320,42 @@ class _VerifySingleRequest(BaseModel):
     # this path so the verifier runs against the FIXED metadata (and the
     # ref typically flips to verified, which moves the health badge).
     apply_correction: bool = False
+
+
+@app.get("/api/history/{check_id}/llm-usage")
+async def get_llm_usage(
+    check_id: int,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Per-check LLM token + cost accumulator snapshot for the $ badge.
+
+    Returns total tokens / cost plus a per-flow breakdown
+    (extract / verify / hallucination / suggest / graph / reverify) so the
+    Summary-tab badge can render a hover tooltip showing what each phase
+    cost. The accumulator resets at the start of each `check_paper` call
+    so the badge always reflects a single run.
+    """
+    # Ownership gate: load the check under the same user_id filter the
+    # rest of /api/history uses, so one authenticated user can't probe
+    # another user's token spend by enumerating check_ids.
+    user_id = get_user_id_filter(current_user)
+    refs = await db.get_check_references(check_id, user_id=user_id)
+    if refs is None:
+        raise HTTPException(status_code=404, detail="Check not found")
+
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).parent.parent / "src"))
+        from refchecker.llm import usage_tracker
+        snap = usage_tracker.snapshot(str(check_id))
+        return snap
+    except Exception as e:
+        logger.warning(f"llm-usage snapshot failed: {e}")
+        return {
+            "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+            "calls": 0, "by_flow": {}, "by_model": {},
+        }
 
 
 @app.post("/api/history/{check_id}/references/{ref_id}/verify")
@@ -4162,7 +4404,40 @@ async def verify_single_reference(
         cached = await db.lookup_verified_reference(target)
     except Exception:
         cached = None
-    if cached and isinstance(cached.get("result"), dict) and cached["result"]:
+
+    def _cache_is_pre_split(cached_result: Dict[str, Any]) -> bool:
+        """Entries written before the cited-vs-verified split overwrote
+        cited title/authors/year/venue/doi/arxiv_id with verified values
+        but never wrote any of the new ``verified_*`` siblings. Replaying
+        them would reintroduce the "mixed up metadata" bug. Detect the
+        old shape so we force a fresh verification instead of replaying
+        a corrupted cache entry."""
+        if not isinstance(cached_result, dict):
+            return False
+        # Newer entries always carry at least one verified_* sibling
+        # when verified_data was non-empty; old entries never do.
+        has_new_shape = any(
+            cached_result.get(k) for k in (
+                "verified_title", "verified_authors", "verified_year",
+                "verified_venue", "verified_doi", "verified_arxiv_id",
+            )
+        )
+        if has_new_shape:
+            return False
+        # If the entry has a status of verified/warning AND a matched_db
+        # but no verified_* siblings, it's almost certainly old-shape.
+        looks_verified = cached_result.get("status") in {"verified", "warning"} and bool(
+            cached_result.get("matched_db") or cached_result.get("verified_url")
+            or cached_result.get("authoritative_urls")
+        )
+        return looks_verified
+
+    if (
+        cached
+        and isinstance(cached.get("result"), dict)
+        and cached["result"]
+        and not _cache_is_pre_split(cached["result"])
+    ):
         updated = dict(cached["result"])
         updated["id"] = target.get("id")
         updated["index"] = target.get("index")
@@ -4185,10 +4460,17 @@ async def verify_single_reference(
             semantic_scholar_api_key=ss_api_key,
             debug_mode=False,
         )
+        # Tag any LLM calls made during this single-ref re-verify so the
+        # $ badge's by-flow breakdown attributes correctly.
+        from refchecker.llm import usage_tracker as _usage_tracker
+
+        def _run_verify():
+            _usage_tracker.set_current_check(str(check_id))
+            with _usage_tracker.FlowScope("reverify"):
+                return checker.verify_reference(dict(target))
+
         import asyncio
-        verified_data, errors, url = await asyncio.to_thread(
-            checker.verify_reference, dict(target)
-        )
+        verified_data, errors, url = await asyncio.to_thread(_run_verify)
     except Exception as e:
         logger.exception("Per-ref verify failed")
         raise HTTPException(status_code=500, detail=f"Verify failed: {e}")
@@ -4219,11 +4501,23 @@ async def verify_single_reference(
     updated["warnings"] = []  # warnings come back through error_type for now
     updated["verified_url"] = url
     if verified_data:
-        # Merge the canonical metadata from the verified_data back over the
-        # stored ref so the UI surfaces it.
-        for key in ("title", "authors", "year", "venue", "doi", "arxiv_id"):
-            if verified_data.get(key):
-                updated[key] = verified_data[key]
+        # Surface the canonical metadata in dedicated `verified_*` fields
+        # rather than overwriting the cited title/authors/year. Mixing the
+        # two on the same field (which is what the old code did) caused
+        # the References tab to show inconsistent metadata: re-verified
+        # rows showed the newer canonical metadata while never-re-verified
+        # rows still showed the cited values, so the user saw "mixed up"
+        # versions side-by-side.
+        for src_key, dst_key in (
+            ("title", "verified_title"),
+            ("authors", "verified_authors"),
+            ("year", "verified_year"),
+            ("venue", "verified_venue"),
+            ("doi", "verified_doi"),
+            ("arxiv_id", "verified_arxiv_id"),
+        ):
+            if verified_data.get(src_key):
+                updated[dst_key] = verified_data[src_key]
         updated["matched_db"] = verified_data.get("source") or updated.get("matched_db")
         updated["authoritative_urls"] = [{"url": url}] if url else []
 
@@ -4763,11 +5057,128 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
         logger.debug("LLM similar-papers source skipped: %s", e)
 
     # ── Rank: shared first, multi-source as tiebreak, then llm/web ──
+    # Pre-rank by co-citation count so we have a candidate pool, but the
+    # FINAL rank is driven by reference-overlap below (the user's actual
+    # spec: "papers that share 90% same references with the input"). We
+    # take 3x `limit` from the pool so reference-overlap can re-rank
+    # before we cut to the user-visible limit.
+    pool_size = max(limit * 3, 15)
     ranked = sorted(
         tally.values(),
         key=lambda v: (v["shared"], len(v["sources"]), "semantic_scholar" in v["sources"], "openalex" in v["sources"]),
         reverse=True,
-    )[:limit]
+    )[:pool_size]
+
+    # ── Reference-overlap rescoring (this is the user's primary signal) ─
+    # For every candidate, pull its own reference list from S2 and compute
+    # what fraction of the *input* paper's references also appear in the
+    # candidate's bibliography. A candidate that cites 18 of the input's 20
+    # references is far more similar to the input than one that just shares
+    # a single co-citation. Identity uses DOI -> arXiv -> normalized title.
+    def _ref_identity(r: dict) -> Optional[str]:
+        if not isinstance(r, dict):
+            return None
+        doi = (r.get("doi") or "").strip().lower()
+        if doi:
+            return f"doi:{doi}"
+        aid = (r.get("arxiv_id") or "").strip().lower()
+        if aid:
+            # Strip version suffix so v1/v2 collapse to one identity.
+            import re as _re
+            aid = _re.sub(r"v\d+$", "", aid)
+            return f"arxiv:{aid}"
+        title = (r.get("title") or "").strip().lower()
+        # Normalise to alphanumerics + spaces so trivial punctuation
+        # differences don't break the match.
+        import re as _re
+        title = _re.sub(r"[^a-z0-9]+", " ", title).strip()
+        year = r.get("year")
+        # NB: threshold here is intentionally looser (12) than the Seen
+        # Refs identity key (30 + 3 tokens). This identity is used only
+        # within a single Similar-Papers request to count shared refs
+        # between two papers — a loose match slightly inflates one
+        # candidate's overlap score but doesn't poison a persistent
+        # cache. A stricter threshold would miss real overlaps where one
+        # side has the year and the other doesn't.
+        if title and len(title) >= 12:
+            return f"title:{title}:{year}" if year else f"title:{title}:_"
+        return None
+
+    input_idset = {k for k in (_ref_identity(r) for r in refs) if k}
+    input_idcount = max(1, len(input_idset))
+
+    async def _candidate_refs(client: httpx.AsyncClient, entry: dict) -> set:
+        p = entry["paper"]
+        # Need an S2 paperId or external id to ask S2 for references.
+        ident = None
+        if p.get("paperId"):
+            ident = p["paperId"]
+        elif p.get("doi"):
+            ident = f"DOI:{p['doi']}"
+        elif p.get("arxiv_id"):
+            ident = f"arXiv:{p['arxiv_id']}"
+        if not ident:
+            return set()
+        data = await _fetch(
+            client,
+            f"https://api.semanticscholar.org/graph/v1/paper/{ident}/references",
+            params={
+                "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.externalIds",
+                "limit": 200,
+            },
+        )
+        out: set = set()
+        for item in (data or {}).get("data", []) or []:
+            cp = item.get("citedPaper") or {}
+            ext = cp.get("externalIds") or {}
+            ref_shape = {
+                "title": cp.get("title"),
+                "year": cp.get("year"),
+                "doi": ext.get("DOI"),
+                "arxiv_id": ext.get("ArXiv"),
+            }
+            ident_key = _ref_identity(ref_shape)
+            if ident_key:
+                out.add(ident_key)
+        return out
+
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient() as _client:
+            overlap_sem = asyncio.Semaphore(6)
+
+            async def _score(entry):
+                async with overlap_sem:
+                    cand_set = await _candidate_refs(_client, entry)
+                shared_refs = input_idset & cand_set
+                entry["shared_refs_count"] = len(shared_refs)
+                entry["shared_refs_pct"] = len(shared_refs) / input_idcount
+                union = input_idset | cand_set
+                entry["shared_refs_jaccard"] = (
+                    len(shared_refs) / max(1, len(union)) if union else 0.0
+                )
+                entry["candidate_ref_count"] = len(cand_set)
+
+            await asyncio.gather(*[_score(e) for e in ranked])
+    except Exception as e:
+        logger.debug("Reference-overlap rescoring failed: %s", e)
+        for entry in ranked:
+            entry.setdefault("shared_refs_count", 0)
+            entry.setdefault("shared_refs_pct", 0.0)
+            entry.setdefault("shared_refs_jaccard", 0.0)
+            entry.setdefault("candidate_ref_count", 0)
+
+    # Re-rank by overlap percentage, then count, then co-citation tiebreak.
+    ranked.sort(
+        key=lambda v: (
+            v.get("shared_refs_pct", 0.0),
+            v.get("shared_refs_count", 0),
+            v.get("shared", 0),
+            len(v.get("sources", [])),
+        ),
+        reverse=True,
+    )
+    ranked = ranked[:limit]
 
     # ── Active verification of cache-miss candidates ────────────────
     # Cap to `limit` candidates and verify in parallel (sem limits concurrency).
@@ -4858,6 +5269,14 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
             "venue": p.get("venue"),
             "reason": p.get("reason"),
             "shared_with_source": entry["shared"],
+            # NEW: actual reference-overlap signal — the % of the input
+            # paper's references that the candidate also cites. Drives
+            # the "share 90% same references" experience the user asked
+            # for (#4 on the roadmap).
+            "shared_refs_count": entry.get("shared_refs_count", 0),
+            "shared_refs_pct": entry.get("shared_refs_pct", 0.0),
+            "shared_refs_jaccard": entry.get("shared_refs_jaccard", 0.0),
+            "candidate_ref_count": entry.get("candidate_ref_count", 0),
             "sources": entry["sources"],
             "via": entry["sources"][0] if entry["sources"] else None,
             "semantic_scholar_url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,
@@ -4877,9 +5296,14 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
     # results are useful for "what else should I read?". The previous
     # filter dropped lone-LLM/web ghosts but that left users with an empty
     # tab when no source could be cross-verified, which is worse.
+    # Final rank: reference-overlap is the primary signal (the user's
+    # "shares 90% of refs" spec), then verified, then co-citation, then
+    # multi-source backing as tiebreakers.
     final = list(out)
     final.sort(
         key=lambda o: (
+            o.get("shared_refs_pct", 0.0),
+            o.get("shared_refs_count", 0),
             1 if o["was_verified"] else 0,
             o["shared_with_source"] or 0,
             len(o["sources"]),

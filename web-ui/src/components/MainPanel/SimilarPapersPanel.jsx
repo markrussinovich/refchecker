@@ -150,6 +150,26 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                         {s === 'semantic_scholar' ? 'S2' : s === 'openalex' ? 'OpenAlex' : s === 'web' ? 'Web' : s === 'llm' ? 'LLM' : s}
                       </span>
                     ))}
+                    {/* Reference-overlap chip — the user's primary signal.
+                        Shows "85% shared refs (17/20)" when the candidate
+                        cites 17 of the input's 20 references. */}
+                    {typeof c.shared_refs_pct === 'number' && c.shared_refs_count > 0 && (
+                      <span
+                        className="px-1.5 py-0.5 rounded"
+                        style={{
+                          background: 'rgba(59,130,246,0.12)',
+                          color: 'var(--color-accent, #3b82f6)',
+                          fontSize: '0.7rem',
+                          border: '1px solid rgba(59,130,246,0.35)',
+                        }}
+                        title={`Cites ${c.shared_refs_count} of the input paper's references` +
+                          (c.candidate_ref_count
+                            ? ` (out of ${c.candidate_ref_count} total in this paper)`
+                            : '')}
+                      >
+                        {Math.round(c.shared_refs_pct * 100)}% shared refs ({c.shared_refs_count})
+                      </span>
+                    )}
                     {c.was_verified ? (
                       <span
                         className="px-1.5 py-0.5 rounded"

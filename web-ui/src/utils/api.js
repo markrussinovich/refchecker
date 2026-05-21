@@ -134,6 +134,14 @@ export const suggestAlternativeReference = (checkId, refId) =>
 export const verifyReferenceInCheck = (checkId, refId, opts = {}) =>
   api.post(`/history/${checkId}/references/${encodeURIComponent(refId)}/verify`, opts)
 
+// Per-check LLM token + cost accumulator for the $ badge
+export const getLLMUsage = (checkId) =>
+  api.get(`/history/${checkId}/llm-usage`)
+
+// Resolve a DOI to title/authors/year/venue via CrossRef
+export const resolveDoi = (doi) =>
+  api.get('/doi/resolve', { params: { doi } })
+
 // Clear the global Seen References cache
 export const clearSeenReferences = () =>
   api.delete('/references/seen')
