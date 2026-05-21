@@ -113,53 +113,80 @@ export default function GlobalDropZone() {
     }
   }, [])
 
-  // Tauri Open-With → file path event
+  // Tauri-side events: both Open-With (refchecker://open-files) and
+  // Tauri's own drag-drop events. With dragDropEnabled=true in
+  // tauri.conf.json the OS file-drop is intercepted by Tauri and
+  // surfaced as tauri://drag-enter / tauri://drag-over / tauri://drop /
+  // tauri://drag-leave — the HTML5 onDrop won't fire, so we have to
+  // hook these explicitly instead of relying on the document listeners
+  // above.
   useEffect(() => {
     if (!isTauri()) return
-    let unlisten = null
-    const onEvent = async (event) => {
-      const payload = event?.payload
-      if (!Array.isArray(payload) || payload.length === 0) return
-      // Take the first path that resolves successfully; surface failures
-      // in the console (and via the diagnostics ring buffer).
-      for (const p of payload) {
-        try {
-          const file = await tauriPathToFile(p)
-          broadcastFile(file, p)
-          break
-        } catch (e) {
-          console.warn('[GlobalDropZone] failed to read open-with path', p, e)
-        }
+    if (!window.__TAURI_INTERNALS__) return
+    const cleanupFns = []
+
+    const consumePaths = async (paths, source) => {
+      if (!Array.isArray(paths) || paths.length === 0) return
+      const usable = paths.find((p) => looksLikeAcceptedFile(p)) || paths[0]
+      try {
+        const file = await tauriPathToFile(usable)
+        broadcastFile(file, usable)
+      } catch (e) {
+        console.warn(`[GlobalDropZone] failed to read ${source} path`, usable, e)
       }
     }
+
+    // Subscribe via the dynamic import of @tauri-apps/api/event so we
+    // get reliable unlisten handles. Falls through to internals if the
+    // package isn't bundled.
+    let unlistenFns = []
     ;(async () => {
       try {
-        // Tauri 2.x v1-style listener via internals
-        if (window.__TAURI_INTERNALS__?.invoke) {
-          const eventName = 'refchecker://open-files'
-          // Use the event plugin's listen command. plugin:event|listen
-          // returns a handler id; unlisten via plugin:event|unlisten.
-          const handlerId = await window.__TAURI_INTERNALS__.invoke('plugin:event|listen', {
-            event: eventName,
-            target: { kind: 'Any' },
-            handler: (...args) => { /* unused — events arrive via __TAURI_EVENT__ */ },
-          }).catch(() => null)
-
-          // Fallback: subscribe to the global event window dispatches.
-          window.addEventListener('tauri://event', (e) => {
-            if (e.detail?.event === eventName) onEvent({ payload: e.detail.payload })
-          })
-          unlisten = () => {
-            if (handlerId != null && window.__TAURI_INTERNALS__?.invoke) {
-              window.__TAURI_INTERNALS__.invoke('plugin:event|unlisten', { event: eventName, eventId: handlerId }).catch(() => {})
-            }
+        const ev = await import('@tauri-apps/api/event')
+        if (!ev?.listen) return
+        // 1. Open-With from the OS / file-association launch
+        unlistenFns.push(await ev.listen('refchecker://open-files', (event) => {
+          consumePaths(event?.payload || [], 'open-with')
+        }))
+        // 2. File dragged onto the window (Tauri 2.x native drag-drop)
+        // The event payload shape is { type: 'enter'|'over'|'drop'|'leave', paths: [...] }
+        // on some Tauri builds; on others, the event NAMES split out as
+        // tauri://drag-enter / drag-over / drop / drag-leave. Subscribe to
+        // both shapes.
+        const dropHandler = (event) => {
+          const payload = event?.payload
+          // Shape A: { type: 'drop', paths: [...] }
+          if (payload && typeof payload === 'object' && payload.type === 'drop') {
+            consumePaths(payload.paths || [], 'drag-drop')
+            setActive(false); setCounter(0)
+            return
+          }
+          if (payload && typeof payload === 'object' && (payload.type === 'enter' || payload.type === 'over')) {
+            setActive(true)
+            return
+          }
+          if (payload && typeof payload === 'object' && payload.type === 'leave') {
+            setActive(false); setCounter(0)
+            return
+          }
+          // Shape B: payload is itself a list of paths (older Tauri builds)
+          if (Array.isArray(payload)) {
+            consumePaths(payload, 'drag-drop')
+            setActive(false); setCounter(0)
           }
         }
+        unlistenFns.push(await ev.listen('tauri://drag-drop', dropHandler))
+        unlistenFns.push(await ev.listen('tauri://drop', dropHandler))
+        unlistenFns.push(await ev.listen('tauri://file-drop', dropHandler))  // legacy
+        unlistenFns.push(await ev.listen('tauri://drag-enter', () => setActive(true)))
+        unlistenFns.push(await ev.listen('tauri://drag-leave', () => { setActive(false); setCounter(0) }))
       } catch (e) {
         console.warn('[GlobalDropZone] Tauri event listener install failed', e)
       }
     })()
-    return () => { if (unlisten) unlisten() }
+    cleanupFns.push(() => unlistenFns.forEach((fn) => { try { fn?.() } catch {} }))
+
+    return () => cleanupFns.forEach((fn) => fn())
   }, [])
 
   if (!active) return null
