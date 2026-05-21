@@ -14,7 +14,7 @@ import { buildReferenceSummary } from '../../utils/referenceStatus'
  * Stats section showing reference check summary with clickable filters
  * Compact design with refs summary and individual issue counts
  */
-export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource }) {
+export default function StatsSection({ stats, isComplete, references, paperTitle, paperSource, healthBadge }) {
   const statusFilter = useCheckStore(s => s.statusFilter)
   const setStatusFilter = useCheckStore(s => s.setStatusFilter)
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -144,21 +144,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
     >
       {/* Header row */}
       <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <div className="flex items-center gap-3">
-          <h3 
+        <div className="flex items-center gap-3 flex-wrap">
+          <h3
             className="font-semibold text-sm"
             style={{ color: 'var(--color-text-primary)' }}
           >
             Summary
           </h3>
           {!isComplete && processedRefs > 0 && processedRefs < totalRefs && (
-            <span 
+            <span
               className="text-xs"
               style={{ color: 'var(--color-text-muted)' }}
             >
               {processedRefs}/{totalRefs} checked
             </span>
           )}
+          {healthBadge}
         </div>
         {/* Right side controls */}
         <div className="flex items-center gap-2">

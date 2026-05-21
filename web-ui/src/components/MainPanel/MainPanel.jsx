@@ -282,20 +282,17 @@ export default function MainPanel() {
           <StatusSection />
         )}
 
-        {/* Stats Section */}
+        {/* Stats Section — minimal health chip sits in its header row */}
         {showContent && (
-          <StatsSection 
+          <StatsSection
             stats={displayStats}
             isComplete={isComplete}
             references={displayRefs}
             paperTitle={displayPaperTitle}
             paperSource={displayPaperSource}
+            healthBadge={<HealthBadge references={displayRefs} />}
           />
         )}
-
-        {/* Live health badge — updates whenever the references list
-            changes (auto-checks, Apply Fix, Add/Remove, etc.) */}
-        {showContent && <HealthBadge references={displayRefs} />}
 
         {/* References / Corrections tabs */}
         {showContent && (

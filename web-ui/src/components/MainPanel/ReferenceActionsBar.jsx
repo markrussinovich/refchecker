@@ -122,19 +122,21 @@ export function ReferenceRowActions({ reference, displayIndex, busyKey, onSugges
   const ident = String(reference.id ?? reference.index ?? displayIndex)
   const busy = busyKey === ident
   const disabled = busy || !selectedCheckId
-  const btnStyle = {
+  // Match Settings panel button styling — pill, subtle border, hover lift.
+  const baseStyle = {
     border: '1px solid var(--color-border)',
-    background: 'var(--color-bg-secondary)',
+    background: 'var(--color-bg-primary)',
     color: 'var(--color-text-secondary)',
-    opacity: disabled ? 0.6 : 1,
+    opacity: disabled ? 0.55 : 1,
+    transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
   }
   return (
-    <div className="px-4 pb-3 -mt-1 flex flex-wrap gap-2 text-xs">
+    <div className="px-4 pb-3 pt-1 flex flex-wrap gap-1.5 text-xs">
       <button
         onClick={() => onReverify(reference, displayIndex)}
         disabled={disabled}
-        className="px-2 py-0.5 rounded"
-        style={btnStyle}
+        className="px-2.5 py-1 rounded-md font-medium"
+        style={baseStyle}
         title="Re-verify this reference now"
       >
         {busy ? '…' : 'Re-verify'}
@@ -142,8 +144,8 @@ export function ReferenceRowActions({ reference, displayIndex, busyKey, onSugges
       <button
         onClick={() => onSuggest(reference, displayIndex)}
         disabled={disabled}
-        className="px-2 py-0.5 rounded"
-        style={btnStyle}
+        className="px-2.5 py-1 rounded-md font-medium"
+        style={baseStyle}
         title="Suggest a real paper the author might have meant"
       >
         Suggest alternative
@@ -151,8 +153,12 @@ export function ReferenceRowActions({ reference, displayIndex, busyKey, onSugges
       <button
         onClick={() => onRemove(reference, displayIndex)}
         disabled={disabled}
-        className="px-2 py-0.5 rounded"
-        style={{ ...btnStyle, color: 'var(--color-error, #c0392b)' }}
+        className="px-2.5 py-1 rounded-md font-medium"
+        style={{
+          ...baseStyle,
+          color: 'var(--color-error, #ef4444)',
+          borderColor: 'var(--color-error, #ef4444)55',
+        }}
         title="Remove this reference from the check"
       >
         Remove

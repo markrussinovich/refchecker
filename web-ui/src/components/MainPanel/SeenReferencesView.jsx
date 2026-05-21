@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { listSeenReferences } from '../../utils/api'
+import { listSeenReferences, clearSeenReferences } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 
 /**
@@ -36,6 +36,25 @@ export default function SeenReferencesView() {
   }, [offset, q])
 
   useEffect(() => { load() }, [load])
+
+  // Refresh the library after any check finishes so newly-verified refs
+  // surface here without a manual reload.
+  useEffect(() => {
+    const onCheckDone = () => { load({ offset: 0 }); setOffset(0) }
+    window.addEventListener('refchecker:check-completed', onCheckDone)
+    return () => window.removeEventListener('refchecker:check-completed', onCheckDone)
+  }, [load])
+
+  const handleClearCache = async () => {
+    if (!window.confirm('Clear the entire Seen References cache? This cannot be undone.')) return
+    try {
+      await clearSeenReferences()
+      await load({ offset: 0 })
+      setOffset(0)
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || 'Clear failed')
+    }
+  }
 
   useEffect(() => {
     // Debounce the search input so we don't hit the server on every keystroke.
@@ -76,19 +95,45 @@ export default function SeenReferencesView() {
           {q ? ` (filtered: ${items.length} shown)` : items.length < total ? ` (showing ${items.length})` : ''}
           {' · '}<span style={{ color: 'var(--color-success, #22c55e)' }}>{verifiedCount} verified on this page</span>
         </div>
-        <input
-          type="text"
-          placeholder="Search by title, author, or DOI…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          className="px-3 py-1.5 rounded border text-xs"
-          style={{
-            backgroundColor: 'var(--color-bg-primary)',
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text-primary)',
-            minWidth: '260px',
-          }}
-        />
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            placeholder="Search by title, author, or DOI…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="px-3 py-1.5 rounded border text-xs"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-primary)',
+              minWidth: '260px',
+            }}
+          />
+          <button
+            onClick={() => load({ offset: 0 })}
+            className="px-2 py-1 rounded text-xs"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg-tertiary)',
+              color: 'var(--color-text-secondary)',
+            }}
+            title="Refresh from server"
+          >
+            ↻
+          </button>
+          <button
+            onClick={handleClearCache}
+            className="px-2 py-1 rounded text-xs"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: 'transparent',
+              color: 'var(--color-error, #ef4444)',
+            }}
+            title="Delete every cached entry"
+          >
+            Clear cache
+          </button>
+        </div>
       </div>
 
       {error && (

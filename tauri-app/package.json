@@ -1,6 +1,6 @@
 {
   "name": "refchecker-desktop",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "description": "Desktop wrapper for RefChecker built with Tauri",
   "scripts": {

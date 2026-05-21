@@ -287,6 +287,9 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: 'Check completed',
       completedCheckId: checkId,
     })
+    try {
+      window.dispatchEvent(new CustomEvent('refchecker:check-completed', { detail: { checkId } }))
+    } catch { /* SSR guard */ }
   },
 
   cancelCheck: () => {

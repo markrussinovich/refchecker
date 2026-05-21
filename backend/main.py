@@ -4004,6 +4004,37 @@ def _read_log_tail(path: Path, lines: int = 25) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
+def _find_ref_index(refs: list, ref_id: str) -> Optional[int]:
+    """Resolve a ref_id from the URL to a position in ``refs``.
+
+    Accepts (in order): explicit ``id`` match, 1-based ``index`` match,
+    or 0-based positional index. This is forgiving because different UI
+    paths send different identifiers (manual-added refs have an id like
+    'manual-...', extracted refs use index, and 'just clicked the 3rd row'
+    sends the array position).
+    """
+    if not refs:
+        return None
+    # 1) explicit id match
+    for i, r in enumerate(refs):
+        rid = r.get("id")
+        if rid is not None and str(rid) == ref_id:
+            return i
+    # 2) 1-based index match
+    for i, r in enumerate(refs):
+        idx = r.get("index")
+        if idx is not None and str(idx) == ref_id:
+            return i
+    # 3) array position fallback
+    try:
+        pos = int(ref_id)
+        if 0 <= pos < len(refs):
+            return pos
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
 class _AddReferenceRequest(BaseModel):
     title: Optional[str] = None
     authors: Optional[list] = None
@@ -4061,10 +4092,10 @@ async def remove_reference_from_check(
     refs = await db.get_check_references(check_id, user_id=user_id)
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
-    before = len(refs)
-    refs = [r for r in refs if str(r.get("id")) != ref_id and str(r.get("index")) != ref_id]
-    if len(refs) == before:
+    idx = _find_ref_index(refs, ref_id)
+    if idx is None:
         raise HTTPException(status_code=404, detail="Reference not found in check")
+    refs.pop(idx)
     ok = await db.replace_check_references(check_id, refs, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to persist removal")
@@ -4087,11 +4118,7 @@ async def verify_single_reference(
     refs = await db.get_check_references(check_id, user_id=user_id)
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
-    idx = None
-    for i, r in enumerate(refs):
-        if str(r.get("id")) == ref_id or str(r.get("index")) == ref_id:
-            idx = i
-            break
+    idx = _find_ref_index(refs, ref_id)
     if idx is None:
         raise HTTPException(status_code=404, detail="Reference not found in check")
     target = refs[idx]
@@ -4198,9 +4225,10 @@ async def suggest_alternative_reference(
     refs = await db.get_check_references(check_id, user_id=user_id)
     if refs is None:
         raise HTTPException(status_code=404, detail="Check not found")
-    target = next((r for r in refs if str(r.get("id")) == ref_id or str(r.get("index")) == ref_id), None)
-    if not target:
+    idx = _find_ref_index(refs, ref_id)
+    if idx is None:
         raise HTTPException(status_code=404, detail="Reference not found in check")
+    target = refs[idx]
     title = (target.get("title") or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="Reference has no title to search on")
@@ -4373,6 +4401,20 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
     parallel) so the UI can show a real verification status, not just
     'unknown'.
     """
+    try:
+        return await _find_similar_papers_impl(req, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("find_similar_papers crashed")
+        return {
+            "source_paper": req.paper_title,
+            "candidates": [],
+            "error": f"Similar Papers lookup failed: {e}",
+        }
+
+
+async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: UserInfo):
     user_id = get_user_id_filter(current_user)
     refs = req.references or []
     if not refs:
@@ -4419,7 +4461,8 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
             logger.debug("Fetch failed for %s: %s", url, e)
         return None
 
-    async with httpx.AsyncClient() as client:
+    try:
+      async with httpx.AsyncClient() as client:
         # ── Source 1: Semantic Scholar ──────────────────────────────
         if req.paper_id:
             data = await _fetch(
@@ -4505,6 +4548,8 @@ async def find_similar_papers(req: _SimilarPapersRequest, current_user: UserInfo
                     }, "openalex", shared=1)
         except Exception as e:
             logger.debug("OpenAlex similar-papers source failed: %s", e)
+    except Exception as e:
+        logger.debug("S2/OpenAlex similar-papers block failed: %s", e)
 
     # ── Source 3: web search (uses user's configured provider) ──────
     try:
@@ -4937,6 +4982,14 @@ async def list_seen_references(
     rows = await db.list_verified_references(limit=limit, offset=offset, q=q)
     total = await db.count_verified_references()
     return {"total": total, "limit": limit, "offset": offset, "items": rows}
+
+
+@app.delete("/api/references/seen")
+async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
+    """Wipe the entire Seen References cache. Powers the 'Clear cache'
+    button on the Seen Refs tab."""
+    removed = await db.clear_verified_references()
+    return {"removed": removed}
 
 
 class _ListModelsRequest(BaseModel):

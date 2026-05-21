@@ -1794,6 +1794,18 @@ class Database:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
 
+    async def clear_verified_references(self) -> int:
+        """Empty the global identity-keyed reference cache. Returns the
+        number of rows that existed before the wipe."""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("PRAGMA busy_timeout=5000")
+            cursor = await db.execute("SELECT COUNT(*) FROM verified_reference_identity")
+            row = await cursor.fetchone()
+            before = int(row[0] if row else 0)
+            await db.execute("DELETE FROM verified_reference_identity")
+            await db.commit()
+        return before
+
     # Batch operations
 
     async def get_batch_checks(self, batch_id: str, user_id: Optional[int] = None) -> List[Dict[str, Any]]:

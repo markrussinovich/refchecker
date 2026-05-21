@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   CITATION_STYLES,
+  CITATION_STYLE_DEFAULTS,
   exportReferenceAsStyle,
   exportResultsAsStyle,
   downloadAsFile,
   formatIssueLine,
+  listCustomCitationStyles,
+  saveCustomCitationStyle,
+  deleteCustomCitationStyle,
 } from '../../utils/formatters'
 import {
   addReferenceToCheck,
   removeReferenceFromCheck,
   suggestAlternativeReference,
+  verifyReferenceInCheck,
 } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { wordDiff } from '../../utils/wordDiff'
@@ -156,6 +161,35 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   const [copiedKey, setCopiedKey] = useState(null)
   const [showDiff, setShowDiff] = useState(true)
 
+  // Citation-style overrides + custom-style builder.
+  const [styleOptions, setStyleOptions] = useState({})  // { max_authors, et_al_threshold, include_url }
+  const [showStyleCustomize, setShowStyleCustomize] = useState(false)
+  const [customStyles, setCustomStyles] = useState(() => listCustomCitationStyles())
+  const [newCustomStyle, setNewCustomStyle] = useState({ id: '', label: '', template: '{authors} ({year}). {title}. {venue}. {url}' })
+
+  const refreshCustom = () => setCustomStyles(listCustomCitationStyles())
+  const handleSaveCustomStyle = () => {
+    const id = (newCustomStyle.id || newCustomStyle.label || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
+    if (!id || !newCustomStyle.template.trim()) {
+      alert('Custom style needs a name and a template')
+      return
+    }
+    saveCustomCitationStyle({ id, label: newCustomStyle.label || id, template: newCustomStyle.template })
+    setNewCustomStyle({ id: '', label: '', template: '{authors} ({year}). {title}. {venue}. {url}' })
+    refreshCustom()
+  }
+  const handleDeleteCustomStyle = (id) => {
+    if (!window.confirm(`Delete custom style "${id}"?`)) return
+    deleteCustomCitationStyle(id)
+    refreshCustom()
+  }
+  const styleDefaults = CITATION_STYLE_DEFAULTS[format] || {}
+  const effectiveOptions = {
+    max_authors: styleOptions.max_authors ?? styleDefaults.max_authors,
+    et_al_threshold: styleOptions.et_al_threshold ?? styleDefaults.et_al_threshold,
+    include_url: styleOptions.include_url ?? styleDefaults.include_url,
+  }
+
   // Per-reference decision state: keyed by ref id (or fallback "ref-N").
   //   { status: 'applied' | 'rejected' | 'edited', text?: string }
   // text is only set when the user explicitly edited the correction.
@@ -247,10 +281,10 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     const k = keyFor(ref, i)
     const d = decisions[k]
     if (d?.status === 'edited' && typeof d.text === 'string') return d.text
-    try { return exportReferenceAsStyle(ref, format, i) } catch { return '(could not render)' }
+    try { return exportReferenceAsStyle(ref, format, i, effectiveOptions) } catch { return '(could not render)' }
   }
   const renderCited = (ref, i) => {
-    try { return exportReferenceAsStyle(citedShell(ref), format, i) } catch { return '' }
+    try { return exportReferenceAsStyle(citedShell(ref), format, i, effectiveOptions) } catch { return '' }
   }
 
   const setDecision = (k, payload) => {
@@ -262,7 +296,23 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     })
   }
 
-  const applyAllVisible = () => {
+  // When the user accepts a correction we trigger a live re-verify so
+  // the badge / status updates without waiting for a full re-run.
+  const applyAndReverify = async (ref, i) => {
+    const k = keyFor(ref, i)
+    setDecision(k, { status: 'applied' })
+    if (selectedCheckId) {
+      try {
+        await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i))
+        await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+      } catch (e) {
+        /* re-verify is best-effort; the apply still stands */
+      }
+    }
+  }
+
+  const applyAllVisible = async () => {
+    const targets = []
     setDecisions(prev => {
       const next = { ...prev }
       filtered.forEach(({ ref }, i) => {
@@ -270,9 +320,22 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         // Don't clobber a user-edited entry — but do mark pending/rejected as applied.
         if (next[k]?.status === 'edited') return
         next[k] = { status: 'applied' }
+        targets.push({ ref, i })
       })
       return next
     })
+    if (selectedCheckId && targets.length) {
+      // Re-verify the applied refs in parallel (cap 4) so the badge updates.
+      const queue = targets.slice()
+      const worker = async () => {
+        while (queue.length) {
+          const { ref, i } = queue.shift()
+          try { await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i)) } catch {}
+        }
+      }
+      await Promise.all([worker(), worker(), worker(), worker()])
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId)
+    }
   }
   const resetDecisions = () => setDecisions({})
 
@@ -363,9 +426,123 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
               title="Citation style"
             >
               {CITATION_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+              {customStyles.length > 0 && <optgroup label="Custom">
+                {customStyles.map(s => <option key={s.id} value={`custom:${s.id}`}>{s.label || s.id}</option>)}
+              </optgroup>}
             </select>
+            <button
+              onClick={() => setShowStyleCustomize(v => !v)}
+              className="px-2 py-1 rounded-md text-xs font-medium"
+              style={{
+                border: '1px solid var(--color-border)',
+                background: showStyleCustomize ? 'var(--color-bg-tertiary)' : 'var(--color-bg-primary)',
+                color: 'var(--color-text-secondary)',
+              }}
+              title="Tune authors / URL / build a custom style"
+            >
+              {showStyleCustomize ? 'Hide style options' : 'Customize style'}
+            </button>
           </div>
         </div>
+
+        {showStyleCustomize && (
+          <div
+            className="rounded-md border p-3 mt-2 text-xs space-y-2"
+            style={{ borderColor: 'var(--color-border)', background: 'var(--color-bg-tertiary)' }}
+          >
+            {!format.startsWith('custom:') && (
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1">
+                  Max authors:
+                  <input
+                    type="number" min="1" max="50"
+                    value={effectiveOptions.max_authors ?? ''}
+                    placeholder={String(styleDefaults.max_authors ?? '')}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, max_authors: e.target.value ? parseInt(e.target.value, 10) : null })}
+                    className="px-1.5 py-0.5 rounded border w-16"
+                    style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                  />
+                </label>
+                <label className="flex items-center gap-1">
+                  Use et al. when ≥
+                  <input
+                    type="number" min="2" max="50"
+                    value={effectiveOptions.et_al_threshold ?? ''}
+                    placeholder={String(styleDefaults.et_al_threshold ?? '')}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, et_al_threshold: e.target.value ? parseInt(e.target.value, 10) : null })}
+                    className="px-1.5 py-0.5 rounded border w-16"
+                    style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                  />
+                  authors
+                </label>
+                <label className="flex items-center gap-1">
+                  <input
+                    type="checkbox"
+                    checked={effectiveOptions.include_url !== false}
+                    onChange={(e) => setStyleOptions({ ...styleOptions, include_url: e.target.checked })}
+                  />
+                  Include URL
+                </label>
+                <button
+                  onClick={() => setStyleOptions({})}
+                  className="ml-auto underline"
+                  style={{ color: 'var(--color-text-muted)' }}
+                >Reset to style defaults</button>
+              </div>
+            )}
+
+            <details className="mt-1">
+              <summary className="cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
+                + New custom style (template)
+              </summary>
+              <div className="mt-2 space-y-2">
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    placeholder="Name (e.g. 'Lancet')"
+                    value={newCustomStyle.label}
+                    onChange={(e) => setNewCustomStyle({ ...newCustomStyle, label: e.target.value })}
+                    className="px-2 py-1 rounded border flex-1 min-w-[160px]"
+                    style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
+                  />
+                  <button
+                    onClick={handleSaveCustomStyle}
+                    className="px-3 py-1 rounded-md text-xs font-medium"
+                    style={{ background: 'var(--color-accent, #3b82f6)', color: 'white' }}
+                  >Save style</button>
+                </div>
+                <textarea
+                  rows={2}
+                  value={newCustomStyle.template}
+                  onChange={(e) => setNewCustomStyle({ ...newCustomStyle, template: e.target.value })}
+                  className="w-full px-2 py-1 rounded border font-mono"
+                  style={{ background: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)', fontSize: '0.75rem' }}
+                />
+                <div style={{ color: 'var(--color-text-muted)' }}>
+                  Placeholders: <code>{'{authors}'}</code> <code>{'{title}'}</code> <code>{'{year}'}</code> <code>{'{venue}'}</code> <code>{'{doi}'}</code> <code>{'{arxiv_id}'}</code> <code>{'{url}'}</code> <code>{'{index}'}</code>
+                </div>
+              </div>
+            </details>
+
+            {customStyles.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {customStyles.map(s => (
+                  <span
+                    key={s.id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full"
+                    style={{ background: 'var(--color-bg-primary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    {s.label || s.id}
+                    <button
+                      onClick={() => handleDeleteCustomStyle(s.id)}
+                      style={{ color: 'var(--color-error, #ef4444)' }}
+                      title="Delete this custom style"
+                    >×</button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={applyAllVisible} disabled={filtered.length === 0}
@@ -522,7 +699,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
-                  <button onClick={() => setDecision(key, { status: 'applied' })}
+                  <button onClick={() => applyAndReverify(ref, i)}
                     className="px-2 py-0.5 rounded text-xs"
                     style={{ backgroundColor: decision?.status === 'applied' ? 'var(--color-success, #22c55e)' : 'var(--color-bg-primary)',
                              color: decision?.status === 'applied' ? 'white' : 'var(--color-text-primary)',

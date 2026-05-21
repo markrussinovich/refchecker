@@ -964,12 +964,98 @@ export const CITATION_STYLES = [
   { id: 'bibitem', label: 'LaTeX \\bibitem' },
 ]
 
-export function exportReferenceAsStyle(ref, style, index = 0) {
+// Default options-per-style. Overridable per call via the `options` arg.
+// `max_authors`: keep at most N authors, then add the et-al suffix.
+// `et_al_threshold`: list size at which we even consider abbreviating.
+// `include_url`: append the preferred URL when present.
+export const CITATION_STYLE_DEFAULTS = {
+  bibtex: { include_url: true, max_authors: null, et_al_threshold: null },
+  plaintext: { include_url: true, max_authors: null, et_al_threshold: null },
+  apa: { include_url: true, max_authors: 20, et_al_threshold: 21 },
+  mla: { include_url: true, max_authors: 1, et_al_threshold: 3 },
+  chicago: { include_url: true, max_authors: 1, et_al_threshold: 4 },
+  ieee: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+  vancouver: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+  bibitem: { include_url: true, max_authors: 6, et_al_threshold: 7 },
+}
+
+const _CUSTOM_STYLES_KEY = 'refchecker:custom-citation-styles'
+
+export function listCustomCitationStyles() {
+  try {
+    const raw = localStorage.getItem(_CUSTOM_STYLES_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
+}
+
+export function saveCustomCitationStyle(style) {
+  if (!style || !style.id || !style.template) return
+  const all = listCustomCitationStyles().filter(s => s.id !== style.id)
+  all.push(style)
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+}
+
+export function deleteCustomCitationStyle(id) {
+  const all = listCustomCitationStyles().filter(s => s.id !== id)
+  try { localStorage.setItem(_CUSTOM_STYLES_KEY, JSON.stringify(all)) } catch {}
+}
+
+// Truncate an author list to N entries with "et al." suffix when there
+// are more than `threshold` (so we don't abbreviate 2 authors to "X et al.")
+function _applyAuthorCap(formatted, authors, maxAuthors, etAlThreshold) {
+  if (!Array.isArray(authors) || authors.length === 0) return formatted
+  if (!maxAuthors || maxAuthors <= 0) return formatted
+  if (etAlThreshold && authors.length < etAlThreshold) return formatted
+  if (authors.length <= maxAuthors) return formatted
+  // The formatter already produced something — replace the trailing tail
+  // with the truncated form. We rebuild from scratch using the same
+  // separator the source used (comma) since that's the lowest common
+  // denominator across APA/IEEE/Vancouver/etc.
+  const head = authors.slice(0, maxAuthors).join(', ')
+  return `${head}, et al.`
+}
+
+// Render a user-defined template against a corrected ref. Supported
+// placeholders: {authors}, {title}, {year}, {venue}, {doi}, {arxiv_id},
+// {url}, {index}. Unknown placeholders are left intact.
+function _renderCustomTemplate(template, corrected, index) {
+  const url = _preferredCitationUrl(corrected) || ''
+  const authors = Array.isArray(corrected.authors) ? corrected.authors.join(', ') : (corrected.authors || '')
+  const map = {
+    authors,
+    title: corrected.title || '',
+    year: corrected.year || '',
+    venue: corrected.venue || '',
+    doi: corrected.doi || '',
+    arxiv_id: corrected.arxiv_id || '',
+    url,
+    index: String((index || 0) + 1),
+  }
+  return template.replace(/\{(\w+)\}/g, (m, k) => (k in map ? map[k] : m))
+}
+
+export function exportReferenceAsStyle(ref, style, index = 0, options = null) {
   const corrected = getCorrectedReferenceData(ref)
-  const url = _preferredCitationUrl(corrected)
+  // Custom styles use the `custom:<id>` namespace.
+  if (style && style.startsWith('custom:')) {
+    const id = style.slice('custom:'.length)
+    const def = listCustomCitationStyles().find(s => s.id === id)
+    if (def) {
+      return _renderCustomTemplate(def.template, corrected, index)
+    }
+    return exportReferenceAsPlainText(ref)
+  }
+
+  // Merge per-call options on top of the per-style defaults.
+  const opts = { ...(CITATION_STYLE_DEFAULTS[style] || {}), ...(options || {}) }
+  const rawUrl = _preferredCitationUrl(corrected)
+  const url = opts.include_url === false ? '' : rawUrl
   const venue = corrected.venue || ''
   const title = corrected.title || ''
   const year = corrected.year || ''
+  const cap = (formatted) => _applyAuthorCap(formatted, corrected.authors, opts.max_authors, opts.et_al_threshold)
 
   switch (style) {
     case 'bibtex':
@@ -978,7 +1064,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
       return exportReferenceAsPlainText(ref)
     case 'apa': {
       // Author, F. M. (Year). Title. Venue. URL
-      const authors = _formatAuthorsAPA(corrected.authors)
+      const authors = cap(_formatAuthorsAPA(corrected.authors))
       const parts = []
       if (authors) parts.push(`${authors}${authors.endsWith('.') ? '' : '.'}`)
       if (year) parts.push(`(${year}).`)
@@ -989,7 +1075,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
     }
     case 'mla': {
       // Author. "Title." Venue, Year, URL.
-      const authors = _formatAuthorsMLA(corrected.authors)
+      const authors = cap(_formatAuthorsMLA(corrected.authors))
       const parts = []
       if (authors) parts.push(`${authors}.`)
       if (title) parts.push(`"${title}."`)
@@ -1000,7 +1086,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
     }
     case 'chicago': {
       // Last, First, and Co Author. Year. "Title." Venue. URL.
-      const authors = _formatAuthorsChicago(corrected.authors)
+      const authors = cap(_formatAuthorsChicago(corrected.authors))
       const parts = []
       if (authors) parts.push(`${authors}.`)
       if (year) parts.push(`${year}.`)
@@ -1011,7 +1097,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
     }
     case 'ieee': {
       // F. M. Last, "Title," Venue, Year. [Online]. Available: URL
-      const authors = _formatAuthorsIEEE(corrected.authors)
+      const authors = cap(_formatAuthorsIEEE(corrected.authors))
       const parts = []
       if (authors) parts.push(`${authors},`)
       if (title) parts.push(`"${title},"`)
@@ -1022,7 +1108,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
     }
     case 'vancouver': {
       // Last FM, Co N. Title. Venue. Year. URL
-      const authors = _formatAuthorsVancouver(corrected.authors)
+      const authors = cap(_formatAuthorsVancouver(corrected.authors))
       const parts = []
       if (authors) parts.push(`${authors}.`)
       if (title) parts.push(`${title}.`)
@@ -1034,7 +1120,7 @@ export function exportReferenceAsStyle(ref, style, index = 0) {
     case 'bibitem': {
       // \bibitem{key} F. M. Last, "Title," Venue, Year.
       const key = (ref.bibtex_key || `ref${index + 1}`).replace(/[^A-Za-z0-9_-]/g, '')
-      const authors = _formatAuthorsIEEE(corrected.authors)
+      const authors = cap(_formatAuthorsIEEE(corrected.authors))
       const tail = [venue, year].filter(Boolean).join(', ')
       const body = [authors && `${authors},`, title && `"${title},"`, tail && `${tail}.`, url].filter(Boolean).join(' ')
       return `\\bibitem{${key}} ${body}`

@@ -134,6 +134,10 @@ export const suggestAlternativeReference = (checkId, refId) =>
 export const verifyReferenceInCheck = (checkId, refId) =>
   api.post(`/history/${checkId}/references/${encodeURIComponent(refId)}/verify`)
 
+// Clear the global Seen References cache
+export const clearSeenReferences = () =>
+  api.delete('/references/seen')
+
 // WebSocket connection factory — cookie is sent automatically by browser for same-origin WS
 export const createWebSocket = (sessionId, handlers) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
