@@ -133,9 +133,6 @@
     }
   },
   "plugins": {
-    "shell": {
-      "open": true
-    },
     "updater": {
       "active": true,
       "dialog": true,
