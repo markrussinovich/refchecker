@@ -1,4 +1,10 @@
 import { openExternal } from '../../utils/tauriBridge'
+import { useStyleStore } from '../../stores/useStyleStore'
+import {
+  CITATION_STYLE_DEFAULTS,
+  CITATION_STYLES,
+  exportReferenceAsStyle,
+} from '../../utils/formatters'
 
 export function AddReferencePanel({ newRef, setNewRef, busyKey, onSave, onCancel }) {
   const disabled = busyKey === '__add__'
@@ -66,7 +72,27 @@ export function AddReferencePanel({ newRef, setNewRef, busyKey, onSave, onCancel
 }
 
 export function SuggestAltPanel({ suggestFor, onClose }) {
+  // Render suggestions in the user's currently-selected citation style so
+  // the candidates can be copied straight into the bibliography without
+  // any further formatting work.
+  const format = useStyleStore(s => s.format)
+  const styleOptions = useStyleStore(s => s.styleOptions)
   if (!suggestFor) return null
+  const styleLabel = CITATION_STYLES.find(s => s.id === format)?.label || (format.startsWith('custom:') ? 'Custom' : format)
+  const effectiveOpts = {
+    ...(CITATION_STYLE_DEFAULTS[format] || {}),
+    ...(styleOptions || {}),
+  }
+  const renderInStyle = (c, i) => {
+    try {
+      return exportReferenceAsStyle(c, format, i, effectiveOpts)
+    } catch {
+      return c.title || ''
+    }
+  }
+  const copyToClipboard = async (text) => {
+    try { await navigator.clipboard.writeText(text) } catch { /* ignore */ }
+  }
   return (
     <div
       className="px-4 py-3 border-t text-sm"
@@ -74,44 +100,87 @@ export function SuggestAltPanel({ suggestFor, onClose }) {
     >
       <div className="flex items-center justify-between mb-2">
         <strong>Suggested alternatives for ref {suggestFor.ref_id}</strong>
-        <button
-          onClick={onClose}
-          className="text-xs px-2 py-0.5 rounded border"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
-          Close
-        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            rendered as {styleLabel}
+          </span>
+          <button
+            onClick={onClose}
+            className="text-xs px-2 py-0.5 rounded border"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            Close
+          </button>
+        </div>
       </div>
       {(!suggestFor.candidates || suggestFor.candidates.length === 0) ? (
         <div style={{ color: 'var(--color-text-muted)' }}>No alternatives found.</div>
       ) : (
         <ul className="space-y-2">
-          {suggestFor.candidates.map((c, i) => (
-            <li key={i} className="flex flex-col gap-0.5">
-              <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                {c.title || c.name || 'Untitled'} {c.year ? `(${c.year})` : ''}
-              </div>
-              <div style={{ color: 'var(--color-text-muted)', fontSize: '0.85em' }}>
-                {Array.isArray(c.authors) ? c.authors.slice(0, 5).join(', ') : (c.authors || '')}
-                {c.venue ? ` · ${c.venue}` : ''}
-                {c.source ? ` · ${c.source}` : ''}
-              </div>
-              {c.url && (
-                <a
-                  href={c.url}
-                  onClick={e => { e.preventDefault(); openExternal(c.url) }}
-                  style={{ color: 'var(--color-accent)', fontSize: '0.85em' }}
-                >
-                  {c.url}
-                </a>
-              )}
-              {c.reason && (
-                <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8em', fontStyle: 'italic' }}>
-                  {c.reason}
+          {suggestFor.candidates.map((c, i) => {
+            const styled = renderInStyle(c, i)
+            return (
+              <li
+                key={i}
+                className="flex flex-col gap-1 rounded-md p-2"
+                style={{ background: 'var(--color-bg-secondary)', border: '1px solid var(--color-border)' }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div
+                    className="flex-1 min-w-0"
+                    style={{
+                      color: 'var(--color-text-primary)',
+                      fontFamily: format === 'bibtex' || format === 'bibitem' ? 'ui-monospace, monospace' : undefined,
+                      fontSize: format === 'bibtex' || format === 'bibitem' ? '0.78rem' : undefined,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                    }}
+                  >
+                    {styled}
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(styled)}
+                    className="text-xs px-2 py-0.5 rounded flex-shrink-0"
+                    style={{
+                      border: '1px solid var(--color-border)',
+                      background: 'var(--color-bg-primary)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                    title="Copy this citation"
+                  >
+                    Copy
+                  </button>
                 </div>
-              )}
-            </li>
-          ))}
+                <div className="flex items-center gap-2 flex-wrap text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {c.source && (
+                    <span
+                      className="px-1.5 py-0.5 rounded"
+                      style={{
+                        background: 'var(--color-bg-tertiary)',
+                        border: '1px solid var(--color-border)',
+                      }}
+                    >
+                      {c.source === 'llm' ? 'LLM' : c.source === 'semantic_scholar' ? 'S2' : c.source}
+                    </span>
+                  )}
+                  {c.url && (
+                    <a
+                      href={c.url}
+                      onClick={e => { e.preventDefault(); openExternal(c.url) }}
+                      style={{ color: 'var(--color-accent)' }}
+                    >
+                      {c.url.length > 80 ? `${c.url.slice(0, 80)}…` : c.url}
+                    </a>
+                  )}
+                </div>
+                {c.reason && (
+                  <div style={{ color: 'var(--color-text-muted)', fontSize: '0.8em', fontStyle: 'italic' }}>
+                    {c.reason}
+                  </div>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>

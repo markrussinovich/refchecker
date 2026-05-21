@@ -17,6 +17,7 @@ import {
   verifyReferenceInCheck,
 } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useStyleStore } from '../../stores/useStyleStore'
 import { wordDiff } from '../../utils/wordDiff'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
@@ -163,6 +164,16 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
 
   // Citation-style overrides + custom-style builder.
   const [styleOptions, setStyleOptions] = useState({})  // { max_authors, et_al_threshold, include_url }
+
+  // Mirror format + styleOptions into the shared store so other views
+  // (Suggest-alternative, References-tab actions, etc.) can render in
+  // the same style without each maintaining its own picker.
+  useEffect(() => {
+    useStyleStore.getState().setFormat(format)
+  }, [format])
+  useEffect(() => {
+    useStyleStore.getState().setStyleOptions(styleOptions)
+  }, [styleOptions])
   const [showStyleCustomize, setShowStyleCustomize] = useState(false)
   const [customStyles, setCustomStyles] = useState(() => listCustomCitationStyles())
   const [newCustomStyle, setNewCustomStyle] = useState({ id: '', label: '', template: '{authors} ({year}). {title}. {venue}. {url}' })

@@ -3,6 +3,8 @@ import ReferenceCard from '../ReferenceCard/ReferenceCard'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
 import useReferenceActions from '../../hooks/useReferenceActions'
+import { useStyleStore } from '../../stores/useStyleStore'
+import { CITATION_STYLES, listCustomCitationStyles } from '../../utils/formatters'
 import {
   AddReferencePanel,
   SuggestAltPanel,
@@ -196,6 +198,9 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
             </span>
           )}
           {selectedCheckId && (
+            <SuggestionStylePicker />
+          )}
+          {selectedCheckId && (
             <button
               onClick={() => setShowAdd(v => !v)}
               className="text-xs px-2 py-1 rounded"
@@ -252,5 +257,37 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
         ))}
       </div>
     </div>
+  )
+}
+
+/**
+ * Tiny inline style picker that lives in the References-tab header.
+ * Writes to the shared useStyleStore so the Suggest-alternative panel
+ * (and anything else that reads from the store) renders candidates in
+ * whatever format the user picked here.
+ */
+function SuggestionStylePicker() {
+  const format = useStyleStore(s => s.format)
+  const setFormat = useStyleStore(s => s.setFormat)
+  const customs = listCustomCitationStyles()
+  return (
+    <select
+      value={format}
+      onChange={(e) => setFormat(e.target.value)}
+      className="text-xs px-2 py-1 rounded border"
+      style={{
+        background: 'var(--color-bg-tertiary)',
+        borderColor: 'var(--color-border)',
+        color: 'var(--color-text-secondary)',
+      }}
+      title="Citation style used to render Suggest-alternative results"
+    >
+      {CITATION_STYLES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+      {customs.length > 0 && (
+        <optgroup label="Custom">
+          {customs.map(s => <option key={s.id} value={`custom:${s.id}`}>{s.label || s.id}</option>)}
+        </optgroup>
+      )}
+    </select>
   )
 }
