@@ -483,8 +483,20 @@ class Database:
                 )
             """)
 
+            # Tiny key/value store for one-time migrations. Keeps the
+            # bump-schema-and-clean-stale-rows logic out of the column
+            # additions in `_ensure_columns` so each migration is a
+            # named step we can extend later.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS schema_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+
             await self._ensure_columns(db)
             await self._migrate_plaintext_secrets(db)
+            await self._migrate_stale_verified_identity(db)
             
             # Create index for batch queries
             await db.execute("""
@@ -667,6 +679,79 @@ class Database:
                     "UPDATE app_settings SET value_encrypted = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?",
                     (encrypted, key),
                 )
+
+    async def _migrate_stale_verified_identity(self, db: aiosqlite.Connection):
+        """Drop pre-fix rows from the Seen-Refs cache.
+
+        Rows written before the v0.7 bug round had two issues that the
+        per-read code can't fully cover:
+
+        1. Identity keys were computed from cited fields only, so the
+           same paper could appear under multiple keys depending on
+           which version of the cascade saw it first. New writes use a
+           cascade that prefers DOI/arXiv from authoritative_urls, so
+           old keys are inconsistent with the new ones.
+        2. result_json carried the pre-split shape (verified canonical
+           values overwrote cited title/authors/year) — replaying those
+           through the verify endpoint would re-introduce the "mixed
+           up" metadata that #13 fixed.
+
+        Migration is one-shot, gated on `schema_meta.key = 'seen_refs_v'`.
+        We DELETE rows whose result_json is missing every `verified_*`
+        sibling AND has a status of verified/warning (i.e. they came
+        from a real verification, not a bare insert). Bare-insert rows
+        with status=unverified are left alone — they don't carry stale
+        canonical metadata.
+        """
+        async with db.execute(
+            "SELECT value FROM schema_meta WHERE key = 'seen_refs_v'"
+        ) as cursor:
+            row = await cursor.fetchone()
+        current_version = int(row[0]) if row and row[0] else 0
+        TARGET_VERSION = 2
+        if current_version >= TARGET_VERSION:
+            return
+
+        # Inspect rows whose status was a real verification. Sample
+        # cheaply by checking the result_json text — full JSON parsing
+        # per row would balloon for big caches.
+        async with db.execute(
+            """
+            SELECT identity_key, result_json
+            FROM verified_reference_identity
+            WHERE status IN ('verified', 'warning')
+            """
+        ) as cursor:
+            stale_keys = []
+            async for ikey, result_json in cursor:
+                if not result_json:
+                    continue
+                # Fast path: a pre-split row has none of the new keys.
+                if (
+                    'verified_title' not in result_json
+                    and 'verified_authors' not in result_json
+                    and 'verified_year' not in result_json
+                    and 'verified_doi' not in result_json
+                    and 'verified_arxiv_id' not in result_json
+                ):
+                    stale_keys.append(ikey)
+        if stale_keys:
+            logger.info(
+                "seen-refs migration: deleting %d pre-fix verified rows so the cache repopulates with the new identity-key cascade",
+                len(stale_keys),
+            )
+            # Chunk the delete to keep SQL params under the 999 SQLite limit.
+            for i in range(0, len(stale_keys), 500):
+                chunk = stale_keys[i:i + 500]
+                placeholders = ",".join(["?"] * len(chunk))
+                await db.execute(
+                    f"DELETE FROM verified_reference_identity WHERE identity_key IN ({placeholders})",
+                    chunk,
+                )
+        await db.execute(
+            "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('seen_refs_v', ?)",
+            (str(TARGET_VERSION),),
+        )
 
     async def save_check(self,
                          paper_title: str,
