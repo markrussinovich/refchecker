@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   addReferenceToCheck,
   removeReferenceFromCheck,
@@ -6,6 +6,7 @@ import {
   verifyReferenceInCheck,
 } from '../utils/api'
 import { useHistoryStore } from '../stores/useHistoryStore'
+import { useCheckStore } from '../stores/useCheckStore'
 
 const EMPTY_NEW = { title: '', authors: '', year: '', doi: '', arxiv_id: '' }
 
@@ -15,6 +16,13 @@ export default function useReferenceActions() {
   const [showAdd, setShowAdd] = useState(false)
   const [newRef, setNewRef] = useState(EMPTY_NEW)
   const [suggestFor, setSuggestFor] = useState(null)
+  // Session-local "trash" so the user can Undo a removal. Scoped to the
+  // currently-selected check — switching checks discards the trash.
+  const [removedRefs, setRemovedRefs] = useState([])
+
+  useEffect(() => {
+    setRemovedRefs([])
+  }, [selectedCheckId])
 
   const reloadCheck = async () => {
     if (!selectedCheckId) return
@@ -70,15 +78,75 @@ export default function useReferenceActions() {
     if (!selectedCheckId) return
     const ident = String(ref.id ?? ref.index ?? i)
     setBusyKey(ident)
+    // Snapshot the ref so Undo can re-create it. We stash the metadata
+    // the add endpoint needs, plus a synthetic key so the UI can render
+    // a stable list of removed items.
+    const snapshot = {
+      _stashKey: `${ident}-${Date.now()}`,
+      title: ref.title || '',
+      authors: Array.isArray(ref.authors) ? ref.authors.join(', ') : (ref.authors || ''),
+      year: ref.year ?? '',
+      doi: ref.doi || '',
+      arxiv_id: ref.arxiv_id || '',
+      venue: ref.venue || '',
+    }
+    // Optimistically drop from the live checkStore feed. When the user
+    // is viewing the active check, displayRefs comes from checkStore,
+    // not from selectedCheck.results — without this, the row stays
+    // visible and the health badge doesn't move until they navigate
+    // away and back.
+    const removedFromStore = (useCheckStore.getState().references || []).find(
+      (r, idx) => (
+        String(r?.id ?? '') === ident ||
+        String(r?.index ?? '') === ident ||
+        String(idx) === ident
+      )
+    )
+    useCheckStore.getState().removeReference(ident)
     try {
       await removeReferenceFromCheck(selectedCheckId, ident)
+      setRemovedRefs(prev => [snapshot, ...prev].slice(0, 20))
       await reloadCheck()
     } catch (e) {
+      // Server rejected the delete — put the ref back so the optimistic
+      // remove doesn't strand the UI in a worse state than it started.
+      if (removedFromStore) useCheckStore.getState().restoreReference(removedFromStore)
       alert(e?.response?.data?.detail || e?.message || 'Remove failed')
     } finally {
       setBusyKey(null)
     }
   }
+
+  const handleRestoreRef = async (snapshot) => {
+    if (!selectedCheckId || !snapshot) return
+    setBusyKey('__restore__')
+    try {
+      const res = await addReferenceToCheck(selectedCheckId, {
+        title: (snapshot.title || '').trim() || null,
+        authors: (snapshot.authors || '').trim()
+          ? snapshot.authors.split(',').map(s => s.trim()).filter(Boolean)
+          : null,
+        year: snapshot.year ? parseInt(snapshot.year, 10) : null,
+        doi: (snapshot.doi || '').trim() || null,
+        arxiv_id: (snapshot.arxiv_id || '').trim() || null,
+        venue: (snapshot.venue || '').trim() || null,
+      })
+      const addedId = res?.data?.id ?? res?.data?.reference?.id ?? null
+      if (addedId != null) {
+        try {
+          await verifyReferenceInCheck(selectedCheckId, String(addedId))
+        } catch { /* re-verify is best-effort */ }
+      }
+      setRemovedRefs(prev => prev.filter(r => r._stashKey !== snapshot._stashKey))
+      await reloadCheck()
+    } catch (e) {
+      alert(e?.response?.data?.detail || e?.message || 'Restore failed')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const clearRemovedRefs = () => setRemovedRefs([])
 
   const handleSuggestAlt = async (ref, i) => {
     if (!selectedCheckId) return
@@ -121,5 +189,8 @@ export default function useReferenceActions() {
     handleRemoveRef,
     handleSuggestAlt,
     handleReverify,
+    removedRefs,
+    handleRestoreRef,
+    clearRemovedRefs,
   }
 }

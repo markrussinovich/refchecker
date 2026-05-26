@@ -269,9 +269,39 @@ export const useCheckStore = create((set, get) => ({
     // Extract data fields but preserve the local 0-based index
     const { index: _backendIndex, ...dataWithoutIndex } = data
     set(state => ({
-      references: state.references.map((ref, i) => 
+      references: state.references.map((ref, i) =>
         i === index ? { ...ref, ...dataWithoutIndex, index: i, ...(normalizedStatus ? { status: normalizedStatus } : {}) } : ref
       )
+    }))
+  },
+
+  // Optimistically drop a reference from the live check feed so the
+  // HealthBadge and ReferenceList react instantly. selectedCheck reload
+  // alone won't update this slice — when the user is viewing the
+  // currently-running check, displayRefs comes from this array, not
+  // from selectedCheck.results.
+  removeReference: (refId) => {
+    const id = String(refId)
+    set(state => {
+      const before = state.references || []
+      const after = before.filter((r, i) => {
+        const matches =
+          String(r?.id ?? '') === id ||
+          String(r?.index ?? '') === id ||
+          String(i) === id
+        return !matches
+      })
+      return { references: after }
+    })
+  },
+
+  // Re-insert a previously-removed reference so the Undo path can
+  // render it immediately. reloadCheck() afterwards reconciles indices
+  // with the server, so we don't bother renumbering here.
+  restoreReference: (refData) => {
+    if (!refData) return
+    set(state => ({
+      references: [...(state.references || []), { ...refData }],
     }))
   },
 

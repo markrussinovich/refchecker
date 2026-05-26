@@ -38,6 +38,9 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
     handleRemoveRef,
     handleSuggestAlt,
     handleReverify,
+    removedRefs,
+    handleRestoreRef,
+    clearRemovedRefs,
   } = useReferenceActions()
 
   // Memoize all derived data to ensure consistency within a render
@@ -239,6 +242,13 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
 
       <SuggestAltPanel suggestFor={suggestFor} onClose={() => setSuggestFor(null)} />
 
+      <RemovedRefsStrip
+        removedRefs={removedRefs}
+        busyKey={busyKey}
+        onRestore={handleRestoreRef}
+        onClear={clearRemovedRefs}
+      />
+
       <div
         className="divide-y"
         style={{ borderColor: 'var(--color-border)' }}
@@ -265,6 +275,79 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
               )}
             </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Inline "Removed (N) — Undo" strip rendered above the references list.
+ * Stash is scoped per-check (see useReferenceActions) so switching to
+ * another history item starts fresh. Each entry has an Undo button that
+ * calls addReferenceToCheck + verify, restoring the ref and moving the
+ * health badge back.
+ */
+function RemovedRefsStrip({ removedRefs, busyKey, onRestore, onClear }) {
+  if (!removedRefs || removedRefs.length === 0) return null
+  // Block Undo while ANY action is in flight — sharing busyKey with
+  // Re-verify / Suggest / Add means a stray Undo click would otherwise
+  // hijack the global busy slot and prematurely clear another row's
+  // spinner. Clear stays enabled because it's purely local.
+  const restoring = !!busyKey
+  return (
+    <div
+      className="px-4 py-2 border-t text-xs flex items-center gap-2 flex-wrap"
+      style={{
+        borderColor: 'var(--color-border)',
+        background: 'var(--color-bg-tertiary)',
+        color: 'var(--color-text-secondary)',
+      }}
+    >
+      <span style={{ fontWeight: 600 }}>
+        Removed ({removedRefs.length})
+      </span>
+      <span style={{ color: 'var(--color-text-muted)' }}>
+        — click Undo to put a reference back and re-verify it.
+      </span>
+      <div className="flex flex-wrap gap-1.5 ml-auto">
+        {removedRefs.slice(0, 6).map(snap => {
+          const label = (snap.title || snap.doi || snap.arxiv_id || '(untitled)').toString()
+          const short = label.length > 48 ? `${label.slice(0, 48)}…` : label
+          return (
+            <button
+              key={snap._stashKey}
+              onClick={() => onRestore(snap)}
+              disabled={restoring}
+              className="px-2 py-0.5 rounded-md"
+              style={{
+                border: '1px solid var(--color-border)',
+                background: 'var(--color-bg-primary)',
+                color: 'var(--color-text-secondary)',
+                opacity: restoring ? 0.6 : 1,
+              }}
+              title={`Undo remove: ${label}`}
+            >
+              ↺ {short}
+            </button>
+          )
+        })}
+        {removedRefs.length > 6 && (
+          <span style={{ color: 'var(--color-text-muted)' }}>
+            +{removedRefs.length - 6} more
+          </span>
+        )}
+        <button
+          onClick={onClear}
+          className="px-2 py-0.5 rounded-md"
+          style={{
+            border: '1px solid transparent',
+            background: 'transparent',
+            color: 'var(--color-text-muted)',
+          }}
+          title="Discard the undo list"
+        >
+          Clear
+        </button>
       </div>
     </div>
   )
