@@ -252,12 +252,15 @@ function WorldCatChip({ searchUrl, doi }) {
     e.preventDefault()
     try { openExternal(href) } catch { /* fall back to native nav */ }
   }
+  // Keyboard nav (Tab) used to fire onFocus on every chip, burst-
+  // hammering the backend with one SPARQL query per row. Hover-only
+  // means the user opts in deliberately; the keyboard path still
+  // works on click (the link itself is focusable + activatable).
   return (
     <a
       href={href}
       onClick={handleClick}
       onMouseEnter={triggerLookup}
-      onFocus={triggerLookup}
       target="_blank"
       rel="noopener noreferrer"
       className="px-1.5 py-0.5 rounded hover:underline"
@@ -269,8 +272,10 @@ function WorldCatChip({ searchUrl, doi }) {
         opacity: resolving ? 0.7 : 1,
       }}
       title={title}
+      aria-label={isDirect ? 'WorldCat direct link (OCLC resolved)' : 'Search WorldCat for this work'}
     >
-      WorldCat {resolving ? '…' : (isDirect ? '🎯' : '↗')}
+      WorldCat <span aria-hidden="true">{resolving ? '…' : (isDirect ? '🎯' : '↗')}</span>
+      {isDirect && <span className="sr-only"> (direct)</span>}
     </a>
   )
 }

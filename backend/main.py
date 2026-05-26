@@ -4351,6 +4351,14 @@ async def lookup_oclc(
     if not clean or '/' not in clean:
         return {"oclc": None, "doi": doi, "source": "wikidata"}
 
+    # Strict DOI shape: 10.{registrant}/{suffix}. Reject anything else
+    # before building the SPARQL — defence-in-depth against query
+    # injection on top of the escaping below. Real DOIs never contain
+    # double quotes, backslashes, or control characters.
+    import re as _re
+    if not _re.match(r'^10\.\d{4,9}/[^\s"\\\x00-\x1f]+$', clean):
+        return {"oclc": None, "doi": doi, "source": "wikidata", "error": "doi_shape"}
+
     cache_key = clean.lower()
     cached = cached_api_response(None, 'wikidata', 'doi_to_oclc', cache_key)
     if cached is not None:
@@ -4358,17 +4366,30 @@ async def lookup_oclc(
 
     # Wikidata stores most DOIs in uppercase but a few in lowercase —
     # try both via UNION so we never miss on case alone.
+    def _esc_literal(s: str) -> str:
+        # SPARQL string-literal escaping: backslash and quote. Newlines
+        # are also illegal but the shape regex above already excludes
+        # them.
+        return s.replace('\\', '\\\\').replace('"', '\\"')
+    upper_lit = _esc_literal(clean.upper())
+    lower_lit = _esc_literal(clean.lower())
     query = (
         'SELECT ?oclc WHERE { '
-        f'{{ ?work wdt:P356 "{clean.upper()}" }} UNION '
-        f'{{ ?work wdt:P356 "{clean.lower()}" }} '
+        f'{{ ?work wdt:P356 "{upper_lit}" }} UNION '
+        f'{{ ?work wdt:P356 "{lower_lit}" }} '
         '?work wdt:P243 ?oclc. } LIMIT 1'
     )
+    # Wikimedia's UA policy requires a contact method, not just a repo
+    # URL — keep an email reachable.
     headers = {
         'Accept': 'application/sparql-results+json',
-        'User-Agent': 'RefChecker/1.0 (https://github.com/ariomoniri/refchecker)',
+        'User-Agent': (
+            'RefChecker/1.0 '
+            '(https://github.com/ariomoniri/refchecker; moniriario@gmail.com)'
+        ),
     }
     result: Dict[str, Any] = {"oclc": None, "doi": clean, "source": "wikidata"}
+    is_authoritative = False  # True only when Wikidata gave us a clean 200
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(
@@ -4377,6 +4398,7 @@ async def lookup_oclc(
                 headers=headers,
             )
         if response.status_code == 200:
+            is_authoritative = True
             data = response.json()
             bindings = data.get('results', {}).get('bindings', [])
             if bindings:
@@ -4394,9 +4416,11 @@ async def lookup_oclc(
     except Exception as e:
         logger.debug(f"Wikidata OCLC lookup failed for {clean}: {e}")
 
-    # Cache both hits and misses so we don't keep hitting Wikidata for
-    # DOIs we know it has nothing useful on.
-    cache_api_response(None, 'wikidata', 'doi_to_oclc', cache_key, result)
+    # Only cache RESPONSES — not transient failures (timeout / 5xx /
+    # network error). Locking those in would keep the user stuck with
+    # "no OCLC found" forever for a DOI Wikidata actually knows about.
+    if is_authoritative:
+        cache_api_response(None, 'wikidata', 'doi_to_oclc', cache_key, result)
     return result
 
 
