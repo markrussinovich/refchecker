@@ -449,8 +449,13 @@ export const useHistoryStore = create((set, get) => ({
         error: null,
       })
 
-      // Completed checks with local results are already fully viewable.
-      if (hasLocalResults && existingHistoryItem.status !== 'in_progress') {
+      // Completed checks with local results are normally already fully
+      // viewable — skip the API roundtrip. But `force` callers (Remove,
+      // Restore, Apply Fix, Re-verify) need the *server's* fresh results
+      // to land so the HealthBadge and Summary counters track the
+      // mutation; without this short-circuit bypass, the optimistic UI
+      // update gets reverted by stale local data on the next reload.
+      if (!force && hasLocalResults && existingHistoryItem.status !== 'in_progress') {
         return
       }
     }

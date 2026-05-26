@@ -5042,10 +5042,29 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
     try:
       async with httpx.AsyncClient() as client:
         # ── Source 1: Semantic Scholar ──────────────────────────────
-        if req.paper_id:
+        # If we don't have a paper_id but do have a title, resolve via
+        # S2 /paper/search so the /recommendations endpoint still fires.
+        # Without this, title-only inputs fell straight through to the
+        # garbage-producing web-search source (paper.docx, twitter
+        # handles, conference camera-ready pages).
+        resolved_paper_id = req.paper_id
+        if not resolved_paper_id and req.paper_title:
+            try:
+                search = await _fetch(
+                    client,
+                    "https://api.semanticscholar.org/graph/v1/paper/search/match",
+                    params={"query": req.paper_title, "fields": "paperId,title"},
+                )
+                if search and (data := search.get("data")):
+                    if isinstance(data, list) and data and data[0].get("paperId"):
+                        resolved_paper_id = data[0]["paperId"]
+            except Exception as e:
+                logger.debug("S2 title->paperId resolve failed: %s", e)
+
+        if resolved_paper_id:
             data = await _fetch(
                 client,
-                f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{req.paper_id}",
+                f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{resolved_paper_id}",
                 params={"fields": "paperId,title,authors,year,externalIds", "limit": 20},
             )
             for p in (data or {}).get("recommendedPapers", []) or []:
@@ -5129,59 +5148,14 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
     except Exception as e:
         logger.debug("S2/OpenAlex similar-papers block failed: %s", e)
 
-    # ── Source 3: web search (uses user's configured provider) ──────
-    try:
-        from refchecker.checkers.web_search import OpenAISearchProvider, AnthropicSearchProvider, GeminiSearchProvider
+    # Web-search source removed — it produced noise (paper.docx
+    # templates, conference camera-ready instructions, twitter handles)
+    # because LLM web search treats "papers related to X" as generic
+    # text queries, not paper retrieval. S2 + OpenAlex + LLM-suggested-
+    # from-bibliography give signal; web search just contaminated the
+    # tally.
 
-        default_cfg = await db.get_default_llm_config(user_id=user_id)
-        web_provider = None
-        if default_cfg:
-            prov = (default_cfg.get("provider") or "").lower()
-            key = default_cfg.get("api_key")
-            try:
-                if prov == "openai":
-                    web_provider = OpenAISearchProvider(api_key=key)
-                elif prov == "anthropic":
-                    web_provider = AnthropicSearchProvider(api_key=key)
-                elif prov in ("google", "gemini"):
-                    web_provider = GeminiSearchProvider(api_key=key)
-            except Exception as e:
-                logger.debug("Web search provider init failed: %s", e)
-
-        if web_provider and getattr(web_provider, "available", False) and req.paper_title:
-            query = (
-                f"Find 5 academic papers strongly related to: \"{req.paper_title}\". "
-                "Return titles and links to peer-reviewed sources (arXiv, DOI, ACL, IEEE) where possible."
-            )
-            try:
-                results = await asyncio.to_thread(web_provider.search, query, 8)
-            except Exception as e:
-                logger.debug("Web search call failed: %s", e)
-                results = []
-            for r in (results or [])[:8]:
-                link = r.get("link") or ""
-                title = r.get("title") or ""
-                if not title and not link:
-                    continue
-                # Best-effort: pull DOI / arXiv ID out of the URL
-                doi_v, arxiv_v = None, None
-                import re as _re
-                m_doi = _re.search(r"10\.\d{4,9}/[\w.\-;()/:]+", link)
-                if m_doi:
-                    doi_v = m_doi.group(0).rstrip(".)")
-                m_arx = _re.search(r"arxiv\.org/abs/([\w.\-/]+)", link)
-                if m_arx:
-                    arxiv_v = m_arx.group(1)
-                _merge({
-                    "title": title or link,
-                    "doi": doi_v,
-                    "arxiv_id": arxiv_v,
-                    "url": link,
-                }, "web", shared=0)
-    except Exception as e:
-        logger.debug("Web search source skipped: %s", e)
-
-    # ── Source 4: LLM ───────────────────────────────────────────────
+    # ── Source 3: LLM ───────────────────────────────────────────────
     try:
         default_cfg = await db.get_default_llm_config(user_id=user_id)
         if default_cfg and default_cfg.get("provider"):

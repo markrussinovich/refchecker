@@ -3,6 +3,13 @@ import { findSimilarPapers } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 
 /**
+ * Module-level cache keyed by paperTitle. Survives tab unmount/remount
+ * so switching from "Similar Papers" to another tab and back doesn't
+ * blow away results the user already fetched.
+ */
+const SIMILAR_CACHE = new Map()
+
+/**
  * Post-check sibling of the References tab. On mount, asks the backend
  * which papers cite the most refs in common with the current paper
  * (recommendations + co-citation tally from Semantic Scholar). Each
@@ -11,11 +18,13 @@ import { openExternal } from '../../utils/tauriBridge'
  * references.
  */
 export default function SimilarPapersPanel({ references, paperTitle, onCheckPaper }) {
+  const cacheKey = paperTitle || ''
+  const cached = SIMILAR_CACHE.get(cacheKey)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [candidates, setCandidates] = useState([])
-  const [sourceCounts, setSourceCounts] = useState({})
-  const [loaded, setLoaded] = useState(false)
+  const [candidates, setCandidates] = useState(cached?.candidates || [])
+  const [sourceCounts, setSourceCounts] = useState(cached?.sourceCounts || {})
+  const [loaded, setLoaded] = useState(Boolean(cached))
 
   const refsForRequest = (references || [])
     .filter((r) => r && (r.doi || r.arxiv_id || r.title))
@@ -29,9 +38,13 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
         paper_title: paperTitle,
         limit: 5,
       })
-      setCandidates(res.data?.candidates || [])
-      setSourceCounts(res.data?.source_counts || {})
+      const cands = res.data?.candidates || []
+      const counts = res.data?.source_counts || {}
+      setCandidates(cands)
+      setSourceCounts(counts)
       setLoaded(true)
+      // Cache so a tab swap doesn't lose the result.
+      SIMILAR_CACHE.set(cacheKey, { candidates: cands, sourceCounts: counts })
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Lookup failed')
     } finally {
@@ -40,7 +53,15 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
   }
 
   useEffect(() => {
-    setLoaded(false); setCandidates([])
+    // Only reset if we don't have a cached result for this paperTitle.
+    const c = SIMILAR_CACHE.get(paperTitle || '')
+    if (c) {
+      setCandidates(c.candidates)
+      setSourceCounts(c.sourceCounts)
+      setLoaded(true)
+    } else {
+      setLoaded(false); setCandidates([])
+    }
   }, [paperTitle])
 
   if (!refsForRequest.length) {

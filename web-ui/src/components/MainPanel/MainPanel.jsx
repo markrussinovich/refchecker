@@ -10,7 +10,6 @@ import SeenReferencesView from './SeenReferencesView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
 import HealthBadge from './HealthBadge'
-import UsageChip from './UsageChip'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
@@ -301,7 +300,6 @@ export default function MainPanel() {
                 <LLMUsageBadge checkId={selectedCheckId} isComplete={isComplete} />
               </>
             }
-            usageChip={<UsageChip />}
           />
         )}
 
