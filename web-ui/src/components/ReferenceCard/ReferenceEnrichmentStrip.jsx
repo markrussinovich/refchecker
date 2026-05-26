@@ -1,5 +1,12 @@
 import { useState, useEffect, useId, useRef } from 'react'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import { lookupOclc } from '../../utils/api'
+
+// Module-level cache for DOI → OCLC promises. The backend already
+// caches the answer on disk; this dedupes in-flight requests across
+// ReferenceCard mounts so reopening the same check doesn't re-fire
+// the lookup until the answer lands.
+const _oclcLookupCache = new Map()
 
 /**
  * Display-only strip rendered under each verified reference showing
@@ -169,11 +176,9 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         />
       )}
       {links.worldcat && (
-        <ExternalIdLink
-          label="WorldCat"
-          value="↗"
-          href={links.worldcat}
-          title="Search WorldCat for this work"
+        <WorldCatChip
+          searchUrl={links.worldcat}
+          doi={links.doi}
         />
       )}
       {Array.isArray(fields_of_study) && fields_of_study.slice(0, 3).map(fos => (
@@ -202,6 +207,71 @@ function Badge({ children, title }) {
     >
       {children}
     </span>
+  )
+}
+
+/**
+ * WorldCat chip with lazy OCLC resolution. The pre-built link is a
+ * `worldcat.org/search?q={doi}` search URL — always works but lands
+ * on a results page. On first hover we ask the backend for an OCLC
+ * via Wikidata SPARQL; if one comes back, the chip rewrites to
+ * `worldcat.org/oclc/{number}` (a direct work link). Cached so the
+ * lookup runs at most once per DOI per session.
+ */
+function WorldCatChip({ searchUrl, doi }) {
+  const [resolvedUrl, setResolvedUrl] = useState(null)
+  const [resolving, setResolving] = useState(false)
+  const startedRef = useRef(false)
+
+  const triggerLookup = () => {
+    if (!doi || startedRef.current || resolvedUrl) return
+    startedRef.current = true
+    let promise = _oclcLookupCache.get(doi)
+    if (!promise) {
+      promise = lookupOclc(doi)
+        .then(r => r?.data?.worldcat_url || null)
+        .catch(() => null)
+      _oclcLookupCache.set(doi, promise)
+    }
+    setResolving(true)
+    promise.then(url => {
+      if (url) setResolvedUrl(url)
+      setResolving(false)
+    })
+  }
+
+  const href = resolvedUrl || searchUrl
+  const isDirect = !!resolvedUrl
+  const title = isDirect
+    ? 'Open this work in WorldCat (resolved via Wikidata OCLC)'
+    : resolving
+      ? 'Looking up OCLC…'
+      : 'Search WorldCat for this work (hover to look up exact OCLC)'
+  const handleClick = (e) => {
+    if (!isTauri()) return
+    e.preventDefault()
+    try { openExternal(href) } catch { /* fall back to native nav */ }
+  }
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      onMouseEnter={triggerLookup}
+      onFocus={triggerLookup}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="px-1.5 py-0.5 rounded hover:underline"
+      style={{
+        background: 'var(--color-bg-tertiary)',
+        border: '1px solid var(--color-border)',
+        color: 'var(--color-link, #3b82f6)',
+        whiteSpace: 'nowrap',
+        opacity: resolving ? 0.7 : 1,
+      }}
+      title={title}
+    >
+      WorldCat {resolving ? '…' : (isDirect ? '🎯' : '↗')}
+    </a>
   )
 }
 

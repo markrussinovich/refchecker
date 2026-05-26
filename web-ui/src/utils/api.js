@@ -150,6 +150,12 @@ export const getLLMUsage = (checkId) =>
 export const resolveDoi = (doi) =>
   api.get('/doi/resolve', { params: { doi } })
 
+// Best-effort DOI -> OCLC via Wikidata SPARQL. Cached server-side
+// and returns `{ oclc: null }` when no match (typical: article-level
+// hit rate is <10%; books / journal-level entries do much better).
+export const lookupOclc = (doi) =>
+  api.get('/oclc-lookup', { params: { doi } })
+
 // Clear the global Seen References cache
 export const clearSeenReferences = () =>
   api.delete('/references/seen')

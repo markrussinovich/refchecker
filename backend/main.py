@@ -4312,6 +4312,94 @@ async def resolve_doi(
     return meta
 
 
+def _clean_doi_for_lookup(doi: str) -> str:
+    """Strip common DOI URL/prefix forms so what's left is the bare DOI
+    (`10.x/y/z`)."""
+    s = (doi or '').strip()
+    for prefix in ('https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/',
+                   'http://dx.doi.org/', 'doi:'):
+        if s.lower().startswith(prefix.lower()):
+            s = s[len(prefix):]
+            break
+    return s.strip()
+
+
+@app.get("/api/oclc-lookup")
+async def lookup_oclc(
+    doi: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Best-effort DOI -> OCLC via Wikidata SPARQL.
+
+    Wikidata stores DOI as P356 and OCLC control number as P243. When
+    a work is in Wikidata with both properties (mostly books and
+    well-known journal articles), we can offer the user a direct
+    `worldcat.org/oclc/{number}` link instead of the search URL. Hit
+    rate is low (Wikidata's article-level coverage is patchy), so
+    this endpoint is called LAZILY by the UI — only when the user
+    actually clicks the WorldCat chip.
+
+    Cached aggressively because (a) Wikidata responses are slow
+    (1–3 s) and (b) the same DOI gets clicked many times across
+    sessions. No auth required by Wikidata; we set a polite
+    User-Agent.
+    """
+    import httpx
+    from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+
+    clean = _clean_doi_for_lookup(doi)
+    if not clean or '/' not in clean:
+        return {"oclc": None, "doi": doi, "source": "wikidata"}
+
+    cache_key = clean.lower()
+    cached = cached_api_response(None, 'wikidata', 'doi_to_oclc', cache_key)
+    if cached is not None:
+        return cached
+
+    # Wikidata stores most DOIs in uppercase but a few in lowercase —
+    # try both via UNION so we never miss on case alone.
+    query = (
+        'SELECT ?oclc WHERE { '
+        f'{{ ?work wdt:P356 "{clean.upper()}" }} UNION '
+        f'{{ ?work wdt:P356 "{clean.lower()}" }} '
+        '?work wdt:P243 ?oclc. } LIMIT 1'
+    )
+    headers = {
+        'Accept': 'application/sparql-results+json',
+        'User-Agent': 'RefChecker/1.0 (https://github.com/ariomoniri/refchecker)',
+    }
+    result: Dict[str, Any] = {"oclc": None, "doi": clean, "source": "wikidata"}
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(
+                'https://query.wikidata.org/sparql',
+                params={'query': query},
+                headers=headers,
+            )
+        if response.status_code == 200:
+            data = response.json()
+            bindings = data.get('results', {}).get('bindings', [])
+            if bindings:
+                oclc_value = (bindings[0].get('oclc') or {}).get('value')
+                if oclc_value:
+                    # Wikidata returns OCLC as a bare integer string;
+                    # strip any accidental whitespace and validate it's
+                    # all digits before surfacing.
+                    oclc_clean = ''.join(ch for ch in str(oclc_value) if ch.isdigit())
+                    if oclc_clean:
+                        result["oclc"] = oclc_clean
+                        result["worldcat_url"] = f"https://www.worldcat.org/oclc/{oclc_clean}"
+        else:
+            logger.debug(f"Wikidata SPARQL returned {response.status_code} for DOI {clean}")
+    except Exception as e:
+        logger.debug(f"Wikidata OCLC lookup failed for {clean}: {e}")
+
+    # Cache both hits and misses so we don't keep hitting Wikidata for
+    # DOIs we know it has nothing useful on.
+    cache_api_response(None, 'wikidata', 'doi_to_oclc', cache_key, result)
+    return result
+
+
 @app.post("/api/history/{check_id}/references")
 async def add_reference_to_check(
     check_id: int,
