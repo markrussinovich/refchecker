@@ -269,43 +269,263 @@ export function isAuthorCountConsistentWithStyle(citedCount, actualCount, style)
   return Number(actualCount) >= threshold && Number(citedCount) <= cap
 }
 
+// ────────────────────────────────────────────────────────────────────
+// Cosmetic-difference detection
+//
+// Verifiers raise a mismatch whenever the cited string doesn't byte-
+// match the canonical DB record, but the vast majority of "mismatches"
+// users see are just style differences: ISO 4 venue abbreviations,
+// page-range dashes, DOI URL prefixes, sentence-case vs title-case
+// titles, "Lastname F" vs "F. Lastname", year-in-parentheses, et al.
+// truncation. These helpers normalise per error type and answer "are
+// these two strings the same thing under that style's rules?" — when
+// yes, the issue is suppressed from the corrections panel.
+//
+// New error-types added here should follow the same shape:
+//   case '<type>': return normalize(cited) === normalize(actual)
+// keeping the comparison conservative (false positives are worse than
+// false negatives — we'd rather surface a real correction than hide
+// it).
+// ────────────────────────────────────────────────────────────────────
+
+const _COSMETIC_STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'on', 'in', 'at', 'to', 'for', 'with',
+  'by', 'and', 'or', 'but', 'as', 'from',
+])
+
+const _foldText = (s) =>
+  String(s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')   // strip combining diacritics
+    .toLowerCase()
+
+const _normalizeTitle = (s) =>
+  _foldText(s)
+    .replace(/\\[a-z]+\s*\{([^}]*)\}/gi, '$1')   // strip simple LaTeX commands
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+const _normalizeYear = (s) => {
+  const m = String(s ?? '').match(/\b(?:19|20)\d{2}\b/)
+  return m ? m[0] : null
+}
+
+const _normalizePages = (s) => {
+  const nums = String(s ?? '').match(/\d+/g) || []
+  if (nums.length === 0) return ''
+  return nums.slice(0, 2).map(n => parseInt(n, 10)).join('-')
+}
+
+const _normalizeDoi = (s) =>
+  _foldText(s)
+    .replace(/^https?:\/\/(?:dx\.)?doi\.org\//, '')
+    .replace(/^doi:\s*/, '')
+    .trim()
+
+const _venueTokens = (s) =>
+  _foldText(s)
+    .replace(/\([^)]*\)/g, '')        // drop catalog parentheticals
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length >= 2 && !_COSMETIC_STOPWORDS.has(w))
+
+const _venuesEquivalent = (cited, actual) => {
+  const c = _venueTokens(cited)
+  const a = _venueTokens(actual)
+  if (c.length === 0 || a.length === 0) return false
+  if (c.join(' ') === a.join(' ')) return true
+  // ISO 4 acceptance: every cited token must be a 3+-char prefix of
+  // some actual token (or vice versa for the reverse abbreviation).
+  // "Clin Anat" → "Clinical Anatomy"; "J Bone Joint Surg" → "Journal
+  // of Bone and Joint Surgery".
+  return c.every(cw =>
+    a.some(aw =>
+      cw.length >= 3 && aw.length >= 3 &&
+      (aw.startsWith(cw) || cw.startsWith(aw))
+    )
+  )
+}
+
+const _authorSurname = (s) => {
+  // Lift the surname from "Lastname AB" / "A. B. Lastname" /
+  // "Anna Lastname". Longest non-initial token wins; initials are
+  // 1–3 letter all-caps (after folding, treat as length ≤ 2). For
+  // Dutch / German tussenvoegsel ("van der Berg") the longest token
+  // is the actual surname, so picking length rather than position
+  // matters.
+  const parts = _foldText(s)
+    .replace(/\./g, '')
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  if (parts.length === 0) return ''
+  const longish = parts.filter(p => p.length > 2)
+  if (longish.length === 0) return parts[0]
+  return longish.reduce((best, p) => (p.length > best.length ? p : best), longish[0])
+}
+
+// Per-author signature: surname + first given initial (when present).
+// Distinguishes "Smith J" from "Smith K" — same surname, different
+// person — without rejecting "Smith J" vs "J. Smith" or "Jane Smith".
+const _authorSignature = (raw) => {
+  const surname = _authorSurname(raw)
+  if (!surname) return ''
+  const parts = _foldText(raw)
+    .replace(/\./g, '')
+    .split(/[\s,]+/)
+    .filter(Boolean)
+  // First initial — prefer a real single-character token (canonical
+  // "H." form), then fall back to the first letter of the leading
+  // non-surname word (handles "Anna Lastname" giving 'a'). Anything
+  // with no recoverable initial keeps the bare-surname signature so
+  // a citation that omits the initial still matches a fully-named
+  // DB record.
+  const oneChar = parts.find(p => p.length === 1 && p !== surname)
+  let initial = oneChar || ''
+  if (!initial) {
+    const leading = parts.find(p => p !== surname)
+    if (leading) initial = leading[0]
+  }
+  return initial ? `${surname}|${initial}` : surname
+}
+
+const _authorListSignatures = (s) => {
+  if (s == null) return []
+  const text = Array.isArray(s) ? s.join('; ') : String(s)
+  return text
+    .split(/[;,]\s*|\s+and\s+/i)
+    .map(_authorSignature)
+    .filter(Boolean)
+}
+
+const _signatureMatches = (s, list) => {
+  if (list.includes(s)) return true
+  // Match a bare-surname signature against any list entry that shares
+  // the surname (regardless of initial), and vice versa — handles
+  // single-name citations against fully-named DB records.
+  const [sur] = s.split('|')
+  return list.some(other => {
+    const [otherSur] = other.split('|')
+    return otherSur === sur && (!s.includes('|') || !other.includes('|'))
+  })
+}
+
+const _authorsEquivalent = (cited, actual) => {
+  // Either side may be a list (string of comma-separated names, or an
+  // array). Accept when every author signature in the shorter list
+  // appears in the longer one — handles et-al truncation as well as
+  // surname-only-vs-fullname.
+  const c = _authorListSignatures(cited)
+  const a = _authorListSignatures(actual)
+  if (c.length === 0 || a.length === 0) return false
+  const shorter = c.length <= a.length ? c : a
+  const longer = c.length <= a.length ? a : c
+  return shorter.every(s => _signatureMatches(s, longer))
+}
+
 /**
- * Filter out issues that are artefacts of the citation style — chiefly
- * "author count mismatch" warnings raised when the user correctly
- * truncated to the style's et-al cap. Leaves real errors (wrong title,
- * wrong year, wrong venue, wrong authors with matching count) intact.
+ * True when the "cited" and "actual" values differ ONLY in formatting,
+ * not in content — i.e. the user's reference is correct under their
+ * citation style and the DB record just uses canonical form. Dispatched
+ * by error_type so each field uses an appropriate normaliser.
+ *
+ * Errors of a type we don't recognise return false (better to surface
+ * a real correction than to silently hide one we can't classify).
+ */
+export function isCosmeticDifference(errorType, cited, actual) {
+  if (cited == null || actual == null) return false
+  const t = String(errorType || '').toLowerCase()
+  switch (t) {
+    case 'title':
+      return _normalizeTitle(cited) === _normalizeTitle(actual)
+    case 'year': {
+      const c = _normalizeYear(cited)
+      const a = _normalizeYear(actual)
+      return c != null && a != null && c === a
+    }
+    case 'venue':
+    case 'journal':
+    case 'booktitle':
+      return _venuesEquivalent(cited, actual)
+    case 'doi':
+      return _normalizeDoi(cited) === _normalizeDoi(actual)
+    case 'page':
+    case 'pages':
+    case 'page_range':
+      return _normalizePages(cited) === _normalizePages(actual)
+    case 'author':
+    case 'authors':
+      return _authorsEquivalent(cited, actual)
+    default:
+      return false
+  }
+}
+
+const _extractCitedActual = (issue, ref) => {
+  let cited = issue?.cited
+  let actual = issue?.actual_value ?? issue?.actual
+  if (cited == null || actual == null) {
+    const details = issue?.error_details || issue?.warning_details || issue?.message
+    const parsed = parseErrorDetailsForMarkdown(details)
+    if (parsed) {
+      if (cited == null) cited = parsed.cited
+      if (actual == null) actual = parsed.actual
+    }
+  }
+  // Last-ditch fallback: use the ref's own field as the cited value.
+  if (cited == null && ref) {
+    const t = String(issue?.error_type || '').toLowerCase()
+    if (t === 'title') cited = ref.title
+    else if (t === 'year') cited = ref.year
+    else if (t === 'venue' || t === 'journal' || t === 'booktitle') cited = ref.venue
+    else if (t === 'doi') cited = ref.doi
+    else if (t === 'author' || t === 'authors') {
+      cited = Array.isArray(ref.authors) ? ref.authors.join(', ') : ref.authors
+    }
+    else if (t === 'page' || t === 'pages' || t === 'page_range') cited = ref.pages
+  }
+  return { cited, actual }
+}
+
+const _isStyleConformingAuthorCount = (issue, ref, style) => {
+  if (!style) return false
+  const details = String(issue?.error_details || issue?.message || '')
+  const m = details.match(/(\d+)\s*cited\s*vs\.?\s*(\d+)/i)
+  if (m) {
+    return isAuthorCountConsistentWithStyle(parseInt(m[1], 10), parseInt(m[2], 10), style)
+  }
+  const citedCount = Array.isArray(ref?.authors) ? ref.authors.length : 0
+  const actual = issue?.actual_value
+  let actualCount = 0
+  if (Array.isArray(actual)) actualCount = actual.length
+  else if (typeof actual === 'string') {
+    actualCount = actual
+      .split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
+      .map(s => s.trim())
+      .filter(Boolean).length
+  } else if (typeof actual === 'number') actualCount = actual
+  return actualCount > 0 && isAuthorCountConsistentWithStyle(citedCount, actualCount, style)
+}
+
+/**
+ * Filter out issues that are artefacts of the citation style or are
+ * purely cosmetic — same content, different presentation. Suppression
+ * applies to every error_type we have a normaliser for; unknown types
+ * pass through untouched so we don't accidentally hide a real
+ * correction the user needs to act on.
  */
 export function filterIssuesForStyle(issues, ref, style) {
   if (!Array.isArray(issues) || issues.length === 0) return issues || []
-  if (!style) return issues
-  const citedAuthorsCount = Array.isArray(ref?.authors) ? ref.authors.length : 0
   return issues.filter(issue => {
     const errorType = String(issue?.error_type || '').toLowerCase()
-    if (!(errorType === 'author' || errorType === 'authors' || errorType === 'author_count')) {
-      return true
+    // Style-specific author-count rule (MLA's et-al cap, etc.) still
+    // wins ahead of the generic cosmetic check because it needs the
+    // style argument; the generic check is style-agnostic.
+    if (errorType === 'author' || errorType === 'authors' || errorType === 'author_count') {
+      if (_isStyleConformingAuthorCount(issue, ref, style)) return false
     }
-    // Try to read counts from the issue. Backends emit a few shapes:
-    //   { error_details: "Author count mismatch: 1 cited vs 4 correct" }
-    //   { cited: [...], actual_value: [...] }
-    //   { cited: "A et al.", actual_value: "A, B, C, D" }
-    const details = String(issue.error_details || issue.message || '')
-    const m = details.match(/(\d+)\s*cited\s*vs\.?\s*(\d+)/i)
-    if (m) {
-      const c = parseInt(m[1], 10)
-      const a = parseInt(m[2], 10)
-      if (isAuthorCountConsistentWithStyle(c, a, style)) return false
-      return true
-    }
-    const actual = issue.actual_value
-    let actualCount = 0
-    if (Array.isArray(actual)) actualCount = actual.length
-    else if (typeof actual === 'string') {
-      actualCount = actual
-        .split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
-        .map(s => s.trim())
-        .filter(Boolean).length
-    } else if (typeof actual === 'number') actualCount = actual
-    if (actualCount > 0 && isAuthorCountConsistentWithStyle(citedAuthorsCount, actualCount, style)) {
+    const { cited, actual } = _extractCitedActual(issue, ref)
+    if (cited != null && actual != null && isCosmeticDifference(errorType, cited, actual)) {
       return false
     }
     return true
