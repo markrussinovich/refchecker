@@ -5530,24 +5530,46 @@ def find_best_match(search_results, cleaned_title, year=None, authors=None):
         # Calculate similarity score using utility function
         score = calculate_title_similarity(cleaned_title, result_title)
         
-        # Bonus for year match
+        # Year alignment: small bonus when years match, growing penalty
+        # when the gap exceeds plausible reprint / accepted-vs-published
+        # drift. Without a penalty a strong title match silently grabs a
+        # paper from a different year (e.g. cited 1999 but DB row 2005),
+        # which surfaces to the user as a confusing "Year mismatch"
+        # warning rather than the verifier rejecting the candidate.
         result_year = result.get('publication_year') or result.get('year')
-        if year and result_year and year == result_year:
-            score += 0.1
-        
-        # Bonus for first author match when multiple papers have same/similar titles
-        if authors and len(authors) > 0:
+        year_gap = None
+        if year and result_year:
+            try:
+                year_gap = abs(int(year) - int(result_year))
+                if year_gap == 0:
+                    score += 0.1
+                elif year_gap == 1:
+                    score += 0.05
+                elif year_gap <= 3:
+                    pass  # neutral — reprints / preprint vs journal drift
+                else:
+                    score -= 0.2
+            except (TypeError, ValueError):
+                year_gap = None
+
+        # Bonus for first author match when multiple papers have same/similar titles.
+        # If the year is wildly off (>3 years) we don't trust the author
+        # bonus either — shared surnames are common (Wang, Smith, Sakamoto)
+        # and adding +0.2 there would exactly cancel the year penalty,
+        # letting a different-paper-same-surname candidate sneak past
+        # the SIMILARITY_THRESHOLD when the title is only fuzzy-matched.
+        if authors and len(authors) > 0 and (year_gap is None or year_gap <= 3):
             result_authors = result.get('authors', [])
             if result_authors and len(result_authors) > 0:
                 cited_first_author = authors[0]
                 result_first_author = result_authors[0]
-                
+
                 # Extract author name from different formats
                 if isinstance(result_first_author, dict):
                     result_first_author_name = result_first_author.get('name', '')
                 else:
                     result_first_author_name = str(result_first_author)
-                
+
                 # Check if first authors match using existing name matching logic
                 if is_name_match(cited_first_author, result_first_author_name):
                     score += 0.2  # Significant bonus for first author match

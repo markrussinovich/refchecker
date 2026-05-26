@@ -275,21 +275,38 @@ class CrossRefReferenceChecker:
     def extract_year_from_published(self, published: Dict[str, List[int]]) -> Optional[int]:
         """
         Extract year from CrossRef published date
-        
+
         Args:
             published: Published date object from CrossRef
-            
+
         Returns:
             Publication year or None
         """
         if not published:
             return None
-        
+
         # CrossRef date format: {"date-parts": [[2017, 6, 12]]}
         date_parts = published.get('date-parts', [])
         if date_parts and len(date_parts) > 0 and len(date_parts[0]) > 0:
             return date_parts[0][0]  # First element is the year
-        
+
+        return None
+
+    def extract_best_publication_year(self, work_data: Dict[str, Any]) -> Optional[int]:
+        """
+        Pick the most reliable publication year from a CrossRef work,
+        preferring the official print publication date over later
+        derived fields. CrossRef returns several date stamps and the
+        verifier was sometimes picking up ``created`` (the date the
+        DOI record was registered) instead of the actual publication
+        year — producing bogus "Year mismatch" warnings.
+        """
+        if not work_data:
+            return None
+        for key in ('published-print', 'published-online', 'published', 'issued', 'created'):
+            year = self.extract_year_from_published(work_data.get(key))
+            if year:
+                return year
         return None
     
     def extract_url_from_work(self, work_data: Dict[str, Any]) -> Optional[str]:
@@ -385,7 +402,7 @@ class CrossRefReferenceChecker:
                     # Create a normalized result for the utility function
                     processed_result = dict(result)
                     processed_result['title'] = result_title
-                    processed_result['publication_year'] = self.extract_year_from_published(result.get('published'))
+                    processed_result['publication_year'] = self.extract_best_publication_year(result)
                     processed_results.append(processed_result)
             
             if processed_results:
@@ -428,8 +445,10 @@ class CrossRefReferenceChecker:
                     'ref_authors_correct': ', '.join(correct_author_names)
                 })
         
-        # Verify year
-        work_year = self.extract_year_from_published(work_data.get('published'))
+        # Verify year — prefer print pub date over CrossRef record-
+        # creation date so we don't flag bogus year mismatches against
+        # the DOI registration year.
+        work_year = self.extract_best_publication_year(work_data)
         if year and work_year and year != work_year:
             errors.append({
                 'warning_type': 'year',
