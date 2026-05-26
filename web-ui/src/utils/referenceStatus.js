@@ -198,6 +198,16 @@ export const computeReferenceStats = (references = [], isCheckComplete = false) 
     if (
       s === 'unverified' || s === 'hallucination' ||
       (s !== 'checking' && r?.errors?.some(e => e.error_type === 'unverified')) ||
+      // A ref backend-labeled `status === 'unverified'` that hasn't yet
+      // entered the hallucination LLM phase has its effective status
+      // overridden to 'checking' (see getEffectiveReferenceStatus L76)
+      // so the row shows a spinner. The Summary chip still needs to
+      // show the count so the user knows how many refs are coming up
+      // for that second-pass check. We DO NOT count refs flagged with
+      // hallucination_check_pending=true — those are transient,
+      // mid-LLM-call, and would otherwise double-flicker the badge.
+      (r?.status === 'unverified' && !r?.hallucination_assessment &&
+        !r?.hallucination_check_pending && s === 'checking') ||
       likelyHallucinated
     ) {
       withUnverified += 1
