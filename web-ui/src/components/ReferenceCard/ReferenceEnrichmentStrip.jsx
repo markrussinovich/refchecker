@@ -26,6 +26,11 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     fields_of_study = [],
     authors = [],
     source_label,
+    has_funding,
+    funders = [],
+    has_affiliation,
+    biblio,
+    links = {},
   } = enrichment
 
   // Bail when there's literally nothing to show — avoids an empty
@@ -37,15 +42,62 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     openalex_id || pubmed_id || pmc_id || mag_id ||
     publication_type ||
     (Array.isArray(fields_of_study) && fields_of_study.length > 0) ||
-    (Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id))
+    (Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)) ||
+    has_funding ||
+    has_affiliation ||
+    (biblio && (biblio.volume || biblio.issue || biblio.first_page)) ||
+    links.libkey || links.worldcat
   )
   if (!hasAnyBadge) return null
+
+  // Friendly label for publication_type. Matches what users expect to
+  // see at a glance ("Journal Article" / "Conference Proceedings")
+  // instead of the API slugs ("journal-article" / "proceedings").
+  const PUB_TYPE_LABEL = {
+    'journal-article': 'Journal Article',
+    'proceedings-article': 'Conference Proceedings',
+    'proceedings': 'Conference Proceedings',
+    'book': 'Book',
+    'book-chapter': 'Book Chapter',
+    'dissertation': 'Dissertation',
+    'preprint': 'Preprint',
+    'posted-content': 'Preprint',
+    'report': 'Report',
+    'review': 'Review',
+    'editorial': 'Editorial',
+  }
+  const prettyPubType = publication_type
+    ? (PUB_TYPE_LABEL[publication_type.toLowerCase()] || publication_type)
+    : null
+
+  // Compact bibliographic spec like "Vol. 32, Iss. 10, pp. 2541-2556"
+  // — matches how the screenshot's IEEE row reads.
+  const biblioBits = []
+  if (biblio?.volume) biblioBits.push(`Vol. ${biblio.volume}`)
+  if (biblio?.issue) biblioBits.push(`Iss. ${biblio.issue}`)
+  if (biblio?.first_page && biblio?.last_page) {
+    biblioBits.push(`pp. ${biblio.first_page}–${biblio.last_page}`)
+  } else if (biblio?.first_page) {
+    biblioBits.push(`p. ${biblio.first_page}`)
+  }
+  const biblioLine = biblioBits.join(', ')
 
   return (
     <div
       className="flex flex-wrap gap-1.5 mt-2 text-[11px] items-center"
       style={{ color: 'var(--color-text-secondary)' }}
     >
+      {/* Publication type sits up front so the row reads
+          "Conference Proceedings · Cited by 12 · …" like the
+          screenshot. */}
+      {prettyPubType && (
+        <BadgeLabel color="#6366f1" title="Publication type">
+          {prettyPubType}
+        </BadgeLabel>
+      )}
+      {biblioLine && (
+        <Badge title="Bibliographic detail">{biblioLine}</Badge>
+      )}
       {source_label && (
         <BadgeLabel color="#3b82f6" title={`Verified via ${source_label}`}>
           {source_label}
@@ -66,10 +118,15 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           OA
         </BadgeLabel>
       )}
-      {publication_type && (
-        <Badge title="Publication type">
-          {publication_type}
-        </Badge>
+      {has_funding && (
+        <BadgeLabel color="#a855f7" title={funders.length ? `Funded by ${funders.join('; ')}` : 'Funded'}>
+          Funding
+        </BadgeLabel>
+      )}
+      {has_affiliation && (
+        <BadgeLabel color="#f97316" title="Author institutions on file">
+          Affiliation
+        </BadgeLabel>
       )}
       {openalex_id && (
         <ExternalIdLink
@@ -99,6 +156,25 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         <Badge title="Microsoft Academic Graph (legacy)">
           MAG <strong>{mag_id}</strong>
         </Badge>
+      )}
+      {/* LibKey and WorldCat are free public link services — paste
+          a DOI and they resolve to library-subscribed full text or
+          to OA copies. No API call from us; we just build the URL. */}
+      {links.libkey && (
+        <ExternalIdLink
+          label="LibKey"
+          value="↗"
+          href={links.libkey}
+          title="Open in LibKey (free public DOI resolver)"
+        />
+      )}
+      {links.worldcat && (
+        <ExternalIdLink
+          label="WorldCat"
+          value="↗"
+          href={links.worldcat}
+          title="Search WorldCat for this work"
+        />
       )}
       {Array.isArray(fields_of_study) && fields_of_study.slice(0, 3).map(fos => (
         <BadgeLabel key={fos} color="#f59e0b" title="Field of Study">

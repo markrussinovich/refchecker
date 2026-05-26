@@ -92,7 +92,7 @@ class OpenAlexReferenceChecker:
         params = {
             "search": query,
             "per_page": min(limit, 25),  # OpenAlex max per page is 200, but we limit for performance
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts"
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio"
         }
         
         # Add year filter if provided
@@ -152,7 +152,7 @@ class OpenAlexReferenceChecker:
         endpoint = f"{self.base_url}/works/doi:{clean_doi}"
         
         params = {
-            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts"
+            "select": "id,doi,title,display_name,publication_year,authorships,type,open_access,primary_location,locations,referenced_works,ids,cited_by_count,concepts,grants,biblio"
         }
         
         # Make the request with retries and backoff

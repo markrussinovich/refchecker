@@ -17,7 +17,12 @@ Fields produced:
     mag_id               str   — Microsoft Academic Graph ID (legacy)
     fields_of_study      list  — top concept display names
     publication_type     str   — journal-article / preprint / book / …
-    authors              list  — [{name, orcid, openalex_id}]
+    has_funding          bool  — at least one grant/funder listed
+    funders              list  — distinct funder display names
+    has_affiliation      bool  — at least one author has an institution
+    biblio               dict  — {volume, issue, first_page, last_page}
+    links                dict  — {doi, libkey, worldcat, openalex}
+    authors              list  — [{name, orcid, openalex_id, institutions}]
     source_label         str   — which checker produced the match
 
 Anything we can't extract is left out of the dict — the UI treats
@@ -25,6 +30,7 @@ missing fields as "no signal" rather than zero.
 """
 
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 
 def _safe_get(d: Dict[str, Any], *path: str, default: Any = None) -> Any:
@@ -41,9 +47,17 @@ def _safe_get(d: Dict[str, Any], *path: str, default: Any = None) -> Any:
 def _short_id(openalex_url: Optional[str]) -> Optional[str]:
     if not openalex_url:
         return None
-    s = str(openalex_url)
-    if 'openalex.org/' in s:
-        return s.rsplit('/', 1)[-1]
+    s = str(openalex_url).rstrip('/')
+    if not s:
+        return None
+    # If the URL is at most the host (no ID segment after openalex.org),
+    # there's nothing useful to extract.
+    for host in ('openalex.org', 'orcid.org', 'doi.org'):
+        if s.endswith(host) or s.endswith(host.upper()):
+            return None
+    if '/' in s:
+        tail = s.rsplit('/', 1)[-1]
+        return tail or None
     return s
 
 
@@ -158,14 +172,15 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         if 'mag_id' not in enrichment and s2_ext.get('MAG'):
             enrichment['mag_id'] = str(s2_ext['MAG'])
 
-    # Publication type
-    pub_type = (
-        verified_data.get('type')
-        or verified_data.get('publicationVenue', {}).get('type')
-        if isinstance(verified_data.get('publicationVenue'), dict)
-        else None
-    ) or verified_data.get('type')
-    if isinstance(pub_type, str):
+    # Publication type — prefer the top-level `type` (OpenAlex /
+    # Crossref); fall back to Semantic Scholar's nested
+    # publicationVenue.type only when it's actually a dict.
+    pub_type = verified_data.get('type')
+    if not pub_type:
+        venue = verified_data.get('publicationVenue')
+        if isinstance(venue, dict):
+            pub_type = venue.get('type')
+    if isinstance(pub_type, str) and pub_type:
         enrichment['publication_type'] = pub_type
 
     # Fields of study — OpenAlex concepts; S2 has `fieldsOfStudy`.
@@ -186,6 +201,84 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     enriched_authors = _extract_authors_with_orcid(authorships or [])
     if enriched_authors:
         enrichment['authors'] = enriched_authors
+
+    # Funders / grants — OpenAlex returns `grants[]` with funder name.
+    grants = verified_data.get('grants')
+    if isinstance(grants, list) and grants:
+        funders = []
+        seen = set()
+        for g in grants:
+            if not isinstance(g, dict):
+                continue
+            name = g.get('funder_display_name') or g.get('funder') or g.get('award_id')
+            if name and name not in seen:
+                funders.append(str(name))
+                seen.add(name)
+        if funders:
+            enrichment['has_funding'] = True
+            enrichment['funders'] = funders[:5]
+
+    # Affiliation badge — at least one author institution present.
+    if any(a.get('institutions') for a in (enrichment.get('authors') or [])):
+        enrichment['has_affiliation'] = True
+
+    # Bibliographic detail (volume / issue / pages) — OpenAlex `biblio`
+    # is exactly this shape; Crossref scatters them across top-level
+    # `volume`, `issue`, `page` fields.
+    biblio_src = verified_data.get('biblio')
+    if isinstance(biblio_src, dict):
+        biblio = {k: biblio_src.get(k) for k in ('volume', 'issue', 'first_page', 'last_page') if biblio_src.get(k)}
+        if biblio:
+            enrichment['biblio'] = biblio
+    elif verified_data.get('volume') or verified_data.get('issue') or verified_data.get('page'):
+        biblio = {}
+        if verified_data.get('volume'):
+            biblio['volume'] = str(verified_data['volume'])
+        if verified_data.get('issue'):
+            biblio['issue'] = str(verified_data['issue'])
+        page = verified_data.get('page')
+        if isinstance(page, str):
+            # Accept ASCII hyphen, en-dash (U+2013), or em-dash (U+2014).
+            import re as _re
+            parts = [p.strip() for p in _re.split(r'[\-–—]', page, maxsplit=1)]
+            if parts[0]:
+                biblio['first_page'] = parts[0]
+            if len(parts) > 1 and parts[1]:
+                biblio['last_page'] = parts[1]
+        elif page:
+            biblio['first_page'] = str(page)
+        if biblio:
+            enrichment['biblio'] = biblio
+
+    # Click-through links — built from the canonical IDs we already
+    # extracted. LibKey and WorldCat are public link services (no auth
+    # required), so we surface them whenever a DOI is available.
+    links: Dict[str, str] = {}
+    canonical_doi = (
+        verified_data.get('doi')
+        or verified_data.get('DOI')
+        or (verified_data.get('ids') or {}).get('doi')
+        or (verified_data.get('externalIds') or {}).get('DOI')
+    )
+    if canonical_doi:
+        clean_doi = str(canonical_doi)
+        for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
+            if clean_doi.startswith(prefix):
+                clean_doi = clean_doi[len(prefix):]
+                break
+        # doi.org accepts the raw DOI as the path; LibKey's resolver
+        # is documented to accept the same. Slashes inside the DOI are
+        # valid in URL path segments, so we keep them literal there.
+        links['doi'] = f"https://doi.org/{clean_doi}"
+        links['libkey'] = f"https://libkey.io/{clean_doi}"
+        # WorldCat's `q` is a query-string value: percent-encode so
+        # DOIs containing `&`, `#`, `+`, or other reserved characters
+        # don't truncate the query or split it into multiple params.
+        links['worldcat'] = f"https://www.worldcat.org/search?q={quote(clean_doi, safe='')}"
+    if enrichment.get('openalex_id'):
+        links['openalex'] = f"https://openalex.org/{enrichment['openalex_id']}"
+    if links:
+        enrichment['links'] = links
 
     # Which checker produced this — the enhanced_hybrid_checker stamps
     # _matched_database / _matched_checker on the dict before it lands
