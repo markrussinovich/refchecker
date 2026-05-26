@@ -2202,30 +2202,63 @@ def _fallback_author_token_match(name1: str, name2: str) -> bool:
 
 
 def _compact_initials_name_match(parts1: List[str], parts2: List[str]) -> bool:
-    """Match compact initials plus surname against expanded name tokens."""
-    if len(parts1) == 2 and len(parts2) >= 3:
-        compact_initials, compact_surname = parts1
-        expanded_prefix = parts2[:-1]
-        expanded_surname = parts2[-1]
-    elif len(parts2) == 2 and len(parts1) >= 3:
-        compact_initials, compact_surname = parts2
-        expanded_prefix = parts1[:-1]
-        expanded_surname = parts1[-1]
+    """Match compact initials plus surname against expanded name tokens.
+
+    Handles both common publication-shape combinations:
+      * Western "F. M. Lastname" (surname-last)        — original case
+      * Vancouver "Lastname F. M." (surname-first)     — added 2026-05
+        for cases like "R. Tubbs" (cited APA) vs
+        "Tubbs R. S" (DB Vancouver) where the SAME author appears in
+        opposite token orders.
+
+    Also relaxes the strict length equality: the cited compact form may
+    have FEWER initials than the DB expanded form (one initial vs first
+    middle initial). The cited side providing MORE initials than the DB
+    has tokens is still rejected — that would be claiming initials the
+    DB doesn't confirm.
+    """
+    # Strip trailing periods on each token so "r." becomes "r" — common
+    # in cleaned-name forms where the period survives. The original
+    # function compared on `.isalpha()` which fails for "r.".
+    def _strip_period(tok: str) -> str:
+        return tok.rstrip('.').strip()
+
+    p1 = [_strip_period(t) for t in parts1]
+    p2 = [_strip_period(t) for t in parts2]
+    if len(p1) == 2 and len(p2) >= 3:
+        compact_initials, compact_surname = p1
+        long_parts = p2
+    elif len(p2) == 2 and len(p1) >= 3:
+        compact_initials, compact_surname = p2
+        long_parts = p1
     else:
         return False
 
-    if not compact_initials.isalpha() or len(compact_initials) < 2:
-        return False
-    if len(compact_initials) != len(expanded_prefix):
-        return False
-    if not surname_similarity(compact_surname, expanded_surname):
+    if not compact_initials.isalpha() or len(compact_initials) < 1:
         return False
 
-    return all(
-        initial == token[0]
-        for initial, token in zip(compact_initials, expanded_prefix)
-        if token
-    )
+    # Try both orientations on the expanded side: surname-last (Western)
+    # AND surname-first (Vancouver / Asian).
+    candidates = []
+    candidates.append((long_parts[:-1], long_parts[-1]))   # surname-last
+    candidates.append((long_parts[1:],  long_parts[0]))    # surname-first
+
+    for expanded_prefix, expanded_surname in candidates:
+        if not surname_similarity(compact_surname, expanded_surname):
+            continue
+        # Cited can't have MORE initials than the DB provides — that
+        # would be inventing initials. Equal-or-fewer is fine.
+        if len(compact_initials) > len(expanded_prefix):
+            continue
+        # Each cited initial must match the first letter of the
+        # corresponding expanded token, positionally.
+        if all(
+            initial == token[0]
+            for initial, token in zip(compact_initials, expanded_prefix)
+            if token
+        ):
+            return True
+    return False
 
 
 def _normalize_initials_token(token: str) -> str:
@@ -5735,8 +5768,16 @@ def is_year_substantially_different(cited_year: int, correct_year: int, context:
     # If years are the same, no warning needed
     if cited_year == correct_year:
         return False, None
-    
-    # Any year difference should be flagged as a warning for manual review
+
+    # Suppress trivial 1-year gaps: online-ahead-of-print / epub vs print /
+    # accepted vs published. These are not real "wrong year" mismatches.
+    try:
+        if abs(int(cited_year) - int(correct_year)) <= 1:
+            return False, None
+    except (TypeError, ValueError):
+        pass
+
+    # Any larger year difference should be flagged as a warning for manual review
     warning_msg = f"Year mismatch: cited as {cited_year} but actually {correct_year}"
     return True, warning_msg
 

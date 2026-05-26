@@ -815,7 +815,11 @@ class ProgressRefChecker:
         """
         if event_type == "reference_result" and isinstance(data, dict):
             try:
-                from .database import db as _db
+                # Absolute import matches the rest of this module — the
+                # relative form fails when refchecker_wrapper is imported
+                # as a top-level script (sidecar PyInstaller bundle path),
+                # which silently skipped every Seen-Refs write.
+                from backend.database import db as _db
                 upsert_key = await _db.upsert_verified_reference(data)
                 if upsert_key is not None:
                     if not hasattr(self, "_global_cache_writes"):
@@ -1298,15 +1302,20 @@ class ProgressRefChecker:
             # both since we don't know the split. Hallucination LLM
             # invocations are counted from refs whose assessment came
             # back via the LLM path (assessment carries 'source').
-            _regex_methods = {"bbl", "bib", "regex"}
-            if extraction_method in _regex_methods:
-                regex_count = total_refs
-                llm_count = 0
-            elif extraction_method == "llm":
+            # Deterministic / structural extraction stages all bucket as
+            # "regex" for the Summary chip. The LLM bucket is reserved for
+            # paths that actually invoke the LLM extractor.
+            _regex_methods = {"bbl", "bib", "regex", "grobid", "text", "pdf", "file"}
+            if extraction_method == "llm":
                 regex_count = 0
                 llm_count = total_refs
+            elif extraction_method in _regex_methods:
+                regex_count = total_refs
+                llm_count = 0
             else:
-                regex_count = 0
+                # 'cache' / None — we don't know the split. Attribute to
+                # regex so the chip isn't a confusing all-zero display.
+                regex_count = total_refs
                 llm_count = 0
             hallucination_llm_count = sum(
                 1 for r in results
@@ -2130,21 +2139,20 @@ class ProgressRefChecker:
         checked_count = 0  # Tracks refs that finished verification (including deferred ones)
 
         # Per-stage extraction counts surfaced in the Summary chip
-        # (Regex / LLM / Hallucination LLM). The deterministic parsers
-        # (.bbl, .bib) all count as "regex"; the LLM extractor counts
-        # as "llm"; cache hits keep the stage from the original run.
-        _regex_methods = {"bbl", "bib", "regex"}
-        if extraction_method in _regex_methods:
-            regex_count = total_refs
-            llm_count = 0
-        elif extraction_method == "llm":
+        # (Regex / LLM / Hallucination LLM). Deterministic / structural
+        # parsers (bbl, bib, grobid, regex, raw pdf/file/text) bucket as
+        # "regex"; only the LLM extractor counts as "llm".
+        _regex_methods = {"bbl", "bib", "regex", "grobid", "text", "pdf", "file"}
+        if extraction_method == "llm":
             regex_count = 0
             llm_count = total_refs
+        elif extraction_method in _regex_methods:
+            regex_count = total_refs
+            llm_count = 0
         else:
-            # 'pdf', 'file', 'text', 'cache', None — we genuinely
-            # don't know the per-stage split for these, so attribute
-            # to whichever flag the underlying CLI checker raised.
-            regex_count = 0
+            # 'cache' / None — attribute to regex so the chip isn't an
+            # all-zero display (cached runs preserved the original refs).
+            regex_count = total_refs
             llm_count = 0
         
         loop = asyncio.get_event_loop()

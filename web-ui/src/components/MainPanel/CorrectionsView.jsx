@@ -12,13 +12,11 @@ import {
   deleteCustomCitationStyle,
 } from '../../utils/formatters'
 import {
-  addReferenceToCheck,
-  removeReferenceFromCheck,
-  suggestAlternativeReference,
   verifyReferenceInCheck,
 } from '../../utils/api'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useStyleStore } from '../../stores/useStyleStore'
+import useReferenceActions from '../../hooks/useReferenceActions'
 import { wordDiff } from '../../utils/wordDiff'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
@@ -280,72 +278,32 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   const [editingKey, setEditingKey] = useState(null)
   const [editBuffer, setEditBuffer] = useState('')
 
-  // Add / Remove / Suggest server actions. selectedCheckId comes from
-  // the history store so we know which check to mutate.
-  const selectedCheckId = useHistoryStore(s => s.selectedCheckId)
-  const [busyKey, setBusyKey] = useState(null)
-  const [showAdd, setShowAdd] = useState(false)
-  const [newRef, setNewRef] = useState({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
-  const [suggestFor, setSuggestFor] = useState(null) // { ref_id, candidates }
-  const handleAddRef = async () => {
-    if (!selectedCheckId) return
-    setBusyKey('__add__')
-    try {
-      const res = await addReferenceToCheck(selectedCheckId, {
-        title: newRef.title.trim() || null,
-        authors: newRef.authors.trim() ? newRef.authors.split(',').map(s => s.trim()).filter(Boolean) : null,
-        year: newRef.year ? parseInt(newRef.year, 10) : null,
-        doi: newRef.doi.trim() || null,
-        arxiv_id: newRef.arxiv_id.trim() || null,
-      })
-      setShowAdd(false)
-      setNewRef({ title: '', authors: '', year: '', doi: '', arxiv_id: '' })
-      // Kick off /verify on the new ref id immediately so it doesn't sit
-      // on 'pending' forever. (The References-tab Add path already did
-      // this through useReferenceActions; this duplicate handler was
-      // skipping it.) Pass `{ force: true }` to selectCheck so the
-      // post-mutation reload bypasses the same-id short-circuit and
-      // the Citation health badge + Summary tiles recompute against
-      // the freshly-added ref.
-      const addedId = res?.data?.reference?.id ?? res?.data?.id ?? null
-      if (addedId != null) {
-        try {
-          await verifyReferenceInCheck(selectedCheckId, String(addedId))
-        } catch { /* best-effort */ }
-      }
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
-    } catch (e) {
-      alert(e?.response?.data?.detail || e?.message || 'Add failed')
-    } finally {
-      setBusyKey(null)
-    }
-  }
-  const handleRemoveRef = async (ref, i) => {
-    if (!selectedCheckId) return
-    const ident = String(ref.id ?? ref.index ?? i)
-    setBusyKey(ident)
-    try {
-      await removeReferenceFromCheck(selectedCheckId, ident)
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
-    } catch (e) {
-      alert(e?.response?.data?.detail || e?.message || 'Remove failed')
-    } finally {
-      setBusyKey(null)
-    }
-  }
-  const handleSuggestAlt = async (ref, i) => {
-    if (!selectedCheckId) return
-    const ident = String(ref.id ?? ref.index ?? i)
-    setBusyKey(ident)
-    try {
-      const res = await suggestAlternativeReference(selectedCheckId, ident)
-      setSuggestFor({ ref_id: ident, candidates: res.data?.candidates || [] })
-    } catch (e) {
-      alert(e?.response?.data?.detail || e?.message || 'Suggest failed')
-    } finally {
-      setBusyKey(null)
-    }
-  }
+  // Add / Remove / Suggest server actions — delegate to the same hook
+  // the References tab uses. This gives the Corrections view the same
+  // optimistic checkStore updates (so HealthBadge moves immediately),
+  // the Undo stash for removed refs, and per-row busy state. Before
+  // this, Remove fired a server delete and a reload but skipped the
+  // optimistic update, so the badge stayed stale until the user
+  // navigated away and back; Undo didn't exist at all here.
+  const {
+    selectedCheckId,
+    busyKey,
+    globalBusy,
+    showAdd,
+    setShowAdd,
+    newRef,
+    setNewRef,
+    suggestFor,
+    setSuggestFor,
+    handleAddRef,
+    handleRemoveRef,
+    handleSuggestAlt,
+    removedRefs,
+    handleRestoreRef,
+    clearRemovedRefs,
+    isRemoving,
+    isSuggesting,
+  } = useReferenceActions()
 
   const statusFilter = useCheckStore(s => s.statusFilter)
   const summaryActive = statusFilter.length > 0
@@ -787,6 +745,67 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         </div>
       )}
 
+      {/* Undo strip — appears after the user removes a ref from this
+          tab. Mirrors the strip in the References tab so the same
+          stash is visible regardless of which view did the remove. */}
+      {removedRefs && removedRefs.length > 0 && (
+        <div
+          className="px-3 py-2 rounded-lg border text-xs flex items-center gap-2 flex-wrap"
+          style={{
+            borderColor: 'var(--color-border)',
+            background: 'var(--color-bg-tertiary)',
+            color: 'var(--color-text-secondary)',
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>
+            Removed ({removedRefs.length})
+          </span>
+          <span style={{ color: 'var(--color-text-muted)' }}>
+            — click Undo to put a reference back and re-verify.
+          </span>
+          <div className="flex flex-wrap gap-1.5 ml-auto">
+            {removedRefs.slice(0, 6).map(snap => {
+              const label = (snap.title || snap.doi || snap.arxiv_id || '(untitled)').toString()
+              const short = label.length > 48 ? `${label.slice(0, 48)}…` : label
+              return (
+                <button
+                  key={snap._stashKey}
+                  onClick={() => handleRestoreRef(snap)}
+                  disabled={!!globalBusy}
+                  className="px-2 py-0.5 rounded-md"
+                  style={{
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg-primary)',
+                    color: 'var(--color-text-secondary)',
+                    opacity: globalBusy ? 0.6 : 1,
+                  }}
+                  title={`Undo remove: ${label}`}
+                >
+                  ↺ {short}
+                </button>
+              )
+            })}
+            {removedRefs.length > 6 && (
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                +{removedRefs.length - 6} more
+              </span>
+            )}
+            <button
+              onClick={clearRemovedRefs}
+              className="px-2 py-0.5 rounded-md"
+              style={{
+                border: '1px solid transparent',
+                background: 'transparent',
+                color: 'var(--color-text-muted)',
+              }}
+              title="Discard the undo list"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Rows */}
       <div className="space-y-2">
         {filtered.map(({ ref, tags }, i) => {
@@ -865,25 +884,37 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
                     type="button"
                   >{copiedKey === key ? '✓' : 'Copy'}</button>
-                  {tags.has('hallucination') && (
-                    <button onClick={() => handleSuggestAlt(ref, i)} disabled={busyKey === String(ref.id ?? ref.index ?? i) || !selectedCheckId}
-                      className="px-2 py-0.5 rounded text-xs"
-                      style={{ backgroundColor: 'var(--color-hallucination, #a855f7)', color: 'white', opacity: !selectedCheckId ? 0.5 : 1 }}
-                      type="button"
-                      title="Search Semantic Scholar for real papers matching this title"
-                    >Suggest alternative</button>
-                  )}
-                  <button onClick={() => handleRemoveRef(ref, i)} disabled={busyKey === String(ref.id ?? ref.index ?? i) || !selectedCheckId}
-                    className="px-2 py-0.5 rounded text-xs"
-                    style={{
-                      backgroundColor: 'var(--color-bg-primary)',
-                      color: 'var(--color-error, #ef4444)',
-                      border: '1px solid var(--color-border)',
-                      opacity: !selectedCheckId ? 0.5 : 1,
-                    }}
-                    type="button"
-                    title="Drop this reference from the check (counters update live)"
-                  >Remove</button>
+                  {tags.has('hallucination') && (() => {
+                    const ident = String(ref.id ?? ref.index ?? i)
+                    const suggesting = isSuggesting(ident)
+                    const disabled = suggesting || !!globalBusy || !selectedCheckId
+                    return (
+                      <button onClick={() => handleSuggestAlt(ref, i)} disabled={disabled}
+                        className="px-2 py-0.5 rounded text-xs"
+                        style={{ backgroundColor: 'var(--color-hallucination, #a855f7)', color: 'white', opacity: disabled ? 0.5 : 1 }}
+                        type="button"
+                        title="Search Semantic Scholar for real papers matching this title"
+                      >{suggesting ? '…' : 'Suggest alternative'}</button>
+                    )
+                  })()}
+                  {(() => {
+                    const ident = String(ref.id ?? ref.index ?? i)
+                    const removing = isRemoving(ident)
+                    const disabled = removing || !!globalBusy || !selectedCheckId
+                    return (
+                      <button onClick={() => handleRemoveRef(ref, i)} disabled={disabled}
+                        className="px-2 py-0.5 rounded text-xs"
+                        style={{
+                          backgroundColor: 'var(--color-bg-primary)',
+                          color: 'var(--color-error, #ef4444)',
+                          border: '1px solid var(--color-border)',
+                          opacity: disabled ? 0.5 : 1,
+                        }}
+                        type="button"
+                        title="Drop this reference from the check (counters update live)"
+                      >{removing ? '…' : 'Remove'}</button>
+                    )
+                  })()}
                 </div>
               </div>
 

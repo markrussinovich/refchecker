@@ -586,11 +586,17 @@ class CrossRefReferenceChecker:
         # the DOI registration year.
         work_year = self.extract_best_publication_year(work_data)
         if year and work_year and year != work_year:
-            errors.append({
-                'warning_type': 'year',
-                'warning_details': format_year_mismatch(year, work_year),
-                'ref_year_correct': work_year
-            })
+            try:
+                year_gap = abs(int(year) - int(work_year))
+            except (TypeError, ValueError):
+                year_gap = None
+            # Suppress trivial 1-year gaps (online-ahead-of-print, epub vs print)
+            if year_gap is None or year_gap > 1:
+                errors.append({
+                    'warning_type': 'year',
+                    'warning_details': format_year_mismatch(year, work_year),
+                    'ref_year_correct': work_year
+                })
         
         # Verify DOI
         work_doi = work_data.get('DOI')

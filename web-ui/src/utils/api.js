@@ -120,13 +120,15 @@ export const listLLMModels = (provider, api_key, endpoint) =>
 export const listSeenReferences = (limit = 200, offset = 0, q = null) =>
   api.get('/references/seen', { params: { limit, offset, ...(q ? { q } : {}) } })
 
-// Similar-papers recommendations + co-citation tally
+// Similar-papers recommendations + co-citation tally — Semantic Scholar's
+// /recommendations endpoint is slow, so this can legitimately take longer
+// than the default 30s. Give it a 2-minute budget.
 export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5 }) =>
-  api.post('/papers/similar', { references, paper_title, paper_id, limit })
+  api.post('/papers/similar', { references, paper_title, paper_id, limit }, { timeout: 120000 })
 
 // Real inter-reference citation graph via Semantic Scholar
 export const fetchCitationGraph = ({ references, paper_title }) =>
-  api.post('/papers/citation-graph', { references, paper_title })
+  api.post('/papers/citation-graph', { references, paper_title }, { timeout: 120000 })
 
 // One-hop expand: a paper's outgoing references for the graph view
 export const expandPaper = ({ paper_id, limit = 8 }) =>

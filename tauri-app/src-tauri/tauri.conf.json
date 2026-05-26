@@ -23,7 +23,7 @@
         "decorations": true,
         "transparent": false,
         "url": "index.html",
-        "dragDropEnabled": true
+        "dragDropEnabled": false
       }
     ],
     "security": {
