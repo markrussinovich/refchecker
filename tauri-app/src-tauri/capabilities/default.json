@@ -44,6 +44,19 @@
     "process:default",
     "process:allow-restart",
     "fs:default",
-    "fs:allow-read-file"
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$HOME/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$TEMP/**" },
+        { "path": "/tmp/**" },
+        { "path": "/private/tmp/**" },
+        { "path": "/private/var/folders/**" },
+        { "path": "/Volumes/**" }
+      ]
+    }
   ]
 }

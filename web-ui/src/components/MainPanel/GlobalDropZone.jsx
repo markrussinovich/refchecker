@@ -136,26 +136,64 @@ export default function GlobalDropZone() {
       }
     }
 
-    // Subscribe via the dynamic import of @tauri-apps/api/event so we
-    // get reliable unlisten handles. Falls through to internals if the
-    // package isn't bundled.
+    // Subscribe via the dynamic import of @tauri-apps/api so we get
+    // reliable unlisten handles.
     let unlistenFns = []
     ;(async () => {
       try {
         const ev = await import('@tauri-apps/api/event')
+        // Open-With from the OS / file-association launch — global event.
+        if (ev?.listen) {
+          unlistenFns.push(await ev.listen('refchecker://open-files', (event) => {
+            consumePaths(event?.payload || [], 'open-with')
+          }))
+        }
+      } catch (e) {
+        console.warn('[GlobalDropZone] @tauri-apps/api/event load failed', e)
+      }
+
+      // Native drag-drop in Tauri 2.x is delivered through the WEBVIEW
+      // channel, not the global event bus. listen('tauri://drag-drop')
+      // never fires under Tauri 2 because the events are scoped to the
+      // webview; you have to call getCurrentWebview().onDragDropEvent()
+      // explicitly. v0.7.0 only registered the global path, which is
+      // why dragging a file showed the overlay (HTML5 dragenter still
+      // fires) but the drop did nothing (Tauri swallowed it).
+      try {
+        const wv = await import('@tauri-apps/api/webview')
+        const webview = wv?.getCurrentWebview?.()
+        if (webview?.onDragDropEvent) {
+          const unlisten = await webview.onDragDropEvent((event) => {
+            const payload = event?.payload
+            if (!payload || typeof payload !== 'object') return
+            if (payload.type === 'enter' || payload.type === 'over') {
+              setActive(true)
+              return
+            }
+            if (payload.type === 'drop') {
+              consumePaths(payload.paths || [], 'drag-drop')
+              setActive(false); setCounter(0)
+              return
+            }
+            if (payload.type === 'leave') {
+              setActive(false); setCounter(0)
+            }
+          })
+          unlistenFns.push(unlisten)
+        }
+      } catch (e) {
+        console.warn('[GlobalDropZone] webview drag-drop subscribe failed', e)
+      }
+
+      // Belt-and-braces: some Tauri builds DO surface drag events on
+      // the global bus. Subscribe to those too — duplicate fires are
+      // idempotent because consumePaths is dedup-by-path internally and
+      // setActive/setCounter are setters.
+      try {
+        const ev = await import('@tauri-apps/api/event')
         if (!ev?.listen) return
-        // 1. Open-With from the OS / file-association launch
-        unlistenFns.push(await ev.listen('refchecker://open-files', (event) => {
-          consumePaths(event?.payload || [], 'open-with')
-        }))
-        // 2. File dragged onto the window (Tauri 2.x native drag-drop)
-        // The event payload shape is { type: 'enter'|'over'|'drop'|'leave', paths: [...] }
-        // on some Tauri builds; on others, the event NAMES split out as
-        // tauri://drag-enter / drag-over / drop / drag-leave. Subscribe to
-        // both shapes.
         const dropHandler = (event) => {
           const payload = event?.payload
-          // Shape A: { type: 'drop', paths: [...] }
           if (payload && typeof payload === 'object' && payload.type === 'drop') {
             consumePaths(payload.paths || [], 'drag-drop')
             setActive(false); setCounter(0)
@@ -169,7 +207,6 @@ export default function GlobalDropZone() {
             setActive(false); setCounter(0)
             return
           }
-          // Shape B: payload is itself a list of paths (older Tauri builds)
           if (Array.isArray(payload)) {
             consumePaths(payload, 'drag-drop')
             setActive(false); setCounter(0)
@@ -181,10 +218,10 @@ export default function GlobalDropZone() {
         unlistenFns.push(await ev.listen('tauri://drag-enter', () => setActive(true)))
         unlistenFns.push(await ev.listen('tauri://drag-leave', () => { setActive(false); setCounter(0) }))
       } catch (e) {
-        console.warn('[GlobalDropZone] Tauri event listener install failed', e)
+        console.warn('[GlobalDropZone] global drag-drop subscribe failed', e)
       }
     })()
-    cleanupFns.push(() => unlistenFns.forEach((fn) => { try { fn?.() } catch {} }))
+    cleanupFns.push(() => unlistenFns.forEach((fn) => { try { fn?.() } catch { /* ignore */ } }))
 
     return () => cleanupFns.forEach((fn) => fn())
   }, [])
