@@ -2268,33 +2268,29 @@ def _vancouver_apa_name_match(parts1: List[str], parts2: List[str]) -> bool:
     # Two orderings on each side: "Surname Initials" / "Initials Surname".
     # Try the four combinations.
     for p1_surname_first in (True, False):
-        s1, init1, s2_a, init2_a = split_into(p1_surname_first)
-        compact_a = _normalize_initials_token(init1)
-        expanded_a = _normalize_initials_token(init2_a)
+        s1_surname, s1_initials, _, _ = split_into(p1_surname_first)
+        compact_a = _normalize_initials_token(s1_initials)
         if not compact_a:
             continue
         for p2_surname_first in (True, False):
-            sb, init_b, sa, init_other = (s2_a, init2_a, p1_surname_first, p1_surname_first)
             sb_surname = parts2[0] if p2_surname_first else parts2[1]
             sb_given = parts2[1] if p2_surname_first else parts2[0]
             sb_given_norm = _normalize_initials_token(sb_given)
-            # Need a surname on both sides:
-            if not surname_similarity(s1, sb_surname):
+            if not surname_similarity(s1_surname, sb_surname):
                 continue
-            # If the other side is ALSO compact initials, just compare them.
+            # If the other side is ALSO compact initials, compare them.
             if sb_given_norm:
                 if compact_a == sb_given_norm:
                     return True
-                # One-letter compact initial is a strict prefix of the
-                # longer compact initials.
+                # A single initial is a strict prefix of longer initials.
                 if (len(compact_a) == 1 and sb_given_norm.startswith(compact_a)) or \
                    (len(sb_given_norm) == 1 and compact_a.startswith(sb_given_norm)):
                     return True
                 continue
-            # Otherwise the other side has a real given name (e.g.
-            # "Patrick"). Accept only if compact_a is a single letter
-            # matching the given name's first letter — otherwise we'd
-            # be claiming an unverified middle name.
+            # Other side has a real given name (e.g. "Patrick"). Accept
+            # only when compact_a is a single letter matching the given
+            # name's first letter — multi-letter "PM" against a single
+            # "Patrick" would claim an unverifiable middle name.
             if len(compact_a) == 1 and sb_given.lower().startswith(compact_a):
                 return True
     return False

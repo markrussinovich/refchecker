@@ -348,101 +348,113 @@ const _venuesEquivalent = (cited, actual) => {
 }
 
 // True when a token looks like initials rather than a surname /
-// given name. A token is "initial-like" when every hyphen segment
-// is exactly one letter (so "p-m" qualifies but "smith-jones"
-// doesn't), OR the whole token is at most three letters with no
-// vowel structure to it (so "PM" qualifies but "Liu" stays
-// ambiguous and "Bossuyt" never qualifies).
+// given name. We use the ORIGINAL case (not the folded lowercase)
+// because uppercase is the strongest signal that a 2-letter token
+// like "PM" is initials, while a mixed-case token like "Wu" is a
+// surname. A token is "initial-like" when:
+//   - every hyphen segment is a single letter ("p-m"), OR
+//   - it's at most 4 letters and entirely uppercase ("PM", "ABC"),
+//     OR length 1 (any case).
 const _looksLikeInitials = (token) => {
   if (!token) return false
-  const t = token.toLowerCase()
-  if (t.includes('-')) {
-    return t.split('-').every(seg => seg.length === 1 && /[a-zà-ÿ]/.test(seg))
+  if (token.length === 1) return /[A-Za-zÀ-ÿ]/.test(token)
+  if (token.includes('-')) {
+    return token.split('-').every(seg => seg.length === 1 && /[A-Za-zÀ-ÿ]/.test(seg))
   }
-  return t.length <= 3 && /^[a-zà-ÿ]+$/.test(t)
+  return token.length <= 4 && token === token.toUpperCase() && /^[A-ZÀ-Ý]+$/.test(token)
+}
+
+const _surnameCandidates = (raw) => {
+  // Returns the candidate surname strings for a name, in lowercase.
+  // Most names give a single answer; ambiguous 2-token names with no
+  // initials (e.g. "Wu Yifeng" — could be Chinese surname-first or
+  // Western given-first) give two candidates and we let the matcher
+  // resolve which is right by intersecting with the other name's
+  // candidates.
+  const cleaned = String(raw || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\./g, '')
+  const parts = cleaned.split(/[\s,]+/).filter(Boolean)
+  if (parts.length === 0) return []
+  const nonInitials = parts.filter(p => !_looksLikeInitials(p))
+  if (nonInitials.length === 0) return [parts[0].toLowerCase()]
+  if (nonInitials.length === 1) return [nonInitials[0].toLowerCase()]
+  // 2+ non-initial tokens: ambiguous. Report both first and last as
+  // possible surnames so "Wu Yifeng" matches "Wu Y" via "wu" AND
+  // "Yifeng Wu" matches the same via "wu".
+  const first = nonInitials[0].toLowerCase()
+  const last = nonInitials[nonInitials.length - 1].toLowerCase()
+  if (first === last) return [first]
+  return [last, first]
 }
 
 const _authorSurname = (s) => {
-  // Lift the surname from "Lastname AB" / "A. B. Lastname" /
-  // "Anna Lastname" / "Bossuyt P" / "Patrick Bossuyt" / "Bossuyt P-M".
-  //
-  //   1. Drop tokens that look like initials. What remains is
-  //      candidate surnames + given names.
-  //   2. If exactly one candidate, that's the surname.
-  //   3. If multiple — typical of "First Last" or "van der Berg" —
-  //      pick the LAST one (Western convention). Dutch tussenvoegsel
-  //      still works because "berg" is the last non-initial token
-  //      in "van der berg".
-  //   4. If nothing survives the initial filter (the input was all
-  //      initials), fall back to the first token.
-  const parts = _foldText(s)
-    .replace(/\./g, '')
-    .split(/[\s,]+/)
-    .filter(Boolean)
-  if (parts.length === 0) return ''
-  const surnameCandidates = parts.filter(p => !_looksLikeInitials(p))
-  if (surnameCandidates.length === 0) return parts[0]
-  if (surnameCandidates.length === 1) return surnameCandidates[0]
-  return surnameCandidates[surnameCandidates.length - 1]
+  // Single-surname accessor for legacy callers. Returns the
+  // "preferred" candidate (the last non-initial token, Western
+  // convention — Dutch tussenvoegsel still works because "berg" is
+  // the last non-initial in "van der berg").
+  const c = _surnameCandidates(s)
+  return c[0] || ''
 }
 
-// Per-author signature: surname + first given initial (when present).
-// Distinguishes "Smith J" from "Smith K" — same surname, different
-// person — without rejecting "Smith J" vs "J. Smith" or "Jane Smith".
-const _authorSignature = (raw) => {
-  const surname = _authorSurname(raw)
-  if (!surname) return ''
+// Per-author signature SET: emit one signature per plausible surname
+// interpretation. "Wu Yifeng" (Chinese surname-first OR Western
+// given-first) emits both "wu|y" and "yifeng|w" so a match against
+// either "Wu Y" or "Yifeng Wu" succeeds.
+const _authorSignatureSet = (raw) => {
+  const surnames = _surnameCandidates(raw)
+  if (surnames.length === 0) return []
   const parts = _foldText(raw)
     .replace(/\./g, '')
     .split(/[\s,]+/)
     .filter(Boolean)
-  // First initial — prefer a real single-character token (canonical
-  // "H." form), then fall back to the first letter of the leading
-  // non-surname word (handles "Anna Lastname" giving 'a'). Anything
-  // with no recoverable initial keeps the bare-surname signature so
-  // a citation that omits the initial still matches a fully-named
-  // DB record.
-  const oneChar = parts.find(p => p.length === 1 && p !== surname)
-  let initial = oneChar || ''
-  if (!initial) {
-    const leading = parts.find(p => p !== surname)
-    if (leading) initial = leading[0]
+  const sigs = []
+  for (const surname of surnames) {
+    const oneChar = parts.find(p => p.length === 1 && p !== surname)
+    let initial = oneChar || ''
+    if (!initial) {
+      const leading = parts.find(p => p !== surname)
+      if (leading) initial = leading[0]
+    }
+    sigs.push(initial ? `${surname}|${initial}` : surname)
   }
-  return initial ? `${surname}|${initial}` : surname
+  return sigs
 }
 
-const _authorListSignatures = (s) => {
+const _authorListSignatureSets = (s) => {
   if (s == null) return []
   const text = Array.isArray(s) ? s.join('; ') : String(s)
   return text
     .split(/[;,]\s*|\s+and\s+/i)
-    .map(_authorSignature)
-    .filter(Boolean)
+    .map(_authorSignatureSet)
+    .filter(sigs => sigs.length > 0)
 }
 
-const _signatureMatches = (s, list) => {
-  if (list.includes(s)) return true
-  // Match a bare-surname signature against any list entry that shares
-  // the surname (regardless of initial), and vice versa — handles
-  // single-name citations against fully-named DB records.
-  const [sur] = s.split('|')
-  return list.some(other => {
-    const [otherSur] = other.split('|')
-    return otherSur === sur && (!s.includes('|') || !other.includes('|'))
-  })
+// True iff at least one signature in `sigs` matches at least one
+// signature in any entry of `listOfSigSets`. Bare-surname tolerance:
+// "smith" matches "smith|j" too — a citation lacking initials still
+// resolves against a fully-named DB record.
+const _signatureSetMatchesAny = (sigs, listOfSigSets) => {
+  for (const other of listOfSigSets) {
+    for (const o of other) {
+      if (sigs.includes(o)) return true
+      const [otherSur] = o.split('|')
+      const matchingSig = sigs.find(s => s.split('|')[0] === otherSur)
+      if (matchingSig && (!matchingSig.includes('|') || !o.includes('|'))) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 const _authorsEquivalent = (cited, actual) => {
-  // Either side may be a list (string of comma-separated names, or an
-  // array). Accept when every author signature in the shorter list
-  // appears in the longer one — handles et-al truncation as well as
-  // surname-only-vs-fullname.
-  const c = _authorListSignatures(cited)
-  const a = _authorListSignatures(actual)
+  const c = _authorListSignatureSets(cited)
+  const a = _authorListSignatureSets(actual)
   if (c.length === 0 || a.length === 0) return false
   const shorter = c.length <= a.length ? c : a
   const longer = c.length <= a.length ? a : c
-  return shorter.every(s => _signatureMatches(s, longer))
+  return shorter.every(sigs => _signatureSetMatchesAny(sigs, longer))
 }
 
 /**
