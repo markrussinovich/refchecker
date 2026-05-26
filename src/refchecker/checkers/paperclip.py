@@ -11,16 +11,20 @@ Why optional:
   search (PMC, bioRxiv, medRxiv) — for plain metadata lookups it
   largely overlaps with what we already query.
 
-This module is therefore inactive unless:
-  1. `PAPERCLIP_API_KEY` environment variable is set, AND
-  2. the `gxl_paperclip` package is importable (`pip install
-     gxl-paperclip`), AND
-  3. EnhancedHybridReferenceChecker is constructed with
-     enable_paperclip=True (default False).
+The `gxl-paperclip` SDK ships pre-installed (it's in requirements.txt
+so the Tauri sidecar bundles it automatically). Activation reduces to
+a single user-visible step:
 
-When inactive, every public method returns the empty/no-match
-result so the surrounding pipeline behaves identically to the
-pre-Paperclip baseline.
+  1. Set `PAPERCLIP_API_KEY` in the env (or in Settings → API keys).
+
+The check is also gated by `enable_paperclip=True` on the
+EnhancedHybridReferenceChecker constructor, which defaults to False
+so the tier remains opt-in at the application level.
+
+When the API key is missing OR the import unexpectedly fails OR
+enable_paperclip is False, every public method returns the empty /
+no-match result so the surrounding pipeline behaves identically to
+the pre-Paperclip baseline.
 """
 
 import logging
@@ -106,13 +110,15 @@ class PaperclipReferenceChecker:
             return
 
         try:
-            # Imported lazily so the module loads even when the SDK is
-            # not installed. Users opting in run `pip install gxl-paperclip`.
+            # Lazy import so this module loads even on the unusual path
+            # where gxl-paperclip is somehow missing from a custom
+            # install (e.g. user-built sidecar without the bundled
+            # requirements.txt). The SDK is shipped by default.
             from gxl_paperclip import PaperclipClient  # type: ignore
         except ImportError:
             logger.info(
-                "Paperclip enabled but gxl-paperclip not installed; "
-                "run `pip install gxl-paperclip` to activate."
+                "Paperclip enabled but gxl-paperclip not importable; "
+                "reinstall requirements.txt to restore the bundled SDK."
             )
             return
 

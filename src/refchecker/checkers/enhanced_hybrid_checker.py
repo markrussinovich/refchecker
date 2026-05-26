@@ -26,6 +26,7 @@ Usage:
 """
 
 import logging
+import os
 import random
 import requests
 import threading
@@ -68,7 +69,7 @@ class EnhancedHybridReferenceChecker:
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
                  enable_acl_anthology: bool = True,
-                 enable_paperclip: bool = False,
+                 enable_paperclip: Optional[bool] = None,
                  debug_mode: bool = False,
                  cache_dir: Optional[str] = None):
         """
@@ -166,11 +167,18 @@ class EnhancedHybridReferenceChecker:
             )
 
         # Paperclip is an OPTIONAL secondary tier — biomedical full-text
-        # corpus (PMC, bioRxiv, medRxiv) plus arXiv. Auth-gated, no
-        # public pricing/rate-limit info, so the default is off. Users
-        # opt in by passing enable_paperclip=True AND setting
-        # PAPERCLIP_API_KEY in the environment. The checker no-ops
-        # quietly when the SDK isn't installed.
+        # corpus (PMC, bioRxiv, medRxiv) plus arXiv. Auth-gated.
+        #
+        # Activation: enable_paperclip defaults to "auto" — when None,
+        # the tier turns itself on if PAPERCLIP_API_KEY is present in
+        # the environment. Callers that explicitly want it off (e.g.
+        # offline tests) pass False; callers that always want it on
+        # despite a missing key (e.g. testing the dry-run path) pass
+        # True. End users only need to set the API key — no constructor
+        # flag, no pip install — and the tier activates on the next
+        # run.
+        if enable_paperclip is None:
+            enable_paperclip = bool(os.environ.get('PAPERCLIP_API_KEY'))
         self.paperclip = None
         if enable_paperclip:
             self.paperclip = self._initialize_checker(

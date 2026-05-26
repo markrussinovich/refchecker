@@ -39,6 +39,13 @@ nltk>=3.9.4
 scikit-learn>=1.8.0
 joblib>=1.5.3
 
+# Paperclip biomedical full-text / arXiv search — used as an OPTIONAL
+# secondary verification tier. Bundled so users only need to set
+# PAPERCLIP_API_KEY in Settings; no extra pip step. The checker
+# (src/refchecker/checkers/paperclip.py) is inert when the key is
+# missing, so shipping this dep is safe by default.
+gxl-paperclip>=0.1.0
+
 # vLLM support (for local model inference) - optional, install separately
 # These have complex dependency chains (torch, numba, etc.)
 # pip install torch vllm huggingface_hub
