@@ -5,6 +5,7 @@ import {
   exportReferenceAsStyle,
   exportResultsAsStyle,
   downloadAsFile,
+  filterIssuesForStyle,
   formatIssueLine,
   listCustomCitationStyles,
   saveCustomCitationStyle,
@@ -148,17 +149,88 @@ function detectDefaultStyle(paperSource) {
   return 'bibtex'
 }
 
+/**
+ * Best-effort inference of which citation style the user's bibliography
+ * was written in, by sampling the cited_text of the first few refs.
+ * Falls back to the source-extension default so existing behaviour is
+ * preserved when references aren't extracted yet. Coarse heuristics —
+ * the dropdown remains a free override.
+ */
+function inferStyleFromReferences(references) {
+  if (!Array.isArray(references) || references.length === 0) return null
+  const samples = references
+    .map(r => (r?.cited_text || r?.raw_text || '').trim())
+    .filter(s => s.length > 20)
+    .slice(0, 8)
+  if (samples.length === 0) return null
+  let ieee = 0, vancouver = 0, mla = 0, apa = 0, chicago = 0
+  for (const s of samples) {
+    if (/^\s*\[\d+\]/.test(s)) ieee += 2
+    // Vancouver: "Surname AB" — initials with no periods stuck to surname.
+    if (/^[A-Z][a-zA-Z'-]+\s+[A-Z]{1,3}(,|\.|\s)/.test(s)) vancouver += 1
+    // APA: "Lastname, A. B. (yyyy)." — surname, comma, initials with
+    // periods, year in parens.
+    if (/^[A-Z][a-zA-Z'-]+,\s+[A-Z]\.\s*[A-Z]?\.?.*\(\d{4}[a-z]?\)/.test(s)) apa += 2
+    // MLA: "Lastname, First Last." — surname, comma, full given names,
+    // not initials, year usually mid-string not in parens.
+    if (/^[A-Z][a-zA-Z'-]+,\s+[A-Z][a-z]+\s+[A-Z][a-z]+/.test(s)) mla += 1
+    // Chicago author-date is close to APA but uses "lastname, firstname"
+    // with full given names + (year). Hard to disambiguate from MLA
+    // without more context, so leave Chicago weakly weighted.
+    if (/\(\d{4}[a-z]?\)/.test(s) && /[A-Z][a-z]+ [A-Z][a-z]+/.test(s)) chicago += 0.5
+  }
+  const tally = [
+    ['ieee', ieee], ['vancouver', vancouver],
+    ['apa', apa], ['mla', mla], ['chicago', chicago],
+  ].sort((a, b) => b[1] - a[1])
+  const [winner, score] = tally[0]
+  if (score >= 2) return winner
+  return null
+}
+
 export default function CorrectionsView({ references, isCheckComplete = false, paperSource = null }) {
   const [format, setFormat] = useState(() => detectDefaultStyle(paperSource))
+  const [autoDetected, setAutoDetected] = useState(null)
   const lastSourceRef = useRef(paperSource)
+  const userOverroteStyle = useRef(false)
   useEffect(() => {
     // Re-pick the default when navigating to a different check / new input
     // so a .bib file doesn't keep showing as APA after a previous APA check.
     if (lastSourceRef.current !== paperSource) {
       lastSourceRef.current = paperSource
       setFormat(detectDefaultStyle(paperSource))
+      setAutoDetected(null)
+      userOverroteStyle.current = false
     }
   }, [paperSource])
+
+  // Try to infer the style from the references themselves once they
+  // land. Only auto-promote it if the user hasn't already touched the
+  // dropdown — otherwise we'd fight their explicit choice (#24).
+  //
+  // Re-infer whenever any cited_text changes (not just the list length),
+  // so Re-verify / Apply Fix that swap text in place still trigger a
+  // fresh detection if the user hasn't overridden yet.
+  const refsTextSig = useMemo(() => {
+    if (!Array.isArray(references)) return 0
+    let sig = 0
+    for (let i = 0; i < references.length; i += 1) {
+      const t = references[i]?.cited_text || references[i]?.raw_text || ''
+      sig += t.length
+    }
+    return `${references.length}:${sig}`
+  }, [references])
+  useEffect(() => {
+    if (userOverroteStyle.current) return
+    const guess = inferStyleFromReferences(references)
+    if (guess && guess !== format) {
+      setAutoDetected(guess)
+      setFormat(guess)
+    } else if (guess) {
+      setAutoDetected(guess)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refsTextSig])
   const [copiedKey, setCopiedKey] = useState(null)
   const [showDiff, setShowDiff] = useState(true)
 
@@ -278,8 +350,29 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   const statusFilter = useCheckStore(s => s.statusFilter)
   const summaryActive = statusFilter.length > 0
 
+  // Pre-filter each ref's errors/warnings against the user's selected
+  // citation style — author-count "mismatches" that just reflect the
+  // style's own et-al rules aren't real corrections (#19, #21). The
+  // filtered refs then flow into classifyReference + the renderer so a
+  // ref whose only "issue" was style-conforming et-al drops out of the
+  // Corrections list entirely.
+  const styleFilteredRefs = useMemo(() => {
+    return (references || []).map(ref => {
+      if (!ref) return ref
+      const filteredErrors = filterIssuesForStyle(ref.errors, ref, format)
+      const filteredWarnings = filterIssuesForStyle(ref.warnings, ref, format)
+      if (
+        filteredErrors === ref.errors &&
+        filteredWarnings === ref.warnings
+      ) {
+        return ref
+      }
+      return { ...ref, errors: filteredErrors, warnings: filteredWarnings }
+    })
+  }, [references, format])
+
   const categorized = useMemo(() => {
-    return (references || [])
+    return (styleFilteredRefs || [])
       .map(ref => ({ ref, tags: classifyReference(ref, isCheckComplete) }))
       .filter(({ tags }) => tags.size > 0)
       .sort((a, b) => {
@@ -287,7 +380,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         const bi = typeof b.ref?.index === 'number' ? b.ref.index : 999999
         return ai - bi
       })
-  }, [references, isCheckComplete])
+  }, [styleFilteredRefs, isCheckComplete])
 
   const filtered = useMemo(() => {
     if (!summaryActive) return categorized
@@ -452,7 +545,22 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
               <input type="checkbox" checked={showDiff} onChange={(e) => setShowDiff(e.target.checked)} />
               Highlight diff
             </label>
-            <select value={format} onChange={(e) => setFormat(e.target.value)}
+            {autoDetected && autoDetected === format && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{
+                  backgroundColor: 'var(--color-bg-tertiary)',
+                  color: 'var(--color-text-muted)',
+                  border: '1px solid var(--color-border)',
+                }}
+                title="Auto-detected from the cited references"
+              >
+                auto
+              </span>
+            )}
+            <select
+              value={format}
+              onChange={(e) => { userOverroteStyle.current = true; setFormat(e.target.value) }}
               className="px-2 py-1 rounded border text-xs"
               style={{ backgroundColor: 'var(--color-bg-primary)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
               title="Citation style"

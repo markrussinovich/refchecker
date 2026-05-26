@@ -247,6 +247,71 @@ export function formatIssueLine(issue) {
   try { return JSON.stringify(issue) } catch { return '(unrenderable issue)' }
 }
 
+/**
+ * True if a citation that lists ``citedCount`` authors in a style with
+ * the supplied et-al rules is conforming to that style — and therefore
+ * the author-list "mismatch" the verifier reported against a longer
+ * actual list is not a real correction the user needs to act on.
+ *
+ * Example: cited reference lists 1 author with "et al.", actual paper
+ * has 4 authors, style = MLA (max_authors=1, et_al_threshold=3). The
+ * cited form is exactly what MLA prescribes, so we suppress the
+ * "Author count mismatch" issue from the Corrections panel.
+ */
+export function isAuthorCountConsistentWithStyle(citedCount, actualCount, style) {
+  const defaults = CITATION_STYLE_DEFAULTS[style]
+  if (!defaults) return false
+  const threshold = defaults.et_al_threshold
+  const cap = defaults.max_authors
+  // Styles without an et-al rule (bibtex, plaintext) keep the full
+  // author list, so any count mismatch IS a real correction.
+  if (threshold == null || cap == null) return false
+  return Number(actualCount) >= threshold && Number(citedCount) <= cap
+}
+
+/**
+ * Filter out issues that are artefacts of the citation style — chiefly
+ * "author count mismatch" warnings raised when the user correctly
+ * truncated to the style's et-al cap. Leaves real errors (wrong title,
+ * wrong year, wrong venue, wrong authors with matching count) intact.
+ */
+export function filterIssuesForStyle(issues, ref, style) {
+  if (!Array.isArray(issues) || issues.length === 0) return issues || []
+  if (!style) return issues
+  const citedAuthorsCount = Array.isArray(ref?.authors) ? ref.authors.length : 0
+  return issues.filter(issue => {
+    const errorType = String(issue?.error_type || '').toLowerCase()
+    if (!(errorType === 'author' || errorType === 'authors' || errorType === 'author_count')) {
+      return true
+    }
+    // Try to read counts from the issue. Backends emit a few shapes:
+    //   { error_details: "Author count mismatch: 1 cited vs 4 correct" }
+    //   { cited: [...], actual_value: [...] }
+    //   { cited: "A et al.", actual_value: "A, B, C, D" }
+    const details = String(issue.error_details || issue.message || '')
+    const m = details.match(/(\d+)\s*cited\s*vs\.?\s*(\d+)/i)
+    if (m) {
+      const c = parseInt(m[1], 10)
+      const a = parseInt(m[2], 10)
+      if (isAuthorCountConsistentWithStyle(c, a, style)) return false
+      return true
+    }
+    const actual = issue.actual_value
+    let actualCount = 0
+    if (Array.isArray(actual)) actualCount = actual.length
+    else if (typeof actual === 'string') {
+      actualCount = actual
+        .split(/,\s*(?:and\s+)?|;\s*|\s+and\s+/)
+        .map(s => s.trim())
+        .filter(Boolean).length
+    } else if (typeof actual === 'number') actualCount = actual
+    if (actualCount > 0 && isAuthorCountConsistentWithStyle(citedAuthorsCount, actualCount, style)) {
+      return false
+    }
+    return true
+  })
+}
+
 function getCorrectedReferenceData(ref) {
   // Verifier may attach typed URLs (doi, arxiv, journal) in
   // authoritative_urls. Surface them so the URL picker can prefer DOI
