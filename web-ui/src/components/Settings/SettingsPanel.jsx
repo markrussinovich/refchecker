@@ -97,10 +97,26 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
     setUpdateChecking(true)
     try {
-      // Returns null when no update, or { available, current_version, version, ... }
+      // plugin:updater|check returns:
+      //   null  — no newer version OR signature/platform check failed
+      //   { version, current_version, body, date, available?, ... }
+      //
+      // The plugin returns null silently when the running platform has
+      // no matching `platforms.<target>` entry in the manifest (this
+      // is how Intel Mac users on an Apple-Silicon-only release see
+      // "You're on the latest"). Surface the raw response in the
+      // status so the user can distinguish that case from a genuine
+      // "up to date" answer.
       const update = await invokeTauri('plugin:updater|check')
-      if (!update || update.available === false) {
-        setUpdateStatus({ kind: 'ok', text: "You're on the latest version." })
+      // eslint-disable-next-line no-console
+      console.info('[updater] check response:', update)
+      const noUpdate = !update || update.available === false ||
+        (update.version && appVersion && update.version === appVersion)
+      if (noUpdate) {
+        const hint = appVersion
+          ? `You're on ${appVersion}. If a newer version is published but this still says "latest," your Mac may be an Intel build and only arm64 builds ship — grab the right installer from the release page.`
+          : "You're on the latest version."
+        setUpdateStatus({ kind: 'ok', text: hint })
         return
       }
       setUpdateStatus({ kind: 'info', text: `Downloading ${update.version || 'update'}…` })
