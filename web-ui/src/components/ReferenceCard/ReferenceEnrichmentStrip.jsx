@@ -98,7 +98,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
           "Conference Proceedings · Cited by 12 · …" like the
           screenshot. */}
       {prettyPubType && (
-        <BadgeLabel color="#6366f1" title="Publication type">
+        <BadgeLabel variant="info" title="Publication type">
           {prettyPubType}
         </BadgeLabel>
       )}
@@ -106,7 +106,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         <Badge title="Bibliographic detail">{biblioLine}</Badge>
       )}
       {source_label && (
-        <BadgeLabel color="#3b82f6" title={`Verified via ${source_label}`}>
+        <BadgeLabel variant="info" title={`Verified via ${source_label}`}>
           {source_label}
         </BadgeLabel>
       )}
@@ -121,17 +121,17 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         </Badge>
       )}
       {is_open_access === true && (
-        <BadgeLabel color="#16a34a" title="Open Access">
+        <BadgeLabel variant="success" title="Open Access">
           OA
         </BadgeLabel>
       )}
       {has_funding && (
-        <BadgeLabel color="#a855f7" title={funders.length ? `Funded by ${funders.join('; ')}` : 'Funded'}>
+        <BadgeLabel variant="suggestion" title={funders.length ? `Funded by ${funders.join('; ')}` : 'Funded'}>
           Funding
         </BadgeLabel>
       )}
       {has_affiliation && (
-        <BadgeLabel color="#f97316" title="Author institutions on file">
+        <BadgeLabel variant="hallucination" title="Author institutions on file">
           Affiliation
         </BadgeLabel>
       )}
@@ -182,7 +182,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         />
       )}
       {Array.isArray(fields_of_study) && fields_of_study.slice(0, 3).map(fos => (
-        <BadgeLabel key={fos} color="#f59e0b" title="Field of Study">
+        <BadgeLabel key={fos} variant="warning" title="Field of Study">
           {fos}
         </BadgeLabel>
       ))}
@@ -280,15 +280,32 @@ function WorldCatChip({ searchUrl, doi }) {
   )
 }
 
-function BadgeLabel({ children, color, title }) {
-  // Coloured-pill variant for category labels (source, OA, FoS).
+// Theme-aware palette for the categorical badges. Each variant maps
+// to a paired (foreground, background) CSS variable already defined
+// in web-ui/src/index.css for BOTH light and dark themes, so the
+// badges flip cleanly with the rest of the app rather than rendering
+// fixed bright hexes that fight the dark theme.
+const _BADGE_VARIANTS = {
+  info:          { fg: 'var(--color-info)',          bg: 'var(--color-info-bg)' },
+  success:       { fg: 'var(--color-success)',       bg: 'var(--color-success-bg)' },
+  warning:       { fg: 'var(--color-warning)',       bg: 'var(--color-warning-bg)' },
+  error:         { fg: 'var(--color-error)',         bg: 'var(--color-error-bg)' },
+  suggestion:    { fg: 'var(--color-suggestion)',    bg: 'var(--color-suggestion-bg)' },
+  hallucination: { fg: 'var(--color-hallucination)', bg: 'var(--color-hallucination-bg)' },
+}
+
+function BadgeLabel({ children, variant = 'info', title }) {
+  // Coloured-pill variant for category labels (source, OA, FoS,
+  // Funding, Affiliation, publication type). Picks fg + bg from the
+  // app's semantic palette so the chip respects the active theme.
+  const v = _BADGE_VARIANTS[variant] || _BADGE_VARIANTS.info
   return (
     <span
       className="px-1.5 py-0.5 rounded font-medium"
       style={{
-        background: `${color}1a`,        // ~10% opacity tint
-        border: `1px solid ${color}55`,
-        color,
+        background: v.bg,
+        border: '1px solid var(--color-border)',
+        color: v.fg,
         whiteSpace: 'nowrap',
       }}
       title={title || ''}
