@@ -161,19 +161,28 @@ export default function GraphView({ references, paperTitle }) {
 
     // Expanded one-hop nodes (from double-click). Sized by the
     // expanded paper's S2 citation count so the user can pick out
-    // landmark-influential refs at a glance. Coloured cyan so they're
-    // visually distinct from the in-paper refs (which carry verify-
-    // status colours).
+    // landmark-influential refs at a glance. Coloured by the 2nd-degree
+    // verify status when it's known (the expand endpoint probes the
+    // Seen-Refs cache and returns `verified_status`) — that's the
+    // "shows the references status of the references in the article"
+    // 2nd-degree analysis. Unknown / un-probed nodes fall back to cyan
+    // so they're still distinguishable from the in-paper nodes.
+    const EXPANDED_FALLBACK = '#0ea5e9'
     for (const ex of expandedNodes) {
+      const expStatus = ex.verified_status
+      const expColor = expStatus && expStatus !== 'unknown'
+        ? (STATUS_COLOR[expStatus] || EXPANDED_FALLBACK)
+        : EXPANDED_FALLBACK
       nodes.push({
         id: ex.id,
         label: (ex.title || '(no title)').slice(0, 80),
         type: 'expanded',
         ref: ex,
         paperId: ex.paperId,
+        status: expStatus || 'unknown',
         citationCount: ex.citationCount,
         val: Math.max(4, Math.log10((ex.citationCount || 0) + 1) * 4.5 + 4),
-        color: '#0ea5e9',
+        color: expColor,
       })
       if (ex.parent) edges.push({ source: ex.parent, target: ex.id, expanded: true })
     }
@@ -225,6 +234,12 @@ export default function GraphView({ references, paperTitle }) {
           citationCount: it.citationCount,
           doi: it.doi,
           arxiv_id: it.arxiv_id,
+          // 2nd-degree verify status (from Seen-Refs cache probe on the
+          // backend). Lets the graph colour expanded nodes by their
+          // verification result instead of a uniform cyan.
+          verified_status: it.verified_status || 'unknown',
+          pre_verified: !!it.pre_verified,
+          times_seen: it.times_seen || 0,
           verified_url: it.doi ? `https://doi.org/${it.doi}` : (it.arxiv_id ? `https://arxiv.org/abs/${it.arxiv_id}` : `https://www.semanticscholar.org/paper/${it.paperId}`),
         }))
       // Dedup against existing expanded entries

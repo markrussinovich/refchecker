@@ -5471,7 +5471,37 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
             "arxiv_id": ext.get("ArXiv"),
         })
     items.sort(key=lambda x: x["citationCount"] or 0, reverse=True)
-    return {"paper_id": pid, "items": items[:limit]}
+    items = items[:limit]
+
+    # 2nd-degree verify-status enrichment. For each expanded item probe
+    # the Seen-Refs cache by (DOI / arXiv / title+year) — when we have
+    # a hit, the verify status was determined during a previous check
+    # and we can colour the graph node by that status. Cache misses get
+    # 'unknown' so the frontend can render them in a neutral colour
+    # rather than uniformly cyan (which previously masked any 2nd-degree
+    # verification signal entirely). Cheap, no LLM, no network beyond
+    # the SQLite hit per node.
+    for it in items:
+        probe = {
+            "doi": it.get("doi"),
+            "arxiv_id": it.get("arxiv_id"),
+            "title": it.get("title"),
+            "year": it.get("year"),
+        }
+        try:
+            cached = await db.lookup_verified_reference(probe)
+        except Exception:
+            cached = None
+        if cached:
+            it["verified_status"] = cached.get("status") or "unknown"
+            it["pre_verified"] = True
+            it["times_seen"] = cached.get("times_seen") or 0
+        else:
+            it["verified_status"] = "unknown"
+            it["pre_verified"] = False
+            it["times_seen"] = 0
+
+    return {"paper_id": pid, "items": items}
 
 
 @app.get("/api/references/seen")
