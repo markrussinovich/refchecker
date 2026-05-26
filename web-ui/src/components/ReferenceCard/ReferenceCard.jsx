@@ -15,6 +15,7 @@ import {
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import { useStyleStore } from '../../stores/useStyleStore'
+import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
 // running inside the desktop app. Belt-and-braces alongside the global
@@ -777,6 +778,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               </div>
             ))
           })()}
+
+          {/* Display-ready enrichment from OpenAlex / Crossref / S2 —
+              cited-by count, refs count, OA, external IDs, FoS chips,
+              per-author ORCID popover. Renders nothing when no
+              enrichment data is available. */}
+          <ReferenceEnrichmentStrip enrichment={reference.enrichment} />
 
           {/* Unverified message */}
           {reference.status === 'unverified' && (
