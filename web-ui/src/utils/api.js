@@ -61,6 +61,14 @@ export const getSemanticScholarKeyStatus = () => api.get('/settings/semantic-sch
 export const setSemanticScholarKey = (apiKey) => api.put('/settings/semantic-scholar', { api_key: apiKey })
 export const deleteSemanticScholarKey = () => api.delete('/settings/semantic-scholar')
 
+// Paperclip secondary verification tier — biomedical full-text +
+// arXiv. Mirrors the SS key endpoints; the backend hydrates the key
+// into PAPERCLIP_API_KEY at sidecar startup so the next check
+// auto-activates the tier.
+export const getPaperclipKeyStatus = () => api.get('/settings/paperclip')
+export const setPaperclipKey = (apiKey) => api.put('/settings/paperclip', { api_key: apiKey })
+export const deletePaperclipKey = () => api.delete('/settings/paperclip')
+
 // Check operations
 export const startCheck = (formData) => api.post('/check', formData, {
   headers: { 'Content-Type': 'multipart/form-data' },
@@ -204,6 +212,9 @@ export default {
   getSemanticScholarKeyStatus,
   setSemanticScholarKey,
   deleteSemanticScholarKey,
+  getPaperclipKeyStatus,
+  setPaperclipKey,
+  deletePaperclipKey,
   startCheck,
   startBatchCheck,
   startBatchFileCheck,

@@ -42,6 +42,14 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
   const [ssApiKey, setSsApiKey] = useState('')
+  // Paperclip — same lifecycle as the SS key (Set / Edit / Remove +
+  // server-stored has-key flag). Activates the biomedical full-text
+  // secondary tier when present.
+  const [pcApiKey, setPcApiKey] = useState('')
+  const [pcIsEditing, setPcIsEditing] = useState(false)
+  const [pcIsSaving, setPcIsSaving] = useState(false)
+  const [pcError, setPcError] = useState(null)
+  const [pcServerHasKey, setPcServerHasKey] = useState(false)
   const [ssIsSaving, setSsIsSaving] = useState(false)
   const [ssIsValidating, setSsIsValidating] = useState(false)
   const [ssError, setSsError] = useState(null)
@@ -316,6 +324,13 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }).catch(() => {})
   }, [])
 
+  // Same for Paperclip — server tells us whether a key is on file.
+  useEffect(() => {
+    api.getPaperclipKeyStatus().then(res => {
+      setPcServerHasKey(res.data.has_key)
+    }).catch(() => {})
+  }, [])
+
   // Close on escape key
   useEffect(() => {
     const handleEscape = (e) => {
@@ -416,6 +431,53 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     setSsIsEditing(false)
     setSsApiKey('')
     setSsError(null)
+  }
+
+  // Paperclip key handlers — same shape as SS but no separate
+  // /validate endpoint (Paperclip has no public validate API). The
+  // backend's /api/settings/paperclip PUT also propagates the key
+  // into PAPERCLIP_API_KEY so the next check enables the tier.
+  const handlePcSave = async () => {
+    if (!pcApiKey.trim()) {
+      setPcError('API key cannot be empty')
+      return
+    }
+    try {
+      setPcIsSaving(true)
+      setPcError(null)
+      await api.setPaperclipKey(pcApiKey.trim())
+      setPcServerHasKey(true)
+      setPcIsEditing(false)
+      setPcApiKey('')
+      logger.info('SettingsPanel', 'Paperclip API key saved')
+    } catch (err) {
+      logger.error('SettingsPanel', 'Failed to save Paperclip key', err)
+      setPcError(err.response?.data?.detail || 'Failed to save API key')
+    } finally {
+      setPcIsSaving(false)
+    }
+  }
+
+  const handlePcDelete = async () => {
+    setPcIsSaving(true)
+    try {
+      await api.deletePaperclipKey()
+      setPcServerHasKey(false)
+      setPcIsEditing(false)
+      setPcApiKey('')
+      setPcError(null)
+      logger.info('SettingsPanel', 'Paperclip API key removed')
+    } catch (err) {
+      logger.error('SettingsPanel', 'Failed to delete Paperclip key', err)
+    } finally {
+      setPcIsSaving(false)
+    }
+  }
+
+  const handlePcCancel = () => {
+    setPcIsEditing(false)
+    setPcApiKey('')
+    setPcError(null)
   }
 
   const navItems = [
@@ -1075,6 +1137,102 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             {ssError && (
               <div className="text-xs" style={{ color: 'var(--color-error)' }}>
                 {ssError}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Paperclip API Key — OPTIONAL biomedical full-text +
+          arXiv secondary verification tier. Paste a key and the
+          next check auto-activates the tier; no other setup. */}
+      <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="flex items-center justify-between mb-1">
+          <div>
+            <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+              Paperclip API Key
+            </div>
+            <div className="text-sm mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+              Optional. Activates a secondary biomedical full-text + arXiv lookup tier
+              (PMC, bioRxiv, medRxiv, arXiv) on top of OpenAlex / CrossRef / Semantic
+              Scholar. Get a key at{' '}
+              <a
+                href="https://paperclip.gxl.ai/keys"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--color-link, #3b82f6)' }}
+              >paperclip.gxl.ai/keys</a>.
+              {' '}The next check picks it up automatically.
+            </div>
+          </div>
+          {!pcIsEditing && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPcIsEditing(true)}
+                className="text-xs px-2 py-1 rounded cursor-pointer"
+                style={{ color: 'var(--color-accent)' }}
+              >
+                {pcServerHasKey ? 'Edit' : 'Set'}
+              </button>
+              {pcServerHasKey && (
+                <button
+                  onClick={handlePcDelete}
+                  disabled={pcIsSaving}
+                  className="text-xs px-2 py-1 rounded cursor-pointer"
+                  style={{ color: 'var(--color-error)' }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {pcIsEditing && (
+          <div className="mt-2 space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={pcApiKey}
+                onChange={(e) => setPcApiKey(e.target.value)}
+                placeholder="Enter Paperclip API key…"
+                className="flex-1 px-2 py-1.5 text-sm rounded border"
+                style={{
+                  backgroundColor: 'var(--color-bg-primary)',
+                  borderColor: pcError ? 'var(--color-error)' : 'var(--color-border)',
+                  color: 'var(--color-text-primary)',
+                }}
+                disabled={pcIsSaving}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && pcApiKey.trim()) handlePcSave()
+                  if (e.key === 'Escape') handlePcCancel()
+                }}
+              />
+              <button
+                onClick={handlePcSave}
+                disabled={pcIsSaving || !pcApiKey.trim()}
+                className="px-3 py-1.5 text-xs rounded cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'white',
+                  opacity: pcIsSaving || !pcApiKey.trim() ? 0.5 : 1,
+                }}
+              >
+                {pcIsSaving ? '…' : 'Save'}
+              </button>
+              <button
+                onClick={handlePcCancel}
+                disabled={pcIsSaving}
+                className="px-3 py-1.5 text-xs rounded border cursor-pointer"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                Cancel
+              </button>
+            </div>
+            {pcError && (
+              <div className="text-xs" style={{ color: 'var(--color-error)' }}>
+                {pcError}
               </div>
             )}
           </div>

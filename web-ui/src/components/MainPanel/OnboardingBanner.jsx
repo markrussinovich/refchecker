@@ -141,6 +141,37 @@ export default function OnboardingBanner({ onOpenSettings }) {
                 </div>
               </div>
             </li>
+
+            <li className="flex items-start gap-2">
+              <span
+                className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
+                style={{
+                  width: 22, height: 22, flexShrink: 0,
+                  backgroundColor: 'var(--color-text-muted, #94a3b8)',
+                  color: 'white',
+                }}
+              >
+                i
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium">Bonus: Paperclip key (biomedical / arXiv full-text)</div>
+                <div style={{ color: 'var(--color-text-secondary)' }}>
+                  Activates a secondary verification tier over PMC, bioRxiv, medRxiv, and
+                  arXiv full text — useful for medical / life-sciences references the main
+                  pipeline misses. Get a key at{' '}
+                  <button
+                    type="button"
+                    onClick={() => openExternal('https://paperclip.gxl.ai/keys')}
+                    className="underline"
+                    style={{ color: 'var(--color-accent, #3b82f6)' }}
+                  >
+                    paperclip.gxl.ai/keys
+                  </button>
+                  {' '}— paste it into <button type="button" onClick={() => onOpenSettings?.('API Keys')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → API Keys</button>.
+                  The SDK is already bundled, so the next check picks it up automatically.
+                </div>
+              </div>
+            </li>
           </ol>
         </div>
 

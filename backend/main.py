@@ -873,6 +873,18 @@ async def _run_startup_tasks() -> None:
 async def lifespan(app: FastAPI):
     await _run_startup_tasks()
 
+    # Hydrate stored API keys into the process env so optional checkers
+    # (currently just Paperclip) auto-activate on the next check after
+    # a sidecar restart, without forcing the user to re-paste keys.
+    if not is_multiuser_mode():
+        try:
+            stored_paperclip = await db.get_setting("paperclip_api_key")
+            if stored_paperclip and not os.environ.get("PAPERCLIP_API_KEY"):
+                os.environ["PAPERCLIP_API_KEY"] = stored_paperclip
+                logger.info("Paperclip API key restored from settings; secondary tier active")
+        except Exception as e:
+            logger.debug(f"Could not hydrate Paperclip key: {e}")
+
     # In multiuser mode, pre-start GROBID so users without LLM keys can extract refs
     if is_multiuser_mode():
         try:
@@ -3666,6 +3678,73 @@ async def delete_semantic_scholar_key(current_user: UserInfo = Depends(require_u
         "has_key": False,
         "storage": "database",
         "message": "Semantic Scholar API key removed from the local RefChecker database",
+    }
+
+
+class PaperclipKeyUpdate(BaseModel):
+    api_key: str
+
+
+@app.get("/api/settings/paperclip")
+async def get_paperclip_key_status(current_user: UserInfo = Depends(require_user)):
+    """Return Paperclip API key storage status."""
+    if is_multiuser_mode():
+        return {
+            "has_key": False,
+            "storage": "browser-only",
+            "message": "Paperclip API keys are stored in the browser cache only",
+        }
+    has_key = await db.has_setting("paperclip_api_key")
+    return {
+        "has_key": has_key,
+        "storage": "database",
+        "message": (
+            "Paperclip API key saved encrypted in the local RefChecker database. "
+            "The next check automatically enables the Paperclip secondary tier."
+        ),
+    }
+
+
+@app.put("/api/settings/paperclip")
+async def set_paperclip_key(
+    data: PaperclipKeyUpdate,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Store the Paperclip key and surface it as PAPERCLIP_API_KEY so
+    EnhancedHybridReferenceChecker auto-activates the tier."""
+    if is_multiuser_mode():
+        raise HTTPException(
+            status_code=410,
+            detail="Paperclip API keys are stored in the browser cache only",
+        )
+    api_key = (data.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key cannot be empty")
+    await db.set_setting("paperclip_api_key", api_key)
+    # Propagate to the running process's env so the next check picks it
+    # up without restarting the sidecar.
+    os.environ["PAPERCLIP_API_KEY"] = api_key
+    return {
+        "has_key": True,
+        "storage": "database",
+        "message": "Paperclip API key saved and activated for the next check",
+    }
+
+
+@app.delete("/api/settings/paperclip")
+async def delete_paperclip_key(current_user: UserInfo = Depends(require_user)):
+    """Remove the stored Paperclip key and clear the env var."""
+    if is_multiuser_mode():
+        raise HTTPException(
+            status_code=410,
+            detail="Paperclip API keys are stored in the browser cache only",
+        )
+    await db.delete_setting("paperclip_api_key")
+    os.environ.pop("PAPERCLIP_API_KEY", None)
+    return {
+        "has_key": False,
+        "storage": "database",
+        "message": "Paperclip API key removed; the secondary tier is now disabled",
     }
 
 
