@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   validateSemanticScholarKey: vi.fn(),
   setSemanticScholarKey: vi.fn(),
   deleteSemanticScholarKey: vi.fn(),
+  getPaperclipKeyStatus: vi.fn(),
+  setPaperclipKey: vi.fn(),
+  deletePaperclipKey: vi.fn(),
 }))
 
 vi.mock('../../stores/useSettingsStore', () => ({
@@ -48,6 +51,9 @@ vi.mock('../../utils/api', () => ({
   validateSemanticScholarKey: mocks.validateSemanticScholarKey,
   setSemanticScholarKey: mocks.setSemanticScholarKey,
   deleteSemanticScholarKey: mocks.deleteSemanticScholarKey,
+  getPaperclipKeyStatus: mocks.getPaperclipKeyStatus,
+  setPaperclipKey: mocks.setPaperclipKey,
+  deletePaperclipKey: mocks.deletePaperclipKey,
 }))
 
 vi.mock('../../utils/logger', () => ({
@@ -59,7 +65,12 @@ import SettingsPanel from './SettingsPanel'
 async function saveSemanticScholarKey() {
   render(<SettingsPanel theme="system" onThemeChange={vi.fn()} />)
   fireEvent.click(screen.getByRole('button', { name: 'API Keys' }))
-  fireEvent.click(screen.getByRole('button', { name: 'Set' }))
+  // There are now multiple Set/Save buttons on the API Keys tab
+  // (one set per API key block — Semantic Scholar, Paperclip). The
+  // Semantic Scholar block is rendered first, so [0] still targets
+  // it; placeholder text lookups also resolve to that block since
+  // each block only shows its input while it's the one being edited.
+  fireEvent.click(screen.getAllByRole('button', { name: 'Set' })[0])
   fireEvent.change(screen.getByPlaceholderText('Enter API key…'), { target: { value: 'ss-key' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
   await waitFor(() => expect(mocks.validateSemanticScholarKey).toHaveBeenCalledWith('ss-key'))
@@ -74,6 +85,9 @@ describe('SettingsPanel Semantic Scholar key storage', () => {
     mocks.validateSemanticScholarKey.mockResolvedValue({ data: { valid: true } })
     mocks.setSemanticScholarKey.mockResolvedValue({ data: { has_key: true, storage: 'database' } })
     mocks.deleteSemanticScholarKey.mockResolvedValue({ data: { has_key: false, storage: 'database' } })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: false, storage: 'database' } })
+    mocks.setPaperclipKey.mockResolvedValue({ data: { has_key: true, storage: 'database' } })
+    mocks.deletePaperclipKey.mockResolvedValue({ data: { has_key: false, storage: 'database' } })
   })
 
   it('stores Semantic Scholar keys in the browser cache in multi-user mode', async () => {
