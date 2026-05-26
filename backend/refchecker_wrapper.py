@@ -1281,9 +1281,15 @@ class ProgressRefChecker:
                 "message": f"Checking {total_refs} references..."
             })
 
-            # Process references in parallel
+            # Process references in parallel.
+            # `extraction_method` is the bibliography-extraction stage we
+            # took (bbl / bib / pdf / file / text / llm / cache / None).
+            # _check_references_parallel uses it for the Summary chip's
+            # Regex-vs-LLM split. Pass it explicitly — earlier the method
+            # read it as a closure-free free name and crashed with
+            # NameError on every text-paste run.
             results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count = \
-                await self._check_references_parallel(references, total_refs)
+                await self._check_references_parallel(references, total_refs, extraction_method=extraction_method)
 
             # Per-stage extraction counts for the Summary chip
             # (Regex / LLM / Hallucination LLM). The deterministic
@@ -2095,7 +2101,8 @@ class ProgressRefChecker:
     async def _check_references_parallel(
         self,
         references: List[Dict[str, Any]],
-        total_refs: int
+        total_refs: int,
+        extraction_method: Optional[str] = None,
     ) -> tuple:
         """
         Check references in parallel using per-session concurrency limiting.

@@ -50,7 +50,7 @@ export function useFileUpload() {
     const hasValidType = ALLOWED_TYPES.includes(file.type) || file.type === ''
     
     if (!hasValidExtension && !hasValidType) {
-      const msg = `Invalid file type. Allowed: PDF, TXT, TEX, LaTeX, BibTeX`
+      const msg = `Invalid file type. Allowed: PDF, DOCX, ODT, RTF, TXT, TEX, LaTeX, BibTeX (.bib/.bbl), Markdown, HTML`
       logger.warn('useFileUpload', msg)
       return msg
     }
