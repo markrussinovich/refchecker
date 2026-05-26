@@ -68,6 +68,7 @@ class EnhancedHybridReferenceChecker:
                  enable_crossref: bool = True,
                  enable_arxiv_citation: bool = True,
                  enable_acl_anthology: bool = True,
+                 enable_paperclip: bool = False,
                  debug_mode: bool = False,
                  cache_dir: Optional[str] = None):
         """
@@ -163,6 +164,25 @@ class EnhancedHybridReferenceChecker:
                 'acl_anthology', 'ACLAnthologyReferenceChecker', 'ACL Anthology checker',
                 email=contact_email
             )
+
+        # Paperclip is an OPTIONAL secondary tier — biomedical full-text
+        # corpus (PMC, bioRxiv, medRxiv) plus arXiv. Auth-gated, no
+        # public pricing/rate-limit info, so the default is off. Users
+        # opt in by passing enable_paperclip=True AND setting
+        # PAPERCLIP_API_KEY in the environment. The checker no-ops
+        # quietly when the SDK isn't installed.
+        self.paperclip = None
+        if enable_paperclip:
+            self.paperclip = self._initialize_checker(
+                'paperclip', 'PaperclipReferenceChecker', 'Paperclip secondary checker'
+            )
+            if self.paperclip is not None and not getattr(self.paperclip, 'enabled', False):
+                # _initialize_checker succeeded but PAPERCLIP_API_KEY was
+                # missing or the SDK isn't installed — drop the instance
+                # so the fallback list doesn't try a permanently-disabled
+                # checker.
+                logger.debug("Paperclip instance created but not enabled; dropping")
+                self.paperclip = None
         
         # Google Scholar removed - using more reliable APIs only
 
@@ -171,7 +191,7 @@ class EnhancedHybridReferenceChecker:
         all_local_checkers = [checker for _, _, checker in self.local_db_checkers]
         for checker in (self.arxiv_citation, *all_local_checkers, self.semantic_scholar,
                         self.openalex, self.crossref, self.openreview, self.dblp,
-                        self.acl_anthology):
+                        self.acl_anthology, self.paperclip):
             if checker is not None:
                 checker.cache_dir = cache_dir
 
@@ -184,6 +204,7 @@ class EnhancedHybridReferenceChecker:
             'openreview': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'dblp': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
             'acl_anthology': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
+            'paperclip': {'success': 0, 'failure': 0, 'avg_time': 0, 'throttled': 0},
         }
         for checker_key, _, _ in self.local_db_checkers:
             self.api_stats.setdefault(
@@ -209,6 +230,10 @@ class EnhancedHybridReferenceChecker:
             'dblp': threading.Semaphore(2),
             'openreview': threading.Semaphore(2),
             'acl_anthology': threading.Semaphore(2),
+            # Conservative concurrency cap for Paperclip — pricing /
+            # rate limits aren't publicly documented, so hold at 2 to
+            # avoid burst-hammering the service in bulk mode.
+            'paperclip': threading.Semaphore(2),
         }
         for checker_key, _, _ in self.local_db_checkers:
             self._api_semaphores.setdefault(checker_key, threading.Semaphore(100))
@@ -767,7 +792,13 @@ class EnhancedHybridReferenceChecker:
             fallback_apis.append(('dblp', self.dblp))
         if self.acl_anthology:
             fallback_apis.append(('acl_anthology', self.acl_anthology))
-        
+        # Paperclip runs at the END of the priority list — it's a
+        # secondary/biomedical-fallback signal, not a primary metadata
+        # source. Only opted-in users (PAPERCLIP_API_KEY set + SDK
+        # installed) ever hit this.
+        if self.paperclip:
+            fallback_apis.append(('paperclip', self.paperclip))
+
         if fallback_apis:
             logger.debug(f"Enhanced Hybrid: SS failed, launching {len(fallback_apis)} fallback APIs in parallel")
             futures = {}
@@ -776,8 +807,8 @@ class EnhancedHybridReferenceChecker:
                     self._append_attempted_api(attempted_apis, api_name)
                     futures[api_name] = pool.submit(
                         self._try_api, api_name, api_instance, reference)
-            
-            priority = ['crossref', 'openalex', 'dblp', 'acl_anthology']
+
+            priority = ['crossref', 'openalex', 'dblp', 'acl_anthology', 'paperclip']
             for api_name in priority:
                 if api_name not in futures:
                     continue
