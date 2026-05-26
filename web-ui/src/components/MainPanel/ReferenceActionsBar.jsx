@@ -347,50 +347,64 @@ export function SuggestAltPanel({ suggestFor, onClose }) {
   )
 }
 
-export function ReferenceRowActions({ reference, displayIndex, busyKey, onSuggest, onRemove, onReverify, selectedCheckId }) {
-  const ident = String(reference.id ?? reference.index ?? displayIndex)
-  const busy = busyKey === ident
-  const disabled = busy || !selectedCheckId
+export function ReferenceRowActions({
+  reference,
+  displayIndex,
+  selectedCheckId,
+  onSuggest,
+  onRemove,
+  onReverify,
+  // Per-action busy flags so Re-verify and Suggest-alternative can
+  // run in parallel on the same row without each disabling/clobbering
+  // the other's spinner (#18). globalBusy blocks every per-row action
+  // while Add or Restore is in flight so we don't race those state
+  // resets.
+  reverifyBusy = false,
+  suggestBusy = false,
+  removeBusy = false,
+  globalBusy = false,
+}) {
   // Match Settings panel button styling — pill, subtle border, hover lift.
   const baseStyle = {
     border: '1px solid var(--color-border)',
     background: 'var(--color-bg-primary)',
     color: 'var(--color-text-secondary)',
-    opacity: disabled ? 0.55 : 1,
     transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
   }
+  const styleFor = (busy) => ({ ...baseStyle, opacity: (busy || !selectedCheckId || globalBusy) ? 0.55 : 1 })
+  const disableFor = (busy) => busy || !selectedCheckId || globalBusy
   return (
     <div className="px-4 pb-3 pt-1 flex flex-wrap gap-1.5 text-xs">
       <button
         onClick={() => onReverify(reference, displayIndex)}
-        disabled={disabled}
+        disabled={disableFor(reverifyBusy)}
         className="px-2.5 py-1 rounded-md font-medium"
-        style={baseStyle}
+        style={styleFor(reverifyBusy)}
         title="Re-verify this reference now"
       >
-        {busy ? '…' : 'Re-verify'}
+        {reverifyBusy ? '…' : 'Re-verify'}
       </button>
       <button
         onClick={() => onSuggest(reference, displayIndex)}
-        disabled={disabled}
+        disabled={disableFor(suggestBusy)}
         className="px-2.5 py-1 rounded-md font-medium"
-        style={baseStyle}
+        style={styleFor(suggestBusy)}
         title="Suggest a real paper the author might have meant"
       >
-        Suggest alternative
+        {suggestBusy ? '…' : 'Suggest alternative'}
       </button>
       <button
         onClick={() => onRemove(reference, displayIndex)}
-        disabled={disabled}
+        disabled={disableFor(removeBusy)}
         className="px-2.5 py-1 rounded-md font-medium"
         style={{
-          ...baseStyle,
+          ...styleFor(removeBusy),
           color: 'var(--color-error, #ef4444)',
           borderColor: 'var(--color-error, #ef4444)55',
         }}
         title="Remove this reference from the check"
       >
-        Remove
+        {removeBusy ? '…' : 'Remove'}
       </button>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   addReferenceToCheck,
   removeReferenceFromCheck,
@@ -10,12 +10,40 @@ import { useCheckStore } from '../stores/useCheckStore'
 
 const EMPTY_NEW = { title: '', authors: '', year: '', doi: '', arxiv_id: '' }
 
+// Add/remove an ident from a Set state without mutating the previous value
+// (zustand-style immutable update so React re-renders pick it up).
+const enterBusy = (setter, ident) =>
+  setter(prev => {
+    const next = new Set(prev)
+    next.add(ident)
+    return next
+  })
+const leaveBusy = (setter, ident) =>
+  setter(prev => {
+    const next = new Set(prev)
+    next.delete(ident)
+    return next
+  })
+
 export default function useReferenceActions() {
   const selectedCheckId = useHistoryStore(s => s.selectedCheckId)
-  const [busyKey, setBusyKey] = useState(null)
+  // Per-action in-flight tracking, so Re-verify and Suggest-alternative
+  // (and Remove) on the same row don't clobber each other's busy
+  // indicators when the user fires them concurrently (#18). Each Set
+  // holds the row idents currently running that action.
+  const [reverifyBusy, setReverifyBusy] = useState(() => new Set())
+  const [suggestBusy, setSuggestBusy] = useState(() => new Set())
+  const [removeBusy, setRemoveBusy] = useState(() => new Set())
+  // Global busy slot: '__add__' while Add-reference is in flight,
+  // '__restore__' during Undo, null otherwise. Kept separate from the
+  // per-row sets so per-row ops survive a parallel Undo.
+  const [globalBusy, setGlobalBusy] = useState(null)
   const [showAdd, setShowAdd] = useState(false)
   const [newRef, setNewRef] = useState(EMPTY_NEW)
   const [suggestFor, setSuggestFor] = useState(null)
+  // Track the most-recently-started Suggest so a slow earlier request
+  // can't clobber the panel after the user moved on to a newer one.
+  const latestSuggestRef = useRef(null)
   // Session-local "trash" so the user can Undo a removal. Scoped to the
   // currently-selected check — switching checks discards the trash.
   const [removedRefs, setRemovedRefs] = useState([])
@@ -34,7 +62,7 @@ export default function useReferenceActions() {
 
   const handleAddRef = async (override) => {
     if (!selectedCheckId) return null
-    setBusyKey('__add__')
+    setGlobalBusy('__add__')
     // Accept an optional override patch so callers can pass in fields
     // that the parent's `newRef` state hasn't received yet (the "Add by
     // DOI" panel resolves a DOI on click — setNewRef is async, so by
@@ -70,14 +98,14 @@ export default function useReferenceActions() {
       alert(e?.response?.data?.detail || e?.message || 'Add failed')
       return null
     } finally {
-      setBusyKey(null)
+      setGlobalBusy(null)
     }
   }
 
   const handleRemoveRef = async (ref, i) => {
     if (!selectedCheckId) return
     const ident = String(ref.id ?? ref.index ?? i)
-    setBusyKey(ident)
+    enterBusy(setRemoveBusy, ident)
     // Snapshot the ref so Undo can re-create it. We stash the metadata
     // the add endpoint needs, plus a synthetic key so the UI can render
     // a stable list of removed items.
@@ -113,13 +141,13 @@ export default function useReferenceActions() {
       if (removedFromStore) useCheckStore.getState().restoreReference(removedFromStore)
       alert(e?.response?.data?.detail || e?.message || 'Remove failed')
     } finally {
-      setBusyKey(null)
+      leaveBusy(setRemoveBusy, ident)
     }
   }
 
   const handleRestoreRef = async (snapshot) => {
     if (!selectedCheckId || !snapshot) return
-    setBusyKey('__restore__')
+    setGlobalBusy('__restore__')
     try {
       const res = await addReferenceToCheck(selectedCheckId, {
         title: (snapshot.title || '').trim() || null,
@@ -142,7 +170,7 @@ export default function useReferenceActions() {
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Restore failed')
     } finally {
-      setBusyKey(null)
+      setGlobalBusy(null)
     }
   }
 
@@ -151,34 +179,51 @@ export default function useReferenceActions() {
   const handleSuggestAlt = async (ref, i) => {
     if (!selectedCheckId) return
     const ident = String(ref.id ?? ref.index ?? i)
-    setBusyKey(ident)
+    enterBusy(setSuggestBusy, ident)
+    latestSuggestRef.current = ident
     try {
       const res = await suggestAlternativeReference(selectedCheckId, ident)
-      setSuggestFor({ ref_id: ident, candidates: res.data?.candidates || [] })
+      // Discard the result if the user has since started a newer Suggest
+      // (e.g. clicked Suggest on a different row while this one was slow).
+      // Without this, a slower earlier response can overwrite the panel
+      // the user is actively reading.
+      if (latestSuggestRef.current === ident) {
+        setSuggestFor({ ref_id: ident, candidates: res.data?.candidates || [] })
+      }
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Suggest failed')
     } finally {
-      setBusyKey(null)
+      leaveBusy(setSuggestBusy, ident)
     }
   }
 
   const handleReverify = async (ref, i) => {
     if (!selectedCheckId) return
     const ident = String(ref.id ?? ref.index ?? i)
-    setBusyKey(ident)
+    enterBusy(setReverifyBusy, ident)
     try {
       await verifyReferenceInCheck(selectedCheckId, ident)
       await reloadCheck()
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Re-verify failed')
     } finally {
-      setBusyKey(null)
+      leaveBusy(setReverifyBusy, ident)
     }
   }
+
+  // Back-compat: a few callers (AddReferencePanel) still expect a single
+  // `busyKey` string. Map the global slot onto it so '__add__'/'__restore__'
+  // sentinels keep working without touching those components.
+  const busyKey = globalBusy
+
+  const isReverifying = (ident) => reverifyBusy.has(String(ident))
+  const isSuggesting = (ident) => suggestBusy.has(String(ident))
+  const isRemoving = (ident) => removeBusy.has(String(ident))
 
   return {
     selectedCheckId,
     busyKey,
+    globalBusy,
     showAdd,
     setShowAdd,
     newRef,
@@ -192,5 +237,8 @@ export default function useReferenceActions() {
     removedRefs,
     handleRestoreRef,
     clearRemovedRefs,
+    isReverifying,
+    isSuggesting,
+    isRemoving,
   }
 }

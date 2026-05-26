@@ -28,6 +28,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
   const {
     selectedCheckId,
     busyKey,
+    globalBusy,
     showAdd,
     setShowAdd,
     newRef,
@@ -41,6 +42,9 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
     removedRefs,
     handleRestoreRef,
     clearRemovedRefs,
+    isReverifying,
+    isSuggesting,
+    isRemoving,
   } = useReferenceActions()
 
   // Memoize all derived data to ensure consistency within a render
@@ -262,17 +266,23 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
                 totalRefs={sortedReferences.length}
                 isCheckComplete={isCheckComplete}
               />
-              {selectedCheckId && (
-                <ReferenceRowActions
-                  reference={ref}
-                  displayIndex={displayIndex}
-                  busyKey={busyKey}
-                  selectedCheckId={selectedCheckId}
-                  onSuggest={handleSuggestAlt}
-                  onRemove={handleRemoveRef}
-                  onReverify={handleReverify}
-                />
-              )}
+              {selectedCheckId && (() => {
+                const ident = String(ref.id ?? ref.index ?? displayIndex)
+                return (
+                  <ReferenceRowActions
+                    reference={ref}
+                    displayIndex={displayIndex}
+                    selectedCheckId={selectedCheckId}
+                    onSuggest={handleSuggestAlt}
+                    onRemove={handleRemoveRef}
+                    onReverify={handleReverify}
+                    reverifyBusy={isReverifying(ident)}
+                    suggestBusy={isSuggesting(ident)}
+                    removeBusy={isRemoving(ident)}
+                    globalBusy={!!globalBusy}
+                  />
+                )
+              })()}
             </div>
         ))}
       </div>
@@ -289,10 +299,11 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
  */
 function RemovedRefsStrip({ removedRefs, busyKey, onRestore, onClear }) {
   if (!removedRefs || removedRefs.length === 0) return null
-  // Block Undo while ANY action is in flight — sharing busyKey with
-  // Re-verify / Suggest / Add means a stray Undo click would otherwise
-  // hijack the global busy slot and prematurely clear another row's
-  // spinner. Clear stays enabled because it's purely local.
+  // Block Undo only while another global action (Add / Restore) is in
+  // flight. Per-row actions (Re-verify / Suggest / Remove) live in
+  // their own sets and don't conflict with the global busy slot, so
+  // Undo can run in parallel with them. Clear stays enabled — it's
+  // purely local.
   const restoring = !!busyKey
   return (
     <div
