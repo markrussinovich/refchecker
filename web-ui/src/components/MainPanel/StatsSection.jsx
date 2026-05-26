@@ -17,6 +17,63 @@ import {
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 
 /**
+ * Per-stage extraction breakdown chip — Regex / LLM / Hallucination LLM.
+ *
+ * Reads `stats.regex_count` / `stats.llm_count` / `stats.hallucination_llm_count`
+ * (emitted by the backend in summary_update events) when present, and falls
+ * back to deriving the values from `references` for older check records
+ * that don't carry the new fields. Hides when we have nothing useful to
+ * show (zero refs, or a cache hit where the original stage is unknown).
+ */
+function PerStageChip({ stats, references }) {
+  const refs = Array.isArray(references) ? references : []
+  const total = refs.length
+
+  // Prefer backend-emitted counts when present (most accurate). When
+  // absent (e.g. older history records, cache hits) derive from the
+  // refs array on the client.
+  const regex = typeof stats?.regex_count === 'number'
+    ? stats.regex_count
+    : (stats?.extraction_method === 'bbl' || stats?.extraction_method === 'bib' || stats?.extraction_method === 'regex' ? total : 0)
+  const llm = typeof stats?.llm_count === 'number'
+    ? stats.llm_count
+    : (stats?.extraction_method === 'llm' ? total : 0)
+  const hallucLlm = typeof stats?.hallucination_llm_count === 'number'
+    ? stats.hallucination_llm_count
+    : refs.filter(r => r?.hallucination_assessment?.source).length
+
+  if (total === 0) return null
+  if (regex === 0 && llm === 0 && hallucLlm === 0) return null
+
+  return (
+    <span
+      className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full text-xs"
+      style={{
+        border: '1px solid var(--color-border)',
+        background: 'var(--color-bg-tertiary)',
+        color: 'var(--color-text-secondary)',
+      }}
+      title="How references were extracted: deterministic parser (BibTeX/.bbl) vs LLM, plus how many were checked by the hallucination LLM."
+    >
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>Regex </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{regex}</span>
+      </span>
+      <span style={{ opacity: 0.5 }}>·</span>
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>LLM </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{llm}</span>
+      </span>
+      <span style={{ opacity: 0.5 }}>·</span>
+      <span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>Halluc LLM </span>
+        <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{hallucLlm}</span>
+      </span>
+    </span>
+  )
+}
+
+/**
  * Stats section showing reference check summary with clickable filters
  * Compact design with refs summary and individual issue counts
  */
@@ -202,6 +259,11 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
           )}
           {healthBadge}
           {usageChip}
+          {/* Per-stage extraction breakdown — surfaces which stage of
+              the cascade produced the references and how many got the
+              hallucination LLM treatment. Hidden when we have no data
+              (cache hits / pre-#11 checks). */}
+          <PerStageChip stats={stats} references={references} />
         </div>
         {/* Right side controls */}
         <div className="flex items-center gap-2">

@@ -151,8 +151,11 @@ def _sentence_tokenize(text):
     'U.'). Good enough for grouping a citation marker with its
     surrounding clause; avoids pulling in a regex backport just for this.
 
-    Multi-word abbreviation check uses the trailing two tokens so phrases
-    like "et al." (whose single last token is just "al.") still merge.
+    Multi-word abbreviations like "et al." are matched against the
+    trailing two tokens, not just the last one — otherwise
+    "Vaswani et al. (2017)" splits at the period (because the
+    open-paren in the lookahead triggers a sentence break) and
+    "al." alone isn't in the abbreviation list.
     """
     import re
     raw = re.split(r"(?<=[.!?])\s+(?=[A-Z\(])", text)
@@ -165,6 +168,9 @@ def _sentence_tokenize(text):
         # candidate "word." that triggered the split.
         last_token = prev.rsplit(" ", 1)[-1] if " " in prev else prev
         lt_lower = last_token.lower()
+        # Multi-word abbreviation check: also peek at the last two tokens
+        # joined so phrases like "et al." (whose last single token is
+        # "al.") get caught.
         tail_two = " ".join(prev.rsplit(" ", 2)[-2:]).lower() if " " in prev else ""
         is_abbrev = lt_lower in _ABBREVIATIONS or tail_two in _ABBREVIATIONS
         # Single-capital + period (initials in author names: "J. Smith").
@@ -285,6 +291,9 @@ def _attach_citation_contexts(references, paper_text):
             year_int = 0
         if not year_int:
             continue
+        # First author's last name = last whitespace-separated token,
+        # stripped of punctuation. Handles "Smith", "John Smith", "Smith,
+        # John" (in which case the first word is the last name).
         first = (authors[0] or "").strip()
         if not first:
             continue
@@ -295,13 +304,23 @@ def _attach_citation_contexts(references, paper_text):
         last_name = re.sub(r"[^A-Za-z\-]", "", last_name).lower()
         if len(last_name) < 2:
             continue
+        # First-key collisions (multiple refs with same first author +
+        # year) are rare but real; keep the lowest-index winner for
+        # determinism, matching numeric markers' first-occurrence behavior.
         key = (last_name, year_int)
         if key not in author_year_lookup or ref_idx < author_year_lookup[key]:
             author_year_lookup[key] = ref_idx
 
     if author_year_lookup:
+        # Two patterns covering the common citation forms. Each one
+        # captures the surface name and the year as separate groups so
+        # we can look up the ref. `et al.` and `and X` are absorbed into
+        # the "name" group via a non-capturing extension so the lookup
+        # only sees the first author's last name.
         au_yr_patterns = [
+            # "(Smith et al., 2024)" / "(Smith and Jones 2024)"
             re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
+            # "Smith et al. (2024)" / "Smith (2024)"
             re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*\((\d{4})[a-z]?\)"),
         ]
         for i, sent in enumerate(sentences):
@@ -322,6 +341,9 @@ def _attach_citation_contexts(references, paper_text):
                     lst = by_index.setdefault(ref_idx, [])
                     if len(lst) >= 3:
                         continue
+                    # Skip if this exact sentence already attributed to
+                    # this ref via the numeric pass (avoid dupes when a
+                    # paper uses both styles).
                     if any(existing.get("sentence") == sent_clean for existing in lst):
                         continue
                     lst.append({
@@ -1248,6 +1270,30 @@ class ProgressRefChecker:
             results, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count = \
                 await self._check_references_parallel(references, total_refs)
 
+            # Per-stage extraction counts for the Summary chip
+            # (Regex / LLM / Hallucination LLM). The deterministic
+            # parsers ('bbl', 'bib') count as regex; the LLM extractor
+            # counts as llm; cache and pdf-only paths report zeros for
+            # both since we don't know the split. Hallucination LLM
+            # invocations are counted from refs whose assessment came
+            # back via the LLM path (assessment carries 'source').
+            _regex_methods = {"bbl", "bib", "regex"}
+            if extraction_method in _regex_methods:
+                regex_count = total_refs
+                llm_count = 0
+            elif extraction_method == "llm":
+                regex_count = 0
+                llm_count = total_refs
+            else:
+                regex_count = 0
+                llm_count = 0
+            hallucination_llm_count = sum(
+                1 for r in results
+                if isinstance(r, dict)
+                and isinstance(r.get("hallucination_assessment"), dict)
+                and r["hallucination_assessment"].get("source")
+            )
+
             # Step 4: Return final results
             final_result = {
                 "paper_title": paper_title,
@@ -1263,6 +1309,9 @@ class ProgressRefChecker:
                     "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
                     "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
@@ -1807,6 +1856,7 @@ class ProgressRefChecker:
             'warnings_count': num_warnings,
             'suggestions_count': num_suggestions,
             'hallucination_count': 0,
+            'hallucination_llm_count': 0,
             'unverified_count': 0,
             'verified_count': 0,
             'refs_verified': 0,
@@ -1814,6 +1864,12 @@ class ProgressRefChecker:
             'refs_with_warnings_only': 0,
             'refs_with_suggestions_only': 0,
         }
+        # An assessment with a `source` field means the LLM (or web
+        # search) was invoked. pre-screen-only assessments have no
+        # source — they're deterministic.
+        ha = result.get('hallucination_assessment')
+        if isinstance(ha, dict) and ha.get('source'):
+            d['hallucination_llm_count'] = 1
 
         status = result.get('status', '')
         has_unverified_error = any(
@@ -2042,6 +2098,7 @@ class ProgressRefChecker:
         suggestions_count = 0
         unverified_count = 0
         hallucination_count = 0
+        hallucination_llm_count = 0  # Refs where the hallucination LLM was actually invoked.
         verified_count = 0
         refs_with_errors = 0
         refs_with_warnings_only = 0
@@ -2049,6 +2106,24 @@ class ProgressRefChecker:
         refs_verified = 0
         processed_count = 0
         checked_count = 0  # Tracks refs that finished verification (including deferred ones)
+
+        # Per-stage extraction counts surfaced in the Summary chip
+        # (Regex / LLM / Hallucination LLM). The deterministic parsers
+        # (.bbl, .bib) all count as "regex"; the LLM extractor counts
+        # as "llm"; cache hits keep the stage from the original run.
+        _regex_methods = {"bbl", "bib", "regex"}
+        if extraction_method in _regex_methods:
+            regex_count = total_refs
+            llm_count = 0
+        elif extraction_method == "llm":
+            regex_count = 0
+            llm_count = total_refs
+        else:
+            # 'pdf', 'file', 'text', 'cache', None — we genuinely
+            # don't know the per-stage split for these, so attribute
+            # to whichever flag the underlying CLI checker raised.
+            regex_count = 0
+            llm_count = 0
         
         loop = asyncio.get_event_loop()
         
@@ -2162,6 +2237,7 @@ class ProgressRefChecker:
                 warnings_count += d['warnings_count']
                 suggestions_count += d['suggestions_count']
                 hallucination_count += d['hallucination_count']
+                hallucination_llm_count += d.get('hallucination_llm_count', 0)
                 unverified_count += d['unverified_count']
                 verified_count += d['verified_count']
                 refs_verified += d['refs_verified']
@@ -2186,6 +2262,9 @@ class ProgressRefChecker:
                     "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
                     "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
@@ -2234,6 +2313,7 @@ class ProgressRefChecker:
                         warnings_count += d['warnings_count']
                         suggestions_count += d['suggestions_count']
                         hallucination_count += d['hallucination_count']
+                        hallucination_llm_count += d.get('hallucination_llm_count', 0)
                         unverified_count += d['unverified_count']
                         verified_count += d['verified_count']
                         refs_verified += d['refs_verified']
@@ -2262,6 +2342,9 @@ class ProgressRefChecker:
                         "suggestions_count": suggestions_count,
                         "unverified_count": unverified_count,
                         "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                         "verified_count": verified_count,
                         "refs_with_errors": refs_with_errors,
                         "refs_with_warnings_only": refs_with_warnings_only,
@@ -2325,6 +2408,9 @@ class ProgressRefChecker:
                                         "suggestions_count": suggestions_count,
                                         "unverified_count": unverified_count,
                                         "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                                         "verified_count": verified_count,
                                         "refs_with_errors": refs_with_errors,
                                         "refs_with_warnings_only": refs_with_warnings_only,
@@ -2342,6 +2428,7 @@ class ProgressRefChecker:
                             warnings_count += d['warnings_count']
                             suggestions_count += d['suggestions_count']
                             hallucination_count += d['hallucination_count']
+                            hallucination_llm_count += d.get('hallucination_llm_count', 0)
                             unverified_count += d['unverified_count']
                             verified_count += d['verified_count']
                             refs_verified += d['refs_verified']
@@ -2360,6 +2447,9 @@ class ProgressRefChecker:
                                 "suggestions_count": suggestions_count,
                                 "unverified_count": unverified_count,
                                 "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                                 "verified_count": verified_count,
                                 "refs_with_errors": refs_with_errors,
                                 "refs_with_warnings_only": refs_with_warnings_only,
@@ -2378,6 +2468,9 @@ class ProgressRefChecker:
                     "suggestions_count": suggestions_count,
                     "unverified_count": unverified_count,
                     "hallucination_count": hallucination_count,
+                    "regex_count": regex_count,
+                    "llm_count": llm_count,
+                    "hallucination_llm_count": hallucination_llm_count,
                     "verified_count": verified_count,
                     "refs_with_errors": refs_with_errors,
                     "refs_with_warnings_only": refs_with_warnings_only,
@@ -2400,6 +2493,7 @@ class ProgressRefChecker:
         # not only from incremental deltas emitted during streaming.
         errors_count = warnings_count = suggestions_count = 0
         unverified_count = verified_count = hallucination_count = 0
+        hallucination_llm_count = 0
         refs_with_errors = refs_with_warnings_only = refs_with_suggestions_only = refs_verified = 0
         for result in results_list:
             if not result:
@@ -2409,6 +2503,7 @@ class ProgressRefChecker:
             warnings_count += d['warnings_count']
             suggestions_count += d['suggestions_count']
             hallucination_count += d['hallucination_count']
+            hallucination_llm_count += d.get('hallucination_llm_count', 0)
             unverified_count += d['unverified_count']
             verified_count += d['verified_count']
             refs_verified += d['refs_verified']
