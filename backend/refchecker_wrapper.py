@@ -217,11 +217,17 @@ def _attach_citation_contexts(references, paper_text):
     import re
     global _NUMERIC_MARKER_RE
     if _NUMERIC_MARKER_RE is None:
-        # Match `[12]`, `[12, 14]`, `[12-15]`, `[12–15]`, including
-        # space tolerance. The outer match's group(0) is the whole marker
-        # so we can highlight it; inner findall pulls the numbers out.
+        # Match three citation-marker shapes:
+        #   1. Square brackets:  [12]  [12, 14]  [12-15]  [12–15]
+        #   2. Parentheses:      (12)  (12, 14)  (12–15)        — Vancouver/AMA
+        #   3. Superscripts:     ¹²³   ¹·²   ¹⁻³                — medical journals
+        # Each form supports comma- and dash-separated ranges. group(0)
+        # is the whole marker so we can highlight it; inner findall pulls
+        # the ASCII numbers out (superscripts are translated below).
         _NUMERIC_MARKER_RE = re.compile(
             r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
+            r"|\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
+            r"|[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
         )
 
     sentences = _sentence_tokenize(paper_text)
@@ -238,11 +244,22 @@ def _attach_citation_contexts(references, paper_text):
             continue
         for m in _NUMERIC_MARKER_RE.finditer(stripped):
             marker_text = m.group(0)
-            nums_in_marker = [int(n) for n in re.findall(r"\d{1,3}", marker_text)]
+            # Translate Unicode superscripts to ASCII so the digit
+            # extractor below works uniformly across [N] / (N) / ¹²³.
+            _sup_trans = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
+            marker_ascii = marker_text.translate(_sup_trans)
+            nums_in_marker = [int(n) for n in re.findall(r"\d{1,3}", marker_ascii)]
+            # Heuristic guard: a bare-superscript marker is only valid
+            # if it appears immediately after a word character (not
+            # after whitespace). Footnote-style superscripts can also be
+            # numeric, so we don't treat raw years (4 digits) as refs.
+            if marker_text != marker_ascii and len(nums_in_marker) == 1 and nums_in_marker[0] > 200:
+                # Way out of typical ref-list range; skip.
+                continue
             # Expand `[12-15]` and `[12–15]` into a contiguous range so
             # the readers see the citation even for inclusive ranges.
             expanded = set()
-            range_match = re.match(r"\s*(\d+)\s*[\-–]\s*(\d+)\s*$", marker_text.strip("[]"))
+            range_match = re.match(r"\s*(\d+)\s*[\-–]\s*(\d+)\s*$", marker_ascii.strip("[]()"))
             if range_match:
                 lo, hi = sorted((int(range_match.group(1)), int(range_match.group(2))))
                 # Cap the expansion so a typo `[1-999]` doesn't blow up.

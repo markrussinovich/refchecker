@@ -1080,7 +1080,27 @@ class Database:
                 params,
             )
             await db.commit()
-            return True
+
+        # Backstop: when a check finishes, walk every result and upsert
+        # it into the Seen-Refs library. Without this, refs that didn't
+        # flow through the per-emit hook (cache hits, manually added
+        # refs, follow-up re-verifies that mutated state) silently
+        # missed the library. Errors here mustn't block the check write
+        # we just committed.
+        if status in ("completed", "cancelled"):
+            written = 0
+            for ref in (results or []):
+                try:
+                    key = await self.upsert_verified_reference(ref)
+                    if key is not None:
+                        written += 1
+                except Exception as e:
+                    logger.debug("Seen-Refs backstop upsert failed for ref: %s", e)
+            logger.info(
+                "Seen-Refs backstop wrote %d/%d refs for check %d",
+                written, len(results or []), check_id,
+            )
+        return True
 
     async def update_check_progress(self,
                                      check_id: int,
@@ -1785,20 +1805,18 @@ class Database:
         """Pick the canonical identity key for a reference.
 
         Order: DOI -> ArXiv ID -> (normalized title + year) ->
-        (normalized title alone, when title is substantial).
+        (normalized title alone) -> (title+authors+year hash).
 
         Falls back to ``authoritative_urls`` when the result dict
         doesn't carry top-level doi/arxiv_id, since the main check
         pipeline only surfaces verified ids through that list.
 
-        The title-only fallback is intentionally permissive enough to
-        populate the Seen References library for medical / humanities
-        papers cited without DOIs, but tight enough to avoid
-        false-dedupe across distinct papers that happen to share a
-        short generic title like "Deep Learning". Verifier-B flagged
-        the false-dedupe risk explicitly; we require 30 normalized
-        characters AND 3+ tokens, which still covers a wide range of
-        real titles.
+        Threshold for title-only was relaxed from 30 chars to 12 (and
+        the 3-token requirement dropped) so single-author medical /
+        humanities papers like "TNM Staging Atlas" or "Vesalius 1543"
+        still produce a usable key. False-dedupe is still avoided by
+        the title+year preferred path; this only fires when year is
+        missing entirely.
         """
         if not isinstance(ref, dict):
             return None
@@ -1820,10 +1838,22 @@ class Database:
         year = ref.get("year") or ref.get("verified_year")
         if title and year:
             return f"title:{title}:{year}"
-        # Last-ditch title-only fallback. Threshold guards against
-        # generic short-title collisions.
-        if title and len(title) >= 30 and len(title.split()) >= 3:
+        # Title-only fallback for refs without a year.
+        if title and len(title) >= 12:
             return f"title:{title}:_"
+        # Hash-of-everything last resort, so refs without title still
+        # land in the Seen-Refs library (manual entries, etc.). Uses
+        # the ref's id when present + a hash of its identifying bits.
+        import hashlib
+        bits = "|".join(str(v) for v in [
+            ref.get("id"),
+            (ref.get("title") or "")[:200],
+            (ref.get("authors") or [""])[0] if isinstance(ref.get("authors"), list) else (ref.get("authors") or "")[:80],
+            ref.get("year"),
+        ] if v)
+        if bits:
+            digest = hashlib.sha1(bits.encode("utf-8", errors="ignore")).hexdigest()[:16]
+            return f"hash:{digest}"
         return None
 
     async def upsert_verified_reference(self, ref: Dict[str, Any]) -> Optional[str]:
@@ -1835,11 +1865,18 @@ class Database:
         """
         ident = self.reference_identity_key(ref)
         if not ident:
+            logger.debug(
+                "Seen-Refs upsert skipped: no identity key for ref title=%r doi=%r arxiv=%r",
+                (ref.get("title") or "")[:80], ref.get("doi"), ref.get("arxiv_id"),
+            )
             return None
         status = ref.get("status") or ""
-        # Don't cache hallucinated / unverified — those should re-check.
-        if status in ("hallucinated", "error"):
-            return None
+        # Cache every ref the user has checked, regardless of verdict.
+        # Previously hallucinated/error refs were skipped — but the user
+        # wants to see EVERYTHING that has flowed through a check, so the
+        # Seen Refs library doubles as a curation log. The status column
+        # records the verdict; the UI can filter by status to hide
+        # unverified ones when desired.
         result = json.dumps(ref, default=str)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")

@@ -4789,6 +4789,97 @@ async def suggest_alternative_reference(
             "source": "semantic_scholar",
         })
 
+    # ── Crossref fallback (medical / humanities coverage) ────────────
+    # S2 indexing is thin outside CS / physics. Crossref covers
+    # biomedicine, anatomy, surgery far better — and exposes DOIs
+    # directly, so any hit here is immediately verifiable.
+    if len(suggestions) < 3:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                cr = await client.get(
+                    "https://api.crossref.org/works",
+                    params={
+                        "query.bibliographic": title,
+                        "rows": 5,
+                        "select": "DOI,title,author,issued,container-title",
+                    },
+                )
+                if cr.status_code == 200:
+                    cr_data = cr.json()
+                    for item in (cr_data.get("message", {}).get("items") or [])[:5]:
+                        cr_title = (item.get("title") or [None])[0]
+                        if not cr_title:
+                            continue
+                        cr_authors = []
+                        for a in (item.get("author") or [])[:8]:
+                            given = a.get("given") or ""
+                            family = a.get("family") or ""
+                            full = f"{given} {family}".strip()
+                            if full:
+                                cr_authors.append(full)
+                        cr_year = None
+                        issued = item.get("issued", {}).get("date-parts")
+                        if issued and issued[0]:
+                            cr_year = issued[0][0]
+                        cr_doi = item.get("DOI")
+                        suggestions.append({
+                            "title": cr_title,
+                            "authors": cr_authors,
+                            "year": cr_year,
+                            "doi": cr_doi,
+                            "arxiv_id": None,
+                            "url": f"https://doi.org/{cr_doi}" if cr_doi else None,
+                            "venue": (item.get("container-title") or [None])[0],
+                            "source": "crossref",
+                        })
+        except Exception as e:
+            logger.debug("Crossref suggest-alt fallback failed: %s", e)
+
+    # ── OpenAlex fallback (broad coverage, fast) ─────────────────────
+    if len(suggestions) < 3:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                oa = await client.get(
+                    "https://api.openalex.org/works",
+                    params={
+                        "search": title,
+                        "per-page": 5,
+                        "select": "id,title,doi,publication_year,authorships",
+                    },
+                )
+                if oa.status_code == 200:
+                    oa_data = oa.json()
+                    for w in (oa_data.get("results") or [])[:5]:
+                        w_title = w.get("title")
+                        if not w_title:
+                            continue
+                        suggestions.append({
+                            "title": w_title,
+                            "authors": [
+                                a.get("author", {}).get("display_name")
+                                for a in (w.get("authorships") or [])
+                                if a.get("author", {}).get("display_name")
+                            ],
+                            "year": w.get("publication_year"),
+                            "doi": (w.get("doi") or "").replace("https://doi.org/", "") or None,
+                            "arxiv_id": None,
+                            "url": w.get("id"),
+                            "source": "openalex",
+                        })
+        except Exception as e:
+            logger.debug("OpenAlex suggest-alt fallback failed: %s", e)
+
+    # Dedupe by DOI / title — Crossref and OpenAlex often return the same paper.
+    _seen_keys = set()
+    _deduped = []
+    for s in suggestions:
+        key = (s.get("doi") or "").lower() or (s.get("title") or "").strip().lower()[:80]
+        if key in _seen_keys:
+            continue
+        _seen_keys.add(key)
+        _deduped.append(s)
+    suggestions = _deduped[:8]
+
     # ── Co-citation overlap pass ─────────────────────────────────────
     # For each title-search hit, ask Semantic Scholar for its reference
     # list and count how many entries match other references in the
