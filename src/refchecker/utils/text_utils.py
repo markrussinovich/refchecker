@@ -2228,6 +2228,78 @@ def _compact_initials_name_match(parts1: List[str], parts2: List[str]) -> bool:
     )
 
 
+def _normalize_initials_token(token: str) -> str:
+    """Reduce an initials token to a flat lowercase letter string.
+
+    "P.M." / "P. M." / "P-M" / "P.-M." / "PM" → "pm"
+    Returns "" for non-initial tokens.
+    """
+    cleaned = re.sub(r'[.\-]', '', token).lower()
+    if cleaned and cleaned.isalpha() and len(cleaned) <= 4:
+        return cleaned
+    return ''
+
+
+def _vancouver_apa_name_match(parts1: List[str], parts2: List[str]) -> bool:
+    """Match a 2-token Vancouver-shaped name ("Surname AB" or "AB Surname")
+    against a 2-token APA / full-given-name shape ("First Surname" or
+    "Surname First").
+
+    Vancouver compresses initials into one token (no periods between).
+    APA / display form may give a single first name. The match succeeds
+    only when:
+      - one side has a 1–4 letter all-letters token (compact initials),
+      - the OTHER side has a non-initial token (the given name),
+      - their surnames are similar (`surname_similarity`),
+      - AND every compact initial corresponds to the leading letter of
+        a given-name component. With a single given-name token like
+        "Patrick", we accept ONLY when the compact initials are a
+        single letter — otherwise we'd be claiming a middle name the
+        DB doesn't supply.
+    """
+    if len(parts1) != 2 or len(parts2) != 2:
+        return False
+
+    def split_into(surname_first_initials):
+        if surname_first_initials:
+            return parts1[0], parts1[1], parts2[0], parts2[1]
+        return parts1[1], parts1[0], parts2[1], parts2[0]
+
+    # Two orderings on each side: "Surname Initials" / "Initials Surname".
+    # Try the four combinations.
+    for p1_surname_first in (True, False):
+        s1, init1, s2_a, init2_a = split_into(p1_surname_first)
+        compact_a = _normalize_initials_token(init1)
+        expanded_a = _normalize_initials_token(init2_a)
+        if not compact_a:
+            continue
+        for p2_surname_first in (True, False):
+            sb, init_b, sa, init_other = (s2_a, init2_a, p1_surname_first, p1_surname_first)
+            sb_surname = parts2[0] if p2_surname_first else parts2[1]
+            sb_given = parts2[1] if p2_surname_first else parts2[0]
+            sb_given_norm = _normalize_initials_token(sb_given)
+            # Need a surname on both sides:
+            if not surname_similarity(s1, sb_surname):
+                continue
+            # If the other side is ALSO compact initials, just compare them.
+            if sb_given_norm:
+                if compact_a == sb_given_norm:
+                    return True
+                # One-letter compact initial is a strict prefix of the
+                # longer compact initials.
+                if (len(compact_a) == 1 and sb_given_norm.startswith(compact_a)) or \
+                   (len(sb_given_norm) == 1 and compact_a.startswith(sb_given_norm)):
+                    return True
+                continue
+            # Otherwise the other side has a real given name (e.g.
+            # "Patrick"). Accept only if compact_a is a single letter
+            # matching the given name's first letter — otherwise we'd
+            # be claiming an unverified middle name.
+            if len(compact_a) == 1 and sb_given.lower().startswith(compact_a):
+                return True
+    return False
+
+
 def _collapsed_author_token_match(parts1: List[str], parts2: List[str]) -> bool:
     """Match names where PDF extraction removed spaces inside one author."""
     def compact_token_text(tokens: List[str]) -> str:
@@ -2315,6 +2387,9 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
         return True
 
     if _compact_initials_name_match(parts1, parts2):
+        return True
+
+    if _vancouver_apa_name_match(parts1, parts2):
         return True
 
     # Allow same-first-name matches when a two-part surname differs only by

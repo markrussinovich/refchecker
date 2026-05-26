@@ -347,21 +347,43 @@ const _venuesEquivalent = (cited, actual) => {
   )
 }
 
+// True when a token looks like initials rather than a surname /
+// given name. A token is "initial-like" when every hyphen segment
+// is exactly one letter (so "p-m" qualifies but "smith-jones"
+// doesn't), OR the whole token is at most three letters with no
+// vowel structure to it (so "PM" qualifies but "Liu" stays
+// ambiguous and "Bossuyt" never qualifies).
+const _looksLikeInitials = (token) => {
+  if (!token) return false
+  const t = token.toLowerCase()
+  if (t.includes('-')) {
+    return t.split('-').every(seg => seg.length === 1 && /[a-zà-ÿ]/.test(seg))
+  }
+  return t.length <= 3 && /^[a-zà-ÿ]+$/.test(t)
+}
+
 const _authorSurname = (s) => {
   // Lift the surname from "Lastname AB" / "A. B. Lastname" /
-  // "Anna Lastname". Longest non-initial token wins; initials are
-  // 1–3 letter all-caps (after folding, treat as length ≤ 2). For
-  // Dutch / German tussenvoegsel ("van der Berg") the longest token
-  // is the actual surname, so picking length rather than position
-  // matters.
+  // "Anna Lastname" / "Bossuyt P" / "Patrick Bossuyt" / "Bossuyt P-M".
+  //
+  //   1. Drop tokens that look like initials. What remains is
+  //      candidate surnames + given names.
+  //   2. If exactly one candidate, that's the surname.
+  //   3. If multiple — typical of "First Last" or "van der Berg" —
+  //      pick the LAST one (Western convention). Dutch tussenvoegsel
+  //      still works because "berg" is the last non-initial token
+  //      in "van der berg".
+  //   4. If nothing survives the initial filter (the input was all
+  //      initials), fall back to the first token.
   const parts = _foldText(s)
     .replace(/\./g, '')
     .split(/[\s,]+/)
     .filter(Boolean)
   if (parts.length === 0) return ''
-  const longish = parts.filter(p => p.length > 2)
-  if (longish.length === 0) return parts[0]
-  return longish.reduce((best, p) => (p.length > best.length ? p : best), longish[0])
+  const surnameCandidates = parts.filter(p => !_looksLikeInitials(p))
+  if (surnameCandidates.length === 0) return parts[0]
+  if (surnameCandidates.length === 1) return surnameCandidates[0]
+  return surnameCandidates[surnameCandidates.length - 1]
 }
 
 // Per-author signature: surname + first given initial (when present).
