@@ -10,10 +10,14 @@ const _oclcLookupCache = new Map()
 
 /**
  * Display-only strip rendered under each verified reference showing
- * the OpenAlex / Crossref / S2 enrichment payload — cited-by count,
- * reference count, OA flag, external IDs (DOI / OpenAlex W-id /
- * PubMed / PMC / MAG), publication type, Fields of Study, and a
- * per-author popover with ORCID + OpenAlex author profile links.
+ * the OpenAlex / Crossref / S2 enrichment payload.
+ *
+ * Layout matches the SciSpace-style multi-row card the user requested:
+ *
+ *   [Journal Article]  Venue, Volume: 32, Issue: 10, Pages: 2541-2556. Oct 1, 2021
+ *   Citing Patents: 0 · Citing Scholarly Works: 0 · Reference Count: 51
+ *   [DOI 10.1109/…] [OpenAlex W…] [LibKey] [WorldCat]
+ *   Additional Info: [Funding] [Affiliation] [Field of Study]
  *
  * Quiet: when nothing useful is present (e.g. references that
  * verified via DBLP only) the component renders nothing.
@@ -24,12 +28,15 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
   const {
     cited_by_count,
     reference_count,
+    citing_patents_count,
     is_open_access,
     openalex_id,
     pubmed_id,
     pmc_id,
     mag_id,
     publication_type,
+    venue,
+    publication_date,
     fields_of_study = [],
     authors = [],
     source_label,
@@ -40,26 +47,24 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     links = {},
   } = enrichment
 
-  // Bail when there's literally nothing to show — avoids an empty
-  // strip cluttering the card.
   const hasAnyBadge = (
     cited_by_count != null ||
     reference_count != null ||
+    citing_patents_count != null ||
     is_open_access != null ||
     openalex_id || pubmed_id || pmc_id || mag_id ||
     publication_type ||
+    venue ||
+    publication_date ||
     (Array.isArray(fields_of_study) && fields_of_study.length > 0) ||
     (Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)) ||
     has_funding ||
     has_affiliation ||
     (biblio && (biblio.volume || biblio.issue || biblio.first_page)) ||
-    links.libkey || links.worldcat
+    links.libkey || links.worldcat || links.doi
   )
   if (!hasAnyBadge) return null
 
-  // Friendly label for publication_type. Matches what users expect to
-  // see at a glance ("Journal Article" / "Conference Proceedings")
-  // instead of the API slugs ("journal-article" / "proceedings").
   const PUB_TYPE_LABEL = {
     'journal-article': 'Journal Article',
     'proceedings-article': 'Conference Proceedings',
@@ -77,133 +82,149 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     ? (PUB_TYPE_LABEL[publication_type.toLowerCase()] || publication_type)
     : null
 
-  // Compact bibliographic spec like "Vol. 32, Iss. 10, pp. 2541-2556"
-  // — matches how the screenshot's IEEE row reads.
-  const biblioBits = []
-  if (biblio?.volume) biblioBits.push(`Vol. ${biblio.volume}`)
-  if (biblio?.issue) biblioBits.push(`Iss. ${biblio.issue}`)
+  // Row-1 metadata line: "Conference on Computers and Accessibility, Volume: 32, Issue: 10, Pages: 2541-2556. Oct 1, 2021"
+  const bibBits = []
+  if (venue) bibBits.push(venue)
+  if (biblio?.volume) bibBits.push(`Volume: ${biblio.volume}`)
+  if (biblio?.issue) bibBits.push(`Issue: ${biblio.issue}`)
   if (biblio?.first_page && biblio?.last_page) {
-    biblioBits.push(`pp. ${biblio.first_page}–${biblio.last_page}`)
+    bibBits.push(`Pages: ${biblio.first_page}-${biblio.last_page}`)
   } else if (biblio?.first_page) {
-    biblioBits.push(`p. ${biblio.first_page}`)
+    bibBits.push(`Page: ${biblio.first_page}`)
   }
-  const biblioLine = biblioBits.join(', ')
+  const metaLine = bibBits.join(', ')
+  const metaSuffix = publication_date ? ` ${publication_date}` : ''
+
+  // Row-2 counters (inline text, not chips — matches the target screenshot)
+  const counters = []
+  if (typeof citing_patents_count === 'number') {
+    counters.push({ label: 'Citing Patents', value: citing_patents_count.toLocaleString() })
+  }
+  if (typeof cited_by_count === 'number') {
+    counters.push({ label: 'Citing Scholarly Works', value: cited_by_count.toLocaleString() })
+  }
+  if (typeof reference_count === 'number') {
+    counters.push({ label: 'Reference Count', value: reference_count.toLocaleString() })
+  }
+
+  const hasIdRow = !!(links.doi || openalex_id || pubmed_id || pmc_id || mag_id || links.libkey || links.worldcat)
+  const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
+  const hasAuthors = Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)
 
   return (
-    <div
-      className="flex flex-wrap gap-1.5 mt-2 text-[11px] items-center"
-      style={{ color: 'var(--color-text-secondary)' }}
-    >
-      {/* Publication type sits up front so the row reads
-          "Conference Proceedings · Cited by 12 · …" like the
-          screenshot. */}
-      {prettyPubType && (
-        <BadgeLabel variant="info" title="Publication type">
-          {prettyPubType}
-        </BadgeLabel>
+    <div className="flex flex-col gap-1.5 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+      {/* Row 1: publication type + venue + bibliographic + date */}
+      {(prettyPubType || metaLine || metaSuffix) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {prettyPubType && <PubTypeChip>{prettyPubType}</PubTypeChip>}
+          {metaLine && (
+            <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}{metaSuffix && <>. <span style={{ color: 'var(--color-text-muted)' }}>{publication_date}</span></>}</span>
+          )}
+        </div>
       )}
-      {biblioLine && (
-        <Badge title="Bibliographic detail">{biblioLine}</Badge>
+
+      {/* Row 2: inline counters */}
+      {counters.length > 0 && (
+        <div className="flex flex-wrap items-center" style={{ color: 'var(--color-text-muted)' }}>
+          {counters.map((c, i) => (
+            <span key={c.label} className="flex items-center">
+              {i > 0 && <span className="mx-2">·</span>}
+              <span>{c.label}: </span>
+              <strong className="ml-1" style={{ color: 'var(--color-text-primary)' }}>{c.value}</strong>
+            </span>
+          ))}
+        </div>
       )}
-      {source_label && (
-        <BadgeLabel variant="neutral" title={`Verified via ${source_label}`}>
-          {source_label}
-        </BadgeLabel>
+
+      {/* Row 3: external ID and reader pills */}
+      {hasIdRow && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {links.doi && (
+            <PillLink href={`https://doi.org/${links.doi}`} variant="primary" icon="🔗" title="Open DOI">
+              {links.doi}
+            </PillLink>
+          )}
+          {openalex_id && (
+            <PillLink href={`https://openalex.org/${openalex_id}`} variant="primary" icon="🅾" title="Open in OpenAlex">
+              {openalex_id}
+            </PillLink>
+          )}
+          {pubmed_id && (
+            <PillLink href={`https://pubmed.ncbi.nlm.nih.gov/${pubmed_id}/`} variant="primary" icon="🅿" title="Open in PubMed">
+              PMID {pubmed_id}
+            </PillLink>
+          )}
+          {pmc_id && (
+            <PillLink
+              href={`https://www.ncbi.nlm.nih.gov/pmc/articles/PMC${pmc_id.replace(/^PMC/i, '')}/`}
+              variant="primary"
+              icon="📄"
+              title="Open in PubMed Central"
+            >
+              PMC {pmc_id.replace(/^PMC/i, '')}
+            </PillLink>
+          )}
+          {links.libkey && (
+            <PillLink href={links.libkey} variant="libkey" icon="🔥" title="Open in LibKey (free public DOI resolver)">
+              LibKey
+            </PillLink>
+          )}
+          {links.worldcat && (
+            <WorldCatPill searchUrl={links.worldcat} doi={links.doi} />
+          )}
+          {hasAuthors && <AuthorsPopover authors={authors} />}
+          {source_label && (
+            <span className="ml-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              via {source_label}
+            </span>
+          )}
+        </div>
       )}
-      {typeof cited_by_count === 'number' && (
-        <Badge title="Citing Scholarly Works — papers that cite this one">
-          Cited by <strong>{cited_by_count.toLocaleString()}</strong>
-        </Badge>
-      )}
-      {typeof reference_count === 'number' && (
-        <Badge title="Reference Count — references in this paper">
-          Refs <strong>{reference_count.toLocaleString()}</strong>
-        </Badge>
-      )}
-      {is_open_access === true && (
-        <BadgeLabel variant="success" title="Open Access">
-          OA
-        </BadgeLabel>
-      )}
-      {has_funding && (
-        <BadgeLabel variant="suggestion" title={funders.length ? `Funded by ${funders.join('; ')}` : 'Funded'}>
-          Funding
-        </BadgeLabel>
-      )}
-      {has_affiliation && (
-        <BadgeLabel variant="neutral" title="Author institutions on file">
-          Affiliation
-        </BadgeLabel>
-      )}
-      {openalex_id && (
-        <ExternalIdLink
-          label="OpenAlex"
-          value={openalex_id}
-          href={`https://openalex.org/${openalex_id}`}
-          title="Open in OpenAlex"
-        />
-      )}
-      {pubmed_id && (
-        <ExternalIdLink
-          label="PMID"
-          value={pubmed_id}
-          href={`https://pubmed.ncbi.nlm.nih.gov/${pubmed_id}/`}
-          title="Open in PubMed"
-        />
-      )}
-      {pmc_id && (
-        <ExternalIdLink
-          label="PMC"
-          value={pmc_id.replace(/^PMC/i, '')}
-          href={`https://www.ncbi.nlm.nih.gov/pmc/articles/PMC${pmc_id.replace(/^PMC/i, '')}/`}
-          title="Open in PubMed Central"
-        />
-      )}
-      {mag_id && (
-        <Badge title="Microsoft Academic Graph (legacy)">
-          MAG <strong>{mag_id}</strong>
-        </Badge>
-      )}
-      {/* LibKey and WorldCat are free public link services — paste
-          a DOI and they resolve to library-subscribed full text or
-          to OA copies. No API call from us; we just build the URL. */}
-      {links.libkey && (
-        <ExternalIdLink
-          label="LibKey"
-          value="↗"
-          href={links.libkey}
-          title="Open in LibKey (free public DOI resolver)"
-        />
-      )}
-      {links.worldcat && (
-        <WorldCatChip
-          searchUrl={links.worldcat}
-          doi={links.doi}
-        />
-      )}
-      {Array.isArray(fields_of_study) && fields_of_study.slice(0, 3).map(fos => (
-        <BadgeLabel key={fos} variant="warning" title="Field of Study">
-          {fos}
-        </BadgeLabel>
-      ))}
-      {Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id) && (
-        <AuthorsPopover authors={authors} />
+
+      {/* Row 4: Additional Info — yellow/orange status pills */}
+      {hasAdditional && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-medium" style={{ color: 'var(--color-text-muted)' }}>Additional Info:</span>
+          {has_funding && (
+            <InfoPill title={funders.length ? `Funded by ${funders.join('; ')}` : 'Funded'}>
+              $ Funding
+            </InfoPill>
+          )}
+          {has_affiliation && (
+            <InfoPill title="Author institutions on file">
+              🏛 Affiliation
+            </InfoPill>
+          )}
+          {Array.isArray(fields_of_study) && fields_of_study.slice(0, 3).map(fos => (
+            <InfoPill key={fos} title="Field of Study">
+              🔬 {fos}
+            </InfoPill>
+          ))}
+          {is_open_access === true && (
+            <InfoPill title="Open Access" variant="success">
+              🔓 Open Access
+            </InfoPill>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-function Badge({ children, title }) {
+/**
+ * Round "Journal Article" / "Conference Proceedings" type chip — sits
+ * at the start of row 1, matching the screenshot's blue-link style.
+ */
+function PubTypeChip({ children }) {
   return (
     <span
-      className="px-1.5 py-0.5 rounded"
+      className="px-1.5 py-0.5 rounded font-medium"
       style={{
-        background: 'var(--color-bg-tertiary)',
+        background: 'var(--color-info-bg)',
+        color: 'var(--color-info)',
         border: '1px solid var(--color-border)',
-        color: 'var(--color-text-secondary)',
         whiteSpace: 'nowrap',
       }}
-      title={title}
     >
       {children}
     </span>
@@ -211,14 +232,78 @@ function Badge({ children, title }) {
 }
 
 /**
- * WorldCat chip with lazy OCLC resolution. The pre-built link is a
+ * Colored pill link. Variants:
+ *   - primary: blue, used for DOI / OpenAlex / PMID / PMC
+ *   - libkey:  orange flame, matches the LibKey brand colour
+ *   - worldcat: blue book, matches the WorldCat brand colour
+ */
+function PillLink({ href, children, variant = 'primary', icon, title }) {
+  const handleClick = (e) => {
+    if (!isTauri()) return
+    e.preventDefault()
+    try { openExternal(href) } catch { /* fall through */ }
+  }
+  const palette = {
+    primary: { fg: 'var(--color-link, #3b82f6)', bg: 'var(--color-info-bg)' },
+    libkey: { fg: '#ea580c', bg: 'rgba(234, 88, 12, 0.12)' },
+    worldcat: { fg: '#0ea5e9', bg: 'rgba(14, 165, 233, 0.12)' },
+  }[variant] || { fg: 'var(--color-link, #3b82f6)', bg: 'var(--color-info-bg)' }
+  return (
+    <a
+      href={href}
+      onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="px-2 py-0.5 rounded-full inline-flex items-center gap-1 hover:underline font-medium"
+      style={{
+        background: palette.bg,
+        color: palette.fg,
+        border: `1px solid ${palette.fg}33`,
+        whiteSpace: 'nowrap',
+      }}
+      title={title || ''}
+    >
+      {icon && <span aria-hidden="true">{icon}</span>}
+      <span>{children}</span>
+    </a>
+  )
+}
+
+/**
+ * Bottom-row Additional-Info pill (yellow/amber by default, matching
+ * the screenshot's Funding / Affiliation / Field of Study chips).
+ */
+function InfoPill({ children, title, variant = 'warning' }) {
+  const palette = {
+    warning: { fg: 'var(--color-warning)', bg: 'var(--color-warning-bg)' },
+    success: { fg: 'var(--color-success)', bg: 'var(--color-success-bg)' },
+    suggestion: { fg: 'var(--color-suggestion)', bg: 'var(--color-suggestion-bg)' },
+  }[variant] || { fg: 'var(--color-warning)', bg: 'var(--color-warning-bg)' }
+  return (
+    <span
+      className="px-2 py-0.5 rounded-full inline-flex items-center gap-1 font-medium"
+      style={{
+        background: palette.bg,
+        color: palette.fg,
+        border: `1px solid ${palette.fg}33`,
+        whiteSpace: 'nowrap',
+      }}
+      title={title || ''}
+    >
+      {children}
+    </span>
+  )
+}
+
+/**
+ * WorldCat pill with lazy OCLC resolution. The pre-built link is a
  * `worldcat.org/search?q={doi}` search URL — always works but lands
  * on a results page. On first hover we ask the backend for an OCLC
- * via Wikidata SPARQL; if one comes back, the chip rewrites to
+ * via Wikidata SPARQL; if one comes back, the pill rewrites to
  * `worldcat.org/oclc/{number}` (a direct work link). Cached so the
  * lookup runs at most once per DOI per session.
  */
-function WorldCatChip({ searchUrl, doi }) {
+function WorldCatPill({ searchUrl, doi }) {
   const [resolvedUrl, setResolvedUrl] = useState(null)
   const [resolving, setResolving] = useState(false)
   const startedRef = useRef(false)
@@ -247,129 +332,25 @@ function WorldCatChip({ searchUrl, doi }) {
     : resolving
       ? 'Looking up OCLC…'
       : 'Search WorldCat for this work (hover to look up exact OCLC)'
-  const handleClick = (e) => {
-    if (!isTauri()) return
-    e.preventDefault()
-    try { openExternal(href) } catch { /* fall back to native nav */ }
-  }
-  // Keyboard nav (Tab) used to fire onFocus on every chip, burst-
-  // hammering the backend with one SPARQL query per row. Hover-only
-  // means the user opts in deliberately; the keyboard path still
-  // works on click (the link itself is focusable + activatable).
   return (
-    <a
-      href={href}
-      onClick={handleClick}
-      onMouseEnter={triggerLookup}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="px-1.5 py-0.5 rounded hover:underline"
-      style={{
-        background: 'var(--color-bg-tertiary)',
-        border: '1px solid var(--color-border)',
-        color: 'var(--color-link, #3b82f6)',
-        whiteSpace: 'nowrap',
-        opacity: resolving ? 0.7 : 1,
-      }}
-      title={title}
-      aria-label={isDirect ? 'WorldCat direct link (OCLC resolved)' : 'Search WorldCat for this work'}
-    >
-      WorldCat <span aria-hidden="true">{resolving ? '…' : (isDirect ? '🎯' : '↗')}</span>
-      {isDirect && <span className="sr-only"> (direct)</span>}
-    </a>
-  )
-}
-
-// Theme-aware palette for the categorical badges. Each variant maps
-// to a paired (foreground, background) CSS variable already defined
-// in web-ui/src/index.css for BOTH light and dark themes, so the
-// badges flip cleanly with the rest of the app rather than rendering
-// fixed bright hexes that fight the dark theme.
-const _BADGE_VARIANTS = {
-  // Neutral = just-text-on-tertiary; reserved for metadata that has no
-  // strong status meaning (data source, structural facts like "author
-  // institutions on file"). Keeps the colored variants for badges that
-  // ARE status-bearing — OA, Funding, FoS.
-  neutral:       { fg: 'var(--color-text-secondary)', bg: 'var(--color-bg-tertiary)' },
-  info:          { fg: 'var(--color-info)',          bg: 'var(--color-info-bg)' },
-  success:       { fg: 'var(--color-success)',       bg: 'var(--color-success-bg)' },
-  warning:       { fg: 'var(--color-warning)',       bg: 'var(--color-warning-bg)' },
-  error:         { fg: 'var(--color-error)',         bg: 'var(--color-error-bg)' },
-  suggestion:    { fg: 'var(--color-suggestion)',    bg: 'var(--color-suggestion-bg)' },
-  // hallucination palette is reserved for the "likely fabricated"
-  // reference status in ReferenceCard.jsx and referenceStatus.js —
-  // we don't reuse it for benign metadata chips like Affiliation.
-}
-
-function BadgeLabel({ children, variant = 'info', title }) {
-  // Coloured-pill variant for category labels (source, OA, FoS,
-  // Funding, Affiliation, publication type). Picks fg + bg from the
-  // app's semantic palette so the chip respects the active theme.
-  const v = _BADGE_VARIANTS[variant] || _BADGE_VARIANTS.info
-  return (
-    <span
-      className="px-1.5 py-0.5 rounded font-medium"
-      style={{
-        background: v.bg,
-        border: '1px solid var(--color-border)',
-        color: v.fg,
-        whiteSpace: 'nowrap',
-      }}
-      title={title || ''}
-    >
-      {children}
+    <span onMouseEnter={triggerLookup} className="inline-flex">
+      <PillLink href={href} variant="worldcat" icon="📚" title={title}>
+        WorldCat {resolving ? '…' : (isDirect ? '' : '')}
+      </PillLink>
     </span>
   )
 }
 
-function ExternalIdLink({ label, value, href, title }) {
-  // In the Tauri shell we route through openExternal so the system
-  // browser opens (the embedded webview can't render arbitrary URLs).
-  // In the web build we leave the native href + target=_blank alone so
-  // a transient openExternal failure can't produce a dead click.
-  const handleClick = (e) => {
-    if (!isTauri()) return  // browser handles the click natively
-    e.preventDefault()
-    try { openExternal(href) } catch { /* fall back to native nav */ }
-  }
-  return (
-    <a
-      href={href}
-      onClick={handleClick}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="px-1.5 py-0.5 rounded hover:underline"
-      style={{
-        background: 'var(--color-bg-tertiary)',
-        border: '1px solid var(--color-border)',
-        color: 'var(--color-link, #3b82f6)',
-        whiteSpace: 'nowrap',
-      }}
-      title={title || ''}
-    >
-      {label} <strong>{value}</strong>
-    </a>
-  )
-}
-
 function AuthorsPopover({ authors }) {
-  // One pill that expands into a list of author chips on click. The
-  // ORCID and OpenAlex links open externally; click toggles so the
-  // popover works on touch too (mouseLeave-only fails on iPad).
   const [open, setOpen] = useState(false)
-  // Horizontal alignment of the floating menu: 'left' (default, pinned
-  // to the button) or 'right' (flipped because the menu would overflow
-  // the viewport's right edge).
   const [align, setAlign] = useState('left')
   const wrapperRef = useRef(null)
   const popoverRef = useRef(null)
-  // React 18 useId — guaranteed unique and SSR-safe.
   const baseId = useId()
   const triggerId = `${baseId}-trigger`
   const menuId = `${baseId}-menu`
   const withIds = authors.filter(a => a?.orcid || a?.openalex_id)
 
-  // Close on outside click + Escape.
   useEffect(() => {
     if (!open) return undefined
     const onDown = (e) => {
@@ -377,9 +358,7 @@ function AuthorsPopover({ authors }) {
         setOpen(false)
       }
     }
-    const onKey = (e) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('mousedown', onDown)
     document.addEventListener('keydown', onKey)
     return () => {
@@ -388,14 +367,10 @@ function AuthorsPopover({ authors }) {
     }
   }, [open])
 
-  // Edge-collision: after the popover renders, check if its right edge
-  // overflows the viewport; if so, flip to right-anchored.
   useEffect(() => {
     if (!open || !popoverRef.current) return
     const rect = popoverRef.current.getBoundingClientRect()
-    if (rect.right > window.innerWidth - 8) {
-      setAlign('right')
-    }
+    if (rect.right > window.innerWidth - 8) setAlign('right')
   }, [open])
 
   if (withIds.length === 0) return null
@@ -414,11 +389,11 @@ function AuthorsPopover({ authors }) {
       <button
         id={triggerId}
         onClick={() => setOpen(v => !v)}
-        className="px-1.5 py-0.5 rounded"
+        className="px-2 py-0.5 rounded-full font-medium"
         style={{
-          background: 'var(--color-bg-tertiary)',
-          border: '1px solid var(--color-border)',
-          color: 'var(--color-text-secondary)',
+          background: 'var(--color-info-bg)',
+          border: '1px solid var(--color-info)33',
+          color: 'var(--color-info)',
           whiteSpace: 'nowrap',
         }}
         title="Authors with ORCID / OpenAlex profiles"
@@ -426,7 +401,7 @@ function AuthorsPopover({ authors }) {
         aria-haspopup="menu"
         aria-controls={menuId}
       >
-        ORCID ({withIds.length})
+        🆔 ORCID ({withIds.length})
       </button>
       {open && (
         <div
@@ -446,26 +421,17 @@ function AuthorsPopover({ authors }) {
                 {a.name}
               </span>
               {a.orcid && (
-                <ExternalIdLink
-                  label="ORCID"
-                  value={a.orcid}
-                  href={`https://orcid.org/${a.orcid}`}
-                  title="Open ORCID profile"
-                />
+                <PillLink href={`https://orcid.org/${a.orcid}`} variant="primary" title="Open ORCID profile">
+                  ORCID {a.orcid}
+                </PillLink>
               )}
               {a.openalex_id && (
-                <ExternalIdLink
-                  label="OpenAlex"
-                  value={a.openalex_id}
-                  href={`https://openalex.org/${a.openalex_id}`}
-                  title="Open OpenAlex author profile"
-                />
+                <PillLink href={`https://openalex.org/${a.openalex_id}`} variant="primary" title="Open OpenAlex author profile">
+                  OpenAlex {a.openalex_id}
+                </PillLink>
               )}
               {Array.isArray(a.institutions) && a.institutions.length > 0 && (
-                <span
-                  className="text-[10px]"
-                  style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}
-                >
+                <span className="text-[10px]" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
                   {a.institutions.slice(0, 2).join(', ')}
                 </span>
               )}

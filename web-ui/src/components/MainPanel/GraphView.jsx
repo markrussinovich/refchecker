@@ -288,6 +288,13 @@ export default function GraphView({ references, paperTitle }) {
                 citationCount: it.citationCount,
                 doi: it.doi,
                 arxiv_id: it.arxiv_id,
+                // 2nd-degree verify status carried over from the backend
+                // Seen-Refs probe — without this, auto-expanded nodes
+                // rendered uniformly cyan and masked the verification
+                // signal the single-node expand path already shows.
+                verified_status: it.verified_status || 'unknown',
+                pre_verified: !!it.pre_verified,
+                times_seen: it.times_seen || 0,
                 verified_url: it.doi ? `https://doi.org/${it.doi}` : (it.arxiv_id ? `https://arxiv.org/abs/${it.arxiv_id}` : `https://www.semanticscholar.org/paper/${it.paperId}`),
               }))
             setExpandedNodes(prev => {
@@ -334,9 +341,9 @@ export default function GraphView({ references, paperTitle }) {
               color: autoExpanded ? 'var(--color-success, #16a34a)' : 'var(--color-text-secondary)',
               opacity: autoExpanding ? 0.6 : 1,
             }}
-            title={`Pre-fetch each verified ref's own references (up to 25 refs × 4 children each)`}
+            title={"Pull each ref's own bibliography (2nd-degree). Each new node is coloured by its check status (verified / unverified / hallucinated)."}
           >
-            {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ 2nd-level expanded' : 'Expand all verified refs (2nd level)'}
+            {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ Showing 2nd-degree refs' : '⊕ Show 2nd-degree refs + status'}
           </button>
         )}
         {expandedNodes.length > 0 && (

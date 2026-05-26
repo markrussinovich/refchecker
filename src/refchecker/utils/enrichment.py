@@ -131,6 +131,20 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(cited_by, int):
         enrichment['cited_by_count'] = cited_by
 
+    # Citing-Patents counter — OpenAlex exposes this in
+    # `counts_by_year[*].citing_patents` for the top-level patent-cite
+    # tally we display in the SciSpace-style header. When the field
+    # isn't present we just leave it off; the UI handles `null`
+    # gracefully ("Citing Patents" row hidden).
+    cb_year = verified_data.get('counts_by_year')
+    if isinstance(cb_year, list):
+        try:
+            citing_patents = sum(int(y.get('citing_patents') or 0) for y in cb_year if isinstance(y, dict))
+            if citing_patents > 0:
+                enrichment['citing_patents_count'] = citing_patents
+        except (TypeError, ValueError):
+            pass
+
     # reference_count: OpenAlex `referenced_works` array length; S2
     # may include `referenceCount`; Crossref `references-count`.
     ref_count: Optional[int] = None
@@ -176,12 +190,66 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # Crossref); fall back to Semantic Scholar's nested
     # publicationVenue.type only when it's actually a dict.
     pub_type = verified_data.get('type')
-    if not pub_type:
-        venue = verified_data.get('publicationVenue')
-        if isinstance(venue, dict):
-            pub_type = venue.get('type')
+    venue_struct = verified_data.get('publicationVenue')
+    if not pub_type and isinstance(venue_struct, dict):
+        pub_type = venue_struct.get('type')
     if isinstance(pub_type, str) and pub_type:
         enrichment['publication_type'] = pub_type
+
+    # Venue / journal name — OpenAlex uses `primary_location.source.display_name`,
+    # Crossref puts the journal title in `container-title` (list), Semantic Scholar
+    # uses `venue` (str) or `publicationVenue.name`.
+    venue_name = None
+    if isinstance(venue_struct, dict):
+        venue_name = venue_struct.get('name') or venue_struct.get('display_name')
+    if not venue_name:
+        primary = verified_data.get('primary_location')
+        if isinstance(primary, dict):
+            src = primary.get('source')
+            if isinstance(src, dict):
+                venue_name = src.get('display_name')
+    if not venue_name:
+        venue_name = verified_data.get('venue')
+    if not venue_name:
+        ct = verified_data.get('container-title')
+        if isinstance(ct, list) and ct:
+            venue_name = ct[0]
+        elif isinstance(ct, str):
+            venue_name = ct
+    if isinstance(venue_name, str) and venue_name.strip():
+        enrichment['venue'] = venue_name.strip()
+
+    # Publication date — pretty-printed for the venue header line.
+    # OpenAlex has `publication_date` (YYYY-MM-DD); Crossref has nested
+    # `issued.date-parts`; Semantic Scholar uses `year` + optional
+    # `publicationDate`. Output is a single human string like
+    # "Oct 1, 2021" or fallback to just the year.
+    pub_date_str = None
+    pd = verified_data.get('publication_date') or verified_data.get('publicationDate')
+    if isinstance(pd, str) and len(pd) >= 4:
+        try:
+            from datetime import datetime
+            pub_date_str = datetime.strptime(pd[:10], "%Y-%m-%d").strftime("%b %-d, %Y")
+        except (ValueError, TypeError):
+            pub_date_str = pd
+    if not pub_date_str:
+        issued = _safe_get(verified_data, 'issued', 'date-parts')
+        if isinstance(issued, list) and issued and isinstance(issued[0], list):
+            parts = issued[0]
+            try:
+                if len(parts) >= 3:
+                    from datetime import datetime
+                    pub_date_str = datetime(int(parts[0]), int(parts[1]), int(parts[2])).strftime("%b %-d, %Y")
+                elif len(parts) >= 1:
+                    pub_date_str = str(int(parts[0]))
+            except (ValueError, TypeError):
+                pass
+    if not pub_date_str:
+        yr = verified_data.get('publication_year') or verified_data.get('year')
+        if yr:
+            pub_date_str = str(yr)
+    if pub_date_str:
+        enrichment['publication_date'] = pub_date_str
 
     # Fields of study — OpenAlex concepts; S2 has `fieldsOfStudy`.
     fos = _fields_of_study_from_openalex(verified_data.get('concepts') or [])
@@ -266,10 +334,10 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             if clean_doi.startswith(prefix):
                 clean_doi = clean_doi[len(prefix):]
                 break
-        # doi.org accepts the raw DOI as the path; LibKey's resolver
-        # is documented to accept the same. Slashes inside the DOI are
-        # valid in URL path segments, so we keep them literal there.
-        links['doi'] = f"https://doi.org/{clean_doi}"
+        # Bare DOI for FE display; the resolver URL is built client-side
+        # so a single value powers both label text and href.
+        links['doi'] = clean_doi
+        links['doi_url'] = f"https://doi.org/{clean_doi}"
         links['libkey'] = f"https://libkey.io/{clean_doi}"
         # WorldCat's `q` is a query-string value: percent-encode so
         # DOIs containing `&`, `#`, `+`, or other reserved characters
