@@ -79,8 +79,9 @@ test.describe('Semantic Scholar API Key Validation', () => {
     // SS row should show "Set" (not "Edit") because mock returns has_key: false
     // The API Keys tab now hosts two blocks (Semantic Scholar then
     // Paperclip). SS is rendered first; .first() targets its Set
-    // button. Previously .last() worked when SS was the only block.
-    const setButton = page.locator('button:has-text("Set")').first();
+    // button. Use exact text-match so the sidebar's "Settings" button
+    // (substring "Set") doesn't beat the row-action "Set" button.
+    const setButton = page.getByRole('button', { name: 'Set', exact: true }).first();
     await expect(setButton).toBeVisible({ timeout: 5000 });
     await setButton.click();
 
@@ -113,8 +114,9 @@ test.describe('Semantic Scholar API Key Validation', () => {
 
     // The API Keys tab now hosts two blocks (Semantic Scholar then
     // Paperclip). SS is rendered first; .first() targets its Set
-    // button. Previously .last() worked when SS was the only block.
-    const setButton = page.locator('button:has-text("Set")').first();
+    // button. Use exact text-match so the sidebar's "Settings" button
+    // (substring "Set") doesn't beat the row-action "Set" button.
+    const setButton = page.getByRole('button', { name: 'Set', exact: true }).first();
     await expect(setButton).toBeVisible({ timeout: 5000 });
     await setButton.click();
 
