@@ -1145,7 +1145,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
       {/* Paperclip API Key — OPTIONAL biomedical full-text +
           arXiv secondary verification tier. Paste a key and the
-          next check auto-activates the tier; no other setup. */}
+          next check auto-activates the tier; no other setup.
+          Hidden in multi-user mode where Paperclip keys aren't
+          stored server-side (the backend rejects PUT/DELETE with
+          410 there). */}
+      {!multiuser && (
       <div className="py-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div className="flex items-center justify-between mb-1">
           <div>
@@ -1238,6 +1242,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 

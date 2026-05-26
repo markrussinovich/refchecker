@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { openExternal } from '../../utils/tauriBridge'
+import { useState, useEffect, useId, useRef } from 'react'
+import { openExternal, isTauri } from '../../utils/tauriBridge'
 
 /**
  * Display-only strip rendered under each verified reference showing
@@ -47,7 +47,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
       style={{ color: 'var(--color-text-secondary)' }}
     >
       {source_label && (
-        <BadgeLabel color="var(--color-accent, #3b82f6)" title={`Verified via ${source_label}`}>
+        <BadgeLabel color="#3b82f6" title={`Verified via ${source_label}`}>
           {source_label}
         </BadgeLabel>
       )}
@@ -148,10 +148,21 @@ function BadgeLabel({ children, color, title }) {
 }
 
 function ExternalIdLink({ label, value, href, title }) {
+  // In the Tauri shell we route through openExternal so the system
+  // browser opens (the embedded webview can't render arbitrary URLs).
+  // In the web build we leave the native href + target=_blank alone so
+  // a transient openExternal failure can't produce a dead click.
+  const handleClick = (e) => {
+    if (!isTauri()) return  // browser handles the click natively
+    e.preventDefault()
+    try { openExternal(href) } catch { /* fall back to native nav */ }
+  }
   return (
     <a
       href={href}
-      onClick={e => { e.preventDefault(); openExternal(href) }}
+      onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
       className="px-1.5 py-0.5 rounded hover:underline"
       style={{
         background: 'var(--color-bg-tertiary)',
@@ -168,14 +179,65 @@ function ExternalIdLink({ label, value, href, title }) {
 
 function AuthorsPopover({ authors }) {
   // One pill that expands into a list of author chips on click. The
-  // ORCID and OpenAlex links open externally; the click toggles so
-  // keyboard users can also reach them (hover-only popovers fail a11y).
+  // ORCID and OpenAlex links open externally; click toggles so the
+  // popover works on touch too (mouseLeave-only fails on iPad).
   const [open, setOpen] = useState(false)
+  // Horizontal alignment of the floating menu: 'left' (default, pinned
+  // to the button) or 'right' (flipped because the menu would overflow
+  // the viewport's right edge).
+  const [align, setAlign] = useState('left')
+  const wrapperRef = useRef(null)
+  const popoverRef = useRef(null)
+  // React 18 useId — guaranteed unique and SSR-safe.
+  const baseId = useId()
+  const triggerId = `${baseId}-trigger`
+  const menuId = `${baseId}-menu`
   const withIds = authors.filter(a => a?.orcid || a?.openalex_id)
+
+  // Close on outside click + Escape.
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // Edge-collision: after the popover renders, check if its right edge
+  // overflows the viewport; if so, flip to right-anchored.
+  useEffect(() => {
+    if (!open || !popoverRef.current) return
+    const rect = popoverRef.current.getBoundingClientRect()
+    if (rect.right > window.innerWidth - 8) {
+      setAlign('right')
+    }
+  }, [open])
+
   if (withIds.length === 0) return null
+
+  const popoverStyle = {
+    top: '100%',
+    minWidth: 260,
+    maxWidth: 360,
+    background: 'var(--color-bg-secondary)',
+    border: '1px solid var(--color-border)',
+    ...(align === 'right' ? { right: 0 } : { left: 0 }),
+  }
+
   return (
-    <div className="relative inline-block">
+    <div ref={wrapperRef} className="relative inline-block">
       <button
+        id={triggerId}
         onClick={() => setOpen(v => !v)}
         className="px-1.5 py-0.5 rounded"
         style={{
@@ -186,21 +248,19 @@ function AuthorsPopover({ authors }) {
         }}
         title="Authors with ORCID / OpenAlex profiles"
         aria-expanded={open}
+        aria-haspopup="menu"
+        aria-controls={menuId}
       >
         ORCID ({withIds.length})
       </button>
       {open && (
         <div
+          ref={popoverRef}
+          id={menuId}
+          role="menu"
+          aria-labelledby={triggerId}
           className="absolute z-50 mt-1 p-2 rounded-md shadow-lg"
-          style={{
-            top: '100%',
-            left: 0,
-            minWidth: 260,
-            maxWidth: 360,
-            background: 'var(--color-bg-secondary)',
-            border: '1px solid var(--color-border)',
-          }}
-          onMouseLeave={() => setOpen(false)}
+          style={popoverStyle}
         >
           <div className="text-[11px] font-semibold mb-1.5" style={{ color: 'var(--color-text-primary)' }}>
             Author profiles
