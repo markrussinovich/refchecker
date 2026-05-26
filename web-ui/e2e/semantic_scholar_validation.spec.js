@@ -36,6 +36,14 @@ function mockAllApi(page, overrides = {}) {
       if (method === 'DELETE') return json(route, 200, { message: 'Deleted' });
     }
 
+    // Paperclip key block also calls these on mount + save. Stub them
+    // so a missing handler doesn't 404 and trip an unrelated test.
+    if (path === '/api/settings/paperclip') {
+      if (method === 'GET') return json(route, 200, { has_key: false });
+      if (method === 'PUT') return json(route, 200, { message: 'Saved', has_key: true });
+      if (method === 'DELETE') return json(route, 200, { message: 'Deleted' });
+    }
+
     if (path.startsWith('/api/settings')) return json(route, 200, {});
     return json(route, 404, { detail: 'Unhandled mock path', path });
   });
@@ -69,17 +77,20 @@ test.describe('Semantic Scholar API Key Validation', () => {
     await openApiKeysPanel(page);
 
     // SS row should show "Set" (not "Edit") because mock returns has_key: false
-    const setButton = page.locator('button:has-text("Set")').last();
+    // The API Keys tab now hosts two blocks (Semantic Scholar then
+    // Paperclip). SS is rendered first; .first() targets its Set
+    // button. Previously .last() worked when SS was the only block.
+    const setButton = page.locator('button:has-text("Set")').first();
     await expect(setButton).toBeVisible({ timeout: 5000 });
     await setButton.click();
 
     // Fill in the API key
-    const input = page.locator('input[type="password"]').last();
+    const input = page.locator('input[type="password"]').first();
     await expect(input).toBeVisible();
     await input.fill('test_api_key_12345');
 
     // Click Save — button text changes from "Save" to the ellipsis while validating
-    const saveButton = page.locator('button:has-text("Save")').last();
+    const saveButton = page.locator('button:has-text("Save")').first();
     await expect(saveButton).toBeVisible();
     await saveButton.click();
 
@@ -100,15 +111,18 @@ test.describe('Semantic Scholar API Key Validation', () => {
 
     await openApiKeysPanel(page);
 
-    const setButton = page.locator('button:has-text("Set")').last();
+    // The API Keys tab now hosts two blocks (Semantic Scholar then
+    // Paperclip). SS is rendered first; .first() targets its Set
+    // button. Previously .last() worked when SS was the only block.
+    const setButton = page.locator('button:has-text("Set")').first();
     await expect(setButton).toBeVisible({ timeout: 5000 });
     await setButton.click();
 
-    const input = page.locator('input[type="password"]').last();
+    const input = page.locator('input[type="password"]').first();
     await expect(input).toBeVisible();
     await input.fill('invalid_key');
 
-    const saveButton = page.locator('button:has-text("Save")').last();
+    const saveButton = page.locator('button:has-text("Save")').first();
     await saveButton.click();
 
     // Error message appears after validation fails
