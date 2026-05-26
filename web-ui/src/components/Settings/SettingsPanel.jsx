@@ -120,9 +120,13 @@ export default function SettingsPanel({ theme, onThemeChange }) {
         return
       }
       setUpdateStatus({ kind: 'info', text: `Downloading ${update.version || 'update'}…` })
-      // download_and_install streams progress events back, but we don't
-      // need to subscribe — Tauri's dialog config handles the prompt.
-      await invokeTauri('plugin:updater|download_and_install', { onEvent: null })
+      // Tauri 2's `download_and_install` requires the `rid` (resource id)
+      // returned by `check` and an `onEvent` Channel for progress events.
+      // Pass both — null `onEvent` makes the plugin reject the call,
+      // missing `rid` makes it reject with "missing required key rid".
+      const { Channel } = await import('@tauri-apps/api/core')
+      const channel = new Channel()
+      await invokeTauri('plugin:updater|download_and_install', { rid: update.rid, onEvent: channel })
       setUpdateStatus({ kind: 'ok', text: `Update ${update.version || ''} installed — restarting…` })
       setTimeout(() => { invokeTauri('plugin:process|restart').catch(() => {}) }, 600)
     } catch (err) {
