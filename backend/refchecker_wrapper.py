@@ -742,6 +742,20 @@ class ProgressRefChecker:
             'Web page' if verified_via_webpage else None
         )
 
+        # Enrichment payload: cited-by counts, reference count, OA flag,
+        # OpenAlex / PubMed / MAG IDs, Field of Study, per-author ORCID.
+        # Pulled from whatever verified_data shape the matched checker
+        # returned; missing fields are left out rather than zeroed so
+        # the UI can distinguish "no signal" from "zero". Wrapped in
+        # try/except because this is a display nicety — failing here
+        # must not break the verification result.
+        enrichment_payload: Dict[str, Any] = {}
+        try:
+            from refchecker.utils.enrichment import build_enrichment
+            enrichment_payload = build_enrichment(verified_data) or {}
+        except Exception as e:
+            logger.debug("enrichment build failed: %s", e)
+
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
@@ -755,6 +769,7 @@ class ProgressRefChecker:
             "suggestions": formatted_suggestions,
             "authoritative_urls": authoritative_urls,
             "matched_database": matched_database,
+            "enrichment": enrichment_payload,
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
             "_raw_errors": errors,  # Stashed for deferred hallucination check

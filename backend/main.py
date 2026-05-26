@@ -4520,6 +4520,16 @@ async def verify_single_reference(
                 updated[dst_key] = verified_data[src_key]
         updated["matched_db"] = verified_data.get("source") or updated.get("matched_db")
         updated["authoritative_urls"] = [{"url": url}] if url else []
+        # Display-ready enrichment payload — cited-by counts, reference
+        # count, Field of Study, per-author ORCID/OpenAlex IDs, etc.
+        # Pulled by the References tab to render the metadata strip.
+        try:
+            from refchecker.utils.enrichment import build_enrichment
+            enrichment = build_enrichment(verified_data)
+            if enrichment:
+                updated["enrichment"] = enrichment
+        except Exception as e:
+            logger.debug("enrichment extraction failed: %s", e)
 
     refs[idx] = updated
     ok = await db.replace_check_references(check_id, refs, user_id=user_id)
