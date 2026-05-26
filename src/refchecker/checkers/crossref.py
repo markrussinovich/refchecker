@@ -136,6 +136,102 @@ class CrossRefReferenceChecker:
         logger.warning(f"Failed to search CrossRef after {self.max_retries} attempts")
         return []
     
+    def search_works_bibliographic(
+        self,
+        bib_string: str,
+        year: Optional[int] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fuzzy-match an unstructured citation string against CrossRef's
+        `query.bibliographic` endpoint. This is Crossref's purpose-built
+        search for raw bibliography lines — much better recall than the
+        title-only `query` parameter when the citation has odd
+        punctuation, abbreviated venue names, or page numbers mashed in.
+
+        Used as a fallback after the title-only search fails so we
+        recover papers the cleaner pipeline missed (typically when the
+        cited title in the PDF was mangled by extraction).
+        """
+        from refchecker.utils.cache_utils import cached_api_response, cache_api_response
+        cache_q = f"bib|{bib_string}|{year}|{limit}"
+        hit = cached_api_response(getattr(self, 'cache_dir', None), 'crossref', 'search_bib', cache_q)
+        if hit is not None:
+            return hit
+        result = self._search_works_bibliographic_uncached(bib_string, year, limit)
+        cache_api_response(getattr(self, 'cache_dir', None), 'crossref', 'search_bib', cache_q, result)
+        return result
+
+    def _search_works_bibliographic_uncached(
+        self,
+        bib_string: str,
+        year: Optional[int] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        if not bib_string or not bib_string.strip():
+            return []
+        endpoint = f"{self.base_url}/works"
+        params = {
+            "query.bibliographic": bib_string,
+            "rows": min(limit, 20),
+            "select": "DOI,title,author,published,published-print,published-online,issued,created,publisher,container-title,type,URL,link,abstract,subject",
+        }
+        if year:
+            # Widen the window to year±1 for the bib fallback. This is
+            # the path that catches refs the title search missed, so we
+            # want preprint-vs-journal-year drift to land inside the
+            # filter; the graded year penalty in find_best_match still
+            # downranks the candidate appropriately.
+            try:
+                y = int(year)
+                params["filter"] = f"from-pub-date:{y - 1},until-pub-date:{y + 1}"
+            except (TypeError, ValueError):
+                pass
+        for attempt in range(self.max_retries):
+            try:
+                time.sleep(self.request_delay)
+                response = requests.get(endpoint, headers=self.headers, params=params, timeout=30)
+                if response.status_code == 429:
+                    retry_after = response.headers.get('Retry-After')
+                    wait_time = int(retry_after) + 1 if retry_after else self.request_delay * (self.backoff_factor ** attempt) + 1
+                    logger.debug(f"CrossRef rate limit exceeded (bib). Retrying in {wait_time}s")
+                    time.sleep(wait_time)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+                results = data.get('message', {}).get('items', [])
+                logger.debug(f"CrossRef bibliographic search returned {len(results)} results")
+                return results
+            except requests.exceptions.RequestException as e:
+                wait_time = self.request_delay * (self.backoff_factor ** attempt) + 1
+                logger.debug(f"CrossRef bib request failed: {e}. Retrying in {wait_time:.2f}s")
+                time.sleep(wait_time)
+        logger.warning(f"CrossRef bibliographic search failed after {self.max_retries} attempts")
+        return []
+
+    def _build_bibliographic_query(self, reference: Dict[str, Any]) -> str:
+        """
+        Best-effort raw-citation string for query.bibliographic. Prefers
+        the original raw_text (what the PDF extractor pulled), then
+        falls back to a synthesised "Authors. Title. Venue. Year." line.
+        """
+        raw = (reference.get('raw_text') or '').strip()
+        if len(raw) >= 30:
+            return raw
+        bits = []
+        authors = reference.get('authors') or []
+        if isinstance(authors, str):
+            bits.append(authors)
+        elif isinstance(authors, list) and authors:
+            bits.append(', '.join(str(a) for a in authors[:5]))
+        if reference.get('title'):
+            bits.append(str(reference['title']))
+        if reference.get('venue'):
+            bits.append(str(reference['venue']))
+        if reference.get('year'):
+            bits.append(str(reference['year']))
+        return '. '.join(bits)
+
     def get_work_by_doi(self, doi: str) -> Optional[Dict[str, Any]]:
         from refchecker.utils.cache_utils import cached_api_response, cache_api_response
         hit = cached_api_response(getattr(self, 'cache_dir', None), 'crossref', 'get_by_doi', doi)
@@ -407,7 +503,7 @@ class CrossRefReferenceChecker:
             
             if processed_results:
                 best_match, best_score = find_best_match(processed_results, cleaned_title, year, authors)
-                
+
                 # Use match if score is good enough
                 if best_match and best_score >= SIMILARITY_THRESHOLD:
                     work_data = best_match
@@ -416,7 +512,47 @@ class CrossRefReferenceChecker:
                     logger.debug(f"No good title match found in CrossRef (best score: {best_score:.2f})")
             else:
                 logger.debug(f"No works found for title in CrossRef: {cleaned_title}")
-        
+
+        # Bibliographic-string fallback: when title-only search misses
+        # (typically because the PDF extractor mangled the title or the
+        # cited form differs heavily from the canonical), feed Crossref
+        # the raw citation string. query.bibliographic is purpose-built
+        # for unstructured bib lines and frequently recovers papers the
+        # title path drops.
+        if not work_data:
+            bib_query = self._build_bibliographic_query(reference)
+            if bib_query and len(bib_query) >= 20:
+                logger.debug(f"Trying CrossRef bibliographic search: {bib_query[:80]}...")
+                bib_results = self.search_works_bibliographic(bib_query, year)
+                processed_bib = []
+                for result in bib_results:
+                    result_titles = result.get('title', [])
+                    if not result_titles:
+                        continue
+                    result_title = result_titles[0] if isinstance(result_titles, list) else str(result_titles)
+                    processed_result = dict(result)
+                    processed_result['title'] = result_title
+                    processed_result['publication_year'] = self.extract_best_publication_year(result)
+                    processed_bib.append(processed_result)
+                if processed_bib:
+                    # When the title field is present we score against the
+                    # clean Crossref title and demand the normal threshold.
+                    # When title is missing entirely (extractor mangled it)
+                    # we fall back to scoring the raw bib line against the
+                    # Crossref title — an asymmetric comparison that won't
+                    # clear 0.8, so use the same 0.5 floor the S2 author-
+                    # fallback path uses.
+                    if title:
+                        cmp_title = clean_title_for_search(title)
+                        threshold = SIMILARITY_THRESHOLD
+                    else:
+                        cmp_title = reference.get('raw_text') or ''
+                        threshold = 0.5
+                    best_match, best_score = find_best_match(processed_bib, cmp_title, year, authors)
+                    if best_match and best_score >= threshold:
+                        work_data = best_match
+                        logger.debug(f"Found work via CrossRef bibliographic fallback (score {best_score:.2f})")
+
         # If we still couldn't find the work, return no verification
         if not work_data:
             logger.debug("Could not find matching work in CrossRef")
