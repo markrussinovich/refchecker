@@ -2703,8 +2703,23 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
             return False, error_msg
         
-        # For cases where cited > correct, also show count mismatch
+        # For cases where cited > correct: if every authoritative author
+        # is matched somewhere in the cited list, the DB record is just
+        # missing entries (Semantic Scholar / OpenAlex routinely truncate
+        # very long author lists). That's not a citation error, so we
+        # accept the match instead of flagging a count mismatch the user
+        # can't act on.
         elif len(cleaned_cited) > len(correct_names):
+            def _correct_covered_by_cited():
+                for correct_author in correct_names:
+                    if not any(enhanced_name_match(correct_author, c) for c in cleaned_cited):
+                        return False
+                return True
+            if _correct_covered_by_cited():
+                return True, (
+                    f"Authors match (cited lists {len(cleaned_cited)} authors; "
+                    f"DB record only has {len(correct_names)} — likely DB truncation)"
+                )
             from refchecker.utils.error_utils import format_author_count_mismatch
             display_cited = [format_author_for_display(author) for author in cleaned_cited]
             error_msg = format_author_count_mismatch(len(cleaned_cited), len(correct_names), display_cited, correct_names)
@@ -5749,6 +5764,28 @@ def normalize_venue_for_display(venue: str) -> str:
     venue_text = re.sub(r',?\s*pp?\.?\s*\\?\s*\d+.*$', '', venue_text, flags=re.IGNORECASE)  # Page info
     venue_text = re.sub(r'\s*\(print\).*$', '', venue_text, flags=re.IGNORECASE)  # Print designation
     venue_text = re.sub(r'\s*\(\d{4}\.\s*print\).*$', '', venue_text, flags=re.IGNORECASE)  # Year.Print
+    # Strip NLM-style location + format parentheticals like
+    # "(New York, N.Y. Print)", "(Online)", or pure-geographic
+    # qualifiers like "(London, England)" — these are catalog metadata,
+    # not part of the venue name, and they sandbag the word-count-ratio
+    # check downstream into reporting a false mismatch.
+    # 1. Anything containing a known format/medium keyword.
+    venue_text = re.sub(
+        r'\s*\([^)]*\b(?:print|online|internet|electronic|web|cd[- ]rom)\b[^)]*\)[\s.,;]*$',
+        '',
+        venue_text,
+        flags=re.IGNORECASE,
+    )
+    # 2. Pure geographic qualifier — capitalised tokens (City, State /
+    # City, Country) only. Restricted to titlecase words + 2-letter
+    # state codes to avoid eating a meaningful "(Special Issue)" or
+    # "(Proceedings)" parenthetical.
+    venue_text = re.sub(
+        r'\s*\(\s*[A-Z][A-Za-z.]{2,}(?:\s+[A-Z][A-Za-z.]+)*'
+        r'(?:,\s*[A-Z][A-Za-z.]+(?:\s+[A-Z][A-Za-z.]+)*)?\s*\)[\s.,;]*$',
+        '',
+        venue_text,
+    )
     
     # Remove procedural prefixes (case-insensitive)
     prefixes_to_remove = [
