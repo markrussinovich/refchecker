@@ -88,9 +88,17 @@ jobs:
           architecture: ${{ matrix.platform.python_arch }}
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform.rust_target }}
+        # Was `dtolnay/rust-toolchain@stable` — codeload.github.com has
+        # been flaking on the action archive download (intermittent
+        # 404s), wedging the whole release pipeline. Direct rustup
+        # avoids the action-archive path entirely. Runners ship with
+        # rustup pre-installed.
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.platform.rust_target }}
+          rustc --version
 
       - name: Cache cargo
         uses: actions/cache@v4
