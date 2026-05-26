@@ -155,11 +155,23 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   }
-  const handleOpenIssueWithDiagnostics = () => {
+  const handleOpenIssueWithDiagnostics = async () => {
+    // GitHub rejects ?body= URLs above ~8 KB with a "Whoa there!
+    // Your request URL is too long" page. Diagnostic JSON commonly
+    // runs 4-20 KB, so we copy the body to the clipboard and open a
+    // bare new-issue page. The placeholder body just tells the user
+    // to paste — they'll have a single Cmd/Ctrl-V to drop the full
+    // report into the issue.
     const body = diagReport
       ? '## What I expected\n\n\n## What happened\n\n\n## Diagnostic report\n\n```json\n' + diagnosticsToText(diagReport) + '\n```\n'
       : '## What I expected\n\n\n## What happened\n\n'
-    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(body)}`
+    try {
+      await navigator.clipboard.writeText(body)
+    } catch { /* clipboard may be unavailable in some contexts */ }
+    const shortBody = diagReport
+      ? '## What I expected\n\n\n## What happened\n\n\n<!-- Diagnostic report was copied to your clipboard. Paste it here (Cmd/Ctrl-V). -->\n'
+      : '## What I expected\n\n\n## What happened\n\n'
+    const url = `${REPO_URL}/issues/new?body=${encodeURIComponent(shortBody)}`
     openExternal(url)
   }
 

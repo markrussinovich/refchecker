@@ -33,8 +33,17 @@ export default function OnboardingBanner({ onOpenSettings }) {
 
   const hasLlm = Array.isArray(configs) && configs.some(c => c.has_key || c.id)
   const dbPathSet = !!settings?.db_path?.value
-  const allDone = hasLlm && (multiuser || dbPathSet)
-  if (allDone) return null
+  // Previously auto-hid the banner when LLM and DB were both
+  // configured, but that also hid the OPTIONAL bonus steps (Semantic
+  // Scholar key, Paperclip key) before the user ever saw them. Users
+  // reported "the guide on first page isn't shown" once their
+  // primary setup was done. Keep the banner visible until the user
+  // explicitly clicks Dismiss; the steps themselves render a green
+  // "configured" tag next to their checklist items so the banner
+  // doesn't nag for things already done.
+  // const allDone = hasLlm && (multiuser || dbPathSet)
+  // if (allDone) return null
+  void hasLlm; void dbPathSet
 
   const dismiss = () => {
     try { localStorage.setItem(DISMISS_KEY, '1') } catch {}

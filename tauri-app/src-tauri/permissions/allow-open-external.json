@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2/permission",
+  "identifier": "allow-open-external",
+  "description": "Permit the JS frontend to invoke the app's own `open_external` Rust command. Tauri 2.x's ACL denies custom commands by default — even ones registered in the same crate — so the capability needs to reference this permission explicitly. Without it the bridge logs 'Command open_external not allowed by ACL' and falls back to the shell plugin, which in turn fails its scope check and breaks every link click in the app.",
+  "commands": {
+    "allow": ["open_external"]
+  }
+}

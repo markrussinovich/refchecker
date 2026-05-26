@@ -11,6 +11,7 @@
   },
   "permissions": [
     "core:default",
+    "allow-open-external",
     "core:window:default",
     "core:webview:default",
     "core:app:default",

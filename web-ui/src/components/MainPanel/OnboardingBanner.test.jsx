@@ -59,9 +59,22 @@ describe('OnboardingBanner', () => {
     expect(screen.getByText(/OpenAI, Anthropic, Google, or Azure are supported/)).toBeInTheDocument()
   })
 
-  it('does not require a local database path in multiuser mode', () => {
+  it('still renders when LLM is configured — the banner now stays until the user dismisses it', () => {
+    // Previous behavior auto-hid the banner once LLM (and DB) were
+    // set, but that also hid the optional Paperclip / Semantic
+    // Scholar bonus steps the user never had a chance to discover.
+    // The banner now shows until the explicit Dismiss button is
+    // clicked.
     mocks.multiuser = true
     mocks.configs = [{ id: 1, provider: 'openai', has_key: true }]
+
+    render(<OnboardingBanner onOpenSettings={vi.fn()} />)
+
+    expect(screen.getByText('Welcome to RefChecker')).toBeInTheDocument()
+  })
+
+  it('hides only when explicitly dismissed via localStorage', () => {
+    window.localStorage.getItem.mockReturnValue('1')
 
     const { container } = render(<OnboardingBanner onOpenSettings={vi.fn()} />)
 

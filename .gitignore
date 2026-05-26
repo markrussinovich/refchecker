@@ -128,6 +128,7 @@ backend/uploads/
 !tauri-app/package-lock.json
 !tauri-app/src-tauri/tauri.conf.json
 !tauri-app/src-tauri/capabilities/*.json
+!tauri-app/src-tauri/permissions/*.json
 !tauri-app/src-tauri/icons/**/*.json
 !tauri-app/python/*.spec
 
