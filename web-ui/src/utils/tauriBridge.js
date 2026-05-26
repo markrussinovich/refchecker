@@ -21,19 +21,14 @@ export function isTauri() {
 export async function openExternal(url) {
   if (!url) return
   if (isTauri()) {
-    // Try Rust-side `open_external` first — it's a custom command we
-    // ship that shells out to the native OS opener (open / start /
-    // xdg-open). Doesn't depend on the shell plugin's scope, so it
-    // works on builds where shell:allow-open was misconfigured.
-    try {
-      if (window.__TAURI_INTERNALS__?.invoke) {
-        await window.__TAURI_INTERNALS__.invoke('open_external', { url })
-        return
-      }
-    } catch (err) {
-      console.warn('[tauriBridge] open_external failed, trying shell plugin', err)
-    }
-    // Fallback: shell plugin (works on builds with a correct ACL scope)
+    // Shell plugin first — it's a documented plugin permission with a
+    // scope (^https?://.+ / mailto:.+ / tel:.+ / file://.+) declared
+    // in capabilities/default.json. Works on every build without
+    // needing an extra ACL grant for the custom `open_external`
+    // command, which previously surfaced as "Command open_external
+    // not allowed by ACL" on Tauri 2.x. We keep open_external as a
+    // last-resort fallback in case the shell scope ever rejects a
+    // legitimate URL.
     try {
       if (window.__TAURI_INTERNALS__?.invoke) {
         await window.__TAURI_INTERNALS__.invoke('plugin:shell|open', { path: url })
@@ -44,7 +39,15 @@ export async function openExternal(url) {
         return
       }
     } catch (err) {
-      console.warn('[tauriBridge] shell.open failed, falling back to window.open', err)
+      console.warn('[tauriBridge] shell.open failed, trying open_external', err)
+    }
+    try {
+      if (window.__TAURI_INTERNALS__?.invoke) {
+        await window.__TAURI_INTERNALS__.invoke('open_external', { url })
+        return
+      }
+    } catch (err) {
+      console.warn('[tauriBridge] open_external failed, falling back to window.open', err)
     }
   }
   window.open(url, '_blank', 'noopener,noreferrer')
