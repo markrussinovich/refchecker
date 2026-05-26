@@ -106,7 +106,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         <Badge title="Bibliographic detail">{biblioLine}</Badge>
       )}
       {source_label && (
-        <BadgeLabel variant="info" title={`Verified via ${source_label}`}>
+        <BadgeLabel variant="neutral" title={`Verified via ${source_label}`}>
           {source_label}
         </BadgeLabel>
       )}
@@ -131,7 +131,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         </BadgeLabel>
       )}
       {has_affiliation && (
-        <BadgeLabel variant="hallucination" title="Author institutions on file">
+        <BadgeLabel variant="neutral" title="Author institutions on file">
           Affiliation
         </BadgeLabel>
       )}
@@ -286,12 +286,19 @@ function WorldCatChip({ searchUrl, doi }) {
 // badges flip cleanly with the rest of the app rather than rendering
 // fixed bright hexes that fight the dark theme.
 const _BADGE_VARIANTS = {
+  // Neutral = just-text-on-tertiary; reserved for metadata that has no
+  // strong status meaning (data source, structural facts like "author
+  // institutions on file"). Keeps the colored variants for badges that
+  // ARE status-bearing — OA, Funding, FoS.
+  neutral:       { fg: 'var(--color-text-secondary)', bg: 'var(--color-bg-tertiary)' },
   info:          { fg: 'var(--color-info)',          bg: 'var(--color-info-bg)' },
   success:       { fg: 'var(--color-success)',       bg: 'var(--color-success-bg)' },
   warning:       { fg: 'var(--color-warning)',       bg: 'var(--color-warning-bg)' },
   error:         { fg: 'var(--color-error)',         bg: 'var(--color-error-bg)' },
   suggestion:    { fg: 'var(--color-suggestion)',    bg: 'var(--color-suggestion-bg)' },
-  hallucination: { fg: 'var(--color-hallucination)', bg: 'var(--color-hallucination-bg)' },
+  // hallucination palette is reserved for the "likely fabricated"
+  // reference status in ReferenceCard.jsx and referenceStatus.js —
+  // we don't reuse it for benign metadata chips like Affiliation.
 }
 
 function BadgeLabel({ children, variant = 'info', title }) {
