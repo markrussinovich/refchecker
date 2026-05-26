@@ -10,7 +10,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException, Body, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
