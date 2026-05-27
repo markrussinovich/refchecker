@@ -312,11 +312,13 @@ export default function GraphView({ references, paperTitle }) {
     if (autoExpanding || !eligibleNodes.length) return
     setAutoExpanding(true)
     try {
-      // Bigger budget: cap at 60 refs (was 25), 8 children each (was 4),
-      // 6 workers in parallel (was 4). The user's complaint was that
-      // only some refs got expanded — bumping both limits ensures full
-      // bibliographies expand within a reasonable time budget.
+      // Budget: 60 refs × 8 children = 480 potential 2nd-degree nodes.
+      // v0.7.28 ran 6 workers concurrently which hammered S2's per-IP
+      // rate limit (HTTP 429). v0.7.29 drops to 2 workers + a 350ms
+      // pause between each call per worker — slower but completes
+      // reliably without rate-limit storms.
       const queue = eligibleNodes.slice(0, 60)
+      const sleep = (ms) => new Promise(r => setTimeout(r, ms))
       const worker = async () => {
         while (queue.length) {
           const node = queue.shift()
@@ -349,11 +351,17 @@ export default function GraphView({ references, paperTitle }) {
               return [...prev, ...additions.filter(a => !seen.has(a.id))]
             })
           } catch { /* skip this one */ }
+          // Pace requests to stay under S2's per-IP rate limit. With
+          // 2 workers running, this gives ~5-6 req/s sustained — well
+          // under the 100 req/5min anonymous limit and tolerated by
+          // the per-key limit too.
+          await sleep(350)
         }
       }
-      // 6 workers — enough parallelism to clear a 60-ref queue in
-      // ~2 batches without overrunning S2's per-IP rate limit.
-      await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()])
+      // 2 workers — tradeoff: slower wall-time but no 429 storms.
+      // Backend already retries on 429 with backoff, so any single
+      // burst that slips through still recovers.
+      await Promise.all([worker(), worker()])
       setAutoExpanded(true)
     } finally {
       setAutoExpanding(false)

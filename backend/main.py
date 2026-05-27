@@ -5281,23 +5281,46 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
                 llm_config["endpoint"] = default_cfg["endpoint"]
             provider = create_llm_provider(default_cfg["provider"], llm_config)
             if provider and (not hasattr(provider, "is_available") or provider.is_available()):
-                # Give the LLM the 10 strongest user refs as priming
+                # Prime with up to 15 bibliography rows so the LLM can
+                # actually pick up the subject area. Earlier 10-row cap
+                # was too thin for narrow-topic case reports (the LLM
+                # would default to broad methodology papers like PRISMA).
                 top_refs = []
-                for r in refs[:10]:
+                for r in refs[:15]:
                     bits = [r.get("title"), str(r.get("year") or "")]
                     a = r.get("authors")
                     if isinstance(a, list):
                         bits.append(", ".join(a[:3]))
                     top_refs.append(" — ".join(b for b in bits if b))
+                # Tighter prompt: explicitly demand topic specificity and
+                # forbid methodology / reporting-guideline references that
+                # apply to any paper in the field. Asks the LLM to think
+                # about what the input paper is actually ABOUT (from its
+                # title + bibliography) and pull papers that overlap on
+                # the specific subject matter.
                 prompt = (
                     f"Source paper title: {req.paper_title or '(unknown)'}\n\n"
                     "Its bibliography includes:\n"
                     + "\n".join(f"- {t}" for t in top_refs)
-                    + "\n\nSuggest up to 5 OTHER real academic papers that build on, "
-                      "extend, or are commonly cited alongside this work. Return strict "
-                      "JSON array of objects with: title, authors (array), year (int), "
-                      "venue, doi (or null), arxiv_id (or null), reason (one short "
-                      "sentence). Respond with ONLY the JSON array, no prose or markdown."
+                    + "\n\nIdentify what specific topic this paper is about (read the "
+                      "title + bibliography), then suggest up to 5 OTHER real academic "
+                      "papers that are NARROWLY on that same specific topic.\n\n"
+                      "STRICT RULES:\n"
+                      "1. Do NOT suggest methodology papers (PRISMA, CARE guidelines, "
+                      "STROBE, CONSORT, etc.) — those apply to every paper in a field "
+                      "and are not topic-similar.\n"
+                      "2. Do NOT suggest generic reviews unless the source paper IS itself "
+                      "a generic review on the same topic.\n"
+                      "3. Prefer papers that likely share specific references with the "
+                      "input (clinical case series of the same condition, the seminal "
+                      "papers the input cites, follow-up studies extending the input's "
+                      "findings).\n"
+                      "4. Each suggestion must include a DOI when one exists — papers "
+                      "without DOIs are usually too obscure to be useful.\n\n"
+                      "Return strict JSON array of objects with: title, authors (array), "
+                      "year (int), venue, doi (or null), arxiv_id (or null), reason "
+                      "(one specific sentence on why this paper is topically narrow). "
+                      "Respond with ONLY the JSON array, no prose or markdown."
                 )
                 try:
                     raw = await asyncio.to_thread(provider._call_llm, prompt)
@@ -5314,8 +5337,25 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
                     try:
                         parsed = _json.loads(text)
                         if isinstance(parsed, list):
+                            # Reporting-guideline / methodology titles
+                            # that LLMs love to suggest regardless of the
+                            # actual paper topic. These match any clinical
+                            # paper but don't share specific references
+                            # with it. Filter aggressively.
+                            _GENERIC_TITLE_TOKENS = (
+                                'prisma', 'preferred reporting items',
+                                'care guidelines', 'care checklist',
+                                'consort statement', 'strobe statement',
+                                'consort 2010', 'spirit 2013', 'tripod',
+                                'reporting guidelines for',
+                                'systematic review of systematic reviews',
+                            )
                             for item in parsed[:5]:
                                 if not isinstance(item, dict) or not item.get("title"):
+                                    continue
+                                title_lc = item["title"].lower()
+                                if any(tok in title_lc for tok in _GENERIC_TITLE_TOKENS):
+                                    logger.debug("LLM similar-papers: skipping generic methodology title %r", item["title"])
                                     continue
                                 doi_v = item.get("doi")
                                 arxiv_v = item.get("arxiv_id")
@@ -5745,21 +5785,55 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     if not pid:
         raise HTTPException(status_code=400, detail="paper_id required")
 
+    # Retry with exponential backoff on 429s. Even with the per-key
+    # quota, bursts from the graph 2nd-degree expansion (six parallel
+    # workers × dozens of refs) easily exceed S2's per-IP rate limit
+    # and surface as HTTP 429. Sleeping between retries — plus
+    # respecting the Retry-After header when S2 sets it — recovers
+    # gracefully without bubbling the error all the way to the FE.
+    import asyncio as _asyncio
+    data = None
     async with httpx.AsyncClient() as client:
-        try:
-            r = await client.get(
-                f"https://api.semanticscholar.org/graph/v1/paper/{pid}/references",
-                params={
-                    "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
-                    "limit": min(50, limit * 4),
-                },
-                headers=headers,
-                timeout=timeout,
-            )
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"S2 expand failed: {e}")
+        last_err = None
+        for attempt in range(3):
+            try:
+                r = await client.get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/{pid}/references",
+                    params={
+                        "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
+                        "limit": min(50, limit * 4),
+                    },
+                    headers=headers,
+                    timeout=timeout,
+                )
+                if r.status_code == 429:
+                    # Honour Retry-After; cap at 8s so a misbehaving
+                    # S2 doesn't park the worker indefinitely.
+                    try:
+                        wait_s = float(r.headers.get('Retry-After', '2.0'))
+                    except Exception:
+                        wait_s = 2.0
+                    wait_s = min(8.0, max(0.5, wait_s)) * (2 ** attempt)
+                    await _asyncio.sleep(wait_s)
+                    last_err = "rate-limited (429) — retrying"
+                    continue
+                r.raise_for_status()
+                data = r.json()
+                break
+            except HTTPException:
+                raise
+            except Exception as e:
+                last_err = str(e)
+                # Network-level errors get one more attempt after a short pause.
+                await _asyncio.sleep(0.5 * (2 ** attempt))
+        if data is None:
+            # Don't propagate 429 to the FE as a hard error — the graph
+            # expander runs many of these in parallel and a single
+            # over-quota response will keep popping toast notifications.
+            # Return an empty items list so the worker silently skips
+            # this node and the rest of the queue continues.
+            logger.debug("S2 /papers/expand failed after retries: %s", last_err)
+            return {"paper_id": pid, "items": [], "rate_limited": True, "detail": last_err}
 
     items = []
     for entry in (data.get("data") or []):
