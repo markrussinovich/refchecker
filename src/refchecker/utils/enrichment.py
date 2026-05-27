@@ -372,4 +372,16 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     elif verified_data.get('source'):
         enrichment['source_label'] = verified_data['source']
 
+    # Multi-source attribution: when a future cross-check phase records
+    # which sources independently confirmed the same paper, the
+    # verifier sets `_verified_by` to a list. Surface it so the FE
+    # can render "via Semantic Scholar + Paperclip + Wikipedia"
+    # instead of just the single winner. Falls back to [source_label]
+    # so the FE has one consistent shape to consume.
+    verified_by = verified_data.get('_verified_by')
+    if isinstance(verified_by, list) and verified_by:
+        enrichment['verified_by'] = [str(s) for s in verified_by if s]
+    elif enrichment.get('source_label'):
+        enrichment['verified_by'] = [enrichment['source_label']]
+
     return enrichment

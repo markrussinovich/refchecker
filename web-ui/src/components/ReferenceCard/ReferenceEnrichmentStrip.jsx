@@ -40,6 +40,7 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     fields_of_study = [],
     authors = [],
     source_label,
+    verified_by = [],
     has_funding,
     funders = [],
     has_affiliation,
@@ -82,9 +83,13 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     ? (PUB_TYPE_LABEL[publication_type.toLowerCase()] || publication_type)
     : null
 
-  // Row-1 metadata line: "Conference on Computers and Accessibility, Volume: 32, Issue: 10, Pages: 2541-2556. Oct 1, 2021"
+  // Row-1 metadata line: bibliographic detail ONLY (Volume / Issue /
+  // Pages). The venue name is intentionally NOT repeated here — the
+  // main reference-card section above already shows the venue (often
+  // as an acronym like "ANZ J Surg") and its hover surfaces the
+  // OpenAlex-resolved full name. Showing both as plain text below
+  // produced visible duplication that the user flagged.
   const bibBits = []
-  if (venue) bibBits.push(venue)
   if (biblio?.volume) bibBits.push(`Volume: ${biblio.volume}`)
   if (biblio?.issue) bibBits.push(`Issue: ${biblio.issue}`)
   if (biblio?.first_page && biblio?.last_page) {
@@ -93,7 +98,6 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     bibBits.push(`Page: ${biblio.first_page}`)
   }
   const metaLine = bibBits.join(', ')
-  const metaSuffix = publication_date ? ` ${publication_date}` : ''
 
   // Row-2 counters (inline text, not chips — matches the target screenshot)
   const counters = []
@@ -177,9 +181,14 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
             <WorldCatPill searchUrl={links.worldcat} doi={links.doi} />
           )}
           {hasAuthors && <AuthorsPopover authors={authors} />}
-          {source_label && (
+          {/* Source attribution. Prefer the multi-source list when a
+              future cross-check phase populates `verified_by` — that
+              way "via Semantic Scholar + Paperclip + Wikipedia"
+              renders without needing FE changes. Falls back to the
+              single source_label. */}
+          {(verified_by?.length || source_label) && (
             <span className="ml-1 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
-              via {source_label}
+              via {verified_by?.length ? verified_by.join(' + ') : source_label}
             </span>
           )}
         </div>
