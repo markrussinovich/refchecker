@@ -1,13 +1,21 @@
 import { useMemo } from 'react'
+import { filterIssuesForStyle } from '../../utils/formatters'
+import { useStyleStore } from '../../stores/useStyleStore'
 
 /**
  * Minimal "Citation health" chip. Live — recomputes on every edit because
  * it's derived from the current `references` prop. Pure CSS, matches the
  * app theme; intentionally NOT an SVG (user feedback: "minimalistic
  * design not svg"). Hover for the per-status breakdown.
+ *
+ * Style-aware: when the active citation style would suppress some
+ * issues (style-conforming author count, NLM venue abbreviations,
+ * cosmetic-only differences), those issues are excluded from the
+ * error/warning counts so the score moves when the user flips the
+ * dropdown. Matches what the Corrections view shows.
  */
 
-function computeScore(references) {
+function computeScore(references, style) {
   const list = Array.isArray(references) ? references : []
   const total = list.length
   if (total === 0) return { score: null, total: 0 }
@@ -20,8 +28,10 @@ function computeScore(references) {
     const status = r?.status || ''
     if (status === 'verified') verified += 1
     if (status === 'hallucinated' || r?.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') halluc += 1
-    if ((r?.errors || []).length > 0) errors += 1
-    if ((r?.warnings || []).length > 0) warnings += 1
+    const styleFilteredErrors = filterIssuesForStyle(r?.errors, r, style)
+    const styleFilteredWarnings = filterIssuesForStyle(r?.warnings, r, style)
+    if ((styleFilteredErrors || []).length > 0) errors += 1
+    if ((styleFilteredWarnings || []).length > 0) warnings += 1
   }
   const verifyRatio = verified / total
   const cleanRatio = (total - errors - halluc) / total
@@ -41,7 +51,8 @@ function colorFor(score) {
 }
 
 export default function HealthBadge({ references }) {
-  const stats = useMemo(() => computeScore(references), [references])
+  const activeFormat = useStyleStore(s => s.format)
+  const stats = useMemo(() => computeScore(references, activeFormat), [references, activeFormat])
   const color = colorFor(stats.score)
   const tooltip = stats.total === 0
     ? 'No references checked yet'

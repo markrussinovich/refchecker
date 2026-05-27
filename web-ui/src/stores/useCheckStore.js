@@ -296,13 +296,21 @@ export const useCheckStore = create((set, get) => ({
   },
 
   // Re-insert a previously-removed reference so the Undo path can
-  // render it immediately. reloadCheck() afterwards reconciles indices
-  // with the server, so we don't bother renumbering here.
-  restoreReference: (refData) => {
+  // render it immediately. When `insertAt` is a number, splice the
+  // ref back at that 0-based position (matches the backend's
+  // insert_at_index honouring); otherwise append. reloadCheck()
+  // afterwards reconciles indices with the server.
+  restoreReference: (refData, insertAt) => {
     if (!refData) return
-    set(state => ({
-      references: [...(state.references || []), { ...refData }],
-    }))
+    set(state => {
+      const list = [...(state.references || [])]
+      if (typeof insertAt === 'number' && insertAt >= 0 && insertAt <= list.length) {
+        list.splice(insertAt, 0, { ...refData })
+      } else {
+        list.push({ ...refData })
+      }
+      return { references: list }
+    })
   },
 
   updateStats: (stats) => {

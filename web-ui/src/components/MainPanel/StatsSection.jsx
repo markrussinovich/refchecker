@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { 
+import { useStyleStore } from '../../stores/useStyleStore'
+import {
   exportResultsAsMarkdown,
   exportResultsAsPlainText,
   exportResultsAsBibtex,
@@ -12,6 +13,7 @@ import {
   exportCorrectedListAsStyle,
   sortReferencesForExport,
   REFERENCE_SORT_MODES,
+  filterIssuesForStyle,
   downloadAsFile
 } from '../../utils/formatters'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
@@ -147,9 +149,60 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
   const activeFilterId = isFilterActive ? statusFilter[0] : null
   const activeFilter = activeFilterId ? allFilters[activeFilterId] : null
 
+  // Style-aware summary counters. When the active citation style would
+  // suppress an issue (style-conforming author count, NLM venue
+  // abbreviation, cosmetic-only), the issue is filtered out of the
+  // counts so the chips and progress totals move on style change.
+  const styleFormat = useStyleStore(s => s.format)
+  const styleFilteredReferences = useMemo(() => {
+    if (!Array.isArray(references) || references.length === 0) return references || []
+    return references.map(r => {
+      if (!r) return r
+      const filteredErrors = filterIssuesForStyle(r.errors, r, styleFormat)
+      const filteredWarnings = filterIssuesForStyle(r.warnings, r, styleFormat)
+      if (filteredErrors === r.errors && filteredWarnings === r.warnings) return r
+      return { ...r, errors: filteredErrors, warnings: filteredWarnings }
+    })
+  }, [references, styleFormat])
+
+  // Suppress style-filtered issue totals from the persisted stats too —
+  // otherwise the backend's stats.errors_count/warnings_count would
+  // leak through buildReferenceSummary's fallback path even when the
+  // derived per-ref counts say zero. Recompute totals from the
+  // filtered refs.
+  const styleAwareStats = useMemo(() => {
+    if (!stats || !Array.isArray(styleFilteredReferences)) return stats
+    let errorsCount = 0
+    let warningsCount = 0
+    let suggestionsCount = 0
+    let refsWithErrors = 0
+    let refsWithWarningsOnly = 0
+    let refsWithSuggestionsOnly = 0
+    for (const r of styleFilteredReferences) {
+      const e = (r?.errors || []).filter(i => (i?.error_type || '').toLowerCase() !== 'unverified').length
+      const w = (r?.warnings || []).length
+      const s = (r?.suggestions || []).length
+      errorsCount += e
+      warningsCount += w
+      suggestionsCount += s
+      if (e > 0) refsWithErrors += 1
+      else if (w > 0) refsWithWarningsOnly += 1
+      else if (s > 0) refsWithSuggestionsOnly += 1
+    }
+    return {
+      ...stats,
+      errors_count: errorsCount,
+      warnings_count: warningsCount,
+      suggestions_count: suggestionsCount,
+      refs_with_errors: refsWithErrors,
+      refs_with_warnings_only: refsWithWarningsOnly,
+      refs_with_suggestions_only: refsWithSuggestionsOnly,
+    }
+  }, [stats, styleFilteredReferences])
+
   const summaryCounts = useMemo(
-    () => buildReferenceSummary({ stats, references, isComplete }),
-    [stats, references, isComplete]
+    () => buildReferenceSummary({ stats: styleAwareStats, references: styleFilteredReferences, isComplete }),
+    [styleAwareStats, styleFilteredReferences, isComplete]
   )
 
   const refsWithErrors = summaryCounts.references.errors

@@ -109,8 +109,17 @@ export default function useReferenceActions() {
     // Snapshot the ref so Undo can re-create it. We stash the metadata
     // the add endpoint needs, plus a synthetic key so the UI can render
     // a stable list of removed items.
+    // Capture the original 0-based position so Undo can put the ref
+    // back exactly where it was, not at the bottom of the list.
+    const storeRefs = useCheckStore.getState().references || []
+    let originalPosition = storeRefs.findIndex(r => (
+      String(r?.id ?? '') === ident ||
+      String(r?.index ?? '') === ident
+    ))
+    if (originalPosition === -1) originalPosition = typeof i === 'number' ? i : 0
     const snapshot = {
       _stashKey: `${ident}-${Date.now()}`,
+      _originalPosition: originalPosition,
       title: ref.title || '',
       authors: Array.isArray(ref.authors) ? ref.authors.join(', ') : (ref.authors || ''),
       year: ref.year ?? '',
@@ -170,7 +179,7 @@ export default function useReferenceActions() {
       suggestions: [{ message: 'Restoring…', error_type: 'manual' }],
     }
     try {
-      useCheckStore.getState().restoreReference(placeholder)
+      useCheckStore.getState().restoreReference(placeholder, snapshot._originalPosition)
     } catch { /* store may not have action yet */ }
     // Pop from the trash strip right away — user sees the placeholder
     // in the list and the trash entry gone in the same render.
@@ -183,6 +192,9 @@ export default function useReferenceActions() {
         doi: (snapshot.doi || '').trim() || null,
         arxiv_id: (snapshot.arxiv_id || '').trim() || null,
         venue: (snapshot.venue || '').trim() || null,
+        // Send the original position so the backend inserts there,
+        // not at the bottom. Falls back to append when None.
+        insert_at_index: typeof snapshot._originalPosition === 'number' ? snapshot._originalPosition : null,
       })
       const addedId = res?.data?.id ?? res?.data?.reference?.id ?? null
       // Re-verify runs in the background — don't await. The reload

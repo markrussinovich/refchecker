@@ -4230,6 +4230,10 @@ class _AddReferenceRequest(BaseModel):
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     cited_url: Optional[str] = None
+    # Insertion position. None = append (default, "Add reference"
+    # button). The "Undo Remove" flow passes the original position so
+    # the restored ref lands back where it was, not at the bottom.
+    insert_at_index: Optional[int] = None
 
 
 async def _resolve_doi_via_crossref(doi: str) -> Optional[Dict[str, Any]]:
@@ -4476,7 +4480,20 @@ async def add_reference_to_check(
         "warnings": [],
         "suggestions": [{"message": "Added manually — re-run the check or click Verify to validate.", "error_type": "manual"}],
     }
-    refs.append(new_ref)
+    # Insert at the requested position when the caller specified one
+    # (Undo Remove sends the original index). Append otherwise so the
+    # default "Add reference" button keeps adding at the bottom.
+    if payload.insert_at_index is not None and 0 <= payload.insert_at_index <= len(refs):
+        refs.insert(payload.insert_at_index, new_ref)
+        # Re-number every ref's `index` field so the visible numbering
+        # stays contiguous after the insertion. Without this the
+        # restored ref would have the next-available number but sit
+        # earlier in the list, which confuses citation-number lookups.
+        for i, r in enumerate(refs):
+            r["index"] = i + 1
+        new_ref["index"] = payload.insert_at_index + 1
+    else:
+        refs.append(new_ref)
     ok = await db.replace_check_references(check_id, refs, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to persist reference")

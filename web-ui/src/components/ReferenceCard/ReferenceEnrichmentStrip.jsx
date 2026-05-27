@@ -119,12 +119,18 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
 
   return (
     <div className="flex flex-col gap-1.5 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-      {/* Row 1: publication type + venue + bibliographic. The year is
-          intentionally NOT repeated here — the main reference-card
-          section above already renders it on its own line. */}
+      {/* Row 1: "Type:" label + publication type chip + bibliographic
+          detail. The type chip used to float alone with no context; now
+          it's labelled "Type:" so the user can tell what it means at
+          a glance. Year is NOT repeated here — main metadata above. */}
       {(prettyPubType || metaLine) && (
         <div className="flex flex-wrap items-center gap-2">
-          {prettyPubType && <PubTypeChip>{prettyPubType}</PubTypeChip>}
+          {prettyPubType && (
+            <>
+              <span style={{ color: 'var(--color-text-muted)' }}>Type:</span>
+              <PubTypeChip>{prettyPubType}</PubTypeChip>
+            </>
+          )}
           {metaLine && (
             <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}</span>
           )}
@@ -256,23 +262,46 @@ function PillLink({ href, children, variant = 'primary', icon, title }) {
     e.preventDefault()
     try { openExternal(href) } catch { /* fall through */ }
   }
+  // Theme-friendly palette. `primary` uses the app's info palette
+  // so PMC / OpenAlex / PMID share the same blue accent. `libkey`
+  // and `worldcat` keep their brand-ish hue but at semi-transparent
+  // tint so the chips don't fight the rest of the theme — matches
+  // the user's reference screenshot (light tinted backgrounds,
+  // coloured text).
   const palette = {
-    primary: { fg: 'var(--color-link, #3b82f6)', bg: 'var(--color-info-bg)' },
-    libkey: { fg: '#ea580c', bg: 'rgba(234, 88, 12, 0.12)' },
-    worldcat: { fg: '#0ea5e9', bg: 'rgba(14, 165, 233, 0.12)' },
-  }[variant] || { fg: 'var(--color-link, #3b82f6)', bg: 'var(--color-info-bg)' }
+    primary: {
+      fg: 'var(--color-link, #3b82f6)',
+      bg: 'var(--color-info-bg)',
+      border: 'var(--color-info, #3b82f6)',
+    },
+    libkey: {
+      fg: '#ea580c',
+      bg: 'rgba(234, 88, 12, 0.10)',
+      border: 'rgba(234, 88, 12, 0.45)',
+    },
+    worldcat: {
+      fg: '#16a34a',
+      bg: 'rgba(22, 163, 74, 0.10)',
+      border: 'rgba(22, 163, 74, 0.45)',
+    },
+  }[variant] || {
+    fg: 'var(--color-link, #3b82f6)',
+    bg: 'var(--color-info-bg)',
+    border: 'var(--color-info, #3b82f6)',
+  }
   return (
     <a
       href={href}
       onClick={handleClick}
       target="_blank"
       rel="noopener noreferrer"
-      className="px-2 py-0.5 rounded-full inline-flex items-center gap-1 hover:underline font-medium"
+      className="px-2 py-0.5 rounded-full inline-flex items-center gap-1 hover:opacity-80 font-medium transition-opacity"
       style={{
         background: palette.bg,
         color: palette.fg,
-        border: `1px solid ${palette.fg}33`,
+        border: `1px solid ${palette.border}`,
         whiteSpace: 'nowrap',
+        textDecoration: 'none',
       }}
       title={title || ''}
     >
