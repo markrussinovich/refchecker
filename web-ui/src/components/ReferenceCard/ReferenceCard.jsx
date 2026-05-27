@@ -1174,30 +1174,140 @@ function AuthorsLine({ authors, enrichedAuthors }) {
         }
         return (
           <span key={`${name}-${i}`}>
-            {href ? (
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handle}
-                title={tooltip}
-                style={{
-                  color: 'var(--color-text-secondary)',
-                  textDecorationColor: 'var(--color-link, #3b82f6)',
-                  textDecorationStyle: 'dotted',
-                  textUnderlineOffset: '3px',
-                  textDecorationLine: 'underline',
-                }}
-              >
-                {name}
-              </a>
-            ) : (
-              <span title={tooltip || undefined}>{name}</span>
-            )}
+            <AuthorChip name={name} display={name} e={e} href={href} onClickHref={handle} tooltipFallback={tooltip} />
             {i < visible.length - 1 ? ', ' : (overflow ? ', et al.' : '')}
           </span>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * Single author chip with hover popover. Renders the name inline with
+ * a dotted underline (matching the rest of the card), and on hover
+ * pops up a small card with the author's full name, ORCID, OpenAlex
+ * / Semantic Scholar author IDs, and first affiliation. Click opens
+ * the profile link in the system browser.
+ */
+function AuthorChip({ name, e, href, onClickHref, tooltipFallback }) {
+  const [open, setOpen] = useState(false)
+  const wrapperRef = useRef(null)
+  const enterTimer = useRef(null)
+  const leaveTimer = useRef(null)
+  // 250ms hover delay so brushing past names doesn't flash the popover.
+  const onEnter = () => {
+    if (leaveTimer.current) { clearTimeout(leaveTimer.current); leaveTimer.current = null }
+    if (!e) return
+    enterTimer.current = setTimeout(() => setOpen(true), 250)
+  }
+  const onLeave = () => {
+    if (enterTimer.current) { clearTimeout(enterTimer.current); enterTimer.current = null }
+    leaveTimer.current = setTimeout(() => setOpen(false), 120)
+  }
+  useEffect(() => () => {
+    if (enterTimer.current) clearTimeout(enterTimer.current)
+    if (leaveTimer.current) clearTimeout(leaveTimer.current)
+  }, [])
+
+  const orcidUrl = e?.orcid ? `https://orcid.org/${e.orcid}` : null
+  const openalexUrl = e?.openalex_id ? `https://openalex.org/${e.openalex_id}` : null
+  const s2Url = e?.s2_author_id ? `https://www.semanticscholar.org/author/${e.s2_author_id}` : null
+
+  return (
+    <span
+      ref={wrapperRef}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{ position: 'relative', display: 'inline-block' }}
+    >
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onClickHref}
+          title={!e ? tooltipFallback : undefined}
+          style={{
+            color: 'var(--color-text-secondary)',
+            textDecorationColor: 'var(--color-link, #3b82f6)',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '3px',
+            textDecorationLine: 'underline',
+          }}
+        >
+          {name}
+        </a>
+      ) : (
+        <span title={tooltipFallback || undefined}>{name}</span>
+      )}
+      {open && e && (
+        <div
+          role="tooltip"
+          className="rounded-md shadow-lg p-2 text-xs"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: 6,
+            zIndex: 60,
+            minWidth: 260,
+            maxWidth: 360,
+            background: 'var(--color-bg-primary)',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text-primary)',
+            whiteSpace: 'normal',
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{e.name || name}</div>
+          {Array.isArray(e.institutions) && e.institutions.length > 0 && (
+            <div style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: 6 }}>
+              {e.institutions.slice(0, 2).join(' · ')}
+            </div>
+          )}
+          <div className="space-y-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {orcidUrl && (
+              <ProfileRow label="ORCID" value={e.orcid} href={orcidUrl} />
+            )}
+            {openalexUrl && (
+              <ProfileRow label="OpenAlex" value={e.openalex_id} href={openalexUrl} />
+            )}
+            {s2Url && !orcidUrl && !openalexUrl && (
+              <ProfileRow label="Semantic Scholar" value={e.s2_author_id} href={s2Url} />
+            )}
+          </div>
+          {(orcidUrl || openalexUrl || s2Url) && (
+            <div className="mt-1.5 text-[10px]" style={{ color: 'var(--color-text-muted)' }}>
+              Click name to open profile in browser
+            </div>
+          )}
+        </div>
+      )}
+    </span>
+  )
+}
+
+function ProfileRow({ label, value, href }) {
+  return (
+    <div className="flex items-baseline gap-2 leading-snug">
+      <span style={{ color: 'var(--color-text-muted)', minWidth: 64 }}>{label}:</span>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(ev) => {
+          if (!isTauri()) return
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+          ev.preventDefault()
+          openExternal(href)
+        }}
+        style={{
+          color: 'var(--color-link, #3b82f6)',
+          wordBreak: 'break-all',
+        }}
+      >
+        {value}
+      </a>
     </div>
   )
 }

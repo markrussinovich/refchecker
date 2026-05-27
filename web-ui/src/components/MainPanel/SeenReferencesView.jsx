@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { listSeenReferences, clearSeenReferences } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
+import { useHistoryStore } from '../../stores/useHistoryStore'
 
 /**
  * "Seen References" — a single global view of every reference RefChecker
@@ -80,10 +81,28 @@ export default function SeenReferencesView() {
     return raw
   }
 
+  // Resolve an outbound URL for every row. Priority:
+  //   DOI → arXiv → verified_url → S2 search by title (always-on
+  //   fallback so every row has an Open button, even refs that landed
+  //   in the library via the hash-only identity key).
   const renderUrl = (item) => {
     if (item.doi) return `https://doi.org/${item.doi.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '')}`
     if (item.arxiv_id) return `https://arxiv.org/abs/${item.arxiv_id}`
-    return item.verified_url || null
+    if (item.verified_url) return item.verified_url
+    if (item.title) return `https://www.semanticscholar.org/search?q=${encodeURIComponent(item.title)}`
+    return null
+  }
+
+  // Jump the user to the originating check in the History sidebar.
+  // Falls back to opening the check via selectCheck when we have an id;
+  // if the row has no last_seen_check_id (older rows or pre-v0.7.27
+  // upserts) the chip is hidden.
+  const selectCheck = useHistoryStore(s => s.selectCheck)
+  const openSourceCheck = (checkId) => {
+    if (!checkId) return
+    try { selectCheck?.(checkId, { force: true }) } catch { /* */ }
+    // Bounce the user out of Seen Refs back to Current check view.
+    window.dispatchEvent(new CustomEvent('refchecker:switch-to-current'))
   }
 
   return (
@@ -197,26 +216,45 @@ export default function SeenReferencesView() {
                 </div>
                 <div className="text-[11px] flex-shrink-0 text-right" style={{ color: 'var(--color-text-muted)' }}>
                   seen <strong style={{ color: 'var(--color-text-primary)' }}>{it.times_seen}×</strong>
+                  {it.last_seen_check_id && (
+                    <div className="mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => openSourceCheck(it.last_seen_check_id)}
+                        title={it.last_seen_paper_title
+                          ? `Open the check this ref was last seen in: "${it.last_seen_paper_title}"`
+                          : 'Open the check this ref was last seen in'}
+                        className="underline hover:no-underline"
+                        style={{ color: 'var(--color-accent, #3b82f6)' }}
+                      >
+                        in: {it.last_seen_paper_title
+                          ? (it.last_seen_paper_title.length > 28 ? it.last_seen_paper_title.slice(0, 28) + '…' : it.last_seen_paper_title)
+                          : `check #${it.last_seen_check_id}`}
+                      </button>
+                    </div>
+                  )}
                 </div>
-                {url && (
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => {
-                      if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
-                        e.preventDefault()
-                        openExternal(url)
-                      }
-                    }}
-                    className="text-xs px-2 py-0.5 rounded border flex-shrink-0"
-                    style={{
-                      backgroundColor: 'var(--color-bg-primary)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-accent, #3b82f6)',
-                    }}
-                  >Open</a>
-                )}
+                <a
+                  href={url || '#'}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => {
+                    if (!url) { e.preventDefault(); return }
+                    if (typeof window !== 'undefined' && window.__TAURI_INTERNALS__) {
+                      e.preventDefault()
+                      openExternal(url)
+                    }
+                  }}
+                  className="text-xs px-2 py-0.5 rounded border flex-shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-bg-primary)',
+                    borderColor: 'var(--color-border)',
+                    color: url ? 'var(--color-accent, #3b82f6)' : 'var(--color-text-muted)',
+                    cursor: url ? 'pointer' : 'not-allowed',
+                    opacity: url ? 1 : 0.5,
+                  }}
+                  title={url ? 'Open external link' : 'No outbound URL — ref has no DOI / arXiv ID and no title to search by'}
+                >Open</a>
               </div>
             )
           })}

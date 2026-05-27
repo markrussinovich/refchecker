@@ -889,7 +889,15 @@ class ProgressRefChecker:
                 # as a top-level script (sidecar PyInstaller bundle path),
                 # which silently skipped every Seen-Refs write.
                 from backend.database import db as _db
-                upsert_key = await _db.upsert_verified_reference(data)
+                # Pass the source check_id + paper title so the seen-refs
+                # row remembers WHERE this ref was last seen. The Seen
+                # References tab uses these to link each row back to
+                # the originating check.
+                upsert_key = await _db.upsert_verified_reference(
+                    data,
+                    check_id=getattr(self, "check_id", None),
+                    paper_title=getattr(self, "_current_paper_title", None) or getattr(self, "paper_title", None),
+                )
                 if upsert_key is not None:
                     if not hasattr(self, "_global_cache_writes"):
                         self._global_cache_writes = 0

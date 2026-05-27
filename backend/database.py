@@ -457,12 +457,24 @@ class Database:
                     result_json TEXT NOT NULL,
                     times_seen INTEGER DEFAULT 1,
                     first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_check_id INTEGER,
+                    last_seen_paper_title TEXT
                 )
             """)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_doi ON verified_reference_identity(doi)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_arxiv ON verified_reference_identity(arxiv_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_vri_last_seen ON verified_reference_identity(last_seen DESC)")
+            # Best-effort column add for existing installs — ignore errors
+            # since the columns may already exist from a previous startup.
+            for ddl in (
+                "ALTER TABLE verified_reference_identity ADD COLUMN last_seen_check_id INTEGER",
+                "ALTER TABLE verified_reference_identity ADD COLUMN last_seen_paper_title TEXT",
+            ):
+                try:
+                    await db.execute(ddl)
+                except Exception:
+                    pass
 
             # Users table (for multi-user mode)
             await db.execute("""
@@ -770,12 +782,12 @@ class Database:
         if current_version < 3:
             try:
                 async with db.execute(
-                    "SELECT id, results_json FROM check_history "
+                    "SELECT id, paper_title, results_json FROM check_history "
                     "WHERE status IN ('completed', 'cancelled') AND results_json IS NOT NULL"
                 ) as ch_cur:
                     backfilled = 0
                     skipped = 0
-                    async for check_id, results_json in ch_cur:
+                    async for check_id, paper_title, results_json in ch_cur:
                         if not results_json:
                             continue
                         try:
@@ -804,11 +816,14 @@ class Database:
                                     INSERT INTO verified_reference_identity
                                         (identity_key, title, authors, year, doi, arxiv_id, venue,
                                          verified_url, matched_db, status, result_json,
-                                         times_seen, first_seen, last_seen)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                         times_seen, first_seen, last_seen,
+                                         last_seen_check_id, last_seen_paper_title)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
                                     ON CONFLICT(identity_key) DO UPDATE SET
                                         times_seen = verified_reference_identity.times_seen + 1,
-                                        last_seen = CURRENT_TIMESTAMP
+                                        last_seen = CURRENT_TIMESTAMP,
+                                        last_seen_check_id = COALESCE(excluded.last_seen_check_id, verified_reference_identity.last_seen_check_id),
+                                        last_seen_paper_title = COALESCE(excluded.last_seen_paper_title, verified_reference_identity.last_seen_paper_title)
                                     """,
                                     (
                                         ident,
@@ -822,6 +837,8 @@ class Database:
                                         ref.get("matched_db") or ref.get("_matched_database"),
                                         ref.get("status") or "",
                                         json.dumps(ref, default=str),
+                                        check_id,
+                                        paper_title,
                                     ),
                                 )
                                 backfilled += 1
@@ -1177,7 +1194,12 @@ class Database:
             written = 0
             for ref in (results or []):
                 try:
-                    key = await self.upsert_verified_reference(ref)
+                    # Stamp the source check_id + paper_title on each
+                    # backstop write so Seen Refs rows link back to
+                    # the originating check.
+                    key = await self.upsert_verified_reference(
+                        ref, check_id=check_id, paper_title=paper_title,
+                    )
                     if key is not None:
                         written += 1
                 except Exception as e:
@@ -1942,12 +1964,22 @@ class Database:
             return f"hash:{digest}"
         return None
 
-    async def upsert_verified_reference(self, ref: Dict[str, Any]) -> Optional[str]:
+    async def upsert_verified_reference(
+        self,
+        ref: Dict[str, Any],
+        check_id: Optional[int] = None,
+        paper_title: Optional[str] = None,
+    ) -> Optional[str]:
         """Persist a single verified reference into the global identity index.
 
         Idempotent — repeated calls for the same identity bump `times_seen`
         and refresh `last_seen` without touching first_seen. Skips refs
         without a safe identity key.
+
+        ``check_id`` and ``paper_title`` (when provided) are stored as
+        ``last_seen_check_id`` / ``last_seen_paper_title`` so the Seen
+        Refs view can link each row back to the most recent check that
+        produced it.
         """
         ident = self.reference_identity_key(ref)
         if not ident:
@@ -1971,8 +2003,9 @@ class Database:
                 INSERT INTO verified_reference_identity
                     (identity_key, title, authors, year, doi, arxiv_id, venue,
                      verified_url, matched_db, status, result_json,
-                     times_seen, first_seen, last_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                     times_seen, first_seen, last_seen,
+                     last_seen_check_id, last_seen_paper_title)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)
                 ON CONFLICT(identity_key) DO UPDATE SET
                     title = excluded.title,
                     authors = excluded.authors,
@@ -1983,7 +2016,9 @@ class Database:
                     status = excluded.status,
                     result_json = excluded.result_json,
                     times_seen = verified_reference_identity.times_seen + 1,
-                    last_seen = CURRENT_TIMESTAMP
+                    last_seen = CURRENT_TIMESTAMP,
+                    last_seen_check_id = COALESCE(excluded.last_seen_check_id, verified_reference_identity.last_seen_check_id),
+                    last_seen_paper_title = COALESCE(excluded.last_seen_paper_title, verified_reference_identity.last_seen_paper_title)
                 """,
                 (
                     ident,
@@ -1997,6 +2032,8 @@ class Database:
                     ref.get("matched_db"),
                     status,
                     result_json,
+                    check_id,
+                    paper_title,
                 ),
             )
             await db.commit()
@@ -2025,15 +2062,22 @@ class Database:
 
     async def list_verified_references(self, limit: int = 200, offset: int = 0, q: Optional[str] = None) -> List[Dict[str, Any]]:
         """Page through the identity-keyed reference table for the Seen Refs tab."""
+        # Pull last_seen_check_id / last_seen_paper_title via safe column
+        # references — the columns may not exist on very old DBs since
+        # they were added in v0.7.27. SELECT lists them; the ALTER
+        # path in init runs first so on a real install they're present.
+        select_cols = (
+            "identity_key, title, authors, year, doi, arxiv_id, venue, "
+            "verified_url, matched_db, status, times_seen, "
+            "first_seen, last_seen, last_seen_check_id, last_seen_paper_title"
+        )
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
             if q:
                 like = f"%{q.lower()}%"
                 cursor = await db.execute(
-                    """
-                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue,
-                           verified_url, matched_db, status, times_seen,
-                           first_seen, last_seen
+                    f"""
+                    SELECT {select_cols}
                     FROM verified_reference_identity
                     WHERE LOWER(title) LIKE ? OR LOWER(authors) LIKE ? OR LOWER(doi) LIKE ?
                     ORDER BY last_seen DESC
@@ -2043,10 +2087,8 @@ class Database:
                 )
             else:
                 cursor = await db.execute(
-                    """
-                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue,
-                           verified_url, matched_db, status, times_seen,
-                           first_seen, last_seen
+                    f"""
+                    SELECT {select_cols}
                     FROM verified_reference_identity
                     ORDER BY last_seen DESC
                     LIMIT ? OFFSET ?
