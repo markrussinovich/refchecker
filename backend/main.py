@@ -5413,6 +5413,17 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
         async with _httpx.AsyncClient() as _client:
             overlap_sem = asyncio.Semaphore(6)
 
+            # Build identity→title map from the input refs so we can
+            # surface WHICH refs each candidate shares, not just the
+            # count. The FE renders these as a "Shared refs:" list.
+            input_id_to_title = {}
+            for r in refs:
+                k = _ref_identity(r)
+                if k:
+                    t = (r.get("title") or "").strip()
+                    if t:
+                        input_id_to_title[k] = t[:160]
+
             async def _score(entry):
                 async with overlap_sem:
                     cand_set = await _candidate_refs(_client, entry)
@@ -5424,6 +5435,11 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
                     len(shared_refs) / max(1, len(union)) if union else 0.0
                 )
                 entry["candidate_ref_count"] = len(cand_set)
+                # Up to 10 shared-ref titles for the FE expandable list.
+                entry["shared_refs_titles"] = [
+                    input_id_to_title[k] for k in list(shared_refs)[:10]
+                    if k in input_id_to_title
+                ]
 
             await asyncio.gather(*[_score(e) for e in ranked])
     except Exception as e:

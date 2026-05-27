@@ -261,9 +261,25 @@ export default function GraphView({ references, paperTitle }) {
   // an explicit toggle.
   const [autoExpanding, setAutoExpanding] = useState(false)
   const [autoExpanded, setAutoExpanded] = useState(false)
-  const eligibleNodes = useMemo(() => (
-    Object.values(serverGraph?.byId || {}).filter(n => n?.paperId)
-  ), [serverGraph])
+  // Eligible-for-expansion: prefer serverGraph nodes (already paperId-
+  // keyed) but fall back to any ref with a DOI / arxiv id so the
+  // 2nd-degree toggle still shows up for bibliographies where the S2
+  // co-citation graph endpoint returned nothing (e.g. .docx uploads
+  // with bare metadata, or papers S2 hasn't indexed yet).
+  const eligibleNodes = useMemo(() => {
+    const fromGraph = Object.values(serverGraph?.byId || {}).filter(n => n?.paperId)
+    if (fromGraph.length) return fromGraph
+    // Synthesize paperId-shaped entries from the raw refs so handleExpand
+    // can still fire. S2 accepts DOI:... / arXiv:... in the same slot.
+    return (references || [])
+      .map((r, i) => {
+        const id = String(r.id ?? r.index ?? `ref-${i}`)
+        if (r.doi) return { id, paperId: `DOI:${r.doi}`, title: r.title }
+        if (r.arxiv_id) return { id, paperId: `arXiv:${r.arxiv_id}`, title: r.title }
+        return null
+      })
+      .filter(Boolean)
+  }, [serverGraph, references])
 
   const runAutoExpand = async () => {
     if (autoExpanding || !eligibleNodes.length) return

@@ -6,8 +6,14 @@ import { openExternal } from '../../utils/tauriBridge'
  * Module-level cache keyed by paperTitle. Survives tab unmount/remount
  * so switching from "Similar Papers" to another tab and back doesn't
  * blow away results the user already fetched.
+ *
+ * SIMILAR_CACHE holds completed responses; SIMILAR_INFLIGHT holds the
+ * in-flight Promise + started timestamp so a tab swap mid-search
+ * shows the same loading state when the user comes back instead of
+ * letting the search appear cancelled.
  */
 const SIMILAR_CACHE = new Map()
+const SIMILAR_INFLIGHT = new Map()
 
 /**
  * Post-check sibling of the References tab. On mount, asks the backend
@@ -20,49 +26,100 @@ const SIMILAR_CACHE = new Map()
 export default function SimilarPapersPanel({ references, paperTitle, onCheckPaper }) {
   const cacheKey = paperTitle || ''
   const cached = SIMILAR_CACHE.get(cacheKey)
-  const [loading, setLoading] = useState(false)
+  const inflight = SIMILAR_INFLIGHT.get(cacheKey)
+  const [loading, setLoading] = useState(Boolean(inflight))
+  const [searchStartedAt, setSearchStartedAt] = useState(inflight?.startedAt || null)
   const [error, setError] = useState(null)
   const [candidates, setCandidates] = useState(cached?.candidates || [])
   const [sourceCounts, setSourceCounts] = useState(cached?.sourceCounts || {})
   const [loaded, setLoaded] = useState(Boolean(cached))
+  const [expandedShared, setExpandedShared] = useState(null) // paperId of expanded
 
   const refsForRequest = (references || [])
     .filter((r) => r && (r.doi || r.arxiv_id || r.title))
     .map((r) => ({ doi: r.doi, arxiv_id: r.arxiv_id, title: r.title, authors: r.authors }))
 
   const load = async () => {
+    // Reuse an in-flight search for the same paperTitle so two tab
+    // mounts don't fire duplicate backend calls. Also makes the
+    // "search continues across tab change" behaviour automatic — when
+    // the user comes back, they're attaching to the same Promise.
+    const existing = SIMILAR_INFLIGHT.get(cacheKey)
+    if (existing) {
+      setLoading(true)
+      setSearchStartedAt(existing.startedAt)
+      try {
+        const { cands, counts } = await existing.promise
+        setCandidates(cands); setSourceCounts(counts); setLoaded(true); setError(null)
+      } catch (e) {
+        setError(e?.response?.data?.detail || e?.message || 'Lookup failed')
+      } finally {
+        setLoading(false); setSearchStartedAt(null)
+      }
+      return
+    }
+
     setLoading(true); setError(null)
-    try {
-      const res = await findSimilarPapers({
-        references: refsForRequest,
-        paper_title: paperTitle,
-        limit: 5,
-      })
+    const startedAt = Date.now()
+    setSearchStartedAt(startedAt)
+    const promise = findSimilarPapers({
+      references: refsForRequest,
+      paper_title: paperTitle,
+      limit: 5,
+    }).then(res => {
       const cands = res.data?.candidates || []
       const counts = res.data?.source_counts || {}
-      setCandidates(cands)
-      setSourceCounts(counts)
-      setLoaded(true)
-      // Cache so a tab swap doesn't lose the result.
       SIMILAR_CACHE.set(cacheKey, { candidates: cands, sourceCounts: counts })
+      return { cands, counts }
+    }).finally(() => {
+      SIMILAR_INFLIGHT.delete(cacheKey)
+    })
+    SIMILAR_INFLIGHT.set(cacheKey, { promise, startedAt })
+    try {
+      const { cands, counts } = await promise
+      setCandidates(cands); setSourceCounts(counts); setLoaded(true)
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Lookup failed')
     } finally {
-      setLoading(false)
+      setLoading(false); setSearchStartedAt(null)
     }
   }
 
   useEffect(() => {
-    // Only reset if we don't have a cached result for this paperTitle.
+    // Reset / restore state on paperTitle change. Priority:
+    //   1. completed cache → show those candidates
+    //   2. in-flight search → attach to its promise and show loading
+    //   3. neither → empty + Find similar papers button
     const c = SIMILAR_CACHE.get(paperTitle || '')
+    const inFly = SIMILAR_INFLIGHT.get(paperTitle || '')
     if (c) {
       setCandidates(c.candidates)
       setSourceCounts(c.sourceCounts)
-      setLoaded(true)
+      setLoaded(true); setLoading(false); setSearchStartedAt(null)
+    } else if (inFly) {
+      // Re-attach to the in-flight promise so the loading spinner
+      // continues correctly and results land here when done.
+      setLoading(true); setLoaded(false)
+      setSearchStartedAt(inFly.startedAt)
+      inFly.promise
+        .then(({ cands, counts }) => {
+          setCandidates(cands); setSourceCounts(counts); setLoaded(true)
+        })
+        .catch(e => setError(e?.message || 'Lookup failed'))
+        .finally(() => { setLoading(false); setSearchStartedAt(null) })
     } else {
-      setLoaded(false); setCandidates([])
+      setLoaded(false); setCandidates([]); setLoading(false); setSearchStartedAt(null)
     }
   }, [paperTitle])
+
+  // Tick a re-render every second while a search is in flight so the
+  // elapsed-time progress label updates instead of freezing.
+  useEffect(() => {
+    if (!loading || !searchStartedAt) return undefined
+    const t = setInterval(() => setSearchStartedAt(s => s), 1000)
+    return () => clearInterval(t)
+  }, [loading, searchStartedAt])
+  const elapsedSec = searchStartedAt ? Math.floor((Date.now() - searchStartedAt) / 1000) : 0
 
   if (!refsForRequest.length) {
     return (
@@ -91,9 +148,41 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
           style={{ backgroundColor: 'var(--color-accent, #3b82f6)', color: 'white', opacity: loading ? 0.5 : 1 }}
           type="button"
         >
-          {loading ? 'Searching…' : (loaded ? 'Refresh' : 'Find similar papers')}
+          {loading
+            ? `Searching… ${elapsedSec}s`
+            : (loaded ? 'Refresh' : 'Find similar papers')}
         </button>
       </div>
+
+      {/* In-flight progress bar — runs across tab changes because the
+          inflight Promise lives at module scope. Stages roughly match
+          the backend pipeline: S2 recs → OpenAlex co-cite → LLM →
+          per-candidate reference-overlap rescore. The bar is an
+          estimate, not a real percentage. */}
+      {loading && (
+        <div className="rounded border p-2"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)' }}>
+          <div className="text-xs mb-1.5 flex items-center justify-between"
+            style={{ color: 'var(--color-text-secondary)' }}>
+            <span>
+              {elapsedSec < 5 ? 'Querying Semantic Scholar…'
+                : elapsedSec < 12 ? 'Cross-checking OpenAlex co-citations…'
+                : elapsedSec < 22 ? 'Asking LLM for missed candidates…'
+                : 'Scoring reference overlap per candidate…'}
+            </span>
+            <span style={{ color: 'var(--color-text-muted)' }}>continues across tab changes</span>
+          </div>
+          <div className="h-1 rounded overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
+            <div
+              className="h-full transition-all"
+              style={{
+                width: `${Math.min(95, (elapsedSec / 30) * 100)}%`,
+                background: 'var(--color-accent, #3b82f6)',
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="text-xs p-2 rounded" style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: 'var(--color-error, #ef4444)' }}>
@@ -175,21 +264,26 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                         Shows "85% shared refs (17/20)" when the candidate
                         cites 17 of the input's 20 references. */}
                     {typeof c.shared_refs_pct === 'number' && c.shared_refs_count > 0 && (
-                      <span
+                      <button
+                        onClick={() => setExpandedShared(expandedShared === c.paperId ? null : c.paperId)}
                         className="px-1.5 py-0.5 rounded"
                         style={{
                           background: 'rgba(59,130,246,0.12)',
                           color: 'var(--color-accent, #3b82f6)',
                           fontSize: '0.7rem',
                           border: '1px solid rgba(59,130,246,0.35)',
+                          cursor: 'pointer',
                         }}
-                        title={`Cites ${c.shared_refs_count} of the input paper's references` +
+                        title={`Click to see which references are shared. Cites ${c.shared_refs_count} of the input paper's references` +
                           (c.candidate_ref_count
                             ? ` (out of ${c.candidate_ref_count} total in this paper)`
                             : '')}
+                        type="button"
                       >
                         {Math.round(c.shared_refs_pct * 100)}% shared refs ({c.shared_refs_count})
-                      </span>
+                        {' '}
+                        <span aria-hidden="true">{expandedShared === c.paperId ? '▾' : '▸'}</span>
+                      </button>
                     )}
                     {c.was_verified ? (
                       <span
@@ -222,6 +316,24 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                   {c.reason && (
                     <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
                       {c.reason}
+                    </div>
+                  )}
+                  {expandedShared === c.paperId && Array.isArray(c.shared_refs_titles) && c.shared_refs_titles.length > 0 && (
+                    <div className="mt-2 p-2 rounded text-xs"
+                      style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}>
+                      <div className="font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                        Shared references ({c.shared_refs_count}):
+                      </div>
+                      <ul className="space-y-0.5 list-disc pl-4" style={{ color: 'var(--color-text-secondary)' }}>
+                        {c.shared_refs_titles.map((t, i) => (
+                          <li key={i} className="leading-snug">{t}</li>
+                        ))}
+                        {c.shared_refs_count > c.shared_refs_titles.length && (
+                          <li style={{ color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                            …and {c.shared_refs_count - c.shared_refs_titles.length} more
+                          </li>
+                        )}
+                      </ul>
                     </div>
                   )}
                 </div>
