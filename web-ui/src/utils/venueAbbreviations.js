@@ -173,6 +173,63 @@ export function parseVenueWarning(details) {
 }
 
 /**
+ * Reverse lookup: given a full journal name, return its NLM acronym
+ * (uppercase-preserving canonical form) when one exists. Returns null
+ * if the journal isn't in the bootstrap table.
+ *
+ * Display-only — the reference card calls this to show
+ * "ANZ Journal of Surgery (ANZ J Surg)" so the user sees both forms
+ * regardless of which one was cited.
+ */
+export function acronymFor(fullName) {
+  if (!fullName) return null
+  const f = normalizeVenue(fullName)
+  if (!f) return null
+  // The table values are full names; find the abbreviation key whose
+  // value matches. Cap the iteration since the table is bounded.
+  for (const [abbrev, full] of Object.entries(NLM_ABBREV_TO_FULL)) {
+    if (full === f) return prettyCase(abbrev)
+  }
+  return null
+}
+
+/**
+ * Reverse: given an abbreviation, return the canonical full name.
+ * Lets the card surface the unabbreviated form when only the
+ * acronym was cited.
+ */
+export function fullNameFor(abbrev) {
+  if (!abbrev) return null
+  const a = normalizeVenue(abbrev)
+  if (!a) return null
+  const full = NLM_ABBREV_TO_FULL[a]
+  return full ? prettyCase(full) : null
+}
+
+/**
+ * Title-case the table's lowercase keys/values for display, preserving
+ * common all-caps tokens (JAMA, BMJ, IEEE, PNAS, MAG, etc.) and the
+ * single-letter Roman numeral that occurs in some NLM titles.
+ */
+const _ALL_CAPS_TOKENS = new Set([
+  'jama', 'bmj', 'ieee', 'pnas', 'mag', 'plos', 'anz', 'jnci', 'acl',
+  'iclr', 'icml', 'nips', 'neurips', 'eurosys', 'nsdi', 'sosp', 'phys',
+])
+function prettyCase(s) {
+  if (!s) return s
+  return s.split(/\s+/).map(tok => {
+    const lo = tok.toLowerCase()
+    if (_ALL_CAPS_TOKENS.has(lo)) return lo.toUpperCase()
+    if (lo.length <= 3 && /^[a-z]+$/.test(lo)) {
+      // Single-letter / 2-letter alphabetic tokens like 'a', 'b' (NLM
+      // journal-section letters): all-caps.
+      return lo.toUpperCase()
+    }
+    return lo.charAt(0).toUpperCase() + lo.slice(1)
+  }).join(' ')
+}
+
+/**
  * Decide whether a venue warning/correction should be hidden under
  * the currently active citation style. Returns true when the cited
  * venue is an acceptable abbreviation of the actual venue.

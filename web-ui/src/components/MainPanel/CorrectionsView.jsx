@@ -989,32 +989,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                       )}
                     </div>
                   )}
-                  {ref.verified_url && (
-                    <div
-                      className="text-[11px] mt-2"
-                      style={{
-                        color: 'var(--color-text-secondary)',
-                        minWidth: 0,
-                        // Long DOI / verified URLs were overflowing the
-                        // card right edge in BibTeX-style corrections.
-                        // Wrap on any character so the link stays
-                        // inside the outline.
-                        wordBreak: 'break-all',
-                        overflowWrap: 'anywhere',
-                      }}
-                    >
-                      Source: <a
-                        href={ref.verified_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          color: 'var(--color-link, #3b82f6)',
-                          wordBreak: 'break-all',
-                          overflowWrap: 'anywhere',
-                        }}
-                      >{ref.verified_url}</a>
-                    </div>
-                  )}
+                  {/* "Source:" link removed in v0.7.25 — it surfaces the
+                      verifier database URL which isn't a correction in
+                      its own right. Users found it redundant noise on
+                      the corrections card. The same URL still appears
+                      in the References tab's Verification block where
+                      it belongs as provenance, not as a fix to apply. */}
                 </div>
               </div>
             </div>

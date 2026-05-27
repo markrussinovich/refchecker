@@ -15,7 +15,12 @@ import {
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import { useStyleStore } from '../../stores/useStyleStore'
-import { shouldSuppressVenueWarning } from '../../utils/venueAbbreviations'
+import {
+  shouldSuppressVenueWarning,
+  acronymFor,
+  fullNameFor,
+  styleAcceptsAbbreviatedVenue,
+} from '../../utils/venueAbbreviations'
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
@@ -622,12 +627,17 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               )}
 
               {/* Venue — hover surfaces the journal/conference page on
-                  OpenAlex when we have a source_id from enrichment. */}
+                  OpenAlex when we have a source_id from enrichment.
+                  Inline parenthetical shows the OTHER form (full name
+                  if user cited acronym, or NLM acronym if user cited
+                  full name AND the active style accepts abbrevs).
+                  Re-evaluates when style changes. */}
               {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
                 <VenueLine
                   venue={reference.venue}
                   fullVenue={reference.enrichment?.venue}
                   venueOpenalexId={reference.enrichment?.venue_id}
+                  activeStyle={activeFormat}
                 />
               )}
 
@@ -1198,10 +1208,43 @@ function AuthorsLine({ authors, enrichedAuthors }) {
  * OpenAlex's "ANZ journal of surgery") plus the OpenAlex source ID.
  * Click opens the OpenAlex venue page in the system browser.
  */
-function VenueLine({ venue, fullVenue, venueOpenalexId }) {
-  const fullDiffers = fullVenue && fullVenue !== venue
+function VenueLine({ venue, fullVenue, venueOpenalexId, activeStyle }) {
+  // Resolve the (full, acronym) pair so we can display both forms.
+  // Priority for the FULL name: the OpenAlex-resolved string > the
+  // reverse-lookup from the cited string (when only an acronym was
+  // cited). Priority for the ACRONYM: NLM table forward lookup on
+  // whichever full name we have.
+  const resolvedFull = (() => {
+    if (fullVenue && fullVenue !== venue) return fullVenue
+    const reverse = fullNameFor(venue)
+    return reverse && reverse.toLowerCase() !== String(venue).toLowerCase() ? reverse : null
+  })()
+  const resolvedAcronym = acronymFor(resolvedFull || venue) || acronymFor(venue)
+
+  // Cited venue is the source-of-truth display. The supplemental form
+  // (acronym OR full) shows in parens after, gated by whether the
+  // ACTIVE STYLE accepts abbreviations: in Vancouver/AMA/IEEE/NLM the
+  // acronym is the official form so we surface it alongside the full
+  // name; in APA/MLA/Chicago we show the full name alongside an
+  // acronym if the cited string was the abbrev.
+  const styleAcceptsAbbrev = styleAcceptsAbbreviatedVenue(activeStyle)
+  let supplemental = null
+  // Pick the form the user DIDN'T cite. If the cited string already
+  // matches resolvedFull, show the acronym; otherwise show the full.
+  const venueNorm = String(venue || '').toLowerCase().trim()
+  const fullNorm = String(resolvedFull || '').toLowerCase().trim()
+  if (resolvedFull && venueNorm !== fullNorm) {
+    supplemental = resolvedFull
+  } else if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) {
+    // Only show the acronym alongside the full name when the active
+    // style would permit it (so APA refs don't get noisy with NLM
+    // acronyms the user wouldn't use anyway).
+    if (styleAcceptsAbbrev) supplemental = resolvedAcronym
+  }
+
   const titleBits = []
-  if (fullDiffers) titleBits.push(`Full name: ${fullVenue}`)
+  if (resolvedFull && venueNorm !== fullNorm) titleBits.push(`Full name: ${resolvedFull}`)
+  if (resolvedAcronym && resolvedAcronym.toLowerCase() !== venueNorm) titleBits.push(`NLM acronym: ${resolvedAcronym}`)
   if (venueOpenalexId) titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
   if (venueOpenalexId) titleBits.push('(click to open venue page)')
   const title = titleBits.join('\n') || undefined
@@ -1232,6 +1275,11 @@ function VenueLine({ venue, fullVenue, venueOpenalexId }) {
         </a>
       ) : (
         <span>{venue}</span>
+      )}
+      {supplemental && (
+        <span style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>
+          ({supplemental})
+        </span>
       )}
     </div>
   )
