@@ -15,6 +15,7 @@ import {
 } from '../../utils/referenceStatus'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
 import { useStyleStore } from '../../stores/useStyleStore'
+import { shouldSuppressVenueWarning } from '../../utils/venueAbbreviations'
 import ReferenceEnrichmentStrip from './ReferenceEnrichmentStrip'
 
 // Click handler that routes link clicks through Tauri's shell plugin when
@@ -467,10 +468,36 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
       error_type: issue.warning_type,
       error_details: issue.warning_details || '',
     }))
-  const displayWarnings = foundMetadataMatchesCitation ? [] : (recheckWarnings.length > 0 ? recheckWarnings : (reference.warnings || []))
+  const baseDisplayWarnings = foundMetadataMatchesCitation
+    ? []
+    : (recheckWarnings.length > 0 ? recheckWarnings : (reference.warnings || []))
+  // Style-aware venue suppression. When the active citation style
+  // permits NLM-style abbreviated journal titles AND the cited venue
+  // is a known abbreviation of the database venue, the venue warning
+  // is a false positive. Suppression runs at render time, so flipping
+  // the style dropdown re-evaluates instantly.
+  const displayWarnings = baseDisplayWarnings.filter(w => {
+    const t = (w.warning_type || w.error_type || '').toLowerCase()
+    if (t !== 'venue') return true
+    return !shouldSuppressVenueWarning({
+      cited_value: reference.venue,
+      actual_value: w.ref_venue_correct || w.actual_value,
+      warning_details: w.warning_details || w.error_details,
+    }, activeFormat)
+  })
   const displayErrors = (reference.errors || [])
     .filter(issue => issue.error_type && issue.error_type !== 'unverified')
     .filter(() => !foundMetadataMatchesCitation)
+    .filter(issue => {
+      // Same style-aware suppression for errors typed as 'venue'.
+      const t = (issue.error_type || '').toLowerCase()
+      if (t !== 'venue') return true
+      return !shouldSuppressVenueWarning({
+        cited_value: reference.venue,
+        actual_value: issue.ref_venue_correct || issue.actual_value,
+        warning_details: issue.error_details,
+      }, activeFormat)
+    })
 
   return (
     <div

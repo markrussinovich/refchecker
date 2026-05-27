@@ -7,7 +7,7 @@ import re
 import logging
 import unicodedata
 import html
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -4933,23 +4933,40 @@ def _extract_key_phrases(title: str) -> List[str]:
     return phrases
 
 
-def are_venues_substantially_different(venue1: str, venue2: str) -> bool:
+def are_venues_substantially_different(venue1: str, venue2: str, citation_style: Optional[str] = None) -> bool:
     """
     Check if two venue names are substantially different (not just minor variations).
     This function uses a generic approach to handle academic venue abbreviations and formats.
-    
+
     Args:
-        venue1: First venue name
-        venue2: Second venue name
-        
+        venue1: First venue name (typically the cited venue)
+        venue2: Second venue name (typically the database/authoritative venue)
+        citation_style: Optional style hint ("vancouver", "ama", "ieee",
+            "apa", "mla", "chicago", "bibtex", "plaintext", "acm"). When the
+            style is one that permits NLM-style abbreviated journal titles
+            and the cited venue is a known abbreviation of the authoritative
+            venue, returns False (no mismatch).
+
     Returns:
         True if venues are substantially different, False if they match/overlap
     """
     # Import here to avoid circular dependency
     from refchecker.utils.url_utils import extract_arxiv_id_from_url
-    
+    from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation
+
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
+
+    # Style-aware abbreviation short-circuit. If the citation style
+    # permits the cited venue's abbreviated form, accept "ANZ J Surg"
+    # against the database's "ANZ journal of surgery" without firing a
+    # mismatch. Bidirectional check — works whether the cited or the
+    # database string is the abbreviation.
+    if citation_style and (
+        is_acceptable_abbreviation(venue1, venue2, citation_style)
+        or is_acceptable_abbreviation(venue2, venue1, citation_style)
+    ):
+        return False
     
     # If one venue is a preprint server (arXiv) and the other is a real
     # conference or journal, this is a preprint-to-published upgrade, not a

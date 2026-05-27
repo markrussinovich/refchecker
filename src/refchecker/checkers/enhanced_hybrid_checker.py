@@ -1258,7 +1258,104 @@ class EnhancedHybridReferenceChecker:
         verified_data, errors, url = self._postprocess_verification(
             verified_data, errors, url, reference,
         )
+
+        # Cross-attribution: after a primary match lands, ask the
+        # secondary signal sources (Paperclip + Wikidata) whether they
+        # also have this paper. Stamp the union as `_verified_by` so
+        # the FE renders "via Semantic Scholar + Paperclip + Wikidata"
+        # instead of single-source attribution. Cheap: Paperclip is a
+        # single DOI/title lookup, Wikidata is a single SPARQL — both
+        # gated on Paperclip being enabled / Wikidata being reachable.
+        if isinstance(verified_data, dict):
+            try:
+                self._cross_verify_secondary(verified_data, reference)
+            except Exception as e:
+                logger.debug("Cross-attribution skipped: %s", e)
+
         return verified_data, errors, url
+
+    def _cross_verify_secondary(self, verified_data: Dict[str, Any], reference: Dict[str, Any]) -> None:
+        """Ask Paperclip + Wikidata whether they also confirm the matched paper.
+
+        The primary verifier already stamped `_matched_database`. This
+        adds any secondary confirmations to `_verified_by` so users see
+        all sources that independently confirmed the same paper.
+
+        Mutates `verified_data` in place — appending to `_verified_by`.
+        Doesn't raise; any source that errors out is silently skipped.
+        """
+        primary = verified_data.get('_matched_database') or verified_data.get('_matched_checker') or 'verified'
+        confirmations = [primary]
+
+        # Canonical DOI for cross-source lookup: prefer the primary
+        # verifier's DOI, fall back to the cited DOI.
+        doi = (
+            verified_data.get('doi')
+            or verified_data.get('DOI')
+            or (verified_data.get('ids') or {}).get('doi')
+            or (verified_data.get('externalIds') or {}).get('DOI')
+            or reference.get('doi')
+        )
+        if isinstance(doi, str):
+            doi = doi.strip()
+            for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
+                if doi.lower().startswith(prefix):
+                    doi = doi[len(prefix):]
+                    break
+
+        # --- Paperclip cross-check ---
+        # Don't re-query when Paperclip WAS the primary source.
+        if self.paperclip and 'paperclip' not in primary.lower() and 'Paperclip' != primary:
+            try:
+                pc_ref = dict(reference)
+                if doi:
+                    pc_ref['doi'] = doi
+                pc_data, _pc_errors, _pc_url = self.paperclip.verify_reference(pc_ref)
+                if pc_data:
+                    confirmations.append('Paperclip')
+            except Exception as e:
+                logger.debug("Paperclip cross-check failed: %s", e)
+
+        # --- Wikidata cross-check ---
+        # Single SPARQL query: ?work wdt:P356 "<DOI>" — returns a binding
+        # iff Wikidata has this paper as an entity. No auth required;
+        # short timeout so a slow Wikidata can't drag verification.
+        if doi:
+            try:
+                import requests
+                sparql = (
+                    'SELECT ?work WHERE { '
+                    f'?work wdt:P356 "{doi.upper()}" . '
+                    '} LIMIT 1'
+                )
+                resp = requests.get(
+                    'https://query.wikidata.org/sparql',
+                    params={'query': sparql, 'format': 'json'},
+                    headers={
+                        'User-Agent': 'RefChecker/0.7 (https://github.com/ArioMoniri/refchecker)',
+                        'Accept': 'application/sparql-results+json',
+                    },
+                    timeout=4.0,
+                )
+                if resp.status_code == 200:
+                    bindings = (resp.json().get('results') or {}).get('bindings') or []
+                    if bindings:
+                        confirmations.append('Wikidata')
+            except Exception as e:
+                logger.debug("Wikidata cross-check failed: %s", e)
+
+        # Dedup-preserve-order. Stamp even on single-confirmation so the
+        # FE always has the verified_by list (matches enrichment.py's
+        # contract of falling back to [source_label]).
+        seen = set()
+        deduped = []
+        for s in confirmations:
+            key = (s or '').strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(s)
+        verified_data['_verified_by'] = deduped
 
     def _verify_reference_core(self, reference: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], Optional[str]]:
         """Core verification logic — parallel API calls + retries + fallbacks."""

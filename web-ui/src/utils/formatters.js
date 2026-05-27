@@ -1,6 +1,7 @@
 /**
  * Formatting utilities
  */
+import { shouldSuppressVenueWarning } from './venueAbbreviations'
 
 /**
  * Format a date for display
@@ -551,12 +552,25 @@ const _isStyleConformingAuthorCount = (issue, ref, style) => {
 export function filterIssuesForStyle(issues, ref, style) {
   if (!Array.isArray(issues) || issues.length === 0) return issues || []
   return issues.filter(issue => {
-    const errorType = String(issue?.error_type || '').toLowerCase()
+    const errorType = String(issue?.error_type || issue?.warning_type || '').toLowerCase()
     // Style-specific author-count rule (MLA's et-al cap, etc.) still
     // wins ahead of the generic cosmetic check because it needs the
     // style argument; the generic check is style-agnostic.
     if (errorType === 'author' || errorType === 'authors' || errorType === 'author_count') {
       if (_isStyleConformingAuthorCount(issue, ref, style)) return false
+    }
+    // Style-aware venue abbreviation: when the active style permits
+    // NLM-style abbreviated journal titles (Vancouver/AMA/IEEE/etc.)
+    // and the cited venue is a known abbreviation of the database
+    // venue, the mismatch is a false positive under that style.
+    if (errorType === 'venue') {
+      const { cited, actual } = _extractCitedActual(issue, ref)
+      const suppressed = shouldSuppressVenueWarning({
+        cited_value: cited || ref?.venue,
+        actual_value: actual || issue?.ref_venue_correct,
+        warning_details: issue?.warning_details || issue?.error_details,
+      }, style)
+      if (suppressed) return false
     }
     const { cited, actual } = _extractCitedActual(issue, ref)
     if (cited != null && actual != null && isCosmeticDifference(errorType, cited, actual)) {
@@ -565,6 +579,7 @@ export function filterIssuesForStyle(issues, ref, style) {
     return true
   })
 }
+
 
 function getCorrectedReferenceData(ref) {
   // Verifier may attach typed URLs (doi, arxiv, journal) in
