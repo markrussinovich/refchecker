@@ -5576,6 +5576,11 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
             "shared_refs_pct": entry.get("shared_refs_pct", 0.0),
             "shared_refs_jaccard": entry.get("shared_refs_jaccard", 0.0),
             "candidate_ref_count": entry.get("candidate_ref_count", 0),
+            # Up to 10 shared-ref titles so the FE can expand "which refs
+            # exactly are shared" on click. Computed during reference-
+            # overlap rescoring; empty list when overlap was 0 / scoring
+            # skipped (no DOI on the input refs, S2 unreachable, etc.).
+            "shared_refs_titles": entry.get("shared_refs_titles") or [],
             "sources": entry["sources"],
             "via": entry["sources"][0] if entry["sources"] else None,
             "semantic_scholar_url": f"https://www.semanticscholar.org/paper/{p.get('paperId')}" if p.get("paperId") else None,

@@ -263,28 +263,70 @@ export default function SimilarPapersPanel({ references, paperTitle, onCheckPape
                     {/* Reference-overlap chip — the user's primary signal.
                         Shows "85% shared refs (17/20)" when the candidate
                         cites 17 of the input's 20 references. */}
-                    {typeof c.shared_refs_pct === 'number' && c.shared_refs_count > 0 && (
-                      <button
-                        onClick={() => setExpandedShared(expandedShared === c.paperId ? null : c.paperId)}
-                        className="px-1.5 py-0.5 rounded"
-                        style={{
-                          background: 'rgba(59,130,246,0.12)',
-                          color: 'var(--color-accent, #3b82f6)',
-                          fontSize: '0.7rem',
-                          border: '1px solid rgba(59,130,246,0.35)',
-                          cursor: 'pointer',
-                        }}
-                        title={`Click to see which references are shared. Cites ${c.shared_refs_count} of the input paper's references` +
-                          (c.candidate_ref_count
-                            ? ` (out of ${c.candidate_ref_count} total in this paper)`
-                            : '')}
-                        type="button"
-                      >
-                        {Math.round(c.shared_refs_pct * 100)}% shared refs ({c.shared_refs_count})
-                        {' '}
-                        <span aria-hidden="true">{expandedShared === c.paperId ? '▾' : '▸'}</span>
-                      </button>
-                    )}
+                    {/* Always show the shared-refs chip so the user
+                        knows the overlap pass ran for every candidate.
+                        Three visible states:
+                          - count > 0: clickable "% shared refs (N)" — expands list
+                          - count = 0 but candidate_ref_count > 0: "no shared refs"
+                          - candidate_ref_count = 0: "shared refs N/A" (couldn't fetch)
+                       */}
+                    {(() => {
+                      const sharedN = c.shared_refs_count || 0
+                      const candRefs = c.candidate_ref_count || 0
+                      if (sharedN > 0) {
+                        return (
+                          <button
+                            onClick={() => setExpandedShared(expandedShared === c.paperId ? null : c.paperId)}
+                            className="px-1.5 py-0.5 rounded"
+                            style={{
+                              background: 'rgba(59,130,246,0.12)',
+                              color: 'var(--color-accent, #3b82f6)',
+                              fontSize: '0.7rem',
+                              border: '1px solid rgba(59,130,246,0.35)',
+                              cursor: 'pointer',
+                            }}
+                            title={`Click to see which references are shared. Cites ${sharedN} of the input paper's references` +
+                              (candRefs ? ` (out of ${candRefs} total in this paper)` : '')}
+                            type="button"
+                          >
+                            {Math.round((c.shared_refs_pct || 0) * 100)}% shared refs ({sharedN})
+                            {' '}
+                            <span aria-hidden="true">{expandedShared === c.paperId ? '▾' : '▸'}</span>
+                          </button>
+                        )
+                      }
+                      if (candRefs > 0) {
+                        return (
+                          <span
+                            className="px-1.5 py-0.5 rounded"
+                            style={{
+                              background: 'var(--color-bg-tertiary)',
+                              color: 'var(--color-text-muted)',
+                              fontSize: '0.7rem',
+                              border: '1px solid var(--color-border)',
+                            }}
+                            title={`Overlap computed: 0 of the input paper's references appear in this candidate's ${candRefs} references.`}
+                          >
+                            no shared refs · 0 / {candRefs}
+                          </span>
+                        )
+                      }
+                      return (
+                        <span
+                          className="px-1.5 py-0.5 rounded"
+                          style={{
+                            background: 'var(--color-bg-tertiary)',
+                            color: 'var(--color-text-muted)',
+                            fontSize: '0.7rem',
+                            border: '1px solid var(--color-border)',
+                            fontStyle: 'italic',
+                          }}
+                          title="Couldn't fetch this candidate's reference list — overlap not computed."
+                        >
+                          shared refs N/A
+                        </span>
+                      )
+                    })()}
                     {c.was_verified ? (
                       <span
                         className="px-1.5 py-0.5 rounded"

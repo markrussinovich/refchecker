@@ -650,10 +650,22 @@ export default function StatsSection({ stats, isComplete, references, paperTitle
         <span className="text-xs px-1" style={{ color: 'var(--color-text-muted)' }}>of {processedRefs}</span>
       </div>
 
-      {/* Issue counts row - separate line */}
+      {/* Issue counts row - separate line. Label disambiguated from
+          the "References" row above: each chip here counts INDIVIDUAL
+          issue items (a single ref can contribute multiple), whereas
+          the References row counts REFS-WITH-STATUS. That distinction
+          was confusing users who saw "6 warnings" on References but
+          "8 Warnings" here for the same dataset (8 warning items
+          spread across 6 refs). */}
       {issueFilters.some(f => f.value > 0) && (
         <div className="flex items-center gap-2 flex-wrap mt-2">
-          <span className="text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Issues</span>
+          <span
+            className="text-xs font-medium"
+            style={{ color: 'var(--color-text-muted)' }}
+            title="Total individual issue items across all refs (a single ref can contribute more than one). The References row above counts refs-with-status instead."
+          >
+            Issue items
+          </span>
           {issueFilters.filter(f => f.value > 0).map(filter => {
             const isSelected = statusFilter.includes(filter.id)
             return (

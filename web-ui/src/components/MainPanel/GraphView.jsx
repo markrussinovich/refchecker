@@ -40,11 +40,11 @@ export default function GraphView({ references, paperTitle }) {
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
-  // Filters / display modes. When `hideSourceSpokes` is on we drop the
-  // source-paper -> ref edges so the actual co-citation structure
-  // between refs reads cleanly (otherwise everything spokes off the
-  // centre node and the inter-ref edges drown).
-  const [hideSourceSpokes, setHideSourceSpokes] = useState(false)
+  // Source spokes are now always shown — the toggle that hid them was
+  // removed in v0.7.18 because users didn't find it useful and the
+  // rosette layout is the most readable default. Kept as a constant
+  // so the existing branches in graphData don't need restructuring.
+  const hideSourceSpokes = false
 
   useEffect(() => {
     const el = containerRef.current
@@ -127,13 +127,21 @@ export default function GraphView({ references, paperTitle }) {
       // boost from global citationCount so orphan-but-famous refs still
       // read at a glance.
       const val = 4 + inDegree * 2.5 + Math.log10(citationCount + 1) * 0.8
+      // paperId for expansion: prefer the S2 graph result, fall back
+      // to DOI:/arXiv: tokens (which the /papers/expand endpoint also
+      // accepts) so double-click expansion works even when the
+      // co-citation graph endpoint returned nothing (.docx uploads,
+      // unindexed papers).
+      const fallbackPaperId = r.doi ? `DOI:${r.doi}`
+        : r.arxiv_id ? `arXiv:${r.arxiv_id}`
+        : null
       const node = {
         id,
         label: (r.title || '(no title)').slice(0, 80),
         type: 'reference',
         status,
         ref: r,
-        paperId: serverNode?.paperId,
+        paperId: serverNode?.paperId || fallbackPaperId,
         citationCount,
         inDegree,
         outDegree,
@@ -337,15 +345,10 @@ export default function GraphView({ references, paperTitle }) {
         <span>
           {loadingGraph ? 'Fetching S2 citation graph…' : 'Double-click a node to expand one hop'}
         </span>
-        <label className="inline-flex items-center gap-1 cursor-pointer" title="Hide source-paper spokes so the co-citation structure between refs reads clearly. Orphan refs drift to the rim.">
-          <input
-            type="checkbox"
-            checked={hideSourceSpokes}
-            onChange={(e) => setHideSourceSpokes(e.target.checked)}
-            style={{ accentColor: 'var(--color-accent, #3b82f6)' }}
-          />
-          <span>Hide source spokes</span>
-        </label>
+        {/* The "Hide source spokes" toggle was removed in v0.7.18 —
+            user feedback was that the option served no clear purpose
+            in the typical view, and the rosette layout the spokes
+            produce is the most readable default. */}
         {eligibleNodes.length > 0 && (
           <button
             onClick={runAutoExpand}
