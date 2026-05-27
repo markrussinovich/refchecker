@@ -907,6 +907,160 @@ class ProgressRefChecker:
     def _bibliography_cache_identity(self) -> str:
         return llm_cache_identity_from_extractor(SimpleNamespace(llm_provider=self.llm) if self.llm else None)
 
+    async def _attach_citation_contexts_via_llm(
+        self, references: List[Dict[str, Any]], paper_text: str
+    ) -> int:
+        """LLM fallback for refs the regex pass missed.
+
+        Prompts the configured LLM with the paper text and the
+        unmatched refs, asks it to return the sentences in the paper
+        where each ref is cited. Merges results into each ref's
+        ``citation_contexts`` field.
+
+        Tokens are tracked under flow="context" via FlowScope so the
+        per-check $ badge surfaces this spend on its own line.
+
+        Returns the number of refs that picked up at least one
+        context from this LLM pass. Soft-fails — never raises.
+        """
+        if not references or not paper_text or not self.llm:
+            return 0
+
+        # Build the candidate list: only refs that have NO contexts yet.
+        missed = []
+        for ref in references:
+            try:
+                idx = int(ref.get("index") or 0)
+            except Exception:
+                continue
+            if idx <= 0:
+                continue
+            existing = ref.get("citation_contexts") or []
+            if existing:
+                continue
+            # Skip refs that don't carry enough metadata for the LLM
+            # to match — no title AND no author makes the lookup
+            # untenable.
+            title = (ref.get("title") or "").strip()
+            authors = ref.get("authors") or []
+            if not title and not authors:
+                continue
+            first_author = ""
+            if isinstance(authors, list) and authors:
+                first_author = str(authors[0])
+            elif isinstance(authors, str):
+                first_author = authors.split(",")[0].strip()
+            missed.append({
+                "ref_id": str(idx),
+                "title": title[:140] or "(no title)",
+                "first_author": first_author[:80],
+                "year": ref.get("year") or "",
+            })
+
+        if not missed:
+            return 0
+
+        # Cap the LLM payload — full paper text would blow the context.
+        # Take the body up to a generous limit; the prompt only needs
+        # the prose around citation markers, not appendix detail.
+        max_chars = 60_000
+        paper_excerpt = paper_text[:max_chars]
+        # Cap refs too — beyond 60 refs the response shape gets
+        # impractical and the cost stops being worth it.
+        missed = missed[:60]
+
+        prompt = (
+            "You are extracting inline citation contexts from an "
+            "academic paper. Given the paper body and a list of cited "
+            "references (by ref_id, title, first author, year), find "
+            "up to 3 sentences in the paper where each reference is "
+            "cited. Return STRICT JSON: an array of objects with "
+            "{ref_id: string, sentences: [string]}. Skip refs you "
+            "can't find. Do not include refs with no matches.\n\n"
+            "PAPER BODY:\n"
+            f"{paper_excerpt}\n\n"
+            "REFERENCES TO LOCATE:\n"
+            + "\n".join(
+                f"- ref_id={m['ref_id']} | {m['first_author']} ({m['year']}) | {m['title']}"
+                for m in missed
+            )
+            + "\n\nRespond with ONLY the JSON array, no prose."
+        )
+
+        try:
+            # Late import so this stays optional and the CLI path
+            # doesn't pull the tracker. FlowScope tags the call as
+            # "context" so the $ badge breakdown shows it on its own
+            # line ("Citation context extraction").
+            from refchecker.llm import usage_tracker as _ut
+            with _ut.FlowScope("context"):
+                raw = await asyncio.to_thread(self.llm._call_llm, prompt)
+        except Exception as e:
+            logger.debug("LLM context call failed: %s", e)
+            return 0
+
+        if not raw:
+            return 0
+
+        import json as _json
+        import re as _re
+
+        # Strip code fences / prose around the JSON.
+        text = raw.strip()
+        m = _re.search(r"\[.*\]", text, _re.DOTALL)
+        if m:
+            text = m.group(0)
+        try:
+            parsed = _json.loads(text)
+        except Exception as e:
+            logger.debug("LLM context JSON parse failed: %s", e)
+            return 0
+        if not isinstance(parsed, list):
+            return 0
+
+        # Build a refs-by-index map for fast assignment.
+        refs_by_index: Dict[int, Dict[str, Any]] = {}
+        for ref in references:
+            try:
+                idx = int(ref.get("index") or 0)
+            except Exception:
+                continue
+            if idx > 0:
+                refs_by_index[idx] = ref
+
+        added_refs = 0
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            try:
+                ref_idx = int(item.get("ref_id"))
+            except (TypeError, ValueError):
+                continue
+            ref = refs_by_index.get(ref_idx)
+            if not ref:
+                continue
+            sentences = item.get("sentences") or []
+            if not isinstance(sentences, list):
+                continue
+            contexts = []
+            for s in sentences[:3]:
+                if not isinstance(s, str) or not s.strip():
+                    continue
+                contexts.append({
+                    "sentence": s.strip()[:420],
+                    "marker": "",  # LLM doesn't return a literal marker
+                    "before": "",
+                    "after": "",
+                })
+            if not contexts:
+                continue
+            ref["citation_contexts"] = contexts
+            ref["citation_count"] = len(contexts)
+            ref["citation_context"] = " … ".join(c["sentence"][:240] for c in contexts[:2])
+            added_refs += 1
+
+        return added_refs
+
     async def check_paper(self, paper_source: str, source_type: str) -> Dict[str, Any]:
         """
         Check a paper and emit progress updates
@@ -1300,6 +1454,34 @@ class ProgressRefChecker:
                     "Citation contexts: %d/%d refs got an inline sentence (paper_text=%d chars)",
                     _ctx_attached, len(references or []), len(paper_text or ""),
                 )
+
+                # LLM fallback for citation contexts. When the
+                # regex-based attachment caught fewer than 30% of refs
+                # AND we have an LLM configured AND paper_text exists,
+                # ask the LLM to identify where each missed ref is
+                # cited. Tokens flow into the per-check usage tracker
+                # under flow="context" so the $ badge surfaces this
+                # spend. Soft-fails: an LLM error doesn't block the
+                # check from completing — the user just sees fewer
+                # contexts.
+                try:
+                    total_refs_for_ctx = len(references or [])
+                    if (
+                        total_refs_for_ctx > 0
+                        and _ctx_attached / max(1, total_refs_for_ctx) < 0.3
+                        and self.llm
+                        and paper_text and len(paper_text) > 500
+                    ):
+                        added = await self._attach_citation_contexts_via_llm(
+                            references, paper_text,
+                        )
+                        if added:
+                            logger.info(
+                                "Citation contexts (LLM fallback): added %d more refs (total now %d/%d)",
+                                added, _ctx_attached + added, total_refs_for_ctx,
+                            )
+                except Exception as e:
+                    logger.debug("LLM citation-context fallback skipped: %s", e)
 
             if not references:
                 await self.emit_progress("completed", {

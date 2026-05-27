@@ -24,6 +24,7 @@ const FLOW_LABEL = {
   suggest: 'Suggested alternatives',
   graph: 'Citation graph',
   reverify: 'Re-verify',
+  context: 'Inline citation contexts',
   other: 'Other LLM calls',
 }
 
