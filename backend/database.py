@@ -716,7 +716,15 @@ class Database:
         ) as cursor:
             row = await cursor.fetchone()
         current_version = int(row[0]) if row and row[0] else 0
-        TARGET_VERSION = 2
+        # v3 forces a backfill from every completed check_history row.
+        # Reason: v0.7.7 - v0.7.10 had a latent NameError in the
+        # Seen-Refs backstop (database.py used `logger` without
+        # importing logging). New checks failed to populate the
+        # library silently. v0.7.11 fixed the logger but a user
+        # who'd already installed an earlier version would still see
+        # an empty library. This migration sweeps every persisted
+        # check result and re-upserts so the library catches up.
+        TARGET_VERSION = 3
         if current_version >= TARGET_VERSION:
             return
 
@@ -756,6 +764,76 @@ class Database:
                     f"DELETE FROM verified_reference_identity WHERE identity_key IN ({placeholders})",
                     chunk,
                 )
+        # v3 backfill: walk every completed check's results_json and
+        # upsert each ref. Idempotent — repeated keys just bump
+        # times_seen. Cheap: SQLite indexed reads + one INSERT per ref.
+        if current_version < 3:
+            try:
+                async with db.execute(
+                    "SELECT id, results_json FROM check_history "
+                    "WHERE status IN ('completed', 'cancelled') AND results_json IS NOT NULL"
+                ) as ch_cur:
+                    backfilled = 0
+                    skipped = 0
+                    async for check_id, results_json in ch_cur:
+                        if not results_json:
+                            continue
+                        try:
+                            results = json.loads(results_json)
+                        except Exception:
+                            continue
+                        if not isinstance(results, list):
+                            continue
+                        for ref in results:
+                            if not isinstance(ref, dict):
+                                continue
+                            ident = self.reference_identity_key(ref)
+                            if not ident:
+                                skipped += 1
+                                continue
+                            try:
+                                authors_field = (
+                                    ref.get("authors") if isinstance(ref.get("authors"), str)
+                                    else json.dumps(ref.get("authors") or [], default=str)
+                                )
+                                year_val = (
+                                    int(ref.get("year")) if str(ref.get("year") or "").isdigit() else None
+                                )
+                                await db.execute(
+                                    """
+                                    INSERT INTO verified_reference_identity
+                                        (identity_key, title, authors, year, doi, arxiv_id, venue,
+                                         verified_url, matched_db, status, result_json,
+                                         times_seen, first_seen, last_seen)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                                    ON CONFLICT(identity_key) DO UPDATE SET
+                                        times_seen = verified_reference_identity.times_seen + 1,
+                                        last_seen = CURRENT_TIMESTAMP
+                                    """,
+                                    (
+                                        ident,
+                                        ref.get("title"),
+                                        authors_field,
+                                        year_val,
+                                        (ref.get("doi") or "").strip() or None,
+                                        (ref.get("arxiv_id") or "").strip() or None,
+                                        ref.get("venue"),
+                                        ref.get("verified_url"),
+                                        ref.get("matched_db") or ref.get("_matched_database"),
+                                        ref.get("status") or "",
+                                        json.dumps(ref, default=str),
+                                    ),
+                                )
+                                backfilled += 1
+                            except Exception:
+                                skipped += 1
+                logger.info(
+                    "seen-refs backfill (v3): wrote %d refs, skipped %d (no identity key)",
+                    backfilled, skipped,
+                )
+            except Exception as e:
+                logger.warning("seen-refs v3 backfill failed: %s", e)
+
         await db.execute(
             "INSERT OR REPLACE INTO schema_meta(key, value) VALUES('seen_refs_v', ?)",
             (str(TARGET_VERSION),),

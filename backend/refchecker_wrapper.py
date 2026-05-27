@@ -329,17 +329,35 @@ def _attach_citation_contexts(references, paper_text):
             author_year_lookup[key] = ref_idx
 
     if author_year_lookup:
-        # Two patterns covering the common citation forms. Each one
-        # captures the surface name and the year as separate groups so
-        # we can look up the ref. `et al.` and `and X` are absorbed into
-        # the "name" group via a non-capturing extension so the lookup
-        # only sees the first author's last name.
+        # Patterns covering the common citation forms. Each one captures
+        # the surface name and the year as separate groups so we can
+        # look up the ref. `et al.` and `and X` are absorbed into the
+        # "name" group via a non-capturing extension so the lookup only
+        # sees the first author's last name.
         au_yr_patterns = [
+            # natbib \citep style: "[Arditi et al., 2024]" /
+            # "[Wang et al., 2022, Gurnee et al., 2023]" / "[Anthropic, 2025]"
+            # Brackets + author-year is the dominant CS/ML preprint
+            # convention but wasn't covered by the earlier two patterns
+            # (numeric brackets and paren-style author-year only).
+            re.compile(r"\[\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?(?:\s*[,;]\s*[A-Z][A-Za-z\-' ]*?(?:\d{4})[a-z]?)*\s*\]"),
             # "(Smith et al., 2024)" / "(Smith and Jones 2024)"
             re.compile(r"\(\s*([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?\s*\)"),
-            # "Smith et al. (2024)" / "Smith (2024)"
-            re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*\((\d{4})[a-z]?\)"),
+            # "Smith et al. (2024)" / "Smith (2024)" / "Smith et al. [2024]"
+            # The trailing year delimiter is (…) or [\[…\]] for LaTeX
+            # \citet which writes "Arditi et al. [2024]".
+            re.compile(r"\b([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?\s*[\(\[](\d{4})[a-z]?[\)\]]"),
         ]
+        # Inner pattern for splitting multi-citation brackets like
+        # "[Wang et al., 2022; Gurnee et al., 2023]" — each chunk is
+        # one Name(, et al.)? + Year. The bracketed group pattern above
+        # only grabs the FIRST author/year; this second scanner sweeps
+        # the entire bracket content for additional citations.
+        inner_au_yr = re.compile(
+            r"([A-Z][A-Za-z\-']+)(?:\s+et\s+al\.?|\s+(?:and|&)\s+[A-Z][A-Za-z\-']+)?[\s,]+(\d{4})[a-z]?"
+        )
+        bracket_scan_pattern = re.compile(r"\[([^\[\]]{3,300})\]")
+
         for i, sent in enumerate(sentences):
             stripped = sent.strip()
             if not stripped:
@@ -366,6 +384,40 @@ def _attach_citation_contexts(references, paper_text):
                     lst.append({
                         "sentence": sent_clean,
                         "marker": m.group(0),
+                        "before": (sentences[i - 1].strip()[:160] if i > 0 else "").strip(),
+                        "after": (sentences[i + 1].strip()[:160] if i + 1 < len(sentences) else "").strip(),
+                    })
+
+            # Multi-citation bracket sweep: "[Wang et al., 2022;
+            # Gurnee et al., 2023]" packs two citations into one
+            # bracket. The per-pattern matchers above caught the first
+            # author/year; this scanner finds the rest. Skips brackets
+            # we've already scored a hit inside (avoids dupes when the
+            # bracket only had one citation).
+            for bm in bracket_scan_pattern.finditer(stripped):
+                inner = bm.group(1)
+                # Skip purely numeric brackets ([12], [12, 14]) — those
+                # are handled by the numeric-marker pass above.
+                if re.fullmatch(r"\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*", inner):
+                    continue
+                for im in inner_au_yr.finditer(inner):
+                    name = re.sub(r"[^A-Za-z\-]", "", im.group(1)).lower()
+                    try:
+                        yr = int(im.group(2))
+                    except Exception:
+                        continue
+                    ref_idx = author_year_lookup.get((name, yr))
+                    if not ref_idx:
+                        continue
+                    sent_clean = re.sub(r"\s+", " ", stripped)[:420]
+                    lst = by_index.setdefault(ref_idx, [])
+                    if len(lst) >= 3:
+                        continue
+                    if any(existing.get("sentence") == sent_clean for existing in lst):
+                        continue
+                    lst.append({
+                        "sentence": sent_clean,
+                        "marker": bm.group(0),
                         "before": (sentences[i - 1].strip()[:160] if i > 0 else "").strip(),
                         "after": (sentences[i + 1].strip()[:160] if i + 1 < len(sentences) else "").strip(),
                     })

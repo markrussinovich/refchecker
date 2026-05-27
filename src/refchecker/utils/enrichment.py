@@ -74,6 +74,11 @@ def _extract_authors_with_orcid(authorships: List[Dict[str, Any]]) -> List[Dict[
         if not name:
             continue
         entry: Dict[str, Any] = {'name': name}
+        # S2 author-id passthrough (from the synthetic shape built in
+        # build_enrichment). Lets the FE link to semanticscholar.org
+        # /author/<id> even when ORCID/OpenAlex IDs aren't available.
+        if auth.get('s2_author_id'):
+            entry['s2_author_id'] = str(auth['s2_author_id'])
         orcid = (
             author.get('orcid')
             or auth.get('ORCID')
@@ -274,12 +279,34 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if fos:
         enrichment['fields_of_study'] = fos
 
-    # Authors with ORCID — works for OpenAlex shape (`authorships` with
-    # author.display_name + author.orcid + institutions) and Crossref
-    # shape (`author` with given/family/ORCID).
+    # Authors — multi-shape adapter. OpenAlex returns `authorships` with
+    # author.{display_name, orcid, institutions}. Crossref returns
+    # `author` with {given, family, ORCID}. Semantic Scholar returns
+    # `authors` with {authorId, name} (no ORCID in the basic /paper
+    # response; the dedicated /author endpoint has more but we don't
+    # fetch it). We surface SOMETHING in all three cases so the FE's
+    # AuthorsLine renders a hover for the cited name even when the
+    # backing DB doesn't expose author profile IDs.
     authorships = verified_data.get('authorships')
-    if not authorships and isinstance(verified_data.get('author'), list):
-        authorships = verified_data['author']
+    s2_authors_raw: List[Dict[str, Any]] = []
+    if not authorships:
+        # Crossref shape
+        if isinstance(verified_data.get('author'), list):
+            authorships = verified_data['author']
+        # Semantic Scholar shape — promote {authorId, name} into
+        # OpenAlex-shaped {author: {display_name}}. We deliberately
+        # omit `id` because S2's authorId is NOT an OpenAlex ID and
+        # would produce a broken openalex.org/<id> link in the FE.
+        # `s2_author_id` is stored separately so a future FE pass can
+        # link to semanticscholar.org/author/<id>.
+        elif isinstance(verified_data.get('authors'), list):
+            for a in verified_data['authors']:
+                if isinstance(a, dict) and a.get('name'):
+                    entry = {'author': {'display_name': a.get('name')}}
+                    if a.get('authorId'):
+                        entry['s2_author_id'] = a.get('authorId')
+                    s2_authors_raw.append(entry)
+            authorships = s2_authors_raw
     enriched_authors = _extract_authors_with_orcid(authorships or [])
     if enriched_authors:
         enrichment['authors'] = enriched_authors

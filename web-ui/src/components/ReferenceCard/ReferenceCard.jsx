@@ -1092,22 +1092,26 @@ function AuthorsLine({ authors, enrichedAuthors }) {
     <div style={{ color: 'var(--color-text-secondary)' }}>
       {visible.map((name, i) => {
         const e = lookupEnrichment(name)
+        const profileHref = e?.orcid
+          ? `https://orcid.org/${e.orcid}`
+          : e?.openalex_id
+            ? `https://openalex.org/${e.openalex_id}`
+            : e?.s2_author_id
+              ? `https://www.semanticscholar.org/author/${e.s2_author_id}`
+              : null
         const tooltip = e
           ? [
               e.name && e.name !== name ? `Full name: ${e.name}` : null,
               e.orcid ? `ORCID: ${e.orcid}` : null,
               e.openalex_id ? `OpenAlex: ${e.openalex_id}` : null,
+              !e.orcid && !e.openalex_id && e.s2_author_id ? `Semantic Scholar author: ${e.s2_author_id}` : null,
               Array.isArray(e.institutions) && e.institutions.length > 0
                 ? `Affiliation: ${e.institutions.slice(0, 2).join(', ')}`
                 : null,
-              '(click to open profile)',
+              profileHref ? '(click to open profile)' : null,
             ].filter(Boolean).join('\n')
           : null
-        const href = e?.orcid
-          ? `https://orcid.org/${e.orcid}`
-          : e?.openalex_id
-            ? `https://openalex.org/${e.openalex_id}`
-            : null
+        const href = profileHref
         const handle = (ev) => {
           if (!href) return
           if (!isTauri()) return
