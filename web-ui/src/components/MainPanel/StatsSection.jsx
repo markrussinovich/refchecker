@@ -55,8 +55,16 @@ function PerStageChip({ stats, references }) {
         background: 'var(--color-bg-tertiary)',
         color: 'var(--color-text-secondary)',
       }}
-      title="How references were extracted: deterministic parser (BibTeX/.bbl) vs LLM, plus how many were checked by the hallucination LLM."
+      title={
+        "Extraction: how many references the deterministic parser " +
+        "(BibTeX / .bbl / regex) handled vs the LLM extractor.\n\n" +
+        "Hallucination check: how many references the hallucination-" +
+        "verifier LLM actually ran on (only the ones flagged as " +
+        "possibly fabricated by the cheap pre-screen — verified refs " +
+        "skip this stage)."
+      }
     >
+      <span style={{ color: 'var(--color-text-muted)' }}>Extracted:</span>
       <span>
         <span style={{ color: 'var(--color-text-secondary)' }}>Regex </span>
         <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{regex}</span>
@@ -66,9 +74,9 @@ function PerStageChip({ stats, references }) {
         <span style={{ color: 'var(--color-text-secondary)' }}>LLM </span>
         <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{llm}</span>
       </span>
-      <span style={{ opacity: 0.5 }}>·</span>
+      <span style={{ opacity: 0.4, margin: '0 4px' }}>|</span>
       <span>
-        <span style={{ color: 'var(--color-text-secondary)' }}>Halluc LLM </span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>Halluc checked </span>
         <span style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{hallucLlm}</span>
       </span>
     </span>

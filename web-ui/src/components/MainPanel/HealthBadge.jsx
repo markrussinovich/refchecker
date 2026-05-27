@@ -33,11 +33,15 @@ function computeScore(references, style) {
     if ((styleFilteredErrors || []).length > 0) errors += 1
     if ((styleFilteredWarnings || []).length > 0) warnings += 1
   }
+  // Score weights: verified contributes 70, clean contributes 30 — sums
+  // to 100 when every ref is verified + clean (was 70+25=95, capping
+  // the badge at 95% even with zero issues). Warnings shave up to 5
+  // off, hallucinations get a steeper penalty.
   const verifyRatio = verified / total
   const cleanRatio = (total - errors - halluc) / total
-  const raw = verifyRatio * 70 + cleanRatio * 25 - (warnings / total) * 5
+  const raw = verifyRatio * 70 + cleanRatio * 30 - (warnings / total) * 5
   const penalty = halluc > 0 ? Math.min(20, 8 + halluc * 4) : 0
-  const score = Math.max(0, Math.round(raw - penalty))
+  const score = Math.max(0, Math.min(100, Math.round(raw - penalty)))
   return { score, total, verified, halluc, errors, warnings }
 }
 
