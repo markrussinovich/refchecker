@@ -583,30 +583,40 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               styled preview block above already contains all this. */}
           {(activeFormat === 'plaintext' || !activeFormat) && (
             <>
-              {/* Authors */}
+              {/* Authors — per-name hover surfaces ORCID + OpenAlex
+                  profile links when the enrichment payload has them.
+                  Falls back to a plain comma-joined string when no
+                  enrichment is available (extractor-only refs). */}
               {normalizeAuthors(reference.authors).length > 0 && (
-                <div
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {formatAuthors(reference.authors)}
-                </div>
+                <AuthorsLine
+                  authors={reference.authors}
+                  enrichedAuthors={reference.enrichment?.authors}
+                />
               )}
 
-              {/* Venue */}
+              {/* Venue — hover surfaces the journal/conference page on
+                  OpenAlex when we have a source_id from enrichment. */}
               {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
-                <div
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {reference.venue}
-                </div>
+                <VenueLine
+                  venue={reference.venue}
+                  fullVenue={reference.enrichment?.venue}
+                  venueOpenalexId={reference.enrichment?.venue_id}
+                />
               )}
 
-              {/* Year */}
+              {/* Year — with accessed date if it differs from the
+                  published year (web-style references like "Accessed
+                  2024-03-12; published 2018"). */}
               {reference.year && reference.year !== 0 && reference.year !== '0' && (
                 <div
                   style={{ color: 'var(--color-text-secondary)' }}
                 >
                   {reference.year}
+                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(reference.year) && (
+                    <span style={{ color: 'var(--color-text-muted)' }}>
+                      {' '}· accessed {reference.accessed_date}
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -1006,5 +1016,151 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
     prev.authoritative_urls === next.authoritative_urls
   )
 })
+
+/**
+ * Authors line with per-name hover. Matches each surface-string token
+ * back to an enrichment record (by surname) so authors that have an
+ * ORCID or OpenAlex profile in the OpenAlex/Crossref enrichment
+ * payload get a clickable name; others render as plain text.
+ *
+ * Hover surfaces the author's profile link + first known affiliation.
+ * Falls back gracefully when no enrichment was returned (e.g. the
+ * ref verified via DBLP only and has no author IDs).
+ */
+function AuthorsLine({ authors, enrichedAuthors }) {
+  const list = normalizeAuthors(authors)
+  if (list.length === 0) return null
+
+  // Build a lookup table from surname → enrichment entry so we can
+  // match "Buchwald P" against {name: "Per Buchwald", orcid: ...}.
+  const enrichmentByKey = (() => {
+    const m = new Map()
+    for (const a of (enrichedAuthors || [])) {
+      if (!a?.name) continue
+      const tokens = String(a.name).trim().split(/\s+/)
+      const surname = tokens[tokens.length - 1].toLowerCase()
+      if (surname) m.set(surname, a)
+      const full = String(a.name).trim().toLowerCase()
+      if (full) m.set(full, a)
+    }
+    return m
+  })()
+
+  const lookupEnrichment = (display) => {
+    const lower = display.toLowerCase().trim()
+    if (enrichmentByKey.has(lower)) return enrichmentByKey.get(lower)
+    // "Buchwald P" → "buchwald"
+    const tokens = lower.split(/\s+/)
+    for (const tok of tokens) {
+      if (enrichmentByKey.has(tok)) return enrichmentByKey.get(tok)
+    }
+    return null
+  }
+
+  // Cap at 10 visible names + " et al." so very long author lists don't
+  // dominate the card. Matches the legacy formatAuthors() behaviour.
+  const visible = list.slice(0, 10)
+  const overflow = list.length > 10
+  return (
+    <div style={{ color: 'var(--color-text-secondary)' }}>
+      {visible.map((name, i) => {
+        const e = lookupEnrichment(name)
+        const tooltip = e
+          ? [
+              e.name && e.name !== name ? `Full name: ${e.name}` : null,
+              e.orcid ? `ORCID: ${e.orcid}` : null,
+              e.openalex_id ? `OpenAlex: ${e.openalex_id}` : null,
+              Array.isArray(e.institutions) && e.institutions.length > 0
+                ? `Affiliation: ${e.institutions.slice(0, 2).join(', ')}`
+                : null,
+              '(click to open profile)',
+            ].filter(Boolean).join('\n')
+          : null
+        const href = e?.orcid
+          ? `https://orcid.org/${e.orcid}`
+          : e?.openalex_id
+            ? `https://openalex.org/${e.openalex_id}`
+            : null
+        const handle = (ev) => {
+          if (!href) return
+          if (!isTauri()) return
+          if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+          ev.preventDefault()
+          openExternal(href)
+        }
+        return (
+          <span key={`${name}-${i}`}>
+            {href ? (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={handle}
+                title={tooltip}
+                style={{
+                  color: 'var(--color-text-secondary)',
+                  textDecorationColor: 'var(--color-link, #3b82f6)',
+                  textDecorationStyle: 'dotted',
+                  textUnderlineOffset: '3px',
+                  textDecorationLine: 'underline',
+                }}
+              >
+                {name}
+              </a>
+            ) : (
+              <span title={tooltip || undefined}>{name}</span>
+            )}
+            {i < visible.length - 1 ? ', ' : (overflow ? ', et al.' : '')}
+          </span>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Venue line with hover. Title attribute shows the full venue name
+ * (when the cited string was an abbreviation like "ANZ J Surg" vs
+ * OpenAlex's "ANZ journal of surgery") plus the OpenAlex source ID.
+ * Click opens the OpenAlex venue page in the system browser.
+ */
+function VenueLine({ venue, fullVenue, venueOpenalexId }) {
+  const fullDiffers = fullVenue && fullVenue !== venue
+  const titleBits = []
+  if (fullDiffers) titleBits.push(`Full name: ${fullVenue}`)
+  if (venueOpenalexId) titleBits.push(`OpenAlex source: ${venueOpenalexId}`)
+  if (venueOpenalexId) titleBits.push('(click to open venue page)')
+  const title = titleBits.join('\n') || undefined
+  const href = venueOpenalexId ? `https://openalex.org/${venueOpenalexId}` : null
+  const handle = (ev) => {
+    if (!href || !isTauri()) return
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button !== 0) return
+    ev.preventDefault()
+    openExternal(href)
+  }
+  return (
+    <div style={{ color: 'var(--color-text-secondary)' }} title={title}>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={handle}
+          style={{
+            color: 'var(--color-text-secondary)',
+            textDecorationColor: 'var(--color-link, #3b82f6)',
+            textDecorationStyle: 'dotted',
+            textUnderlineOffset: '3px',
+            textDecorationLine: 'underline',
+          }}
+        >
+          {venue}
+        </a>
+      ) : (
+        <span>{venue}</span>
+      )}
+    </div>
+  )
+}
 
 export default ReferenceCard

@@ -115,12 +115,14 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
 
   return (
     <div className="flex flex-col gap-1.5 mt-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-      {/* Row 1: publication type + venue + bibliographic + date */}
-      {(prettyPubType || metaLine || metaSuffix) && (
+      {/* Row 1: publication type + venue + bibliographic. The year is
+          intentionally NOT repeated here — the main reference-card
+          section above already renders it on its own line. */}
+      {(prettyPubType || metaLine) && (
         <div className="flex flex-wrap items-center gap-2">
           {prettyPubType && <PubTypeChip>{prettyPubType}</PubTypeChip>}
           {metaLine && (
-            <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}{metaSuffix && <>. <span style={{ color: 'var(--color-text-muted)' }}>{publication_date}</span></>}</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>{metaLine}</span>
           )}
         </div>
       )}

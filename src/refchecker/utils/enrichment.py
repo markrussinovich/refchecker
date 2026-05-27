@@ -219,6 +219,20 @@ def build_enrichment(verified_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if isinstance(venue_name, str) and venue_name.strip():
         enrichment['venue'] = venue_name.strip()
 
+    # OpenAlex venue (source) ID — lets the FE link the venue name to
+    # the journal/conference profile page. Mirrors the OpenAlex shape
+    # `primary_location.source.id` → "https://openalex.org/S12345".
+    venue_id_url = None
+    primary = verified_data.get('primary_location')
+    if isinstance(primary, dict):
+        src = primary.get('source')
+        if isinstance(src, dict):
+            venue_id_url = src.get('id')
+    if isinstance(venue_id_url, str):
+        vid = _short_id(venue_id_url)
+        if vid:
+            enrichment['venue_id'] = vid
+
     # Publication date — pretty-printed for the venue header line.
     # OpenAlex has `publication_date` (YYYY-MM-DD); Crossref has nested
     # `issued.date-parts`; Semantic Scholar uses `year` + optional
