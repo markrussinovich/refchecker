@@ -228,8 +228,33 @@ export default function GlobalDropZone() {
 
   if (!active) return null
 
+  // Overlay-as-drop-target: the document-level listeners catch most
+  // drops, but reports from the field showed drops landing on the
+  // centred "Drop a paper to verify" card sometimes silently no-op'd
+  // (events get swallowed by underlying handlers / browser default
+  // for the Mac webview). Putting `onDragOver` + `onDrop` directly on
+  // the overlay div guarantees the drop fires anywhere the visible
+  // overlay is rendered, regardless of what's underneath.
+  const overlayDragOver = (e) => {
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const overlayDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setCounter(0)
+    setActive(false)
+    const files = Array.from(e.dataTransfer?.files || [])
+    if (files.length === 0) return
+    const usable = files.find((f) => looksLikeAcceptedFile(f.name)) || files[0]
+    broadcastFile(usable)
+  }
+
   return (
     <div
+      onDragOver={overlayDragOver}
+      onDrop={overlayDrop}
       style={{
         position: 'fixed',
         inset: 0,
@@ -237,10 +262,15 @@ export default function GlobalDropZone() {
         backgroundColor: 'rgba(59, 130, 246, 0.12)',
         backdropFilter: 'blur(2px)',
         border: '3px dashed var(--color-accent, #3b82f6)',
-        pointerEvents: 'none',
+        // pointer-events ENABLED so the overlay itself receives the
+        // drop. Previously this was 'none' to let underlying elements
+        // get the drop, but that path was unreliable inside the Tauri
+        // webview when the overlay completely covered the FileDropZone.
+        pointerEvents: 'auto',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        cursor: 'copy',
       }}
     >
       <div
@@ -252,6 +282,7 @@ export default function GlobalDropZone() {
           border: '1px solid var(--color-border)',
           boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
           textAlign: 'center',
+          pointerEvents: 'none',  // keep the card click-through, the wrapper owns the drop
         }}
       >
         <div style={{ fontSize: 36, marginBottom: 8 }}>📎</div>
