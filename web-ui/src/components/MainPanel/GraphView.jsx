@@ -277,13 +277,32 @@ export default function GraphView({ references, paperTitle }) {
   const eligibleNodes = useMemo(() => {
     const fromGraph = Object.values(serverGraph?.byId || {}).filter(n => n?.paperId)
     if (fromGraph.length) return fromGraph
-    // Synthesize paperId-shaped entries from the raw refs so handleExpand
-    // can still fire. S2 accepts DOI:... / arXiv:... in the same slot.
+    // Fallback: synthesize paperId-shaped entries from any ref that
+    // carries a usable identifier. S2 /papers/expand accepts:
+    //   - DOI:<doi>
+    //   - arXiv:<id>
+    //   - the S2 paperId tail of semanticscholar.org/paper/<id> URLs
+    // We also accept refs whose authoritative_urls includes any of
+    // those, since verified refs often have the identifier there
+    // even when the top-level r.doi / r.arxiv_id wasn't extracted.
     return (references || [])
       .map((r, i) => {
         const id = String(r.id ?? r.index ?? `ref-${i}`)
         if (r.doi) return { id, paperId: `DOI:${r.doi}`, title: r.title }
         if (r.arxiv_id) return { id, paperId: `arXiv:${r.arxiv_id}`, title: r.title }
+        // Probe authoritative_urls / verified_url for embedded IDs.
+        const urls = []
+        if (Array.isArray(r.authoritative_urls)) urls.push(...r.authoritative_urls.map(u => (u || {}).url || ''))
+        if (typeof r.verified_url === 'string') urls.push(r.verified_url)
+        for (const u of urls) {
+          if (!u) continue
+          const doiMatch = u.match(/10\.\d{4,9}\/[\w.\-;()/:]+/)
+          if (doiMatch) return { id, paperId: `DOI:${doiMatch[0].replace(/[.,]$/, '')}`, title: r.title }
+          const arxivMatch = u.match(/arxiv\.org\/abs\/([\w.\-/]+)/i)
+          if (arxivMatch) return { id, paperId: `arXiv:${arxivMatch[1].replace(/v\d+$/, '')}`, title: r.title }
+          const s2Match = u.match(/semanticscholar\.org\/paper\/([0-9a-f]+)/i)
+          if (s2Match) return { id, paperId: s2Match[1], title: r.title }
+        }
         return null
       })
       .filter(Boolean)
@@ -349,22 +368,32 @@ export default function GraphView({ references, paperTitle }) {
             user feedback was that the option served no clear purpose
             in the typical view, and the rosette layout the spokes
             produce is the most readable default. */}
-        {eligibleNodes.length > 0 && (
-          <button
-            onClick={runAutoExpand}
-            disabled={autoExpanding}
-            className="ml-1 px-2 py-0.5 rounded"
-            style={{
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-bg-secondary)',
-              color: autoExpanded ? 'var(--color-success, #16a34a)' : 'var(--color-text-secondary)',
-              opacity: autoExpanding ? 0.6 : 1,
-            }}
-            title={"Pull each ref's own bibliography (2nd-degree). Each new node is coloured by its check status (verified / unverified / hallucinated)."}
-          >
-            {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ Showing 2nd-degree refs' : '⊕ Show 2nd-degree refs + status'}
-          </button>
-        )}
+        {/* Always render the 2nd-degree toggle. When no refs carry an
+            identifier (no DOI / arXiv / S2 paperId / authoritative_url
+            match) it disables itself with an explanatory title so the
+            user doesn't think the feature is hidden — they just see
+            "needs refs with DOI / arXiv to expand". */}
+        <button
+          onClick={runAutoExpand}
+          disabled={autoExpanding || eligibleNodes.length === 0}
+          className="ml-1 px-2 py-0.5 rounded"
+          style={{
+            border: '1px solid var(--color-border)',
+            background: 'var(--color-bg-secondary)',
+            color: autoExpanded
+              ? 'var(--color-success, #16a34a)'
+              : eligibleNodes.length === 0
+                ? 'var(--color-text-muted)'
+                : 'var(--color-text-secondary)',
+            opacity: (autoExpanding || eligibleNodes.length === 0) ? 0.6 : 1,
+            cursor: eligibleNodes.length === 0 ? 'not-allowed' : 'pointer',
+          }}
+          title={eligibleNodes.length === 0
+            ? '2nd-degree expansion needs refs with a DOI, arXiv ID, or Semantic Scholar paperId. None of the refs in this paper carry one.'
+            : `Pull each ref's own bibliography (2nd-degree). ${eligibleNodes.length} refs eligible. Each new node is coloured by its check status (verified / unverified / hallucinated).`}
+        >
+          {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ Showing 2nd-degree refs' : '⊕ Show 2nd-degree refs + status'}
+        </button>
         {expandedNodes.length > 0 && (
           <button
             onClick={() => setExpandedNodes([])}

@@ -979,8 +979,29 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     </div>
                   )}
                   {ref.verified_url && (
-                    <div className="text-[11px] mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      Source: <a href={ref.verified_url} target="_blank" rel="noreferrer">{ref.verified_url}</a>
+                    <div
+                      className="text-[11px] mt-2"
+                      style={{
+                        color: 'var(--color-text-secondary)',
+                        minWidth: 0,
+                        // Long DOI / verified URLs were overflowing the
+                        // card right edge in BibTeX-style corrections.
+                        // Wrap on any character so the link stays
+                        // inside the outline.
+                        wordBreak: 'break-all',
+                        overflowWrap: 'anywhere',
+                      }}
+                    >
+                      Source: <a
+                        href={ref.verified_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{
+                          color: 'var(--color-link, #3b82f6)',
+                          wordBreak: 'break-all',
+                          overflowWrap: 'anywhere',
+                        }}
+                      >{ref.verified_url}</a>
                     </div>
                   )}
                 </div>
