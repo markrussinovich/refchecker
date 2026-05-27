@@ -10,7 +10,9 @@ import { logger } from '../../utils/logger'
 const MIN_WIDTH = 220
 const MAX_WIDTH = 500
 const DEFAULT_WIDTH = 280
+const COLLAPSED_WIDTH = 48
 const STORAGE_KEY = 'refchecker-sidebar-width'
+const COLLAPSED_KEY = 'refchecker-sidebar-collapsed'
 
 /**
  * Sidebar component containing LLM selector and history list.
@@ -30,6 +32,20 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   })
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef(null)
+  // Sidebar collapsed state. When true, the sidebar shrinks to a thin
+  // rail (just the expand button) so the user gets max horizontal room
+  // for the main content. Persisted to localStorage so the choice
+  // survives reloads. Desktop-only — mobile keeps the drawer.
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false }
+  })
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed(c => {
+      const next = !c
+      try { localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0') } catch { /* quota */ }
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     // Don't fetch configs until auth check has finished
@@ -163,26 +179,59 @@ export default function Sidebar({ mobileOpen, onMobileClose }) {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside 
+      <aside
         ref={sidebarRef}
         className="sidebar-desktop flex flex-col h-full relative"
-        style={{ 
-          width: `${width}px`,
-          minWidth: `${MIN_WIDTH}px`,
-          maxWidth: `${MAX_WIDTH}px`,
+        style={{
+          width: collapsed ? `${COLLAPSED_WIDTH}px` : `${width}px`,
+          minWidth: collapsed ? `${COLLAPSED_WIDTH}px` : `${MIN_WIDTH}px`,
+          maxWidth: collapsed ? `${COLLAPSED_WIDTH}px` : `${MAX_WIDTH}px`,
           backgroundColor: 'var(--color-bg-secondary)',
+          transition: 'width 160ms ease, min-width 160ms ease, max-width 160ms ease',
         }}
       >
-        {sidebarContent}
-
-        {/* Resize handle (desktop only) */}
-        <div
-          onMouseDown={startResizing}
-          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
+        {/* Collapse / expand toggle — top of the sidebar, always visible
+            so the user can hide or restore the panel from either state.
+            Hidden on mobile (the drawer overlay already handles
+            visibility there). */}
+        <button
+          onClick={toggleCollapsed}
+          className="sidebar-toggle flex items-center justify-center gap-1.5 mt-2 mx-2 px-2 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors hover:bg-[var(--color-bg-tertiary)]"
           style={{
-            backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
           }}
-        />
+          title={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Hide sidebar'}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-3.5 h-3.5 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            style={{ transform: collapsed ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+          {!collapsed && <span>Hide sidebar</span>}
+        </button>
+
+        {/* Content. When collapsed the inner content is hidden — only
+            the toggle button + a thin rail remain. */}
+        {!collapsed && sidebarContent}
+
+        {/* Resize handle (desktop only) — disabled when collapsed. */}
+        {!collapsed && (
+          <div
+            onMouseDown={startResizing}
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-500 transition-colors"
+            style={{
+              backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent',
+            }}
+          />
+        )}
       </aside>
 
       {/* Mobile drawer overlay */}

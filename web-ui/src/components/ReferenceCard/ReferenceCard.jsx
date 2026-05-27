@@ -1058,28 +1058,71 @@ function AuthorsLine({ authors, enrichedAuthors }) {
   const list = normalizeAuthors(authors)
   if (list.length === 0) return null
 
-  // Build a lookup table from surname → enrichment entry so we can
-  // match "Buchwald P" against {name: "Per Buchwald", orcid: ...}.
+  // Normalise a name fragment: lowercase, strip diacritics, strip
+  // punctuation. Matches "Bossuyt" / "Bössuyt" / "bossuyt," to one
+  // canonical "bossuyt" so cited spellings + database spellings
+  // match regardless of accents or trailing punctuation.
+  const norm = (s) => {
+    if (!s) return ''
+    return String(s)
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')      // strip combining diacritics
+      .toLowerCase()
+      .replace(/[^a-z0-9\-' ]+/g, ' ')      // keep letters, digits, hyphens, apostrophes, spaces
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  // Build a lookup table from surname → enrichment entry. Indexes by:
+  //   - normalised full name ("per buchwald")
+  //   - normalised surname ("buchwald")
+  //   - first initial + surname ("p buchwald", "buchwald p")
+  // so the cited "Buchwald P" (Vancouver) and "P. Buchwald" (APA) and
+  // "Per Buchwald" (database canonical) all collapse to one entry.
   const enrichmentByKey = (() => {
     const m = new Map()
+    const add = (k, v) => { if (k && !m.has(k)) m.set(k, v) }
     for (const a of (enrichedAuthors || [])) {
-      if (!a?.name) continue
-      const tokens = String(a.name).trim().split(/\s+/)
-      const surname = tokens[tokens.length - 1].toLowerCase()
-      if (surname) m.set(surname, a)
-      const full = String(a.name).trim().toLowerCase()
-      if (full) m.set(full, a)
+      const name = a && a.name ? String(a.name).trim() : ''
+      if (!name) continue
+      const lower = norm(name)
+      const tokens = lower.split(/\s+/).filter(Boolean)
+      if (tokens.length === 0) continue
+      const surname = tokens[tokens.length - 1]
+      const given = tokens.slice(0, -1)
+      const initials = given.map(t => t.charAt(0)).filter(Boolean)
+      add(lower, a)
+      add(surname, a)
+      // "buchwald p" / "p buchwald"
+      for (const ini of initials) {
+        add(`${surname} ${ini}`, a)
+        add(`${ini} ${surname}`, a)
+      }
+      // Surname-first (Vancouver order in S2 data)
+      if (tokens.length >= 2) {
+        add(`${tokens[0]} ${tokens[tokens.length - 1]}`, a)
+      }
     }
     return m
   })()
 
   const lookupEnrichment = (display) => {
-    const lower = display.toLowerCase().trim()
+    const lower = norm(display)
+    if (!lower) return null
     if (enrichmentByKey.has(lower)) return enrichmentByKey.get(lower)
-    // "Buchwald P" → "buchwald"
-    const tokens = lower.split(/\s+/)
-    for (const tok of tokens) {
-      if (enrichmentByKey.has(tok)) return enrichmentByKey.get(tok)
+    const tokens = lower.split(/\s+/).filter(Boolean)
+    // Try the longest token first (surnames are typically the longest
+    // single token in "Buchwald P" or "P. Buchwald"). Then any single
+    // token. Final pass: pairwise surname+initial combos.
+    const sorted = [...tokens].sort((a, b) => b.length - a.length)
+    for (const tok of sorted) {
+      if (tok.length >= 2 && enrichmentByKey.has(tok)) return enrichmentByKey.get(tok)
+    }
+    for (let i = 0; i < tokens.length; i++) {
+      for (let j = i + 1; j < tokens.length; j++) {
+        const a = `${tokens[i]} ${tokens[j]}`
+        if (enrichmentByKey.has(a)) return enrichmentByKey.get(a)
+      }
     }
     return null
   }
