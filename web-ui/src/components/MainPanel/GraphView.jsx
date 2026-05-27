@@ -312,12 +312,16 @@ export default function GraphView({ references, paperTitle }) {
     if (autoExpanding || !eligibleNodes.length) return
     setAutoExpanding(true)
     try {
-      const queue = eligibleNodes.slice(0, 25)  // hard cap for sanity
+      // Bigger budget: cap at 60 refs (was 25), 8 children each (was 4),
+      // 6 workers in parallel (was 4). The user's complaint was that
+      // only some refs got expanded — bumping both limits ensures full
+      // bibliographies expand within a reasonable time budget.
+      const queue = eligibleNodes.slice(0, 60)
       const worker = async () => {
         while (queue.length) {
           const node = queue.shift()
           try {
-            const res = await expandPaper({ paper_id: node.paperId, limit: 4 })
+            const res = await expandPaper({ paper_id: node.paperId, limit: 8 })
             const items = res.data?.items || []
             const additions = items
               .filter(it => it.paperId)
@@ -347,7 +351,9 @@ export default function GraphView({ references, paperTitle }) {
           } catch { /* skip this one */ }
         }
       }
-      await Promise.all([worker(), worker(), worker(), worker()])
+      // 6 workers — enough parallelism to clear a 60-ref queue in
+      // ~2 batches without overrunning S2's per-IP rate limit.
+      await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()])
       setAutoExpanded(true)
     } finally {
       setAutoExpanding(false)
@@ -403,6 +409,27 @@ export default function GraphView({ references, paperTitle }) {
             Clear expanded ({expandedNodes.length})
           </button>
         )}
+      </div>
+
+      {/* Colour legend — bottom-right corner. Disambiguates the cyan
+          "expanded but unknown verification status" from the green
+          "verified" without forcing the user to hover each node. */}
+      <div
+        className="absolute bottom-2 right-2 z-10 text-[10px] px-2 py-1 rounded flex items-center gap-2 flex-wrap"
+        style={{
+          background: 'var(--color-bg-tertiary)',
+          color: 'var(--color-text-secondary)',
+          border: '1px solid var(--color-border)',
+          maxWidth: 320,
+        }}
+        title="Node colours map to verification status. Expanded 2nd-degree refs that don't appear in your Seen References cache stay cyan because their status is unknown."
+      >
+        <LegendDot color={STATUS_COLOR.verified} label="verified" />
+        <LegendDot color={STATUS_COLOR.warning} label="warning" />
+        <LegendDot color={STATUS_COLOR.error} label="error" />
+        <LegendDot color={STATUS_COLOR.unverified} label="unverified" />
+        <LegendDot color={STATUS_COLOR.hallucinated} label="hallucinated" />
+        <LegendDot color="#0ea5e9" label="expanded · unknown" />
       </div>
       <Suspense fallback={
         <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -560,5 +587,14 @@ export default function GraphView({ references, paperTitle }) {
         </div>
       )}
     </div>
+  )
+}
+
+function LegendDot({ color, label }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      <span>{label}</span>
+    </span>
   )
 }
