@@ -275,6 +275,40 @@ export const useCheckStore = create((set, get) => ({
     }))
   },
 
+  // Optimistically flip a reference to verified + clear errors/warnings
+  // in the live checkStore. Mirrors useHistoryStore.optimisticApplyCorrection
+  // but on the per-check feed, which is what displayRefs renders from
+  // while a check is current — without this, Apply Fix only moves the
+  // HealthBadge after the network roundtrip lands (and only for
+  // historical-view checks).
+  applyCorrectionInStore: (refId) => {
+    const idStr = String(refId)
+    set(state => {
+      const list = state.references || []
+      let touched = false
+      const next = list.map((r, i) => {
+        const matches =
+          String(r?.id ?? '') === idStr ||
+          String(r?.index ?? '') === idStr ||
+          String(i) === idStr
+        if (!matches) return r
+        touched = true
+        const corrected = r.corrected_reference || {}
+        const merged = { ...r }
+        for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+          if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
+            merged[k] = corrected[k]
+          }
+        }
+        merged.status = 'verified'
+        merged.errors = []
+        merged.warnings = []
+        return merged
+      })
+      return touched ? { references: next } : {}
+    })
+  },
+
   // Optimistically drop a reference from the live check feed so the
   // HealthBadge and ReferenceList react instantly. selectedCheck reload
   // alone won't update this slice — when the user is viewing the

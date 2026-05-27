@@ -375,12 +375,18 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     const k = keyFor(ref, i)
     setDecision(k, { status: 'applied' })
     if (selectedCheckId) {
-      // Optimistically flip status + merge corrected metadata locally so
-      // the citation-health chip moves the moment Apply Fix is clicked,
-      // not after the network roundtrip completes.
-      useHistoryStore.getState().optimisticApplyCorrection?.(String(ref.id ?? ref.index ?? i))
+      const refIdStr = String(ref.id ?? ref.index ?? i)
+      // Optimistically flip status + merge corrected metadata in BOTH
+      // stores so the citation-health chip moves immediately. The
+      // useHistoryStore update covers historical-view checks; the
+      // useCheckStore update covers the in-progress / current-check
+      // view (displayRefs prefers checkStore when isCurrentCheck, so
+      // without the second call the badge stayed frozen for fresh
+      // checks until reload landed).
+      useHistoryStore.getState().optimisticApplyCorrection?.(refIdStr)
+      useCheckStore.getState().applyCorrectionInStore?.(refIdStr)
       try {
-        await verifyReferenceInCheck(selectedCheckId, String(ref.id ?? ref.index ?? i), { apply_correction: true })
+        await verifyReferenceInCheck(selectedCheckId, refIdStr, { apply_correction: true })
         await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
       } catch (e) {
         /* re-verify is best-effort; the optimistic update stands */
@@ -403,10 +409,15 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     })
     if (selectedCheckId && targets.length) {
       // Optimistic local flip so the badge climbs immediately for every
-      // accepted correction; /verify confirms in the background.
+      // accepted correction; /verify confirms in the background. Update
+      // BOTH stores — historical view reads selectedCheck.results,
+      // current-check view reads useCheckStore.references.
       const histStore = useHistoryStore.getState()
+      const checkStoreApi = useCheckStore.getState()
       for (const { ref, i } of targets) {
-        histStore.optimisticApplyCorrection?.(String(ref.id ?? ref.index ?? i))
+        const refIdStr = String(ref.id ?? ref.index ?? i)
+        histStore.optimisticApplyCorrection?.(refIdStr)
+        checkStoreApi.applyCorrectionInStore?.(refIdStr)
       }
       // Re-verify the applied refs in parallel (cap 4) so the badge updates.
       const queue = targets.slice()
