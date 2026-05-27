@@ -394,9 +394,19 @@ export default function InputSection() {
   // fires regardless of how event bubbling interacts with the inner
   // FileDropZone.
   const handleBannerDragOver = (e) => {
-    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    // Permissive file-drag detection — matches GlobalDropZone's
+    // looksLikeFileDrag. macOS Tauri webview reports drags via
+    // 'public.file-url' / 'NSFilenamesPboardType' rather than 'Files',
+    // and pre-drop dataTransfer.types is sometimes empty. preventDefault
+    // is required on dragover or the browser refuses the drop entirely.
+    const types = Array.from(e.dataTransfer?.types || [])
+    const looksLikeFile = types.length === 0 || types.some(t => {
+      const lo = String(t).toLowerCase()
+      return lo === 'files' || lo.includes('file-url') || lo.includes('filenames') || lo.includes('uri-list')
+    })
+    if (!looksLikeFile) return
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
+    try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
   }
   const handleBannerDrop = (e) => {
     const files = Array.from(e.dataTransfer?.files || [])

@@ -68,18 +68,37 @@ export default function GlobalDropZone() {
   const [active, setActive] = useState(false)
   const [counter, setCounter] = useState(0) // nested dragenter/leave counter
 
+  // Tauri's WebKit webview reports file drags with a `types` list of
+  // `['Files']` on Chromium-style platforms but `['public.file-url',
+  // 'NSFilenamesPboardType']` (or empty) on macOS, depending on
+  // OS/version. The naive `types.includes('Files')` gate failed silently
+  // on macOS — no preventDefault ran on dragover, so the browser
+  // refused the drop entirely and nothing ever fired.
+  const looksLikeFileDrag = (dt) => {
+    if (!dt) return false
+    const types = Array.from(dt.types || [])
+    if (types.length === 0) return true  // empty in macOS Tauri — be permissive
+    return types.some((t) => {
+      const lo = String(t).toLowerCase()
+      return lo === 'files'
+        || lo.includes('file-url')
+        || lo.includes('filenames')
+        || lo.includes('uri-list')
+        || lo === 'application/x-moz-file'
+    })
+  }
+
   useEffect(() => {
     const handleDragEnter = (e) => {
-      // Only show overlay when the drag carries files
-      if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return
+      if (!looksLikeFileDrag(e.dataTransfer)) return
       e.preventDefault()
       setCounter((c) => c + 1)
       setActive(true)
     }
     const handleDragOver = (e) => {
-      if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return
+      if (!looksLikeFileDrag(e.dataTransfer)) return
       e.preventDefault()
-      e.dataTransfer.dropEffect = 'copy'
+      try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
     }
     const handleDragLeave = (e) => {
       e.preventDefault()
@@ -236,9 +255,9 @@ export default function GlobalDropZone() {
   // the overlay div guarantees the drop fires anywhere the visible
   // overlay is rendered, regardless of what's underneath.
   const overlayDragOver = (e) => {
-    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes('Files')) return
+    if (!looksLikeFileDrag(e.dataTransfer)) return
     e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
+    try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
   }
   const overlayDrop = (e) => {
     e.preventDefault()
