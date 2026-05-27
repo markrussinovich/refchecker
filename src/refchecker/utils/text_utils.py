@@ -5651,8 +5651,17 @@ def find_best_match(search_results, cleaned_title, year=None, authors=None):
                     score += 0.05
                 elif year_gap <= 3:
                     pass  # neutral — reprints / preprint vs journal drift
+                elif year_gap <= 5:
+                    # Likely wrong paper — small penalty
+                    score -= 0.25
                 else:
-                    score -= 0.2
+                    # Almost certainly a different paper with similar
+                    # title (e.g. cited 1999 but candidate is 2005).
+                    # Heavy penalty so the candidate falls below the
+                    # SIMILARITY_THRESHOLD and the verifier rejects it
+                    # instead of accepting and surfacing a confusing
+                    # "Year mismatch" warning.
+                    score -= 0.45
             except (TypeError, ValueError):
                 year_gap = None
 

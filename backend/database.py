@@ -5,6 +5,7 @@ import aiosqlite
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
@@ -12,6 +13,13 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 from cryptography.fernet import Fernet, InvalidToken
+
+# Module logger. Several call sites in this file (Seen-Refs backstop,
+# fernet decrypt warnings, etc.) reference `logger` directly; without
+# this definition any check that hits those paths crashes with
+# `NameError: name 'logger' is not defined` — surfaced especially on
+# LLM-extracted runs where the Seen-Refs backstop fires.
+logger = logging.getLogger(__name__)
 
 
 SECRET_VALUE_PREFIX = "enc:"

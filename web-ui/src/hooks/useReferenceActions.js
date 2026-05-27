@@ -148,26 +148,55 @@ export default function useReferenceActions() {
   const handleRestoreRef = async (snapshot) => {
     if (!selectedCheckId || !snapshot) return
     setGlobalBusy('__restore__')
+    // Optimistic put-back: drop a placeholder row into the live
+    // checkStore *immediately* so the user sees the restore instantly
+    // instead of staring at a spinning button for the 5-10s the
+    // network roundtrip + re-verify takes.
+    const optimisticId = `restoring-${snapshot._stashKey}`
+    const authorsArr = (snapshot.authors || '').trim()
+      ? snapshot.authors.split(',').map(s => s.trim()).filter(Boolean)
+      : []
+    const placeholder = {
+      id: optimisticId,
+      title: snapshot.title || '',
+      authors: authorsArr,
+      year: snapshot.year || null,
+      doi: snapshot.doi || null,
+      arxiv_id: snapshot.arxiv_id || null,
+      venue: snapshot.venue || null,
+      status: 'pending',
+      errors: [],
+      warnings: [],
+      suggestions: [{ message: 'Restoring…', error_type: 'manual' }],
+    }
+    try {
+      useCheckStore.getState().restoreReference(placeholder)
+    } catch { /* store may not have action yet */ }
+    // Pop from the trash strip right away — user sees the placeholder
+    // in the list and the trash entry gone in the same render.
+    setRemovedRefs(prev => prev.filter(r => r._stashKey !== snapshot._stashKey))
     try {
       const res = await addReferenceToCheck(selectedCheckId, {
         title: (snapshot.title || '').trim() || null,
-        authors: (snapshot.authors || '').trim()
-          ? snapshot.authors.split(',').map(s => s.trim()).filter(Boolean)
-          : null,
+        authors: authorsArr.length ? authorsArr : null,
         year: snapshot.year ? parseInt(snapshot.year, 10) : null,
         doi: (snapshot.doi || '').trim() || null,
         arxiv_id: (snapshot.arxiv_id || '').trim() || null,
         venue: (snapshot.venue || '').trim() || null,
       })
       const addedId = res?.data?.id ?? res?.data?.reference?.id ?? null
+      // Re-verify runs in the background — don't await. The reload
+      // below will pick up its result on the next progress tick.
       if (addedId != null) {
-        try {
-          await verifyReferenceInCheck(selectedCheckId, String(addedId))
-        } catch { /* re-verify is best-effort */ }
+        verifyReferenceInCheck(selectedCheckId, String(addedId)).catch(() => {})
       }
-      setRemovedRefs(prev => prev.filter(r => r._stashKey !== snapshot._stashKey))
+      // reload picks up the real persisted row (with the server-assigned
+      // manual-XXX id) and replaces our placeholder.
       await reloadCheck()
     } catch (e) {
+      // Roll back the optimistic restore and put the ref back in the trash.
+      try { useCheckStore.getState().removeReference(optimisticId) } catch { /* */ }
+      setRemovedRefs(prev => [snapshot, ...prev])
       alert(e?.response?.data?.detail || e?.message || 'Restore failed')
     } finally {
       setGlobalBusy(null)

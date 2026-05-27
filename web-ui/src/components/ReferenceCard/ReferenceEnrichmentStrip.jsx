@@ -107,7 +107,9 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
     counters.push({ label: 'Reference Count', value: reference_count.toLocaleString() })
   }
 
-  const hasIdRow = !!(links.doi || openalex_id || pubmed_id || pmc_id || mag_id || links.libkey || links.worldcat)
+  // DOI excluded — rendered above by the Verification block; pills row
+  // shows OpenAlex / PMID / PMC / LibKey / WorldCat / ORCID instead.
+  const hasIdRow = !!(openalex_id || pubmed_id || pmc_id || mag_id || links.libkey || links.worldcat)
   const hasAdditional = has_funding || has_affiliation || (Array.isArray(fields_of_study) && fields_of_study.length > 0)
   const hasAuthors = Array.isArray(authors) && authors.some(a => a?.orcid || a?.openalex_id)
 
@@ -136,14 +138,14 @@ export default function ReferenceEnrichmentStrip({ enrichment }) {
         </div>
       )}
 
-      {/* Row 3: external ID and reader pills */}
+      {/* Row 3: external ID and reader pills. DOI is intentionally NOT
+          repeated here — the ReferenceCard's Verification block above
+          already renders the DOI URL prominently, and the user flagged
+          the duplicate-DOI display as visual noise. LibKey + WorldCat
+          still use the DOI internally (passed via links), they just
+          don't get their own redundant DOI pill alongside. */}
       {hasIdRow && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {links.doi && (
-            <PillLink href={`https://doi.org/${links.doi}`} variant="primary" icon="🔗" title="Open DOI">
-              {links.doi}
-            </PillLink>
-          )}
           {openalex_id && (
             <PillLink href={`https://openalex.org/${openalex_id}`} variant="primary" icon="🅾" title="Open in OpenAlex">
               {openalex_id}

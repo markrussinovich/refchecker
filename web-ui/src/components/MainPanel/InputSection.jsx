@@ -386,15 +386,41 @@ export default function InputSection() {
   const isChecking = status === 'checking' && !isNewRefcheckMode
   const isComplete = (status === 'completed' || status === 'cancelled' || status === 'error') && !isNewRefcheckMode
 
+  // Outer-banner drag-drop. When the user drops a file ANYWHERE on the
+  // input card (above the tabs, on the title, around the inner zone),
+  // the GlobalDropZone's document listener should catch it — but the
+  // user reported drops outside the dashed zone silently did nothing.
+  // Adding explicit handlers on the outer card guarantees the drop
+  // fires regardless of how event bubbling interacts with the inner
+  // FileDropZone.
+  const handleBannerDragOver = (e) => {
+    if (!Array.from(e.dataTransfer?.types || []).includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+  const handleBannerDrop = (e) => {
+    const files = Array.from(e.dataTransfer?.files || [])
+    if (files.length === 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    // Route through the same custom event GlobalDropZone uses so the
+    // existing onOpenFile listener handles state + auto-submit.
+    window.dispatchEvent(new CustomEvent('refchecker:open-file', {
+      detail: { file: files[0], sourceLabel: files[0].name },
+    }))
+  }
+
   return (
-    <div 
+    <div
       className="rounded-lg border p-4 lg:p-6"
       style={{
         backgroundColor: 'var(--color-bg-secondary)',
         borderColor: 'var(--color-border)',
       }}
+      onDragOver={handleBannerDragOver}
+      onDrop={handleBannerDrop}
     >
-      <h2 
+      <h2
         className="text-lg font-semibold mb-4"
         style={{ color: 'var(--color-text-primary)' }}
       >
