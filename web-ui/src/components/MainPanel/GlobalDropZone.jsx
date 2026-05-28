@@ -41,14 +41,27 @@ function broadcastFile(file, sourceLabel) {
 }
 
 async function tauriPathToFile(path) {
-  // Read raw bytes via the fs plugin, then wrap as a File so the existing
-  // FormData upload path doesn't need a special case.
+  // Read raw bytes through our custom Rust command FIRST — it bypasses
+  // the fs plugin's capability ACL, which silently rejects paths
+  // outside the configured scopes ($HOME, $DOWNLOAD, etc.) and was a
+  // suspected silent failure mode for drag-drop. Drag-drop hands us
+  // an OS-validated absolute path; the user explicitly chose to drop
+  // it, so we trust it.
   if (!isTauri() || !window.__TAURI_INTERNALS__?.invoke) {
-    throw new Error('fs plugin unavailable')
+    throw new Error('Tauri bridge unavailable')
   }
-  const bytes = await window.__TAURI_INTERNALS__.invoke('plugin:fs|read_file', { path })
-  // The fs plugin returns a Uint8Array (or array of numbers depending on
-  // the bridge); normalize both.
+  let bytes
+  try {
+    bytes = await window.__TAURI_INTERNALS__.invoke('read_dropped_file', { path })
+  } catch (e) {
+    // Fall back to the fs plugin if the custom command isn't available
+    // (older build or registration glitch). Logs the failure so we can
+    // see which path the read came through.
+    console.warn('[GlobalDropZone] read_dropped_file failed, falling back to plugin:fs|read_file', e)
+    bytes = await window.__TAURI_INTERNALS__.invoke('plugin:fs|read_file', { path })
+  }
+  // The bridge returns a Uint8Array or an array of numbers depending on
+  // serializer; normalize both.
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)
   const filename = path.split(/[\\/]/).pop() || 'opened-file'
   const lower = filename.toLowerCase()
@@ -125,15 +138,20 @@ export default function GlobalDropZone() {
   // hook these explicitly instead of relying on the document listeners
   // above.
   useEffect(() => {
+    console.info('[GlobalDropZone] mount diagnostic — isTauri=', isTauri(),
+      ' TAURI_INTERNALS=', !!window.__TAURI_INTERNALS__)
     if (!isTauri()) return
     if (!window.__TAURI_INTERNALS__) return
     const cleanupFns = []
 
     const consumePaths = async (paths, source) => {
+      console.info(`[GlobalDropZone] consumePaths(${source}) called with`,
+        Array.isArray(paths) ? paths.length : '(not-array)', 'paths:', paths)
       if (!Array.isArray(paths) || paths.length === 0) return
       const usable = paths.find((p) => looksLikeAcceptedFile(p)) || paths[0]
       try {
         const file = await tauriPathToFile(usable)
+        console.info(`[GlobalDropZone] tauriPathToFile OK — broadcasting`, usable, file.size, 'bytes')
         broadcastFile(file, usable)
       } catch (e) {
         console.warn(`[GlobalDropZone] failed to read ${source} path`, usable, e)
@@ -147,10 +165,17 @@ export default function GlobalDropZone() {
       try {
         const ev = await import('@tauri-apps/api/event')
         // Open-With from the OS / file-association launch — global event.
+        // ALSO the channel the Rust-side drag-drop handler re-emits to,
+        // so this listener is on the critical path for both flows.
         if (ev?.listen) {
+          console.info('[GlobalDropZone] subscribing to refchecker://open-files')
           unlistenFns.push(await ev.listen('refchecker://open-files', (event) => {
+            console.info('[GlobalDropZone] refchecker://open-files event received',
+              event?.payload?.length || 0, 'path(s):', event?.payload)
             consumePaths(event?.payload || [], 'open-with')
           }))
+        } else {
+          console.warn('[GlobalDropZone] ev.listen unavailable')
         }
       } catch (e) {
         console.warn('[GlobalDropZone] @tauri-apps/api/event load failed', e)

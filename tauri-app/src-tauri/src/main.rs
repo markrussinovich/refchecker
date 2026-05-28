@@ -45,6 +45,33 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+/// Read a file dropped onto the window into a byte array. Bypasses the
+/// `plugin:fs|read_file` ACL because drag-drop hands us OS-validated
+/// absolute paths that may not be under any of the capability scopes
+/// (network mounts, /Applications, etc.) — the user explicitly chose
+/// to drop the file, so we trust the OS-supplied path. Returns the
+/// raw bytes, capped at 200MB to match the FE upload limit.
+#[tauri::command]
+fn read_dropped_file(path: String) -> Result<Vec<u8>, String> {
+    use std::fs;
+    use std::path::Path;
+    let p = Path::new(&path);
+    if !p.is_file() {
+        return Err(format!("not a regular file: {}", path));
+    }
+    // 200MB cap. Larger payloads would in any case fail the backend's
+    // FastAPI body-size guard, so reject early with a clear message
+    // instead of OOMing the renderer.
+    let metadata = fs::metadata(p).map_err(|e| format!("stat failed: {e}"))?;
+    if metadata.len() > 200 * 1024 * 1024 {
+        return Err(format!(
+            "file exceeds 200MB upload limit ({} bytes)",
+            metadata.len()
+        ));
+    }
+    fs::read(p).map_err(|e| format!("read failed: {e}"))
+}
+
 /// Inspect launch args for files the OS told us to open (Open With,
 /// `refchecker file.pdf`, drag-onto-dock). Returns absolute paths.
 fn extract_files_from_argv(argv: &[String]) -> Vec<String> {
@@ -248,24 +275,29 @@ fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![open_external])
+        .invoke_handler(tauri::generate_handler![open_external, read_dropped_file])
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // ── Rust-side drag-drop handler ───────────────────────────
-            // Belt-and-braces fix for v0.7.32: the JS-side
-            // `onDragDropEvent` subscriptions in GlobalDropZone have
-            // proven flaky across builds — drops would silently no-op
-            // with zero logs in DevTools, suggesting the dynamic-import
-            // chain or the webview channel isn't receiving the event.
-            // Catching the WindowEvent::DragDrop variant in Rust is the
-            // most reliable path: it taps the OS-level drag-drop signal
-            // (the same one `dragDropEnabled: true` enables) before any
-            // JS layer can swallow it, then re-emits the file paths
-            // through the existing `refchecker://open-files` channel
-            // that the FE already wires for Open With / argv launches.
+            // ── Rust-side drag-drop handler (v0.7.34 diagnostics) ────
+            // Even after v0.7.32/33's Rust handler users still reported
+            // "drag-drop captures nothing, no DevTools logs". To finally
+            // diagnose, every drag event now ALSO injects a console.log
+            // into the WebView via main_win.eval — Rust logs go to
+            // stderr/Console.app where the user can't easily see them,
+            // but DevTools console is where every report is grounded.
+            // Three outcomes possible after this build:
+            //   1. User drops a file and sees "[Rust drag-drop] …" in
+            //      DevTools → OS IS delivering events; the JS path that
+            //      reads the file must be the broken link.
+            //   2. User drops and sees nothing in DevTools → OS isn't
+            //      delivering the event to the Tauri window at all,
+            //      pointing at dragDropEnabled / NSWindow registration.
+            //   3. User sees the enter/over log but NOT the drop log →
+            //      something is cancelling the drop mid-gesture.
             if let Some(main_win) = app.get_webview_window("main") {
                 let drag_handle = handle.clone();
+                let eval_win = main_win.clone();
                 main_win.on_window_event(move |event| {
                     if let tauri::WindowEvent::DragDrop(drag_event) = event {
                         match drag_event {
@@ -278,12 +310,34 @@ fn run() {
                                     .iter()
                                     .filter_map(|p| p.to_str().map(|s| s.to_string()))
                                     .collect();
+                                // Diagnostic: also log via DevTools console
+                                // so the user can confirm the event arrived.
+                                if let Ok(json) = serde_json::to_string(&str_paths) {
+                                    let js = format!(
+                                        "console.info('[Rust drag-drop] DROP', {});",
+                                        json
+                                    );
+                                    let _ = eval_win.eval(js);
+                                }
                                 emit_open_files(&drag_handle, str_paths);
                             }
                             tauri::DragDropEvent::Enter { paths, .. } => {
-                                log::debug!(
+                                log::info!(
                                     "Rust drag-enter: {} path(s)",
                                     paths.len()
+                                );
+                                let _ = eval_win.eval(format!(
+                                    "console.info('[Rust drag-drop] ENTER', {});",
+                                    paths.len()
+                                ));
+                            }
+                            tauri::DragDropEvent::Over { .. } => {
+                                // Over fires continuously while dragging;
+                                // skip log spam, just record the first.
+                            }
+                            tauri::DragDropEvent::Leave => {
+                                let _ = eval_win.eval(
+                                    "console.info('[Rust drag-drop] LEAVE');".to_string(),
                                 );
                             }
                             _ => {}
@@ -291,6 +345,14 @@ fn run() {
                     }
                 });
                 log::info!("Registered Rust-side drag-drop handler on main window");
+                // Also tell the WebView the handler is up — this prints
+                // once after page load. If the user opens DevTools fresh
+                // and doesn't see this line, the page reloaded after
+                // setup() and the conf-defined window's drag-drop config
+                // was lost during the navigation to the sidecar URL.
+                let _ = main_win.eval(
+                    "setTimeout(() => console.info('[Rust drag-drop] handler registered, dragDropEnabled=true'), 2000);".to_string(),
+                );
             } else {
                 log::warn!(
                     "main window not found in setup() — drag-drop handler not registered"
