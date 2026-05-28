@@ -215,6 +215,25 @@ def _attach_citation_contexts(references, paper_text):
     if not references or not paper_text:
         return
     import re
+    # Pre-assign 1-based positional indexes to any refs that don't
+    # already carry one. This function runs BEFORE the per-ref
+    # verification pipeline (which uses enumerate-order for its own
+    # index events), so refs straight out of `cli_checker.parse_references`
+    # or the LLM extractor arrive here without an `index` field. The
+    # numeric-marker pass keys by `ref.get("index")` — without this
+    # assignment, every ref looked up as index=0 and the function
+    # silently attached nothing. That's why .docx case-reports with
+    # Vancouver-style `[1]`, `[2]` markers showed no inline citation
+    # contexts under the References tab, even though the markers were
+    # plainly extractable from the body text. Idempotent: refs that
+    # already have an `index` are left alone, so this is safe to re-run.
+    for i, ref in enumerate(references):
+        try:
+            existing_idx = int(ref.get("index") or 0)
+        except Exception:
+            existing_idx = 0
+        if existing_idx <= 0:
+            ref["index"] = i + 1
     global _NUMERIC_MARKER_RE
     if _NUMERIC_MARKER_RE is None:
         # Match three citation-marker shapes:
