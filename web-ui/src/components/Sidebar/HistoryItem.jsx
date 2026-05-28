@@ -1,7 +1,8 @@
 import { useState, useMemo, memo } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useCheckStore } from '../../stores/useCheckStore'
-import { formatDate } from '../../utils/formatters'
+import { useStyleStore } from '../../stores/useStyleStore'
+import { formatDate, filterIssuesForStyle } from '../../utils/formatters'
 import { logger } from '../../utils/logger'
 import { buildReferenceSummary } from '../../utils/referenceStatus'
 import * as api from '../../utils/api'
@@ -51,16 +52,31 @@ const HistoryItem = memo(function HistoryItem({ item, isSelected, compact = fals
   const liveReferences = useCheckStore(state => (isCurrentCheck ? state.references : null))
   const liveStats = useCheckStore(state => (isCurrentCheck ? state.stats : null))
   const liveStatus = useCheckStore(state => (isCurrentCheck ? state.status : null))
+  // Subscribe to the active citation style so the per-history-item
+  // counters re-evaluate when the user flips the style dropdown — the
+  // sidebar otherwise lagged behind the main view's style-aware counts.
+  const activeStyle = useStyleStore(s => s.format)
   const summaryCounts = useMemo(() => {
-    const refs = Array.isArray(liveReferences) && liveReferences.length > 0
+    const rawRefs = Array.isArray(liveReferences) && liveReferences.length > 0
       ? liveReferences
       : (Array.isArray(item.results) ? item.results : [])
+    // Apply the same style filter the main Summary chips and Corrections
+    // tab use, so the sidebar badge never reads "⚠1" while the main
+    // view shows 0 warnings (which happens when the only warning is a
+    // style-suppressed AJNR-type venue mismatch under Vancouver).
+    const refs = (rawRefs || []).map(r => {
+      if (!r) return r
+      const filteredErrors = filterIssuesForStyle(r.errors, r, activeStyle)
+      const filteredWarnings = filterIssuesForStyle(r.warnings, r, activeStyle)
+      if (filteredErrors === r.errors && filteredWarnings === r.warnings) return r
+      return { ...r, errors: filteredErrors, warnings: filteredWarnings }
+    })
     const stats = isCurrentCheck && liveStats ? liveStats : item
     const summaryIsComplete = isCurrentCheck
       ? ['completed', 'cancelled', 'error'].includes(liveStatus)
       : isComplete
     return buildReferenceSummary({ stats, references: refs, isComplete: summaryIsComplete })
-  }, [isCurrentCheck, liveStats, liveStatus, liveReferences, item, isComplete])
+  }, [isCurrentCheck, liveStats, liveStatus, liveReferences, item, isComplete, activeStyle])
 
   const totalRefs = summaryCounts.totalRefs
   const processedRefs = summaryCounts.processedRefs

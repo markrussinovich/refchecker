@@ -905,6 +905,17 @@ class ProgressRefChecker:
             "corrected_reference": None,
             "hallucination_assessment": hallucination_assessment,
             "_raw_errors": errors,  # Stashed for deferred hallucination check
+            # Carry inline citation contexts ("which paper sentences cite
+            # this ref") through to the FE result. Without these the
+            # _attach_citation_contexts pass earlier in the pipeline was
+            # silently dropped here — the new result dict picks out only
+            # specific fields from the original reference and citation_*
+            # weren't in the list. That's why the References tab showed
+            # no inline "Cited in:" sentences even after the index +
+            # cache-hit fixes in v0.7.36 / v0.7.37 landed.
+            "citation_contexts": reference.get('citation_contexts') or [],
+            "citation_context": reference.get('citation_context'),
+            "citation_count": reference.get('citation_count') or 0,
         }
         logger.info(f"_format_verification_result output: suggestions={formatted_suggestions}, status={status}")
         return result
@@ -931,7 +942,10 @@ class ProgressRefChecker:
             "warnings": [],
             "suggestions": [],
             "authoritative_urls": [],
-            "corrected_reference": None
+            "corrected_reference": None,
+            "citation_contexts": reference.get('citation_contexts') or [],
+            "citation_context": reference.get('citation_context'),
+            "citation_count": reference.get('citation_count') or 0,
         }
 
     async def emit_progress(self, event_type: str, data: Dict[str, Any]):
@@ -2386,6 +2400,18 @@ class ProgressRefChecker:
                     cached_result = dict(cached["result"])
                     cached_result["index"] = idx + 1
                     cached_result["from_cache"] = True
+                    # Merge in citation contexts from the fresh reference —
+                    # the global cache stores verification metadata only
+                    # and predates the contexts attached for THIS paper
+                    # body. Without this overlay, every cache-hit ref
+                    # rendered without its inline "Cited in:" sentences
+                    # in the References tab.
+                    if reference.get('citation_contexts'):
+                        cached_result['citation_contexts'] = reference['citation_contexts']
+                    if reference.get('citation_context'):
+                        cached_result['citation_context'] = reference['citation_context']
+                    if reference.get('citation_count'):
+                        cached_result['citation_count'] = reference['citation_count']
                     return cached_result
             except Exception as _e:
                 logger.debug("Global cache lookup skipped: %s", _e)
@@ -2417,7 +2443,10 @@ class ProgressRefChecker:
                     "warnings": [],
                     "suggestions": [],
                     "authoritative_urls": [],
-                    "corrected_reference": None
+                    "corrected_reference": None,
+                    "citation_contexts": reference.get('citation_contexts') or [],
+                    "citation_context": reference.get('citation_context'),
+                    "citation_count": reference.get('citation_count') or 0,
                 }
             except asyncio.CancelledError:
                 raise  # Re-raise cancellation
@@ -2437,7 +2466,10 @@ class ProgressRefChecker:
                     }],
                     "warnings": [],
                     "authoritative_urls": [],
-                    "corrected_reference": None
+                    "corrected_reference": None,
+                    "citation_contexts": reference.get('citation_contexts') or [],
+                    "citation_context": reference.get('citation_context'),
+                    "citation_count": reference.get('citation_count') or 0,
                 }
         
         return result
