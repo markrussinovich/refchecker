@@ -45,6 +45,26 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+/// Open DevTools on the main window. Exposed as a Tauri command so the
+/// FE can wire a keyboard shortcut (Cmd+Opt+I / Ctrl+Shift+I) — the
+/// built-in menu shortcut is unreliable on signed/notarized macOS
+/// builds, and users have reported being unable to open DevTools at
+/// all on the release artifact, which blocked diagnosing the
+/// drag-drop chain. Only effective when the `devtools` feature is
+/// enabled on the tauri crate (v0.7.40+).
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    #[cfg(any(debug_assertions, feature = "devtools"))]
+    {
+        window.open_devtools();
+    }
+    #[cfg(not(any(debug_assertions, feature = "devtools")))]
+    {
+        let _ = window;
+        log::warn!("open_devtools called but `devtools` feature is not enabled in this build");
+    }
+}
+
 /// Read a file dropped onto the window into a byte array. Bypasses the
 /// `plugin:fs|read_file` ACL because drag-drop hands us OS-validated
 /// absolute paths that may not be under any of the capability scopes
@@ -275,7 +295,7 @@ fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![open_external, read_dropped_file])
+        .invoke_handler(tauri::generate_handler![open_external, read_dropped_file, open_devtools])
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -298,6 +318,7 @@ fn run() {
             if let Some(main_win) = app.get_webview_window("main") {
                 let drag_handle = handle.clone();
                 let eval_win = main_win.clone();
+                let title_win = main_win.clone();
                 main_win.on_window_event(move |event| {
                     if let tauri::WindowEvent::DragDrop(drag_event) = event {
                         match drag_event {
@@ -310,14 +331,36 @@ fn run() {
                                     .iter()
                                     .filter_map(|p| p.to_str().map(|s| s.to_string()))
                                     .collect();
-                                // Diagnostic: also log via DevTools console
-                                // so the user can confirm the event arrived.
+                                // VISIBLE diagnostic — change the window
+                                // title for 4s so the user can confirm
+                                // the OS drop reached Rust even when
+                                // DevTools isn't accessible. They report
+                                // not being able to open DevTools at all
+                                // on the signed release build, so the
+                                // title bar is the only surface they can
+                                // see without instrumentation.
+                                let filename = str_paths
+                                    .first()
+                                    .and_then(|p| p.rsplit(['/', '\\']).next())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("{} path(s)", str_paths.len()));
+                                let tw = title_win.clone();
+                                let _ = tw.set_title(&format!("RefChecker — ✓ Got: {}", filename));
+                                let tw2 = tw.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(std::time::Duration::from_secs(4));
+                                    let _ = tw2.set_title("RefChecker");
+                                });
+                                // Also surface via DevTools console (in
+                                // case the user does manage to open it
+                                // — v0.7.40 enables the `devtools`
+                                // feature in release builds via the
+                                // tauri crate cargo feature).
                                 if let Ok(json) = serde_json::to_string(&str_paths) {
-                                    let js = format!(
+                                    let _ = eval_win.eval(format!(
                                         "console.info('[Rust drag-drop] DROP', {});",
                                         json
-                                    );
-                                    let _ = eval_win.eval(js);
+                                    ));
                                 }
                                 emit_open_files(&drag_handle, str_paths);
                             }
@@ -326,6 +369,8 @@ fn run() {
                                     "Rust drag-enter: {} path(s)",
                                     paths.len()
                                 );
+                                let tw = title_win.clone();
+                                let _ = tw.set_title("RefChecker — drag detected, release to drop");
                                 let _ = eval_win.eval(format!(
                                     "console.info('[Rust drag-drop] ENTER', {});",
                                     paths.len()
@@ -336,6 +381,8 @@ fn run() {
                                 // skip log spam, just record the first.
                             }
                             tauri::DragDropEvent::Leave => {
+                                let tw = title_win.clone();
+                                let _ = tw.set_title("RefChecker");
                                 let _ = eval_win.eval(
                                     "console.info('[Rust drag-drop] LEAVE');".to_string(),
                                 );
@@ -345,11 +392,6 @@ fn run() {
                     }
                 });
                 log::info!("Registered Rust-side drag-drop handler on main window");
-                // Also tell the WebView the handler is up — this prints
-                // once after page load. If the user opens DevTools fresh
-                // and doesn't see this line, the page reloaded after
-                // setup() and the conf-defined window's drag-drop config
-                // was lost during the navigation to the sidecar URL.
                 let _ = main_win.eval(
                     "setTimeout(() => console.info('[Rust drag-drop] handler registered, dragDropEnabled=true'), 2000);".to_string(),
                 );

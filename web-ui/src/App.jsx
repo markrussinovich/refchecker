@@ -66,6 +66,29 @@ function App() {
     setSidebarOpen(false)
   }, [selectedCheckId])
 
+  // Global Cmd+Opt+I / Ctrl+Shift+I shortcut to open DevTools in
+  // signed/release Tauri builds. WebKit's default DevTools shortcut
+  // is blocked on signed macOS apps, leaving users unable to inspect
+  // the console — which broke our ability to diagnose drag-drop
+  // failures over the v0.7.32–v0.7.39 cycle. The custom Tauri command
+  // `open_devtools` (registered in main.rs, compiled in via the
+  // `devtools` cargo feature in v0.7.40) routes around the limitation.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__?.invoke) return
+    const onKey = (e) => {
+      const mac = (e.metaKey && e.altKey && (e.key === 'i' || e.key === 'I'))
+      const win = (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i'))
+      if (mac || win) {
+        e.preventDefault()
+        window.__TAURI_INTERNALS__.invoke('open_devtools').catch((err) => {
+          console.warn('open_devtools failed', err)
+        })
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   // Only show auth loading spinner if we already know auth is required
   // (avoids blocking the entire UI while checking providers in single-user mode)
   if (authLoading && authRequired) {
