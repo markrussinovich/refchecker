@@ -81,52 +81,67 @@ export default function GlobalDropZone() {
   const [active, setActive] = useState(false)
   const [counter, setCounter] = useState(0) // nested dragenter/leave counter
 
-  // v0.7.26: unconditional preventDefault on every drag event. Earlier
-  // versions tried to be smart about what looked like a file drag, but
-  // every wrapper around the check caused at least one platform/runtime
-  // combo to silently refuse the drop. The cost of always
-  // preventDefault'ing is minimal — non-file drags simply don't carry a
-  // file to broadcast. The drop handler still checks for actual files
-  // before doing anything.
+  // v0.7.38: split HTML5 drag handling by runtime mode.
+  //
+  // In Tauri (`dragDropEnabled: true`), calling preventDefault on the
+  // JS-side `dragover` / `drop` events appears to cancel the OS-level
+  // drop on macOS WKWebView before Tauri's native handler can fire.
+  // The user reported the overlay banner showing up but the file
+  // never being captured — classic symptom of the WebKit handler
+  // consuming the event ahead of the NSWindow registration. In Tauri
+  // we now ONLY listen to `dragenter` / `dragleave` for the visual
+  // overlay, with no preventDefault and no drop handler — drops are
+  // exclusively delivered by the Rust `WindowEvent::DragDrop::Drop`
+  // handler which re-emits via `refchecker://open-files`.
+  //
+  // Outside Tauri (Docker / pip web UI) the browser needs the full
+  // HTML5 dance to accept drops, so we keep the preventDefault path.
   useEffect(() => {
+    const inTauri = isTauri()
+
     const handleDragEnter = (e) => {
-      e.preventDefault()
+      if (!inTauri) e.preventDefault()
       setCounter((c) => c + 1)
       setActive(true)
     }
-    const handleDragOver = (e) => {
-      e.preventDefault()
-      try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
-    }
     const handleDragLeave = (e) => {
-      e.preventDefault()
+      if (!inTauri) e.preventDefault()
       setCounter((c) => {
         const next = Math.max(0, c - 1)
         if (next === 0) setActive(false)
         return next
       })
     }
-    const handleDrop = (e) => {
-      e.preventDefault()
-      setCounter(0)
-      setActive(false)
-      const files = Array.from(e.dataTransfer?.files || [])
-      if (files.length === 0) return
-      // Single-file: route to single-paper check. Multi: feed the first
-      // recognised file; the user can use bulk mode for batches.
-      const usable = files.find((f) => looksLikeAcceptedFile(f.name)) || files[0]
-      broadcastFile(usable)
-    }
 
     document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragover', handleDragOver)
     document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('drop', handleDrop)
+
+    if (!inTauri) {
+      const handleDragOver = (e) => {
+        e.preventDefault()
+        try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
+      }
+      const handleDrop = (e) => {
+        e.preventDefault()
+        setCounter(0)
+        setActive(false)
+        const files = Array.from(e.dataTransfer?.files || [])
+        if (files.length === 0) return
+        const usable = files.find((f) => looksLikeAcceptedFile(f.name)) || files[0]
+        broadcastFile(usable)
+      }
+      document.addEventListener('dragover', handleDragOver)
+      document.addEventListener('drop', handleDrop)
+      return () => {
+        document.removeEventListener('dragenter', handleDragEnter)
+        document.removeEventListener('dragleave', handleDragLeave)
+        document.removeEventListener('dragover', handleDragOver)
+        document.removeEventListener('drop', handleDrop)
+      }
+    }
     return () => {
       document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragover', handleDragOver)
       document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('drop', handleDrop)
     }
   }, [])
 
@@ -272,20 +287,21 @@ export default function GlobalDropZone() {
 
   if (!active) return null
 
-  // Overlay-as-drop-target: the document-level listeners catch most
-  // drops, but reports from the field showed drops landing on the
-  // centred "Drop a paper to verify" card sometimes silently no-op'd
-  // (events get swallowed by underlying handlers / browser default
-  // for the Mac webview). Putting `onDragOver` + `onDrop` directly on
-  // the overlay div guarantees the drop fires anywhere the visible
-  // overlay is rendered, regardless of what's underneath.
+  const inTauri = isTauri()
+
+  // Overlay-as-drop-target — ONLY when running outside Tauri. In
+  // Tauri the overlay is visual-only (pointer-events: none) so the
+  // NSWindow drag-drop handler isn't blocked by the WebKit overlay
+  // capturing the drop ahead of it. The user reported the banner
+  // appearing but the drop never being captured; the fix is to let
+  // the native handler own the drop entirely in desktop mode.
   const overlayDragOver = (e) => {
-    // Unconditional preventDefault — see note above on handleDragOver.
-    // Without this WebKit refuses the drop entirely.
+    if (inTauri) return
     e.preventDefault()
     try { e.dataTransfer.dropEffect = 'copy' } catch { /* read-only on some webviews */ }
   }
   const overlayDrop = (e) => {
+    if (inTauri) return
     e.preventDefault()
     e.stopPropagation()
     setCounter(0)
@@ -307,11 +323,11 @@ export default function GlobalDropZone() {
         backgroundColor: 'rgba(59, 130, 246, 0.12)',
         backdropFilter: 'blur(2px)',
         border: '3px dashed var(--color-accent, #3b82f6)',
-        // pointer-events ENABLED so the overlay itself receives the
-        // drop. Previously this was 'none' to let underlying elements
-        // get the drop, but that path was unreliable inside the Tauri
-        // webview when the overlay completely covered the FileDropZone.
-        pointerEvents: 'auto',
+        // In Tauri, click-through so the native NSWindow drag-drop
+        // handler receives the drop, not the WebKit overlay. In web
+        // mode keep pointer-events:auto so the overlay catches drops
+        // that land on areas not covered by FileDropZone.
+        pointerEvents: inTauri ? 'none' : 'auto',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
