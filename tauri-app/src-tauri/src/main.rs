@@ -252,6 +252,51 @@ fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // ── Rust-side drag-drop handler ───────────────────────────
+            // Belt-and-braces fix for v0.7.32: the JS-side
+            // `onDragDropEvent` subscriptions in GlobalDropZone have
+            // proven flaky across builds — drops would silently no-op
+            // with zero logs in DevTools, suggesting the dynamic-import
+            // chain or the webview channel isn't receiving the event.
+            // Catching the WindowEvent::DragDrop variant in Rust is the
+            // most reliable path: it taps the OS-level drag-drop signal
+            // (the same one `dragDropEnabled: true` enables) before any
+            // JS layer can swallow it, then re-emits the file paths
+            // through the existing `refchecker://open-files` channel
+            // that the FE already wires for Open With / argv launches.
+            if let Some(main_win) = app.get_webview_window("main") {
+                let drag_handle = handle.clone();
+                main_win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::DragDrop(drag_event) = event {
+                        match drag_event {
+                            tauri::DragDropEvent::Drop { paths, .. } => {
+                                log::info!(
+                                    "Rust drag-drop: {} path(s) dropped",
+                                    paths.len()
+                                );
+                                let str_paths: Vec<String> = paths
+                                    .iter()
+                                    .filter_map(|p| p.to_str().map(|s| s.to_string()))
+                                    .collect();
+                                emit_open_files(&drag_handle, str_paths);
+                            }
+                            tauri::DragDropEvent::Enter { paths, .. } => {
+                                log::debug!(
+                                    "Rust drag-enter: {} path(s)",
+                                    paths.len()
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                });
+                log::info!("Registered Rust-side drag-drop handler on main window");
+            } else {
+                log::warn!(
+                    "main window not found in setup() — drag-drop handler not registered"
+                );
+            }
+
             // First-launch Open With: argv may already contain a file path
             // (e.g. the user right-clicked a PDF and the OS launched the
             // app fresh). Wait a tick so the WebView has time to install
