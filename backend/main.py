@@ -5345,8 +5345,22 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
                       "(one specific sentence on why this paper is topically narrow). "
                       "Respond with ONLY the JSON array, no prose or markdown."
                 )
+                # Tag this LLM call as the `suggest` flow so the $ badge's
+                # per-flow breakdown attributes the cost to the Similar
+                # Papers tab rather than dumping it into "other". The
+                # FlowScope's thread-local doesn't cross asyncio.to_thread,
+                # so we set it INSIDE the worker function — same pattern
+                # as the re-verify path uses.
+                def _run_llm_similar():
+                    try:
+                        from refchecker.llm import usage_tracker as _ut
+                        with _ut.FlowScope("suggest"):
+                            return provider._call_llm(prompt)
+                    except Exception:
+                        # Fall back to unflagged call if usage_tracker is unavailable.
+                        return provider._call_llm(prompt)
                 try:
-                    raw = await asyncio.to_thread(provider._call_llm, prompt)
+                    raw = await asyncio.to_thread(_run_llm_similar)
                 except Exception as e:
                     logger.debug("LLM similar-papers call failed: %s", e)
                     raw = None
@@ -5657,16 +5671,41 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
     # Run enrichment in parallel — sem caps concurrent verifications
     await asyncio.gather(*[_enrich(e) for e in ranked])
 
-    # Keep candidates that actually verified or hit cache OR have multi-source backing.
-    # Filter out lone-web/LLM ghosts that nobody could confirm at all.
-    # Always show candidates if we got any — even unverified single-source
-    # results are useful for "what else should I read?". The previous
-    # filter dropped lone-LLM/web ghosts but that left users with an empty
-    # tab when no source could be cross-verified, which is worse.
-    # Final rank: reference-overlap is the primary signal (the user's
-    # "shares 90% of refs" spec), then verified, then co-citation, then
-    # multi-source backing as tiebreakers.
-    final = list(out)
+    # Trust filter. A candidate is trustworthy when at least one of:
+    #   - the active verifier matched it (was_verified)
+    #   - multiple independent sources surfaced it (S2 + OpenAlex / etc.)
+    #   - it shares at least 2 references with the input paper
+    # LLM-only candidates that failed active verification AND share no
+    # refs are filtered out — those are the "hallucinated suggestion +
+    # fake DOI" case the user hit ("none are similar, some are
+    # hallucinations, wrong links"). The previous policy of "always
+    # show something" turned the tab into a noise generator on inputs
+    # where nothing could be cross-verified.
+    def _trustworthy(o):
+        if o.get("was_verified"):
+            return True
+        sources = o.get("sources") or []
+        if len(sources) >= 2:
+            return True
+        if o.get("shared_refs_count", 0) >= 2:
+            return True
+        # LLM-only, unverified, zero ref overlap → drop.
+        if sources == ["llm"]:
+            return False
+        # Lone non-LLM source with no overlap is still suspect but
+        # historically benign (S2 recommendation, OpenAlex similar) —
+        # keep but mark unverified so the FE can render a chip.
+        return True
+
+    pre_filter = list(out)
+    final = [o for o in pre_filter if _trustworthy(o)]
+    dropped_hallucinations = len(pre_filter) - len(final)
+    if dropped_hallucinations:
+        logger.info(
+            "similar-papers: filtered %d untrustworthy LLM-only candidate(s) "
+            "(no verification + no ref overlap)",
+            dropped_hallucinations,
+        )
     final.sort(
         key=lambda o: (
             o.get("shared_refs_pct", 0.0),
@@ -5688,6 +5727,7 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
         "candidates": final[:limit],
         "source_counts": source_counts,
         "total_candidates": len(out),
+        "dropped_untrustworthy": dropped_hallucinations,
     }
 
 

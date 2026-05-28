@@ -14,8 +14,10 @@ import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useCheckStore } from '../../stores/useCheckStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
+import { useStyleStore } from '../../stores/useStyleStore'
 import { useShallow } from 'zustand/react/shallow'
 import { applyStatusFilter } from '../../utils/referenceStatus'
+import { filterIssuesForStyle } from '../../utils/formatters'
 
 /**
  * Main panel containing input, status, stats, and references
@@ -45,6 +47,9 @@ export default function MainPanel() {
     statusFilter: s.statusFilter,
   })))
   const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
+  // Subscribe so the tab badges re-evaluate the style-aware corrections
+  // count whenever the user flips the citation style dropdown.
+  const activeStyle = useStyleStore(s => s.format)
 
   // Track scroll position to show/hide scroll-to-top button
   useEffect(() => {
@@ -314,16 +319,26 @@ export default function MainPanel() {
             >
               {(() => {
                 // Reflect the active Summary-chip filter in the tab pill
-                // counts, not just in the in-page header.
+                // counts, not just in the in-page header. The corrections
+                // count must apply the SAME style filter the Summary chips
+                // and Corrections view apply — otherwise a ref whose only
+                // issue is a style-suppressed venue mismatch (e.g.
+                // "AJNR Am J Neuroradiol") shows as "Corrections 1" while
+                // the page itself reads "No corrections needed", which
+                // confuses the user.
                 const refsForCount = (statusFilter || []).length
                   ? applyStatusFilter(displayRefs, statusFilter, isComplete)
                   : (displayRefs || [])
-                const correctionsCount = (refsForCount || []).filter(r =>
-                  (r.errors || []).length ||
-                  (r.warnings || []).length ||
-                  r.status === 'unverified' ||
-                  r.status === 'hallucinated'
-                ).length
+                const correctionsCount = (refsForCount || []).filter(r => {
+                  const filteredErrors = filterIssuesForStyle(r.errors, r, activeStyle)
+                  const filteredWarnings = filterIssuesForStyle(r.warnings, r, activeStyle)
+                  return (
+                    (filteredErrors || []).length ||
+                    (filteredWarnings || []).length ||
+                    r.status === 'unverified' ||
+                    r.status === 'hallucinated'
+                  )
+                }).length
                 return [
                   ['references', 'References', refsForCount.length],
                   ['corrections', 'Corrections', correctionsCount],
@@ -362,21 +377,38 @@ export default function MainPanel() {
                 )
               })}
             </div>
-            {resultsTab === 'references' ? (
+            {/*
+             * Tabs render with display:none rather than unmount/remount,
+             * so internal component state survives a tab switch. Graph
+             * was the primary motivator — `expandedNodes` and the loaded
+             * S2 co-citation `serverGraph` used to reset whenever the
+             * user clicked away to References and back, throwing away
+             * the 2nd-degree expansion they'd just run. Now every tab's
+             * state is preserved as long as the parent stays mounted.
+             *
+             * Cost: each tab continues running its effects in the
+             * background (e.g. the force-graph simulation, if any). The
+             * libs in use (react-force-graph-2d, the similar-papers
+             * fetch) are cheap enough that this is a net win for UX.
+             */}
+            <div style={{ display: resultsTab === 'references' ? 'block' : 'none' }}>
               <ReferenceList
                 references={displayRefs}
                 isLoading={isLoadingDetail}
                 isCheckComplete={isComplete}
               />
-            ) : resultsTab === 'corrections' ? (
+            </div>
+            <div style={{ display: resultsTab === 'corrections' ? 'block' : 'none' }}>
               <CorrectionsView
                 references={displayRefs}
                 isCheckComplete={isComplete}
                 paperSource={displayPaperSource}
               />
-            ) : resultsTab === 'graph' ? (
+            </div>
+            <div style={{ display: resultsTab === 'graph' ? 'block' : 'none' }}>
               <GraphView references={displayRefs} paperTitle={displayPaperTitle} />
-            ) : (
+            </div>
+            <div style={{ display: resultsTab === 'similar' ? 'block' : 'none' }}>
               <SimilarPapersPanel
                 references={displayRefs}
                 paperTitle={displayPaperTitle}
@@ -390,7 +422,7 @@ export default function MainPanel() {
                   window.dispatchEvent(new CustomEvent('refchecker:check-url', { detail: { url } }))
                 }}
               />
-            )}
+            </div>
           </div>
         )}
         </>

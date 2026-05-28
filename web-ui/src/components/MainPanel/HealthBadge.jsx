@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { filterIssuesForStyle } from '../../utils/formatters'
 import { useStyleStore } from '../../stores/useStyleStore'
+import { getEffectiveReferenceStatus } from '../../utils/referenceStatus'
 
 /**
  * Minimal "Citation health" chip. Live — recomputes on every edit because
@@ -25,11 +26,25 @@ function computeScore(references, style) {
   let errors = 0
   let warnings = 0
   for (const r of list) {
-    const status = r?.status || ''
-    if (status === 'verified') verified += 1
-    if (status === 'hallucinated' || r?.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') halluc += 1
+    // Style-filter errors/warnings first, then derive the effective
+    // status from the filtered view — this matches what
+    // StatsSection's Summary chips show. Counting `verified` off the
+    // RAW r.status would diverge from the chips: a ref whose only
+    // warning is a style-suppressed venue mismatch reads as
+    // "verified" in the chips (effective status) but as "warning" in
+    // raw status, which is why the badge sat at 92% while the chips
+    // showed 9/0/0.
     const styleFilteredErrors = filterIssuesForStyle(r?.errors, r, style)
     const styleFilteredWarnings = filterIssuesForStyle(r?.warnings, r, style)
+    const filteredRef = (styleFilteredErrors === r?.errors && styleFilteredWarnings === r?.warnings)
+      ? r
+      : { ...r, errors: styleFilteredErrors, warnings: styleFilteredWarnings }
+    const effective = getEffectiveReferenceStatus(filteredRef, true)
+    if (effective === 'verified') verified += 1
+    if (effective === 'hallucination' || effective === 'hallucinated' ||
+        r?.hallucination_assessment?.verdict?.toUpperCase?.() === 'LIKELY') {
+      halluc += 1
+    }
     if ((styleFilteredErrors || []).length > 0) errors += 1
     if ((styleFilteredWarnings || []).length > 0) warnings += 1
   }
