@@ -4,7 +4,8 @@ import {
   exportReferenceAsMarkdown,
   exportReferenceAsPlainText,
   exportReferenceAsBibtex,
-  copyToClipboard
+  copyToClipboard,
+  displayReferenceValue
 } from '../../utils/formatters'
 import {
   getEffectiveReferenceStatus,
@@ -461,6 +462,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
   const displayErrors = (reference.errors || [])
     .filter(issue => issue.error_type && issue.error_type !== 'unverified')
     .filter(() => !foundMetadataMatchesCitation)
+  const displayVenue = displayReferenceValue(reference.venue)
+  const displayYear = displayReferenceValue(reference.year)
 
   return (
     <div
@@ -548,20 +551,20 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
           )}
 
           {/* Venue */}
-          {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
+          {displayVenue && displayVenue !== 0 && displayVenue !== '0' && (
             <div
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {reference.venue}
+              {displayVenue}
             </div>
           )}
 
           {/* Year */}
-          {reference.year && reference.year !== 0 && reference.year !== '0' && (
+          {displayYear && displayYear !== 0 && displayYear !== '0' && (
             <div
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {reference.year}
+              {displayYear}
             </div>
           )}
 

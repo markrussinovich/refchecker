@@ -43,7 +43,7 @@ class LLMProviderMixin:
     # Set by the checker when --cache is used; None means disabled.
     cache_dir: str = None
 
-    def _call_llm_cached(self, prompt: str) -> str:
+    def _call_llm_cached(self, prompt: str, cache_predicate=None) -> str:
         """Wrapper around _call_llm that checks/saves the LLM response cache."""
         logger.debug("Raw bibliography text passed to LLM (%d chars):\n%s",
                       len(prompt), prompt)
@@ -54,11 +54,16 @@ class LLMProviderMixin:
             if hit is not None:
                 logger.debug("Raw LLM extraction response (cached, %d chars):\n%s",
                              len(hit['text']), hit['text'])
-                return hit['text']
+                if cache_predicate is None or cache_predicate(hit['text']):
+                    return hit['text']
+                logger.info("Ignoring cached LLM extraction response that parses to zero references")
             result = self._call_llm(prompt)
             logger.debug("Raw LLM extraction response (%d chars):\n%s",
                          len(result), result)
-            cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
+            if cache_predicate is None or cache_predicate(result):
+                cache_llm_response(self.cache_dir, self.model, system, prompt, response={'text': result})
+            else:
+                logger.info("Not caching LLM extraction response that parses to zero references")
             return result
         result = self._call_llm(prompt)
         logger.debug("Raw LLM extraction response (%d chars):\n%s",

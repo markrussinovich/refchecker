@@ -81,6 +81,7 @@ def generate_pdf_thumbnail(
     output_path: Optional[str] = None,
     source_identifier: Optional[str] = None,
     cache_dir: Optional[str] = None,
+    force: bool = False,
 ) -> Optional[str]:
     """
     Generate a thumbnail from the first page of a PDF.
@@ -105,7 +106,7 @@ def generate_pdf_thumbnail(
             output_path = get_thumbnail_cache_path(source_identifier or pdf_path, cache_dir=cache_dir)
         
         # Check if thumbnail already exists
-        if os.path.exists(output_path):
+        if os.path.exists(output_path) and not force:
             logger.debug(f"Thumbnail already exists: {output_path}")
             return output_path
         
@@ -171,6 +172,7 @@ async def generate_pdf_thumbnail_async(
     output_path: Optional[str] = None,
     source_identifier: Optional[str] = None,
     cache_dir: Optional[str] = None,
+    force: bool = False,
 ) -> Optional[str]:
     """
     Async wrapper for PDF thumbnail generation.
@@ -188,7 +190,32 @@ async def generate_pdf_thumbnail_async(
         output_path,
         source_identifier,
         cache_dir,
+        force,
     )
+
+
+def is_probably_placeholder_thumbnail(path: str) -> bool:
+    """Return True for tiny text-placeholder thumbnails, not rendered PDFs."""
+    try:
+        if not path or not os.path.exists(path) or os.path.getsize(path) > 4096:
+            return False
+
+        from PIL import Image
+
+        with Image.open(path).convert("RGB") as image:
+            width, height = image.size
+            if width != THUMBNAIL_WIDTH or height != int(THUMBNAIL_WIDTH * 1.4):
+                return False
+
+            pixels = image.getdata()
+            non_white = sum(
+                1
+                for r, g, b in pixels
+                if not (r >= 240 and g >= 240 and b >= 240)
+            )
+            return non_white / max(width * height, 1) < 0.02
+    except Exception:
+        return False
 
 
 def generate_pdf_preview(

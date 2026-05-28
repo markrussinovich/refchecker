@@ -67,7 +67,8 @@ from .thumbnail import (
     get_text_thumbnail_async,
     get_text_preview_async,
     get_thumbnail_cache_path,
-    get_preview_cache_path
+    get_preview_cache_path,
+    is_probably_placeholder_thumbnail,
 )
 from .usage_tracking import (
     append_usage_event,
@@ -1500,11 +1501,11 @@ async def run_check(
             # Always include check_id so the frontend can reliably route messages
             data_with_id = {**data, "check_id": check_id}
             await manager.send_message(session_id, event_type, data_with_id)
-            
+
             # Save reference results to DB as they come in
             if event_type == "reference_result":
                 accumulated_results.append(data)
-            
+
             # Save progress to DB every 3 references to reduce lock contention
             if event_type == "summary_update":
                 current_count = len(accumulated_results)
@@ -1579,7 +1580,7 @@ async def run_check(
         result_title = result["paper_title"]
         if source_type == "file" and result_title == "Unknown Paper":
             result_title = None  # Don't update title
-        
+
         # Update the existing check entry with results
         completed_at = utcnow_sqlite()
         duration_ms = int((time.perf_counter() - start_monotonic) * 1000)
@@ -1676,7 +1677,7 @@ async def run_check(
                     logger.info(f"Generated thumbnail for check {check_id}: {thumbnail_path}")
             except Exception as thumb_error:
                 logger.warning(f"Failed to generate thumbnail for check {check_id}: {thumb_error}")
-            
+
             # Note: We keep uploaded files for later access via /api/file/{check_id}
 
     except asyncio.CancelledError:
@@ -1793,7 +1794,7 @@ async def get_check_detail(
 async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get or generate a thumbnail for a check.
-    
+
     Returns the thumbnail image file if available, or generates one on-demand.
     For ArXiv papers, downloads the PDF and generates a thumbnail of the first page.
     For uploaded PDFs, generates a thumbnail from the file.
@@ -1801,27 +1802,12 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
-        # Check if we already have a cached thumbnail path
-        thumbnail_path = check.get('thumbnail_path')
-        if thumbnail_path and os.path.exists(thumbnail_path):
-            return FileResponse(
-                thumbnail_path,
-                media_type="image/png",
-                headers=_private_artifact_headers(),
-            )
-        
-        # Stale thumbnail path — clear it from DB so we regenerate cleanly
-        if thumbnail_path:
-            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
-            await db.update_check_thumbnail(check_id, "")
-        
         cache_dir = await _get_configured_cache_dir()
 
         # Generate thumbnail based on source type
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
-        
+
         # Convert OpenReview forum URLs to PDF URLs
         if 'openreview.net/forum' in (paper_source or '').lower():
             from urllib.parse import urlparse, parse_qs
@@ -1831,25 +1817,43 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             if or_id:
                 paper_source = f"https://openreview.net/pdf?id={or_id}"
 
+        is_direct_pdf_url = (
+            source_type == 'url' and
+            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and
+            'arxiv.org' not in paper_source.lower()
+        )
+        force_pdf_thumbnail_regen = False
+
+        # Check if we already have a cached thumbnail path
+        thumbnail_path = check.get('thumbnail_path')
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            if is_direct_pdf_url and is_probably_placeholder_thumbnail(thumbnail_path):
+                logger.info(f"Regenerating placeholder PDF thumbnail for check {check_id}: {thumbnail_path}")
+                force_pdf_thumbnail_regen = True
+            else:
+                return FileResponse(
+                    thumbnail_path,
+                    media_type="image/png",
+                    headers=_private_artifact_headers(),
+                )
+
+        # Stale thumbnail path — clear it from DB so we regenerate cleanly
+        if thumbnail_path:
+            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
+            await db.update_check_thumbnail(check_id, "")
+
         # Try to extract ArXiv ID
         import re
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
         arxiv_match = re.search(arxiv_id_pattern, paper_source)
-        
-        # Check if this is a direct PDF URL (not ArXiv)
-        is_direct_pdf_url = (
-            source_type == 'url' and
-            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
-            'arxiv.org' not in paper_source.lower()
-        )
-        
+
         if is_direct_pdf_url:
             # Generate thumbnail from direct PDF URL
             logger.info(f"Generating thumbnail from PDF URL: {paper_source}")
             from backend.refchecker_wrapper import download_pdf
 
             pdf_path = get_pdf_storage_path(paper_source, cache_dir=cache_dir)
-            
+
             # Download PDF if not already cached (or if cached file is empty/corrupt)
             if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
@@ -1859,22 +1863,23 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     thumbnail_path = await get_text_thumbnail_async(
                         check_id,
                         "PDF",
-                        source_identifier=paper_source,
+                        source_identifier=f"{paper_source}#pdf-placeholder",
                         cache_dir=cache_dir,
                     )
                     pdf_path = None
-            
+
             if pdf_path and os.path.exists(pdf_path):
                 thumbnail_path = await generate_pdf_thumbnail_async(
                     pdf_path,
                     source_identifier=paper_source,
                     cache_dir=cache_dir,
+                    force=force_pdf_thumbnail_regen,
                 )
             else:
                 thumbnail_path = await get_text_thumbnail_async(
                     check_id,
                     "PDF",
-                    source_identifier=paper_source,
+                    source_identifier=f"{paper_source}#pdf-placeholder",
                     cache_dir=cache_dir,
                 )
         elif arxiv_match:
@@ -1943,11 +1948,11 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                 source_identifier=f"check_{check_id}_{source_type}",
                 cache_dir=cache_dir,
             )
-        
+
         if thumbnail_path and os.path.exists(thumbnail_path):
             # Cache the thumbnail path in the database
             await db.update_check_thumbnail(check_id, thumbnail_path)
-            
+
             return FileResponse(
                 thumbnail_path,
                 media_type="image/png",
@@ -1955,7 +1960,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             )
         else:
             raise HTTPException(status_code=404, detail="Could not generate thumbnail")
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1967,20 +1972,20 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
 async def get_preview(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get or generate a high-resolution preview for a check.
-    
+
     Returns a larger preview image suitable for overlay display.
     For ArXiv papers, downloads the PDF and generates a preview of the first page.
     For uploaded PDFs, generates a preview from the file.
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
+
         cache_dir = await _get_configured_cache_dir()
 
         # Generate preview based on source type
         paper_source = check.get('paper_source', '')
         source_type = check.get('source_type', 'url')
-        
+
         # Convert OpenReview forum URLs to PDF URLs
         if 'openreview.net/forum' in (paper_source or '').lower():
             from urllib.parse import urlparse, parse_qs
@@ -1994,23 +1999,23 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
         import re
         arxiv_id_pattern = r'(\d{4}\.\d{4,5})(v\d+)?'
         arxiv_match = re.search(arxiv_id_pattern, paper_source)
-        
+
         # Check if this is a direct PDF URL (not ArXiv)
         is_direct_pdf_url = (
             source_type == 'url' and
-            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
+            (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and
             'arxiv.org' not in paper_source.lower()
         )
-        
+
         preview_path = None
-        
+
         if is_direct_pdf_url:
             # Generate preview from direct PDF URL
             logger.info(f"Generating preview from PDF URL: {paper_source}")
             from backend.refchecker_wrapper import download_pdf
 
             pdf_path = get_pdf_storage_path(paper_source, cache_dir=cache_dir)
-            
+
             # Download PDF if not already cached (or if cached file is empty/corrupt)
             if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
                 try:
@@ -2018,7 +2023,7 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                 except Exception as e:
                     logger.error(f"Failed to download PDF for preview: {e}")
                     pdf_path = None
-            
+
             if pdf_path and os.path.exists(pdf_path):
                 preview_path = await generate_pdf_preview_async(
                     pdf_path,
@@ -2039,14 +2044,14 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                     source_identifier=paper_source,
                     cache_dir=cache_dir,
                 )
-        
+
         if preview_path and os.path.exists(preview_path):
             return FileResponse(
                 preview_path,
                 media_type="image/png",
                 headers=_private_artifact_headers(),
             )
-        
+
         # For text sources, generate a high-resolution text preview for overlay display
         if source_type == 'text':
             logger.info(f"Generating text preview for check {check_id}")
@@ -2063,7 +2068,7 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                     media_type="image/png",
                     headers=_private_artifact_headers(),
                 )
-        
+
         # For non-PDF file uploads, also generate a text preview
         if source_type == 'file' and not paper_source.lower().endswith('.pdf'):
             logger.info(f"Generating text preview for uploaded file check {check_id}")
@@ -2088,9 +2093,9 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
                     media_type="image/png",
                     headers=_private_artifact_headers(),
                 )
-        
+
         raise HTTPException(status_code=404, detail="Could not generate preview")
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2102,18 +2107,18 @@ async def get_preview(check_id: int, current_user: UserInfo = Depends(require_us
 async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the pasted text content for a check.
-    
+
     Returns the text file content as plain text for viewing.
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
+
         source_type = check.get('source_type', '')
         paper_source = check.get('paper_source', '')
-        
+
         if source_type != 'text':
             raise HTTPException(status_code=400, detail="This check is not from pasted text")
-        
+
         # paper_source should now be a file path
         if os.path.exists(paper_source):
             return FileResponse(
@@ -2131,7 +2136,7 @@ async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(requir
                 paper_source,
                 headers=_private_artifact_headers(),
             )
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2143,19 +2148,19 @@ async def get_pasted_text(check_id: int, current_user: UserInfo = Depends(requir
 async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the uploaded file content for a check.
-    
+
     Returns the file for viewing/download.
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
+
         source_type = check.get('source_type', '')
         paper_source = check.get('paper_source', '')
         paper_title = check.get('paper_title', 'uploaded_file')
-        
+
         if source_type != 'file':
             raise HTTPException(status_code=400, detail="This check is not from an uploaded file")
-        
+
         if os.path.exists(paper_source):
             # Determine media type based on file extension
             media_type = "application/octet-stream"
@@ -2167,7 +2172,7 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
                 media_type = "text/plain; charset=utf-8"
             elif paper_source.lower().endswith('.tex'):
                 media_type = "text/plain; charset=utf-8"
-            
+
             return FileResponse(
                 paper_source,
                 media_type=media_type,
@@ -2176,7 +2181,7 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
             )
         else:
             raise HTTPException(status_code=404, detail="File no longer exists")
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2188,18 +2193,18 @@ async def get_uploaded_file(check_id: int, current_user: UserInfo = Depends(requ
 async def get_bibliography_source(check_id: int, current_user: UserInfo = Depends(require_user)):
     """
     Get the bibliography source content (bbl/bib file) for a check.
-    
+
     Returns the bibliography file content as plain text for viewing.
     This is the actual source file used to extract references (from ArXiv source or pasted text).
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
+
         bibliography_source_path = check.get('bibliography_source_path', '')
         extraction_method = check.get('extraction_method', '')
         source_type = check.get('source_type', '')
         paper_source = check.get('paper_source', '')
-        
+
         # First check if we have a saved bibliography source file
         if bibliography_source_path and os.path.exists(bibliography_source_path):
             return FileResponse(
@@ -2210,7 +2215,7 @@ async def get_bibliography_source(check_id: int, current_user: UserInfo = Depend
                     "Content-Type": "text/plain; charset=utf-8",
                 }),
             )
-        
+
         # Fall back to pasted text source if source_type is 'text' and it's bbl/bib
         if source_type == 'text' and extraction_method in ['bbl', 'bib'] and os.path.exists(paper_source):
             return FileResponse(
@@ -2221,9 +2226,9 @@ async def get_bibliography_source(check_id: int, current_user: UserInfo = Depend
                     "Content-Type": "text/plain; charset=utf-8",
                 }),
             )
-        
+
         raise HTTPException(status_code=404, detail="Bibliography source not available for this check")
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2252,7 +2257,7 @@ async def recheck(
         source_type = original.get("source_type") or (
             "url" if source.startswith("http") or "arxiv" in source.lower() else "file"
         )
-        
+
         llm_provider = original.get("llm_provider", "anthropic")
         llm_model = original.get("llm_model")
 
@@ -2278,7 +2283,7 @@ async def recheck(
                 detail=f"Maximum concurrent checks ({MAX_CHECKS_PER_USER}) reached"
             )
         slot_acquired = True
-        
+
         # Create history entry immediately
         new_check_id = await db.create_pending_check(
             paper_title=original.get("paper_title", "Re-checking..."),
@@ -2393,26 +2398,26 @@ async def start_batch_check(
 ):
     """
     Start a batch of reference checks from a list of URLs/ArXiv IDs.
-    
+
     Returns batch_id and list of individual check sessions.
     """
     try:
         if not request.urls or len(request.urls) == 0:
             raise HTTPException(status_code=400, detail="No URLs provided")
-        
+
         # Limit batch size to prevent abuse
         MAX_BATCH_SIZE = 50
         if len(request.urls) > MAX_BATCH_SIZE:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Batch size exceeds maximum of {MAX_BATCH_SIZE} papers"
             )
-        
+
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
         batch_label = request.batch_label or f"Batch of {len(request.urls)} papers"
         started_at = utcnow_sqlite()
-        
+
         user_id = get_user_id_filter(current_user)
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             request.semantic_scholar_api_key
@@ -2492,11 +2497,11 @@ async def start_batch_check(
         )
 
         checks = []
-        
+
         for url in valid_urls:
             session_id = str(uuid.uuid4())
             source_identity = infer_paper_identity(url, source_type='url')
-            
+
             # Create pending check entry with batch info
             check_id = await db.create_pending_check(
                 paper_title=url,  # Will be updated during processing
@@ -2538,7 +2543,7 @@ async def start_batch_check(
                     "llm_model": llm_model if request.use_llm else None,
                 },
             )
-            
+
             # Start check in background (run_check's finally will release the slot)
             cancel_event = asyncio.Event()
             task = asyncio.create_task(
@@ -2554,28 +2559,28 @@ async def start_batch_check(
                 )
             )
             active_checks[session_id] = {
-                "task": task, 
-                "cancel_event": cancel_event, 
+                "task": task,
+                "cancel_event": cancel_event,
                 "check_id": check_id,
                 "batch_id": batch_id,
                 "user_id": user_id,
             }
-            
+
             checks.append({
                 "session_id": session_id,
                 "check_id": check_id,
                 "source": url
             })
-        
+
         logger.info(f"Started batch {batch_id} with {len(checks)} papers")
-        
+
         return {
             "batch_id": batch_id,
             "batch_label": batch_label,
             "total_papers": len(checks),
             "checks": checks
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -2602,7 +2607,7 @@ async def start_batch_check_files(
 ):
     """
     Start a batch of reference checks from uploaded files.
-    
+
     Accepts multiple files or a single ZIP file containing documents.
     """
     try:
@@ -2620,9 +2625,9 @@ async def start_batch_check_files(
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
-        
+
         MAX_BATCH_SIZE = 50
-        
+
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
         started_at = utcnow_sqlite()
@@ -2630,10 +2635,10 @@ async def start_batch_check_files(
         user_id = get_user_id_filter(current_user)
         uploads_dir = get_uploads_dir() / str(user_id)
         uploads_dir.mkdir(parents=True, exist_ok=True)
-        
+
         files_to_process = []
         created_paths: list[Path] = []
-        
+
         # Check if single ZIP file
         if len(files) == 1 and files[0].filename.lower().endswith('.zip'):
             zip_name = files[0].filename.replace("/", "_").replace("\\", "_")
@@ -2660,12 +2665,12 @@ async def start_batch_check_files(
                         detail=f"Batch upload exceeds maximum total size of {MAX_BATCH_UPLOAD_TOTAL_BYTES // (1024 * 1024)} MB",
                     )
                 created_paths.append(file_path)
-                
+
                 files_to_process.append({
                     'path': str(file_path),
                     'filename': file.filename
                 })
-        
+
         if not files_to_process:
             raise HTTPException(status_code=400, detail="No valid files found")
 
@@ -2700,7 +2705,7 @@ async def start_batch_check_files(
                 api_key=hallucination_api_key,
                 require_hallucination_capable=True,
             )
-        
+
         label = batch_label or f"Batch of {len(files_to_process)} files"
 
         # Pre-acquire one slot per file to enforce per-user rate limit atomically
@@ -2745,12 +2750,12 @@ async def start_batch_check_files(
                 "uploaded_bytes": sum(Path(item['path']).stat().st_size for item in files_to_process if Path(item['path']).exists()),
             },
         )
-        
+
         checks = []
         for file_info in files_to_process:
             session_id = str(uuid.uuid4())
             file_size = Path(file_info['path']).stat().st_size if Path(file_info['path']).exists() else None
-            
+
             check_id = await db.create_pending_check(
                 paper_title=file_info['filename'],
                 paper_source=file_info['path'],
@@ -2788,7 +2793,7 @@ async def start_batch_check_files(
                     "original_filename_ext": Path(file_info['filename']).suffix.lower(),
                 },
             )
-            
+
             cancel_event = asyncio.Event()
             task = asyncio.create_task(
                 run_check(
@@ -2809,22 +2814,22 @@ async def start_batch_check_files(
                 "batch_id": batch_id,
                 "user_id": user_id,
             }
-            
+
             checks.append({
                 "session_id": session_id,
                 "check_id": check_id,
                 "source": file_info['filename']
             })
-        
+
         logger.info(f"Started file batch {batch_id} with {len(checks)} files")
-        
+
         return {
             "batch_id": batch_id,
             "batch_label": label,
             "total_papers": len(checks),
             "checks": checks
         }
-    
+
     except HTTPException:
         for path in locals().get('created_paths', []):
             try:
@@ -2849,14 +2854,14 @@ async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user
     """Get batch summary and all checks in the batch"""
     try:
         summary, checks = await _get_owned_batch_or_404(batch_id, current_user)
-        
+
         # Add session_id for in-progress checks
         for check in checks:
             if check.get("status") == "in_progress":
                 session_id = _session_id_for_check(check["id"])
                 if session_id:
                     check["session_id"] = session_id
-        
+
         return {
             **summary,
             "checks": checks
@@ -2885,10 +2890,10 @@ async def cancel_batch(
                 meta["cancel_event"].set()
                 meta["task"].cancel()
                 cancelled_sessions += 1
-        
+
         # Update database status for any remaining in-progress
         db_cancelled = await db.cancel_batch(batch_id, user_id=user_id)
-        
+
         logger.info(f"Cancelled batch {batch_id}: {cancelled_sessions} active, {db_cancelled} in DB")
         await _log_usage_event_safe(
             "batch.cancel_requested",
@@ -2902,7 +2907,7 @@ async def cancel_batch(
                 "cancelled_pending": db_cancelled,
             },
         )
-        
+
         return {
             "message": "Batch cancellation requested",
             "batch_id": batch_id,
@@ -2928,15 +2933,15 @@ async def delete_batch(batch_id: str, current_user: UserInfo = Depends(require_u
                 meta["cancel_event"].set()
                 meta["task"].cancel()
                 active_checks.pop(session_id, None)
-        
+
         # Delete from database
         deleted_count = await db.delete_batch(batch_id, user_id=user_id)
-        
+
         if deleted_count == 0:
             raise HTTPException(status_code=404, detail="Batch not found")
-        
+
         logger.info(f"Deleted batch {batch_id}: {deleted_count} checks")
-        
+
         return {
             "message": "Batch deleted successfully",
             "batch_id": batch_id,
@@ -2975,12 +2980,12 @@ async def recheck_batch(batch_id: str, current_user: UserInfo = Depends(require_
         original_checks = await db.get_batch_checks(batch_id, user_id=user_id)
         if not original_checks:
             raise HTTPException(status_code=404, detail="Batch not found")
-        
+
         # Create new batch
         new_batch_id = str(uuid.uuid4())
         original_label = original_checks[0].get("batch_label", "Re-checked batch")
         new_label = f"Re-check: {original_label}"
-        
+
         checks = []
         for original in original_checks:
             session_id = str(uuid.uuid4())
@@ -2988,7 +2993,7 @@ async def recheck_batch(batch_id: str, current_user: UserInfo = Depends(require_
             source_type = original.get("source_type", "url")
             llm_provider = original.get("llm_provider", "anthropic")
             llm_model = original.get("llm_model")
-            
+
             check_id = await db.create_pending_check(
                 paper_title=original.get("paper_title", "Re-checking..."),
                 paper_source=source,
@@ -3000,7 +3005,7 @@ async def recheck_batch(batch_id: str, current_user: UserInfo = Depends(require_
                 original_filename=original.get("original_filename"),
                 user_id=user_id,
             )
-            
+
             cancel_event = asyncio.Event()
             task = asyncio.create_task(
                 run_check(
@@ -3015,16 +3020,16 @@ async def recheck_batch(batch_id: str, current_user: UserInfo = Depends(require_
                 "batch_id": new_batch_id,
                 "user_id": user_id,
             }
-            
+
             checks.append({
                 "session_id": session_id,
                 "check_id": check_id,
                 "original_id": original["id"],
                 "source": source
             })
-        
+
         logger.info(f"Re-started batch {batch_id} as {new_batch_id} with {len(checks)} papers")
-        
+
         return {
             "batch_id": new_batch_id,
             "batch_label": new_label,
@@ -3257,7 +3262,7 @@ async def validate_llm_config(
         "google": ("google.genai", "pip install google-genai"),
         "gemini": ("google.genai", "pip install google-genai"),
     }
-    
+
     # Check if required package is installed for this provider
     provider_lower = config.provider.lower()
     if provider_lower in PROVIDER_PACKAGES:
@@ -3266,17 +3271,17 @@ async def validate_llm_config(
             __import__(module_name.split('.')[0])
         except ImportError:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"The '{config.provider}' provider requires the '{module_name.split('.')[0]}' package. "
                        f"Please install it with: {install_cmd}"
             )
-    
+
     try:
         import sys
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
         from refchecker.llm.base import create_llm_provider
-        
+
         # Build config
         llm_config = {}
         if config.model:
@@ -3285,12 +3290,12 @@ async def validate_llm_config(
             llm_config['api_key'] = config.api_key
         if config.endpoint:
             llm_config['endpoint'] = config.endpoint
-        
+
         # Try to create provider
         provider = create_llm_provider(config.provider, llm_config)
         if not provider:
             raise HTTPException(status_code=400, detail=f"Failed to create {config.provider} provider")
-        
+
         # Check if provider is available (has required client initialized)
         if hasattr(provider, 'is_available') and not provider.is_available():
             # Provider was created but client failed to initialize
@@ -3302,16 +3307,16 @@ async def validate_llm_config(
                            f"Make sure the required package is installed: {install_cmd}"
                 )
             raise HTTPException(status_code=400, detail=f"Provider '{config.provider}' is not available")
-        
+
         # Make a simple test call using _call_llm
         test_response = provider._call_llm("Respond with only the word 'ok'.")
-        
+
         # If we get here without an exception, the API key and model are valid.
         # Some models return empty text for trivial prompts (e.g. when a
         # system prompt tells them to extract references), so we treat
         # empty-but-no-error as success.
         return {"valid": True, "message": "Connection successful"}
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3375,13 +3380,13 @@ async def validate_semantic_scholar_key(
     Returns success or error message.
     """
     import httpx
-    
+
     try:
         if not data.api_key or not data.api_key.strip():
             raise HTTPException(status_code=400, detail="API key cannot be empty")
-        
+
         api_key = data.api_key.strip()
-        
+
         # Test the API key by making a simple search query
         # Using the paper search endpoint with a minimal query
         url = "https://api.semanticscholar.org/graph/v1/paper/search"
@@ -3394,10 +3399,10 @@ async def validate_semantic_scholar_key(
             "limit": 1,
             "fields": "title"
         }
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, headers=headers, params=params)
-        
+
         if response.status_code == 200:
             return {"valid": True, "message": "API key is valid"}
         elif response.status_code == 401 or response.status_code == 403:
@@ -3407,10 +3412,10 @@ async def validate_semantic_scholar_key(
             return {"valid": True, "message": "API key is valid (rate limited)"}
         else:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"API validation failed with status {response.status_code}"
             )
-            
+
     except HTTPException:
         raise
     except httpx.TimeoutException:
@@ -3518,7 +3523,7 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
                 "description": "Directory for caching PDFs, extracted bibliographies, and LLM responses to speed up repeated checks",
                 "section": "Database"
             }
-        
+
         # Get current values from database
         settings = {}
         for key, config in settings_config.items():
@@ -3547,7 +3552,7 @@ async def get_all_settings(current_user: UserInfo = Depends(require_user)):
             if key == "db_path":
                 resolved_db_path = await _get_configured_semantic_scholar_db_path()
                 settings[key]["current_snapshot"] = _read_semantic_scholar_db_snapshot(resolved_db_path)
-        
+
         return settings
     except Exception as e:
         logger.error(f"Error getting settings: {e}", exc_info=True)
@@ -3567,7 +3572,7 @@ async def update_setting(
         valid_keys = {"max_concurrent_checks", "db_path", "cache_dir"}
         if setting_key not in valid_keys:
             raise HTTPException(status_code=400, detail=f"Unknown setting: {setting_key}")
-        
+
         # Apply setting-specific validation
         if setting_key == "max_concurrent_checks":
             try:
@@ -3576,18 +3581,18 @@ async def update_setting(
                     value = 1
                 if value > 50:
                     value = 50
-                
+
                 # Update the default limit for new sessions
                 await set_default_max_concurrent(value)
                 logger.info(f"Updated per-session concurrency limit to {value}")
-                
+
                 # Store the validated value
                 await db.set_setting(setting_key, str(value))
-                
+
                 return {"key": setting_key, "value": str(value), "message": "Setting updated"}
             except ValueError:
                 raise HTTPException(status_code=400, detail="max_concurrent_checks must be a number")
-        
+
         if setting_key == "db_path":
             path = update.value.strip()
             if not path:
@@ -3652,7 +3657,7 @@ async def update_setting(
                 "papers": db_summary["row_count"],
                 "current_snapshot": _read_semantic_scholar_db_snapshot(path_obj),
             }
-        
+
         if setting_key == "cache_dir":
             path = update.value.strip()
             if not path:
@@ -3673,7 +3678,7 @@ async def update_setting(
         # For other settings, just store the value
         await db.set_setting(setting_key, update.value)
         return {"key": setting_key, "value": update.value, "message": "Setting updated"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -3802,13 +3807,13 @@ async def clear_database(current_user: UserInfo = Depends(require_user)):
         # Clear verification cache
         cache_count = await db.clear_verification_cache()
         usage_event_count = await clear_usage_log()
-        
+
         # Clear check history
         async with aiosqlite.connect(db.db_path) as conn:
             history_cursor = await conn.execute("DELETE FROM check_history")
             await conn.commit()
             history_count = history_cursor.rowcount if history_cursor.rowcount != -1 else 0
-        
+
         logger.info(f"Cleared database: {cache_count} cache entries, {history_count} history entries, {usage_event_count} usage events")
         return {
             "message": f"Cleared {cache_count} cache entries, {history_count} history entries, and {usage_event_count} usage events",
@@ -4143,7 +4148,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
     # Mount assets directory for JS/CSS files
     if (STATIC_DIR / "assets").exists():
         app.mount("/assets", StaticFiles(directory=str(STATIC_DIR / "assets")), name="assets")
-    
+
     @app.get("/favicon.svg")
     async def favicon():
         """Serve favicon"""
@@ -4151,7 +4156,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
         if favicon_path.exists():
             return FileResponse(str(favicon_path), media_type="image/svg+xml")
         raise HTTPException(status_code=404)
-    
+
     @app.get("/{full_path:path}")
     async def serve_spa(request: Request, full_path: str):
         """
@@ -4161,7 +4166,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
         # Don't serve SPA for API routes (they're handled above)
         if full_path.startswith("api/"):
             raise HTTPException(status_code=404, detail="API endpoint not found")
-        
+
         # Try to serve the exact file if it exists
         file_path = STATIC_DIR / full_path
         if file_path.exists() and file_path.is_file():
@@ -4180,7 +4185,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
             }
             media_type = media_types.get(suffix, "application/octet-stream")
             return FileResponse(str(file_path), media_type=media_type)
-        
+
         # For all other paths, serve index.html (SPA routing)
         index_path = STATIC_DIR / "index.html"
         return FileResponse(

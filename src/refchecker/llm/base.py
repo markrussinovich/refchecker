@@ -203,7 +203,10 @@ class LLMProvider(ABC):
         else:
             # Process normally for short bibliographies
             prompt = self._create_extraction_prompt(bibliography_text)
-            response_text = self._call_llm_cached(prompt)
+            response_text = self._call_llm_cached(
+                prompt,
+                cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+            )
             refs = self._parse_llm_response(response_text)
             refs = self._repair_truncated_arxiv_dois(refs, bibliography_text)
             return self._restore_et_al(refs, bibliography_text)
@@ -370,7 +373,10 @@ class LLMProvider(ABC):
             try:
                 logger.debug(f"Processing chunk {chunk_index + 1}/{len(chunks)}")
                 prompt = self._create_extraction_prompt(chunk_text)
-                response_text = self._call_llm_cached(prompt)
+                response_text = self._call_llm_cached(
+                    prompt,
+                    cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+                )
                 chunk_references = self._parse_llm_response(response_text)
                 logger.debug(f"Chunk {chunk_index + 1} extracted {len(chunk_references)} references")
                 return chunk_index, chunk_references
@@ -437,7 +443,10 @@ class LLMProvider(ABC):
             logger.info(f"Processing chunk {i+1}/{len(chunks)}")
             try:
                 prompt = self._create_extraction_prompt(chunk)
-                response_text = self._call_llm_cached(prompt)
+                response_text = self._call_llm_cached(
+                    prompt,
+                    cache_predicate=lambda text: bool(self._parse_llm_response(text)),
+                )
                 chunk_references = self._parse_llm_response(response_text)
                 all_references.extend(chunk_references)
                 logger.debug(f"Chunk {i+1} extracted {len(chunk_references)} references")

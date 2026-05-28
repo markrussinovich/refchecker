@@ -14,6 +14,7 @@ import re
 from typing import Any, Dict, IO, List, Optional
 
 from refchecker.core.hallucination_policy import check_author_hallucination, _detect_garbled_metadata
+from refchecker.utils.text_utils import display_reference_value
 
 logger = logging.getLogger(__name__)
 
@@ -411,7 +412,7 @@ class ReportBuilder:
                 f.write(f'[{i}] {record.get("ref_title", "?")}\n')
 
             authors = record.get('ref_authors_cited', '')
-            year = record.get('ref_year_cited', '')
+            year = display_reference_value(record.get('ref_year_cited', ''))
             if authors:
                 f.write(f'    Authors: {authors}\n')
             if year:

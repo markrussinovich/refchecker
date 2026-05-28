@@ -368,11 +368,19 @@ class PDFProcessor:
         
         # Skip common header elements (conference names, page numbers, etc.)
         header_patterns = [
+            r'^this\s+paper\s+is\s+included\s+in\s+the\s+proceedings\b',
+            r'^open\s+access\s+to\s+the\s+proceedings\b',
+            r'^is\s+sponsored\s+by\b',
             r'^(proceedings|conference|journal|workshop|symposium)',
             r'^(vol\.|volume|issue|no\.|number)',
             r'^\d{1,4}\s*$',  # Page numbers
+            r'^\d+(?:st|nd|rd|th)\s+usenix\b.*\b(symposium|conference|workshop)\b',
+            r'^\d{4}-\d{1,5}\s*\d{2}-\d{1,5}-\d{1,5}$',  # ISBN-like rows from cover pages
+            r'^[\d\s-]{10,}$',  # ISBN/catalog rows with extraction-inserted spaces
+            r'^[a-z]+\s+\d{1,2}\s*[–-]\s*\d{1,2},\s*\d{4}$',  # "August 11-13, 2021"
             r'^(preprint|arxiv|draft)',
             r'^(ieee|acm|springer|elsevier)',
+            r'^https?://',
             r'^[a-z]+\s+\d{4}$',  # "January 2024" etc
             r'^(published|accepted|under review)\s+(as|at|in)\b',  # "Published as a conference paper at..."
         ]
@@ -405,7 +413,7 @@ class PDFProcessor:
             
             # Good candidate: reasonable length, not too long
             if 15 <= len(line) <= 300:
-                title_candidates.append(line)
+                title_candidates.append((i, line))
                 
                 # If next line looks like authors, we found the title
                 if i + 1 < len(lines):
@@ -417,13 +425,33 @@ class PDFProcessor:
             return None
         
         # Take the first good candidate, or combine first few if they seem related
-        title = title_candidates[0]
+        title_index, title = title_candidates[0]
         
         # Sometimes titles span multiple lines - check if next line continues
         if len(title_candidates) > 1:
-            second = title_candidates[1]
-            # If second line is short and starts with lowercase or continues sentence
-            if len(second) < 80 and (second[0].islower() or title.endswith(':')):
+            second_index, second = title_candidates[1]
+            next_line_after_second = lines[second_index + 1] if second_index + 1 < len(lines) else ''
+            second_precedes_authors = bool(next_line_after_second) and any(
+                re.search(pat, next_line_after_second, re.IGNORECASE) for pat in author_indicators
+            )
+            title_continuation_endings = (
+                'a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'into',
+                'of', 'on', 'or', 'the', 'through', 'to', 'toward', 'using', 'via',
+                'with', 'without'
+            )
+            last_title_word = re.sub(r'[^A-Za-z]+', '', title.split()[-1]).lower() if title.split() else ''
+            # If the next candidate is adjacent and short, it is often the rest of
+            # a wrapped title, especially when it immediately precedes authors.
+            if (
+                second_index == title_index + 1
+                and len(second) < 100
+                and (
+                    second[0].islower()
+                    or title.endswith(':')
+                    or last_title_word in title_continuation_endings
+                    or second_precedes_authors
+                )
+            ):
                 title = title + ' ' + second
         
         # Clean up the title

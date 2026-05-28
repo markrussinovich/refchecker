@@ -605,7 +605,7 @@ async function main() {
     await new Promise(() => {});
   } else {
     log('Both servers were already running. Browser opened.', colors.green);
-    process.exit(0);
+    process.exitCode = 0;
   }
 }
 

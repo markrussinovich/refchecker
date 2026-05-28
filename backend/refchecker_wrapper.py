@@ -112,7 +112,7 @@ def _process_llm_references_cli_style(references: List[Any]) -> List[Dict[str, A
     (without running its heavy __init__) to avoid diverging behavior between
     CLI and Web extraction.
     """
-    cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    cli_checker = _make_cli_checker(None)
     return cli_checker._process_llm_extracted_references(references)
 
 
@@ -125,9 +125,11 @@ def _make_cli_checker(llm_provider):
     cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
     cli_checker.llm_extractor = ReferenceExtractor(llm_provider) if llm_provider else None
     cli_checker.llm_enabled = bool(llm_provider)
+    cli_checker.debug_mode = False
     cli_checker.used_regex_extraction = False
     cli_checker.used_unreliable_extraction = False
     cli_checker.fatal_error = False
+    cli_checker.fatal_error_message = None
     return cli_checker
 
 
@@ -144,7 +146,7 @@ def _extract_pdf_text_cli_style(pdf_path: str, llm_provider) -> str:
 
 def _normalize_reference_fields(ref: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize reference field names for consistency.
-    
+
     The parser uses 'journal' but the rest of the pipeline expects 'venue'.
     This function normalizes field names for consistent handling.
     """
@@ -307,7 +309,7 @@ class ProgressRefChecker:
     ) -> Dict[str, Any]:
         """
         Format verification result into a standardized response.
-        
+
         Shared by both async and sync verification methods.
         """
         # Normalize errors to align with CLI behavior
@@ -340,7 +342,7 @@ class ProgressRefChecker:
         # Items originally from warning_type are warnings, not errors
         # Items with error_type (including year/venue/author when missing) are errors
         has_errors = any(
-            e.get('error_type') not in ['unverified'] 
+            e.get('error_type') not in ['unverified']
             and not e.get('is_suggestion')
             and not e.get('is_warning')
             # 'url' errors where the URL references the paper are informational,
@@ -354,7 +356,7 @@ class ProgressRefChecker:
         )
         has_warnings = any(
             e.get('is_warning')
-            and not e.get('is_suggestion') 
+            and not e.get('is_suggestion')
             for e in sanitized
         )
         has_suggestions = any(e.get('is_suggestion') for e in sanitized)
@@ -460,7 +462,7 @@ class ProgressRefChecker:
                 s2_url = construct_semantic_scholar_url(s2_paper_id)
                 if not any(u.get('url') == s2_url for u in authoritative_urls):
                     authoritative_urls.append({"type": "semantic_scholar", "url": s2_url})
-            
+
             # Also check for inline S2 URL (from merged data)
             s2_inline_url = verified_data.get('_semantic_scholar_url')
             if s2_inline_url and not any(u.get('url') == s2_inline_url for u in authoritative_urls):
@@ -656,7 +658,7 @@ class ProgressRefChecker:
                             logger.info(f"Extracted title from cached PDF: {paper_title}")
                     except Exception as e:
                         logger.warning(f"Could not extract title from cached PDF: {e}")
-            
+
             if source_type == "url":
                 # Check if this is an OpenReview URL — convert to PDF download
                 if 'openreview.net/forum' in paper_source.lower():
@@ -671,10 +673,10 @@ class ProgressRefChecker:
 
                 # Check if this is a direct PDF URL (not arXiv)
                 is_direct_pdf_url = (
-                    (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
+                    (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and
                     'arxiv.org' not in paper_source.lower()
                 )
-                
+
                 if is_direct_pdf_url:
                     # Check bibliography cache first — avoids PDF download
                     # entirely when references are already cached.
@@ -737,7 +739,7 @@ class ProgressRefChecker:
                     # Download from ArXiv - run in thread to avoid blocking event loop
                     def fetch_arxiv():
                         return get_arxiv_paper_by_id(arxiv_id)
-                    
+
                     paper = await asyncio.to_thread(fetch_arxiv)
                     if not paper:
                         raise ValueError(f"ArXiv paper not found: {arxiv_id}")
@@ -749,9 +751,9 @@ class ProgressRefChecker:
                     await self.emit_progress("extracting", {
                         "message": f"Checking ArXiv source for bibliography files..."
                     })
-                    
+
                     bibtex_content = await asyncio.to_thread(get_bibtex_content, paper)
-                    
+
                     if bibtex_content:
                         logger.info(f"Found BibTeX/BBL content from ArXiv source for {arxiv_id}")
                         # Save the bibliography content for later viewing
@@ -765,7 +767,7 @@ class ProgressRefChecker:
                             logger.info(f"Extracted {len(arxiv_source_references)} references from ArXiv source files (method: {extraction_method})")
                         else:
                             logger.warning("Could not extract references from ArXiv source, falling back to PDF")
-                    
+
                     # Fall back to PDF extraction if no references from source files
                     if not arxiv_source_references:
                         # Download PDF - run in thread (use cross-platform temp directory)
@@ -791,7 +793,7 @@ class ProgressRefChecker:
                     pdf_processor = PDFProcessor()
                     pdf_path_for_fallback = paper_source
                     paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, self.llm)
-                    
+
                     # Try to extract the paper title from the PDF
                     try:
                         extracted_title = await asyncio.to_thread(pdf_processor.extract_title_from_pdf, paper_source)
@@ -806,7 +808,7 @@ class ProgressRefChecker:
                         with open(paper_source, 'r', encoding='utf-8') as f:
                             return f.read()
                     paper_text = await asyncio.to_thread(read_file)
-                    
+
                     # For .bib files, extract references directly using BibTeX parser
                     if paper_source.lower().endswith('.bib'):
                         logger.info("Processing uploaded .bib file as BibTeX")
@@ -842,7 +844,7 @@ class ProgressRefChecker:
                     paper_text = paper_source
                 paper_title = "Pasted Text"
                 set_extraction_method('text')
-                
+
                 # Check if the pasted text is LaTeX thebibliography format (.bbl)
                 if '\\begin{thebibliography}' in paper_text and '\\bibitem' in paper_text:
                     logger.info("Detected LaTeX thebibliography format in pasted text")
@@ -922,33 +924,7 @@ class ProgressRefChecker:
                     cache_bibliography(self.cache_dir, paper_source, references, bibliography_cache_identity)
 
             if not references:
-                await self.emit_progress("completed", {
-                    "total_refs": 0,
-                    "errors_count": 0,
-                    "warnings_count": 0,
-                    "suggestions_count": 0,
-                    "unverified_count": 0,
-                    "hallucination_count": 0,
-                    "verified_count": 0,
-                    "extraction_method": extraction_method,
-                    "message": "No references could be extracted from this paper.",
-                    "check_id": self.check_id,
-                })
-                return {
-                    "paper_title": paper_title,
-                    "paper_source": paper_source,
-                    "extraction_method": extraction_method,
-                    "bibliography_source_kind": bibliography_source_kind,
-                    "references": [],
-                    "summary": {
-                        "total_refs": 0,
-                        "errors_count": 0,
-                        "warnings_count": 0,
-                        "suggestions_count": 0,
-                        "unverified_count": 0,
-                        "verified_count": 0
-                    }
-                }
+                raise ValueError("No references could be extracted from this paper.")
 
             # Step 3: Check references in parallel (like CLI)
             total_refs = len(references)
@@ -1017,27 +993,27 @@ class ProgressRefChecker:
 
     def _parse_llm_reference(self, ref_string: str) -> Optional[Dict[str, Any]]:
         """Parse a single LLM reference string into a structured dict.
-        
+
         LLM returns strings in format: Authors#Title#Venue#Year#URL
         Authors are separated by asterisks (*).
         Also handles plain text references that don't follow the format.
         """
         import re
-        
+
         if not ref_string:
             return None
-        
+
         # If it's already a dict, return as-is
         if isinstance(ref_string, dict):
             return ref_string
-            
+
         if not isinstance(ref_string, str):
             ref_string = str(ref_string)
-        
+
         ref_string = ref_string.strip()
         if not ref_string:
             return None
-        
+
         # Skip LLM explanatory responses (not actual references)
         skip_patterns = [
             r'^I cannot extract',
@@ -1057,15 +1033,15 @@ class ProgressRefChecker:
             if re.match(pattern, ref_string, re.IGNORECASE):
                 logger.debug(f"Skipping LLM explanatory text: {ref_string[:60]}...")
                 return None
-        
+
         # Check if this looks like a citation key (e.g., "JLZ+22", "ZNIS23")
         # Citation keys are typically short alphanumeric strings, possibly with + or -
         citation_key_pattern = r'^[A-Za-z]+[+\-]?\d{2,4}$'
         is_citation_key = bool(re.match(citation_key_pattern, ref_string.replace('#', '').replace(' ', '')))
-        
+
         # Check if it follows the # format
         parts = ref_string.split('#')
-        
+
         if len(parts) >= 2:
             # Parse parts: Authors#Title#Venue#Year#URL
             authors_str = parts[0].strip() if len(parts) > 0 else ''
@@ -1073,41 +1049,41 @@ class ProgressRefChecker:
             venue = parts[2].strip() if len(parts) > 2 else ''
             year_str = parts[3].strip() if len(parts) > 3 else ''
             url = parts[4].strip() if len(parts) > 4 else ''
-            
+
             # Check if this is a malformed reference (citation key with empty fields)
             # If most fields are empty and authors looks like a citation key, skip it
             non_empty_fields = sum(1 for f in [title, venue, year_str, url] if f)
             authors_is_citation_key = bool(re.match(citation_key_pattern, authors_str.replace(' ', '')))
-            
+
             if non_empty_fields == 0 and authors_is_citation_key:
                 # This is just a citation key, not a real reference - skip it
                 logger.debug(f"Skipping malformed reference (citation key only): {ref_string}")
                 return None
-            
+
             # Also skip if title is just a citation key or year
             if title and re.match(citation_key_pattern, title.replace(' ', '')):
                 logger.debug(f"Skipping reference with citation key as title: {ref_string}")
                 return None
-            
+
             # Skip if title looks like it's just a year
             if title and re.match(r'^\d{4}$', title.strip()):
                 logger.debug(f"Skipping reference with year as title: {ref_string}")
                 return None
-            
+
             # Parse authors (separated by *)
             authors = []
             if authors_str:
                 # Don't treat citation keys as authors
                 if not authors_is_citation_key:
                     authors = [a.strip() for a in authors_str.split('*') if a.strip()]
-            
+
             # Parse year as integer
             year_int = None
             if year_str:
                 year_match = re.search(r'\b(19|20)\d{2}\b', year_str)
                 if year_match:
                     year_int = int(year_match.group())
-            
+
             # Ensure we have a valid title - don't use the raw string if it's mostly separators
             if not title:
                 # If there's no title and no meaningful content, skip this reference
@@ -1117,7 +1093,7 @@ class ProgressRefChecker:
                 clean_raw = ref_string.replace('#', ' ').strip()
                 clean_raw = re.sub(r'\s+', ' ', clean_raw)
                 title = clean_raw[:100] if len(clean_raw) > 100 else clean_raw
-            
+
             return {
                 'title': title,
                 'authors': authors,
@@ -1128,38 +1104,38 @@ class ProgressRefChecker:
             }
         else:
             # Not in expected format, parse as plain text reference
-            
+
             # Skip very short strings (likely citation keys or garbage)
             if len(ref_string) < 15:
                 logger.debug(f"Skipping short string: {ref_string}")
                 return None
-            
+
             # Try to extract structured data from plain text
             title = ref_string
             authors = []
             year_int = None
             venue = None
             url = None
-            
+
             # Try to extract year from plain text
             year_match = re.search(r'\b(19|20)\d{2}\b', ref_string)
             if year_match:
                 year_int = int(year_match.group())
-            
+
             # Try to extract URL from plain text
             url_match = re.search(r'https?://[^\s]+', ref_string)
             if url_match:
                 url = url_match.group()
-            
+
             # Clean up title - remove year and URL if found
             if year_match:
                 title = title.replace(year_match.group(), '').strip()
             if url_match:
                 title = title.replace(url_match.group(), '').strip()
-            
+
             # Remove common delimiters from start/end
             title = title.strip('.,;:-() ')
-            
+
             return {
                 'title': title if title else ref_string[:100],
                 'authors': authors,
@@ -1241,27 +1217,27 @@ class ProgressRefChecker:
 
     async def _extract_references_from_bibtex(self, bibtex_content: str) -> tuple:
         """Extract references from BibTeX/BBL content (from ArXiv source files).
-        
+
         This mirrors the CLI's extract_bibliography logic for handling BibTeX content.
-        
+
         Returns:
             Tuple of (references list, extraction_method string)
             extraction_method is one of: 'bbl', 'bib', 'llm', or None if extraction failed
         """
         try:
             cli_checker = _make_cli_checker(self.llm)
-            
+
             # Check if this is LaTeX thebibliography format (e.g., from .bbl files)
             if '\\begin{thebibliography}' in bibtex_content and '\\bibitem' in bibtex_content:
                 logger.info("Detected LaTeX thebibliography format from .bbl file")
                 # Use extract_latex_references for .bbl format
                 refs = await asyncio.to_thread(extract_latex_references, bibtex_content, None)
-                
+
                 if refs:
                     # Validate the parsed references
                     from refchecker.utils.text_utils import validate_parsed_references
                     validation = await asyncio.to_thread(validate_parsed_references, refs)
-                    
+
                     if not validation['is_valid'] and self.llm:
                         logger.debug(f"LaTeX parsing validation failed (quality: {validation['quality_score']:.2f}), trying LLM fallback")
                         # Try LLM fallback
@@ -1297,7 +1273,7 @@ class ProgressRefChecker:
                                 await self.emit_progress("extracting", {
                                     "message": "LLM extraction skipped — invalid API key. Using standard parser instead."
                                 })
-                    
+
                     logger.info(f"Extracted {len(refs)} references from .bbl content")
                     # Normalize field names (journal -> venue)
                     refs = [_normalize_reference_fields(ref) for ref in refs]
@@ -1314,7 +1290,7 @@ class ProgressRefChecker:
                     # Normalize field names (journal -> venue)
                     refs = [_normalize_reference_fields(ref) for ref in refs]
                     return (refs, 'bib')
-            
+
             return ([], None)
         except Exception as e:
             logger.error(f"Error extracting references from BibTeX: {e}")
@@ -1326,7 +1302,7 @@ class ProgressRefChecker:
             # Use the hybrid checker with timeout protection
             import asyncio
             loop = asyncio.get_event_loop()
-            
+
             # Run verification in a thread with timeout
             try:
                 verified_data, errors, url = await asyncio.wait_for(
@@ -1409,7 +1385,7 @@ class ProgressRefChecker:
         except UnicodeEncodeError as e:
             # Handle Windows encoding issues with special characters (e.g., Greek letters in titles)
             logger.warning(f"Unicode encoding error checking reference {index}: {e}")
-            return self._format_error_result(reference, index, 
+            return self._format_error_result(reference, index,
                 Exception(f"Unicode encoding error - title may contain special characters"))
         except Exception as e:
             logger.error(f"Error checking reference {index}: {e}")
@@ -1606,26 +1582,26 @@ class ProgressRefChecker:
     ) -> Dict[str, Any]:
         """
         Check a single reference with per-session concurrency limiting.
-        
+
         First checks the verification cache for a previous result.
         Acquires a slot from the session limiter before starting the check,
         and releases it when done. Stores result in cache on success.
         """
         if limiter is None:
             limiter = create_limiter()
-        
+
         # Wait for a slot in the session queue
         async with limiter:
             # Check for cancellation before starting
             await self._check_cancelled()
-            
+
             # Emit that this reference is now being checked
             await self.emit_progress("checking_reference", {
                 "index": idx + 1,
                 "title": reference.get("title") or reference.get("cited_url") or reference.get("url") or "Unknown Title",
                 "total": total_refs
             })
-            
+
             try:
                 # Run the sync check in a thread
                 result = await asyncio.wait_for(
@@ -1675,7 +1651,7 @@ class ProgressRefChecker:
                     "authoritative_urls": [],
                     "corrected_reference": None
                 }
-        
+
         return result
 
     async def _check_references_parallel(
@@ -1685,10 +1661,10 @@ class ProgressRefChecker:
     ) -> tuple:
         """
         Check references in parallel using per-session concurrency limiting.
-        
+
         Each paper check session gets its own concurrency limiter, so
         concurrent sessions don't block each other.
-        
+
         Emits progress updates as results come in.
         Only marks references as 'checking' when they actually start.
         Returns results list and counts.
@@ -1706,12 +1682,12 @@ class ProgressRefChecker:
         refs_verified = 0
         processed_count = 0
         checked_count = 0  # Tracks refs that finished verification (including deferred ones)
-        
+
         loop = asyncio.get_event_loop()
-        
+
         start_time = time.time()
         debug_log(f"[TIMING] Starting parallel check of {total_refs} references")
-        
+
         # Create tasks for all references - they will be rate-limited by the per-session semaphore
         session_limiter = create_limiter()
         tasks = []
@@ -1721,19 +1697,19 @@ class ProgressRefChecker:
                 name=f"ref-check-{idx}"
             )
             tasks.append((idx, task))
-        
+
         task_creation_time = time.time()
         debug_log(f"[TIMING] Tasks created in {task_creation_time - start_time:.3f}s")
-        
+
         # Process results as they complete
         pending_tasks = {task for _, task in tasks}
         task_to_idx = {task: idx for idx, task in tasks}
-        
+
         iteration = 0
         while pending_tasks:
             iteration += 1
             iter_start = time.time()
-            
+
             # Check for cancellation
             try:
                 await self._check_cancelled()
@@ -1742,19 +1718,19 @@ class ProgressRefChecker:
                 for task in pending_tasks:
                     task.cancel()
                 raise
-            
+
             # Wait for some tasks to complete - no timeout needed, just wait for first completed
             done, pending_tasks = await asyncio.wait(
                 pending_tasks,
                 return_when=asyncio.FIRST_COMPLETED
             )
-            
+
             wait_time = time.time() - iter_start
             debug_log(f"[TIMING] Iteration {iteration}: wait took {wait_time:.3f}s, {len(done)} done, {len(pending_tasks)} pending")
-            
+
             for task in done:
                 idx = task_to_idx[task]
-                
+
                 try:
                     result = task.result()
                 except asyncio.CancelledError:
@@ -1790,7 +1766,7 @@ class ProgressRefChecker:
                         "authoritative_urls": [],
                         "corrected_reference": None
                     }
-                
+
                 # Store result
                 results[idx] = result
 
@@ -1853,14 +1829,14 @@ class ProgressRefChecker:
                 emit_time = time.time() - emit_start
                 if emit_time > 0.1:
                     debug_log(f"[TIMING] Emit for ref {idx + 1} took {emit_time:.3f}s")
-                
+
                 # Yield to event loop to allow WebSocket messages to flush
                 # This prevents stalls when many cache hits complete rapidly
                 await asyncio.sleep(0)
-        
+
         total_time = time.time() - start_time
         debug_log(f"[TIMING] Total parallel check completed in {total_time:.3f}s for {total_refs} refs")
-        
+
         # Small delay to ensure all WebSocket messages are sent before returning
         # This prevents the 'completed' event from arriving before final progress updates
         await asyncio.sleep(0.1)
@@ -2049,7 +2025,7 @@ class ProgressRefChecker:
         for idx in range(total_refs):
             if results.get(idx):
                 results[idx].pop('_raw_errors', None)
-        
+
         # Convert dict to ordered list
         results_list = [results.get(i) for i in range(total_refs)]
 
@@ -2072,5 +2048,5 @@ class ProgressRefChecker:
             refs_with_errors += d['refs_with_errors']
             refs_with_warnings_only += d['refs_with_warnings_only']
             refs_with_suggestions_only += d['refs_with_suggestions_only']
-        
+
         return results_list, errors_count, warnings_count, suggestions_count, unverified_count, verified_count, refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, hallucination_count

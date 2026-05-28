@@ -55,4 +55,23 @@ describe('ReferenceCard', () => {
     expect(screen.getByText('LLM search')).toBeTruthy()
     expect(screen.queryByText(/Likely hallucinated/i)).toBeNull()
   })
+
+  it('omits no-date placeholders from reference metadata', () => {
+    const reference = {
+      status: 'verified',
+      title: 'Afl',
+      authors: [],
+      venue: 'n.d.',
+      year: 'n.d.',
+      cited_url: 'http://lcamtuf.coredump.cx/afl/',
+      errors: [],
+      warnings: [],
+      suggestions: [],
+    }
+
+    render(<ReferenceCard reference={reference} index={0} />)
+
+    expect(screen.getByText('Afl')).toBeTruthy()
+    expect(screen.queryByText('n.d.')).toBeNull()
+  })
 })
