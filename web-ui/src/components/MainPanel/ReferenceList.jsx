@@ -4,7 +4,7 @@ import { useCheckStore } from '../../stores/useCheckStore'
 import { getEffectiveReferenceStatus, llmFoundMetadataMatchesCitation } from '../../utils/referenceStatus'
 import useReferenceActions from '../../hooks/useReferenceActions'
 import { useStyleStore } from '../../stores/useStyleStore'
-import { CITATION_STYLES, listCustomCitationStyles } from '../../utils/formatters'
+import { CITATION_STYLES, listCustomCitationStyles, filterIssuesForStyle } from '../../utils/formatters'
 import {
   AddReferencePanel,
   SuggestAltPanel,
@@ -47,17 +47,35 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
     isRemoving,
   } = useReferenceActions()
 
+  const activeStyle = useStyleStore(s => s.format)
+
   // Memoize all derived data to ensure consistency within a render
   const { sortedReferences, filteredReferences } = useMemo(() => {
     const filters = statusFilter.map(f => f.toLowerCase())
-    
+
     const sorted = (references || []).slice().sort((a, b) => {
       const aIndex = typeof a?.index === 'number' ? a.index : Number.MAX_SAFE_INTEGER
       const bIndex = typeof b?.index === 'number' ? b.index : Number.MAX_SAFE_INTEGER
       return aIndex - bIndex
     })
 
-    const normalized = sorted.map(ref => ({
+    // Apply style-aware issue filtering BEFORE deriving status. Without
+    // this, a ref whose only issue is a style-suppressed venue mismatch
+    // (e.g. "AJNR Am J Neuroradiol" under Vancouver) renders with a red
+    // error indicator on the row even though the Summary chips, health
+    // badge, and Corrections tab — all of which DO style-filter —
+    // report 0 errors / 0 corrections / 100% health. Aligning the row's
+    // status with the rest of the UI removes that contradiction.
+    const styleFiltered = sorted.map(ref => {
+      const filteredErrors = filterIssuesForStyle(ref.errors, ref, activeStyle)
+      const filteredWarnings = filterIssuesForStyle(ref.warnings, ref, activeStyle)
+      if (filteredErrors === ref.errors && filteredWarnings === ref.warnings) {
+        return ref
+      }
+      return { ...ref, errors: filteredErrors, warnings: filteredWarnings }
+    })
+
+    const normalized = styleFiltered.map(ref => ({
       ...ref,
       status: computeDerivedStatus(ref, isCheckComplete),
       errors: Array.isArray(ref.errors) ? ref.errors : [],
@@ -116,7 +134,7 @@ export default function ReferenceList({ references, isLoading, isCheckComplete =
     })
 
     return { sortedReferences: sorted, filteredReferences: filtered }
-  }, [references, statusFilter, isCheckComplete])
+  }, [references, statusFilter, isCheckComplete, activeStyle])
 
   if (isLoading) {
     return (
