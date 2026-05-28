@@ -156,37 +156,52 @@ export default function GlobalDropZone() {
         console.warn('[GlobalDropZone] @tauri-apps/api/event load failed', e)
       }
 
-      // Native drag-drop in Tauri 2.x is delivered through the WEBVIEW
-      // channel, not the global event bus. listen('tauri://drag-drop')
-      // never fires under Tauri 2 because the events are scoped to the
-      // webview; you have to call getCurrentWebview().onDragDropEvent()
-      // explicitly. v0.7.0 only registered the global path, which is
-      // why dragging a file showed the overlay (HTML5 dragenter still
-      // fires) but the drop did nothing (Tauri swallowed it).
+      // Native drag-drop in Tauri 2 is delivered through TWO channels
+      // — `getCurrentWebview().onDragDropEvent` AND
+      // `getCurrentWindow().onDragDropEvent`. On macOS WKWebView the
+      // event often fires through the WINDOW path, not the webview.
+      // Earlier versions only subscribed to the webview path, which
+      // explained why drops appeared to do nothing on macOS even with
+      // dragDropEnabled=true. v0.7.31 subscribes to both — duplicate
+      // fires are idempotent because consumePaths is dedup-by-path
+      // internally and setActive/setCounter are setters.
+      const handlePayload = (payload, source) => {
+        if (!payload || typeof payload !== 'object') return
+        if (payload.type === 'enter' || payload.type === 'over') {
+          setActive(true)
+          return
+        }
+        if (payload.type === 'drop') {
+          console.info(`[GlobalDropZone] ${source} drop fired with ${payload.paths?.length || 0} paths`)
+          consumePaths(payload.paths || [], source)
+          setActive(false); setCounter(0)
+          return
+        }
+        if (payload.type === 'leave') {
+          setActive(false); setCounter(0)
+        }
+      }
       try {
         const wv = await import('@tauri-apps/api/webview')
         const webview = wv?.getCurrentWebview?.()
         if (webview?.onDragDropEvent) {
-          const unlisten = await webview.onDragDropEvent((event) => {
-            const payload = event?.payload
-            if (!payload || typeof payload !== 'object') return
-            if (payload.type === 'enter' || payload.type === 'over') {
-              setActive(true)
-              return
-            }
-            if (payload.type === 'drop') {
-              consumePaths(payload.paths || [], 'drag-drop')
-              setActive(false); setCounter(0)
-              return
-            }
-            if (payload.type === 'leave') {
-              setActive(false); setCounter(0)
-            }
-          })
-          unlistenFns.push(unlisten)
+          unlistenFns.push(await webview.onDragDropEvent((event) =>
+            handlePayload(event?.payload, 'webview-drag-drop')
+          ))
         }
       } catch (e) {
         console.warn('[GlobalDropZone] webview drag-drop subscribe failed', e)
+      }
+      try {
+        const win = await import('@tauri-apps/api/window')
+        const window_ = win?.getCurrentWindow?.()
+        if (window_?.onDragDropEvent) {
+          unlistenFns.push(await window_.onDragDropEvent((event) =>
+            handlePayload(event?.payload, 'window-drag-drop')
+          ))
+        }
+      } catch (e) {
+        console.warn('[GlobalDropZone] window drag-drop subscribe failed', e)
       }
 
       // Belt-and-braces: some Tauri builds DO surface drag events on

@@ -68,6 +68,18 @@ const NLM_ABBREV_TO_FULL = {
   'br j radiol': 'british journal of radiology',
   'ajr am j roentgenol': 'american journal of roentgenology',
   'j magn reson imaging': 'journal of magnetic resonance imaging',
+  'ajnr': 'american journal of neuroradiology',
+  'am j neuroradiol': 'american journal of neuroradiology',
+  'ajnr am j neuroradiol': 'american journal of neuroradiology',
+  'neuroradiology': 'neuroradiology',
+  'j neurointerv surg': 'journal of neurointerventional surgery',
+  'j neurosurg': 'journal of neurosurgery',
+  'neurosurgery': 'neurosurgery',
+  'stroke': 'stroke',
+  'spine (phila pa 1976)': 'spine',
+  'spine': 'spine',
+  'j vasc interv radiol': 'journal of vascular and interventional radiology',
+  'cardiovasc intervent radiol': 'cardiovascular and interventional radiology',
 
   'j clin oncol': 'journal of clinical oncology',
   'cancer': 'cancer',
@@ -116,9 +128,7 @@ export function styleAcceptsAbbreviatedVenue(style) {
   return !!policy.acceptsAbbrev
 }
 
-function looksLikeWordAbbreviation(cited, full) {
-  const citedTokens = cited.split(/\s+/).map(t => t.replace(/\.$/, '')).filter(Boolean)
-  const fullTokens = full.split(/\s+/).filter(t => t && !STOPWORDS.has(t.toLowerCase()))
+function _tokensPrefixMatch(citedTokens, fullTokens) {
   if (citedTokens.length < 2 || fullTokens.length < 2) return false
   if (Math.abs(citedTokens.length - fullTokens.length) > 1) return false
   let fIdx = 0
@@ -128,6 +138,40 @@ function looksLikeWordAbbreviation(cited, full) {
     fIdx += 1
   }
   return true
+}
+
+/**
+ * Does the candidate acronym `acr` plausibly derive from the letters of
+ * `full`? Walks through the concatenated full string and checks every
+ * letter of `acr` appears in order. Lets us recognise things like
+ * "AJNR" inside "American Journal of NeuroRadiology" without
+ * enumerating every journal.
+ */
+function _isPlausibleAcronymOf(acr, fullTokens) {
+  if (!acr || acr.length < 2 || acr.length > 8) return false
+  if (!/^[a-z]+$/.test(acr)) return false
+  const stream = fullTokens.join('').toLowerCase()
+  let i = 0
+  for (const ch of stream) {
+    if (i >= acr.length) break
+    if (ch === acr[i]) i += 1
+  }
+  return i === acr.length
+}
+
+function looksLikeWordAbbreviation(cited, full) {
+  const citedTokens = cited.split(/\s+/).map(t => t.replace(/\.$/, '')).filter(Boolean)
+  const fullTokens = full.split(/\s+/).filter(t => t && !STOPWORDS.has(t.toLowerCase()))
+  if (_tokensPrefixMatch(citedTokens, fullTokens)) return true
+  // Allow a leading "journal acronym" token in the cited string (e.g.
+  // "AJNR" in "AJNR Am J Neuroradiol", "AJR" in "AJR Am J Roentgenol",
+  // "JCI" in "JCI Insight"). Strip it and retry, but only when it
+  // plausibly derives from the full title's letters — that gate stops
+  // arbitrary leading garbage from matching.
+  if (citedTokens.length >= 2 && _isPlausibleAcronymOf(citedTokens[0].toLowerCase(), fullTokens)) {
+    if (_tokensPrefixMatch(citedTokens.slice(1), fullTokens)) return true
+  }
+  return false
 }
 
 /**

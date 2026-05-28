@@ -4528,6 +4528,12 @@ class _VerifySingleRequest(BaseModel):
     # this path so the verifier runs against the FIXED metadata (and the
     # ref typically flips to verified, which moves the health badge).
     apply_correction: bool = False
+    # Explicit field overrides applied BEFORE re-verification. Used by
+    # the Corrections-tab "↺ Restore" button to roll a previously-
+    # applied fix back to the original cited values — the FE snapshots
+    # the ref before calling apply_correction and replays those fields
+    # here. Keys recognised: title, authors, year, venue, doi, arxiv_id.
+    overrides: Optional[Dict[str, Any]] = None
 
 
 @app.get("/api/history/{check_id}/llm-usage")
@@ -4604,6 +4610,23 @@ async def verify_single_reference(
             # the badge isn't penalised by stale issues that the fix resolved.
             target["errors"] = []
             target["warnings"] = []
+
+    # Explicit overrides path (Restore button). Replays a FE-side
+    # snapshot of the original cited fields, so an "Apply fix" can be
+    # reverted. Runs AFTER apply_correction so that — if both were
+    # somehow set on the same call — overrides win, matching the
+    # caller's intent.
+    if body and isinstance(getattr(body, 'overrides', None), dict) and body.overrides:
+        for k in ("title", "authors", "year", "venue", "doi", "arxiv_id"):
+            if k in body.overrides:
+                v = body.overrides[k]
+                # Allow explicit empty / None to clear a field — the
+                # snapshot may legitimately carry an empty DOI etc.
+                target[k] = v
+        # Reset the verify cache so the verifier runs fresh against the
+        # restored metadata rather than replaying the last result.
+        target["errors"] = []
+        target["warnings"] = []
 
     # Try the global identity cache first — same shortcut the live pipeline
     # uses. If we hit, we skip the network call entirely.
@@ -5770,6 +5793,12 @@ async def citation_graph(req: _CitationGraphRequest, current_user: UserInfo = De
 class _ExpandRequest(BaseModel):
     paper_id: str  # S2 paperId or "DOI:..." / "arXiv:..." identifier
     limit: int = 8
+    # Optional title fallback — when /paper/<paper_id>/references returns
+    # an empty list (S2 sometimes has the paper but not its reference
+    # graph, particularly for niche / older publications), we search S2
+    # by title to resolve the canonical paperId and retry. Without this
+    # the graph view shows lots of central refs with no spokes.
+    title: Optional[str] = None
 
 
 @app.post("/api/papers/expand")
@@ -5792,9 +5821,49 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     # respecting the Retry-After header when S2 sets it — recovers
     # gracefully without bubbling the error all the way to the FE.
     import asyncio as _asyncio
+
+    async def _fetch_references(client, identifier):
+        """Single attempt at /paper/<identifier>/references with the
+        existing 429 retry policy. Returns (data, err)."""
+        local_err = None
+        for attempt in range(3):
+            try:
+                r = await client.get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/{identifier}/references",
+                    params={
+                        "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
+                        "limit": min(50, limit * 4),
+                    },
+                    headers=headers,
+                    timeout=timeout,
+                )
+                if r.status_code == 429:
+                    try:
+                        wait_s = float(r.headers.get('Retry-After', '2.0'))
+                    except Exception:
+                        wait_s = 2.0
+                    wait_s = min(8.0, max(0.5, wait_s)) * (2 ** attempt)
+                    await _asyncio.sleep(wait_s)
+                    local_err = "rate-limited (429) — retrying"
+                    continue
+                if r.status_code == 404:
+                    # Paper not indexed under this identifier — bail so
+                    # the caller can fall back to title search.
+                    return None, "404"
+                r.raise_for_status()
+                return r.json(), None
+            except HTTPException:
+                raise
+            except Exception as e:
+                local_err = str(e)
+                await _asyncio.sleep(0.5 * (2 ** attempt))
+        return None, local_err
+
     data = None
     async with httpx.AsyncClient() as client:
         last_err = None
+        # Inline the legacy retry loop's variable so the fallback path
+        # below can re-use the same client.
         for attempt in range(3):
             try:
                 r = await client.get(
@@ -5817,6 +5886,11 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
                     await _asyncio.sleep(wait_s)
                     last_err = "rate-limited (429) — retrying"
                     continue
+                if r.status_code == 404:
+                    # S2 doesn't have this identifier — fall through to
+                    # the title-search fallback below.
+                    last_err = "404"
+                    break
                 r.raise_for_status()
                 data = r.json()
                 break
@@ -5826,6 +5900,40 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
                 last_err = str(e)
                 # Network-level errors get one more attempt after a short pause.
                 await _asyncio.sleep(0.5 * (2 ** attempt))
+
+        # Title-search fallback. When the primary lookup returned no
+        # reference data (either /references gave an empty list or the
+        # paperId resolved to nothing) and the FE supplied a title, ask
+        # S2 to resolve the canonical paperId by title match and retry
+        # /references against that. This recovers the case where the
+        # ref carries a DOI that S2's bibliographic index doesn't
+        # cross-reference, but the paper itself IS in S2 — fairly
+        # common for older journal articles and case reports.
+        def _empty(d):
+            return not isinstance(d, dict) or not (d.get("data") or [])
+
+        if (_empty(data) and getattr(req, 'title', None)):
+            try:
+                sr = await client.get(
+                    "https://api.semanticscholar.org/graph/v1/paper/search",
+                    params={"query": req.title, "limit": 1, "fields": "paperId,title"},
+                    headers=headers,
+                    timeout=timeout,
+                )
+                if sr.status_code == 200:
+                    hits = (sr.json() or {}).get("data") or []
+                    if hits and hits[0].get("paperId"):
+                        retry_pid = hits[0]["paperId"]
+                        retry_data, retry_err = await _fetch_references(client, retry_pid)
+                        if retry_data and (retry_data.get("data") or []):
+                            data = retry_data
+                            last_err = None
+                        elif retry_err:
+                            last_err = f"title-fallback: {retry_err}"
+            except Exception as e:
+                # Search itself failed — keep the original empty result.
+                last_err = f"title-search failed: {e}"
+
         if data is None:
             # Don't propagate 429 to the FE as a hard error — the graph
             # expander runs many of these in parallel and a single
@@ -5854,11 +5962,16 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     # 2nd-degree verify-status enrichment. For each expanded item probe
     # the Seen-Refs cache by (DOI / arXiv / title+year) — when we have
     # a hit, the verify status was determined during a previous check
-    # and we can colour the graph node by that status. Cache misses get
-    # 'unknown' so the frontend can render them in a neutral colour
-    # rather than uniformly cyan (which previously masked any 2nd-degree
-    # verification signal entirely). Cheap, no LLM, no network beyond
-    # the SQLite hit per node.
+    # and we can colour the graph node by that status. Cache misses now
+    # fall through to a lightweight S2-derived verdict: items returned
+    # from /references with a paperId AND an external ID (DOI or arXiv)
+    # are real, indexed publications and get marked 'verified'. Items
+    # with just a paperId (no external ID) get 'unverified' — they
+    # exist in S2 but aren't independently locatable. Anything else
+    # stays 'unknown'. Without this fall-through every 2nd-degree node
+    # ended up cyan/unknown because the user's Seen-Refs cache only
+    # holds refs from their own past checks, and references-of-
+    # references usually aren't in there yet.
     for it in items:
         probe = {
             "doi": it.get("doi"),
@@ -5875,7 +5988,21 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
             it["pre_verified"] = True
             it["times_seen"] = cached.get("times_seen") or 0
         else:
-            it["verified_status"] = "unknown"
+            has_paper_id = bool(it.get("paperId"))
+            has_external_id = bool(it.get("doi") or it.get("arxiv_id"))
+            if has_paper_id and has_external_id:
+                # S2 returned this from a /references call AND it has a
+                # DOI/arXiv. That's strong evidence it's a real, locatable
+                # publication — treat as verified-light for graph colouring.
+                it["verified_status"] = "verified"
+            elif has_paper_id:
+                # Indexed by S2 but no external identifier — exists, but
+                # the user can't independently look it up. Mark as
+                # unverified rather than verified so the colour distinguishes
+                # them from the strong-evidence case.
+                it["verified_status"] = "unverified"
+            else:
+                it["verified_status"] = "unknown"
             it["pre_verified"] = False
             it["times_seen"] = 0
 

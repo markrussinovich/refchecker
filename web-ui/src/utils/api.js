@@ -130,9 +130,11 @@ export const findSimilarPapers = ({ references, paper_title, paper_id, limit = 5
 export const fetchCitationGraph = ({ references, paper_title }) =>
   api.post('/papers/citation-graph', { references, paper_title }, { timeout: 120000 })
 
-// One-hop expand: a paper's outgoing references for the graph view
-export const expandPaper = ({ paper_id, limit = 8 }) =>
-  api.post('/papers/expand', { paper_id, limit })
+// One-hop expand: a paper's outgoing references for the graph view.
+// `title` is optional — the backend uses it to do a title-search
+// fallback when /paper/<id>/references returns nothing for the DOI.
+export const expandPaper = ({ paper_id, limit = 8, title = null }) =>
+  api.post('/papers/expand', { paper_id, limit, title })
 
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>

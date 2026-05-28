@@ -105,6 +105,18 @@ NLM_ABBREV_TO_FULL: Dict[str, str] = {
     'br j radiol':        'british journal of radiology',
     'ajr am j roentgenol': 'american journal of roentgenology',
     'j magn reson imaging': 'journal of magnetic resonance imaging',
+    'ajnr':               'american journal of neuroradiology',
+    'am j neuroradiol':   'american journal of neuroradiology',
+    'ajnr am j neuroradiol': 'american journal of neuroradiology',
+    'neuroradiology':     'neuroradiology',
+    'j neurointerv surg': 'journal of neurointerventional surgery',
+    'j neurosurg':        'journal of neurosurgery',
+    'neurosurgery':       'neurosurgery',
+    'stroke':             'stroke',
+    'spine (phila pa 1976)': 'spine',
+    'spine':              'spine',
+    'j vasc interv radiol': 'journal of vascular and interventional radiology',
+    'cardiovasc intervent radiol': 'cardiovascular and interventional radiology',
 
     # Oncology
     'j clin oncol':       'journal of clinical oncology',
@@ -215,6 +227,43 @@ def is_acceptable_abbreviation(
 _STOPWORDS = {'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with'}
 
 
+def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
+    if len(cited_tokens) < 2 or len(full_tokens) < 2:
+        return False
+    if abs(len(cited_tokens) - len(full_tokens)) > 1:
+        return False
+    f_idx = 0
+    for c_tok in cited_tokens:
+        if f_idx >= len(full_tokens):
+            return False
+        if not full_tokens[f_idx].lower().startswith(c_tok.lower()):
+            return False
+        f_idx += 1
+    return True
+
+
+def _is_plausible_acronym_of(acr: str, full_tokens) -> bool:
+    """Does ``acr`` plausibly derive from the letters of the full title?
+
+    Walks the concatenated full string and checks that every letter of
+    ``acr`` appears in order. Recognises "AJNR" inside "American Journal
+    of NeuroRadiology" without enumerating every journal.
+    """
+    if not acr or len(acr) < 2 or len(acr) > 8:
+        return False
+    if not acr.isalpha():
+        return False
+    stream = ''.join(full_tokens).lower()
+    i = 0
+    target = acr.lower()
+    for ch in stream:
+        if i >= len(target):
+            break
+        if ch == target[i]:
+            i += 1
+    return i == len(target)
+
+
 def _looks_like_word_abbreviation(cited: str, full: str) -> bool:
     """Heuristic: does ``cited`` match the major-word initials of ``full``?
 
@@ -224,28 +273,16 @@ def _looks_like_word_abbreviation(cited: str, full: str) -> bool:
     Surgical Oncology": Eur→European, J→Journal, Surg→Surgical,
     Oncol→Oncology, ignoring the dropped "of".
 
-    Requires at least 2 cited tokens to fire (so single-token aliases
-    like "Cell" or "Nature" don't accidentally match unrelated titles).
+    Also handles citations that lead with a journal-acronym token like
+    "AJNR Am J Neuroradiol": strip the leading token if it plausibly
+    derives from the full title's letters, then retry the prefix match.
     """
     cited_tokens = [t.rstrip('.') for t in cited.split() if t]
     full_tokens = [t for t in full.split() if t and t.lower() not in _STOPWORDS]
 
-    if len(cited_tokens) < 2 or len(full_tokens) < 2:
-        return False
-    if len(cited_tokens) != len(full_tokens):
-        # Allow one extra full-side token (style might drop the leading
-        # "The" or trailing journal-type qualifier).
-        if abs(len(cited_tokens) - len(full_tokens)) > 1:
-            return False
-
-    # Match each cited token to a full token in order, allowing skips
-    # for stopwords already removed above.
-    f_idx = 0
-    for c_tok in cited_tokens:
-        if f_idx >= len(full_tokens):
-            return False
-        if not full_tokens[f_idx].lower().startswith(c_tok.lower()):
-            return False
-        f_idx += 1
-    # All cited tokens matched as prefixes of consecutive full tokens.
-    return True
+    if _tokens_prefix_match(cited_tokens, full_tokens):
+        return True
+    if len(cited_tokens) >= 2 and _is_plausible_acronym_of(cited_tokens[0], full_tokens):
+        if _tokens_prefix_match(cited_tokens[1:], full_tokens):
+            return True
+    return False

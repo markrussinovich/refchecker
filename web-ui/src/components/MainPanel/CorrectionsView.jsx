@@ -277,6 +277,14 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   const [decisions, setDecisions] = useState({})
   const [editingKey, setEditingKey] = useState(null)
   const [editBuffer, setEditBuffer] = useState('')
+  // Snapshot map: { key: { title, authors, year, venue, doi, arxiv_id } }
+  // captured right before "Apply fix" overwrites the ref. Powers the
+  // per-row "↺ Restore" button — replays the snapshot through the
+  // /verify endpoint's `overrides` path so the ref's metadata reverts
+  // and the badge moves back. Lives in component state only (lost on
+  // tab unmount), which is the right granularity for an immediate-undo
+  // affordance; persistent revert would need a DB-side snapshot.
+  const [originalSnapshots, setOriginalSnapshots] = useState({})
 
   // Add / Remove / Suggest server actions — delegate to the same hook
   // the References tab uses. This gives the Corrections view the same
@@ -331,14 +339,24 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
 
   const categorized = useMemo(() => {
     return (styleFilteredRefs || [])
-      .map(ref => ({ ref, tags: classifyReference(ref, isCheckComplete) }))
-      .filter(({ tags }) => tags.size > 0)
+      .map((ref, i) => {
+        const k = ref.id || `ref-${ref.index ?? i}`
+        return { ref, tags: classifyReference(ref, isCheckComplete), _decisionKey: k }
+      })
+      // Keep the row visible if EITHER the ref still has flagged tags OR
+      // the user has already recorded a decision (applied / edited /
+      // rejected). Otherwise applying a fix made the row vanish — the
+      // user lost the affordance to undo or re-edit, and the only signal
+      // that the fix landed was the health badge moving. Surfacing
+      // accepted rows lets the user reset them via the per-row "Don't
+      // apply" / "Reset decisions" buttons or the new "↺ Restore" button.
+      .filter(({ tags, _decisionKey }) => tags.size > 0 || !!decisions[_decisionKey])
       .sort((a, b) => {
         const ai = typeof a.ref?.index === 'number' ? a.ref.index : 999999
         const bi = typeof b.ref?.index === 'number' ? b.ref.index : 999999
         return ai - bi
       })
-  }, [styleFilteredRefs, isCheckComplete])
+  }, [styleFilteredRefs, isCheckComplete, decisions])
 
   const filtered = useMemo(() => {
     if (!summaryActive) return categorized
@@ -369,10 +387,31 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     })
   }
 
+  // Snapshot the ref's pre-fix metadata so the "↺ Restore" button can
+  // roll it back. Idempotent — the first snapshot wins, so re-applying
+  // a fix doesn't overwrite the original cited values.
+  const snapshotIfMissing = (k, ref) => {
+    setOriginalSnapshots(prev => {
+      if (prev[k]) return prev
+      return {
+        ...prev,
+        [k]: {
+          title: ref.title ?? '',
+          authors: Array.isArray(ref.authors) ? [...ref.authors] : ref.authors,
+          year: ref.year ?? null,
+          venue: ref.venue ?? '',
+          doi: ref.doi ?? '',
+          arxiv_id: ref.arxiv_id ?? '',
+        },
+      }
+    })
+  }
+
   // When the user accepts a correction we trigger a live re-verify so
   // the badge / status updates without waiting for a full re-run.
   const applyAndReverify = async (ref, i) => {
     const k = keyFor(ref, i)
+    snapshotIfMissing(k, ref)
     setDecision(k, { status: 'applied' })
     if (selectedCheckId) {
       const refIdStr = String(ref.id ?? ref.index ?? i)
@@ -394,8 +433,47 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     }
   }
 
+  // Roll an applied fix back to the pre-fix snapshot. Re-runs the
+  // verifier against the original cited values so the badge / status
+  // returns to what it was before the user accepted the fix. No-op when
+  // we don't have a snapshot (e.g. user typed an edit without first
+  // accepting, or the snapshot map was cleared on tab unmount).
+  const restoreOriginal = async (ref, i) => {
+    const k = keyFor(ref, i)
+    const snap = originalSnapshots[k]
+    if (!snap) {
+      // No snapshot — best we can do is drop the local decision so the
+      // row falls back to its current (post-fix) DB state. The user
+      // would need a full re-check to revert.
+      setDecision(k, null)
+      return
+    }
+    setDecision(k, null)
+    if (!selectedCheckId) return
+    const refIdStr = String(ref.id ?? ref.index ?? i)
+    try {
+      await verifyReferenceInCheck(selectedCheckId, refIdStr, { overrides: snap })
+      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
+    } catch (e) {
+      /* best-effort — the local decision flip already happened */
+    }
+    // Drop the snapshot so a subsequent Apply Fix captures a fresh one.
+    setOriginalSnapshots(prev => {
+      const next = { ...prev }
+      delete next[k]
+      return next
+    })
+  }
+
   const applyAllVisible = async () => {
     const targets = []
+    // Snapshot every targeted ref BEFORE marking decisions, so Restore
+    // can roll back any of them. The map is keyed by row key so
+    // per-row restore stays independent even after a bulk apply.
+    filtered.forEach(({ ref }, i) => {
+      const k = keyFor(ref, i)
+      snapshotIfMissing(k, ref)
+    })
     setDecisions(prev => {
       const next = { ...prev }
       filtered.forEach(({ ref }, i) => {
@@ -895,6 +973,20 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
                     style={{ backgroundColor: 'var(--color-bg-primary)', color: 'var(--color-text-primary)', border: '1px solid var(--color-border)' }}
                     type="button"
                   >{copiedKey === key ? '✓' : 'Copy'}</button>
+                  {(decision?.status === 'applied' || decision?.status === 'edited') && (
+                    <button onClick={() => restoreOriginal(ref, i)}
+                      className="px-2 py-0.5 rounded text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-bg-primary)',
+                        color: 'var(--color-accent, #3b82f6)',
+                        border: '1px solid var(--color-border)',
+                      }}
+                      type="button"
+                      title={originalSnapshots[key]
+                        ? 'Roll this fix back to the original cited values and re-verify.'
+                        : 'No snapshot available for this row — pressing Restore just clears the local decision; the stored ref keeps the fix.'}
+                    >↺ Restore</button>
+                  )}
                   {tags.has('hallucination') && (() => {
                     const ident = String(ref.id ?? ref.index ?? i)
                     const suggesting = isSuggesting(ident)

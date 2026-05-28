@@ -228,7 +228,10 @@ export default function GraphView({ references, paperTitle }) {
     if (expanding) return
     setExpanding(node.id)
     try {
-      const res = await expandPaper({ paper_id: node.paperId, limit: 6 })
+      // Pass title so the backend can fall back to title-search when
+      // the DOI/arXiv-keyed /references lookup returns empty.
+      const refTitle = node.ref?.title || node.label || null
+      const res = await expandPaper({ paper_id: node.paperId, limit: 6, title: refTitle })
       const items = res.data?.items || []
       const additions = items
         .filter(it => it.paperId)
@@ -323,7 +326,9 @@ export default function GraphView({ references, paperTitle }) {
         while (queue.length) {
           const node = queue.shift()
           try {
-            const res = await expandPaper({ paper_id: node.paperId, limit: 8 })
+            // Pass title so the backend can fall back to title-search
+            // when /references comes back empty for this DOI/arXiv.
+            const res = await expandPaper({ paper_id: node.paperId, limit: 8, title: node.title })
             const items = res.data?.items || []
             const additions = items
               .filter(it => it.paperId)
@@ -430,14 +435,14 @@ export default function GraphView({ references, paperTitle }) {
           border: '1px solid var(--color-border)',
           maxWidth: 320,
         }}
-        title="Node colours map to verification status. Expanded 2nd-degree refs that don't appear in your Seen References cache stay cyan because their status is unknown."
+        title="Node colours map to verification status. Expanded 2nd-degree refs inherit their status from your Seen References cache when present; otherwise S2's index decides — items with a paperId + DOI/arXiv read as verified, items with only a paperId read as unverified, and only nodes that resolved to neither stay cyan."
       >
         <LegendDot color={STATUS_COLOR.verified} label="verified" />
         <LegendDot color={STATUS_COLOR.warning} label="warning" />
         <LegendDot color={STATUS_COLOR.error} label="error" />
         <LegendDot color={STATUS_COLOR.unverified} label="unverified" />
         <LegendDot color={STATUS_COLOR.hallucinated} label="hallucinated" />
-        <LegendDot color="#0ea5e9" label="expanded · unknown" />
+        <LegendDot color="#0ea5e9" label="expanded · no S2 metadata" />
       </div>
       <Suspense fallback={
         <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
