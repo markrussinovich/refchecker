@@ -1485,7 +1485,8 @@ class ProgressRefChecker:
 
             # Step 2: Extract references (check disk cache first)
             references = cached_bibliography(self.cache_dir, paper_source, bibliography_cache_identity)
-            if references is not None:
+            _from_cache = references is not None
+            if _from_cache:
                 set_extraction_method('cache')
                 logger.info(f"Cache hit: loaded {len(references)} references for {paper_source}")
             else:
@@ -1513,46 +1514,58 @@ class ProgressRefChecker:
                     if self.llm and extraction_method in ('pdf', 'file', 'text'):
                         set_extraction_method('llm')
 
-                # Save to disk cache
+                # Save to disk cache. Done BEFORE citation-context
+                # attachment so cached bibliographies stay compact (a
+                # paragraph-of-text per ref bloats the cache and ties
+                # the cache to the specific paper body, defeating its
+                # cross-rerun share).
                 if references:
                     cache_bibliography(self.cache_dir, paper_source, references, bibliography_cache_identity)
-                # Attach citation contexts (sentence around [N] / author-year
-                # patterns in the source text) so the UI can show
-                # 'context: "as demonstrated in [12]..."' on each ref card.
-                _attach_citation_contexts(references, paper_text)
-                _ctx_attached = sum(1 for r in (references or []) if r.get("citation_context"))
-                logger.info(
-                    "Citation contexts: %d/%d refs got an inline sentence (paper_text=%d chars)",
-                    _ctx_attached, len(references or []), len(paper_text or ""),
-                )
 
-                # LLM fallback for citation contexts. When the
-                # regex-based attachment caught fewer than 30% of refs
-                # AND we have an LLM configured AND paper_text exists,
-                # ask the LLM to identify where each missed ref is
-                # cited. Tokens flow into the per-check usage tracker
-                # under flow="context" so the $ badge surfaces this
-                # spend. Soft-fails: an LLM error doesn't block the
-                # check from completing — the user just sees fewer
-                # contexts.
-                try:
-                    total_refs_for_ctx = len(references or [])
-                    if (
-                        total_refs_for_ctx > 0
-                        and _ctx_attached / max(1, total_refs_for_ctx) < 0.3
-                        and self.llm
-                        and paper_text and len(paper_text) > 500
-                    ):
-                        added = await self._attach_citation_contexts_via_llm(
-                            references, paper_text,
+            # Citation context attachment runs on BOTH cache-hit and
+            # cache-miss paths so the UI always shows the inline "cited
+            # in: …" sentence per ref. Before v0.7.37 this whole block
+            # lived inside the `else` (cache-miss branch) — re-running
+            # the same .docx returned cached refs that had never had
+            # contexts attached, and the References tab showed no
+            # citation sentences. The function is cheap (regex over the
+            # body text, no LLM), idempotent on refs that already have
+            # contexts, and a no-op when paper_text is empty.
+            _attach_citation_contexts(references, paper_text)
+            _ctx_attached = sum(1 for r in (references or []) if r.get("citation_context"))
+            logger.info(
+                "Citation contexts: %d/%d refs got an inline sentence (paper_text=%d chars, from_cache=%s)",
+                _ctx_attached, len(references or []), len(paper_text or ""), _from_cache,
+            )
+
+            # LLM fallback for citation contexts. When the
+            # regex-based attachment caught fewer than 30% of refs
+            # AND we have an LLM configured AND paper_text exists,
+            # ask the LLM to identify where each missed ref is
+            # cited. Tokens flow into the per-check usage tracker
+            # under flow="context" so the $ badge surfaces this
+            # spend. Soft-fails: an LLM error doesn't block the
+            # check from completing — the user just sees fewer
+            # contexts. Skipped on cache-hit if every ref already
+            # has a context (no work to do).
+            try:
+                total_refs_for_ctx = len(references or [])
+                if (
+                    total_refs_for_ctx > 0
+                    and _ctx_attached / max(1, total_refs_for_ctx) < 0.3
+                    and self.llm
+                    and paper_text and len(paper_text) > 500
+                ):
+                    added = await self._attach_citation_contexts_via_llm(
+                        references, paper_text,
+                    )
+                    if added:
+                        logger.info(
+                            "Citation contexts (LLM fallback): added %d more refs (total now %d/%d)",
+                            added, _ctx_attached + added, total_refs_for_ctx,
                         )
-                        if added:
-                            logger.info(
-                                "Citation contexts (LLM fallback): added %d more refs (total now %d/%d)",
-                                added, _ctx_attached + added, total_refs_for_ctx,
-                            )
-                except Exception as e:
-                    logger.debug("LLM citation-context fallback skipped: %s", e)
+            except Exception as e:
+                logger.debug("LLM citation-context fallback skipped: %s", e)
 
             if not references:
                 await self.emit_progress("completed", {
