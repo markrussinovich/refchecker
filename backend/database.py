@@ -2060,6 +2060,106 @@ class Database:
                 data["result"] = {}
             return data
 
+    async def cross_check_seen_refs(self, ref: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Cross-reference a cited ref against the Seen-Refs cache.
+
+        Detects citation inconsistencies across uploads — e.g. when the
+        same paper title appears in a new document with different
+        authors, year, venue, or DOI compared to the metadata we
+        verified for that title previously. Returns one entry per
+        cached row that matched the title but disagreed on at least one
+        identifying field. Each entry carries the diffs so the FE can
+        render them as a "potential mismatch / hallucination" signal.
+
+        Title match is normalized prefix LIKE (case-insensitive,
+        non-alphanumeric stripped) to catch typos and punctuation
+        differences without enumerating fuzzy distances. Identity-key
+        equal-DOI / equal-arXiv matches are skipped — those go through
+        the regular cache-hit path with no need to flag a discrepancy.
+        """
+        import re as _re
+        title = (ref.get("title") or "").strip().lower()
+        if len(title) < 12:
+            return []
+        norm = _re.sub(r"[^a-z0-9 ]+", " ", title)
+        norm = _re.sub(r"\s+", " ", norm).strip()
+        if len(norm) < 12:
+            return []
+        # Use the first 60 chars of normalized title for the LIKE prefix.
+        # Longer than 60 risks LIKE failing on truncated cache rows;
+        # shorter risks collisions across unrelated papers.
+        prefix = norm[:60]
+        ident_self = self.reference_identity_key(ref)
+        out: List[Dict[str, Any]] = []
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    """
+                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue
+                    FROM verified_reference_identity
+                    WHERE LOWER(title) LIKE ?
+                    LIMIT 10
+                    """,
+                    (f"{prefix}%",),
+                )
+                rows = await cursor.fetchall()
+        except Exception:
+            return []
+        ref_authors = ref.get("authors") or []
+        if isinstance(ref_authors, list):
+            ref_authors_str = ", ".join(a for a in ref_authors if a)
+        else:
+            ref_authors_str = str(ref_authors or "")
+        ref_doi = (ref.get("doi") or "").strip().lower()
+        ref_arxiv = (ref.get("arxiv_id") or "").strip().lower()
+        ref_year = str(ref.get("year") or "").strip()
+        ref_venue = (ref.get("venue") or "").strip().lower()
+        for r in rows:
+            cached_ident = r["identity_key"] or ""
+            if ident_self and cached_ident == ident_self:
+                # Same identity — handled by the regular cache-hit
+                # path, not a discrepancy.
+                continue
+            diffs: List[Dict[str, str]] = []
+            # DOI mismatch is the strongest signal — if the same title
+            # already maps to a verified DOI, a new citation with a
+            # different DOI is likely a typo or fabrication.
+            cached_doi = (r["doi"] or "").strip().lower()
+            if cached_doi and ref_doi and cached_doi != ref_doi:
+                diffs.append({"field": "doi", "cached": r["doi"], "cited": ref.get("doi")})
+            cached_arxiv = (r["arxiv_id"] or "").strip().lower()
+            if cached_arxiv and ref_arxiv and cached_arxiv != ref_arxiv:
+                diffs.append({"field": "arxiv_id", "cached": r["arxiv_id"], "cited": ref.get("arxiv_id")})
+            cached_year = str(r["year"] or "").strip()
+            if cached_year and ref_year and cached_year != ref_year:
+                diffs.append({"field": "year", "cached": r["year"], "cited": ref.get("year")})
+            cached_authors = (r["authors"] or "").strip().lower()
+            if cached_authors and ref_authors_str and cached_authors != ref_authors_str.lower():
+                # Only flag if the FIRST author's surname differs —
+                # author-order / et-al / formatting differences shouldn't
+                # trigger noise. Pull the first surname of each side.
+                def _first_surname(s: str) -> str:
+                    s = (s or "").split(",")[0].split(";")[0].strip()
+                    parts = s.split()
+                    return parts[-1].lower() if parts else ""
+                if _first_surname(r["authors"] or "") != _first_surname(ref_authors_str):
+                    diffs.append({
+                        "field": "authors",
+                        "cached": (r["authors"] or "")[:120],
+                        "cited": ref_authors_str[:120],
+                    })
+            cached_venue = (r["venue"] or "").strip().lower()
+            if cached_venue and ref_venue and cached_venue != ref_venue:
+                diffs.append({"field": "venue", "cached": r["venue"], "cited": ref.get("venue")})
+            if diffs:
+                out.append({
+                    "cached_title": r["title"],
+                    "cached_identity": cached_ident,
+                    "diffs": diffs,
+                })
+        return out
+
     async def list_verified_references(self, limit: int = 200, offset: int = 0, q: Optional[str] = None) -> List[Dict[str, Any]]:
         """Page through the identity-keyed reference table for the Seen Refs tab."""
         # Pull last_seen_check_id / last_seen_paper_title via safe column

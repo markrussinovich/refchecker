@@ -2471,7 +2471,40 @@ class ProgressRefChecker:
                     "citation_context": reference.get('citation_context'),
                     "citation_count": reference.get('citation_count') or 0,
                 }
-        
+
+        # ── Cross-check against Seen-Refs cache (v0.7.43) ──────────────
+        # For every checked ref, scan the global Seen-Refs cache for
+        # entries with the same normalized title and flag any that
+        # disagree on identifying metadata (DOI, arXiv, year, first
+        # author surname, venue). Catches inconsistencies across
+        # uploads — the same paper cited with wrong author/year in a
+        # newer document — which is a strong tell for typos, swapped
+        # citations, or LLM hallucinations. Soft-fails: errors here
+        # never block the verification result.
+        try:
+            from .database import db as _db
+            xcheck = await _db.cross_check_seen_refs(reference)
+            if xcheck:
+                warnings_list = result.setdefault("warnings", [])
+                for entry in xcheck[:3]:
+                    field_summaries = []
+                    for d in entry.get("diffs") or []:
+                        field_summaries.append(
+                            f"{d.get('field')}: cached '{d.get('cached')}' vs cited '{d.get('cited')}'"
+                        )
+                    warnings_list.append({
+                        "warning_type": "cache_inconsistency",
+                        "warning_details": (
+                            "A previously-verified ref with this title disagrees on: "
+                            + "; ".join(field_summaries)
+                        ),
+                        "cached_title": entry.get("cached_title"),
+                        "cached_identity": entry.get("cached_identity"),
+                        "diffs": entry.get("diffs"),
+                    })
+        except Exception as _xc_err:
+            logger.debug("cross_check_seen_refs skipped: %s", _xc_err)
+
         return result
 
     async def _check_references_parallel(
