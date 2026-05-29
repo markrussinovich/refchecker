@@ -2154,6 +2154,13 @@ class Database:
             # title with a totally different first author.
             if not cached_surname or not ref_surname or cached_surname != ref_surname:
                 continue
+            # v0.7.55 (per ML review): DOI mismatch guard. If both
+            # sides have a DOI, they MUST agree, otherwise we'd accept
+            # a different paper with the same surname + year + title
+            # prefix (the Round 2 example: 10.X/abc vs 10.X/xyz).
+            cached_doi_raw = (r["doi"] or "").strip().lower()
+            if cached_doi_raw and ref_doi and cached_doi_raw != ref_doi:
+                continue
             score = 1
             # Year exact match is the strongest signal; ±1 is acceptable
             # for accepted-vs-published year drift.

@@ -220,6 +220,49 @@ def _diff_cited_vs_truth(reference, truth):
         parts = s.split()
         return parts[-1].lower() if parts else ""
 
+    # ── Title (v0.7.55 per ML round 2) ────────────────────────────────
+    # A fuzzy hit landed us here; if the fuzzy 60–80 char prefix match
+    # had divergent suffix the cited paper might not actually be the
+    # cached paper. Compare normalized titles via token-set Jaccard:
+    #   >= 0.85  → silent (genuinely the same paper)
+    #   0.55..0.85 → warning
+    #   < 0.55  → error (likely mismatched cache record)
+    def _title_tokens(s):
+        s = (s or "").strip().lower()
+        s = _re_dvt.sub(r"[^a-z0-9 ]+", " ", s)
+        return {t for t in s.split() if len(t) > 2}
+    cited_title = reference.get("title") or ""
+    truth_title = truth.get("title") or ""
+    if cited_title and truth_title:
+        ct = _title_tokens(cited_title)
+        tt = _title_tokens(truth_title)
+        if ct and tt:
+            inter = len(ct & tt)
+            union = len(ct | tt)
+            jacc = inter / union if union else 0.0
+            if jacc < 0.55:
+                errors.append({
+                    "error_type": "title",
+                    "error_details": (
+                        f"Cited title differs sharply from the cached "
+                        f"verification of this paper (Jaccard {jacc:.2f}). "
+                        f"The cache may have matched a similarly-titled "
+                        f"but distinct work."
+                    ),
+                    "cited_value": cited_title[:200],
+                    "actual_value": truth_title[:200],
+                })
+            elif jacc < 0.85:
+                warnings.append({
+                    "warning_type": "title",
+                    "warning_details": (
+                        f"Cited title differs slightly from the cached "
+                        f"truth (Jaccard {jacc:.2f})."
+                    ),
+                    "cited_value": cited_title[:200],
+                    "actual_value": truth_title[:200],
+                })
+
     # ── Year ──────────────────────────────────────────────────────────
     try:
         cited_year = int(reference.get("year")) if reference.get("year") else None
@@ -1542,12 +1585,27 @@ class ProgressRefChecker:
                     # array — zero LLM tokens, deterministic, accurate.
                     # Fall through to HTML+LLM only when Crossref has no
                     # data. Single biggest cost-saver on bulk batches.
+                    # v0.7.55 (per ML review): tightened regex. The old
+                    # pattern `10\.\d{4,9}/[\w.\-;()/:%]+` greedily ate
+                    # `;jsessionid=...`, query strings, fragment anchors,
+                    # and trailing punctuation. New version stops at
+                    # whitespace/?/#/&/ then trims trailing punct.
                     import re as _re_doi
                     doi_match = _re_doi.search(
-                        r"10\.\d{4,9}/[\w.\-;()/:%]+",
+                        r"10\.\d{4,9}/[^\s?#&]+",
                         paper_source,
                     )
-                    extracted_doi = doi_match.group(0).rstrip(".,;)") if doi_match else None
+                    extracted_doi = doi_match.group(0).rstrip(".,;)]}'\"") if doi_match else None
+                    # Additional defence: split off semicolon-prefixed
+                    # session tags (jsessionid, sessionId, sid) inside
+                    # the path portion before the genuine DOI slash.
+                    if extracted_doi and ";" in extracted_doi:
+                        # Find the first ';' AFTER the required `/`; cut.
+                        slash_idx = extracted_doi.find("/")
+                        if slash_idx > 0:
+                            semi_idx = extracted_doi.find(";", slash_idx)
+                            if semi_idx > 0:
+                                extracted_doi = extracted_doi[:semi_idx]
                     crossref_refs = None
                     if extracted_doi:
                         try:
@@ -1590,10 +1648,17 @@ class ProgressRefChecker:
                                             year_int = int(year) if year else None
                                         except Exception:
                                             year_int = None
+                                        # v0.7.55 (per ML review): Crossref's
+                                        # `author` in a reference entry is a
+                                        # single string like "Smith, J." for
+                                        # the FIRST author only. Splitting
+                                        # on comma fragmented the surname
+                                        # from the initial and produced two
+                                        # fake authors. Keep the whole
+                                        # string as one entry.
                                         authors_str = entry.get("author") or ""
-                                        # Crossref author is "Surname, Initial." — split into list.
-                                        if isinstance(authors_str, str) and authors_str:
-                                            authors_list = [a.strip() for a in authors_str.split(",") if a.strip()]
+                                        if isinstance(authors_str, str) and authors_str.strip():
+                                            authors_list = [authors_str.strip()]
                                         else:
                                             authors_list = []
                                         venue = (

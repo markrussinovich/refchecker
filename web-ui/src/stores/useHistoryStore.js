@@ -605,7 +605,17 @@ export const useHistoryStore = create((set, get) => ({
     set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true })
     try {
       const resp = await api.getBatch(batchId)
-      set({ selectedBatch: resp.data, isLoadingBatch: false })
+      // v0.7.55 (per full-stack review round 2): only commit the
+      // result if `selectedBatchId` is still THIS batch. Without
+      // this guard a rapid sidebar click between selectBatch and
+      // its await landed the resolved batch into `selectedBatch`
+      // even after `selectCheck` had nulled `selectedBatchId`,
+      // leaving an orphan data object that the UI never showed.
+      if (get().selectedBatchId === batchId) {
+        set({ selectedBatch: resp.data, isLoadingBatch: false })
+      } else {
+        set({ isLoadingBatch: false })
+      }
     } catch (e) {
       logger.error('HistoryStore', 'selectBatch failed', e)
       set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
