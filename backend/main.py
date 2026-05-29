@@ -4623,12 +4623,26 @@ async def get_llm_usage(
     cost. The accumulator resets at the start of each `check_paper` call
     so the badge always reflects a single run.
     """
-    # Ownership gate: load the check under the same user_id filter the
-    # rest of /api/history uses, so one authenticated user can't probe
-    # another user's token spend by enumerating check_ids.
+    # v0.7.46: use a lightweight existence/ownership check instead of
+    # `get_check_references` which pulled the entire results_json blob
+    # — that was timing out while the SQLite DB was busy with a giant
+    # batch write. get_check_by_id only touches the row's columns
+    # (still includes results_json but is at least a single PK lookup,
+    # not a scan; and we don't actually need the JSON here).
     user_id = get_user_id_filter(current_user)
-    refs = await db.get_check_references(check_id, user_id=user_id)
-    if refs is None:
+    try:
+        owns = await asyncio.wait_for(
+            db.get_check_by_id(check_id, user_id=user_id),
+            timeout=5.0,
+        )
+    except asyncio.TimeoutError:
+        # DB is busy — return empty usage rather than holding the
+        # request and blocking the FE behind a slow ownership probe.
+        return {
+            "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+            "calls": 0, "by_flow": {}, "by_model": {},
+        }
+    if owns is None:
         raise HTTPException(status_code=404, detail="Check not found")
 
     try:

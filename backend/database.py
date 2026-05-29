@@ -525,8 +525,22 @@ class Database:
             """)
             # Create index for per-user history queries
             await db.execute("""
-                CREATE INDEX IF NOT EXISTS idx_check_history_user_id 
+                CREATE INDEX IF NOT EXISTS idx_check_history_user_id
                 ON check_history(user_id)
+            """)
+            # v0.7.46: composite index on (user_id, timestamp DESC) and
+            # raw (timestamp DESC) so the `ORDER BY timestamp DESC LIMIT N`
+            # query the sidebar fires on every page load doesn't scan the
+            # whole table. After the 800-paper batch landed users had
+            # 1600+ rows and /history timed out at 30s because the planner
+            # was doing a full sort.
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_timestamp
+                ON check_history(timestamp DESC)
+            """)
+            await db.execute("""
+                CREATE INDEX IF NOT EXISTS idx_check_history_user_timestamp
+                ON check_history(user_id, timestamp DESC)
             """)
             await db.commit()
 
@@ -906,20 +920,34 @@ class Database:
             return cursor.lastrowid
 
     async def get_history(self, limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Get recent check history, optionally filtered by user."""
+        """Get recent check history, optionally filtered by user.
+
+        v0.7.46: results_json is NO LONGER pulled here. After a user
+        ran an 800-paper batch, every /history request was fetching +
+        re-parsing ~800 JSON blobs (one per row) totalling tens of MB,
+        which made the endpoint time out at the FE's 30s threshold and
+        wiped previous checks from the sidebar. The pre-computed
+        bucket columns (refs_with_errors / refs_with_warnings_only /
+        refs_with_suggestions_only / refs_verified) are kept in sync
+        by the upsert path, so the JSON recompute was duplicate work
+        anyway. Detail view still fetches results_json via
+        get_check_by_id.
+        """
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             db.row_factory = aiosqlite.Row
+            select_cols = (
+                "id, paper_title, paper_source, custom_label, timestamp, "
+                "total_refs, errors_count, warnings_count, suggestions_count, unverified_count, "
+                "hallucination_count, "
+                "refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, "
+                "llm_provider, llm_model, hallucination_provider, hallucination_model, "
+                "status, source_type, batch_id, batch_label, "
+                "bibliography_source_kind, original_filename"
+            )
             if user_id is not None:
-                query = """
-                    SELECT id, paper_title, paper_source, custom_label, timestamp,
-                           total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
-                           hallucination_count,
-                           refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified,
-                              llm_provider, llm_model, hallucination_provider, hallucination_model,
-                              status, source_type, batch_id, batch_label,
-                              bibliography_source_kind,
-                           original_filename, results_json
+                query = f"""
+                    SELECT {select_cols}
                     FROM check_history
                     WHERE user_id = ?
                     ORDER BY timestamp DESC
@@ -927,15 +955,8 @@ class Database:
                 """
                 params = (user_id, limit)
             else:
-                query = """
-                    SELECT id, paper_title, paper_source, custom_label, timestamp,
-                           total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
-                           hallucination_count,
-                           refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified,
-                              llm_provider, llm_model, hallucination_provider, hallucination_model,
-                              status, source_type, batch_id, batch_label,
-                              bibliography_source_kind,
-                           original_filename, results_json
+                query = f"""
+                    SELECT {select_cols}
                     FROM check_history
                     ORDER BY timestamp DESC
                     LIMIT ?
@@ -946,23 +967,8 @@ class Database:
                 history = []
                 for row in rows:
                     item = dict(row)
-                    raw_results = item.pop('results_json', None)
                     item.setdefault('refs_with_suggestions_only', 0)
-
-                    if raw_results:
-                        try:
-                            parsed_results = json.loads(raw_results)
-                        except Exception:
-                            parsed_results = []
-                        if isinstance(parsed_results, list) and len(parsed_results) > 0:
-                            buckets = _compute_reference_buckets_from_results(
-                                parsed_results,
-                                is_complete=item.get('status') in {'completed', 'cancelled', 'error'},
-                            )
-                            item.update(buckets)
-
                     history.append(item)
-
                 return history
 
     async def get_check_by_id(self, check_id: int, user_id: Optional[int] = None) -> Optional[Dict[str, Any]]:

@@ -3,7 +3,12 @@ import { logger } from './logger'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  // 90 s default. v0.7.46: bumped from 30 s because /history queries
+  // started timing out at the FE while a giant batch was concurrently
+  // writing to SQLite. The backend itself still has per-endpoint
+  // timeouts; this just gives the FE more patience before declaring
+  // a request lost.
+  timeout: 90000,
   withCredentials: true, // send rc_auth cookie on every request
 })
 
