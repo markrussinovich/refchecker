@@ -2397,21 +2397,42 @@ class Database:
                 return None
 
     async def cancel_batch(self, batch_id: str, user_id: Optional[int] = None) -> int:
-        """Cancel all in-progress checks in a batch. Returns count of cancelled checks."""
+        """Cancel every non-terminal check in a batch (in_progress, pending,
+        queued, etc.). Returns count of cancelled checks.
+
+        v0.7.51: previously this only flipped `status = 'in_progress'`
+        rows. Children queued behind the concurrency limiter sat as
+        `pending` and got missed — the user saw "Cancel doesn't kill
+        them all at once" because the limiter then released them one
+        by one, each running through extraction + verification before
+        observing the cancel. Now we cancel ANYTHING that isn't
+        already in a terminal state (completed, cancelled, error),
+        so a Cancel All immediately stops the entire pipeline.
+        """
+        terminal = ("completed", "cancelled", "error")
+        placeholders = ",".join("?" for _ in terminal)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             if user_id is not None:
-                cursor = await db.execute("""
-                    UPDATE check_history 
-                    SET status = 'cancelled' 
-                    WHERE batch_id = ? AND user_id = ? AND status = 'in_progress'
-                """, (batch_id, user_id))
+                cursor = await db.execute(
+                    f"""
+                    UPDATE check_history
+                    SET status = 'cancelled'
+                    WHERE batch_id = ? AND user_id = ?
+                          AND status NOT IN ({placeholders})
+                    """,
+                    (batch_id, user_id, *terminal),
+                )
             else:
-                cursor = await db.execute("""
-                    UPDATE check_history 
-                    SET status = 'cancelled' 
-                    WHERE batch_id = ? AND status = 'in_progress'
-                """, (batch_id,))
+                cursor = await db.execute(
+                    f"""
+                    UPDATE check_history
+                    SET status = 'cancelled'
+                    WHERE batch_id = ?
+                          AND status NOT IN ({placeholders})
+                    """,
+                    (batch_id, *terminal),
+                )
             await db.commit()
             return cursor.rowcount
 

@@ -3150,20 +3150,30 @@ async def cancel_batch(
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
-    """Cancel all active checks in a batch"""
+    """Cancel all active checks in a batch.
+
+    v0.7.51: DB flip FIRST, then task.cancel() — previously the task
+    cancellation could race the DB update. A child task might finish
+    its current await between the cancel_event being set and the DB
+    update, write its own status='completed' row, and end up
+    NOT-cancelled. Reversing the order means any subsequent DB write
+    from a still-running task hits a row that's already 'cancelled',
+    so the task's status update becomes a no-op.
+    """
     try:
         user_id = get_user_id_filter(current_user)
         await _get_owned_batch_or_404(batch_id, current_user)
-        # Cancel active tasks
+        # Flip the DB first — covers queued/pending children that haven't
+        # yet acquired a concurrency slot, and stops any running task's
+        # next status write from racing past us.
+        db_cancelled = await db.cancel_batch(batch_id, user_id=user_id)
+        # Now interrupt every active task that belongs to this batch.
         cancelled_sessions = 0
         for session_id, meta in list(active_checks.items()):
             if meta.get("batch_id") == batch_id and (user_id is None or meta.get("user_id") == user_id):
                 meta["cancel_event"].set()
                 meta["task"].cancel()
                 cancelled_sessions += 1
-        
-        # Update database status for any remaining in-progress
-        db_cancelled = await db.cancel_batch(batch_id, user_id=user_id)
         
         logger.info(f"Cancelled batch {batch_id}: {cancelled_sessions} active, {db_cancelled} in DB")
         await _log_usage_event_safe(

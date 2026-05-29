@@ -1774,6 +1774,26 @@ class ProgressRefChecker:
                 logger.debug("LLM citation-context fallback skipped: %s", e)
 
             if not references:
+                # Diagnostic: log every signal that helps explain why
+                # extraction returned empty. v0.7.51 added this after
+                # a user reported "can't extract references at all" —
+                # without these breadcrumbs we couldn't tell whether it
+                # was a missing LLM key, a paper-text extraction
+                # failure, or a real bibliography-less document.
+                logger.warning(
+                    "No references extracted: paper_text=%d chars, "
+                    "extraction_method=%s, llm_available=%s, "
+                    "arxiv_source_count=%s",
+                    len(paper_text or ""),
+                    extraction_method,
+                    bool(self.llm),
+                    len(arxiv_source_references) if arxiv_source_references else None,
+                )
+                detail_msg = "No references could be extracted from this paper."
+                if not self.llm and extraction_method in ('pdf', 'file', 'text'):
+                    detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
+                elif not paper_text or len(paper_text or "") < 200:
+                    detail_msg += " The file's text content looks empty or too short."
                 await self.emit_progress("completed", {
                     "total_refs": 0,
                     "errors_count": 0,
@@ -1783,7 +1803,7 @@ class ProgressRefChecker:
                     "hallucination_count": 0,
                     "verified_count": 0,
                     "extraction_method": extraction_method,
-                    "message": "No references could be extracted from this paper.",
+                    "message": detail_msg,
                     "check_id": self.check_id,
                 })
                 return {
