@@ -431,9 +431,16 @@ export const useHistoryStore = create((set, get) => ({
     // child via the sidebar.
     const stale = stateSnapshot.selectedBatchId
     if (stale) {
-      const targetBatchId = (existingHistoryItem && existingHistoryItem.batch_id) || null
-      if (targetBatchId !== stale) {
-        set({ selectedBatchId: null, selectedBatch: null })
+      // v0.7.56 (per full-stack review round 3): only clear when we
+      // KNOW the target's batch_id differs. If existingHistoryItem is
+      // undefined (cold-load, history still hydrating), don't clear —
+      // a fast click on a batch child during boot was wrongly nulling
+      // the batch context.
+      if (existingHistoryItem) {
+        const targetBatchId = existingHistoryItem.batch_id || null
+        if (targetBatchId !== stale) {
+          set({ selectedBatchId: null, selectedBatch: null })
+        }
       }
     }
 
@@ -618,7 +625,15 @@ export const useHistoryStore = create((set, get) => ({
       }
     } catch (e) {
       logger.error('HistoryStore', 'selectBatch failed', e)
-      set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+      // v0.7.56 (per full-stack review round 3): same race-token
+      // guard on the error path. A failed fetch that resolves AFTER
+      // the user navigated away should NOT surface its error toast
+      // onto the unrelated view they're now on.
+      if (get().selectedBatchId === batchId) {
+        set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+      } else {
+        set({ isLoadingBatch: false })
+      }
     }
   },
 
@@ -635,10 +650,24 @@ export const useHistoryStore = create((set, get) => ({
       try {
         const detail = (await api.getCheckDetail(checkId)).data
         const fetchedAt = Date.now()
-        set(state => ({
-          selectedCheck: detail,
-          detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
-        }))
+        // v0.7.56 (per full-stack review round 3): same race-token
+        // guard as selectBatch — a backToBatch click while this
+        // getCheckDetail was in flight would otherwise write the
+        // resolved detail into selectedCheck even though
+        // selectedCheckId has been nulled by backToBatch, leaving
+        // orphan data the UI might still render against.
+        if (get().selectedCheckId === checkId) {
+          set(state => ({
+            selectedCheck: detail,
+            detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
+          }))
+        } else {
+          // Cache the fetched detail anyway so a return click is fast,
+          // but don't overwrite the now-irrelevant selectedCheck.
+          set(state => ({
+            detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
+          }))
+        }
       } catch (e) {
         logger.error('HistoryStore', 'openBatchChild detail fetch failed', e)
       }
