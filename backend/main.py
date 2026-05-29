@@ -3076,6 +3076,74 @@ async def get_batch(batch_id: str, current_user: UserInfo = Depends(require_user
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/batch/{batch_id}/llm-usage")
+async def get_batch_llm_usage(
+    batch_id: str,
+    current_user: UserInfo = Depends(require_user),
+):
+    """Aggregate LLM token + cost spend across every child check in a
+    batch — one call to the FE instead of N child fetches.
+
+    Returns the same shape as the per-check /llm-usage endpoint plus a
+    `per_check` map so the FE can sort children by cost. Soft-fails on
+    individual children so a single missing snapshot doesn't blank the
+    batch number.
+    """
+    await _get_owned_batch_or_404(batch_id, current_user)
+    user_id = get_user_id_filter(current_user)
+    checks = await db.get_batch_checks(batch_id, user_id=user_id)
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _sys.path.insert(0, str(_Path(__file__).parent.parent / "src"))
+        from refchecker.llm import usage_tracker
+    except Exception as e:
+        logger.warning(f"batch llm-usage import failed: {e}")
+        return {
+            "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+            "calls": 0, "by_flow": {}, "by_model": {}, "per_check": {},
+        }
+    agg = {
+        "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+        "calls": 0, "by_flow": {}, "by_model": {}, "per_check": {},
+    }
+    for check in checks or []:
+        cid = check.get("id")
+        if cid is None:
+            continue
+        try:
+            snap = usage_tracker.snapshot(str(cid))
+        except Exception:
+            continue
+        agg["input_tokens"] += int(snap.get("input_tokens") or 0)
+        agg["output_tokens"] += int(snap.get("output_tokens") or 0)
+        agg["cost_usd"] += float(snap.get("cost_usd") or 0.0)
+        agg["calls"] += int(snap.get("calls") or 0)
+        for flow, sub in (snap.get("by_flow") or {}).items():
+            fb = agg["by_flow"].setdefault(flow, {
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "calls": 0,
+            })
+            fb["input_tokens"] += int(sub.get("input_tokens") or 0)
+            fb["output_tokens"] += int(sub.get("output_tokens") or 0)
+            fb["cost_usd"] += float(sub.get("cost_usd") or 0.0)
+            fb["calls"] += int(sub.get("calls") or 0)
+        for model, sub in (snap.get("by_model") or {}).items():
+            mb = agg["by_model"].setdefault(model, {
+                "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+            })
+            mb["input_tokens"] += int(sub.get("input_tokens") or 0)
+            mb["output_tokens"] += int(sub.get("output_tokens") or 0)
+            mb["cost_usd"] += float(sub.get("cost_usd") or 0.0)
+        if snap.get("cost_usd") or snap.get("input_tokens") or snap.get("output_tokens"):
+            agg["per_check"][cid] = {
+                "cost_usd": snap.get("cost_usd") or 0.0,
+                "input_tokens": snap.get("input_tokens") or 0,
+                "output_tokens": snap.get("output_tokens") or 0,
+                "calls": snap.get("calls") or 0,
+            }
+    return agg
+
+
 @app.post("/api/cancel/batch/{batch_id}")
 async def cancel_batch(
     batch_id: str,

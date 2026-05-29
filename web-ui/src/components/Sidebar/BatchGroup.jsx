@@ -20,7 +20,7 @@ export default function BatchGroup({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false)
   const [isEditingLabel, setIsEditingLabel] = useState(false)
   const [editValue, setEditValue] = useState('')
-  const { fetchHistory, deleteCheck, selectCheck } = useHistoryStore()
+  const { fetchHistory, deleteCheck, selectCheck, selectBatch } = useHistoryStore()
 
   const handleEditStart = (e) => {
     e.stopPropagation()
@@ -118,10 +118,11 @@ export default function BatchGroup({
   }
 
   const handleHeaderClick = () => {
-    // If no child is selected, select first child
-    if (!hasSelectedItem && items.length > 0) {
-      selectCheck(items[0].id)
-    }
+    // v0.7.45: open the batch summary view instead of jumping to the
+    // first child. The aggregate counts, budget chip, and per-paper
+    // status list live there; users can Open into a specific child
+    // from the summary if they want.
+    selectBatch(batchId)
   }
 
   const handleToggleClick = (e) => {

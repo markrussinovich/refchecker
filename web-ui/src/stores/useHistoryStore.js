@@ -13,6 +13,15 @@ export const useHistoryStore = create((set, get) => ({
   history: [],
   selectedCheckId: null,
   selectedCheck: null,
+  // Batch summary selection (v0.7.45). When the user clicks a Batch
+  // row header in the sidebar, this gets set and the MainPanel
+  // renders BatchSummaryView instead of the normal check view.
+  // Clicking a child paper in the batch sets selectedCheckId AND
+  // remembers selectedBatchId so the per-paper view can render a
+  // "← Back to batch" link.
+  selectedBatchId: null,
+  selectedBatch: null, // { batch_id, batch_label?, total, checks: [...] }
+  isLoadingBatch: false,
   isLoading: false,
   isLoadingDetail: false,
   detailCache: {}, // checkId -> { check, fetchedAt }
@@ -570,7 +579,59 @@ export const useHistoryStore = create((set, get) => ({
   },
 
   clearSelection: () => {
+    set({ selectedCheckId: null, selectedCheck: null, selectedBatchId: null, selectedBatch: null })
+  },
+
+  // Select a batch — opens the BatchSummaryView in MainPanel. Also
+  // fetches the batch detail so the view can render immediately.
+  selectBatch: async (batchId) => {
+    if (!batchId) {
+      set({ selectedBatchId: null, selectedBatch: null })
+      return
+    }
+    set({ selectedBatchId: batchId, selectedCheckId: null, selectedCheck: null, isLoadingBatch: true })
+    try {
+      const resp = await api.getBatch(batchId)
+      set({ selectedBatch: resp.data, isLoadingBatch: false })
+    } catch (e) {
+      logger.error('HistoryStore', 'selectBatch failed', e)
+      set({ isLoadingBatch: false, error: e?.response?.data?.detail || e?.message || 'Failed to load batch' })
+    }
+  },
+
+  // Open a child of the currently-selected batch. Keeps selectedBatchId
+  // set so the per-paper view can render "← Back to batch".
+  openBatchChild: async (checkId) => {
+    const currentBatchId = get().selectedBatchId
+    // Preserve the batch context — we want selectedBatchId to stick
+    // so the BatchBackLink component knows where to navigate back to.
+    set({ selectedCheckId: checkId })
+    if (currentBatchId) {
+      // Re-fetch the check detail through the normal selectCheck flow
+      // but DON'T clear selectedBatchId.
+      try {
+        const detail = (await api.getCheckDetail(checkId)).data
+        const fetchedAt = Date.now()
+        set(state => ({
+          selectedCheck: detail,
+          detailCache: { ...state.detailCache, [checkId]: { check: detail, fetchedAt } },
+        }))
+      } catch (e) {
+        logger.error('HistoryStore', 'openBatchChild detail fetch failed', e)
+      }
+    } else {
+      get().selectCheck(checkId)
+    }
+  },
+
+  // Return to the batch summary from a child paper.
+  backToBatch: () => {
+    const batchId = get().selectedBatchId
+    if (!batchId) return
     set({ selectedCheckId: null, selectedCheck: null })
+    // Re-fetch the batch so progress counters reflect any updates
+    // since the user drilled in.
+    get().selectBatch(batchId)
   },
 
   /**

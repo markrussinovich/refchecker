@@ -7,6 +7,7 @@ import CorrectionsView from './CorrectionsView'
 import OnboardingBanner from './OnboardingBanner'
 import GlobalDropZone from './GlobalDropZone'
 import SeenReferencesView from './SeenReferencesView'
+import BatchSummaryView from './BatchSummaryView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
 import HealthBadge from './HealthBadge'
@@ -46,7 +47,7 @@ export default function MainPanel() {
     clearStatusFilter: s.clearStatusFilter,
     statusFilter: s.statusFilter,
   })))
-  const { selectedCheck, selectedCheckId, isLoadingDetail } = useHistoryStore()
+  const { selectedCheck, selectedCheckId, isLoadingDetail, selectedBatchId, backToBatch } = useHistoryStore()
   // Subscribe so the tab badges re-evaluate the style-aware corrections
   // count whenever the user flips the citation style dropdown.
   const activeStyle = useStyleStore(s => s.format)
@@ -100,6 +101,10 @@ export default function MainPanel() {
   // - No selection but check running: show input (shouldn't happen normally)
   const isNewRefcheckSelected = selectedCheckId === -1
   const isViewingCheck = selectedCheckId !== null && selectedCheckId !== -1
+  // v0.7.45: batch summary view takes over the main panel when a batch
+  // row is selected from the sidebar. Per-paper drill-in keeps the
+  // standard check view but adds a "← Back to batch" link at the top.
+  const isViewingBatch = selectedBatchId != null && selectedCheckId == null
 
   // Clear status filter when switching views
   useEffect(() => {
@@ -274,8 +279,27 @@ export default function MainPanel() {
 
         {globalView === 'seen' ? (
           <SeenReferencesView />
+        ) : isViewingBatch ? (
+          <BatchSummaryView />
         ) : (
         <>
+        {/* Back-to-batch link — shown when the user drilled into a
+            specific paper from a batch summary. v0.7.45. */}
+        {selectedBatchId && isViewingCheck && (
+          <button
+            onClick={backToBatch}
+            className="mb-2 text-xs px-2 py-1 rounded inline-flex items-center gap-1"
+            style={{
+              color: 'var(--color-accent, #3b82f6)',
+              background: 'var(--color-bg-secondary)',
+              border: '1px solid var(--color-border)',
+            }}
+            type="button"
+            title="Return to the batch summary"
+          >
+            ← Back to batch
+          </button>
+        )}
         {/* First-launch guidance — only renders when something's missing */}
         {showInput && (
           <OnboardingBanner

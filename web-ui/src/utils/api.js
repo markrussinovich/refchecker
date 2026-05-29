@@ -86,6 +86,9 @@ export const startBatchFileCheck = (formData) => api.post('/check/batch/files', 
 
 export const cancelCheck = (sessionId) => api.post(`/cancel/${sessionId}`)
 export const cancelBatch = (batchId) => api.post(`/cancel/batch/${batchId}`)
+// Batch summary + aggregated LLM usage (v0.7.45)
+export const getBatch = (batchId) => api.get(`/batch/${batchId}`)
+export const getBatchLLMUsage = (batchId) => api.get(`/batch/${batchId}/llm-usage`)
 
 // History operations
 export const getHistory = (limit = 50) => api.get('/history', { params: { limit } })
