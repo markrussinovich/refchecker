@@ -191,11 +191,13 @@ def _sentence_tokenize(text):
 def _diff_cited_vs_truth(reference, truth):
     """Compare a cited reference against a known-verified truth row.
 
-    Used by the v0.7.49 fuzzy cache hit path so a cached entry isn't
-    blindly passed through — the cited reference's authors, year,
-    venue, and DOI/arXiv are validated against the cached ground
-    truth, and any divergence becomes an error or warning the same
-    way the standard verifier would flag it.
+    v0.7.50: no field comparison is silent anymore. If the cited ref
+    is missing a field the cached truth has, that becomes a warning —
+    same way a fresh verification would flag "year missing in
+    citation". The previous (v0.7.49) version silently skipped any
+    comparison where one side was empty, which meant a citation that
+    had typed `Smith (n.d.) Title` got the cache's clean status even
+    though the year was wrong (missing instead of typo'd).
 
     Returns (errors, warnings) — lists of dicts in the same shape
     `_format_verification_result` produces. Style-aware filtering on
@@ -218,7 +220,7 @@ def _diff_cited_vs_truth(reference, truth):
         parts = s.split()
         return parts[-1].lower() if parts else ""
 
-    # Year: ±1 = warning, more = error
+    # ── Year ──────────────────────────────────────────────────────────
     try:
         cited_year = int(reference.get("year")) if reference.get("year") else None
     except Exception:
@@ -227,39 +229,62 @@ def _diff_cited_vs_truth(reference, truth):
         truth_year = int(truth.get("year")) if truth.get("year") else None
     except Exception:
         truth_year = None
-    if cited_year and truth_year and cited_year != truth_year:
-        delta = abs(cited_year - truth_year)
-        entry = {
-            "error_type": "year" if delta > 1 else None,
-            "warning_type": "year" if delta == 1 else None,
-            "error_details": f"Year mismatch: cited {cited_year}, verified {truth_year}",
-            "warning_details": f"Year mismatch: cited {cited_year}, verified {truth_year}",
-            "cited_value": str(cited_year),
+    if cited_year is None and truth_year is not None:
+        warnings.append({
+            "warning_type": "year",
+            "warning_details": f"Year missing from citation; cached verification has {truth_year}",
+            "cited_value": "",
             "actual_value": str(truth_year),
-        }
-        # Pop the wrong half so the dict matches the standard verifier's
-        # error_type vs warning_type discriminator.
+        })
+    elif cited_year is not None and truth_year is None:
+        # Cache is incomplete — surface as a low-stakes warning so the
+        # reviewer can decide whether to trust it.
+        warnings.append({
+            "warning_type": "year_unverified",
+            "warning_details": f"Citation year {cited_year} couldn't be cross-checked (cached record has no year)",
+            "cited_value": str(cited_year),
+            "actual_value": "",
+        })
+    elif cited_year is not None and truth_year is not None and cited_year != truth_year:
+        delta = abs(cited_year - truth_year)
+        details = f"Year mismatch: cited {cited_year}, verified {truth_year}"
         if delta > 1:
-            entry.pop("warning_type"); entry.pop("warning_details")
-            errors.append(entry)
+            errors.append({
+                "error_type": "year",
+                "error_details": details,
+                "cited_value": str(cited_year),
+                "actual_value": str(truth_year),
+            })
         else:
-            entry.pop("error_type"); entry.pop("error_details")
-            warnings.append(entry)
+            warnings.append({
+                "warning_type": "year",
+                "warning_details": details,
+                "cited_value": str(cited_year),
+                "actual_value": str(truth_year),
+            })
 
-    # Authors: first-author surname mismatch was already prevented by
-    # the fuzzy lookup (surname must match for a hit). Compare the
-    # FULL author list instead — if the cited list is materially
-    # different from the truth, flag a warning.
+    # ── Authors ───────────────────────────────────────────────────────
     cited_authors = reference.get("authors") or []
     if isinstance(cited_authors, list):
         cited_authors_str = ", ".join(a for a in cited_authors if a)
     else:
         cited_authors_str = str(cited_authors or "")
     truth_authors_str = truth.get("authors") or ""
-    if cited_authors_str and truth_authors_str and _norm(cited_authors_str) != _norm(truth_authors_str):
-        # Count first three surnames on each side — if those agree
-        # the diff is mostly formatting / et-al cutoff which the
-        # style-aware filter handles.
+    if not cited_authors_str and truth_authors_str:
+        warnings.append({
+            "warning_type": "authors",
+            "warning_details": "Authors missing from citation; cached verification has full author list",
+            "cited_value": "",
+            "actual_value": truth_authors_str[:200],
+        })
+    elif cited_authors_str and not truth_authors_str:
+        warnings.append({
+            "warning_type": "authors_unverified",
+            "warning_details": "Citation authors couldn't be cross-checked (cached record has none)",
+            "cited_value": cited_authors_str[:200],
+            "actual_value": "",
+        })
+    elif cited_authors_str and truth_authors_str and _norm(cited_authors_str) != _norm(truth_authors_str):
         def _first_n_surnames(s, n=3):
             parts = [p.strip() for p in s.replace(";", ",").split(",") if p.strip()]
             return [_first_surname(p) for p in parts[:n]]
@@ -270,15 +295,28 @@ def _diff_cited_vs_truth(reference, truth):
                 "warning_type": "authors",
                 "warning_details": "Author list disagrees with the cached verification of this paper",
                 "cited_value": cited_authors_str[:200],
-                "actual_value": (truth_authors_str or "")[:200],
+                "actual_value": truth_authors_str[:200],
             })
 
-    # Venue: any non-empty disagreement is a warning. Style-aware
-    # NLM-abbreviation filter on the FE will suppress it when the
-    # active style permits an abbreviated form.
+    # ── Venue ─────────────────────────────────────────────────────────
     cited_venue = reference.get("venue") or ""
     truth_venue = truth.get("venue") or ""
-    if cited_venue and truth_venue and _norm(cited_venue) != _norm(truth_venue):
+    if not cited_venue and truth_venue:
+        warnings.append({
+            "warning_type": "venue",
+            "warning_details": f"Venue missing from citation; cached verification has '{truth_venue}'",
+            "cited_value": "",
+            "actual_value": truth_venue,
+            "ref_venue_correct": truth_venue,
+        })
+    elif cited_venue and not truth_venue:
+        warnings.append({
+            "warning_type": "venue_unverified",
+            "warning_details": "Citation venue couldn't be cross-checked (cached record has none)",
+            "cited_value": cited_venue,
+            "actual_value": "",
+        })
+    elif cited_venue and truth_venue and _norm(cited_venue) != _norm(truth_venue):
         warnings.append({
             "warning_type": "venue",
             "warning_details": f"Venue mismatch: cited '{cited_venue}', verified '{truth_venue}'",
@@ -287,11 +325,24 @@ def _diff_cited_vs_truth(reference, truth):
             "ref_venue_correct": truth_venue,
         })
 
-    # DOI: any disagreement is an error — fabricated or transposed
-    # DOIs are the failure mode this catches across re-citations.
+    # ── DOI ───────────────────────────────────────────────────────────
     cited_doi = (reference.get("doi") or "").strip().lower()
     truth_doi = (truth.get("doi") or "").strip().lower()
-    if cited_doi and truth_doi and cited_doi != truth_doi:
+    if not cited_doi and truth_doi:
+        warnings.append({
+            "warning_type": "doi",
+            "warning_details": f"DOI missing from citation; cached verification has {truth.get('doi')}",
+            "cited_value": "",
+            "actual_value": truth.get("doi"),
+        })
+    elif cited_doi and not truth_doi:
+        warnings.append({
+            "warning_type": "doi_unverified",
+            "warning_details": f"Citation DOI {reference.get('doi')} couldn't be cross-checked (cached record has none)",
+            "cited_value": reference.get("doi"),
+            "actual_value": "",
+        })
+    elif cited_doi and truth_doi and cited_doi != truth_doi:
         errors.append({
             "error_type": "doi",
             "error_details": f"DOI mismatch: cited '{reference.get('doi')}', verified '{truth.get('doi')}'",
@@ -299,7 +350,7 @@ def _diff_cited_vs_truth(reference, truth):
             "actual_value": truth.get("doi"),
         })
 
-    # arXiv ID: same treatment as DOI
+    # ── arXiv ID ──────────────────────────────────────────────────────
     cited_arxiv = (reference.get("arxiv_id") or "").strip().lower()
     truth_arxiv = (truth.get("arxiv_id") or "").strip().lower()
     if cited_arxiv and truth_arxiv and cited_arxiv != truth_arxiv:
@@ -307,6 +358,23 @@ def _diff_cited_vs_truth(reference, truth):
             "error_type": "arxiv_id",
             "error_details": f"arXiv ID mismatch: cited '{reference.get('arxiv_id')}', verified '{truth.get('arxiv_id')}'",
             "cited_value": reference.get("arxiv_id"),
+            "actual_value": truth.get("arxiv_id"),
+        })
+    elif cited_arxiv and not truth_arxiv and not cited_doi:
+        # Only flag missing-truth arXiv when there's no DOI either — a
+        # paper rarely has both, so a missing arXiv on the cached side
+        # isn't surprising when the cache has the DOI instead.
+        warnings.append({
+            "warning_type": "arxiv_id_unverified",
+            "warning_details": f"Citation arXiv ID {reference.get('arxiv_id')} couldn't be cross-checked",
+            "cited_value": reference.get("arxiv_id"),
+            "actual_value": "",
+        })
+    elif not cited_arxiv and truth_arxiv and not cited_doi:
+        warnings.append({
+            "warning_type": "arxiv_id",
+            "warning_details": f"arXiv ID missing from citation; cached verification has {truth.get('arxiv_id')}",
+            "cited_value": "",
             "actual_value": truth.get("arxiv_id"),
         })
     return errors, warnings
