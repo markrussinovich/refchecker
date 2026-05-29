@@ -2090,11 +2090,37 @@ class ProgressRefChecker:
             })
             bib_section = await asyncio.to_thread(cli_checker.find_bibliography_section, paper_text)
             if not bib_section:
-                logger.warning("Could not find bibliography section in paper")
-                await self.emit_progress("extracting", {
-                    "message": "Could not find bibliography section in paper."
-                })
-                return []
+                # v0.7.52: heading-finder fallback. The regex-based
+                # `find_bibliography_section` looks for "References" /
+                # "Bibliography" / "Works Cited" headings, but a lot of
+                # .docx files (especially Word-converted case reports
+                # and journal manuscripts) lack a clean heading — the
+                # references just follow the body text. Old behaviour:
+                # silently return []. New: fall through to the LLM with
+                # the whole paper text, which can find the
+                # bibliography from the citation-marker pattern even
+                # without a header anchor. Costs more tokens but lets
+                # the extraction succeed instead of failing.
+                if self.llm and paper_text and len(paper_text) > 300:
+                    logger.info(
+                        "No bibliography heading found in %d-char paper; "
+                        "falling back to LLM-over-full-text extraction",
+                        len(paper_text),
+                    )
+                    await self.emit_progress("extracting", {
+                        "message": "No bibliography heading found — using LLM to extract references from the full text…"
+                    })
+                    bib_section = paper_text
+                else:
+                    logger.warning(
+                        "Could not find bibliography section in paper "
+                        "(paper_text=%d chars, llm_available=%s)",
+                        len(paper_text or ""), bool(self.llm),
+                    )
+                    await self.emit_progress("extracting", {
+                        "message": "Could not find bibliography section in paper. Configure an LLM in Settings → LLM provider to enable header-free extraction."
+                    })
+                    return []
 
             logger.info(f"Found bibliography section ({len(bib_section)} chars)")
             await self.emit_progress("extracting", {
