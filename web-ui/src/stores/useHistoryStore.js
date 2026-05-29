@@ -424,6 +424,19 @@ export const useHistoryStore = create((set, get) => ({
     const cachedDetail = stateSnapshot.detailCache[id]
     const cacheIsFresh = !!(cachedDetail && (Date.now() - cachedDetail.fetchedAt) < DETAIL_CACHE_TTL_MS)
 
+    // v0.7.54 (per full-stack review): clear selectedBatchId if the
+    // newly-selected check doesn't belong to the same batch. Without
+    // this the "← Back to batch" link from MainPanel leaked onto
+    // unrelated checks after the user navigated away from a batch
+    // child via the sidebar.
+    const stale = stateSnapshot.selectedBatchId
+    if (stale) {
+      const targetBatchId = (existingHistoryItem && existingHistoryItem.batch_id) || null
+      if (targetBatchId !== stale) {
+        set({ selectedBatchId: null, selectedBatch: null })
+      }
+    }
+
     // If user re-selects the currently shown check, avoid unnecessary work —
     // unless caller forces a refetch (e.g. after Apply Fix / Re-verify, where
     // the live results must update the badge + summary tiles).

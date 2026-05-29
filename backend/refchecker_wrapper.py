@@ -1265,13 +1265,17 @@ class ProgressRefChecker:
         )
 
         try:
-            # Late import so this stays optional and the CLI path
-            # doesn't pull the tracker. FlowScope tags the call as
-            # "context" so the $ badge breakdown shows it on its own
-            # line ("Citation context extraction").
+            # FlowScope uses threading.local. asyncio.to_thread runs
+            # the callable on a different thread, so a `with` on the
+            # event-loop thread is INVISIBLE inside the worker — every
+            # context-extraction token used to land under "other".
+            # Set the scope INSIDE the worker function instead.
+            # (v0.7.54 fix per ML review.)
             from refchecker.llm import usage_tracker as _ut
-            with _ut.FlowScope("context"):
-                raw = await asyncio.to_thread(self.llm._call_llm, prompt)
+            def _call_with_scope():
+                with _ut.FlowScope("context"):
+                    return self.llm._call_llm(prompt)
+            raw = await asyncio.to_thread(_call_with_scope)
         except Exception as e:
             logger.debug("LLM context call failed: %s", e)
             return 0
@@ -1529,73 +1533,180 @@ class ProgressRefChecker:
                     # v0.7.53: HTML article URL (journal pages, repos,
                     # etc.). Before this, non-PDF non-arXiv URLs fell
                     # into the arXiv branch below, the lookup 404'd, and
-                    # the check completed silently with 0 refs. User
-                    # reported a 796-URL batch (all biomedcentral.com
-                    # articles) where every paper ended at "0 refs ✓".
-                    await self.emit_progress("extracting", {
-                        "message": f"Fetching {paper_source[:80]}…"
-                    })
-                    import requests as _requests
-                    try:
-                        resp = await asyncio.to_thread(
-                            _requests.get,
-                            paper_source,
-                            **{
-                                "headers": {
-                                    # Springer/BMC/Elsevier gate HTML on
-                                    # a User-Agent check — empty UA gets
-                                    # a 403. Send a realistic browser UA.
-                                    "User-Agent": (
-                                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-                                        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                                        "Version/17.0 Safari/605.1.15 RefChecker/0.7.53"
-                                    ),
-                                    "Accept": "text/html,application/xhtml+xml",
+                    # the check completed silently with 0 refs.
+                    #
+                    # v0.7.54 (per ML review): try Crossref by DOI FIRST.
+                    # Most journal URLs either ARE a doi.org link or
+                    # contain a `10.xxxx/` pattern. Crossref's
+                    # /works/{doi} returns the structured `reference`
+                    # array — zero LLM tokens, deterministic, accurate.
+                    # Fall through to HTML+LLM only when Crossref has no
+                    # data. Single biggest cost-saver on bulk batches.
+                    import re as _re_doi
+                    doi_match = _re_doi.search(
+                        r"10\.\d{4,9}/[\w.\-;()/:%]+",
+                        paper_source,
+                    )
+                    extracted_doi = doi_match.group(0).rstrip(".,;)") if doi_match else None
+                    crossref_refs = None
+                    if extracted_doi:
+                        try:
+                            await self.emit_progress("extracting", {
+                                "message": f"Fetching references from Crossref for DOI {extracted_doi}…"
+                            })
+                            import requests as _req_cr
+                            cr_resp = await asyncio.to_thread(
+                                _req_cr.get,
+                                f"https://api.crossref.org/works/{extracted_doi}",
+                                **{
+                                    "headers": {"User-Agent": "RefChecker/0.7.54 (mailto:moniriario@gmail.com)"},
+                                    "timeout": 15,
                                 },
-                                "timeout": 30,
-                                "allow_redirects": True,
-                            },
-                        )
-                        resp.raise_for_status()
-                        html_text = resp.text
-                    except Exception as _fetch_err:
-                        raise ValueError(f"Could not fetch URL: {_fetch_err}")
-                    try:
-                        from bs4 import BeautifulSoup
-                        soup = BeautifulSoup(html_text, "html.parser")
-                        # Title: prefer citation_title meta over <title>
-                        # tag, which is often "ARTICLE TYPE Open Access |
-                        # Journal Name" rather than the actual title.
-                        for selector, attr in [
-                            ('meta[name="citation_title"]', 'content'),
-                            ('meta[property="og:title"]', 'content'),
-                            ('meta[name="DC.Title"]', 'content'),
-                            ('title', None),
-                        ]:
-                            el = soup.select_one(selector)
-                            if el:
-                                val = el.get(attr) if attr else el.get_text(strip=True)
-                                if val and len(val) > 4:
-                                    paper_title = val.strip()
-                                    await update_title_if_needed(paper_title)
-                                    break
-                        # Strip nav/header/footer/aside/script before text
-                        # extraction — they hold the "RESEARCH Open Access"
-                        # mastheads and ads that confuse the LLM.
-                        for noisy in soup.select(
-                            "script, style, nav, header, footer, aside, "
-                            "[class*='cookie'], [class*='ad-'], "
-                            "[role='navigation'], [role='banner'], [role='contentinfo']"
-                        ):
-                            noisy.decompose()
-                        paper_text = soup.get_text("\n", strip=True)
-                    except Exception as _parse_err:
-                        logger.warning("HTML parse failed (%s); using raw text", _parse_err)
-                        paper_text = html_text
-                    set_extraction_method('html')
-                    # paper_text is set; the standard `_extract_references`
-                    # call below (with v0.7.52's full-text LLM fallback)
-                    # will find references regardless of explicit heading.
+                            )
+                            if cr_resp.status_code == 200:
+                                cr_json = cr_resp.json() or {}
+                                msg = cr_json.get("message", {}) or {}
+                                cr_refs = msg.get("reference") or []
+                                if cr_refs:
+                                    # Re-shape Crossref refs into the
+                                    # checker's standard dict format.
+                                    crossref_refs = []
+                                    for entry in cr_refs:
+                                        if not isinstance(entry, dict):
+                                            continue
+                                        # Crossref returns either:
+                                        # - structured fields (DOI, year,
+                                        #   author, article-title, journal-title)
+                                        # - OR unstructured text only
+                                        title = (
+                                            entry.get("article-title")
+                                            or entry.get("series-title")
+                                            or entry.get("volume-title")
+                                            or entry.get("unstructured")
+                                            or ""
+                                        )
+                                        year = entry.get("year")
+                                        try:
+                                            year_int = int(year) if year else None
+                                        except Exception:
+                                            year_int = None
+                                        authors_str = entry.get("author") or ""
+                                        # Crossref author is "Surname, Initial." — split into list.
+                                        if isinstance(authors_str, str) and authors_str:
+                                            authors_list = [a.strip() for a in authors_str.split(",") if a.strip()]
+                                        else:
+                                            authors_list = []
+                                        venue = (
+                                            entry.get("journal-title")
+                                            or entry.get("series-title")
+                                            or ""
+                                        )
+                                        crossref_refs.append(_normalize_reference_fields({
+                                            "title": title,
+                                            "authors": authors_list,
+                                            "year": year_int,
+                                            "venue": venue,
+                                            "doi": entry.get("DOI"),
+                                            "raw_text": entry.get("unstructured") or "",
+                                        }))
+                                    # Also pull the paper title from
+                                    # Crossref while we're here.
+                                    cr_title_arr = msg.get("title") or []
+                                    if cr_title_arr and cr_title_arr[0]:
+                                        paper_title = cr_title_arr[0]
+                                        await update_title_if_needed(paper_title)
+                                    arxiv_source_references = crossref_refs
+                                    set_extraction_method('crossref')
+                                    paper_text = ""  # bypass LLM
+                                    logger.info(
+                                        "Crossref returned %d references for %s — skipping LLM extraction",
+                                        len(crossref_refs), extracted_doi,
+                                    )
+                        except Exception as _cr_err:
+                            logger.debug("Crossref lookup failed for %s: %s", extracted_doi, _cr_err)
+                    # Only fetch HTML if Crossref didn't give us refs.
+                    if not crossref_refs:
+                        await self.emit_progress("extracting", {
+                            "message": f"Fetching {paper_source[:80]}…"
+                        })
+                        import requests as _requests
+                        try:
+                            resp = await asyncio.to_thread(
+                                _requests.get,
+                                paper_source,
+                                **{
+                                    "headers": {
+                                        # Springer/BMC/Elsevier gate HTML on
+                                        # a User-Agent check — empty UA gets
+                                        # a 403. Send a realistic browser UA.
+                                        "User-Agent": (
+                                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
+                                            "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                                            "Version/17.0 Safari/605.1.15 RefChecker/0.7.54"
+                                        ),
+                                        "Accept": "text/html,application/xhtml+xml",
+                                    },
+                                    "timeout": 30,
+                                    "allow_redirects": True,
+                                },
+                            )
+                            resp.raise_for_status()
+                            html_text = resp.text
+                        except Exception as _fetch_err:
+                            raise ValueError(f"Could not fetch URL: {_fetch_err}")
+                        try:
+                            from bs4 import BeautifulSoup
+                            soup = BeautifulSoup(html_text, "html.parser")
+                            # Title: prefer citation_title meta over <title>.
+                            for selector, attr in [
+                                ('meta[name="citation_title"]', 'content'),
+                                ('meta[property="og:title"]', 'content'),
+                                ('meta[name="DC.Title"]', 'content'),
+                                ('title', None),
+                            ]:
+                                el = soup.select_one(selector)
+                                if el:
+                                    val = el.get(attr) if attr else el.get_text(strip=True)
+                                    if val and len(val) > 4:
+                                        paper_title = val.strip()
+                                        await update_title_if_needed(paper_title)
+                                        break
+                            # v0.7.54 (per ML review): broader publisher-
+                            # specific selector list. BMC/Springer, Nature,
+                            # Elsevier/ScienceDirect, Wiley, PMC each have
+                            # their own ad/chrome class patterns that the
+                            # generic list missed.
+                            for noisy in soup.select(
+                                "script, style, nav, header, footer, aside, "
+                                "figure, figcaption, "
+                                "[class*='cookie'], [class*='ad-'], "
+                                "[role='navigation'], [role='banner'], [role='contentinfo'], "
+                                "[aria-hidden='true'], "
+                                # BMC / Springer
+                                ".c-article-author-list, .c-article-info-details, "
+                                ".c-pdf-download, .app-card-service, .c-pdf-button, "
+                                ".c-article-recommendations, .c-article-metrics-bar, "
+                                ".c-author-list, "
+                                # Elsevier / ScienceDirect
+                                ".PdfDownloadButton, .Banner, .Breadcrumbs, "
+                                "#mathjax-container, .author-group, "
+                                # Wiley
+                                ".article-citation, .coversheet, .related-content, "
+                                ".access-options, "
+                                # PMC / NLM
+                                ".usa-banner, .pmc-sidebar, .fm-citation, .figpopup, "
+                                # generic
+                                "[id*='supplementary']"
+                            ):
+                                noisy.decompose()
+                            paper_text = soup.get_text("\n", strip=True)
+                        except Exception as _parse_err:
+                            logger.warning("HTML parse failed (%s); using raw text", _parse_err)
+                            paper_text = html_text
+                        set_extraction_method('html')
+                        # paper_text is set; the standard `_extract_references`
+                        # call below (with v0.7.52's full-text LLM fallback)
+                        # will find references regardless of explicit heading.
                 else:
                     # Handle ArXiv URLs/IDs
                     arxiv_id = extract_arxiv_id_from_url(paper_source)

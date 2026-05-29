@@ -344,12 +344,21 @@ fn run() {
                                     .and_then(|p| p.rsplit(['/', '\\']).next())
                                     .map(|s| s.to_string())
                                     .unwrap_or_else(|| format!("{} path(s)", str_paths.len()));
+                                // v0.7.54 (per full-stack review): debounce
+                                // the title reset so rapid drops don't leak
+                                // threads. Bump a token before sleeping,
+                                // then only reset if our token still wins.
+                                use std::sync::atomic::{AtomicU64, Ordering};
+                                static TITLE_TOKEN: AtomicU64 = AtomicU64::new(0);
+                                let my_token = TITLE_TOKEN.fetch_add(1, Ordering::SeqCst) + 1;
                                 let tw = title_win.clone();
                                 let _ = tw.set_title(&format!("RefChecker — ✓ Got: {}", filename));
                                 let tw2 = tw.clone();
                                 std::thread::spawn(move || {
                                     std::thread::sleep(std::time::Duration::from_secs(4));
-                                    let _ = tw2.set_title("RefChecker");
+                                    if TITLE_TOKEN.load(Ordering::SeqCst) == my_token {
+                                        let _ = tw2.set_title("RefChecker");
+                                    }
                                 });
                                 // Also surface via DevTools console (in
                                 // case the user does manage to open it

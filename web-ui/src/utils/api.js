@@ -43,13 +43,17 @@ api.interceptors.response.use(
 export const setAuthToken = (_token) => {}
 
 // Health check
-export const health = () => api.get('/health')
+// Fast-timeout endpoints (v0.7.54 per full-stack review): if the
+// backend is unreachable the splash spinner / status bar must
+// fail-fast, not hang for the 90 s default. 5 s for liveness probes,
+// 8 s for auth bootstrap.
+export const health = () => api.get('/health', { timeout: 5000 })
 
 // -----------------------------------------------------------------------
 // Auth endpoints
 // -----------------------------------------------------------------------
 export const getAuthProviders = () => api.get('/auth/providers')
-export const getAuthMe = () => api.get('/auth/me')
+export const getAuthMe = () => api.get('/auth/me', { timeout: 8000 })
 export const authLogout = () => api.post('/auth/logout')
 
 // LLM Configurations

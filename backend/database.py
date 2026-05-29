@@ -2093,7 +2093,20 @@ class Database:
         norm = _re.sub(r"\s+", " ", norm).strip()
         if len(norm) < 12:
             return None
-        prefix = norm[:60]
+        # v0.7.54 (per ML review): reject corrections/errata in the
+        # PRE-LLM fuzzy lookup so a citation matching a Correction
+        # record doesn't inherit the original paper's clean status.
+        _correction_markers = (
+            "correction to", "correction:", "erratum",
+            "retraction", "retracted", "withdrawn",
+            "author correction", "publisher correction",
+            "reply to", "comment on", "response to", "addendum",
+        )
+        if any(norm.startswith(marker) for marker in _correction_markers):
+            return None
+        # Longer prefix on long medical titles — 60 chars collide for
+        # NEJM/Lancet review titles that share the first sentence.
+        prefix = norm[:80] if len(norm) >= 100 else norm[:60]
         ref_authors = ref.get("authors") or []
         if isinstance(ref_authors, list):
             ref_authors_str = ", ".join(a for a in ref_authors if a)
