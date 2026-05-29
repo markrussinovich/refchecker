@@ -1521,6 +1521,81 @@ class ProgressRefChecker:
                                         await update_title_if_needed(paper_title)
                             except Exception as e:
                                 logger.warning(f"Could not extract title from PDF: {e}")
+                elif (
+                    paper_source.lower().startswith(('http://', 'https://'))
+                    and 'arxiv.org' not in paper_source.lower()
+                    and not extract_arxiv_id_from_url(paper_source)
+                ):
+                    # v0.7.53: HTML article URL (journal pages, repos,
+                    # etc.). Before this, non-PDF non-arXiv URLs fell
+                    # into the arXiv branch below, the lookup 404'd, and
+                    # the check completed silently with 0 refs. User
+                    # reported a 796-URL batch (all biomedcentral.com
+                    # articles) where every paper ended at "0 refs ✓".
+                    await self.emit_progress("extracting", {
+                        "message": f"Fetching {paper_source[:80]}…"
+                    })
+                    import requests as _requests
+                    try:
+                        resp = await asyncio.to_thread(
+                            _requests.get,
+                            paper_source,
+                            **{
+                                "headers": {
+                                    # Springer/BMC/Elsevier gate HTML on
+                                    # a User-Agent check — empty UA gets
+                                    # a 403. Send a realistic browser UA.
+                                    "User-Agent": (
+                                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
+                                        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                                        "Version/17.0 Safari/605.1.15 RefChecker/0.7.53"
+                                    ),
+                                    "Accept": "text/html,application/xhtml+xml",
+                                },
+                                "timeout": 30,
+                                "allow_redirects": True,
+                            },
+                        )
+                        resp.raise_for_status()
+                        html_text = resp.text
+                    except Exception as _fetch_err:
+                        raise ValueError(f"Could not fetch URL: {_fetch_err}")
+                    try:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(html_text, "html.parser")
+                        # Title: prefer citation_title meta over <title>
+                        # tag, which is often "ARTICLE TYPE Open Access |
+                        # Journal Name" rather than the actual title.
+                        for selector, attr in [
+                            ('meta[name="citation_title"]', 'content'),
+                            ('meta[property="og:title"]', 'content'),
+                            ('meta[name="DC.Title"]', 'content'),
+                            ('title', None),
+                        ]:
+                            el = soup.select_one(selector)
+                            if el:
+                                val = el.get(attr) if attr else el.get_text(strip=True)
+                                if val and len(val) > 4:
+                                    paper_title = val.strip()
+                                    await update_title_if_needed(paper_title)
+                                    break
+                        # Strip nav/header/footer/aside/script before text
+                        # extraction — they hold the "RESEARCH Open Access"
+                        # mastheads and ads that confuse the LLM.
+                        for noisy in soup.select(
+                            "script, style, nav, header, footer, aside, "
+                            "[class*='cookie'], [class*='ad-'], "
+                            "[role='navigation'], [role='banner'], [role='contentinfo']"
+                        ):
+                            noisy.decompose()
+                        paper_text = soup.get_text("\n", strip=True)
+                    except Exception as _parse_err:
+                        logger.warning("HTML parse failed (%s); using raw text", _parse_err)
+                        paper_text = html_text
+                    set_extraction_method('html')
+                    # paper_text is set; the standard `_extract_references`
+                    # call below (with v0.7.52's full-text LLM fallback)
+                    # will find references regardless of explicit heading.
                 else:
                     # Handle ArXiv URLs/IDs
                     arxiv_id = extract_arxiv_id_from_url(paper_source)
