@@ -116,6 +116,32 @@ export default function BatchSummaryView() {
     }
   }
 
+  // v0.7.47: Cancel + delete in one stroke. The user asked for this so
+  // they don't have to do "cancel, wait, confirm delete, wait" when
+  // they realise they grabbed the wrong folder.
+  const handleCancelAndDelete = async () => {
+    if (!batchId || isCancelling) return
+    if (!window.confirm(`Cancel ${agg.inProgress} in-progress AND delete all ${agg.total} papers in this batch? This can't be undone.`)) return
+    setIsCancelling(true)
+    try {
+      if (agg.inProgress > 0) {
+        try { await api.cancelBatch(batchId) } catch (e) { logger.warning?.('BatchSummary', 'cancelBatch failed', e) }
+        await new Promise(r => setTimeout(r, 300))
+      }
+      // Deleting one-by-one is fine here; even 800 DELETE rows is
+      // milliseconds with the timestamp index added in v0.7.46.
+      for (const c of checks) {
+        try { await api.deleteCheck(c.id) } catch (e) { logger.warning?.('BatchSummary', `delete ${c.id} failed`, e) }
+      }
+      useHistoryStore.getState().clearSelection()
+      useHistoryStore.getState().fetchHistory?.()
+    } catch (e) {
+      logger.error('BatchSummary', 'cancel+delete failed', e)
+    } finally {
+      setIsCancelling(false)
+    }
+  }
+
   const filteredChecks = useMemo(() => {
     if (filter === 'all') return checks
     return checks.filter(c => {
@@ -187,10 +213,26 @@ export default function BatchSummaryView() {
                 opacity: isCancelling ? 0.5 : 1,
               }}
               type="button"
+              title="Stop the in-progress papers. Completed checks stay."
             >
               {isCancelling ? 'Cancelling…' : `Cancel all (${agg.inProgress})`}
             </button>
           )}
+          <button
+            onClick={handleCancelAndDelete}
+            disabled={isCancelling}
+            className="px-3 py-1 rounded text-xs font-medium border"
+            style={{
+              backgroundColor: 'var(--color-bg-primary)',
+              color: 'var(--color-error, #ef4444)',
+              borderColor: 'var(--color-error, #ef4444)',
+              opacity: isCancelling ? 0.5 : 1,
+            }}
+            type="button"
+            title="Cancel any in-progress AND delete every paper in this batch from history."
+          >
+            {isCancelling ? '…' : 'Cancel & delete all'}
+          </button>
         </div>
 
         {/* Aggregate counter chips */}
