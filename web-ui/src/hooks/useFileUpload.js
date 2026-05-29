@@ -131,6 +131,14 @@ export function useFileUpload() {
     handleDragOver,
     handleDrop,
     handleInputChange,
+    // Direct File ingest. Used by the Tauri `refchecker:open-file`
+    // listener in InputSection — that path hands us a Blob/File built
+    // from a dropped path, NOT a DOM drag event, so `handleDrop`
+    // (which expects e.dataTransfer) doesn't fit. The hook always had
+    // this internally but never exported it, leaving every Tauri-side
+    // drop to crash with "fileUpload.handleFile is not a function" the
+    // moment GlobalDropZone broadcast the file.
+    handleFile,
     clearFile,
     maxFileSize: MAX_FILE_SIZE,
     allowedExtensions: ALLOWED_EXTENSIONS,
