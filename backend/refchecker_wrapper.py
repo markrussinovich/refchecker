@@ -188,6 +188,130 @@ def _sentence_tokenize(text):
     return merged
 
 
+def _diff_cited_vs_truth(reference, truth):
+    """Compare a cited reference against a known-verified truth row.
+
+    Used by the v0.7.49 fuzzy cache hit path so a cached entry isn't
+    blindly passed through — the cited reference's authors, year,
+    venue, and DOI/arXiv are validated against the cached ground
+    truth, and any divergence becomes an error or warning the same
+    way the standard verifier would flag it.
+
+    Returns (errors, warnings) — lists of dicts in the same shape
+    `_format_verification_result` produces. Style-aware filtering on
+    the FE still applies, so e.g. a venue acronym vs full-name diff
+    that the active citation style accepts will still be suppressed
+    at render time.
+    """
+    import re as _re_dvt
+    errors = []
+    warnings = []
+
+    def _norm(s):
+        if s is None:
+            return ""
+        s = str(s).strip().lower()
+        return _re_dvt.sub(r"\s+", " ", s)
+
+    def _first_surname(s):
+        s = (s or "").split(",")[0].split(";")[0].strip()
+        parts = s.split()
+        return parts[-1].lower() if parts else ""
+
+    # Year: ±1 = warning, more = error
+    try:
+        cited_year = int(reference.get("year")) if reference.get("year") else None
+    except Exception:
+        cited_year = None
+    try:
+        truth_year = int(truth.get("year")) if truth.get("year") else None
+    except Exception:
+        truth_year = None
+    if cited_year and truth_year and cited_year != truth_year:
+        delta = abs(cited_year - truth_year)
+        entry = {
+            "error_type": "year" if delta > 1 else None,
+            "warning_type": "year" if delta == 1 else None,
+            "error_details": f"Year mismatch: cited {cited_year}, verified {truth_year}",
+            "warning_details": f"Year mismatch: cited {cited_year}, verified {truth_year}",
+            "cited_value": str(cited_year),
+            "actual_value": str(truth_year),
+        }
+        # Pop the wrong half so the dict matches the standard verifier's
+        # error_type vs warning_type discriminator.
+        if delta > 1:
+            entry.pop("warning_type"); entry.pop("warning_details")
+            errors.append(entry)
+        else:
+            entry.pop("error_type"); entry.pop("error_details")
+            warnings.append(entry)
+
+    # Authors: first-author surname mismatch was already prevented by
+    # the fuzzy lookup (surname must match for a hit). Compare the
+    # FULL author list instead — if the cited list is materially
+    # different from the truth, flag a warning.
+    cited_authors = reference.get("authors") or []
+    if isinstance(cited_authors, list):
+        cited_authors_str = ", ".join(a for a in cited_authors if a)
+    else:
+        cited_authors_str = str(cited_authors or "")
+    truth_authors_str = truth.get("authors") or ""
+    if cited_authors_str and truth_authors_str and _norm(cited_authors_str) != _norm(truth_authors_str):
+        # Count first three surnames on each side — if those agree
+        # the diff is mostly formatting / et-al cutoff which the
+        # style-aware filter handles.
+        def _first_n_surnames(s, n=3):
+            parts = [p.strip() for p in s.replace(";", ",").split(",") if p.strip()]
+            return [_first_surname(p) for p in parts[:n]]
+        cited_surnames = _first_n_surnames(cited_authors_str)
+        truth_surnames = _first_n_surnames(truth_authors_str)
+        if cited_surnames != truth_surnames:
+            warnings.append({
+                "warning_type": "authors",
+                "warning_details": "Author list disagrees with the cached verification of this paper",
+                "cited_value": cited_authors_str[:200],
+                "actual_value": (truth_authors_str or "")[:200],
+            })
+
+    # Venue: any non-empty disagreement is a warning. Style-aware
+    # NLM-abbreviation filter on the FE will suppress it when the
+    # active style permits an abbreviated form.
+    cited_venue = reference.get("venue") or ""
+    truth_venue = truth.get("venue") or ""
+    if cited_venue and truth_venue and _norm(cited_venue) != _norm(truth_venue):
+        warnings.append({
+            "warning_type": "venue",
+            "warning_details": f"Venue mismatch: cited '{cited_venue}', verified '{truth_venue}'",
+            "cited_value": cited_venue,
+            "actual_value": truth_venue,
+            "ref_venue_correct": truth_venue,
+        })
+
+    # DOI: any disagreement is an error — fabricated or transposed
+    # DOIs are the failure mode this catches across re-citations.
+    cited_doi = (reference.get("doi") or "").strip().lower()
+    truth_doi = (truth.get("doi") or "").strip().lower()
+    if cited_doi and truth_doi and cited_doi != truth_doi:
+        errors.append({
+            "error_type": "doi",
+            "error_details": f"DOI mismatch: cited '{reference.get('doi')}', verified '{truth.get('doi')}'",
+            "cited_value": reference.get("doi"),
+            "actual_value": truth.get("doi"),
+        })
+
+    # arXiv ID: same treatment as DOI
+    cited_arxiv = (reference.get("arxiv_id") or "").strip().lower()
+    truth_arxiv = (truth.get("arxiv_id") or "").strip().lower()
+    if cited_arxiv and truth_arxiv and cited_arxiv != truth_arxiv:
+        errors.append({
+            "error_type": "arxiv_id",
+            "error_details": f"arXiv ID mismatch: cited '{reference.get('arxiv_id')}', verified '{truth.get('arxiv_id')}'",
+            "cited_value": reference.get("arxiv_id"),
+            "actual_value": truth.get("arxiv_id"),
+        })
+    return errors, warnings
+
+
 def _attach_citation_contexts(references, paper_text):
     """Find the sentences in the paper where each reference is cited.
 
@@ -2414,13 +2538,54 @@ class ProgressRefChecker:
                     cached_result = dict(cached["result"])
                     cached_result["index"] = idx + 1
                     cached_result["from_cache"] = True
-                    # Tag fuzzy-cache hits separately so the FE can
-                    # surface a small "matched a previously-seen ref"
-                    # indicator. Lets reviewers spot fuzzy matches that
-                    # might warrant a manual second look.
+                    # ── Fuzzy cache hit: validate cited fields against
+                    # the cached ground truth (v0.7.49) ─────────────────
+                    # User's note: "if any issues should mark, not just
+                    # match title and pass since error could be someplace
+                    # else rather than title". So treat the cached entry
+                    # as the authoritative reference and re-derive
+                    # cited-vs-actual errors/warnings against the cited
+                    # ref's other fields. Strict-identity hits
+                    # (lookup_verified_reference) already store the
+                    # cited-vs-verified diffs that the original check
+                    # produced; we only need this for fuzzy hits.
                     if "_fuzzy_match_score" in cached:
                         cached_result["from_fuzzy_cache"] = True
                         cached_result["fuzzy_match_score"] = cached["_fuzzy_match_score"]
+                        # Build a verified-truth dict from the cached
+                        # entry and walk the cited ref against it. We
+                        # don't trust the cached_result's stale
+                        # errors/warnings list — they were derived for a
+                        # PREVIOUSLY-cited paper's metadata, not this
+                        # one — so we wipe it and rebuild.
+                        verified_truth = {
+                            "title": cached.get("title"),
+                            "authors": cached.get("authors"),
+                            "year": cached.get("year"),
+                            "venue": cached.get("venue"),
+                            "doi": cached.get("doi"),
+                            "arxiv_id": cached.get("arxiv_id"),
+                        }
+                        fresh_errors, fresh_warnings = _diff_cited_vs_truth(
+                            reference, verified_truth,
+                        )
+                        cached_result["errors"] = fresh_errors
+                        cached_result["warnings"] = fresh_warnings
+                        # Status follows the same precedence the
+                        # standard verifier uses: errors → error,
+                        # warnings → warning, else → verified.
+                        if fresh_errors:
+                            cached_result["status"] = "error"
+                        elif fresh_warnings:
+                            cached_result["status"] = "warning"
+                        else:
+                            cached_result["status"] = "verified"
+                        # Re-derive the corrected_reference from the
+                        # cached truth so Apply Fix in the Corrections
+                        # tab gets the right values to merge in.
+                        cached_result["corrected_reference"] = {
+                            k: v for k, v in verified_truth.items() if v not in (None, "")
+                        }
                     # Merge in citation contexts from the fresh reference —
                     # the global cache stores verification metadata only
                     # and predates the contexts attached for THIS paper
