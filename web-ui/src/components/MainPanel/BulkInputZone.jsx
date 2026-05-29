@@ -250,8 +250,8 @@ export default function BulkInputZone({
               style={{ color: 'var(--color-text-muted)' }}
             >
               {urlCount} paper{urlCount !== 1 ? 's' : ''} to check
-              {urlCount > 50 && (
-                <span style={{ color: 'var(--color-warning)' }}> (max 50, will be truncated)</span>
+              {urlCount > 1000 && (
+                <span style={{ color: 'var(--color-warning)' }}> (max 1000, will be truncated)</span>
               )}
             </p>
           )}
@@ -289,7 +289,7 @@ export default function BulkInputZone({
               className="text-sm mt-1"
               style={{ color: 'var(--color-text-muted)' }}
             >
-              PDF, TXT, TEX, BIB, BBL, or a ZIP archive (max 50 files)
+              PDF, TXT, TEX, BIB, BBL, or a ZIP archive (max 1000 files)
             </p>
           </div>
 

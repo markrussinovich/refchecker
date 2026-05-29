@@ -103,8 +103,14 @@ def _form_default_value(value):
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
 MAX_UPLOAD_FILE_BYTES = int(os.environ.get("MAX_UPLOAD_FILE_BYTES", str(25 * 1024 * 1024)))
-MAX_BATCH_UPLOAD_TOTAL_BYTES = int(os.environ.get("MAX_BATCH_UPLOAD_TOTAL_BYTES", str(100 * 1024 * 1024)))
-MAX_BATCH_ARCHIVE_BYTES = int(os.environ.get("MAX_BATCH_ARCHIVE_BYTES", str(50 * 1024 * 1024)))
+# Bulk-mode caps. Defaults raised in v0.7.42 after a user reported a
+# 796-paper batch being truncated to 50. The new defaults cover that
+# case with headroom: 1000 papers, 500 MB total post-extract, 250 MB
+# zip archive. All three remain env-overridable so larger fleets can
+# tune further without code changes.
+MAX_BATCH_UPLOAD_TOTAL_BYTES = int(os.environ.get("MAX_BATCH_UPLOAD_TOTAL_BYTES", str(500 * 1024 * 1024)))
+MAX_BATCH_ARCHIVE_BYTES = int(os.environ.get("MAX_BATCH_ARCHIVE_BYTES", str(250 * 1024 * 1024)))
+MAX_BATCH_SIZE = int(os.environ.get("MAX_BATCH_SIZE", "1000"))
 
 
 def get_uploads_dir() -> Path:
@@ -2601,9 +2607,8 @@ async def start_batch_check(
     try:
         if not request.urls or len(request.urls) == 0:
             raise HTTPException(status_code=400, detail="No URLs provided")
-        
-        # Limit batch size to prevent abuse
-        MAX_BATCH_SIZE = 50
+
+        # Module-level cap (defaults to 1000 in v0.7.42; env-overridable).
         if len(request.urls) > MAX_BATCH_SIZE:
             raise HTTPException(
                 status_code=400, 
@@ -2822,9 +2827,10 @@ async def start_batch_check_files(
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
-        
-        MAX_BATCH_SIZE = 50
-        
+
+        # MAX_BATCH_SIZE is the module-level constant (defaults to 1000
+        # in v0.7.42; env-overridable).
+
         # Generate unique batch ID
         batch_id = str(uuid.uuid4())
         started_at = utcnow_sqlite()
