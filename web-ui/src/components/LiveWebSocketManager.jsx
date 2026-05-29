@@ -49,12 +49,35 @@ export default function LiveWebSocketManager() {
     }
   }, [flushMessages])
 
-  // Connect to all active sessions
+  // Connect to all active sessions, capped at 16 WebSockets.
+  //
+  // v0.7.44: a user dropped a 796-paper bulk batch which produced 796
+  // active session_ids. The previous "connect to every active
+  // session" loop tried to open ~800 simultaneous WebSockets, which
+  // tripped browser per-origin connection limits and flooded the
+  // console with "Error on session <uuid>" lines. The selected
+  // session is always included; the rest are filled from the tail of
+  // `activeSessions` (most-recent-first) up to the cap. Non-connected
+  // sessions still get progress updates through the periodic polling
+  // fallback that this component already runs.
+  const MAX_LIVE_WS = 16
   useEffect(() => {
     if (!activeSessions || activeSessions.length === 0) return
 
+    const currentSessionId = useCheckStore.getState().sessionId
+    // Build the actually-connected set: current session (if active)
+    // plus the tail of activeSessions up to MAX_LIVE_WS total.
+    const connectSet = new Set()
+    if (currentSessionId && activeSessions.includes(currentSessionId)) {
+      connectSet.add(currentSessionId)
+    }
+    for (let i = activeSessions.length - 1; i >= 0 && connectSet.size < MAX_LIVE_WS; i -= 1) {
+      connectSet.add(activeSessions[i])
+    }
+
     // Connect to any sessions we don't have a connection for
     for (const sessionId of activeSessions) {
+      if (!connectSet.has(sessionId)) continue
       if (wsMapRef.current.has(sessionId)) {
         continue // Already connected
       }
@@ -119,10 +142,12 @@ export default function LiveWebSocketManager() {
       wsMapRef.current.set(sessionId, ws)
     }
 
-    // Close connections for sessions that are no longer active
+    // Close connections for sessions that are no longer active OR
+    // that fell off the MAX_LIVE_WS cap (older sessions in a giant
+    // batch). The polling fallback picks them up.
     for (const [sessionId, ws] of wsMapRef.current.entries()) {
-      if (!activeSessions.includes(sessionId)) {
-        logger.info('LiveWebSocketManager', `Closing WebSocket for inactive session ${sessionId}`)
+      if (!activeSessions.includes(sessionId) || !connectSet.has(sessionId)) {
+        logger.info('LiveWebSocketManager', `Closing WebSocket for inactive/over-cap session ${sessionId}`)
         ws.close()
         wsMapRef.current.delete(sessionId)
         lastMessageTimeRef.current.delete(sessionId)
