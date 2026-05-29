@@ -2392,14 +2392,35 @@ class ProgressRefChecker:
                 "total": total_refs
             })
 
-            # Global cache short-circuit before kicking off network checks
+            # Global cache short-circuit before kicking off network checks.
+            # Two layers: strict identity match first (DOI / arXiv /
+            # normalized title+year keyed), then a v0.7.48 fuzzy match
+            # that catches re-cited papers with minor formatting drift
+            # (typo in title, year off by one, comma/period in authors)
+            # — drops LLM + Crossref + S2 traffic on batches that cite
+            # the same seminal papers across many documents.
             try:
                 from .database import db as _db
                 cached = await _db.lookup_verified_reference(reference)
+                if not (cached and isinstance(cached.get("result"), dict) and cached["result"]):
+                    fuzzy = await _db.find_verified_by_fuzzy(reference)
+                    if fuzzy and isinstance(fuzzy.get("result"), dict) and fuzzy["result"]:
+                        cached = fuzzy
+                        logger.debug(
+                            "Fuzzy cache hit (score=%s) for ref '%s' — short-circuited LLM/network",
+                            fuzzy.get("_fuzzy_match_score"), (reference.get("title") or "")[:80],
+                        )
                 if cached and isinstance(cached.get("result"), dict) and cached["result"]:
                     cached_result = dict(cached["result"])
                     cached_result["index"] = idx + 1
                     cached_result["from_cache"] = True
+                    # Tag fuzzy-cache hits separately so the FE can
+                    # surface a small "matched a previously-seen ref"
+                    # indicator. Lets reviewers spot fuzzy matches that
+                    # might warrant a manual second look.
+                    if "_fuzzy_match_score" in cached:
+                        cached_result["from_fuzzy_cache"] = True
+                        cached_result["fuzzy_match_score"] = cached["_fuzzy_match_score"]
                     # Merge in citation contexts from the fresh reference —
                     # the global cache stores verification metadata only
                     # and predates the contexts attached for THIS paper

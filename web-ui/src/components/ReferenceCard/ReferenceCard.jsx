@@ -448,11 +448,13 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
 
   const matchedDatabase = hasLlmVerifiedUrl
     ? 'LLM search'
-    : reference.matched_database || (
-      reference.status === 'verified' && reference.cited_url && !reference.authoritative_urls?.length
-        ? 'Web page'
-        : null
-    )
+    : reference.from_fuzzy_cache
+      ? `Cache (fuzzy${reference.fuzzy_match_score ? ` · score ${reference.fuzzy_match_score}` : ''})`
+      : reference.matched_database || (
+        reference.status === 'verified' && reference.cited_url && !reference.authoritative_urls?.length
+          ? 'Web page'
+          : null
+      )
 
   const displayUrls = hasLlmVerifiedUrl
     ? (reference.authoritative_urls || []).filter(urlObj => urlObj.type === 'llm_verified').concat(

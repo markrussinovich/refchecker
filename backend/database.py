@@ -2066,6 +2066,116 @@ class Database:
                 data["result"] = {}
             return data
 
+    async def find_verified_by_fuzzy(self, ref: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Pre-LLM fuzzy cache lookup against Seen-Refs.
+
+        v0.7.48: complementary to the strict `lookup_verified_reference`
+        — that one keys on exact DOI / arXiv / normalized title+year and
+        misses any cited ref with a minor formatting difference. This
+        looser lookup hits when:
+          - normalized-title prefix (60 chars) matches a cached entry
+          - first-author surname matches that entry
+          - year is identical OR within ±1
+
+        Returns the cached entry's full row + its `result` JSON so the
+        caller can short-circuit the LLM and network checks entirely.
+        Drops LLM bills materially on bibliographies that re-cite the
+        same handful of seminal papers across many documents — the
+        user's 800-paper batch was the trigger.
+
+        None when no confident match was found.
+        """
+        import re as _re
+        title = (ref.get("title") or "").strip().lower()
+        if len(title) < 12:
+            return None
+        norm = _re.sub(r"[^a-z0-9 ]+", " ", title)
+        norm = _re.sub(r"\s+", " ", norm).strip()
+        if len(norm) < 12:
+            return None
+        prefix = norm[:60]
+        ref_authors = ref.get("authors") or []
+        if isinstance(ref_authors, list):
+            ref_authors_str = ", ".join(a for a in ref_authors if a)
+        else:
+            ref_authors_str = str(ref_authors or "")
+        # First-author surname extractor — same logic as cross_check
+        def _first_surname(s: str) -> str:
+            s = (s or "").split(",")[0].split(";")[0].strip()
+            parts = s.split()
+            return parts[-1].lower() if parts else ""
+        ref_surname = _first_surname(ref_authors_str)
+        try:
+            ref_year = int(ref.get("year")) if ref.get("year") else None
+        except Exception:
+            ref_year = None
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("PRAGMA busy_timeout=5000")
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(
+                    """
+                    SELECT identity_key, title, authors, year, doi, arxiv_id, venue,
+                           verified_url, matched_db, status, result_json,
+                           times_seen
+                    FROM verified_reference_identity
+                    WHERE LOWER(title) LIKE ?
+                    LIMIT 25
+                    """,
+                    (f"{prefix}%",),
+                )
+                rows = await cursor.fetchall()
+        except Exception:
+            return None
+        # Pick the BEST candidate. Score by year match + author surname
+        # match, prefer entries with verified status.
+        best = None
+        best_score = 0
+        for r in rows:
+            cached_surname = _first_surname(r["authors"] or "")
+            try:
+                cached_year = int(r["year"]) if r["year"] else None
+            except Exception:
+                cached_year = None
+            # Author surname must match — too risky to accept a fuzzy
+            # title with a totally different first author.
+            if not cached_surname or not ref_surname or cached_surname != ref_surname:
+                continue
+            score = 1
+            # Year exact match is the strongest signal; ±1 is acceptable
+            # for accepted-vs-published year drift.
+            if cached_year is not None and ref_year is not None:
+                if cached_year == ref_year:
+                    score += 2
+                elif abs(cached_year - ref_year) == 1:
+                    score += 1
+                else:
+                    # Year is way off — likely a different paper with
+                    # similar title (review of the same topic, etc.).
+                    continue
+            elif cached_year != ref_year:
+                # One side has year, the other doesn't — accept with
+                # lower confidence but only when there's a DOI or arXiv
+                # on the cached side to anchor the identity.
+                if not (r["doi"] or r["arxiv_id"]):
+                    continue
+            # Verified status > unverified status in the tiebreak.
+            if r["status"] == "verified":
+                score += 1
+            if score > best_score:
+                best = r
+                best_score = score
+        if best is None:
+            return None
+        data = dict(best)
+        try:
+            data["result"] = json.loads(data.get("result_json") or "{}")
+        except Exception:
+            data["result"] = {}
+        data.pop("result_json", None)
+        data["_fuzzy_match_score"] = best_score
+        return data
+
     async def cross_check_seen_refs(self, ref: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Cross-reference a cited ref against the Seen-Refs cache.
 
