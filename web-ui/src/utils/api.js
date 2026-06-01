@@ -116,6 +116,11 @@ export const triggerDatabaseDownload = (payload) => api.post('/databases/downloa
 export const getDatabaseDownloadStatus = () => api.get('/databases/download/status')
 export const cancelDatabaseDownload = (database) => api.post('/databases/download/cancel', { database })
 
+// AI-generated-text detection: local model management
+export const getAIDetectionModelStatus = () => api.get('/ai-detection/model/status')
+export const downloadAIDetectionModel = () => api.post('/ai-detection/model/download')
+export const deleteAIDetectionModel = () => api.delete('/ai-detection/model')
+
 // OpenReview venue scanning
 export const fetchOpenReviewList = (venue, status = 'accepted') =>
   api.post('/openreview/list', { venue, status })
@@ -145,8 +150,8 @@ export const fetchCitationGraph = ({ references, paper_title }) =>
 // One-hop expand: a paper's outgoing references for the graph view.
 // `title` is optional — the backend uses it to do a title-search
 // fallback when /paper/<id>/references returns nothing for the DOI.
-export const expandPaper = ({ paper_id, limit = 8, title = null }) =>
-  api.post('/papers/expand', { paper_id, limit, title })
+export const expandPaper = ({ paper_id, limit = 8, title = null, ai_detection = false }) =>
+  api.post('/papers/expand', { paper_id, limit, title, ai_detection })
 
 // Per-check edit endpoints (Add/Remove citation, regenerate health stats)
 export const addReferenceToCheck = (checkId, payload) =>

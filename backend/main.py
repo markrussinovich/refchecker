@@ -829,6 +829,11 @@ class BatchUrlsRequest(BaseModel):
     api_key: Optional[str] = None
     hallucination_api_key: Optional[str] = None
     semantic_scholar_api_key: Optional[str] = None
+    ai_detection_enabled: bool = False
+    ai_detection_backend: str = "local"
+    ai_detection_api_key: Optional[str] = None
+    ai_detection_consent: bool = False
+    ai_detection_service: str = "pangram"
 
 
 # Create FastAPI app
@@ -1298,6 +1303,11 @@ async def start_check(
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    ai_detection_enabled: bool = Form(False),
+    ai_detection_backend: str = Form("local"),
+    ai_detection_api_key: Optional[str] = Form(None),
+    ai_detection_consent: bool = Form(False),
+    ai_detection_service: str = Form("pangram"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -1332,6 +1342,11 @@ async def start_check(
         use_llm = _form_default_value(use_llm)
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
+        ai_detection_enabled = _form_default_value(ai_detection_enabled)
+        ai_detection_backend = _form_default_value(ai_detection_backend)
+        ai_detection_api_key = _form_default_value(ai_detection_api_key)
+        ai_detection_consent = _form_default_value(ai_detection_consent)
+        ai_detection_service = _form_default_value(ai_detection_service)
         semantic_scholar_api_key = await _resolve_semantic_scholar_api_key(
             _form_default_value(semantic_scholar_api_key)
         )
@@ -1521,6 +1536,11 @@ async def start_check(
                 hallucination_model=resolved_hallucination_model,
                 hallucination_api_key=resolved_hallucination_api_key,
                 hallucination_endpoint=resolved_hallucination_endpoint,
+                ai_detection_enabled=ai_detection_enabled,
+                ai_detection_backend=ai_detection_backend,
+                ai_detection_api_key=ai_detection_api_key,
+                ai_detection_consent=ai_detection_consent,
+                ai_detection_service=ai_detection_service,
             )
         )
         slot_acquired = False  # ownership transferred to run_check's finally block
@@ -1561,6 +1581,11 @@ async def run_check(
     hallucination_model: Optional[str] = None,
     hallucination_api_key: Optional[str] = None,
     hallucination_endpoint: Optional[str] = None,
+    ai_detection_enabled: bool = False,
+    ai_detection_backend: str = "local",
+    ai_detection_api_key: Optional[str] = None,
+    ai_detection_consent: bool = False,
+    ai_detection_service: str = "pangram",
 ):
     """
     Run reference check in background and emit progress updates
@@ -1677,6 +1702,11 @@ async def run_check(
             hallucination_model=hallucination_model,
             hallucination_api_key=hallucination_api_key,
             hallucination_endpoint=hallucination_endpoint,
+            ai_detection_enabled=ai_detection_enabled,
+            ai_detection_backend=ai_detection_backend,
+            ai_detection_api_key=ai_detection_api_key,
+            ai_detection_consent=ai_detection_consent,
+            ai_detection_service=ai_detection_service,
         )
 
         # Run the check
@@ -1726,6 +1756,7 @@ async def run_check(
             issue_type_counts=issue_type_counts,
             cache_hit=cache_hit,
             bibliography_source_kind=bibliography_source_kind,
+            ai_detection=result.get("ai_detection"),
         )
 
         await _log_usage_event_safe(
@@ -2540,6 +2571,11 @@ async def recheck(
                 True,
                 cancel_event,
                 user_id,
+                # AI-generated-text detection is intentionally NOT replayed on
+                # recheck: it is a live client-side preference (useAiDetectionStore),
+                # never persisted per-check, so there is nothing to restore. A
+                # recheck re-verifies citations only; run a fresh check to get a
+                # new AI-detection result.
             )
         )
         slot_acquired = False
@@ -2758,16 +2794,21 @@ async def start_batch_check(
                     hallucination_model=resolved_hallucination_model,
                     hallucination_api_key=resolved_hallucination_api_key,
                     hallucination_endpoint=resolved_hallucination_endpoint,
+                    ai_detection_enabled=request.ai_detection_enabled,
+                    ai_detection_backend=request.ai_detection_backend,
+                    ai_detection_api_key=request.ai_detection_api_key,
+                    ai_detection_consent=request.ai_detection_consent,
+                    ai_detection_service=request.ai_detection_service,
                 )
             )
             active_checks[session_id] = {
-                "task": task, 
-                "cancel_event": cancel_event, 
+                "task": task,
+                "cancel_event": cancel_event,
                 "check_id": check_id,
                 "batch_id": batch_id,
                 "user_id": user_id,
             }
-            
+
             checks.append({
                 "session_id": session_id,
                 "check_id": check_id,
@@ -2804,6 +2845,11 @@ async def start_batch_check_files(
     api_key: Optional[str] = Form(None),
     hallucination_api_key: Optional[str] = Form(None),
     semantic_scholar_api_key: Optional[str] = Form(None),
+    ai_detection_enabled: bool = Form(False),
+    ai_detection_backend: str = Form("local"),
+    ai_detection_api_key: Optional[str] = Form(None),
+    ai_detection_consent: bool = Form(False),
+    ai_detection_service: str = Form("pangram"),
     current_user: UserInfo = Depends(require_user),
     http_request: Request = None,
 ):
@@ -2824,6 +2870,11 @@ async def start_batch_check_files(
         api_key = _form_default_value(api_key)
         hallucination_api_key = _form_default_value(hallucination_api_key)
         semantic_scholar_api_key = _form_default_value(semantic_scholar_api_key)
+        ai_detection_enabled = _form_default_value(ai_detection_enabled)
+        ai_detection_backend = _form_default_value(ai_detection_backend)
+        ai_detection_api_key = _form_default_value(ai_detection_api_key)
+        ai_detection_consent = _form_default_value(ai_detection_consent)
+        ai_detection_service = _form_default_value(ai_detection_service)
 
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -3008,6 +3059,11 @@ async def start_batch_check_files(
                     hallucination_model=resolved_hallucination_model,
                     hallucination_api_key=resolved_hallucination_api_key,
                     hallucination_endpoint=resolved_hallucination_endpoint,
+                    ai_detection_enabled=ai_detection_enabled,
+                    ai_detection_backend=ai_detection_backend,
+                    ai_detection_api_key=ai_detection_api_key,
+                    ai_detection_consent=ai_detection_consent,
+                    ai_detection_service=ai_detection_service,
                 )
             )
             active_checks[session_id] = {
@@ -3017,7 +3073,7 @@ async def start_batch_check_files(
                 "batch_id": batch_id,
                 "user_id": user_id,
             }
-            
+
             checks.append({
                 "session_id": session_id,
                 "check_id": check_id,
@@ -5959,6 +6015,11 @@ class _ExpandRequest(BaseModel):
     # by title to resolve the canonical paperId and retry. Without this
     # the graph view shows lots of central refs with no spokes.
     title: Optional[str] = None
+    # When true, also estimate an AI-generated-text likelihood band for each
+    # expanded article from its ABSTRACT, using the free offline local model.
+    # Abstracts are short, so most come back "inconclusive" — this is an
+    # advisory signal, never proof, and it never incurs API/LLM cost.
+    ai_detection: bool = False
 
 
 @app.post("/api/papers/expand")
@@ -5973,6 +6034,16 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
     pid = req.paper_id
     if not pid:
         raise HTTPException(status_code=400, detail="paper_id required")
+
+    # Pull abstracts too when the caller wants a per-expanded-article AI-gen
+    # band (computed locally from the abstract below).
+    want_ai = bool(getattr(req, "ai_detection", False))
+    _fields = (
+        "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,"
+        "citedPaper.externalIds,citedPaper.citationCount"
+    )
+    if want_ai:
+        _fields += ",citedPaper.abstract"
 
     # Retry with exponential backoff on 429s. Even with the per-key
     # quota, bursts from the graph 2nd-degree expansion (six parallel
@@ -5991,7 +6062,7 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
                 r = await client.get(
                     f"https://api.semanticscholar.org/graph/v1/paper/{identifier}/references",
                     params={
-                        "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
+                        "fields": _fields,
                         "limit": min(50, limit * 4),
                     },
                     headers=headers,
@@ -6029,7 +6100,7 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
                 r = await client.get(
                     f"https://api.semanticscholar.org/graph/v1/paper/{pid}/references",
                     params={
-                        "fields": "citedPaper.paperId,citedPaper.title,citedPaper.year,citedPaper.authors,citedPaper.externalIds,citedPaper.citationCount",
+                        "fields": _fields,
                         "limit": min(50, limit * 4),
                     },
                     headers=headers,
@@ -6115,6 +6186,7 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
             "authors": [a.get("name") for a in (p.get("authors") or []) if a.get("name")],
             "doi": ext.get("DOI"),
             "arxiv_id": ext.get("ArXiv"),
+            "abstract": p.get("abstract") if want_ai else None,
         })
     items.sort(key=lambda x: x["citationCount"] or 0, reverse=True)
     items = items[:limit]
@@ -6166,7 +6238,53 @@ async def expand_paper(req: _ExpandRequest, current_user: UserInfo = Depends(req
             it["pre_verified"] = False
             it["times_seen"] = 0
 
-    return {"paper_id": pid, "items": items}
+    # Optional per-expanded-article AI-gen band, computed locally from the
+    # abstract (free, offline). Abstracts are short, so should_abstain()
+    # short-circuits most to "inconclusive" before any model load — keeping
+    # this bounded and cost-free. Never uses a paid backend here.
+    if want_ai:
+        try:
+            from refchecker.ai_detection import run_detection
+            model_ready = False
+            try:
+                from refchecker.ai_detection import model_manager
+                model_ready = model_manager.is_model_installed() and model_manager.deps_available()
+            except Exception:
+                model_ready = False
+
+            # Cap concurrent CPU-bound inferences. Most abstracts short-circuit
+            # in should_abstain() before any model load, but a few long ones can
+            # each run a DeBERTa forward pass; a semaphore keeps the spike bounded
+            # and matches the asyncio.Semaphore idiom used elsewhere in this file.
+            _ai_sem = asyncio.Semaphore(4)
+
+            async def _detect_abstract(it):
+                abstract = (it.get("abstract") or "").strip()
+                if not abstract:
+                    it["ai_detection_band"] = "unavailable"
+                    return
+                async with _ai_sem:
+                    res = await asyncio.to_thread(
+                        run_detection, abstract, title=it.get("title"), backend="local"
+                    )
+                it["ai_detection_band"] = res.band
+                it["ai_detection_score"] = res.overall_score
+                it["ai_detection_reason"] = res.abstain_reason
+
+            if model_ready:
+                # return_exceptions so one item's failure can't wipe the bands
+                # already computed for the others (each mutates its own dict).
+                await asyncio.gather(
+                    *[_detect_abstract(it) for it in items], return_exceptions=True
+                )
+            else:
+                for it in items:
+                    it["ai_detection_band"] = "unavailable"
+                    it["ai_detection_reason"] = "model_not_installed"
+        except Exception as e:
+            logger.debug("Graph AI-gen expansion skipped: %s", e)
+
+    return {"paper_id": pid, "items": items, "ai_detection": want_ai}
 
 
 @app.get("/api/references/seen")
@@ -6479,6 +6597,50 @@ async def cancel_database_download(payload: Dict[str, str] = Body(...), current_
         return {"cancelled": False, "reason": "no running task"}
     state.task.cancel()
     return {"cancelled": True}
+
+
+@app.get("/api/ai-detection/model/status")
+async def ai_detection_model_status(current_user: UserInfo = Depends(require_user)):
+    """Install/download status for the local AI-text-detection model."""
+    from refchecker.ai_detection import model_manager
+    return model_manager.model_status()
+
+
+@app.post("/api/ai-detection/model/download")
+async def ai_detection_model_download(current_user: UserInfo = Depends(require_user)):
+    """Start (or report) the background download of the local model.
+
+    The model lives at a single shared filesystem path (not per-user), so in
+    a multi-user deployment only admins may mutate it; on the single-user
+    desktop app the (admin) user manages their own model.
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    if not model_manager.deps_available():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Local detection runtime not installed. Install the optional "
+                "dependencies (onnxruntime + transformers, or torch + "
+                "transformers) to use the local model, or pick the LLM-judge "
+                "or API backend in Settings."
+            ),
+        )
+    return model_manager.start_download()
+
+
+@app.delete("/api/ai-detection/model")
+async def ai_detection_model_delete(current_user: UserInfo = Depends(require_user)):
+    """Remove the downloaded local model from disk.
+
+    Admin-gated in multi-user mode: the model is shared across all users, so a
+    non-admin must not be able to delete it out from under everyone else.
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import model_manager
+    return model_manager.delete_model()
 
 
 # Mount static files for bundled frontend (if available)

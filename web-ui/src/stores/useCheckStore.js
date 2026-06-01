@@ -18,6 +18,9 @@ export const useCheckStore = create((set, get) => ({
   statusMessage: '',
   progress: 0,
   references: [],
+  // Document-level AI-generated-text detection result for the current check
+  // (null = not run). Set by the 'ai_detection_result' WS event.
+  aiDetection: null,
   stats: {
     total_refs: 0,
     processed_refs: 0,
@@ -63,6 +66,7 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: 'Starting check...',
       progress: 0,
       references: [],
+      aiDetection: null,
       stats: {
         total_refs: 0,
         processed_refs: 0,
@@ -406,6 +410,7 @@ export const useCheckStore = create((set, get) => ({
       statusMessage: '',
       progress: 0,
       references: [],
+      aiDetection: null,
       stats: {
         total_refs: 0,
         processed_refs: 0,
@@ -554,6 +559,14 @@ export const useCheckStore = create((set, get) => ({
           })
           store.unregisterSession(messageSessionId)
           break
+        case 'ai_detection_result': {
+          // Mirror the AI-likelihood result into the peer check's history
+          // entry so a focused batch child reflects its band the moment it
+          // lands, not only after a refetch. (Parallels reference_result.)
+          const { check_id: _cid, ...detection } = data
+          historyStore.updateHistoryProgress(checkIdForMessage, { ai_detection: detection })
+          break
+        }
         default:
           // Other message types for concurrent sessions - ignore
           break
@@ -675,12 +688,16 @@ export const useCheckStore = create((set, get) => ({
         })
         break
         
-      case 'progress':
-        store.setProgress(data.percent || data.current / data.total * 100)
+      case 'progress': {
+        // Guard against NaN: a message-only 'progress' event (no
+        // percent/current/total) must not blank the bar to "NaN%".
+        const pct = data.percent ?? (data.total ? (data.current / data.total) * 100 : null)
+        if (Number.isFinite(pct)) store.setProgress(pct)
         if (data.message) {
           store.setStatusMessage(data.message)
         }
         break
+      }
 
       case 'phase':
         if (data.message) {
@@ -688,6 +705,22 @@ export const useCheckStore = create((set, get) => ({
         }
         break
         
+      case 'ai_detection_result':
+        // Document-level AI-likelihood result for the manuscript body. Stored
+        // separately from per-reference results (it has no reference index).
+        // Only apply when the event belongs to the displayed check, so a late
+        // result for a now-background check can't overwrite what's on screen.
+        {
+          const { check_id: _cid, ...detection } = data
+          if (!checkIdForMessage || checkIdForMessage === store.currentCheckId) {
+            set({ aiDetection: detection })
+          }
+          if (checkIdForMessage) {
+            useHistoryStore.getState().updateHistoryProgress(checkIdForMessage, { ai_detection: detection })
+          }
+        }
+        break
+
       case 'completed':
         store.completeCheck(data.check_id || store.currentCheckId)
         useHistoryStore.getState().updateHistoryProgress(store.currentCheckId, {
@@ -812,10 +845,14 @@ export const useCheckStore = create((set, get) => ({
           }
           break
 
-        case 'progress':
-          latestProgress = data.percent || (data.current / data.total * 100)
+        case 'progress': {
+          // NaN-guard (see the single-message handler): a message-only
+          // 'progress' must not overwrite the bar with NaN.
+          const pp = data.percent ?? (data.total ? (data.current / data.total) * 100 : null)
+          if (Number.isFinite(pp)) latestProgress = pp
           if (data.message) latestStatusMessage = data.message
           break
+        }
 
         default:
           // Non-hot-path message (started, extracting, etc.) – handle individually

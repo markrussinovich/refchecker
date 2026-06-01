@@ -79,6 +79,7 @@ export const useHistoryStore = create((set, get) => ({
               refs_verified: detail.refs_verified || verifiedCount,
               progress_percent: 100,
             },
+            aiDetection: detail.ai_detection || null,
             completedCheckId: detail.status === 'completed' ? detail.id : null,
           })
         } catch (hydrateErr) {

@@ -25,6 +25,7 @@ const FLOW_LABEL = {
   graph: 'Citation graph',
   reverify: 'Re-verify',
   context: 'Inline citation contexts',
+  ai_detection: 'AI-generated-text detection',
   other: 'Other LLM calls',
 }
 

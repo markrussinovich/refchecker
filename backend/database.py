@@ -612,6 +612,16 @@ class Database:
             await db.execute("ALTER TABLE check_history ADD COLUMN cancel_reason TEXT")
         if "batch_size" not in columns:
             await db.execute("ALTER TABLE check_history ADD COLUMN batch_size INTEGER")
+        # AI-generated-text detection (opt-in). The full result blob lives in
+        # ai_detection_json (for the single-check detail view); score + band
+        # are promoted to scalar columns so batch aggregation — which reads
+        # scalar columns, not the JSON blob — can tally per-paper bands.
+        if "ai_detection_json" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_json TEXT")
+        if "ai_detection_score" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_score REAL")
+        if "ai_detection_band" not in columns:
+            await db.execute("ALTER TABLE check_history ADD COLUMN ai_detection_band TEXT")
 
         await db.execute(
             "UPDATE check_history SET started_at = COALESCE(started_at, timestamp) WHERE started_at IS NULL"
@@ -1013,6 +1023,11 @@ class Database:
                             ))
                     if result.get('issue_type_counts_json'):
                         result['issue_type_counts'] = json.loads(result['issue_type_counts_json'])
+                    if result.get('ai_detection_json'):
+                        try:
+                            result['ai_detection'] = json.loads(result['ai_detection_json'])
+                        except (ValueError, TypeError):
+                            pass
                     return result
                 return None
 
@@ -1131,7 +1146,8 @@ class Database:
                                     cache_hit: Optional[bool] = None,
                                     bibliography_source_kind: Optional[str] = None,
                                     failure_class: Optional[str] = None,
-                                    refs_with_suggestions_only: int = 0) -> bool:
+                                    refs_with_suggestions_only: int = 0,
+                                    ai_detection: Optional[Dict[str, Any]] = None) -> bool:
         """Update a check with its results. If paper_title is None, don't update it."""
         async with aiosqlite.connect(self.db_path) as db:
             updates = []
@@ -1199,6 +1215,13 @@ class Database:
             if failure_class is not None:
                 updates.append("failure_class = ?")
                 params.append(failure_class)
+            if ai_detection is not None:
+                updates.append("ai_detection_json = ?")
+                params.append(json.dumps(ai_detection))
+                updates.append("ai_detection_score = ?")
+                params.append(ai_detection.get("overall_score"))
+                updates.append("ai_detection_band = ?")
+                params.append(ai_detection.get("band"))
 
             params.append(check_id)
             await db.execute(
@@ -2568,7 +2591,8 @@ class Database:
                        refs_with_errors, refs_with_warnings_only, refs_verified,
                       llm_provider, llm_model, hallucination_provider, hallucination_model,
                       status, source_type, batch_id, batch_label,
-                      bibliography_source_kind, original_filename
+                      bibliography_source_kind, original_filename,
+                      ai_detection_score, ai_detection_band
                 FROM check_history
                 WHERE batch_id = ?
             """
@@ -2603,6 +2627,9 @@ class Database:
                     SUM(suggestions_count) as total_suggestions,
                     SUM(unverified_count) as total_unverified,
                     SUM(hallucination_count) as total_hallucinated,
+                    SUM(CASE WHEN ai_detection_band = 'high' THEN 1 ELSE 0 END) as ai_detection_high,
+                    SUM(CASE WHEN ai_detection_band = 'medium' THEN 1 ELSE 0 END) as ai_detection_medium,
+                    SUM(CASE WHEN ai_detection_band = 'low' THEN 1 ELSE 0 END) as ai_detection_low,
                     MIN(timestamp) as started_at
                 FROM check_history
                 WHERE batch_id = ?

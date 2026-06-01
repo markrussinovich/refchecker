@@ -45,6 +45,14 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
+    - name: Lint (report-only)
+      # Non-blocking: the tree has known pre-existing lint findings. This
+      # surfaces new issues in PR logs without failing the build on legacy ones.
+      run: npm run lint || true
+
+    - name: Build (production bundle)
+      run: npm run build
+
     - name: Run unit tests
       run: npx vitest run
 

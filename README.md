@@ -78,6 +78,7 @@ RefChecker verifies citations against **Semantic Scholar**, **OpenAlex**, **Cros
 - [Web UI](#web-ui)
 - [CLI](#cli)
 - [Hallucination Detection](#hallucination-detection)
+- [AI-Generated Text Detection](#ai-generated-text-detection)
 - [Bulk Checking](#bulk-checking)
 - [OpenReview Integration](#openreview-integration)
 - [Output & Reports](#output--reports)
@@ -133,6 +134,7 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 | **Metadata checks** | Titles, authors, years, venues, DOIs, ArXiv IDs, URLs |
 | **Smart matching** | Handles formatting variations (BERT vs B-ERT, pre-trained vs pretrained) |
 | **Hallucination detection** | Flags likely fabricated references using deterministic pre-filters, LLM deep web search, and metadata reverification when the LLM finds a better match |
+| **AI-generated-text detection** (opt-in) | Optionally analyzes the body text of each checked article for AI-generated-likelihood, returning a low/medium/high band plus advisory flagged passages. Three engines: a local calibrated model (offline, downloadable), an LLM judge (reuses your configured LLM), or an external API (Pangram/GPTZero). **Advisory only** — detection is unreliable on technical and non-native-English academic writing, so results are framed as a self-check and never as proof of misconduct. Enable under Settings → AI Detection. |
 | **Bulk checking** | Upload multiple files or a ZIP in the Web UI; use `--paper-list` or `--openreview` in the CLI |
 | **OpenReview scanning** | Fetch all accepted (or submitted) papers for a venue and scan them in one command |
 | **Reports** | JSON, JSONL, CSV, or text — with error details, corrections, and hallucination assessments |
@@ -373,6 +375,42 @@ Each reference receives a verdict:
 | ✅ **UNLIKELY** | Probably real — found on a dedicated page with matching title/authors, then rechecked against the cited metadata |
 
 Hallucination assessments appear inline in CLI output, in Web UI reference cards, and in structured reports (JSON/JSONL/CSV) via the `hallucination_assessment` field.
+
+---
+
+## AI-Generated Text Detection
+
+> **Opt-in and advisory only.** AI-text detection is unreliable on academic, technical, and non-native-English writing, and on human text polished with AI. RefChecker frames every result as a low/medium/high *likelihood band* with a permanent disclaimer — **never** a binary verdict or proof of misconduct, and never a basis for an accusation, grade, or decision. Below ~300 words, or on equation/code/citation-heavy passages, it abstains (`inconclusive`).
+
+When enabled (Settings → AI Detection), each checked article's **body text** is analyzed for AI-generated likelihood, in **single and batch** modes. If both reference checking and AI detection are on, they run **in parallel**. Results show a band + score, an optional list of advisory flagged passages, and the engine/model used.
+
+### Detection engines (pick one in Settings)
+
+| Engine | What it is | Cost | Notes |
+|--------|-----------|------|-------|
+| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via ONNX/Transformers | Free | One-time download (managed in Settings); calibrated, reproducible; no data leaves your machine |
+| **LLM judge** | Reuses your configured LLM provider (OpenAI/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
+| **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
+
+### Usage & cost tracking
+
+AI-detection work is metered in the same per-check token/$ badge under an **"AI-generated-text detection"** flow: the **local** model records the processed word count at **$0**; the **API** backends record words sent plus an estimated dollar cost; the **LLM-judge** records real input/output tokens and their cost.
+
+### Graph 2nd-degree expansion
+
+In the Graph tab, the 2nd-degree expansion has a **"Refs only"** vs **"+ AI-gen"** toggle. With "+ AI-gen", each expanded article also gets an AI-likelihood ring (red = high, amber = medium), estimated **locally from its abstract** (free, offline). Abstracts are short, so most come back `inconclusive` — this is an advisory signal, never a full-text analysis.
+
+### Sources & credits
+
+The detection engines build on these open-source projects and services:
+
+- [`desklib/ai-text-detector-v1.01`](https://huggingface.co/desklib/ai-text-detector-v1.01) — DeBERTa-v3 detector (MIT), the bundled local model
+- [`harshaneel/humanize`](https://github.com/harshaneel/humanize) — the `ai-check` forensic rubric (MIT) adapted for the LLM-judge prompt
+- [`distil-labs/distil-ai-slop-detector`](https://github.com/distil-labs/distil-ai-slop-detector) — the "small quantized classifier in-app" concept (Apache-2.0)
+- Zero-shot research: [Binoculars](https://github.com/ahans30/Binoculars) and [Fast-DetectGPT](https://github.com/baoguangsheng/fast-detect-gpt)
+- API services: [Pangram](https://www.pangram.com) and [GPTZero](https://gptzero.me)
+
+On the reliability of detectors for academic/non-native-English text, see Liang et al., [arXiv:2304.02819](https://arxiv.org/abs/2304.02819).
 
 ---
 

@@ -59,6 +59,7 @@ export default function BatchSummaryView() {
   const agg = useMemo(() => {
     let total = 0, completed = 0, inProgress = 0, errored = 0, cancelled = 0
     let totalRefs = 0, errorsRefs = 0, warningsRefs = 0, hallucRefs = 0, unverifiedRefs = 0, verifiedRefs = 0
+    let aiHigh = 0, aiMedium = 0
     for (const c of checks) {
       total += 1
       if (c.status === 'in_progress') inProgress += 1
@@ -71,8 +72,10 @@ export default function BatchSummaryView() {
       hallucRefs += c.hallucination_count || 0
       unverifiedRefs += c.unverified_count || 0
       verifiedRefs += Math.max(0, (c.total_refs || 0) - (c.errors_count || 0) - (c.warnings_count || 0) - (c.unverified_count || 0) - (c.hallucination_count || 0))
+      if (c.ai_detection_band === 'high') aiHigh += 1
+      else if (c.ai_detection_band === 'medium') aiMedium += 1
     }
-    return { total, completed, inProgress, errored, cancelled, totalRefs, errorsRefs, warningsRefs, hallucRefs, unverifiedRefs, verifiedRefs }
+    return { total, completed, inProgress, errored, cancelled, totalRefs, errorsRefs, warningsRefs, hallucRefs, unverifiedRefs, verifiedRefs, aiHigh, aiMedium }
   }, [checks])
 
   // Fetch aggregated LLM usage. Re-runs whenever the batch's progress
@@ -300,6 +303,14 @@ export default function BatchSummaryView() {
             onClick={() => setFilter(f => f === 'unverified' ? 'all' : 'unverified')}
             title="Click to filter to papers with refs the verifier couldn't resolve (no S2/Crossref/PMC hit + LLM didn't flag as hallucination)"
           />
+          {(agg.aiHigh + agg.aiMedium) > 0 && (
+            <Chip
+              label="AI-flagged"
+              value={agg.aiHigh + agg.aiMedium}
+              color="#ef4444"
+              title="Papers whose body text scored medium/high AI-likelihood (advisory only — not proof of AI authorship)"
+            />
+          )}
         </div>
 
         {/* Budget chip + per-flow breakdown.
@@ -407,6 +418,12 @@ export default function BatchSummaryView() {
                     {(c.warnings_count || 0) > 0 && <span style={{ color: '#f59e0b' }}>{c.warnings_count} warn</span>}
                     {hasHallu && <span style={{ color: '#a855f7' }}>{c.hallucination_count} halluc</span>}
                     {(c.unverified_count || 0) > 0 && <span style={{ color: '#94a3b8' }}>{c.unverified_count} unv</span>}
+                    {(c.ai_detection_band === 'high' || c.ai_detection_band === 'medium') && (
+                      <span style={{ color: c.ai_detection_band === 'high' ? '#ef4444' : '#f59e0b' }}
+                        title="AI-generated-text likelihood (advisory, not proof)">
+                        AI {c.ai_detection_band}
+                      </span>
+                    )}
                     {isVerifiedClean && <span style={{ color: '#22c55e' }}>✓ clean</span>}
                     {checkCost ? <span style={{ color: 'var(--color-text-muted)' }}>· {fmtUsd(checkCost)}</span> : null}
                   </div>

@@ -191,6 +191,7 @@ export default function GraphView({ references, paperTitle }) {
         citationCount: ex.citationCount,
         val: Math.max(4, Math.log10((ex.citationCount || 0) + 1) * 4.5 + 4),
         color: expColor,
+        aiBand: ex.ai_detection_band || null,
       })
       if (ex.parent) edges.push({ source: ex.parent, target: ex.id, expanded: true })
     }
@@ -231,7 +232,7 @@ export default function GraphView({ references, paperTitle }) {
       // Pass title so the backend can fall back to title-search when
       // the DOI/arXiv-keyed /references lookup returns empty.
       const refTitle = node.ref?.title || node.label || null
-      const res = await expandPaper({ paper_id: node.paperId, limit: 6, title: refTitle })
+      const res = await expandPaper({ paper_id: node.paperId, limit: 6, title: refTitle, ai_detection: aiGenMode })
       const items = res.data?.items || []
       const additions = items
         .filter(it => it.paperId)
@@ -245,6 +246,8 @@ export default function GraphView({ references, paperTitle }) {
           citationCount: it.citationCount,
           doi: it.doi,
           arxiv_id: it.arxiv_id,
+          ai_detection_band: it.ai_detection_band,
+          ai_detection_score: it.ai_detection_score,
           // 2nd-degree verify status (from Seen-Refs cache probe on the
           // backend). Lets the graph colour expanded nodes by their
           // verification result instead of a uniform cyan.
@@ -272,6 +275,10 @@ export default function GraphView({ references, paperTitle }) {
   // an explicit toggle.
   const [autoExpanding, setAutoExpanding] = useState(false)
   const [autoExpanded, setAutoExpanded] = useState(false)
+  // When on, 2nd-degree expansion also asks the backend for an AI-generated
+  // -text likelihood band per expanded article (computed locally from the
+  // abstract, free/offline — advisory only, usually inconclusive).
+  const [aiGenMode, setAiGenMode] = useState(false)
   // Eligible-for-expansion: prefer serverGraph nodes (already paperId-
   // keyed) but fall back to any ref with a DOI / arxiv id so the
   // 2nd-degree toggle still shows up for bibliographies where the S2
@@ -328,7 +335,7 @@ export default function GraphView({ references, paperTitle }) {
           try {
             // Pass title so the backend can fall back to title-search
             // when /references comes back empty for this DOI/arXiv.
-            const res = await expandPaper({ paper_id: node.paperId, limit: 8, title: node.title })
+            const res = await expandPaper({ paper_id: node.paperId, limit: 8, title: node.title, ai_detection: aiGenMode })
             const items = res.data?.items || []
             const additions = items
               .filter(it => it.paperId)
@@ -342,6 +349,8 @@ export default function GraphView({ references, paperTitle }) {
                 citationCount: it.citationCount,
                 doi: it.doi,
                 arxiv_id: it.arxiv_id,
+                ai_detection_band: it.ai_detection_band,
+                ai_detection_score: it.ai_detection_score,
                 // 2nd-degree verify status carried over from the backend
                 // Seen-Refs probe — without this, auto-expanded nodes
                 // rendered uniformly cyan and masked the verification
@@ -413,6 +422,33 @@ export default function GraphView({ references, paperTitle }) {
         >
           {autoExpanding ? 'Expanding…' : autoExpanded ? '✓ Showing 2nd-degree refs' : '⊕ Show 2nd-degree refs + status'}
         </button>
+        {/* 2nd-degree mode: reference check only vs also AI-gen status. AI-gen
+            on expanded refs is computed locally from each article's abstract
+            (free, offline, advisory) — most come back inconclusive. */}
+        <span className="inline-flex items-center rounded overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          {[['refs', 'Refs only'], ['ai', '+ AI-gen']].map(([val, label]) => {
+            const active = (val === 'ai') === aiGenMode
+            return (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setAiGenMode(val === 'ai')}
+                onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--color-bg-hover)' }}
+                onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                className="px-2 py-0.5 transition-colors"
+                style={{
+                  background: active ? 'var(--color-bg-tertiary)' : 'transparent',
+                  color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                }}
+                title={val === 'ai'
+                  ? 'Also estimate an AI-generated-text band for each expanded article, from its abstract via the free offline local model. Advisory only (most abstracts are too short → inconclusive); needs the local model downloaded in Settings → AI Detection.'
+                  : 'Only check the reference/verification status of expanded articles.'}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </span>
         {expandedNodes.length > 0 && (
           <button
             onClick={() => setExpandedNodes([])}
@@ -443,6 +479,7 @@ export default function GraphView({ references, paperTitle }) {
         <LegendDot color={STATUS_COLOR.unverified} label="unverified" />
         <LegendDot color={STATUS_COLOR.hallucinated} label="hallucinated" />
         <LegendDot color="#0ea5e9" label="expanded · no S2 metadata" />
+        {aiGenMode && <LegendDot color="#ef4444" label="◯ AI-gen ring (high/amber=med)" />}
       </div>
       <Suspense fallback={
         <div className="p-6 text-center text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -518,6 +555,16 @@ export default function GraphView({ references, paperTitle }) {
               ctx.arc(node.x, node.y, radius + 1.5, 0, 2 * Math.PI, false)
               ctx.stroke()
             }
+            // AI-generated-text ring (2nd-degree AI-gen mode). High = red,
+            // medium = amber — an outer ring layered over the status disc so
+            // it never hides the verification colour. Advisory only.
+            if (node.aiBand === 'high' || node.aiBand === 'medium') {
+              ctx.strokeStyle = node.aiBand === 'high' ? '#ef4444' : '#f59e0b'
+              ctx.lineWidth = Math.max(1.4, 2 / globalScale)
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, radius + 3.5, 0, 2 * Math.PI, false)
+              ctx.stroke()
+            }
             // Single-label rule: the hovered node wins. If no hover, the
             // source node always shows its label so the user has at least
             // one orientation anchor. Past 2.5× zoom, render every label.
@@ -570,6 +617,17 @@ export default function GraphView({ references, paperTitle }) {
               {selected.status && (
                 <div className="mt-1" style={{ color: STATUS_COLOR[selected.status] || STATUS_COLOR.pending }}>
                   Status: {selected.status}
+                </div>
+              )}
+              {(selected.aiBand === 'high' || selected.aiBand === 'medium') && (
+                <div
+                  className="mt-1"
+                  style={{ color: selected.aiBand === 'high' ? 'var(--color-error)' : 'var(--color-warning)' }}
+                  title="AI-generated-text likelihood estimated locally from the abstract. The score is a model score, NOT a probability that a human wrote this. Advisory only — not proof, and unreliable on short/technical text."
+                >
+                  AI-likelihood: {selected.aiBand}
+                  {typeof selected.ref.ai_detection_score === 'number' ? ` · score ${Math.round(selected.ref.ai_detection_score * 100)}` : ''}
+                  {' · from abstract'}
                 </div>
               )}
               {(selected.ref.verified_url || selected.ref.cited_url) && (

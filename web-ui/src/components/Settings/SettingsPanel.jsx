@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAiDetectionStore } from '../../stores/useAiDetectionStore'
 import { useAuthStore } from '../../stores/useAuthStore'
 import LLMSelector from '../Sidebar/LLMSelector'
 import * as api from '../../utils/api'
@@ -38,6 +39,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // Key store for Semantic Scholar API key management
   const { hasKey, setKey, deleteKey } = useKeyStore()
   const multiuser = useAuthStore(state => state.multiuser)
+
+  // AI-generated-text detection (opt-in, client preference + local model mgmt)
+  const aiDetection = useAiDetectionStore()
+  const [aiDetKey, setAiDetKey] = useState('')
+  useEffect(() => {
+    if (isSettingsOpen && activeSection === 'AI Detection') {
+      aiDetection.fetchModelStatus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSettingsOpen, activeSection])
   
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
@@ -512,6 +523,208 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     setPcError(null)
   }
 
+  const renderAIDetectionSection = () => {
+    const ms = aiDetection.modelStatus
+    const backend = aiDetection.backend
+    const fmtMB = (b) => (b ? `${(b / (1024 * 1024)).toFixed(0)} MB` : '')
+    const aiKeyName = aiDetection.service // 'pangram' | 'gptzero'
+    const accent = 'var(--color-accent, #3b82f6)'
+    return (
+      <div className="space-y-4">
+        {/* Permanent honesty banner — warning token pair so it flips between
+            light/dark, matching AIDetectionPanel's medium-band styling. */}
+        <div
+          className="rounded-lg p-3 text-sm border"
+          style={{ borderColor: 'var(--color-warning)', backgroundColor: 'var(--color-warning-bg)', color: 'var(--color-text-secondary)' }}
+        >
+          <strong style={{ color: 'var(--color-text-primary)' }}>Read before enabling.</strong> AI-text
+          detection is unreliable on academic, technical, and non-native-English writing, and on
+          human text polished with AI. Results are an advisory self-check — <strong>never</strong> proof
+          of misconduct, and never a basis for an accusation, grade, or decision.
+        </div>
+
+        {/* Enable toggle */}
+        <label className="flex items-center justify-between gap-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+          <span>
+            <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Detect AI-generated text</span>
+            <span className="block text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              When on, each checked article also gets an AI-likelihood band. Off by default.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={aiDetection.enabled}
+            onChange={(e) => aiDetection.setEnabled(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: 'var(--color-accent)' }}
+          />
+        </label>
+
+        {/* Engine selector */}
+        <div className="py-1">
+          <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Detection engine</div>
+          {[
+            ['local', 'Local model (offline, calibrated)', 'desklib DeBERTa — runs on your machine after a one-time download. Recommended for reproducibility.'],
+            ['llm-judge', 'LLM judge (uses your configured LLM)', 'Reuses your LLM provider/key. No download, but scores are uncalibrated.'],
+            ['api', 'External API (Pangram / GPTZero)', 'Sends manuscript text to a third-party service. Requires a key and explicit consent.'],
+          ].map(([id, label, desc]) => (
+            <label key={id} className="flex items-start gap-2 py-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="ai-detection-backend"
+                checked={backend === id}
+                onChange={() => aiDetection.setBackend(id)}
+                style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+              />
+              <span>
+                <span style={{ color: 'var(--color-text-primary)' }}>{label}</span>
+                <span className="block text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>{desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+
+        {/* Local model management */}
+        {backend === 'local' && (
+          <div className="rounded-lg p-3 border" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <div className="font-medium" style={{ color: 'var(--color-text-primary)' }}>Local detection model</div>
+                <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                  {ms == null && 'Checking status…'}
+                  {ms && ms.installed && `Installed${ms.size_bytes ? ` · ${fmtMB(ms.size_bytes)}` : ''} · ${ms.repo}`}
+                  {ms && !ms.installed && ms.deps_available && 'Not downloaded yet.'}
+                  {ms && !ms.installed && !ms.deps_available &&
+                    'Runtime not installed. Install onnxruntime + transformers (or torch + transformers), or use another engine.'}
+                </div>
+                {aiDetection.modelError && (
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.modelError}</div>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {ms && !ms.installed && (
+                  <button
+                    type="button"
+                    disabled={aiDetection.modelBusy || (ms && !ms.deps_available)}
+                    onClick={() => aiDetection.downloadModel()}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                    style={{ backgroundColor: accent, color: 'white', opacity: (aiDetection.modelBusy || !ms.deps_available) ? 0.5 : 1, cursor: (aiDetection.modelBusy || !ms.deps_available) ? 'not-allowed' : 'pointer' }}
+                  >
+                    {aiDetection.modelBusy ? 'Downloading…' : 'Download model'}
+                  </button>
+                )}
+                {ms && ms.installed && (
+                  <button
+                    type="button"
+                    disabled={aiDetection.modelBusy}
+                    onClick={() => aiDetection.deleteModel()}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)', opacity: aiDetection.modelBusy ? 0.5 : 1, cursor: aiDetection.modelBusy ? 'not-allowed' : 'pointer' }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* LLM-judge note */}
+        {backend === 'llm-judge' && (
+          <div className="text-sm rounded-lg p-3 border" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+            Uses the same LLM provider and API key you configured under <strong>LLM</strong> /{' '}
+            <strong>API Keys</strong>. No extra setup needed.
+          </div>
+        )}
+
+        {/* External API config */}
+        {backend === 'api' && (
+          <div className="rounded-lg p-3 border space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>Service</div>
+              <select
+                value={aiDetection.service}
+                onChange={(e) => aiDetection.setService(e.target.value)}
+                className="px-2 py-1.5 rounded border text-sm"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+              >
+                <option value="pangram">Pangram</option>
+                <option value="gptzero">GPTZero</option>
+              </select>
+            </div>
+            <div>
+              <div className="font-medium mb-1" style={{ color: 'var(--color-text-primary)' }}>API key</div>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={aiDetKey}
+                  placeholder={hasKey(aiKeyName) ? '•••••••• (saved)' : `${aiKeyName} API key`}
+                  onChange={(e) => setAiDetKey(e.target.value)}
+                  className="flex-1 px-2 py-1.5 rounded border text-sm"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-primary)' }}
+                />
+                <button
+                  type="button"
+                  disabled={!aiDetKey.trim()}
+                  onClick={() => { if (aiDetKey.trim()) { setKey(aiKeyName, aiDetKey.trim()); setAiDetKey('') } }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{ backgroundColor: accent, color: 'white', opacity: aiDetKey.trim() ? 1 : 0.5, cursor: aiDetKey.trim() ? 'pointer' : 'not-allowed' }}
+                >
+                  Save
+                </button>
+                {hasKey(aiKeyName) && (
+                  <button
+                    type="button"
+                    onClick={() => deleteKey(aiKeyName)}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium border"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+            <label className="flex items-start gap-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+              <input
+                type="checkbox"
+                checked={aiDetection.consent}
+                onChange={(e) => aiDetection.setConsent(e.target.checked)}
+                style={{ marginTop: 3, accentColor: 'var(--color-accent)' }}
+              />
+              <span>
+                I understand the manuscript text (which may be unpublished) will be sent to{' '}
+                <strong>{aiDetection.service}</strong>, a third-party service, for analysis.
+              </span>
+            </label>
+          </div>
+        )}
+
+        {/* Attribution for the open-source detectors / services used. */}
+        <div className="pt-2 mt-1 border-t text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
+          <div className="mb-1">Detection sources & credits:</div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {[
+              ['desklib/ai-text-detector (local model, MIT)', 'https://huggingface.co/desklib/ai-text-detector-v1.01'],
+              ['harshaneel/humanize (LLM-judge rubric, MIT)', 'https://github.com/harshaneel/humanize'],
+              ['distil-labs/distil-ai-slop-detector', 'https://github.com/distil-labs/distil-ai-slop-detector'],
+              ['Pangram', 'https://www.pangram.com'],
+              ['GPTZero', 'https://gptzero.me'],
+            ].map(([label, url]) => (
+              <button
+                key={url}
+                type="button"
+                onClick={() => openExternal(url)}
+                className="underline"
+                style={{ color: 'var(--color-accent, #3b82f6)' }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const navItems = [
     { id: 'General', label: 'General', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -528,6 +741,11 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     { id: 'API Keys', label: 'API Keys', icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+      </svg>
+    )},
+    { id: 'AI Detection', label: 'AI Detection', icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.456-2.456L14.25 6l1.035-.259a3.375 3.375 0 002.456-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
       </svg>
     )},
   ]
@@ -1366,6 +1584,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 {activeSection === 'General' && renderGeneralSection()}
                 {activeSection === 'LLM' && renderLLMSection()}
                 {activeSection === 'API Keys' && renderAPIKeysSection()}
+                {activeSection === 'AI Detection' && renderAIDetectionSection()}
               </>
             )}
           </div>

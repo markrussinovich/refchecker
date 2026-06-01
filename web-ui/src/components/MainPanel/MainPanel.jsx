@@ -10,6 +10,7 @@ import SeenReferencesView from './SeenReferencesView'
 import BatchSummaryView from './BatchSummaryView'
 import GraphView from './GraphView'
 import SimilarPapersPanel from './SimilarPapersPanel'
+import AIDetectionPanel from './AIDetectionPanel'
 import HealthBadge from './HealthBadge'
 import LLMUsageBadge from './LLMUsageBadge'
 import { useSettingsStore } from '../../stores/useSettingsStore'
@@ -36,6 +37,7 @@ export default function MainPanel() {
     status: checkStoreStatus,
     references: checkStoreRefs,
     stats: checkStoreStats,
+    aiDetection: checkStoreAiDetection,
     currentCheckId,
     clearStatusFilter,
     statusFilter,
@@ -43,6 +45,7 @@ export default function MainPanel() {
     status: s.status,
     references: s.references,
     stats: s.stats,
+    aiDetection: s.aiDetection,
     currentCheckId: s.currentCheckId,
     clearStatusFilter: s.clearStatusFilter,
     statusFilter: s.statusFilter,
@@ -238,6 +241,14 @@ export default function MainPanel() {
     }
   }, [isCurrentCheck, checkStoreStats, hasSelectedCheckData, selectedCheck, displayRefs, isInProgress])
 
+  // Document-level AI-generated-text detection: live result for the current
+  // check, else the persisted result on a selected historical check.
+  const displayAiDetection = useMemo(() => {
+    if (isCurrentCheck && checkStoreAiDetection) return checkStoreAiDetection
+    if (hasSelectedCheckData && selectedCheck.ai_detection) return selectedCheck.ai_detection
+    return null
+  }, [isCurrentCheck, checkStoreAiDetection, hasSelectedCheckData, selectedCheck])
+
   return (
     <main 
       ref={mainRef}
@@ -330,6 +341,11 @@ export default function MainPanel() {
               </>
             }
           />
+        )}
+
+        {/* Document-level AI-generated-text detection (opt-in) */}
+        {showContent && displayAiDetection && (
+          <AIDetectionPanel detection={displayAiDetection} />
         )}
 
         {/* References / Corrections tabs */}

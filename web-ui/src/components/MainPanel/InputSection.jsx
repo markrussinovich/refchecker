@@ -6,6 +6,7 @@ import { useCheckStore } from '../../stores/useCheckStore'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import { useKeyStore } from '../../stores/useKeyStore'
+import { useAiDetectionStore } from '../../stores/useAiDetectionStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useFileUpload } from '../../hooks/useFileUpload'
 import * as api from '../../utils/api'
@@ -14,6 +15,31 @@ import { logger } from '../../utils/logger'
 function getConfigApiKey(keyStore, config) {
   if (!config) return null
   return keyStore.getKey(`llm:${config.id}`) || keyStore.getKey(config.provider)
+}
+
+/**
+ * Collect the opt-in AI-detection request fields, or null when disabled.
+ * Threaded into single + batch requests exactly like the LLM/hallucination
+ * params already are.
+ */
+function aiDetectionValues() {
+  const s = useAiDetectionStore.getState()
+  if (!s.enabled) return null
+  const out = { ai_detection_enabled: true, ai_detection_backend: s.backend }
+  if (s.backend === 'api') {
+    out.ai_detection_service = s.service
+    out.ai_detection_consent = !!s.consent
+    const key = useKeyStore.getState().getKey(s.service)
+    if (key) out.ai_detection_api_key = key
+  }
+  return out
+}
+
+function appendAiDetection(formData) {
+  const v = aiDetectionValues()
+  if (!v) return
+  Object.entries(v).forEach(([k, val]) =>
+    formData.append(k, typeof val === 'boolean' ? String(val) : val))
 }
 
 /**
@@ -181,6 +207,7 @@ export default function InputSection() {
       if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
       const ssKey = keyStore.getKey('semantic_scholar')
       if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
+      appendAiDetection(formData)
 
       logger.info('Check', 'Initiating check request', { 
         mode: inputMode, 
@@ -293,6 +320,7 @@ export default function InputSection() {
           api_key: llmKey,
           hallucination_api_key: hallucinationKey,
           semantic_scholar_api_key: ssKey,
+          ...(aiDetectionValues() || {}),
         })
       } else {
         // File batch
@@ -315,7 +343,8 @@ export default function InputSection() {
         if (llmKey) formData.append('api_key', llmKey)
         if (hallucinationKey) formData.append('hallucination_api_key', hallucinationKey)
         if (ssKey) formData.append('semantic_scholar_api_key', ssKey)
-        
+        appendAiDetection(formData)
+
         response = await api.startBatchFileCheck(formData)
       }
 

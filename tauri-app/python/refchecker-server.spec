@@ -100,9 +100,10 @@ a = Analysis(
         "IPython",
         "jupyter",
         "notebook",
-        "torch",       # vllm is opt-in; keep desktop bundle small
+        "torch",         # vllm is opt-in; keep desktop bundle small
         "vllm",
-        "transformers",
+        "transformers",  # also the AI-detection local backend — opt-in download
+        "onnxruntime",   # AI-detection local backend runtime — installed separately
     ],
     noarchive=False,
 )

@@ -1,0 +1,106 @@
+import { create } from 'zustand'
+import { logger } from '../utils/logger'
+import {
+  getAIDetectionModelStatus,
+  downloadAIDetectionModel,
+  deleteAIDetectionModel,
+} from '../utils/api'
+
+// AI-generated-text detection is an OPT-IN, client-side preference (it is not
+// an admin-gated server setting, so non-admin desktop users can toggle it).
+// Persisted in localStorage; threaded into each check request by InputSection.
+const STORAGE_KEY = 'refchecker.aiDetection.v1'
+
+const DEFAULTS = {
+  enabled: false,
+  backend: 'local',     // 'local' | 'llm-judge' | 'api'
+  service: 'pangram',   // for backend === 'api': 'pangram' | 'gptzero'
+  consent: false,       // explicit consent required for the API backend
+}
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return { ...DEFAULTS, ...JSON.parse(raw) }
+  } catch (e) {
+    logger.warn('AiDetectionStore', 'Failed to load preferences', e)
+  }
+  return { ...DEFAULTS }
+}
+
+function persist(state) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      enabled: state.enabled,
+      backend: state.backend,
+      service: state.service,
+      consent: state.consent,
+    }))
+  } catch (e) {
+    logger.warn('AiDetectionStore', 'Failed to persist preferences', e)
+  }
+}
+
+export const useAiDetectionStore = create((set, get) => ({
+  ...load(),
+
+  // Local-model lifecycle state
+  modelStatus: null,     // { state, installed, deps_available, size_bytes, ... }
+  modelBusy: false,
+  modelError: null,
+
+  setEnabled: (enabled) => { set({ enabled }); persist(get()) },
+  setBackend: (backend) => { set({ backend }); persist(get()) },
+  setService: (service) => { set({ service }); persist(get()) },
+  setConsent: (consent) => { set({ consent }); persist(get()) },
+
+  fetchModelStatus: async () => {
+    try {
+      const res = await getAIDetectionModelStatus()
+      set({ modelStatus: res.data, modelError: null })
+      return res.data
+    } catch (e) {
+      logger.warn('AiDetectionStore', 'model status failed', e)
+      set({ modelError: e?.response?.data?.detail || e.message })
+      return null
+    }
+  },
+
+  downloadModel: async () => {
+    set({ modelBusy: true, modelError: null })
+    try {
+      await downloadAIDetectionModel()
+      // Poll until the background download settles. A transient status-fetch
+      // failure (null) must not end the poll while the server is still
+      // downloading — tolerate a few consecutive misses before giving up.
+      let misses = 0
+      for (let i = 0; i < 600; i++) {
+        const st = await get().fetchModelStatus()
+        if (!st) {
+          if (++misses >= 3) break
+          await new Promise((r) => setTimeout(r, 2000))
+          continue
+        }
+        misses = 0
+        if (st.state === 'installed' || st.state === 'error' || st.installed) break
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+    } catch (e) {
+      set({ modelError: e?.response?.data?.detail || e.message })
+    } finally {
+      set({ modelBusy: false })
+    }
+  },
+
+  deleteModel: async () => {
+    set({ modelBusy: true, modelError: null })
+    try {
+      const res = await deleteAIDetectionModel()
+      set({ modelStatus: res.data })
+    } catch (e) {
+      set({ modelError: e?.response?.data?.detail || e.message })
+    } finally {
+      set({ modelBusy: false })
+    }
+  },
+}))

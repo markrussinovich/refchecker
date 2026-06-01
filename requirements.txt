@@ -51,6 +51,13 @@ gxl-paperclip>=0.1.0
 # pip install torch vllm huggingface_hub
 huggingface_hub>=1.12.0
 
+# AI-generated-text detection — LOCAL backend (optional, install separately;
+# deliberately NOT bundled into the desktop sidecar to keep it small). The
+# llm-judge and api backends need none of these. Prefer the lighter onnxruntime
+# stack; torch is the heavier fallback.
+# pip install onnxruntime transformers        # lighter, PyInstaller-friendly
+# pip install torch transformers              # fallback runtime
+
 # Development dependencies
 pytest>=9.0.3
 pytest-cov>=7.1.0

@@ -871,7 +871,12 @@ class ProgressRefChecker:
                  hallucination_provider: Optional[str] = None,
                  hallucination_model: Optional[str] = None,
                  hallucination_api_key: Optional[str] = None,
-                 hallucination_endpoint: Optional[str] = None):
+                 hallucination_endpoint: Optional[str] = None,
+                 ai_detection_enabled: bool = False,
+                 ai_detection_backend: str = "local",
+                 ai_detection_api_key: Optional[str] = None,
+                 ai_detection_consent: bool = False,
+                 ai_detection_service: str = "pangram"):
         """
         Initialize the progress-aware refchecker
 
@@ -897,6 +902,15 @@ class ProgressRefChecker:
         self.bibliography_source_callback = bibliography_source_callback
         self.cache_dir = cache_dir or str(get_data_dir() / "cache")
         Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
+
+        # AI-generated-text detection (opt-in). The body text of the
+        # submitted manuscript is analyzed AFTER reference checking — see
+        # `_run_ai_detection`. Off by default; never blocks the check.
+        self.ai_detection_enabled = bool(ai_detection_enabled)
+        self.ai_detection_backend = (ai_detection_backend or "local").lower()
+        self.ai_detection_api_key = ai_detection_api_key
+        self.ai_detection_consent = bool(ai_detection_consent)
+        self.ai_detection_service = (ai_detection_service or "pangram").lower()
 
         # Initialize LLM if requested
         self.llm = None
@@ -1547,6 +1561,10 @@ class ProgressRefChecker:
         except Exception:
             pass
 
+        # Concurrent AI-detection task handle — declared before the try so the
+        # finally can always reap it, no matter where the body exits.
+        ai_detection_task = None
+
         try:
             # Reset per-check counters so the UI token meter reflects what
             # THIS check spent, not lifetime totals across the session.
@@ -2185,6 +2203,15 @@ class ProgressRefChecker:
                     detail_msg += " No LLM is configured — set one up in Settings → LLM provider to enable LLM-assisted extraction."
                 elif not paper_text or len(paper_text or "") < 200:
                     detail_msg += " The file's text content looks empty or too short."
+                # Still run AI-text detection on the body even when no
+                # references were found — a bibliography-less manuscript with
+                # real prose is exactly the case the feature is wanted for.
+                # paper_text is live here; it is dropped from the return dict.
+                try:
+                    no_ref_detection = await self._run_ai_detection(paper_text, paper_title)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("AI detection (no-refs path) failed (non-fatal): %s", e)
+                    no_ref_detection = None
                 await self.emit_progress("completed", {
                     "total_refs": 0,
                     "errors_count": 0,
@@ -2197,7 +2224,7 @@ class ProgressRefChecker:
                     "message": detail_msg,
                     "check_id": self.check_id,
                 })
-                return {
+                no_ref_result = {
                     "paper_title": paper_title,
                     "paper_source": paper_source,
                     "extraction_method": extraction_method,
@@ -2212,6 +2239,9 @@ class ProgressRefChecker:
                         "verified_count": 0
                     }
                 }
+                if no_ref_detection is not None:
+                    no_ref_result["ai_detection"] = no_ref_detection
+                return no_ref_result
 
             # Step 3: Check references in parallel (like CLI)
             total_refs = len(references)
@@ -2236,6 +2266,21 @@ class ProgressRefChecker:
                 "total": total_refs,
                 "message": f"Checking {total_refs} references..."
             })
+
+            # AI-generated-text detection runs CONCURRENTLY with reference
+            # checking when both are enabled (the user asked for parallel
+            # execution). Launch it now — paper_text is final at this point —
+            # and await it after reference checking so reference results still
+            # stream first and the terminal "completed" event fires only once
+            # BOTH have finished. The two tasks share no mutable state that
+            # races: detection emits only 'progress'/'ai_detection_result'
+            # (never 'reference_result'), so it doesn't touch the Seen-Refs
+            # upsert path or the reference accumulators; usage records are
+            # tracked under a distinct flow and the tracker is lock-guarded.
+            if self.ai_detection_enabled:
+                ai_detection_task = asyncio.create_task(
+                    self._run_ai_detection(paper_text, paper_title)
+                )
 
             # Process references in parallel.
             # `extraction_method` is the bibliography-extraction stage we
@@ -2304,6 +2349,19 @@ class ProgressRefChecker:
                 }
             }
 
+            # Await the concurrently-running AI-detection task (launched before
+            # reference checking) and attach its result. It usually finished
+            # while references were being checked; if detection is disabled the
+            # task is None and this is a no-op.
+            if ai_detection_task is not None:
+                try:
+                    ai_detection = await ai_detection_task
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("AI detection task failed (non-fatal): %s", e)
+                    ai_detection = None
+                if ai_detection is not None:
+                    final_result["ai_detection"] = ai_detection
+
             await self.emit_progress("completed", {**final_result["summary"], "check_id": self.check_id, "paper_title": paper_title})
 
             return final_result
@@ -2315,6 +2373,98 @@ class ProgressRefChecker:
                 "details": type(e).__name__
             })
             raise
+        finally:
+            # Never let the concurrent AI-detection task outlive the check.
+            # On the success path it was already awaited (done()); on an
+            # exception OR cancellation (CancelledError is a BaseException, so
+            # the except above does NOT catch it) we cancel and reap it here so
+            # there is no orphaned task, no stray late 'ai_detection_result'
+            # event, and no paid API call lingering past a cancelled check.
+            if ai_detection_task is not None and not ai_detection_task.done():
+                ai_detection_task.cancel()
+                try:
+                    await ai_detection_task
+                except BaseException:  # noqa: BLE001 — reaping a cancelled task
+                    pass
+
+    async def _run_ai_detection(self, paper_text: str, paper_title: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Analyze the manuscript body for AI-generated-text likelihood.
+
+        Opt-in and best-effort: a detection failure or timeout never fails the
+        check. Emits a dedicated ``ai_detection_result`` WS event and returns
+        the result dict so the caller can persist it. The honest "unavailable"
+        / "inconclusive" states are surfaced to the UI (e.g. no body text on
+        .bbl/.bib source paths, model not downloaded, input too short).
+        """
+        if not self.ai_detection_enabled:
+            return None
+
+        from refchecker.ai_detection import run_detection, DEFAULT_BACKEND
+
+        backend = self.ai_detection_backend or DEFAULT_BACKEND
+        opts: Dict[str, Any] = {}
+        if backend in ("llm-judge", "llm"):
+            opts = {
+                "provider": self.llm_provider,
+                "api_key": self.api_key,
+                "model": self.llm_model,
+                "endpoint": self.endpoint,
+            }
+        elif backend == "api":
+            opts = {
+                "service": self.ai_detection_service,
+                "api_key": self.ai_detection_api_key,
+                "consent": self.ai_detection_consent,
+            }
+
+        # Use a 'phase' event (message-only) rather than 'progress' so it never
+        # touches the numeric progress bar — a bare 'progress' with no
+        # current/total/percent would compute NaN% in the UI. Best-effort: an
+        # emit failure on the detection path must never fail the reference
+        # check (this runs as a concurrent task whose exception would propagate).
+        try:
+            await self.emit_progress("phase", {
+                "message": "Analyzing manuscript for AI-generated text…",
+            })
+        except Exception as e:  # noqa: BLE001
+            logger.debug("ai_detection phase emit skipped: %s", e)
+
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    run_detection,
+                    paper_text or "",
+                    title=paper_title,
+                    backend=backend,
+                    check_id=self.check_id,
+                    **opts,
+                ),
+                timeout=150,
+            )
+            payload = result.to_dict()
+        except asyncio.TimeoutError:
+            # The asyncio wrapper is cancelled, but the underlying OS worker
+            # thread keeps running run_detection() to completion (threads can't
+            # be force-killed). For the API/LLM backends the request was already
+            # billed, so when that thread finishes it records the real usage/cost
+            # into the per-check meter even though we report 'timeout' here — the
+            # cost was genuinely incurred, so attributing it is correct.
+            logger.warning("AI detection timed out for check %s", self.check_id)
+            from refchecker.ai_detection.base import make_unavailable
+            payload = make_unavailable("timeout", backend).to_dict()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("AI detection failed for check %s: %s", self.check_id, e)
+            from refchecker.ai_detection.base import make_unavailable
+            payload = make_unavailable("detection_error", backend).to_dict()
+
+        try:
+            await self.emit_progress("ai_detection_result", {
+                **payload,
+                "check_id": self.check_id,
+            })
+        except Exception as e:  # noqa: BLE001
+            logger.debug("ai_detection_result emit skipped: %s", e)
+        return payload
 
     def _parse_llm_reference(self, ref_string: str) -> Optional[Dict[str, Any]]:
         """Parse a single LLM reference string into a structured dict.

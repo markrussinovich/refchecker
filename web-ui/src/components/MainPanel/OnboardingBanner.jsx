@@ -54,8 +54,8 @@ export default function OnboardingBanner({ onOpenSettings }) {
     <div
       className="rounded-lg border p-4 mb-4"
       style={{
-        borderColor: 'var(--color-accent, #3b82f6)',
-        backgroundColor: 'rgba(59,130,246,0.06)',
+        borderColor: 'var(--color-info)',
+        backgroundColor: 'var(--color-info-bg)',
       }}
     >
       <div className="flex items-start justify-between gap-3">
@@ -178,6 +178,29 @@ export default function OnboardingBanner({ onOpenSettings }) {
                   </button>
                   {' '}— paste it into <button type="button" onClick={() => onOpenSettings?.('API Keys')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → API Keys</button>.
                   The SDK is already bundled, so the next check picks it up automatically.
+                </div>
+              </div>
+            </li>
+
+            <li className="flex items-start gap-2">
+              <span
+                className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
+                style={{
+                  width: 22, height: 22, flexShrink: 0,
+                  backgroundColor: 'var(--color-text-muted, #94a3b8)',
+                  color: 'white',
+                }}
+              >
+                i
+              </span>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium">Bonus: AI-generated-text detection</div>
+                <div style={{ color: 'var(--color-text-secondary)' }}>
+                  Optionally flag whether each checked article's prose looks AI-generated, with a
+                  low/medium/high likelihood band. Enable it under{' '}
+                  <button type="button" onClick={() => onOpenSettings?.('AI Detection')} className="underline" style={{ color: 'var(--color-accent, #3b82f6)' }}>Settings → AI Detection</button>.
+                  Note: detection is unreliable on technical and non-native-English academic writing —
+                  treat results as an advisory self-check, never as proof.
                 </div>
               </div>
             </li>
