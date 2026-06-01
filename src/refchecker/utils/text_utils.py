@@ -1299,6 +1299,17 @@ def is_name_match(name1: str, name2: str) -> bool:
 
     raw_name1 = normalize_apostrophes(name1.strip())
     raw_name2 = normalize_apostrophes(name2.strip())
+
+    # v0.7.67 (Issue 3a): normalise Unicode hyphen variants with optional
+    # surrounding whitespace down to a single ASCII hyphen BEFORE we
+    # tokenise. PDFs and some database exports render hyphenated surnames
+    # as e.g. "Tejada ‐ Romero" (U+2010 HYPHEN with spaces) where the
+    # cited form is the ASCII "Tejada-Romero" — without this the surname
+    # token splits in two and downstream matching fails.
+    _hyphen_pat = re.compile(r'\s*[‐‑‒–—−]\s*')
+    raw_name1 = _hyphen_pat.sub('-', raw_name1)
+    raw_name2 = _hyphen_pat.sub('-', raw_name2)
+
     raw_parts1 = raw_name1.split()
     raw_parts2 = raw_name2.split()
 
@@ -1394,6 +1405,28 @@ def is_name_match(name1: str, name2: str) -> bool:
             or last_has_period
             or first_looks_like_surname
         )
+        # v0.7.67 (Issue 3b): when leading tokens look like a surname AND
+        # the trailing 2+ tokens are EACH a bare single uppercase letter
+        # (the Vancouver "M J G" run), collapse those tokens into one
+        # initial cluster before rotating. Covers Spanish/Portuguese
+        # APA-Vancouver hybrids like "De Tejada-Romero M J G" where the
+        # cited form puts every given initial as its own token.
+        if leading_looks_like_surname and len(parts) >= 3:
+            trailing_singles = []
+            i = len(parts) - 1
+            while i >= 0:
+                t = parts[i].rstrip('.')
+                if len(t) == 1 and t.isalpha() and t.isupper():
+                    trailing_singles.insert(0, t)
+                    i -= 1
+                else:
+                    break
+            if len(trailing_singles) >= 2 and i >= 0:
+                # Re-check leading is still ≥2 tokens to keep surname-ness.
+                leading = parts[: i + 1]
+                if len(leading) >= 1:
+                    initials = [t + '.' for t in trailing_singles]
+                    return initials + leading
         split = _split_vancouver_initials(parts[-1], allow_single=allow_single)
         if split is None:
             return parts

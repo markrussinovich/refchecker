@@ -610,32 +610,36 @@ class EnhancedHybridReferenceChecker:
         return merged_data, merged_errors
 
     def _is_wrong_paper_match(self, reference, verified_data, errors, api_name):
-        """Detect when a checker matched the WRONG paper (Allen 2021 vs Zhang 2010 case).
+        """Detect when a checker matched the WRONG paper.
 
-        Semantic Scholar's /paper/search/match endpoint returns the most-cited
-        paper sharing the cited title, regardless of year or author overlap.
-        When the cited reference says "Epidemiology of osteoarthritis" by
-        Zhang & Jordan (2010) and SS returns the 2021 Allen review with the
-        same title, we'd otherwise accept that candidate and emit confusing
-        year+author warnings on a paper that obviously isn't the citation.
+        v0.7.63 fired on year-gap-≥5 + zero-author-overlap (Allen 2021 vs
+        Zhang 2010). v0.7.67 broadens this with three additional signals
+        for cases where the year is close enough to slip through:
 
-        Wrong-paper signature: BOTH
-          (a) year gap ≥ 5 (or the actual year is ≥5 off the cited year), AND
-          (b) zero overlap between cited author surnames and actual author
-              surnames (a no-matching-authors-style verifier error).
+          - SHORT cited title (≤3 tokens, e.g. "Osteoporosis", "Discoid
+            meniscus") is a generic word/phrase that re-occurs across
+            many papers. Treat zero-surname-overlap as wrong-paper even
+            when the year gap is small.
+          - Year-gap-≥2 + venue-mismatch + zero-overlap is also wrong-
+            paper signature (Niu/Warindra discoid meniscus case: 2022
+            Clin Sports Med vs 2024 Orthopaedic Proceedings).
+          - Same-authors but the cited title is a SHORT generic phrase
+            AND the actual title is far longer (length ratio ≥3) AND
+            venue doesn't match → wrong paper. Catches the Ensrud 2017
+            "Osteoporosis" review vs same-authors 2025 JAMA Netw Open
+            "Identifying Younger Postmenopausal Women..." case.
 
-        Skipped when the match is DOI- or ArXiv-anchored — those identifiers
-        are authoritative, and any year/author drift there is a real citation
-        error worth surfacing rather than a wrong-paper drift.
+        Always skipped when the match is DOI/ArXiv/PMID-anchored — those
+        identifiers are authoritative and any drift is a real citation
+        error worth surfacing.
         """
         if not verified_data:
             return False
 
-        # DOI/ArXiv-anchored matches are authoritative; never reject.
+        # DOI/ArXiv/PMID-anchored matches are authoritative; never reject.
         try:
             cited_doi = (reference.get('doi') or '').strip()
             if cited_doi:
-                # Strip URL prefixes
                 for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
                     if cited_doi.lower().startswith(prefix):
                         cited_doi = cited_doi[len(prefix):]
@@ -649,10 +653,27 @@ class EnhancedHybridReferenceChecker:
             ref_url = (reference.get('url') or '') + ' ' + (reference.get('venue') or '')
             if 'arxiv.org' in ref_url.lower() or (reference.get('externalIds', {}) or {}).get('ArXiv'):
                 return False
+            # PMID anchored?
+            cited_pmid = (
+                reference.get('pmid')
+                or (reference.get('externalIds') or {}).get('PubMed')
+                or (reference.get('externalIds') or {}).get('PMID')
+                or ''
+            )
+            cited_pmid = str(cited_pmid or '').strip()
+            if cited_pmid:
+                vd_ext = verified_data.get('externalIds') or {}
+                vd_pmid = (
+                    str(verified_data.get('pmid') or '').strip()
+                    or str(vd_ext.get('PubMed') or '').strip()
+                    or str(vd_ext.get('PMID') or '').strip()
+                )
+                if vd_pmid and cited_pmid == vd_pmid:
+                    return False
         except Exception:
             pass
 
-        # ── Year-gap check ──
+        # ── Year-gap calculation ──
         try:
             cited_year = int(reference.get('year')) if reference.get('year') else None
         except (TypeError, ValueError):
@@ -663,11 +684,10 @@ class EnhancedHybridReferenceChecker:
         except (TypeError, ValueError):
             actual_year = None
 
-        year_gap_large = False
+        year_gap = None
         if cited_year and actual_year:
-            year_gap_large = abs(cited_year - actual_year) >= 5
+            year_gap = abs(cited_year - actual_year)
         else:
-            # Also check the errors list for a year mismatch entry.
             for err in errors or []:
                 etype = err.get('error_type') or err.get('warning_type') or ''
                 if etype != 'year':
@@ -675,16 +695,13 @@ class EnhancedHybridReferenceChecker:
                 try:
                     correct_year = int(err.get('ref_year_correct') or 0)
                     cy = cited_year or int((err.get('cited_value') or '0') or 0)
-                    if correct_year and cy and abs(correct_year - cy) >= 5:
-                        year_gap_large = True
+                    if correct_year and cy:
+                        year_gap = abs(correct_year - cy)
                         break
                 except (TypeError, ValueError):
                     continue
-        if not year_gap_large:
-            return False
 
-        # ── Zero-author-overlap check ──
-        # Compare cited surnames to actual surnames after diacritic-strip.
+        # ── Surname-overlap calculation ──
         try:
             from refchecker.utils.text_utils import normalize_diacritics_simple
         except Exception:
@@ -698,44 +715,127 @@ class EnhancedHybridReferenceChecker:
                 if not n:
                     continue
                 s = normalize_diacritics_simple(str(n).strip().lower())
-                # Strip a trailing initials cluster ("Zhang Y" → "zhang"),
-                # and grab the LAST whitespace-separated chunk as the
-                # surname proxy. Crude but symmetric on both sides.
                 toks = [t for t in s.replace(',', ' ').split() if t]
                 if not toks:
                     continue
-                # Drop trailing 1-3 letter initial-like tokens.
                 while toks and len(toks[-1].rstrip('.')) <= 3 and toks[-1].rstrip('.').isalpha():
                     if len(toks) == 1:
-                        break  # don't strip the only token
+                        break
                     toks.pop()
                 if toks:
-                    # Take last 2 tokens to cover compound surnames
-                    # ("coronel granado", "dos santos"). Adding both
-                    # individually keeps the overlap check simple.
                     for t in toks[-2:]:
                         if len(t) >= 3:
                             out.add(t)
             return out
 
         cited_surnames = _surnames(reference.get('authors'))
-        actual_authors_raw = verified_data.get('authors') or []
-        actual_surnames = _surnames(actual_authors_raw)
-
+        actual_surnames = _surnames(verified_data.get('authors') or [])
         if not cited_surnames or not actual_surnames:
-            # Can't verify overlap — don't reject (avoid false negatives
-            # on records with missing authors).
-            return False
+            # Can't determine overlap; for the title+venue branch we may
+            # still proceed below, but it requires title/venue mismatch.
+            surname_overlap = None
+        else:
+            surname_overlap = len(cited_surnames & actual_surnames)
 
-        if cited_surnames & actual_surnames:
-            return False  # Some overlap — likely correct paper, accept it.
+        # ── Title/venue helpers ──
+        def _str(x):
+            return str(x or '').strip()
 
-        logger.debug(
-            f"Enhanced Hybrid: wrong-paper signature on {api_name} — "
-            f"cited surnames {sorted(cited_surnames)[:3]} vs actual "
-            f"{sorted(actual_surnames)[:3]} (year gap large, zero overlap)"
+        cited_title = _str(reference.get('title'))
+        actual_title = _str(verified_data.get('title'))
+        cited_title_tokens = len(cited_title.split())
+        actual_title_tokens = len(actual_title.split())
+        short_cited = 0 < cited_title_tokens <= 3
+        if cited_title_tokens > 0 and actual_title_tokens > 0:
+            length_ratio = max(cited_title_tokens, actual_title_tokens) / max(
+                1, min(cited_title_tokens, actual_title_tokens)
+            )
+        else:
+            length_ratio = 1.0
+        title_length_mismatch = length_ratio >= 3.0
+
+        venue_match = self._venues_compatible(
+            reference.get('venue') or reference.get('journal') or '',
+            verified_data.get('venue') or verified_data.get('journal') or '',
         )
-        return True
+
+        # ── Rules ──
+        # Zero-author-overlap branch
+        if surname_overlap == 0:
+            if year_gap is not None and year_gap >= 5:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — year_gap={year_gap}, "
+                    f"zero author overlap"
+                )
+                return True
+            if short_cited:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — short cited title "
+                    f"'{cited_title}' with zero author overlap"
+                )
+                return True
+            if year_gap is not None and year_gap >= 2 and not venue_match:
+                logger.debug(
+                    f"Enhanced Hybrid: wrong-paper on {api_name} — year_gap={year_gap}, "
+                    f"venue mismatch, zero author overlap"
+                )
+                return True
+
+        # Same-authors-but-generic-title branch (Ensrud "Osteoporosis"):
+        # short cited title + wide title-length mismatch + venue mismatch
+        # → wrong paper regardless of author overlap.
+        if short_cited and title_length_mismatch and not venue_match:
+            logger.debug(
+                f"Enhanced Hybrid: wrong-paper on {api_name} — short generic cited title "
+                f"'{cited_title}' ({cited_title_tokens} tok) vs much longer actual "
+                f"({actual_title_tokens} tok), venue mismatch"
+            )
+            return True
+
+        return False
+
+    def _venues_compatible(self, cited_venue, actual_venue):
+        """Cheap venue-equivalence check used by `_is_wrong_paper_match`.
+
+        Tries (in order):
+          1. Exact match after lowercase + punctuation strip
+          2. Substring containment either direction
+          3. `is_acceptable_abbreviation` from `venue_abbreviations`
+             (handles NLM abbreviation ↔ full title pairs)
+
+        Returns True when either string is empty (don't penalise missing
+        venue data) and True on any positive signal. Conservative — when
+        in doubt, return True (don't trigger wrong-paper rejection on a
+        venue we simply can't classify).
+        """
+        cv = (cited_venue or '').strip()
+        av = (actual_venue or '').strip()
+        if not cv or not av:
+            return True  # missing data — don't reject on venue signal
+
+        def _norm(s):
+            import re as _re
+            s = s.lower()
+            s = _re.sub(r'[\.,;:\(\)\[\]\"\'`]', ' ', s)
+            s = _re.sub(r'\s+', ' ', s).strip()
+            return s
+
+        cv_n = _norm(cv)
+        av_n = _norm(av)
+        if not cv_n or not av_n:
+            return True
+        if cv_n == av_n:
+            return True
+        if cv_n in av_n or av_n in cv_n:
+            return True
+
+        try:
+            from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation
+            if is_acceptable_abbreviation(cv, av) or is_acceptable_abbreviation(av, cv):
+                return True
+        except Exception:
+            pass
+        return False
 
     def _has_major_author_discrepancy(self, errors):
         """Check if errors indicate a major author discrepancy.

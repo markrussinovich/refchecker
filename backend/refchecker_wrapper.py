@@ -450,6 +450,28 @@ def _attach_citation_contexts(references, paper_text):
     if not references or not paper_text:
         return
     import re
+    # v0.7.67 (Issue 5): page-header / running-foot noise that PDF text
+    # extractors interleave with body text. When the marker scan grabs a
+    # sentence that's really a page header ("Page 2 of 8 Yan et al. BMC
+    # Musculoskeletal Disorders (2026) 27:194"), we end up displaying
+    # journal furniture as "citation context", which is just confusing.
+    # The patterns below drop any candidate sentence whose run-of-text
+    # matches the typical header shapes. Conservative — only filters
+    # things that are clearly publisher boilerplate, not real body text.
+    _HEADER_NOISE_RE = re.compile(
+        r"(?ix)"
+        r"(?:^|[\s,;:])page\s+\d+\s+of\s+\d+"          # "Page N of M"
+        r"|\bdoi\s*[:\s]\s*10\.\d{3,}/\S+"             # bare DOI noise
+        r"|\b(?:bmc|plos|nature|frontiers|jama|lancet|cell|science|"
+        r"european|american|british|international|annals)\b[^.]{0,80}\(\d{4}\)\s*\d+[:;\(]"
+        # journal-name + (year) + volume:page → running header
+    )
+    def _is_header_noise(text: str) -> bool:
+        if not text:
+            return False
+        if len(text) < 12:
+            return False
+        return bool(_HEADER_NOISE_RE.search(text))
     # v0.7.66 (Issue A1): truncate paper_text at the bibliography heading
     # before running the marker scan. The full input includes the
     # references section, where lines like
@@ -520,6 +542,9 @@ def _attach_citation_contexts(references, paper_text):
     for i, sent in enumerate(sentences):
         stripped = sent.strip()
         if not stripped:
+            continue
+        # v0.7.67 (Issue 5): skip page-header / running-foot lines
+        if _is_header_noise(stripped):
             continue
         for m in _NUMERIC_MARKER_RE.finditer(stripped):
             marker_text = m.group(0)
@@ -661,6 +686,9 @@ def _attach_citation_contexts(references, paper_text):
         for i, sent in enumerate(sentences):
             stripped = sent.strip()
             if not stripped:
+                continue
+            # v0.7.67 (Issue 5): skip page-header / running-foot lines
+            if _is_header_noise(stripped):
                 continue
             for pat in au_yr_patterns:
                 for m in pat.finditer(stripped):
@@ -1444,11 +1472,26 @@ class ProgressRefChecker:
             if not isinstance(sentences, list):
                 continue
             contexts = []
+            # v0.7.67 (Issue 5): same page-header noise pattern used by
+            # the heuristic pass — keep the LLM-attached contexts free
+            # of journal furniture too. Cheap to compile here; runs once
+            # per LLM-augment pass per paper.
+            import re as _re_hdr
+            _hdr_re = _re_hdr.compile(
+                r"(?ix)"
+                r"(?:^|[\s,;:])page\s+\d+\s+of\s+\d+"
+                r"|\bdoi\s*[:\s]\s*10\.\d{3,}/\S+"
+                r"|\b(?:bmc|plos|nature|frontiers|jama|lancet|cell|science|"
+                r"european|american|british|international|annals)\b[^.]{0,80}\(\d{4}\)\s*\d+[:;\(]"
+            )
             for s in sentences[:3]:
                 if not isinstance(s, str) or not s.strip():
                     continue
+                clean = s.strip()
+                if len(clean) >= 12 and _hdr_re.search(clean):
+                    continue
                 contexts.append({
-                    "sentence": s.strip()[:420],
+                    "sentence": clean[:420],
                     "marker": "",  # LLM doesn't return a literal marker
                     "before": "",
                     "after": "",

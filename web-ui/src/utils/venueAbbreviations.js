@@ -71,8 +71,8 @@ const NLM_ABBREV_TO_FULL = {
   // Orthopaedics / sports medicine (v0.7.58)
   'orthop clin north am': 'orthopedic clinics of north america',
   'j orthop res': 'journal of orthopaedic research',
-  'j bone joint surg am': 'the journal of bone and joint surgery american volume',
-  'j bone joint surg br': 'the journal of bone and joint surgery british volume',
+  'j bone joint surg am': 'journal of bone and joint surgery american volume',
+  'j bone joint surg br': 'journal of bone and joint surgery british volume',
   'j arthroplasty': 'the journal of arthroplasty',
   'am j sports med': 'the american journal of sports medicine',
   'arthrosc': 'arthroscopy',
@@ -80,6 +80,12 @@ const NLM_ABBREV_TO_FULL = {
   'osteoarthritis cartilage': 'osteoarthritis and cartilage',
   'clin orthop relat res': 'clinical orthopaedics and related research',
   'knee surg sports traumatol arthrosc': 'knee surgery sports traumatology arthroscopy',
+  // v0.7.67 additions
+  'bone joint j': 'the bone and joint journal',
+  'clin sports med': 'clinics in sports medicine',
+  'j orthop trauma': 'journal of orthopaedic trauma',
+  'acta diabetol': 'acta diabetologica',
+  'jama netw open': 'jama network open',
   'ajnr': 'american journal of neuroradiology',
   'am j neuroradiol': 'american journal of neuroradiology',
   'ajnr am j neuroradiol': 'american journal of neuroradiology',
@@ -129,6 +135,12 @@ function normalizeVenue(v) {
   s = s.replace(/^["'“”‘’<>[\](){}]+|["'“”‘’<>[\](){}]+$/g, '')
   s = s.replace(/\.\s*$/, '')
   s = s.replace(/,\s*$/, '')
+  // v0.7.67: strip internal punctuation, hyphen-joiners, and leading "the"
+  // so "Journal of Bone and Joint Surgery. British Volume" /
+  // "Journal of Bone and Joint Surgery-british Volume" normalize equal.
+  s = s.replace(/[\.,]/g, ' ')
+  s = s.replace(/[-‐‑–—]/g, ' ')
+  s = s.replace(/^the\s+/, '')
   s = s.replace(/\s+/g, ' ')
   return s.trim()
 }

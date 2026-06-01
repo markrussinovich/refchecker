@@ -108,8 +108,8 @@ NLM_ABBREV_TO_FULL: Dict[str, str] = {
     # Orthopaedics / sports medicine — v0.7.58 batch additions
     'orthop clin north am': 'orthopedic clinics of north america',
     'j orthop res':       'journal of orthopaedic research',
-    'j bone joint surg am': 'the journal of bone and joint surgery american volume',
-    'j bone joint surg br': 'the journal of bone and joint surgery british volume',
+    'j bone joint surg am': 'journal of bone and joint surgery american volume',
+    'j bone joint surg br': 'journal of bone and joint surgery british volume',
     'j arthroplasty':     'the journal of arthroplasty',
     'am j sports med':    'the american journal of sports medicine',
     'arthrosc':           'arthroscopy',
@@ -117,6 +117,12 @@ NLM_ABBREV_TO_FULL: Dict[str, str] = {
     'osteoarthritis cartilage': 'osteoarthritis and cartilage',
     'clin orthop relat res': 'clinical orthopaedics and related research',
     'knee surg sports traumatol arthrosc': 'knee surgery sports traumatology arthroscopy',
+    # v0.7.67: more ortho / general-med pairs that caused false venue mismatches
+    'bone joint j':       'the bone and joint journal',
+    'clin sports med':    'clinics in sports medicine',
+    'j orthop trauma':    'journal of orthopaedic trauma',
+    'acta diabetol':      'acta diabetologica',
+    'jama netw open':     'jama network open',
     'ajnr':               'american journal of neuroradiology',
     'am j neuroradiol':   'american journal of neuroradiology',
     'ajnr am j neuroradiol': 'american journal of neuroradiology',
@@ -162,15 +168,28 @@ NLM_ABBREV_TO_FULL: Dict[str, str] = {
 
 
 def _normalize_venue(venue: Optional[str]) -> str:
-    """Lowercase, strip terminal periods/commas, collapse whitespace."""
+    """Lowercase, strip terminal periods/commas, collapse whitespace.
+
+    v0.7.67: also strip internal periods, commas, leading "the", and
+    hyphens used as compound joiners (e.g. "Journal of Bone and Joint
+    Surgery-british Volume" → "journal of bone and joint surgery british
+    volume") so common style variants normalize-equal.
+    """
     if not venue:
         return ''
     v = str(venue).strip().lower()
     # Strip wrapping quotes / brackets
     v = v.strip('"\'“”‘’<>[](){}')
-    # Common style suffixes the NLM key wouldn't have
+    # Drop trailing punctuation
     v = re.sub(r'\.\s*$', '', v)
     v = re.sub(r',\s*$', '', v)
+    # Strip internal periods/commas (style variants like
+    # "Journal of Bone and Joint Surgery. British Volume").
+    v = re.sub(r'[\.,]', ' ', v)
+    # Convert hyphens used as compound joiners to spaces.
+    v = re.sub(r'[-‐‑–—]', ' ', v)
+    # Drop a leading "the " (some sources include it, others don't).
+    v = re.sub(r'^the\s+', '', v)
     # Collapse multiple spaces
     v = re.sub(r'\s+', ' ', v)
     return v.strip()
