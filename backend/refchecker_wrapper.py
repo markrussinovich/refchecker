@@ -1123,6 +1123,26 @@ class ProgressRefChecker:
         except Exception as e:
             logger.debug("enrichment build failed: %s", e)
 
+        # Carry top-level doi / arxiv_id / pmid through to the result so the
+        # Seen-Refs identity key can resolve to a stable DOI/arxiv bucket
+        # even for refs that didn't verify against an external DB (where
+        # authoritative_urls would be empty). Without this, distinct refs
+        # collide on weak title-only keys and the Seen-Refs counter
+        # plateaus around 120. Prefer the verified value if present,
+        # otherwise fall back to whatever was on the cited reference.
+        _doi = (
+            (reference.get('doi') or reference.get('verified_doi') or '')
+            if isinstance(reference, dict) else ''
+        )
+        _arxiv = (
+            (reference.get('arxiv_id') or reference.get('verified_arxiv_id') or '')
+            if isinstance(reference, dict) else ''
+        )
+        _pmid = (
+            (reference.get('pmid') or reference.get('verified_pmid') or '')
+            if isinstance(reference, dict) else ''
+        )
+
         result = {
             "index": index,
             "title": reference.get('title') or reference.get('cited_url') or reference.get('url') or 'Unknown Title',
@@ -1130,6 +1150,9 @@ class ProgressRefChecker:
             "year": reference.get('year') or None,
             "venue": reference.get('venue'),
             "cited_url": reference.get('cited_url') or reference.get('url'),
+            "doi": _doi or None,
+            "arxiv_id": _arxiv or None,
+            "pmid": _pmid or None,
             "status": status,
             "errors": formatted_errors,
             "warnings": formatted_warnings,
@@ -1555,7 +1578,7 @@ class ProgressRefChecker:
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')
                         pdf_processor = PDFProcessor()
-                        paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, pdf_path, self.llm)
+                        paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
 
                         # Try to extract the paper title from the PDF content
                         # (only if we don't already have a title from the API)
@@ -1837,7 +1860,7 @@ class ProgressRefChecker:
                         pdf_path_for_fallback = pdf_path
                         set_extraction_method('pdf')
                         # Extract text using the same CLI path for parity.
-                        paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, pdf_path, self.llm)
+                        paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
                     else:
                         paper_text = ""  # Not needed since we have references
 
@@ -1851,7 +1874,7 @@ class ProgressRefChecker:
                 if paper_source.lower().endswith('.pdf'):
                     pdf_processor = PDFProcessor()
                     pdf_path_for_fallback = paper_source
-                    paper_text = await asyncio.to_thread(_extract_pdf_text_cli_style, paper_source, self.llm)
+                    paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, paper_source)
                     
                     # Try to extract the paper title from the PDF
                     try:
@@ -2444,6 +2467,24 @@ class ProgressRefChecker:
             })
             raise
 
+    def _extract_pdf_text_scoped(self, pdf_path: str) -> str:
+        """Run the CLI PDF-text extractor with check_id + FlowScope bound.
+
+        PDF text extraction can invoke the LLM as a fallback (when pdftotext /
+        Grobid / native parsing returns garbage). Those LLM calls happen on
+        the asyncio.to_thread worker thread, where the tracker's
+        threading.local check_id is unset — without this binding the tokens
+        land in the "default" / "other" buckets and the $ badge under-counts.
+        """
+        try:
+            from refchecker.llm import usage_tracker as _ut
+            if self.check_id is not None:
+                _ut.set_current_check(str(self.check_id))
+            with _ut.FlowScope("extract"):
+                return _extract_pdf_text_cli_style(pdf_path, self.llm)
+        except Exception:
+            return _extract_pdf_text_cli_style(pdf_path, self.llm)
+
     async def _extract_references_from_bibtex(self, bibtex_content: str) -> tuple:
         """Extract references from BibTeX/BBL content (from ArXiv source files).
 
@@ -2461,10 +2502,23 @@ class ProgressRefChecker:
         try:
             cli_checker = _make_cli_checker(self.llm)
             extraction_mode = (os.environ.get('REFCHECKER_EXTRACTION_MODE') or 'cascade').lower()
+            # Capture check_id + bind FlowScope("extract") inside each
+            # to_thread worker so per-check $ badge attribution doesn't
+            # drop on bibtex/bbl extraction paths. The threading.local
+            # used by the tracker doesn't cross asyncio.to_thread.
+            from refchecker.llm import usage_tracker as _usage_tracker_bib
+            _check_id_for_bib = self.check_id
+
+            def _bib_llm_extract(content):
+                if _check_id_for_bib is not None:
+                    _usage_tracker_bib.set_current_check(str(_check_id_for_bib))
+                with _usage_tracker_bib.FlowScope("extract"):
+                    return cli_checker.llm_extractor.extract_references(content)
+
             if extraction_mode == 'llm-only' and self.llm:
                 logger.info("extraction_mode=llm-only: bypassing deterministic bibtex/bbl parser")
                 try:
-                    llm_refs = await asyncio.to_thread(cli_checker.llm_extractor.extract_references, bibtex_content)
+                    llm_refs = await asyncio.to_thread(_bib_llm_extract, bibtex_content)
                     if llm_refs:
                         processed = await asyncio.to_thread(cli_checker._process_llm_extracted_references, llm_refs)
                         return processed, 'llm'
@@ -2486,7 +2540,7 @@ class ProgressRefChecker:
                         logger.debug(f"LaTeX parsing validation failed (quality: {validation['quality_score']:.2f}), trying LLM fallback")
                         # Try LLM fallback
                         try:
-                            llm_refs = await asyncio.to_thread(cli_checker.llm_extractor.extract_references, bibtex_content)
+                            llm_refs = await asyncio.to_thread(_bib_llm_extract, bibtex_content)
                             if llm_refs:
                                 # DEBUG: Log raw LLM output
                                 debug_log(f"LLM raw output ({len(llm_refs)} refs):")

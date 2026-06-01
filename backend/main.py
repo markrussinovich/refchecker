@@ -5109,8 +5109,23 @@ async def suggest_alternative_reference(
                     f"Venue: {target.get('venue') or 'unknown'}\n\n"
                     "Respond with ONLY a JSON array of objects, no prose, no markdown."
                 )
+                # Tag this call under the `suggest` flow so the $ badge's
+                # per-flow breakdown attributes it correctly. The
+                # FlowScope's thread-local doesn't cross asyncio.to_thread,
+                # so set it INSIDE the worker, same pattern as
+                # `_run_llm_similar` further down this file.
+                _cid_for_suggest_alt = check_id
+                def _run_suggest_alt_llm():
+                    try:
+                        from refchecker.llm import usage_tracker as _ut
+                        if _cid_for_suggest_alt is not None:
+                            _ut.set_current_check(str(_cid_for_suggest_alt))
+                        with _ut.FlowScope("suggest"):
+                            return provider._call_llm(prompt)
+                    except Exception:
+                        return provider._call_llm(prompt)
                 try:
-                    raw = provider._call_llm(prompt)
+                    raw = await asyncio.to_thread(_run_suggest_alt_llm)
                 except Exception as e:
                     logger.debug("LLM suggest-alt call failed: %s", e)
                     raw = None

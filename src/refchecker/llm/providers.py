@@ -106,7 +106,13 @@ def _track_google_usage(response, model: str) -> None:
         if meta is None:
             return
         in_t = _safe_int(getattr(meta, "prompt_token_count", 0))
-        out_t = _safe_int(getattr(meta, "candidates_token_count", 0))
+        candidates = _safe_int(getattr(meta, "candidates_token_count", 0))
+        # Gemini 2.5+ thinking models report reasoning tokens separately
+        # under `thoughts_token_count`. Google bills them as output tokens
+        # so the badge has to add them — otherwise reasoning-heavy calls
+        # under-count by ~2-3x vs the provider dashboard.
+        thoughts = _safe_int(getattr(meta, "thoughts_token_count", 0))
+        out_t = candidates + thoughts
         _check_usage_tracker.record(
             model=model,
             input_tokens=in_t,
@@ -707,6 +713,7 @@ class AzureProvider(LLMProviderMixin, LLMProvider):
             if not _is_openai_reasoning_model(_model):
                 kwargs['temperature'] = self.temperature
             response = self.client.chat.completions.create(**kwargs)
+            _record_provider_usage("openai", _model, response, "extraction")
             _track_openai_usage(response, _model)
             return response.choices[0].message.content or ""
 
@@ -1180,6 +1187,7 @@ class vLLMProvider(LLMProviderMixin, LLMProvider):
 
             # vLLM exposes the same `usage` shape as OpenAI when running in
             # OpenAI-compatible server mode, so the same helper works.
+            _record_provider_usage("openai", self.model_name, response, "extraction")
             _track_openai_usage(response, self.model_name)
 
             content = response.choices[0].message.content

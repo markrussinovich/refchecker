@@ -1952,9 +1952,23 @@ class Database:
         year = ref.get("year") or ref.get("verified_year")
         if title and year:
             return f"title:{title}:{year}"
-        # Title-only fallback for refs without a year.
+        # Title-only fallback for refs without a year. Mix in the
+        # normalized first-author surname so distinct refs that happen to
+        # share an identical title (review titles, generic "Introduction"
+        # entries, multi-author book chapters with different authors) do
+        # NOT collapse onto the same key. Without this the Seen-Refs
+        # counter plateaus around the unique-title floor instead of
+        # tracking distinct refs.
         if title and len(title) >= 12:
-            return f"title:{title}:_"
+            first_surname = ""
+            authors = ref.get("authors") or []
+            if isinstance(authors, list) and authors:
+                first = str(authors[0] or "")
+                if first:
+                    tokens = first.split()
+                    last = tokens[-1] if tokens else ""
+                    first_surname = re.sub(r"[^a-z]", "", last.lower())
+            return f"title:{title}:_:{first_surname}" if first_surname else f"title:{title}:_"
         # Hash-of-everything last resort, so refs without title still
         # land in the Seen-Refs library (manual entries, etc.). Uses
         # the ref's id when present + a hash of its identifying bits.

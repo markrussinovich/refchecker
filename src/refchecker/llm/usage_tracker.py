@@ -20,6 +20,10 @@ from typing import Dict, Optional
 # this. The lookup explicitly sorts by key length (longest first) so a
 # specific key like "claude-3-5-sonnet" wins over the generic "claude-3".
 _PRICES_PER_MILLION = [
+    # 4-5 family (longer keys come first so they win over "claude-*-4")
+    ("claude-opus-4-5", (15.0, 75.0)),
+    ("claude-sonnet-4-5", (3.0, 15.0)),
+    ("claude-haiku-4-5", (1.0, 5.0)),
     ("claude-opus-4", (15.0, 75.0)),
     ("claude-sonnet-4", (3.0, 15.0)),
     ("claude-haiku-4", (1.0, 5.0)),
@@ -28,6 +32,10 @@ _PRICES_PER_MILLION = [
     ("claude-3-opus", (15.0, 75.0)),
     ("claude-3-sonnet", (3.0, 15.0)),
     ("claude-3-haiku", (0.25, 1.25)),
+    # GPT-5.1 family
+    ("gpt-5.1-mini", (0.25, 2.0)),
+    ("gpt-5.1-nano", (0.05, 0.40)),
+    ("gpt-5.1", (1.25, 10.0)),
     ("gpt-5-mini", (0.25, 2.0)),
     ("gpt-5-nano", (0.05, 0.40)),
     ("gpt-5", (1.25, 10.0)),
@@ -46,6 +54,9 @@ _PRICES_PER_MILLION = [
     ("o1-mini", (1.10, 4.40)),
     ("o1-pro", (150.0, 600.0)),
     ("o1", (15.0, 60.0)),
+    # Gemini 3.x
+    ("gemini-3-pro", (1.25, 10.0)),
+    ("gemini-3-flash", (0.30, 2.50)),
     ("gemini-2.5-flash", (0.30, 2.50)),
     ("gemini-2.5-pro", (1.25, 10.0)),
     ("gemini-2.0-flash", (0.075, 0.30)),

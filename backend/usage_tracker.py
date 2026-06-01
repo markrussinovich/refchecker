@@ -211,7 +211,13 @@ def extract_gemini_usage(response) -> Dict[str, int]:
     meta = getattr(response, "usage_metadata", None)
     if not meta:
         return {"input_tokens": 0, "output_tokens": 0}
+    # Gemini 2.5+ thinking models report reasoning tokens separately under
+    # `thoughts_token_count`. Google bills them as output tokens, so add them
+    # in — otherwise reasoning-heavy calls under-count by ~2-3x vs the
+    # provider dashboard.
+    candidates = int(getattr(meta, "candidates_token_count", 0) or 0)
+    thoughts = int(getattr(meta, "thoughts_token_count", 0) or 0)
     return {
         "input_tokens": int(getattr(meta, "prompt_token_count", 0) or 0),
-        "output_tokens": int(getattr(meta, "candidates_token_count", 0) or 0),
+        "output_tokens": candidates + thoughts,
     }

@@ -23,6 +23,47 @@ from refchecker.llm.google_retry import call_google_with_retry, extract_google_r
 logger = logging.getLogger(__name__)
 
 
+def _record_hallucination_usage(provider: str, model: str, response) -> None:
+    """Best-effort usage tracking for hallucination-verifier LLM calls.
+
+    Mirrors what `refchecker.llm.providers` does on the extraction path —
+    pushes tokens into BOTH the per-check FlowScope tracker (drives the
+    $ badge's per-flow breakdown) AND the process-wide tracker (drives
+    the global usage totals). Wrapped end-to-end so a tracking failure
+    never breaks the actual verification call.
+    """
+    try:
+        if provider == 'anthropic':
+            from refchecker.llm.providers import _track_anthropic_usage
+            _track_anthropic_usage(response, model)
+        elif provider in ('google', 'gemini'):
+            from refchecker.llm.providers import _track_google_usage
+            _track_google_usage(response, model)
+        else:
+            from refchecker.llm.providers import _track_openai_usage
+            _track_openai_usage(response, model)
+    except Exception as e:
+        logger.debug('hallucination per-check usage tracking skipped: %s', e)
+
+    try:
+        from backend import usage_tracker as _bg_ut
+        if provider == 'anthropic':
+            u = _bg_ut.extract_anthropic_usage(response)
+        elif provider in ('google', 'gemini'):
+            u = _bg_ut.extract_gemini_usage(response)
+        else:
+            u = _bg_ut.extract_openai_usage(response)
+        _bg_ut.record_usage(
+            'google' if provider == 'gemini' else provider,
+            model,
+            u['input_tokens'],
+            u['output_tokens'],
+            'hallucination',
+        )
+    except Exception as e:
+        logger.debug('hallucination global usage tracking skipped: %s', e)
+
+
 _ASSESSMENT_SYSTEM_PROMPT = """\
 You are an reference-integrity assistant that determines whether a cited \
 reference is likely **hallucinated** (fabricated by an AI).
@@ -422,6 +463,7 @@ class LLMHallucinationVerifier:
             tools=[{'type': 'web_search_preview'}],
             input=user_prompt,
         )
+        _record_hallucination_usage('openai', self.model, resp)
 
         text_parts: List[str] = []
         web_urls: List[str] = []
@@ -457,6 +499,7 @@ class LLMHallucinationVerifier:
         if not _is_openai_reasoning_model(self.model):
             kwargs['temperature'] = 0.0
         resp = self.client.chat.completions.create(**kwargs)
+        _record_hallucination_usage(self.provider or 'openai', self.model, resp)
         return (resp.choices[0].message.content or '').strip(), []
 
     # ------------------------------------------------------------------
@@ -480,6 +523,7 @@ class LLMHallucinationVerifier:
             }],
             messages=[{'role': 'user', 'content': user_prompt}],
         )
+        _record_hallucination_usage('anthropic', self.model, resp)
 
         text_parts: List[str] = []
         web_urls: List[str] = []
@@ -519,6 +563,7 @@ class LLMHallucinationVerifier:
             }],
             messages=[{'role': 'user', 'content': user_prompt}],
         )
+        _record_hallucination_usage('anthropic', self.model, resp)
         text = ''
         for block in resp.content:
             if getattr(block, 'type', '') == 'text':
@@ -613,7 +658,7 @@ class LLMHallucinationVerifier:
 
     def _google_generate_content_with_retry(self, *, contents: str, config: Any, purpose: str) -> Any:
         """Call Gemini with truncated exponential backoff for transient errors."""
-        return call_google_with_retry(
+        resp = call_google_with_retry(
             lambda: self.client.models.generate_content(
                     model=self.model,
                     contents=contents,
@@ -621,6 +666,8 @@ class LLMHallucinationVerifier:
             ),
             purpose=purpose,
         )
+        _record_hallucination_usage('google', self.model, resp)
+        return resp
 
     # ------------------------------------------------------------------
     # Unified dispatch
