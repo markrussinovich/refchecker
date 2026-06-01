@@ -233,7 +233,16 @@ def _diff_cited_vs_truth(reference, truth):
         return {t for t in s.split() if len(t) > 2}
     cited_title = reference.get("title") or ""
     truth_title = truth.get("title") or ""
-    if cited_title and truth_title:
+    # v0.7.68: short-circuit when the cited title differs from the cached
+    # truth only by a subtitle ("X: subtitle" vs "X", or vice versa). DOI
+    # already says it's the same paper; emitting "Title mismatch" here
+    # would be a false positive.
+    try:
+        from refchecker.utils.text_utils import titles_align_with_subtitle_tolerance
+        _subtitle_ok = titles_align_with_subtitle_tolerance(cited_title, truth_title)
+    except Exception:
+        _subtitle_ok = False
+    if cited_title and truth_title and not _subtitle_ok:
         ct = _title_tokens(cited_title)
         tt = _title_tokens(truth_title)
         if ct and tt:

@@ -5169,23 +5169,92 @@ def format_corrected_plaintext(original_reference, corrected_data, error_entry):
     return citation_text
 
 
+def titles_align_with_subtitle_tolerance(cited_title: str, actual_title: str) -> bool:
+    """v0.7.68: tolerate subtitle differences when comparing two titles.
+
+    Real-world cases that triggered this:
+      - cited:  "A torn discoid lateral meniscus impacts Lower-Limb alignment
+                 regardless of age: surgical treatment May not be appropriate
+                 for an asymptomatic discoid lateral meniscus"
+        actual: "A Torn Discoid Lateral Meniscus Impacts Lower-Limb Alignment
+                 Regardless of Age"
+      - cited:  "The adaptive change ... discoid lateral meniscus plasty:
+                 an observational study"
+        actual: "The adaptive change ... discoid lateral meniscus plasty"
+
+    Both have a matching DOI; the cited version has a subtitle the
+    canonical record doesn't carry (or vice versa). The verifier
+    previously flagged "Title mismatch" here, which is a false positive.
+
+    The rule:
+      1. Lowercase + strip punctuation EXCEPT colon (the subtitle separator).
+      2. If the head-before-colon matches on both sides, they align.
+      3. Otherwise, if one is a strict prefix-extension of the other and the
+         shared prefix is >= 70% of the longer title and at least 20 chars
+         long, they align.
+
+    Negative-control titles (e.g. "Discoid meniscus" vs
+    "Identifying Younger Postmenopausal Women...") share no meaningful
+    prefix and correctly return False.
+    """
+    if not cited_title or not actual_title:
+        return False
+
+    def _norm_subtitle_keep_colon(s: str) -> str:
+        s = strip_html_markup(strip_latex_commands(s or ''))
+        s = s.lower().strip()
+        # keep colons (subtitle separator); strip other punctuation
+        s = re.sub(r"[^a-z0-9:\s]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
+    nc = _norm_subtitle_keep_colon(cited_title)
+    na = _norm_subtitle_keep_colon(actual_title)
+    if not nc or not na:
+        return False
+    if nc == na:
+        return True
+
+    # 1) Head-before-colon match — handles "X: subtitle" vs "X".
+    nc_head = nc.split(':', 1)[0].strip()
+    na_head = na.split(':', 1)[0].strip()
+    if nc_head and na_head and nc_head == na_head and len(nc_head) >= 20:
+        return True
+
+    # 2) Strict prefix-extension — handles subtitle appended without colon,
+    #    or colon on one side and the other side just stops at the head.
+    shorter, longer = (nc, na) if len(nc) <= len(na) else (na, nc)
+    if longer.startswith(shorter):
+        if len(shorter) >= max(20, int(0.7 * len(longer))):
+            return True
+
+    # 3) Same after dropping all subtitles on both sides.
+    if nc_head and na_head and nc_head == na_head and len(nc_head) >= 12:
+        # Shorter threshold allowed when BOTH sides have a colon, because
+        # then the subtitles are genuinely additional metadata.
+        if ':' in nc and ':' in na:
+            return True
+
+    return False
+
+
 def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) -> float:
     """
     Compare two titles with proper LaTeX cleaning for accurate similarity scoring.
-    
+
     This function ensures both titles are cleaned of LaTeX commands before comparison
     to avoid false mismatches due to formatting differences like {LLM}s vs LLMs.
-    
+
     Args:
         cited_title: Title from cited reference (may contain LaTeX)
         database_title: Title from database (usually already clean)
-        
+
     Returns:
         Similarity score between 0 and 1
     """
     if not cited_title or not database_title:
         return 0.0
-    
+
     # Clean markup from cited title and database title to match formatting.
     clean_cited = strip_latex_commands(strip_html_markup(cited_title))
     clean_database = strip_latex_commands(strip_html_markup(database_title))
@@ -5198,7 +5267,14 @@ def compare_titles_with_latex_cleaning(cited_title: str, database_title: str) ->
     compact_database = re.sub(r'[^A-Za-z0-9]+', '', artifact_database).lower()
     if compact_cited and compact_cited == compact_database:
         return 1.0
-    
+
+    # v0.7.68: subtitle tolerance — "X" vs "X: subtitle" or vice versa is
+    # the same paper when an external ID (DOI/ArXiv) already linked us
+    # here. Treat as perfect match so we don't emit a false "Title
+    # mismatch" downstream.
+    if titles_align_with_subtitle_tolerance(cited_title, database_title):
+        return 1.0
+
     # Calculate similarity using cleaned titles
     return calculate_title_similarity(artifact_cited, artifact_database)
 

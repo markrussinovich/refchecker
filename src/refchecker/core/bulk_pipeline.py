@@ -1243,7 +1243,12 @@ def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], pap
     Uses the same comparison logic as the existing checkers but operates
     on pre-fetched data instead of making API calls.
     """
-    from refchecker.utils.text_utils import calculate_title_similarity, compare_authors, strip_latex_commands
+    from refchecker.utils.text_utils import (
+        calculate_title_similarity,
+        compare_authors,
+        strip_latex_commands,
+        titles_align_with_subtitle_tolerance,
+    )
     from refchecker.utils.error_utils import validate_year
 
     errors: List[Dict[str, Any]] = []
@@ -1253,6 +1258,12 @@ def _compare_reference_with_ss_data(checker: Any, reference: Dict[str, Any], pap
     actual_title = (paper_data.get('title') or '').strip().lower()
     if cited_title and actual_title:
         similarity = calculate_title_similarity(cited_title, actual_title)
+        # v0.7.68: tolerate cited-has-subtitle / actual-no-subtitle (and vice
+        # versa) — DOI already matched, so this isn't a real mismatch.
+        if similarity < 0.8 and titles_align_with_subtitle_tolerance(
+            reference.get('title', ''), paper_data.get('title', '')
+        ):
+            similarity = 1.0
         if similarity < 0.8:
             errors.append({
                 'error_type': 'title',

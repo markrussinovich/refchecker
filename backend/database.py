@@ -2393,6 +2393,7 @@ class Database:
             query = """
                 SELECT id, paper_title, paper_source, custom_label, timestamp,
                        total_refs, errors_count, warnings_count, suggestions_count, unverified_count,
+                       hallucination_count,
                        refs_with_errors, refs_with_warnings_only, refs_verified,
                       llm_provider, llm_model, hallucination_provider, hallucination_model,
                       status, source_type, batch_id, batch_label,
@@ -2430,6 +2431,7 @@ class Database:
                     SUM(warnings_count) as total_warnings,
                     SUM(suggestions_count) as total_suggestions,
                     SUM(unverified_count) as total_unverified,
+                    SUM(hallucination_count) as total_hallucinated,
                     MIN(timestamp) as started_at
                 FROM check_history
                 WHERE batch_id = ?

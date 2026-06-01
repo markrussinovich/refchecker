@@ -3105,8 +3105,14 @@ class ArxivReferenceChecker:
         if title and paper_data.get('title'):
             normalized_title = self.non_arxiv_checker.normalize_paper_title(title) if hasattr(self.non_arxiv_checker, 'normalize_paper_title') else title.lower().replace(' ', '').replace('.', '').replace(',', '')
             db_title = self.non_arxiv_checker.normalize_paper_title(paper_data.get('title'))
-            
-            if normalized_title != db_title:
+
+            # v0.7.68: subtitle tolerance — "X: subtitle" vs "X" is the
+            # same paper, not a Title mismatch. We landed here via DOI/ID
+            # match so the records are confirmed-same.
+            from refchecker.utils.text_utils import titles_align_with_subtitle_tolerance
+            _subtitle_ok = titles_align_with_subtitle_tolerance(title, paper_data.get('title'))
+
+            if normalized_title != db_title and not _subtitle_ok:
                 from refchecker.utils.error_utils import format_title_mismatch
                 # Clean the title for display (remove LaTeX commands like {LLM}s -> LLMs)
                 clean_cited_title = strip_latex_commands(title)
