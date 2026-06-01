@@ -983,7 +983,7 @@ def normalize_diacritics(text: str) -> str:
     special_chars = {
         'ł': 'l', 'Ł': 'L',
         'ℓ': 'l', 'ℒ': 'L',
-        'đ': 'd', 'Đ': 'D', 
+        'đ': 'd', 'Đ': 'D',
         'ħ': 'h', 'Ħ': 'H',
         'ø': 'o', 'Ø': 'O',
         'þ': 'th', 'Þ': 'TH',
@@ -994,6 +994,12 @@ def normalize_diacritics(text: str) -> str:
         'ü': 'ue', 'Ü': 'UE',
         'ö': 'oe', 'Ö': 'OE',
         'ä': 'ae', 'Ä': 'AE',
+        # Turkish (v0.7.58) — dotless ı and dotted İ don't decompose
+        # via NFD, leaving names like "Dıraçoğlu" mismatched against
+        # the Latinized "Diracoglu" the cited side typically uses.
+        'ı': 'i', 'İ': 'I',
+        'ğ': 'g', 'Ğ': 'G',
+        'ş': 's', 'Ş': 'S',
     }
     
     for special, replacement in special_chars.items():

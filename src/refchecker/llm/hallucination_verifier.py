@@ -900,6 +900,29 @@ class LLMHallucinationVerifier:
         if not cited or not correct:
             return verdict, explanation
 
+        # v0.7.58: when the cited DOI matches the verified DOI, the
+        # author surface diff is *not* sufficient evidence of
+        # hallucination — the paper exists at that DOI and the author
+        # mismatch reflects formatting noise (honorifics/degrees/
+        # transliteration artifacts/wrong-citation-with-right-DOI),
+        # not a fabricated paper. User cases that broke before this
+        # guard: "S Sobti DA, E Sudhakar MJ" vs "A. Sobti, J. Sudhakar"
+        # (degrees appended), and the tennis-elbow paper where the
+        # cited DOI resolves to a different but real paper. Both were
+        # flipping verified→hallucinated based on the same heuristic.
+        cited_doi = (error_entry.get('ref_doi') or '').strip().lower()
+        verified_doi = (error_entry.get('ref_doi_correct')
+                        or (found_metadata or {}).get('doi')
+                        or '').strip().lower()
+        if cited_doi and verified_doi and cited_doi == verified_doi:
+            logger.debug(
+                'Skipping LIKELY override — cited DOI %s matches verified '
+                'paper DOI exactly; author diff is metadata-formatting, not '
+                'hallucination (ref=%r)',
+                cited_doi, error_entry.get('ref_title', ''),
+            )
+            return verdict, explanation
+
         from refchecker.core.hallucination_policy import _compute_author_overlap
 
         cited_list = error_entry.get('_ref_authors_cited_list')
