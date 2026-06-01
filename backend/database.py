@@ -1214,6 +1214,20 @@ class Database:
         # missed the library. Errors here mustn't block the check write
         # we just committed.
         if status in ("completed", "cancelled"):
+            # v0.7.69: capture before-count so we can report NEW rows
+            # added separately from existing-row updates. The "120
+            # plateau" symptom is that every upsert hits ON CONFLICT
+            # and bumps times_seen but never INSERTs — without this
+            # diagnostic the user can't tell whether identity-key
+            # collisions are stranding new refs.
+            before_count = 0
+            try:
+                async with aiosqlite.connect(self.db_path) as _diag_db:
+                    cur = await _diag_db.execute("SELECT COUNT(*) FROM verified_reference_identity")
+                    row = await cur.fetchone()
+                    before_count = int(row[0] if row else 0)
+            except Exception:
+                pass
             written = 0
             for ref in (results or []):
                 try:
@@ -1226,10 +1240,24 @@ class Database:
                     if key is not None:
                         written += 1
                 except Exception as e:
-                    logger.debug("Seen-Refs backstop upsert failed for ref: %s", e)
+                    # Promoted DEBUG→WARNING in v0.7.69 so user logs
+                    # surface backstop failures (silent DEBUG-level
+                    # failures hid the v0.7.64 incomplete fix for
+                    # months).
+                    logger.warning("Seen-Refs backstop upsert failed for ref: %s", e)
+            after_count = before_count
+            try:
+                async with aiosqlite.connect(self.db_path) as _diag_db:
+                    cur = await _diag_db.execute("SELECT COUNT(*) FROM verified_reference_identity")
+                    row = await cur.fetchone()
+                    after_count = int(row[0] if row else 0)
+            except Exception:
+                pass
+            new_rows = max(0, after_count - before_count)
             logger.info(
-                "Seen-Refs backstop wrote %d/%d refs for check %d",
+                "Seen-Refs backstop: wrote %d/%d refs for check %d (%d NEW, %d updated, total now %d)",
                 written, len(results or []), check_id,
+                new_rows, max(0, written - new_rows), after_count,
             )
         return True
 
@@ -2020,9 +2048,20 @@ class Database:
         """
         ident = self.reference_identity_key(ref)
         if not ident:
-            logger.debug(
-                "Seen-Refs upsert skipped: no identity key for ref title=%r doi=%r arxiv=%r",
-                (ref.get("title") or "")[:80], ref.get("doi"), ref.get("arxiv_id"),
+            # Promoted DEBUG→WARNING in v0.7.69 — silent drops here are
+            # the root cause of the "120 plateau". Surfaces title +
+            # first author so the user can spot patterns (e.g. all
+            # Vancouver-style refs missing DOIs).
+            _authors = ref.get("authors") or []
+            _first_author = ""
+            if isinstance(_authors, list) and _authors:
+                _first_author = str(_authors[0])[:60]
+            elif isinstance(_authors, str):
+                _first_author = _authors[:60]
+            logger.warning(
+                "Seen-Refs upsert skipped (no identity key): title=%r author=%r doi=%r arxiv=%r",
+                (ref.get("title") or "")[:80], _first_author,
+                ref.get("doi"), ref.get("arxiv_id"),
             )
             return None
         status = ref.get("status") or ""
@@ -2370,6 +2409,34 @@ class Database:
             cursor = await db.execute("SELECT COUNT(*) FROM verified_reference_identity")
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
+
+    async def verified_references_recent_growth(self) -> Dict[str, int]:
+        """Return how many NEW Seen-Refs rows landed in the last 24h / 7d.
+
+        Powers the FE growth chip on the Seen References tab. Without this,
+        users staring at "120 unique references seen" can't tell whether
+        the count is genuinely stuck (identity-key collision bug upstream)
+        or whether new refs ARE flowing in and 120 is just an old snapshot.
+        Reads against existing `first_seen` column — no schema change.
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                cur = await db.execute(
+                    "SELECT COUNT(*) FROM verified_reference_identity "
+                    "WHERE first_seen >= datetime('now', '-1 day')"
+                )
+                row = await cur.fetchone()
+                last_24h = int(row[0] if row else 0)
+                cur = await db.execute(
+                    "SELECT COUNT(*) FROM verified_reference_identity "
+                    "WHERE first_seen >= datetime('now', '-7 days')"
+                )
+                row = await cur.fetchone()
+                last_7d = int(row[0] if row else 0)
+                return {"last_24_hours": last_24h, "last_7_days": last_7d}
+        except Exception as e:
+            logger.warning("verified_references_recent_growth failed: %s", e)
+            return {"last_24_hours": 0, "last_7_days": 0}
 
     async def clear_verified_references(self) -> int:
         """Empty the global identity-keyed reference cache. Returns the

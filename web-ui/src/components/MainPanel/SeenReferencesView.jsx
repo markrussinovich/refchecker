@@ -16,6 +16,10 @@ export default function SeenReferencesView() {
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [dbPath, setDbPath] = useState('')
+  // v0.7.69: growth chip — surfaces NEW rows added in the last 24h/7d so
+  // a flat total (the "120 plateau" bug) is distinguishable from an old
+  // snapshot. Sourced from /api/references/seen response.
+  const [recentGrowth, setRecentGrowth] = useState({ last_24_hours: 0, last_7_days: 0 })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [q, setQ] = useState('')
@@ -30,6 +34,7 @@ export default function SeenReferencesView() {
       setItems(res.data.items || [])
       setTotal(res.data.total || 0)
       setDbPath(res.data.db_path || '')
+      setRecentGrowth(res.data.recent_growth || { last_24_hours: 0, last_7_days: 0 })
     } catch (e) {
       setError(e?.response?.data?.detail || e?.message || 'Load failed')
       setItems([])
@@ -115,6 +120,21 @@ export default function SeenReferencesView() {
           <strong style={{ color: 'var(--color-text-primary)' }}>{total}</strong> unique references seen
           {q ? ` (filtered: ${items.length} shown)` : items.length < total ? ` (showing ${items.length})` : ''}
           {' · '}<span style={{ color: 'var(--color-success, #22c55e)' }}>{verifiedCount} verified on this page</span>
+          {/* v0.7.69: growth chip — answers "is this counter actually
+              moving?" without digging through backend logs. If a user
+              just ran a 100-paper batch and last_24h is 0, the upstream
+              identity-key collision bug is back. */}
+          {(recentGrowth.last_24_hours > 0 || recentGrowth.last_7_days > 0) && (
+            <>
+              {' · '}
+              <span
+                title={`${recentGrowth.last_24_hours} new in last 24h, ${recentGrowth.last_7_days} new in last 7 days`}
+                style={{ color: 'var(--color-accent, #3b82f6)' }}
+              >
+                +{recentGrowth.last_24_hours} in 24h · +{recentGrowth.last_7_days} in 7d
+              </span>
+            </>
+          )}
           {dbPath && (
             <div style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
               <span title={dbPath}>Cache file: <code>{dbPath.split('/').slice(-2).join('/')}</code></span>

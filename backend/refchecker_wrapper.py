@@ -1213,18 +1213,29 @@ class ProgressRefChecker:
         # collide on weak title-only keys and the Seen-Refs counter
         # plateaus around 120. Prefer the verified value if present,
         # otherwise fall back to whatever was on the cited reference.
-        _doi = (
-            (reference.get('doi') or reference.get('verified_doi') or '')
-            if isinstance(reference, dict) else ''
-        )
-        _arxiv = (
-            (reference.get('arxiv_id') or reference.get('verified_arxiv_id') or '')
-            if isinstance(reference, dict) else ''
-        )
-        _pmid = (
-            (reference.get('pmid') or reference.get('verified_pmid') or '')
-            if isinstance(reference, dict) else ''
-        )
+        #
+        # v0.7.69: pull verified identifiers from the matched-paper payload
+        # too — the cited reference often lacks a DOI (Vancouver references
+        # typically don't carry one), but the verification path picks one
+        # up from S2 / Crossref / OpenAlex. Without this, refs that DID
+        # verify successfully still lose their identity key and collide on
+        # weak title-only keys, stranding the Seen Refs counter at ~120.
+        _verified_doi = ''
+        _verified_arxiv = ''
+        _verified_pmid = ''
+        if verified_data:
+            _ext = (verified_data.get('externalIds') or {})
+            _verified_doi = str(_ext.get('DOI') or verified_data.get('doi') or '').strip().lower()
+            _verified_arxiv = str(_ext.get('ArXiv') or verified_data.get('arxiv_id') or '').strip().lower()
+            _verified_pmid = str(_ext.get('PubMed') or verified_data.get('pmid') or '').strip()
+
+        _ref_doi = (reference.get('doi') or reference.get('verified_doi') or '') if isinstance(reference, dict) else ''
+        _ref_arxiv = (reference.get('arxiv_id') or reference.get('verified_arxiv_id') or '') if isinstance(reference, dict) else ''
+        _ref_pmid = (reference.get('pmid') or reference.get('verified_pmid') or '') if isinstance(reference, dict) else ''
+
+        _doi = (str(_ref_doi).strip().lower() or _verified_doi)
+        _arxiv = (str(_ref_arxiv).strip().lower() or _verified_arxiv)
+        _pmid = (str(_ref_pmid).strip() or _verified_pmid)
 
         result = {
             "index": index,

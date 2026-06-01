@@ -6186,6 +6186,10 @@ async def list_seen_references(
     offset = max(0, int(offset or 0))
     rows = await db.list_verified_references(limit=limit, offset=offset, q=q)
     total = await db.count_verified_references()
+    # v0.7.69: surface recent-growth so the FE chip can answer "is the
+    # count actually stuck or just an old snapshot?" without forcing
+    # users to dig through logs.
+    recent_growth = await db.verified_references_recent_growth()
     return {
         "total": total,
         "limit": limit,
@@ -6194,6 +6198,7 @@ async def list_seen_references(
         # Expose where the cache lives so users can spot a path mismatch
         # between an old install's cache_dir and the new install.
         "db_path": str(getattr(db, "db_path", "")),
+        "recent_growth": recent_growth,
     }
 
 
