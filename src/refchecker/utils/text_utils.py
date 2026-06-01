@@ -1128,6 +1128,143 @@ def normalize_diacritics_simple(text: str) -> str:
     
     return ascii_text
 
+# v0.7.66 (Issue B): surname-prefix particles that travel WITH the
+# surname when generating variants — Vancouver/APA bibliographies write
+# them either way ("dos Santos A" vs "A dos Santos"), and the variant
+# generator must keep the prefix glued to the surname token.
+_SURNAME_PREFIX_PARTICLES = {
+    'dos', 'das', 'da', 'do', 'de', 'del', 'della', 'di', 'du',
+    'van', 'von', 'der', 'den', 'des', 'ten', 'ter',
+    'la', 'le', 'las', 'los',
+    'el', 'al', 'bin', 'ben', 'ibn',
+    'af', 'av', 'zu', 'zur', 'zum', 'mac', 'mc',
+}
+
+
+def _normalize_variant_for_compare(s: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace, normalize
+    diacritics — used to compare two surface name variants for equality
+    without being thrown off by formatting differences (commas, periods,
+    extra spaces, accents)."""
+    if not s:
+        return ''
+    s = normalize_diacritics_simple(s)
+    s = s.lower()
+    # Drop periods, commas, hyphens used as separators (but keep
+    # internal letters joined). Convert any punctuation/whitespace run
+    # to a single space.
+    s = re.sub(r"[\.,;:'`’\-‐‑–—]+", ' ', s)
+    s = re.sub(r"\s+", ' ', s).strip()
+    return s
+
+
+def name_variants(canonical_full_name: str) -> set:
+    """Generate the common citation surface forms for a canonical full
+    author name. Given e.g. "Lindsay A. Tetreault" returns a set of
+    Vancouver / APA / natural / comma-prefixed forms, including the
+    "Lindsay Tetreault L" oddity where the first name is retained and a
+    redundant first-initial trails the surname.
+
+    Surname-prefix particles ("dos", "van", "de", "von", ...) travel
+    with the surname so "André Renato dos Santos" keeps "dos Santos"
+    intact as the surname phrase.
+
+    The output is intentionally over-generative — `is_name_match` uses
+    normalized equality on the cartesian product of two variant sets,
+    so spurious extras cost nothing as long as they don't collide with
+    a DIFFERENT person's canonical name.
+    """
+    variants: set = set()
+    if not canonical_full_name:
+        return variants
+    raw = normalize_apostrophes(canonical_full_name.strip())
+    # If the canonical itself is "Last, First Middle" form, flip to
+    # "First Middle Last" before tokenisation so the surname-detection
+    # logic below sees the natural ordering.
+    if ',' in raw:
+        left, _, right = raw.partition(',')
+        left = left.strip()
+        right = right.strip()
+        if left and right:
+            raw = f"{right} {left}"
+    tokens = raw.split()
+    if not tokens:
+        return variants
+    # Detect the parser-oddity case: input ends in a BARE single letter
+    # (no period) AND has ≥3 tokens AND the second-to-last token looks
+    # like a real surname word (len > 1, not a particle). This is
+    # "Lindsay Tetreault L" — the trailing "L" is a redundant first-
+    # initial that the parser tacked on. We handle it by treating the
+    # tokens BEFORE the trailing letter as the real name, and emit a
+    # special trailing-initial variant.
+    _trailing_oddity = False
+    if (
+        len(tokens) >= 3
+        and len(tokens[-1].rstrip('.')) == 1
+        and tokens[-1].rstrip('.').isalpha()
+        and not tokens[-1].endswith('.')
+        and len(tokens[-2].rstrip('.')) > 1
+        and tokens[-2].lower().rstrip('.') not in _SURNAME_PREFIX_PARTICLES
+    ):
+        _trailing_oddity = True
+        tokens = tokens[:-1]
+    # Identify surname tokens: walk from the right and absorb particles
+    # before the rightmost surname word.
+    surname_tokens = [tokens[-1]]
+    i = len(tokens) - 2
+    while i >= 0 and tokens[i].lower().rstrip('.') in _SURNAME_PREFIX_PARTICLES:
+        surname_tokens.insert(0, tokens[i])
+        i -= 1
+    given_tokens = tokens[:i + 1]
+    if not given_tokens:
+        # Just a surname — variants are limited.
+        surname_phrase = ' '.join(surname_tokens)
+        variants.add(surname_phrase)
+        return variants
+    surname_phrase = ' '.join(surname_tokens)
+    # Initials from given tokens: first letter of each, uppercase.
+    initials = [t[:1].upper() for t in given_tokens if t and t[:1].isalpha()]
+    if not initials:
+        return variants
+    first_initial = initials[0]
+    initials_concat = ''.join(initials)  # "LA"
+    initials_dotted = '. '.join(initials) + '.'  # "L. A."
+    initials_dot_no_space = '.'.join(initials) + '.'  # "L.A."
+    initials_spaced = ' '.join(initials)  # "L A"
+    givens_full = ' '.join(given_tokens)  # "Lindsay A."
+
+    # Vancouver: "<Surname> <initials-concat>" — preserve the FULL
+    # initials set (no first-only fallback) so a different person with
+    # different middle initials can't sneak in via the variant check.
+    variants.add(f"{surname_phrase} {initials_concat}")
+    variants.add(f"{surname_phrase} {initials_spaced}")
+    variants.add(f"{surname_phrase} {initials_dotted}")
+    variants.add(f"{surname_phrase} {initials_dot_no_space}")
+    # APA comma forms
+    variants.add(f"{surname_phrase}, {initials_dotted}")
+    variants.add(f"{surname_phrase}, {initials_concat}")
+    variants.add(f"{surname_phrase}, {initials_dot_no_space}")
+    # APA full given names
+    variants.add(f"{surname_phrase}, {givens_full}")
+    variants.add(f"{surname_phrase} {givens_full}")
+    # Natural "<Givens> <Surname>"
+    variants.add(f"{givens_full} {surname_phrase}")
+    variants.add(f"{initials_concat} {surname_phrase}")
+    variants.add(f"{initials_dotted} {surname_phrase}")
+    variants.add(f"{initials_dot_no_space} {surname_phrase}")
+    variants.add(f"{initials_spaced} {surname_phrase}")
+    # Trailing-initial oddity: "Lindsay A. Tetreault" → "Lindsay Tetreault L"
+    # — first-given + surname + first-given's first letter (NOT any
+    # middle initial). The oddity is specifically a parser quirk where
+    # the cited form retained the full first name AND tacked on the
+    # first-initial again as if it were a Vancouver suffix. Emitting for
+    # ANY initial (e.g. "Pavlo Dral A" for "Pavlo A. Dral") would let
+    # two people with the same first name + surname but different middle
+    # initials wrongly match each other.
+    variants.add(f"{given_tokens[0]} {surname_phrase} {first_initial}")
+    return variants
+
+
 def is_name_match(name1: str, name2: str) -> bool:
     """
     Check if two author names match, allowing for variations.
@@ -1142,6 +1279,16 @@ def is_name_match(name1: str, name2: str) -> bool:
     """
     if not name1 or not name2:
         return False
+
+    # v0.7.66 (Issue B): keep the truly-original inputs around. The
+    # function reassigns name1/name2 after Vancouver rotation, but the
+    # variant generator below needs to see the pre-rotation strings to
+    # catch the "Lindsay Tetreault L" oddity (rotation turns it into
+    # "L. Lindsay Tetreault", which the surname-detector then reads as
+    # surname="Tetreault" / given=["L","Lindsay"] — losing the trailing
+    # initial signal).
+    _orig_name1_for_variants = name1
+    _orig_name2_for_variants = name2
 
     def has_internal_accent_apostrophe(token: str) -> bool:
         token = normalize_apostrophes(token)
@@ -1260,6 +1407,63 @@ def is_name_match(name1: str, name2: str) -> bool:
     raw_name2 = " ".join(raw_parts2)
     name1 = raw_name1
     name2 = raw_name2
+
+    # v0.7.66 (Issue B): variant-based fall-through. Treat EACH side as
+    # potentially canonical, generate the common citation surface forms,
+    # and accept if any cited variant normalizes-equal to any actual
+    # variant. This catches "Lindsay Tetreault L" ↔ "Lindsay A.
+    # Tetreault" (parser oddity where first name is kept and a redundant
+    # first-initial trails the surname) without requiring a new branch
+    # in the dozen surname/initial special cases below. Positive-only:
+    # never rejects, only accepts, so existing strict negatives (e.g.
+    # "JK Brown" vs "J. L. Brown") still fall through to the standard
+    # mismatch checks.
+    try:
+        # Variant-based positive accept — only triggered when ONE side
+        # has the trailing-initial parser oddity shape (≥3 tokens, last
+        # token a bare single uppercase letter without a period, second-
+        # to-last a real word). Without this gate, two unrelated people
+        # with the same first-given letter + surname (e.g. "Pavlo O
+        # Dral" vs "Pavlo A. Dral") would wrongly intersect via the
+        # `<first_given> <surname> <first_initial>` variant.
+        def _looks_like_trailing_initial_oddity(s: str) -> bool:
+            if not s:
+                return False
+            toks = normalize_apostrophes(s.strip()).split()
+            if len(toks) < 3:
+                return False
+            last = toks[-1]
+            if last.endswith('.'):
+                return False
+            last_clean = last.rstrip('.')
+            if len(last_clean) != 1 or not last_clean.isalpha() or not last_clean.isupper():
+                return False
+            prev = toks[-2].rstrip('.')
+            if len(prev) <= 1:
+                return False
+            return True
+
+        _oddity1 = _looks_like_trailing_initial_oddity(_orig_name1_for_variants)
+        _oddity2 = _looks_like_trailing_initial_oddity(_orig_name2_for_variants)
+        if _oddity1 or _oddity2:
+            _vars1 = set()
+            _vars2 = set()
+            for src in (name1, _orig_name1_for_variants):
+                if src:
+                    _vars1.update(_normalize_variant_for_compare(v) for v in name_variants(src))
+                    _vars1.add(_normalize_variant_for_compare(src))
+            for src in (name2, _orig_name2_for_variants):
+                if src:
+                    _vars2.update(_normalize_variant_for_compare(v) for v in name_variants(src))
+                    _vars2.add(_normalize_variant_for_compare(src))
+            _vars1.discard('')
+            _vars2.discard('')
+            if _vars1 & _vars2:
+                return True
+    except Exception:
+        # Variant generation should never block the standard path —
+        # if anything goes wrong, fall through to the existing logic.
+        pass
 
     # v0.7.60: dedicated post-rotation "Initials + Multi-word Surname"
     # compare. The downstream particle grouping handles van/von/de but

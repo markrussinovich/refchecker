@@ -450,6 +450,31 @@ def _attach_citation_contexts(references, paper_text):
     if not references or not paper_text:
         return
     import re
+    # v0.7.66 (Issue A1): truncate paper_text at the bibliography heading
+    # before running the marker scan. The full input includes the
+    # references section, where lines like
+    #     "Radiology. 2015;276(2):553–61. 9. Smith J. ..."
+    # contain `(2)` (journal issue) and `9.` (the next ref index) that
+    # the marker regex would otherwise mis-attribute as citations to
+    # refs #2 and #9. Restrict the scan to body text only when a header
+    # is clearly identifiable; if no header is found, leave behavior
+    # unchanged (some papers don't have one, and body-text `[12]`
+    # markers can legitimately appear near the very end).
+    _BIB_HEADER_RE = re.compile(
+        r"(?im)^\s*("
+        r"references"
+        r"|bibliography"
+        r"|literature\s+cited"
+        r"|cited\s+literature"
+        r"|works\s+cited"
+        r"|reference\s+list"
+        r")\s*[:.]?\s*$"
+    )
+    _header_match = _BIB_HEADER_RE.search(paper_text)
+    if _header_match:
+        paper_text = paper_text[: _header_match.start()]
+        if not paper_text.strip():
+            return
     # Pre-assign 1-based positional indexes to any refs that don't
     # already carry one. This function runs BEFORE the per-ref
     # verification pipeline (which uses enumerate-order for its own
@@ -498,6 +523,27 @@ def _attach_citation_contexts(references, paper_text):
             continue
         for m in _NUMERIC_MARKER_RE.finditer(stripped):
             marker_text = m.group(0)
+            # v0.7.66 (Issue A2): if this is the `(N)` parens form, reject
+            # contexts that look like volume(issue) notation. Diagnostic
+            # signals — preceded by a digit ("276(2)" / "43(2)"), or
+            # followed by a colon ("(2):553") — and require it sit at a
+            # natural word boundary on both sides (sentence-start /
+            # whitespace before; space, period, comma, semicolon, or
+            # end-of-line after). The `[N]` form stays unambiguous, and
+            # the superscript form has its own >200 guard below.
+            if marker_text.startswith("(") and marker_text.endswith(")"):
+                _start = m.start()
+                _end = m.end()
+                _prev_ch = stripped[_start - 1] if _start > 0 else ""
+                _next_ch = stripped[_end] if _end < len(stripped) else ""
+                if _prev_ch.isdigit():
+                    continue  # volume(issue) like 276(2)
+                if _next_ch == ":":
+                    continue  # issue:pagerange like (2):553
+                if _prev_ch and not _prev_ch.isspace():
+                    continue  # not at a word boundary
+                if _next_ch and _next_ch not in " .,;\n\r\t":
+                    continue  # not followed by punctuation/whitespace/EOL
             # Translate Unicode superscripts to ASCII so the digit
             # extractor below works uniformly across [N] / (N) / ¹²³.
             _sup_trans = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
