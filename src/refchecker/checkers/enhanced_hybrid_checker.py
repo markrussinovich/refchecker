@@ -405,8 +405,24 @@ class EnhancedHybridReferenceChecker:
             # Consider it successful if we found data or verification errors (i.e., we could verify something)
             success = verified_data is not None or len(errors) > 0
             self._update_api_stats(api_name, success, duration)
-            
+
             if success:
+                # v0.7.63 (Allen 2021 vs Zhang 2010): wrong-paper rejection.
+                # When a checker title-matched to a paper with a HUGE year gap
+                # AND zero author-surname overlap, it's almost certainly the
+                # WRONG paper (Semantic Scholar's /paper/search/match returns
+                # the most-cited paper sharing the title, regardless of year
+                # or author). Reject the candidate so the next API in the
+                # priority list (or the local DB) gets a chance. Skip this
+                # for DOI/ArXiv-anchored matches — those identifiers are
+                # authoritative and any year/author mismatch is a real
+                # error we want to surface, not a wrong-paper drift.
+                if self._is_wrong_paper_match(reference, verified_data, errors, api_name):
+                    logger.debug(
+                        f"Enhanced Hybrid: {api_name} returned wrong-paper match "
+                        f"(year+author both off) — rejecting and falling through to next API"
+                    )
+                    return None, [], None, False, 'not_found', ''
                 verified_data = self._annotate_match_source(verified_data, api_name, api_instance)
                 retry_info = " (retry)" if is_retry else ""
                 logger.debug(f"Enhanced Hybrid: {api_name} successful in {duration:.2f}s{retry_info}, URL: {url}")
@@ -592,6 +608,134 @@ class EnhancedHybridReferenceChecker:
                 merged_data['venue'] = ss_venue
         
         return merged_data, merged_errors
+
+    def _is_wrong_paper_match(self, reference, verified_data, errors, api_name):
+        """Detect when a checker matched the WRONG paper (Allen 2021 vs Zhang 2010 case).
+
+        Semantic Scholar's /paper/search/match endpoint returns the most-cited
+        paper sharing the cited title, regardless of year or author overlap.
+        When the cited reference says "Epidemiology of osteoarthritis" by
+        Zhang & Jordan (2010) and SS returns the 2021 Allen review with the
+        same title, we'd otherwise accept that candidate and emit confusing
+        year+author warnings on a paper that obviously isn't the citation.
+
+        Wrong-paper signature: BOTH
+          (a) year gap ≥ 5 (or the actual year is ≥5 off the cited year), AND
+          (b) zero overlap between cited author surnames and actual author
+              surnames (a no-matching-authors-style verifier error).
+
+        Skipped when the match is DOI- or ArXiv-anchored — those identifiers
+        are authoritative, and any year/author drift there is a real citation
+        error worth surfacing rather than a wrong-paper drift.
+        """
+        if not verified_data:
+            return False
+
+        # DOI/ArXiv-anchored matches are authoritative; never reject.
+        try:
+            cited_doi = (reference.get('doi') or '').strip()
+            if cited_doi:
+                # Strip URL prefixes
+                for prefix in ('https://doi.org/', 'http://doi.org/', 'doi:'):
+                    if cited_doi.lower().startswith(prefix):
+                        cited_doi = cited_doi[len(prefix):]
+                        break
+                vd_doi = (verified_data.get('doi') or '').strip()
+                vd_ext = verified_data.get('externalIds') or {}
+                vd_doi = vd_doi or vd_ext.get('DOI') or vd_ext.get('doi') or ''
+                if vd_doi and cited_doi.lower() == str(vd_doi).strip().lower():
+                    return False
+            # ArXiv ID anchored?
+            ref_url = (reference.get('url') or '') + ' ' + (reference.get('venue') or '')
+            if 'arxiv.org' in ref_url.lower() or (reference.get('externalIds', {}) or {}).get('ArXiv'):
+                return False
+        except Exception:
+            pass
+
+        # ── Year-gap check ──
+        try:
+            cited_year = int(reference.get('year')) if reference.get('year') else None
+        except (TypeError, ValueError):
+            cited_year = None
+        actual_year = verified_data.get('year')
+        try:
+            actual_year = int(actual_year) if actual_year else None
+        except (TypeError, ValueError):
+            actual_year = None
+
+        year_gap_large = False
+        if cited_year and actual_year:
+            year_gap_large = abs(cited_year - actual_year) >= 5
+        else:
+            # Also check the errors list for a year mismatch entry.
+            for err in errors or []:
+                etype = err.get('error_type') or err.get('warning_type') or ''
+                if etype != 'year':
+                    continue
+                try:
+                    correct_year = int(err.get('ref_year_correct') or 0)
+                    cy = cited_year or int((err.get('cited_value') or '0') or 0)
+                    if correct_year and cy and abs(correct_year - cy) >= 5:
+                        year_gap_large = True
+                        break
+                except (TypeError, ValueError):
+                    continue
+        if not year_gap_large:
+            return False
+
+        # ── Zero-author-overlap check ──
+        # Compare cited surnames to actual surnames after diacritic-strip.
+        try:
+            from refchecker.utils.text_utils import normalize_diacritics_simple
+        except Exception:
+            normalize_diacritics_simple = lambda s: s  # noqa: E731
+
+        def _surnames(names):
+            out = set()
+            for n in (names or []):
+                if isinstance(n, dict):
+                    n = n.get('name') or n.get('full_name') or ''
+                if not n:
+                    continue
+                s = normalize_diacritics_simple(str(n).strip().lower())
+                # Strip a trailing initials cluster ("Zhang Y" → "zhang"),
+                # and grab the LAST whitespace-separated chunk as the
+                # surname proxy. Crude but symmetric on both sides.
+                toks = [t for t in s.replace(',', ' ').split() if t]
+                if not toks:
+                    continue
+                # Drop trailing 1-3 letter initial-like tokens.
+                while toks and len(toks[-1].rstrip('.')) <= 3 and toks[-1].rstrip('.').isalpha():
+                    if len(toks) == 1:
+                        break  # don't strip the only token
+                    toks.pop()
+                if toks:
+                    # Take last 2 tokens to cover compound surnames
+                    # ("coronel granado", "dos santos"). Adding both
+                    # individually keeps the overlap check simple.
+                    for t in toks[-2:]:
+                        if len(t) >= 3:
+                            out.add(t)
+            return out
+
+        cited_surnames = _surnames(reference.get('authors'))
+        actual_authors_raw = verified_data.get('authors') or []
+        actual_surnames = _surnames(actual_authors_raw)
+
+        if not cited_surnames or not actual_surnames:
+            # Can't verify overlap — don't reject (avoid false negatives
+            # on records with missing authors).
+            return False
+
+        if cited_surnames & actual_surnames:
+            return False  # Some overlap — likely correct paper, accept it.
+
+        logger.debug(
+            f"Enhanced Hybrid: wrong-paper signature on {api_name} — "
+            f"cited surnames {sorted(cited_surnames)[:3]} vs actual "
+            f"{sorted(actual_surnames)[:3]} (year gap large, zero overlap)"
+        )
+        return True
 
     def _has_major_author_discrepancy(self, errors):
         """Check if errors indicate a major author discrepancy.

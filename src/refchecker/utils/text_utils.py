@@ -1162,17 +1162,27 @@ def is_name_match(name1: str, name2: str) -> bool:
     # v0.7.60: also accept hyphenated initials ("J-M", "K-C") since
     # German/Polish/etc names like "Kim-Charline" → "K-C" and
     # "Graf von der Schulenburg J-M" all use them.
-    def _split_vancouver_initials(last):
+    def _split_vancouver_initials(last, allow_single=False):
         """If `last` looks like a Vancouver initials cluster, return
         the periodised initials list; else None. Handles:
           "DJC"  (unbroken 2-4 uppercase letters)
           "J-M", "K-C", "J.M.", "J.M"  (hyphen / dot separated)
+          "P"    (single initial — only when allow_single=True, see
+                 v0.7.63 Coronel Granado P case below)
         """
         if not last:
             return None
         s = last.rstrip('.').lstrip()
         if not s:
             return None
+        # v0.7.63 ("Coronel Granado P"): when the caller has additional
+        # surname tokens before the trailing initial, accept a single
+        # letter as a valid Vancouver initial cluster. Without this,
+        # multi-word Spanish/Portuguese surnames with a SINGLE given-
+        # name initial (Vancouver style) fall straight through and the
+        # downstream comparator never sees them as initials+surname.
+        if allow_single and len(s) == 1 and s.isalpha() and s.isupper():
+            return [s + "."]
         # Case 1: unbroken uppercase cluster (2-4 letters, no separators)
         if 2 <= len(s) <= 4 and s.isalpha() and s.isupper():
             return [c + "." for c in s]
@@ -1191,7 +1201,45 @@ def is_name_match(name1: str, name2: str) -> bool:
     def _maybe_rotate_vancouver(parts):
         if len(parts) < 2:
             return parts
-        split = _split_vancouver_initials(parts[-1])
+        # v0.7.63: allow a single-letter trailing initial when EITHER
+        # (a) there are ≥2 preceding tokens that look like a multi-word
+        # surname (covers "Coronel Granado P", "Gimeno del Sol M", "van
+        # der Berg J", "dos Santos A", "Renovato França M"), OR
+        # (b) the trailing token ends with an unambiguous period ("H."),
+        # in which case even a 2-token "Häuselmann H." is unambiguously
+        # Vancouver-style and we can safely rotate. (a)-only would
+        # leave 2-token cases like "Häuselmann H." unrotated and miss
+        # the Hauselmann HJ vs Häuselmann H. cross-comparison.
+        leading_looks_like_surname = len(parts) >= 3 and all(
+            (p[:1].isalpha() and not p.islower()) or p.lower() in {
+                'von', 'van', 'de', 'del', 'della', 'di', 'da', 'dos',
+                'du', 'le', 'la', 'las', 'los', 'der', 'den', 'des',
+                'ten', 'ter', 'af', 'av', 'zu', 'zur', 'zum',
+            }
+            for p in parts[:-1]
+        )
+        last_has_period = parts[-1].endswith('.') and len(parts[-1].rstrip('.')) == 1
+        # Also allow single-letter trailing initial in the 2-token case
+        # when the FIRST token is unambiguously a surname (≥4 letters,
+        # title-cased — not all-caps which would itself look like an
+        # initial cluster). Covers "Hauselmann H" / "Häuselmann H"
+        # without misreading "Zhang Y" — wait, "Zhang Y" is the desired
+        # APA shape "Surname Initial" too, so rotating it is actually
+        # CORRECT (it matches "Y. Zhang"). The existing 2-letter cluster
+        # branch already rotates "Zhang YJ" successfully; this extends
+        # the same treatment to single-letter trailing initials.
+        first_looks_like_surname = (
+            len(parts) == 2
+            and len(parts[0].rstrip('.')) >= 4
+            and parts[0][:1].isalpha() and parts[0][:1].isupper()
+            and not parts[0].isupper()  # avoid all-caps "MGMT R"
+        )
+        allow_single = (
+            leading_looks_like_surname
+            or last_has_period
+            or first_looks_like_surname
+        )
+        split = _split_vancouver_initials(parts[-1], allow_single=allow_single)
         if split is None:
             return parts
         # Move to front so downstream surname-particle grouping pulls
@@ -1249,16 +1297,34 @@ def is_name_match(name1: str, name2: str) -> bool:
         # Diacritic-stripped surname compare via the existing helper.
         sur1_norm = _normalize_surname(normalize_diacritics(sur1))
         sur2_norm = _normalize_surname(normalize_diacritics(sur2))
+        # v0.7.63 ("Häuselmann"): normalize_diacritics() transliterates
+        # ä→ae (German convention), so "Hauselmann" (cited, no umlaut)
+        # vs "Häuselmann" (actual) becomes "hauselmann" vs "haeuselmann"
+        # — a false mismatch. Also try the no-transliteration form
+        # (ä→a) so the diacritic-stripped surfaces compare equal. Same
+        # for Turkish ğ/ş/ı/İ (Türk Geriatri Dergisi style — handled by
+        # the v0.7.58 char map) when ONE side has the diacritic and the
+        # other has the bare Latin letter.
+        sur1_norm_simple = _normalize_surname(normalize_diacritics_simple(sur1))
+        sur2_norm_simple = _normalize_surname(normalize_diacritics_simple(sur2))
         # Accept surname match OR one being a suffix of the other
         # (handles "Abu Osman" vs "Osman" where the DB truncated the
         # particle).
+        def _surnames_agree(a, b):
+            return (
+                a == b
+                or (len(a) >= 4 and len(b) >= 4 and
+                    (a.endswith(' ' + b) or
+                     b.endswith(' ' + a) or
+                     a.endswith(b) or
+                     b.endswith(a)))
+            )
         surnames_agree = (
-            sur1_norm == sur2_norm
-            or (len(sur1_norm) >= 4 and len(sur2_norm) >= 4 and
-                (sur1_norm.endswith(' ' + sur2_norm) or
-                 sur2_norm.endswith(' ' + sur1_norm) or
-                 sur1_norm.endswith(sur2_norm) or
-                 sur2_norm.endswith(sur1_norm)))
+            _surnames_agree(sur1_norm, sur2_norm)
+            or _surnames_agree(sur1_norm_simple, sur2_norm_simple)
+            # Cross-pair: one side transliterated, the other not.
+            or _surnames_agree(sur1_norm, sur2_norm_simple)
+            or _surnames_agree(sur1_norm_simple, sur2_norm)
         )
         if surnames_agree:
             # Initials check: shorter must be a prefix of longer (the
@@ -1272,6 +1338,159 @@ def is_name_match(name1: str, name2: str) -> bool:
                 or (len(short) == 1 and long and short[0] == long[0])  # first only
             ):
                 return True
+            # v0.7.63 ("Coronel Granado P"): when the surnames agree
+            # ONLY via the suffix path (the longer surname phrase is
+            # the shorter one preceded by extra given-name tokens that
+            # got captured as 'surname' on one side), the cited initials
+            # may align with ANY of the trailing given-name letters
+            # rather than the first. E.g. cited "Coronel Granado P" →
+            # ini=["P"], sur="Coronel Granado"; actual "M. Pilar
+            # Coronel Granado" → ini=["M"], sur="Pilar Coronel Granado".
+            # The actual surname *contains* the cited surname, and the
+            # extra prefix "Pilar" gives the cited "P". Accept when EACH
+            # cited initial appears as the first letter of one of those
+            # extra prefix words.
+            if sur1_norm != sur2_norm:
+                shorter_sur_norm, longer_sur_norm = (
+                    (sur1_norm, sur2_norm) if len(sur1_norm) < len(sur2_norm)
+                    else (sur2_norm, sur1_norm)
+                )
+                shorter_ini, longer_ini = (
+                    (ini1, ini2) if len(sur1_norm) < len(sur2_norm)
+                    else (ini2, ini1)
+                )
+                if longer_sur_norm.endswith(shorter_sur_norm):
+                    # The extra words sit at the START of the longer
+                    # surname phrase. Their first letters are candidate
+                    # initials for the shorter side's cited initials.
+                    extra = longer_sur_norm[: -len(shorter_sur_norm)].strip()
+                    extra_initials = [w[:1].upper() for w in extra.split() if w]
+                    # Combined initial pool for the longer side: its own
+                    # parsed initials PLUS the extra-prefix initials.
+                    pool = list(longer_ini) + extra_initials
+                    if all(letter in pool for letter in shorter_ini):
+                        return True
+
+    # v0.7.63 ("Coronel Granado P"): asymmetric initials+multi-word-surname
+    # match. The branch above requires BOTH sides to parse as initials +
+    # surname. Spanish APA gives the surname AT THE END after given names
+    # ("Mª Pilar Coronel Granado") — the leading "Mª" / first-name token
+    # isn't uppercase, so _initials_and_surname() returns (None, None) on
+    # that side and the branch above never fires. Here we accept a one-
+    # sided match: if ONE side parses cleanly as Vancouver initials + a
+    # multi-word surname phrase (≥2 surname words), match when the OTHER
+    # side ends with that surname phrase (after diacritic normalisation)
+    # AND the first letter of the other side's first surname-preceding
+    # token matches the cited first initial. Covers Spanish (Coronel
+    # Granado, García López), Portuguese (Renovato França), Dutch (van
+    # der Berg), German von (von der Leyen), French (de la Cruz),
+    # Brazilian (dos Santos, da Silva), Arabic prefix (Al-Omari) when
+    # combined with a multi-word given name.
+    def _asym_initials_multiword_surname(ini, sur, other_parts):
+        if not ini or not sur:
+            return False
+        # Require a genuinely multi-word surname (≥2 tokens, total ≥6
+        # chars after dropping spaces) — single-token surnames are
+        # already covered by the existing _vancouver_apa / _compact
+        # paths and including them here risks pulling in unrelated
+        # same-surname authors.
+        sur_tokens = sur.split()
+        if len(sur_tokens) < 2:
+            return False
+        # Try both diacritic forms so "Häuselmann"/"Hauselmann" agree.
+        sur_norm_t = _normalize_surname(normalize_diacritics(sur))
+        sur_norm_s = _normalize_surname(normalize_diacritics_simple(sur))
+        if len(sur_norm_t.replace(' ', '')) < 6 and len(sur_norm_s.replace(' ', '')) < 6:
+            return False
+        # Build the OTHER side's full name (post-rotation) and check if
+        # it ends with the surname phrase. We check both diacritic forms
+        # of the other side too.
+        other_full_t = _normalize_surname(normalize_diacritics(' '.join(other_parts).lower()))
+        other_full_s = _normalize_surname(normalize_diacritics_simple(' '.join(other_parts).lower()))
+        ends_with_surname = any(
+            full and (full == sn or full.endswith(' ' + sn))
+            for full in (other_full_t, other_full_s)
+            for sn in (sur_norm_t, sur_norm_s)
+            if sn
+        )
+        if not ends_with_surname:
+            return False
+        # Identify the FIRST given-name token on the other side: the
+        # first non-particle token that isn't part of the trailing
+        # surname phrase. Use diacritic-simple form for first-letter
+        # comparison (so "Mª"/"Pilar" still gives first-letter "m"/"p").
+        particle_lc = {
+            'von', 'van', 'de', 'del', 'della', 'di', 'da', 'dos', 'du',
+            'le', 'la', 'las', 'los', 'der', 'den', 'des', 'ten', 'ter',
+            'af', 'av', 'zu', 'zur', 'zum',
+        }
+        # Strip the surname tokens off the end of `other_parts`. Match
+        # token-by-token from the end using normalised forms so
+        # "Mª Pilar Coronel Granado" minus "Coronel Granado" leaves
+        # ["Mª", "Pilar"].
+        sur_tok_norm = [_normalize_surname(normalize_diacritics_simple(t.lower()))
+                        for t in sur_tokens]
+        other_tok_norm = [_normalize_surname(normalize_diacritics_simple(t.lower()))
+                          for t in other_parts]
+        leading = list(other_parts)
+        # Strip from the end while the last token matches a surname token.
+        while leading and sur_tok_norm and other_tok_norm[-1] == sur_tok_norm[-1]:
+            leading.pop()
+            other_tok_norm.pop()
+            sur_tok_norm.pop()
+        if not leading:
+            # Other side is JUST the surname (no given name) — accept
+            # only if cited has a single initial (we can't claim a
+            # given name the DB doesn't supply, but it's plausible the
+            # DB truncated the name to surname-only).
+            return len(ini) == 1
+        # Collect first-letter initials from EVERY non-particle given-
+        # name token. Spanish APA can list both given names ("Mª Pilar"
+        # = María Pilar); the cited Vancouver initial may correspond to
+        # the second given ("P" → Pilar), not the first. We require
+        # each cited initial to appear in the pool, AND the pool's
+        # first letter to either (a) match the cited first initial, or
+        # (b) be a known ordinal-marked Spanish given like "Mª" / "Sr"
+        # so we don't accept arbitrary first-letter drift.
+        given_initials = []
+        for tok in leading:
+            tok_clean = _normalize_surname(normalize_diacritics_simple(tok.lower()))
+            if tok_clean and tok_clean not in particle_lc:
+                given_initials.append(tok_clean[:1].upper())
+        if not given_initials:
+            return False
+        # Every cited initial must appear somewhere in the pool.
+        if not all(letter in given_initials for letter in ini):
+            return False
+        # If cited has only one initial and it matches the FIRST given
+        # initial, accept. Otherwise require either an exact prefix
+        # match OR the first given to be a Spanish "Mª" / "Mª Pilar"
+        # style ordinal-suffix abbreviation (token contains feminine /
+        # masculine ordinal marker) — in those cases the cited initial
+        # commonly skips to the second given.
+        first_tok_clean = _normalize_surname(normalize_diacritics_simple(
+            leading[0].lower()
+        ))
+        ordinal_abbrev = bool(re.search(r'[ªº]', first_tok_clean))
+        if given_initials[: len(ini)] == ini:
+            return True
+        if ordinal_abbrev:
+            # "Mª Pilar Coronel Granado" — cited "P" matches "Pilar".
+            return True
+        # Single cited initial that matches ANY of the given initials
+        # (covers the v0.7.60 "Maiers MJ vs Michele Maiers" spirit
+        # while remaining narrow — surnames already agree, so a single-
+        # letter match across a given is high-confidence).
+        if len(ini) == 1 and ini[0] in given_initials:
+            return True
+        return False
+
+    if ini1 and sur1 and not (ini2 and sur2):
+        if _asym_initials_multiword_surname(ini1, sur1, raw_parts2):
+            return True
+    if ini2 and sur2 and not (ini1 and sur1):
+        if _asym_initials_multiword_surname(ini2, sur2, raw_parts1):
+            return True
 
     # Keep simple two-part surnames with accent-placeholder apostrophes strict.
     # This avoids treating cases like "Balunovi'c" as exact matches while still
@@ -2248,15 +2467,35 @@ def surname_similarity(surname1: str, surname2: str) -> bool:
     
     s1_clean = remove_all_accents(s1)
     s2_clean = remove_all_accents(s2)
-    
+
     if s1_clean == s2_clean:
         return True
-    
+
+    # v0.7.63 ("Häuselmann"): one side may already have the German
+    # ä→ae / ö→oe / ü→ue transliteration applied (caller passed it
+    # through normalize_diacritics() before reaching us), while the
+    # other side preserves the bare Latin letter. Reverse-collapse the
+    # transliterated digraphs and re-compare. Restrict to the German
+    # forms only; we don't want to collapse "ae" → "a" in arbitrary
+    # surnames that legitimately contain "ae" (e.g. "Aerts").
+    def _collapse_german_transliteration(s):
+        # Only collapse digraphs at positions adjacent to typical
+        # German consonant patterns to limit false collapses. The
+        # surname is already lowercase + accent-stripped here.
+        return (s
+                .replace('ae', 'a')
+                .replace('oe', 'o')
+                .replace('ue', 'u'))
+    s1_collapsed = _collapse_german_transliteration(s1_clean)
+    s2_collapsed = _collapse_german_transliteration(s2_clean)
+    if s1_collapsed == s2_collapsed and len(s1_collapsed) >= 4:
+        return True
+
     # Check if one is a substring of the other (for compound surnames)
     if len(s1_clean) > 3 and len(s2_clean) > 3:
         if s1_clean in s2_clean or s2_clean in s1_clean:
             return True
-    
+
     return False
 
 
