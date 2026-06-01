@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 import * as api from '../../utils/api'
 import { logger } from '../../utils/logger'
+import { openExternal } from '../../utils/tauriBridge'
 
 /**
  * Batch summary view (v0.7.45) — the dedicated MainPanel page that
@@ -90,6 +91,25 @@ export default function BatchSummaryView() {
     fetchUsage()
   }, [fetchUsage, agg.completed, agg.errored, agg.cancelled])
 
+  // v0.7.57: fan out a `refchecker:check-completed` window event
+  // when a poll detects new completions. The 16-WS cap (v0.7.44)
+  // means only a handful of children dispatch this themselves; for
+  // 800-paper batches the SeenReferencesView library tab would never
+  // refresh because 784 child completions were invisible. Now the
+  // poll fires the event whenever agg.completed climbs, so the
+  // library refreshes through the existing listener (no extra wiring).
+  const prevCompletedRef = useRef(0)
+  useEffect(() => {
+    if (agg.completed > prevCompletedRef.current) {
+      try {
+        window.dispatchEvent(new CustomEvent('refchecker:check-completed', {
+          detail: { batchId, completed: agg.completed, total: agg.total },
+        }))
+      } catch { /* SSR guard */ }
+    }
+    prevCompletedRef.current = agg.completed
+  }, [agg.completed, agg.total, batchId])
+
   // Live refresh while any child is in_progress. Polls the batch
   // detail every 4s. WebSocket multiplex (v0.7.44 capped at 16) means
   // we can't rely on per-child WS for every paper in a 800-strong
@@ -148,6 +168,8 @@ export default function BatchSummaryView() {
       if (filter === 'in_progress') return c.status === 'in_progress'
       if (filter === 'completed') return c.status === 'completed'
       if (filter === 'error') return (c.errors_count || 0) > 0 || c.status === 'error'
+      if (filter === 'warning') return (c.warnings_count || 0) > 0
+      if (filter === 'unverified') return (c.unverified_count || 0) > 0
       if (filter === 'hallucinated') return (c.hallucination_count || 0) > 0
       return true
     })
@@ -254,7 +276,14 @@ export default function BatchSummaryView() {
             onClick={() => setFilter(f => f === 'error' ? 'all' : 'error')}
             title="Click to filter to papers with errors / fabricated refs"
           />
-          <Chip label="Warnings" value={agg.warningsRefs} color="#f59e0b" />
+          <Chip
+            label="Warnings"
+            value={agg.warningsRefs}
+            color="#f59e0b"
+            active={filter === 'warning'}
+            onClick={() => setFilter(f => f === 'warning' ? 'all' : 'warning')}
+            title="Click to filter to papers with style-aware warnings (NLM venue abbreviations, author-order diffs, etc.)"
+          />
           <Chip
             label="Hallucinated"
             value={agg.hallucRefs}
@@ -263,28 +292,56 @@ export default function BatchSummaryView() {
             onClick={() => setFilter(f => f === 'hallucinated' ? 'all' : 'hallucinated')}
             title="Click to filter to papers with LIKELY-hallucinated refs"
           />
-          <Chip label="Unverified" value={agg.unverifiedRefs} color="#94a3b8" />
+          <Chip
+            label="Unverified"
+            value={agg.unverifiedRefs}
+            color="#94a3b8"
+            active={filter === 'unverified'}
+            onClick={() => setFilter(f => f === 'unverified' ? 'all' : 'unverified')}
+            title="Click to filter to papers with refs the verifier couldn't resolve (no S2/Crossref/PMC hit + LLM didn't flag as hallucination)"
+          />
         </div>
 
-        {/* Budget chip + per-flow breakdown */}
-        <div
-          className="flex flex-wrap items-center gap-3 mt-3 px-3 py-2 rounded-md text-xs"
-          style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
-        >
-          <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            💰 {fmtUsd(usage.cost_usd)}
-          </span>
-          <span>{fmtTok((usage.input_tokens || 0) + (usage.output_tokens || 0))} tokens</span>
-          <span>{usage.calls || 0} LLM calls</span>
-          {Object.keys(usage.by_flow || {}).length > 0 && (
-            <span style={{ color: 'var(--color-text-muted)' }}>·</span>
-          )}
-          {Object.entries(usage.by_flow || {}).slice(0, 6).map(([flow, sub]) => (
-            <span key={flow} style={{ color: 'var(--color-text-muted)' }}>
-              {flow}: {fmtUsd(sub.cost_usd)}
-            </span>
-          ))}
-        </div>
+        {/* Budget chip + per-flow breakdown.
+            v0.7.57: when the LLM-call count is much smaller than the
+            batch size, the difference is explained — most papers were
+            short-circuited via Crossref-by-DOI (added in v0.7.54), so
+            their references arrived from Crossref's `reference` field
+            with zero token cost. The hover title spells it out. */}
+        {(() => {
+          const llmCalls = usage.calls || 0
+          const totalPapers = agg.total || 0
+          const crossrefShortCircuits = Math.max(0, totalPapers - llmCalls)
+          const explainsCheap = totalPapers > 0 && crossrefShortCircuits >= totalPapers * 0.5
+          return (
+            <div
+              className="flex flex-wrap items-center gap-3 mt-3 px-3 py-2 rounded-md text-xs"
+              style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+              title={explainsCheap
+                ? `${crossrefShortCircuits}/${totalPapers} papers resolved via Crossref by DOI — no LLM tokens needed. Only the ${llmCalls} paper(s) without a usable DOI required LLM extraction.`
+                : `LLM cost broken down by flow: extract = bibliography parsing; verify = per-ref disambiguation; hallucination = LLM-flagged refs; suggest = Similar Papers / Suggest Alternative; reverify = Apply Fix re-runs.`}
+            >
+              <span style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>
+                💰 {fmtUsd(usage.cost_usd)}
+              </span>
+              <span>{fmtTok((usage.input_tokens || 0) + (usage.output_tokens || 0))} tokens</span>
+              <span>{llmCalls} LLM calls</span>
+              {explainsCheap && (
+                <span style={{ color: '#22c55e', fontWeight: 500 }}>
+                  · {crossrefShortCircuits} via Crossref (no cost)
+                </span>
+              )}
+              {Object.keys(usage.by_flow || {}).length > 0 && (
+                <span style={{ color: 'var(--color-text-muted)' }}>·</span>
+              )}
+              {Object.entries(usage.by_flow || {}).slice(0, 6).map(([flow, sub]) => (
+                <span key={flow} style={{ color: 'var(--color-text-muted)' }}>
+                  {flow}: {fmtUsd(sub.cost_usd)}
+                </span>
+              ))}
+            </div>
+          )
+        })()}
       </div>
 
       {/* Papers list */}
@@ -354,7 +411,24 @@ export default function BatchSummaryView() {
                     {checkCost ? <span style={{ color: 'var(--color-text-muted)' }}>· {fmtUsd(checkCost)}</span> : null}
                   </div>
                 </div>
-                {/* Open */}
+                {/* External view + Open buttons (v0.7.57). The
+                    external link only appears when paper_source is an
+                    http(s) URL — for file/text uploads there's nothing
+                    to point at. */}
+                {typeof c.paper_source === 'string' && /^https?:\/\//.test(c.paper_source) && (
+                  <button
+                    onClick={() => openExternal(c.paper_source)}
+                    className="text-xs px-2 py-1 rounded border flex-shrink-0"
+                    style={{
+                      background: 'var(--color-bg-primary)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)',
+                    }}
+                    title={`Open source URL in browser: ${c.paper_source}`}
+                  >
+                    ↗ Source
+                  </button>
+                )}
                 <button
                   onClick={() => openBatchChild(c.id)}
                   className="text-xs px-3 py-1 rounded border flex-shrink-0"

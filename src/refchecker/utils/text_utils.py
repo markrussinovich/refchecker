@@ -1149,6 +1149,36 @@ def is_name_match(name1: str, name2: str) -> bool:
     raw_parts1 = raw_name1.split()
     raw_parts2 = raw_name2.split()
 
+    # v0.7.57: Vancouver-style rotation. "Surname Initials" (Vancouver:
+    # "van der Ven DJC") shouldn't be flagged as a mismatch against
+    # "FirstName ... Surname" (APA: "Denise J C van der Ven") when
+    # they're the same person. Detect "trailing token is 2-4 uppercase
+    # initials" pattern and rotate to "Initials Surname" so the
+    # downstream surname-particle grouping + comparison can match.
+    def _maybe_rotate_vancouver(parts):
+        if len(parts) < 2:
+            return parts
+        last = parts[-1].rstrip('.')
+        # Bare initials cluster: 2-4 chars, all alpha, all uppercase.
+        if 2 <= len(last) <= 4 and last.isalpha() and last.isupper():
+            # Split the initials cluster into individual periods so
+            # ALL initials get compared downstream — keeping "JK" as
+            # one token let "Smith JK" wrongly match "John L Smith"
+            # via the first-letter heuristic. "DJC" → "D. J. C.".
+            split_initials = [c + "." for c in last]
+            # Move to front: "van der Ven DJC" → "D. J. C. van der Ven";
+            # downstream surname-particle grouping pulls "van der Ven"
+            # back together as one and matches against the APA form's
+            # given-name initials.
+            return split_initials + parts[:-1]
+        return parts
+    raw_parts1 = _maybe_rotate_vancouver(raw_parts1)
+    raw_parts2 = _maybe_rotate_vancouver(raw_parts2)
+    raw_name1 = " ".join(raw_parts1)
+    raw_name2 = " ".join(raw_parts2)
+    name1 = raw_name1
+    name2 = raw_name2
+
     # Keep simple two-part surnames with accent-placeholder apostrophes strict.
     # This avoids treating cases like "Balunovi'c" as exact matches while still
     # allowing genuine apostrophe surnames such as "D'Mello" and the more
