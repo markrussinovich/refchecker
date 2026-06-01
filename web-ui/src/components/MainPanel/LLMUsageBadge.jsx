@@ -65,9 +65,13 @@ export default function LLMUsageBadge({ checkId, isComplete }) {
       }
     }
     fetchUsage()
-    // While the check is running, poll fast. Once complete, slow down
-    // to catch occasional re-verify / suggest spend without hammering.
-    const interval = isComplete ? 15_000 : 3_000
+    // While the check is running, poll fast so the number ticks up
+    // live like a graph. Once complete, slow down to catch occasional
+    // re-verify / suggest spend without hammering. v0.7.62: dropped the
+    // running interval from 3s → 1.5s after users reported the badge
+    // didn't feel real-time, and bumped the complete interval from 15s
+    // → 8s so re-verify cost lands on the chip quickly.
+    const interval = isComplete ? 8_000 : 1_500
     const id = setInterval(fetchUsage, interval)
     return () => { cancelled = true; clearInterval(id) }
   }, [checkId, isComplete])
@@ -78,13 +82,18 @@ export default function LLMUsageBadge({ checkId, isComplete }) {
   }, [usage])
 
   if (!checkId || checkId === -1) return null
-  if (!usage || totalTokens === 0) return null
+  // v0.7.62: Always render the badge when a check is in scope, even at
+  // 0 tokens. The old code returned null whenever totalTokens===0, so
+  // Crossref-short-circuited papers opened from the Batch view showed
+  // no badge at all (users assumed "the tracker isn't working"). Now
+  // the badge always shows so the user can see the live counter and,
+  // for cheap papers, the explicit "0 LLM calls" state.
 
-  const flowEntries = Object.entries(usage.by_flow || {})
+  const flowEntries = Object.entries(usage?.by_flow || {})
     .filter(([, v]) => (v.input_tokens || 0) + (v.output_tokens || 0) > 0)
     .sort((a, b) => (b[1].cost_usd || 0) - (a[1].cost_usd || 0))
 
-  const modelEntries = Object.entries(usage.by_model || {})
+  const modelEntries = Object.entries(usage?.by_model || {})
     .filter(([, v]) => (v.input_tokens || 0) + (v.output_tokens || 0) > 0)
     .sort((a, b) => (b[1].cost_usd || 0) - (a[1].cost_usd || 0))
 
@@ -103,8 +112,16 @@ export default function LLMUsageBadge({ checkId, isComplete }) {
       <span style={{ color: 'var(--color-text-secondary)' }}>LLM</span>
       <span>{fmtTokens(totalTokens)} tok</span>
       <span style={{ color: 'var(--color-success, #10b981)', fontWeight: 700 }}>
-        {fmtCost(usage.cost_usd || 0)}
+        {fmtCost(usage?.cost_usd || 0)}
       </span>
+      {/* Live tick indicator while polling — fades when complete. */}
+      {!isComplete && (
+        <span
+          aria-hidden
+          className="inline-block w-1.5 h-1.5 rounded-full animate-pulse"
+          style={{ background: 'var(--color-success, #10b981)' }}
+        />
+      )}
 
       {showHover && (
         <div
@@ -119,9 +136,17 @@ export default function LLMUsageBadge({ checkId, isComplete }) {
           }}
         >
           <div style={{ color: 'var(--color-text-secondary)', marginBottom: 6 }}>
-            This check used <strong>{fmtTokens(totalTokens)}</strong> tokens
-            ({fmtTokens(usage.input_tokens || 0)} in / {fmtTokens(usage.output_tokens || 0)} out)
-            across <strong>{usage.calls || 0}</strong> LLM call{usage.calls === 1 ? '' : 's'}.
+            {totalTokens === 0 ? (
+              isComplete ? (
+                <>This check used <strong>0</strong> LLM tokens — every reference was resolved deterministically (Crossref / arXiv / Semantic Scholar) without paid LLM calls.</>
+              ) : (
+                <>Waiting for the first LLM call to land. The badge ticks live as extraction / verification / hallucination flows record usage.</>
+              )
+            ) : (
+              <>This check used <strong>{fmtTokens(totalTokens)}</strong> tokens
+              ({fmtTokens(usage?.input_tokens || 0)} in / {fmtTokens(usage?.output_tokens || 0)} out)
+              across <strong>{usage?.calls || 0}</strong> LLM call{usage?.calls === 1 ? '' : 's'}.</>
+            )}
           </div>
           {flowEntries.length > 0 && (
             <div style={{ marginBottom: 6 }}>
