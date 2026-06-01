@@ -175,6 +175,12 @@ def extract_openai_usage(response) -> Dict[str, int]:
     u = getattr(response, "usage", None)
     if not u:
         return {"input_tokens": 0, "output_tokens": 0}
+    # `completion_tokens` already includes reasoning_tokens on o*/gpt-5
+    # models (OpenAI bills them as output). `prompt_tokens` already
+    # includes any cached prompt tokens — those are charged at a
+    # discounted rate but still appear in prompt_tokens, so reporting
+    # prompt_tokens here matches what the provider's dashboard shows
+    # under "total tokens".
     return {
         "input_tokens": int(getattr(u, "prompt_tokens", 0) or 0),
         "output_tokens": int(getattr(u, "completion_tokens", 0) or 0),
@@ -185,8 +191,18 @@ def extract_anthropic_usage(response) -> Dict[str, int]:
     u = getattr(response, "usage", None)
     if not u:
         return {"input_tokens": 0, "output_tokens": 0}
+    # Anthropic reports input_tokens SEPARATELY from cache_creation /
+    # cache_read tokens. The provider bills all three, so the badge has
+    # to add them — otherwise prompt-cached calls under-count by 10x+.
+    # Cache reads are billed at ~0.1x and cache writes at ~1.25x of the
+    # input rate; we lump them in here so the token count matches what
+    # the user sees on their Anthropic dashboard. Cost-side refinement
+    # can be added later if we ever start using caching in production.
+    base_in = int(getattr(u, "input_tokens", 0) or 0)
+    cache_w = int(getattr(u, "cache_creation_input_tokens", 0) or 0)
+    cache_r = int(getattr(u, "cache_read_input_tokens", 0) or 0)
     return {
-        "input_tokens": int(getattr(u, "input_tokens", 0) or 0),
+        "input_tokens": base_in + cache_w + cache_r,
         "output_tokens": int(getattr(u, "output_tokens", 0) or 0),
     }
 

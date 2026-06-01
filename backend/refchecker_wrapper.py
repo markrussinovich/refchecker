@@ -1315,7 +1315,15 @@ class ProgressRefChecker:
             # Set the scope INSIDE the worker function instead.
             # (v0.7.54 fix per ML review.)
             from refchecker.llm import usage_tracker as _ut
+            _cid = self.check_id
             def _call_with_scope():
+                # Re-bind check_id INSIDE the worker thread — threading.local
+                # doesn't cross asyncio.to_thread boundaries, so without this
+                # the LLM cost lands in the "default" bucket and the $ badge
+                # silently under-counts (root cause of "API account shows $2
+                # but app shows $0.01" reports).
+                if _cid is not None:
+                    _ut.set_current_check(str(_cid))
                 with _ut.FlowScope("context"):
                     return self.llm._call_llm(prompt)
             raw = await asyncio.to_thread(_call_with_scope)

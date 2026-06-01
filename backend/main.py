@@ -5449,9 +5449,16 @@ async def _find_similar_papers_impl(req: _SimilarPapersRequest, current_user: Us
                 # FlowScope's thread-local doesn't cross asyncio.to_thread,
                 # so we set it INSIDE the worker function — same pattern
                 # as the re-verify path uses.
+                _cid_for_suggest = check_id
                 def _run_llm_similar():
                     try:
                         from refchecker.llm import usage_tracker as _ut
+                        # threading.local doesn't cross asyncio.to_thread.
+                        # Without re-binding check_id inside the worker the
+                        # suggest-flow cost lands in the "default" bucket and
+                        # the $ badge silently under-counts.
+                        if _cid_for_suggest is not None:
+                            _ut.set_current_check(str(_cid_for_suggest))
                         with _ut.FlowScope("suggest"):
                             return provider._call_llm(prompt)
                     except Exception:

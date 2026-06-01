@@ -74,16 +74,24 @@ def _track_openai_usage(response, model: str) -> None:
 
 
 def _track_anthropic_usage(response, model: str) -> None:
-    """Pull input/output token counts off an Anthropic Messages response."""
+    """Pull input/output token counts off an Anthropic Messages response.
+
+    Anthropic separates `input_tokens` from `cache_creation_input_tokens`
+    and `cache_read_input_tokens`. All three are billed, so the per-check
+    badge must add them — otherwise a prompt-cached request under-counts
+    by 10x or more relative to what the provider dashboard shows.
+    """
     try:
         usage = getattr(response, "usage", None)
         if usage is None:
             return
         in_t = _safe_int(getattr(usage, "input_tokens", 0))
+        cache_w = _safe_int(getattr(usage, "cache_creation_input_tokens", 0))
+        cache_r = _safe_int(getattr(usage, "cache_read_input_tokens", 0))
         out_t = _safe_int(getattr(usage, "output_tokens", 0))
         _check_usage_tracker.record(
             model=model,
-            input_tokens=in_t,
+            input_tokens=in_t + cache_w + cache_r,
             output_tokens=out_t,
             flow=_check_usage_tracker.get_current_flow(),
         )
