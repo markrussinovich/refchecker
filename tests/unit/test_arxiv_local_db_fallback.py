@@ -28,6 +28,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         checker.openalex = None
         checker.dblp = None
         checker.openreview = None
+        checker.acl_anthology = None
+        checker.paperclip = None
         checker.retry_base_delay = 0
         checker.max_retry_delay = 0
         checker.retry_backoff_factor = 1
@@ -203,6 +205,10 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         local_db = MagicMock()
         arxiv_citation = MagicMock()
         arxiv_citation.is_arxiv_reference.return_value = False
+        # The non-ArXiv title-search probe (_try_arxiv_title_search, added in
+        # v3.0.139) finds no ArXiv match for this ref, so it never falls through
+        # to an ArXiv verification — keep the probe a clean no-op.
+        arxiv_citation.find_arxiv_id_by_title.return_value = None
 
         good = self._good_local_db_result()
         local_db.verify_reference.return_value = good
@@ -219,7 +225,8 @@ class TestLocalDbArxivFallback(unittest.TestCase):
         paper_data, errors, url = checker.verify_reference(ref)
 
         local_db.verify_reference.assert_called_once()
-        # No ArXiv fallback for non-ArXiv refs
+        # No ArXiv *verification* fallback for non-ArXiv refs (the title-search
+        # probe ran but found nothing, so verify_reference was never called).
         arxiv_citation.verify_reference.assert_not_called()
 
     def test_arxiv_title_revision_not_treated_as_different_paper(self):
