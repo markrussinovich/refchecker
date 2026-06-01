@@ -2450,6 +2450,110 @@ class Database:
             await db.commit()
         return before
 
+    async def backfill_seen_references(self) -> Dict[str, Any]:
+        """Manually re-run the Seen-Refs backfill on demand.
+
+        Walks every completed/cancelled `check_history` row that has a
+        `results_json` payload and upserts every reference into the global
+        identity index via :meth:`upsert_verified_reference`. The upsert is
+        idempotent (ON CONFLICT bumps `times_seen`), so this is safe to
+        invoke repeatedly — duplicates merge, only genuinely new identity
+        keys grow the count.
+
+        Used as a recovery workaround when the per-emit hook + post-check
+        backstop silently dropped references in earlier versions (the
+        "120 plateau" bug). The diagnostic counters returned by this method
+        also let the user see, from the FE, whether their recent checks
+        legitimately produce new identity keys or whether everything is
+        being treated as a duplicate.
+
+        Returns a dict with: ``before_count``, ``after_count``,
+        ``walked_checks``, ``walked_refs``, ``inserted``, ``updated``,
+        ``skipped_no_identity``, ``duration_seconds``.
+        """
+        import time as _time
+        t0 = _time.perf_counter()
+        before_count = await self.count_verified_references()
+        walked_checks = 0
+        walked_refs = 0
+        skipped_no_identity = 0
+        errors = 0
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("PRAGMA busy_timeout=5000")
+                async with db.execute(
+                    "SELECT id, paper_title, results_json FROM check_history "
+                    "WHERE status IN ('completed', 'cancelled') AND results_json IS NOT NULL"
+                ) as ch_cur:
+                    async for check_id, paper_title, results_json in ch_cur:
+                        walked_checks += 1
+                        if walked_checks % 100 == 0:
+                            logger.info(
+                                "backfill_seen_references: walked %d checks (%d refs so far)",
+                                walked_checks, walked_refs,
+                            )
+                        if not results_json:
+                            continue
+                        try:
+                            results = json.loads(results_json)
+                        except Exception:
+                            continue
+                        if not isinstance(results, list):
+                            continue
+                        for ref in results:
+                            if not isinstance(ref, dict):
+                                continue
+                            walked_refs += 1
+                            # Pre-check the identity key so we can count
+                            # "skipped" without paying the upsert's open/
+                            # commit overhead for refs that would no-op
+                            # anyway.
+                            if not self.reference_identity_key(ref):
+                                skipped_no_identity += 1
+                                continue
+                            try:
+                                await self.upsert_verified_reference(
+                                    ref,
+                                    check_id=check_id,
+                                    paper_title=paper_title,
+                                )
+                            except Exception as e:
+                                # One bad ref must not abort the rest.
+                                errors += 1
+                                logger.debug(
+                                    "backfill_seen_references: upsert failed for one ref: %s",
+                                    e,
+                                )
+        except Exception as e:
+            logger.warning("backfill_seen_references walk failed: %s", e)
+        after_count = await self.count_verified_references()
+        inserted = max(0, after_count - before_count)
+        # "updated" = refs that had a valid identity key but didn't grow
+        # the table (i.e. ON CONFLICT path). Errors are excluded so the
+        # numbers add up to walked_refs cleanly.
+        updated = max(
+            0,
+            walked_refs - skipped_no_identity - inserted - errors,
+        )
+        duration = _time.perf_counter() - t0
+        logger.info(
+            "backfill_seen_references: walked %d checks / %d refs in %.2fs "
+            "(+%d new, %d updated, %d skipped no-identity, %d errors)",
+            walked_checks, walked_refs, duration,
+            inserted, updated, skipped_no_identity, errors,
+        )
+        return {
+            "before_count": before_count,
+            "after_count": after_count,
+            "walked_checks": walked_checks,
+            "walked_refs": walked_refs,
+            "inserted": inserted,
+            "updated": updated,
+            "skipped_no_identity": skipped_no_identity,
+            "errors": errors,
+            "duration_seconds": round(duration, 3),
+        }
+
     # Batch operations
 
     async def get_batch_checks(self, batch_id: str, user_id: Optional[int] = None) -> List[Dict[str, Any]]:

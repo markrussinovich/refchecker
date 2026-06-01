@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { listSeenReferences, clearSeenReferences } from '../../utils/api'
+import { listSeenReferences, clearSeenReferences, backfillSeenReferences } from '../../utils/api'
 import { openExternal } from '../../utils/tauriBridge'
 import { useHistoryStore } from '../../stores/useHistoryStore'
 
@@ -24,6 +24,13 @@ export default function SeenReferencesView() {
   const [error, setError] = useState(null)
   const [q, setQ] = useState('')
   const [offset, setOffset] = useState(0)
+  // v0.7.70: manual backfill status — workaround/diagnostic for the
+  // "120 plateau" bug. While running, the button shows a busy state;
+  // when done, we surface walked/inserted/updated/skipped counts so the
+  // user can see whether their historic checks legitimately produce new
+  // identity keys.
+  const [backfillBusy, setBackfillBusy] = useState(false)
+  const [backfillStatus, setBackfillStatus] = useState(null)
   const PAGE = 100
   const debounceRef = useRef(null)
 
@@ -61,6 +68,38 @@ export default function SeenReferencesView() {
       setOffset(0)
     } catch (e) {
       alert(e?.response?.data?.detail || e?.message || 'Clear failed')
+    }
+  }
+
+  // v0.7.70: manual backfill — re-walks every completed check_history
+  // row and upserts each ref. Safe (idempotent: duplicates merge). The
+  // diagnostic counters are the real value here: if walked_refs is high
+  // but inserted is 0, the upsert path is hitting ON CONFLICT every
+  // time → the identity-key cascade is collapsing too aggressively.
+  const handleBackfill = async () => {
+    if (!window.confirm(
+      'Re-scan all completed checks and add their references to the Seen library? '
+      + 'This is safe — duplicates are merged.'
+    )) return
+    setBackfillBusy(true)
+    setBackfillStatus('Backfilling…')
+    try {
+      const res = await backfillSeenReferences()
+      const d = res?.data || {}
+      setBackfillStatus(
+        `Backfill complete: walked ${d.walked_checks ?? 0} checks `
+        + `(${d.walked_refs ?? 0} refs) → +${d.inserted ?? 0} new, `
+        + `${d.updated ?? 0} already known, ${d.skipped_no_identity ?? 0} skipped (no identity)`
+        + (d.duration_seconds != null ? ` · ${d.duration_seconds}s` : '')
+      )
+      await load({ offset: 0 })
+      setOffset(0)
+    } catch (e) {
+      setBackfillStatus(
+        'Backfill failed: ' + (e?.response?.data?.detail || e?.message || 'unknown error')
+      )
+    } finally {
+      setBackfillBusy(false)
     }
   }
 
@@ -168,6 +207,21 @@ export default function SeenReferencesView() {
             ↻
           </button>
           <button
+            onClick={handleBackfill}
+            disabled={backfillBusy}
+            className="px-2 py-1 rounded text-xs"
+            style={{
+              border: '1px solid var(--color-border)',
+              background: 'transparent',
+              color: 'var(--color-text-secondary)',
+              opacity: backfillBusy ? 0.5 : 1,
+              cursor: backfillBusy ? 'wait' : 'pointer',
+            }}
+            title="Re-walk every completed check and re-upsert its refs (idempotent — safe to repeat)"
+          >
+            {backfillBusy ? 'Backfilling…' : 'Backfill from history'}
+          </button>
+          <button
             onClick={handleClearCache}
             className="px-2 py-1 rounded text-xs"
             style={{
@@ -181,6 +235,19 @@ export default function SeenReferencesView() {
           </button>
         </div>
       </div>
+
+      {backfillStatus && (
+        <div
+          className="text-xs px-2 py-1 rounded"
+          style={{
+            backgroundColor: 'var(--color-bg-secondary)',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border)',
+          }}
+        >
+          {backfillStatus}
+        </div>
+      )}
 
       {error && (
         <div className="text-xs p-2 rounded" style={{ backgroundColor: 'rgba(239,68,68,0.08)', color: 'var(--color-error, #ef4444)' }}>

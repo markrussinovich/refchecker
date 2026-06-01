@@ -176,6 +176,15 @@ export const lookupOclc = (doi) =>
 export const clearSeenReferences = () =>
   api.delete('/references/seen')
 
+// Manually re-run the Seen-Refs backfill from check_history. Returns
+// diagnostic counters (walked / inserted / updated / skipped) so the
+// FE can show the user whether their checks ARE producing new identity
+// keys or whether the count is genuinely stuck. Can take a few seconds
+// on libraries with thousands of historic checks — give it a longer
+// budget than the default 30s.
+export const backfillSeenReferences = () =>
+  api.post('/references/seen/backfill', null, { timeout: 120000 })
+
 // Per-provider LLM token + cost totals
 export const fetchUsageTotals = () => api.get('/usage/totals')
 export const resetUsageTotals = () => api.delete('/usage/totals')

@@ -6210,6 +6210,19 @@ async def clear_seen_references(current_user: UserInfo = Depends(require_user)):
     return {"removed": removed}
 
 
+@app.post("/api/references/seen/backfill")
+async def backfill_seen_references(current_user: UserInfo = Depends(require_user)):
+    """Re-run the Seen-Refs backfill: walk every completed check_history
+    row, upsert every reference into the global identity index. Idempotent
+    — repeated keys just bump times_seen. Used to recover when the
+    backstop silently dropped refs in earlier versions (the "120 plateau"
+    bug), and as a diagnostic: the response reports how many NEW vs
+    DUPLICATE rows landed, so the user can see whether their recent
+    checks actually produce new identity keys."""
+    result = await db.backfill_seen_references()
+    return result
+
+
 @app.get("/api/usage/totals")
 async def usage_totals(current_user: UserInfo = Depends(require_user)):
     """Per-provider LLM usage + cost-estimate snapshot.
