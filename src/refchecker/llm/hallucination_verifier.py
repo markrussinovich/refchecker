@@ -784,8 +784,77 @@ class LLMHallucinationVerifier:
                         verdict = 'UNLIKELY'
                         explanation += ' (Web search found the paper.)'
                     elif web_verdict == 'NOT_FOUND' and verdict == 'UNCERTAIN':
-                        verdict = 'LIKELY'
-                        explanation += ' (Web search also found no evidence this paper exists.)'
+                        # v0.7.59: don't promote UNCERTAIN→LIKELY when
+                        # the venue is a non-English-indexed journal
+                        # (Chinese / Japanese / Korean / Russian /
+                        # Arabic / etc). S2/Crossref/PMC + web search
+                        # all skew toward English-indexed content;
+                        # "not found anywhere" for these venues is
+                        # poor evidence of hallucination. User example
+                        # that broke before this guard: a real paper
+                        # in "Chin J Orthop Trauma" got LIKELY because
+                        # the Chinese-language journal isn't in any
+                        # English index.
+                        venue_text = (
+                            (error_entry.get('ref_venue') or '')
+                            + ' '
+                            + (error_entry.get('ref_venue_correct') or '')
+                        ).lower()
+                        _non_english_markers = (
+                            'chin j', 'chinese j', 'zhonghua', 'zhongguo',
+                            'jpn j', 'japanese j', 'nihon', 'nippon',
+                            'korean j', 'kor j', 'taehan',
+                            'russ j', 'russian j', 'rossii',
+                            'arab j', 'farsi', 'persian',
+                            'rev port', 'rev esp', 'cirugia',  # PT/ES
+                            'rev bras',  # Brazilian Portuguese journals
+                            'turk', 'türk',
+                            'kafkas',  # Turkic-zone titles
+                        )
+                        non_english_venue = any(
+                            marker in venue_text for marker in _non_english_markers
+                        )
+                        # Also detect raw CJK / Cyrillic / Arabic chars
+                        # in venue/title (titles + venues with native
+                        # script almost certainly aren't English-indexed).
+                        title_text = (error_entry.get('ref_title') or '')
+                        scan_text = venue_text + ' ' + title_text
+                        has_non_latin = any(
+                            ord(ch) > 0x2E80 and (
+                                # CJK
+                                0x2E80 <= ord(ch) <= 0x9FFF
+                                # Hiragana/Katakana
+                                or 0x3040 <= ord(ch) <= 0x30FF
+                                # Hangul
+                                or 0xAC00 <= ord(ch) <= 0xD7A3
+                                # Cyrillic
+                                or 0x0400 <= ord(ch) <= 0x04FF
+                                # Arabic
+                                or 0x0600 <= ord(ch) <= 0x06FF
+                                # Hebrew
+                                or 0x0590 <= ord(ch) <= 0x05FF
+                            )
+                            for ch in scan_text
+                        )
+                        if non_english_venue or has_non_latin:
+                            logger.debug(
+                                'Holding UNCERTAIN — venue/title looks '
+                                'non-English-indexed (%r); web NOT_FOUND '
+                                'is poor evidence here',
+                                venue_text.strip()[:60],
+                            )
+                            explanation += (
+                                ' (Note: this looks like a non-English-indexed '
+                                'journal; absence from S2/Crossref/PMC isn\'t '
+                                'reliable evidence of hallucination. Manual '
+                                'review recommended.)'
+                            )
+                            # Leave verdict at UNCERTAIN, which falls
+                            # through to "unverified" downstream rather
+                            # than "hallucinated".
+                        else:
+                            verdict = 'LIKELY'
+                            explanation += ' (Web search also found no evidence this paper exists.)'
                 except Exception as exc:
                     logger.debug(f'Web search during assessment failed: {exc}')
 

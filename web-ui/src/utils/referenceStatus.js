@@ -196,7 +196,7 @@ export const computeReferenceStats = (references = [], isCheckComplete = false) 
     else if (s === 'suggestion') withSuggestions += 1
 
     if (
-      s === 'unverified' || s === 'hallucination' ||
+      s === 'unverified' ||
       (s !== 'checking' && r?.errors?.some(e => e.error_type === 'unverified')) ||
       // A ref backend-labeled `status === 'unverified'` that hasn't yet
       // entered the hallucination LLM phase has its effective status
@@ -207,12 +207,18 @@ export const computeReferenceStats = (references = [], isCheckComplete = false) 
       // hallucination_check_pending=true — those are transient,
       // mid-LLM-call, and would otherwise double-flicker the badge.
       (r?.status === 'unverified' && !r?.hallucination_assessment &&
-        !r?.hallucination_check_pending && s === 'checking') ||
-      likelyHallucinated
+        !r?.hallucination_check_pending && s === 'checking')
     ) {
       withUnverified += 1
     }
 
+    // v0.7.59: hallucinated refs are counted ONLY in the hallucinated
+    // bucket, not also under unverified. Before this, every LIKELY
+    // ref bumped BOTH chips, so 5 halluc + 10 unverified out of 50
+    // refs totalled 65 — the user reported "badge counts inside
+    // each article don't match the summary". Hallucination is a more
+    // severe verdict than unverified; surfacing it in two places
+    // exaggerated the bad-count surface.
     if (s === 'hallucination' || likelyHallucinated) {
       hallucinated += 1
     }
