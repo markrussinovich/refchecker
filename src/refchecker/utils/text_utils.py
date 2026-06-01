@@ -1201,6 +1201,14 @@ def is_name_match(name1: str, name2: str) -> bool:
     def _maybe_rotate_vancouver(parts):
         if len(parts) < 2:
             return parts
+        # v0.7.65: never rotate when ANY token carries a comma. A comma
+        # signals "Last, First" (APA) ordering, not Vancouver. v0.7.63's
+        # single-letter trailing-initial branch (allow_single below) was
+        # otherwise pulling the trailing middle initial of
+        # "Johnson, Maria K." → ["K.", "Johnson,", "Maria"] and breaking
+        # the downstream comma-rotation path entirely.
+        if any(',' in p for p in parts):
+            return parts
         # v0.7.63: allow a single-letter trailing initial when EITHER
         # (a) there are ≥2 preceding tokens that look like a multi-word
         # surname (covers "Coronel Granado P", "Gimeno del Sol M", "van
@@ -1273,7 +1281,16 @@ def is_name_match(name1: str, name2: str) -> bool:
             # An initial is 1-2 uppercase letters (already split by
             # rotation), possibly with a period.
             if 1 <= len(tok) <= 2 and tok.isalpha() and tok.isupper():
-                initials.append(tok[0].upper())
+                # v0.7.65: when the token is a 2-letter compact cluster
+                # like "GV" or "HJ" (Vancouver-compact), expand BOTH
+                # letters as separate initials. The pre-v0.7.65 code
+                # only kept tok[0], which made "GV Abramkin" look like
+                # ini=["G"], silently matching "G. A. Abramkin" via the
+                # single-initial-prefix branch and dropping the V vs A
+                # mismatch. Expanding gives ini=["G","V"] which then
+                # fails the position-by-position prefix check correctly.
+                for ch in tok:
+                    initials.append(ch.upper())
                 i += 1
             else:
                 break
@@ -6158,15 +6175,15 @@ def is_year_substantially_different(cited_year: int, correct_year: int, context:
     if cited_year == correct_year:
         return False, None
 
-    # Suppress trivial 1-year gaps: online-ahead-of-print / epub vs print /
-    # accepted vs published. These are not real "wrong year" mismatches.
-    try:
-        if abs(int(cited_year) - int(correct_year)) <= 1:
-            return False, None
-    except (TypeError, ValueError):
-        pass
-
-    # Any larger year difference should be flagged as a warning for manual review
+    # v0.7.65: restore "any year difference flagged" semantics. The
+    # 1-year suppression introduced in v0.7.6 (online-ahead-of-print /
+    # epub vs print, accepted vs published) silently dropped real
+    # wrong-year errors and broke TestYearValidation. The candidate-
+    # filtering side ("≥5 years AND zero author overlap → wrong paper")
+    # lives in enhanced_hybrid_checker._is_wrong_paper_match() and is
+    # intentionally kept SEPARATE from this warning-emission function.
+    # Any year difference here flags a warning for manual review; the
+    # downstream consumer is free to weight 1-year gaps lower.
     warning_msg = f"Year mismatch: cited as {cited_year} but actually {correct_year}"
     return True, warning_msg
 

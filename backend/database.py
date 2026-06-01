@@ -922,16 +922,17 @@ class Database:
     async def get_history(self, limit: int = 50, user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Get recent check history, optionally filtered by user.
 
-        v0.7.46: results_json is NO LONGER pulled here. After a user
-        ran an 800-paper batch, every /history request was fetching +
-        re-parsing ~800 JSON blobs (one per row) totalling tens of MB,
-        which made the endpoint time out at the FE's 30s threshold and
-        wiped previous checks from the sidebar. The pre-computed
-        bucket columns (refs_with_errors / refs_with_warnings_only /
-        refs_with_suggestions_only / refs_verified) are kept in sync
-        by the upsert path, so the JSON recompute was duplicate work
-        anyway. Detail view still fetches results_json via
-        get_check_by_id.
+        v0.7.46: results_json is pulled but bounded by ``limit`` (50 by
+        default) to keep /history snappy. v0.7.46's blanket removal of
+        results_json broke the recompute path: ``processed_refs`` and
+        the stat buckets all live in results_json (the persisted column
+        values reflect the LAST upsert and can be stale during an
+        in-progress run, or carry sentinel 99s during partial writes).
+        v0.7.65 restores the recompute so history rows match the
+        Summary view and the unit tests' processed_refs expectation.
+        The 800-paper-batch case that motivated v0.7.46 is unaffected
+        because the FE still requests LIMIT 50 — fewer rows means
+        bounded JSON parse cost.
         """
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
@@ -943,7 +944,7 @@ class Database:
                 "refs_with_errors, refs_with_warnings_only, refs_with_suggestions_only, refs_verified, "
                 "llm_provider, llm_model, hallucination_provider, hallucination_model, "
                 "status, source_type, batch_id, batch_label, "
-                "bibliography_source_kind, original_filename"
+                "bibliography_source_kind, original_filename, results_json"
             )
             if user_id is not None:
                 query = f"""
@@ -967,7 +968,23 @@ class Database:
                 history = []
                 for row in rows:
                     item = dict(row)
+                    raw_results = item.pop('results_json', None)
                     item.setdefault('refs_with_suggestions_only', 0)
+                    # v0.7.65: recompute display stats from results_json
+                    # so processed_refs / unverified_count reflect the
+                    # actual reference array (the persisted aggregate
+                    # columns can be stale during in-progress runs).
+                    if raw_results:
+                        try:
+                            parsed_results = json.loads(raw_results)
+                        except Exception:
+                            parsed_results = []
+                        if isinstance(parsed_results, list) and parsed_results:
+                            buckets = _compute_reference_buckets_from_results(
+                                parsed_results,
+                                is_complete=item.get('status') in {'completed', 'cancelled', 'error'},
+                            )
+                            item.update(buckets)
                     history.append(item)
                 return history
 
