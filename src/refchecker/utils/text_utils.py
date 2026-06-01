@@ -1158,32 +1158,120 @@ def is_name_match(name1: str, name2: str) -> bool:
     # v0.7.57: Vancouver-style rotation. "Surname Initials" (Vancouver:
     # "van der Ven DJC") shouldn't be flagged as a mismatch against
     # "FirstName ... Surname" (APA: "Denise J C van der Ven") when
-    # they're the same person. Detect "trailing token is 2-4 uppercase
-    # initials" pattern and rotate to "Initials Surname" so the
-    # downstream surname-particle grouping + comparison can match.
+    # they're the same person.
+    # v0.7.60: also accept hyphenated initials ("J-M", "K-C") since
+    # German/Polish/etc names like "Kim-Charline" → "K-C" and
+    # "Graf von der Schulenburg J-M" all use them.
+    def _split_vancouver_initials(last):
+        """If `last` looks like a Vancouver initials cluster, return
+        the periodised initials list; else None. Handles:
+          "DJC"  (unbroken 2-4 uppercase letters)
+          "J-M", "K-C", "J.M.", "J.M"  (hyphen / dot separated)
+        """
+        if not last:
+            return None
+        s = last.rstrip('.').lstrip()
+        if not s:
+            return None
+        # Case 1: unbroken uppercase cluster (2-4 letters, no separators)
+        if 2 <= len(s) <= 4 and s.isalpha() and s.isupper():
+            return [c + "." for c in s]
+        # Case 2: separated cluster — bits are 1-2 uppercase letters,
+        # combined letter count 2..4.
+        bits = [b for b in re.split(r'[-.–—]', s) if b]
+        if not bits:
+            return None
+        if not all(1 <= len(b) <= 2 and b.isalpha() and b.isupper() for b in bits):
+            return None
+        flat = ''.join(bits)
+        if not (2 <= len(flat) <= 4):
+            return None
+        return [c + "." for c in flat]
+
     def _maybe_rotate_vancouver(parts):
         if len(parts) < 2:
             return parts
-        last = parts[-1].rstrip('.')
-        # Bare initials cluster: 2-4 chars, all alpha, all uppercase.
-        if 2 <= len(last) <= 4 and last.isalpha() and last.isupper():
-            # Split the initials cluster into individual periods so
-            # ALL initials get compared downstream — keeping "JK" as
-            # one token let "Smith JK" wrongly match "John L Smith"
-            # via the first-letter heuristic. "DJC" → "D. J. C.".
-            split_initials = [c + "." for c in last]
-            # Move to front: "van der Ven DJC" → "D. J. C. van der Ven";
-            # downstream surname-particle grouping pulls "van der Ven"
-            # back together as one and matches against the APA form's
-            # given-name initials.
-            return split_initials + parts[:-1]
-        return parts
+        split = _split_vancouver_initials(parts[-1])
+        if split is None:
+            return parts
+        # Move to front so downstream surname-particle grouping pulls
+        # "van der Ven" / "Menezes Costa" back together as one and
+        # matches against the APA form's given-name initials.
+        return split + parts[:-1]
     raw_parts1 = _maybe_rotate_vancouver(raw_parts1)
     raw_parts2 = _maybe_rotate_vancouver(raw_parts2)
     raw_name1 = " ".join(raw_parts1)
     raw_name2 = " ".join(raw_parts2)
     name1 = raw_name1
     name2 = raw_name2
+
+    # v0.7.60: dedicated post-rotation "Initials + Multi-word Surname"
+    # compare. The downstream particle grouping handles van/von/de but
+    # NOT genuine compound surnames like "Menezes Costa",
+    # "Graf von der Schulenburg", or hyphenated last names. Pattern:
+    #   Both sides start with 1+ initial tokens (X. or X), end with
+    #   1+ non-initial tokens (the surname, possibly multi-word).
+    # Match when surnames agree (case-insensitive, joined, hyphens and
+    # Al-/El- prefixes normalised) AND cited initials are a prefix or
+    # subset of the actual initials — extra middle initials on either
+    # side are allowed (Vancouver may drop middles, APA may include).
+    def _initials_and_surname(parts):
+        if len(parts) < 2:
+            return None, None
+        initials = []
+        i = 0
+        while i < len(parts):
+            tok = parts[i].rstrip('.')
+            # An initial is 1-2 uppercase letters (already split by
+            # rotation), possibly with a period.
+            if 1 <= len(tok) <= 2 and tok.isalpha() and tok.isupper():
+                initials.append(tok[0].upper())
+                i += 1
+            else:
+                break
+        if not initials or i >= len(parts):
+            return None, None
+        surname = ' '.join(parts[i:]).strip()
+        return initials, surname
+
+    def _normalize_surname(s):
+        s = s.lower()
+        # Strip Arabic "Al-" / "El-" prefix and join hyphenated parts
+        # ("Al-Omari" ≈ "Alomari", "Carvalho-e-Silva" ≈ "Carvalhoesilva")
+        s = re.sub(r'^(al|el)[-‐]', '', s)
+        s = re.sub(r'[-‐]', '', s)
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    ini1, sur1 = _initials_and_surname(raw_parts1)
+    ini2, sur2 = _initials_and_surname(raw_parts2)
+    if ini1 and ini2 and sur1 and sur2:
+        # Diacritic-stripped surname compare via the existing helper.
+        sur1_norm = _normalize_surname(normalize_diacritics(sur1))
+        sur2_norm = _normalize_surname(normalize_diacritics(sur2))
+        # Accept surname match OR one being a suffix of the other
+        # (handles "Abu Osman" vs "Osman" where the DB truncated the
+        # particle).
+        surnames_agree = (
+            sur1_norm == sur2_norm
+            or (len(sur1_norm) >= 4 and len(sur2_norm) >= 4 and
+                (sur1_norm.endswith(' ' + sur2_norm) or
+                 sur2_norm.endswith(' ' + sur1_norm) or
+                 sur1_norm.endswith(sur2_norm) or
+                 sur2_norm.endswith(sur1_norm)))
+        )
+        if surnames_agree:
+            # Initials check: shorter must be a prefix of longer (the
+            # truncated/dropped-middle case) OR one's first initial
+            # equals the other's first initial when one side has only
+            # one (the "Maiers MJ" vs "Michele Maiers" case where
+            # Michele only contributes M as a first initial).
+            short, long = (ini1, ini2) if len(ini1) <= len(ini2) else (ini2, ini1)
+            if (
+                long[:len(short)] == short  # exact prefix
+                or (len(short) == 1 and long and short[0] == long[0])  # first only
+            ):
+                return True
 
     # Keep simple two-part surnames with accent-placeholder apostrophes strict.
     # This avoids treating cases like "Balunovi'c" as exact matches while still
