@@ -73,6 +73,7 @@ function graphToCanvasPoint(transform, x, y) {
 export default function GraphView({ references, paperTitle }) {
   const containerRef = useRef(null)
   const fgRef = useRef(null)
+  const autoFittingRef = useRef(false)
   const [dims, setDims] = useState({ w: 800, h: 560 })
   const [selected, setSelected] = useState(null)
   const [hovered, setHovered] = useState(null)
@@ -106,17 +107,19 @@ export default function GraphView({ references, paperTitle }) {
   useEffect(() => {
     const root = document.documentElement
     const update = () => {
-      const styles = getComputedStyle(root)
+      const rootStyles = getComputedStyle(root)
+      const graphStyles = containerRef.current ? getComputedStyle(containerRef.current) : null
       setGraphTheme({
-        background: styles.getPropertyValue('--color-bg-secondary').trim() || '#f7f7f8',
-        text: styles.getPropertyValue('--color-text-primary').trim() || '#0d0d0d',
-        border: styles.getPropertyValue('--color-border').trim() || '#e5e5e5',
+        background: graphStyles?.backgroundColor || rootStyles.getPropertyValue('--color-bg-secondary').trim() || '#f7f7f8',
+        text: rootStyles.getPropertyValue('--color-text-primary').trim() || '#0d0d0d',
+        border: rootStyles.getPropertyValue('--color-border').trim() || '#e5e5e5',
       })
     }
     update()
     const observer = new MutationObserver(update)
     observer.observe(root, { attributes: true, attributeFilter: ['class'] })
-    return () => observer.disconnect()
+    window.addEventListener('resize', update)
+    return () => { observer.disconnect(); window.removeEventListener('resize', update) }
   }, [])
 
   // Fetch the real S2-backed citation graph once references stabilize.
@@ -293,8 +296,11 @@ export default function GraphView({ references, paperTitle }) {
 
     const timers = [250, 900].map((delay) => setTimeout(() => {
       try {
-        fg.zoomToFit(450, 28, (node) => node.type !== 'source' || graphData.nodes.length <= 12)
+        autoFittingRef.current = true
+        fg.zoomToFit(450, 44)
+        window.setTimeout(() => { autoFittingRef.current = false }, 520)
       } catch {
+        autoFittingRef.current = false
         /* Graph may not be initialized yet; next timer/data update retries. */
       }
     }, delay))
@@ -588,7 +594,7 @@ export default function GraphView({ references, paperTitle }) {
           cooldownTicks={140}
           d3AlphaDecay={0.02}
           d3VelocityDecay={0.4}
-          onZoomEnd={() => setHasUserNavigated(true)}
+          onZoomEnd={() => { if (!autoFittingRef.current) setHasUserNavigated(true) }}
           onNodeClick={(n) => setSelected(n)}
           onNodeDoubleClick={(n) => handleExpand(n)}
           onNodeHover={(n) => setHovered(n || null)}
