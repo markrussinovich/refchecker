@@ -17,6 +17,46 @@ const STATUS_COLOR = {
   pending: '#64748b',
 }
 
+const GRAPH_LABEL_MAX_WIDTH = 280
+const GRAPH_LABEL_MAX_LINES = 3
+
+function wrapCanvasLabel(ctx, text, maxWidth, maxLines) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean)
+  const lines = []
+  let current = ''
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (ctx.measureText(next).width <= maxWidth || !current) {
+      current = next
+      continue
+    }
+    lines.push(current)
+    current = word
+    if (lines.length >= maxLines) break
+  }
+  if (current && lines.length < maxLines) lines.push(current)
+
+  if (lines.length === maxLines && words.length) {
+    let last = lines[lines.length - 1]
+    while (last.length > 1 && ctx.measureText(`${last}...`).width > maxWidth) {
+      last = last.slice(0, -1).trimEnd()
+    }
+    if (last !== lines[lines.length - 1] || words.join(' ').length > lines.join(' ').length) {
+      lines[lines.length - 1] = `${last}...`
+    }
+  }
+  return lines.length ? lines : ['']
+}
+
+function graphToCanvasPoint(transform, x, y) {
+  const m = transform
+  return {
+    x: m.a * x + m.c * y + m.e,
+    y: m.b * x + m.d * y + m.f,
+  }
+}
+
 /**
  * Obsidian-style citation graph view.
  *
@@ -40,7 +80,11 @@ export default function GraphView({ references, paperTitle }) {
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
-  const [isDarkTheme, setIsDarkTheme] = useState(() => document.documentElement.classList.contains('dark'))
+  const [graphTheme, setGraphTheme] = useState(() => ({
+    background: '#f7f7f8',
+    text: '#0d0d0d',
+    border: '#e5e5e5',
+  }))
   // Source spokes are now always shown — the toggle that hid them was
   // removed in v0.7.18 because users didn't find it useful and the
   // rosette layout is the most readable default. Kept as a constant
@@ -60,7 +104,14 @@ export default function GraphView({ references, paperTitle }) {
 
   useEffect(() => {
     const root = document.documentElement
-    const update = () => setIsDarkTheme(root.classList.contains('dark'))
+    const update = () => {
+      const styles = getComputedStyle(root)
+      setGraphTheme({
+        background: styles.getPropertyValue('--color-bg-secondary').trim() || '#f7f7f8',
+        text: styles.getPropertyValue('--color-text-primary').trim() || '#0d0d0d',
+        border: styles.getPropertyValue('--color-border').trim() || '#e5e5e5',
+      })
+    }
     update()
     const observer = new MutationObserver(update)
     observer.observe(root, { attributes: true, attributeFilter: ['class'] })
@@ -524,8 +575,68 @@ export default function GraphView({ references, paperTitle }) {
           onNodeClick={(n) => setSelected(n)}
           onNodeDoubleClick={(n) => handleExpand(n)}
           onNodeHover={(n) => setHovered(n || null)}
+          onRenderFramePost={(ctx, globalScale = 1) => {
+            const nodes = graphData.nodes || []
+            const labelNodes = nodes.filter((node) => {
+              if (!node || typeof node.x !== 'number' || typeof node.y !== 'number') return false
+              return hovered?.id === node.id
+                || selected?.id === node.id
+                || (!hovered && !selected && node.type === 'source')
+                || globalScale > 2.5
+            })
+            if (!labelNodes.length) return
+
+            const canvas = ctx.canvas
+            const margin = 6
+            const graphTransform = ctx.getTransform()
+            ctx.save()
+            ctx.setTransform(1, 0, 0, 1, 0, 0)
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'top'
+
+            for (const node of labelNodes) {
+              const label = node.label || ''
+              if (!label) continue
+              const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
+              const point = graphToCanvasPoint(graphTransform, node.x, node.y)
+              const scaledRadius = radius * globalScale
+              const fontSize = 13
+              const lineHeight = 16
+              const padX = 6
+              const padY = 4
+              ctx.font = `600 ${fontSize}px -apple-system, sans-serif`
+              const maxTextWidth = Math.min(GRAPH_LABEL_MAX_WIDTH, Math.max(120, canvas.width - margin * 2 - padX * 2))
+              const lines = wrapCanvasLabel(ctx, label, maxTextWidth, GRAPH_LABEL_MAX_LINES)
+              const textWidth = Math.min(
+                maxTextWidth,
+                Math.max(...lines.map((line) => ctx.measureText(line).width), 0),
+              )
+              const boxWidth = textWidth + padX * 2
+              const boxHeight = lines.length * lineHeight + padY * 2
+
+              let x = point.x + scaledRadius + 8
+              if (x + boxWidth > canvas.width - margin) {
+                x = point.x - scaledRadius - 8 - boxWidth
+              }
+              x = Math.max(margin, Math.min(x, canvas.width - margin - boxWidth))
+
+              let y = point.y - boxHeight / 2
+              y = Math.max(margin, Math.min(y, canvas.height - margin - boxHeight))
+
+              ctx.fillStyle = graphTheme.background
+              ctx.fillRect(x, y, boxWidth, boxHeight)
+              ctx.strokeStyle = graphTheme.border
+              ctx.lineWidth = 1
+              ctx.strokeRect(x + 0.5, y + 0.5, boxWidth - 1, boxHeight - 1)
+              ctx.fillStyle = graphTheme.text
+              lines.forEach((line, lineIndex) => {
+                ctx.fillText(line, x + padX, y + padY + lineIndex * lineHeight)
+              })
+            }
+
+            ctx.restore()
+          }}
           nodeCanvasObject={(node, ctx, globalScale) => {
-            const label = node.label || ''
             const radius = Math.max(3, Math.sqrt(node.val) * 1.5)
             const isHovered = hovered?.id === node.id
             const isSelected = selected?.id === node.id
@@ -575,27 +686,6 @@ export default function GraphView({ references, paperTitle }) {
               ctx.arc(node.x, node.y, radius + 3.5, 0, 2 * Math.PI, false)
               ctx.stroke()
             }
-            // Single-label rule: the hovered node wins. If no hover, the
-            // source node always shows its label so the user has at least
-            // one orientation anchor. Past 2.5× zoom, render every label.
-            const showLabel = isHovered
-              || (!hovered && node.type === 'source')
-              || globalScale > 2.5
-            if (!showLabel) return
-            const fontSize = Math.max(10, 12 / globalScale)
-            ctx.font = `${fontSize}px -apple-system, sans-serif`
-            const text = label.slice(0, 48)
-            const padX = 4
-            const tx = node.x + radius + 6
-            const ty = node.y
-            const w = ctx.measureText(text).width + padX * 2
-            const h = fontSize + 4
-            ctx.fillStyle = isDarkTheme ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.9)'
-            ctx.fillRect(tx - padX, ty - h / 2, w, h)
-            ctx.fillStyle = isDarkTheme ? 'rgba(255,255,255,0.96)' : 'rgba(0,0,0,0.96)'
-            ctx.textAlign = 'left'
-            ctx.textBaseline = 'middle'
-            ctx.fillText(text, tx, ty)
           }}
         />
       </Suspense>
