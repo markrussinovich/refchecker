@@ -1991,7 +1991,29 @@ class ProgressRefChecker:
                         # Extract text using the same CLI path for parity.
                         paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
                     else:
-                        paper_text = ""  # Not needed since we have references
+                        # We already have high-quality references from the
+                        # source .bbl, but still need body text for inline
+                        # citation contexts. Download/extract the PDF as a
+                        # best-effort context source without changing the
+                        # reference-extraction method away from bbl/bib.
+                        try:
+                            pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
+                            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                                await asyncio.to_thread(download_arxiv_paper_pdf, paper, pdf_path, arxiv_id)
+                            pdf_path_for_fallback = pdf_path
+                            paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
+                            logger.info(
+                                "Extracted PDF body text for citation contexts after %s source extraction (%d chars)",
+                                extraction_method,
+                                len(paper_text or ""),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "Could not extract PDF body text for citation contexts after %s source extraction: %s",
+                                extraction_method,
+                                e,
+                            )
+                            paper_text = ""
 
             elif source_type == "file":
                 set_extraction_method('file')
