@@ -219,8 +219,9 @@ def test_runtime_dir_prefers_explicit_then_data_then_cache(monkeypatch, tmp_path
 def test_pip_argv_torch_targets_runtime_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
     argv = _rt._pip_argv("torch")
-    assert argv[:3] == ["install", "--no-input", "--target"]
-    assert str(tmp_path) in argv
+    assert argv[0] == "install"
+    assert "--no-input" in argv and "--target" in argv
+    assert argv[argv.index("--target") + 1] == str(tmp_path)
     assert "torch" in argv and "transformers" in argv
 
 
@@ -273,3 +274,39 @@ def test_start_install_short_circuits_when_runtime_present(monkeypatch, tmp_path
     monkeypatch.setattr(_rt, "deps_available", lambda: True)
     res = _rt.start_install("bogus")
     assert res["deps_available"] is True
+
+
+def test_runtime_status_includes_live_log(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    _rt._log_reset()
+    _rt._log_line("hello-debug-line")
+    st = _rt.runtime_status()
+    assert isinstance(st.get("log"), list)
+    assert any("hello-debug-line" in line for line in st["log"])
+
+
+def test_log_writer_streams_into_buffer():
+    _rt._log_reset()
+    w = _rt._LogWriter()
+    w.write("downloading torch...\n")
+    assert any("downloading torch" in line for line in _rt.get_log())
+
+
+def test_diagnostics_ring_buffer_newest_first():
+    from refchecker.ai_detection import diagnostics
+    diagnostics.clear()
+    diagnostics.record({"backend": "local", "outcome": "low"})
+    diagnostics.record({"backend": "api", "outcome": "high"})
+    evs = diagnostics.events()
+    assert evs[0]["backend"] == "api" and evs[1]["backend"] == "local"
+    assert all("ts" in e for e in evs)
+
+
+def test_run_detection_records_a_diagnostic_event():
+    from refchecker.ai_detection import diagnostics
+    diagnostics.clear()
+    # unknown backend → graceful unavailable, and still recorded
+    run_detection("some text", backend="nope-not-real")
+    evs = diagnostics.events()
+    assert evs and evs[0]["backend"] == "nope-not-real"
+    assert evs[0]["outcome"] in ("unavailable", "error")

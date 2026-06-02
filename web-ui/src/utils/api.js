@@ -123,6 +123,7 @@ export const deleteAIDetectionModel = () => api.delete('/ai-detection/model')
 export const getAIDetectionRuntimeStatus = () => api.get('/ai-detection/runtime/status')
 export const installAIDetectionRuntime = (variant = 'torch') =>
   api.post('/ai-detection/runtime/install', null, { params: { variant } })
+export const getAIDetectionDiagnostics = () => api.get('/ai-detection/diagnostics')
 
 // OpenReview venue scanning
 export const fetchOpenReviewList = (venue, status = 'accepted') =>

@@ -79,14 +79,36 @@ def run_detection(
     Always returns a result; on any failure returns an "unavailable" result
     with a machine-readable ``abstain_reason``.
     """
+    import time as _time
+    from . import diagnostics
+
     detector = build_detector(backend, check_id=check_id, **opts)
     if detector is None:
+        diagnostics.record({"backend": backend, "outcome": "unavailable",
+                            "reason": "unknown_backend"})
         return make_unavailable("unknown_backend", backend)
+    started = _time.monotonic()
     try:
-        return detector.detect(text, title=title)
+        result = detector.detect(text, title=title)
     except Exception as exc:  # noqa: BLE001
         logger.warning("AI detection (%s) raised: %s", backend, exc)
+        diagnostics.record({"backend": backend, "outcome": "error",
+                            "reason": "detection_error", "error": str(exc)[:200]})
         return make_unavailable("detection_error", backend)
+    # Record a text-free summary for the Settings debugger.
+    try:
+        diagnostics.record({
+            "backend": result.backend_used or backend,
+            "outcome": result.band,
+            "score": result.overall_score,
+            "reason": result.abstain_reason,
+            "word_count": result.word_count,
+            "spans": len(result.spans or []),
+            "duration_ms": int((_time.monotonic() - started) * 1000),
+        })
+    except Exception:  # noqa: BLE001
+        pass
+    return result
 
 
 __all__ = [

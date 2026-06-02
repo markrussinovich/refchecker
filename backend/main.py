@@ -6667,6 +6667,18 @@ async def ai_detection_runtime_install(
     return runtime_manager.start_install(variant)
 
 
+@app.get("/api/ai-detection/diagnostics")
+async def ai_detection_diagnostics(current_user: UserInfo = Depends(require_user)):
+    """Debugger payload for Settings → AI Detection: the runtime install
+    status + live install log, plus recent (text-free) detection-run events
+    so users can see why detection produced a given band / no band."""
+    from refchecker.ai_detection import runtime_manager, diagnostics
+    return {
+        "runtime": runtime_manager.runtime_status(),
+        "events": diagnostics.events(),
+    }
+
+
 # Mount static files for bundled frontend (if available)
 # This must be after all API routes to avoid conflicts
 if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():

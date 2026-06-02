@@ -43,6 +43,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   // AI-generated-text detection (opt-in, client preference + local model mgmt)
   const aiDetection = useAiDetectionStore()
   const [aiDetKey, setAiDetKey] = useState('')
+  const [aiDebugOpen, setAiDebugOpen] = useState(false)
   useEffect(() => {
     if (isSettingsOpen && activeSection === 'AI Detection') {
       aiDetection.fetchModelStatus()
@@ -650,8 +651,20 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                       : 'Large one-time download (torch).'}
                   </span>
                 </div>
+                {(aiDetection.runtimeBusy || (rs && rs.state === 'installing')) && (
+                  <div className="mt-2">
+                    <div style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                      <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                    </div>
+                    {rs && rs.log && rs.log.length > 0 && (
+                      <div className="text-[11px] mt-1 font-mono truncate" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                        {rs.log[rs.log.length - 1]}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {aiDetection.runtimeError && (
-                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.runtimeError}</div>
+                  <div className="text-xs mt-2 rounded p-2 whitespace-pre-wrap" style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{aiDetection.runtimeError}</div>
                 )}
                 {rs && rs.is_frozen && (
                   <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
@@ -733,6 +746,64 @@ export default function SettingsPanel({ theme, onThemeChange }) {
             </label>
           </div>
         )}
+
+        {/* Debugger: runtime install log + recent detection-run events. */}
+        <div className="pt-2 mt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+          <button
+            type="button"
+            onClick={() => { const n = !aiDebugOpen; setAiDebugOpen(n); if (n) aiDetection.fetchDiagnostics() }}
+            className="flex items-center gap-1 text-xs font-medium"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <span style={{ display: 'inline-block', width: 10 }}>{aiDebugOpen ? '▾' : '▸'}</span>
+            Diagnostics &amp; logs
+          </button>
+          {aiDebugOpen && (
+            <div className="mt-2 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  Runtime: {rs ? `${rs.deps_available ? 'ready' : (rs.state || 'idle')}${rs.installed_variant ? ` · ${rs.installed_variant}` : ''}${rs.is_frozen ? ' · desktop' : ''}` : '…'}
+                  {rs && rs.target ? ` · ${rs.target}` : ''}
+                </span>
+                <button type="button" onClick={() => aiDetection.fetchDiagnostics()} className="text-xs underline" style={{ color: accent }}>
+                  Refresh
+                </button>
+              </div>
+              <div>
+                <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Install log</div>
+                <pre
+                  className="text-[11px] rounded p-2 overflow-auto m-0"
+                  style={{ maxHeight: 170, backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                >
+                  {rs && rs.log && rs.log.length ? rs.log.join('\n') : 'No install log yet — click “Install runtime”.'}
+                </pre>
+              </div>
+              <div>
+                <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Recent detection runs</div>
+                {(() => {
+                  const evs = (aiDetection.diagnostics && aiDetection.diagnostics.events) || []
+                  if (!evs.length) {
+                    return <div className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>No detection runs recorded yet (run a check with AI detection on).</div>
+                  }
+                  return (
+                    <div className="text-[11px] font-mono space-y-0.5 rounded p-2 overflow-auto" style={{ maxHeight: 170, backgroundColor: 'var(--color-bg-secondary)' }}>
+                      {evs.map((e, i) => (
+                        <div key={i} style={{ color: 'var(--color-text-secondary)' }}>
+                          {e.ts} · {e.backend} · <strong>{e.outcome}</strong>
+                          {e.score != null ? ` (${Number(e.score).toFixed(2)})` : ''}
+                          {e.reason ? ` · ${e.reason}` : ''}
+                          {e.word_count != null ? ` · ${e.word_count}w` : ''}
+                          {e.duration_ms != null ? ` · ${e.duration_ms}ms` : ''}
+                          {e.error ? ` · ${e.error}` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Attribution for the open-source detectors / services used. */}
         <div className="pt-2 mt-1 border-t text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>

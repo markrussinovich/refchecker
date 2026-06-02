@@ -51,6 +51,45 @@ _status: Dict[str, object] = {"state": "idle", "message": "", "variant": None}
 _thread: Optional[threading.Thread] = None
 _on_path_done = False
 
+# Rolling install/diagnostic log (newest-last), streamed live to the UI debugger
+# so a failing desktop install shows the real pip output instead of failing
+# silently. Capped so it can't grow without bound.
+_LOG_CAP = 400
+_log: List[str] = []
+
+
+def _log_line(msg: str) -> None:
+    import time
+    stamp = time.strftime("%H:%M:%S")
+    with _lock:
+        for line in (str(msg).splitlines() or [""]):
+            _log.append(f"{stamp}  {line}")
+        if len(_log) > _LOG_CAP:
+            del _log[: len(_log) - _LOG_CAP]
+
+
+def _log_reset() -> None:
+    with _lock:
+        _log.clear()
+
+
+def get_log(limit: int = 160) -> List[str]:
+    with _lock:
+        return _log[-limit:]
+
+
+class _LogWriter(io.TextIOBase):
+    """File-like sink that streams written text into the install log live (used
+    to capture in-process pip output as it happens)."""
+
+    def write(self, s):  # noqa: D401
+        if s:
+            _log_line(s.rstrip("\n"))
+        return len(s)
+
+    def flush(self):
+        return None
+
 
 def is_frozen() -> bool:
     """True when running inside a PyInstaller (desktop sidecar) bundle."""
@@ -107,41 +146,56 @@ def _torch_index_args(variant: str) -> List[str]:
 
 
 def _pip_argv(variant: str) -> List[str]:
-    argv = ["install", "--no-input", "--target", str(runtime_dir())]
+    argv = ["install", "--no-input", "--disable-pip-version-check",
+            "--no-warn-script-location", "--target", str(runtime_dir())]
     # In the frozen bundle there is no compiler / usable build environment, so
-    # never let pip fall back to building an sdist from source.
+    # never let pip fall back to building an sdist from source; and skip the
+    # cache dir (the bundle's HOME may be read-only / unexpected).
     if is_frozen():
-        argv.append("--only-binary=:all:")
+        argv += ["--only-binary=:all:", "--no-cache-dir"]
     argv += _torch_index_args(variant)
     argv += _VARIANTS[variant]
     return argv
 
 
-def _run_pip_subprocess(argv: List[str]) -> Tuple[bool, str]:
-    """Run ``{sys.executable} -m pip`` — the clean path for source installs."""
+def _run_pip_subprocess(argv: List[str]) -> bool:
+    """Run ``{sys.executable} -m pip`` — the clean path for source installs.
+
+    Streams pip's output into the live log so the UI debugger shows progress.
+    """
     import subprocess
     cmd = [sys.executable, "-m", "pip", *argv]
-    logger.info("AI-detection runtime install: %s", " ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-    log = (proc.stdout or "") + (proc.stderr or "")
-    return proc.returncode == 0, log
+    _log_line("$ " + " ".join(cmd))
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    )
+    try:
+        for line in proc.stdout:  # live stream
+            _log_line(line.rstrip("\n"))
+        proc.wait(timeout=3600)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    return proc.returncode == 0
 
 
-def _run_pip_inprocess(argv: List[str]) -> Tuple[bool, str]:
+def _run_pip_inprocess(argv: List[str]) -> bool:
     """Run pip inside this interpreter — used in the frozen desktop bundle,
     where ``sys.executable`` is the app (not a Python that accepts ``-m pip``).
 
     Uses an importable ``pip`` if the bundle has one, else downloads the
     official ``pip.pyz`` zipapp and runs it. Either way pip resolves wheels for
     THIS interpreter's version/platform, so installed binaries match the ABI.
+    Output is streamed into the live log.
     """
     import runpy
-    buf = io.StringIO()
+    writer = _LogWriter()
     old_argv = sys.argv
     code = 1
     try:
-        with redirect_stdout(buf), redirect_stderr(buf):
+        with redirect_stdout(writer), redirect_stderr(writer):
             if importlib.util.find_spec("pip") is not None:
+                _log_line("[pip] using bundled pip")
                 sys.argv = ["pip", *argv]
                 try:
                     runpy.run_module("pip", run_name="__main__", alter_sys=True)
@@ -149,23 +203,26 @@ def _run_pip_inprocess(argv: List[str]) -> Tuple[bool, str]:
                 except SystemExit as exc:  # pip always exits
                     code = int(exc.code or 0)
             else:
-                pyz = _ensure_pip_pyz(buf)
+                pyz = _ensure_pip_pyz()
                 if pyz is None:
-                    return False, buf.getvalue() + "\nCould not obtain pip."
+                    return False
+                _log_line("[pip] using downloaded pip.pyz")
                 sys.argv = ["pip", *argv]
                 try:
                     runpy.run_path(str(pyz), run_name="__main__")
                     code = 0
                 except SystemExit as exc:
                     code = int(exc.code or 0)
-    except Exception as exc:  # noqa: BLE001
-        return False, buf.getvalue() + f"\npip raised: {exc}"
+    except Exception:  # noqa: BLE001
+        import traceback
+        _log_line("pip raised:\n" + traceback.format_exc())
+        return False
     finally:
         sys.argv = old_argv
-    return code == 0, buf.getvalue()
+    return code == 0
 
 
-def _ensure_pip_pyz(buf: io.StringIO) -> Optional[Path]:
+def _ensure_pip_pyz() -> Optional[Path]:
     """Download the standalone pip zipapp into the runtime dir (once)."""
     dest = runtime_dir() / "pip.pyz"
     if dest.is_file() and dest.stat().st_size > 0:
@@ -173,17 +230,18 @@ def _ensure_pip_pyz(buf: io.StringIO) -> Optional[Path]:
     try:
         import urllib.request
         dest.parent.mkdir(parents=True, exist_ok=True)
-        buf.write(f"Downloading pip from {_PIP_PYZ_URL}…\n")
+        _log_line(f"Downloading pip from {_PIP_PYZ_URL}…")
         with urllib.request.urlopen(_PIP_PYZ_URL, timeout=60) as resp:  # noqa: S310
             data = resp.read()
         dest.write_bytes(data)
+        _log_line(f"pip.pyz downloaded ({len(data)} bytes)")
         return dest
     except Exception as exc:  # noqa: BLE001
-        buf.write(f"pip download failed: {exc}\n")
+        _log_line(f"pip download failed: {exc}")
         return None
 
 
-def _run_pip(argv: List[str]) -> Tuple[bool, str]:
+def _run_pip(argv: List[str]) -> bool:
     if is_frozen():
         return _run_pip_inprocess(argv)
     return _run_pip_subprocess(argv)
@@ -226,6 +284,7 @@ def runtime_status() -> Dict[str, object]:
         state = _status.get("state")
         message = _status.get("message", "")
         variant = _status.get("variant")
+        log = list(_log[-160:])
     available = deps_available()
     if available and state != "installing":
         state = "installed"
@@ -239,15 +298,19 @@ def runtime_status() -> Dict[str, object]:
         "variants": list(_VARIANTS.keys()),
         "is_frozen": is_frozen(),
         "target": str(runtime_dir()),
+        "log": log,
     }
 
 
 def _install_worker(variant: str) -> None:
     global _status
     try:
+        _log_line(f"=== installing '{variant}' runtime ===")
+        _log_line(f"frozen={is_frozen()} python={sys.version.split()[0]} "
+                  f"platform={sys.platform} executable={sys.executable}")
+        _log_line(f"target={runtime_dir()}")
         runtime_dir().mkdir(parents=True, exist_ok=True)
-        ok, log = _run_pip(_pip_argv(variant))
-        tail = "\n".join((log or "").strip().splitlines()[-8:])
+        ok = _run_pip(_pip_argv(variant))
         # Make the just-installed packages importable in-process so the next
         # check / status poll sees them without a restart, then VERIFY they
         # actually import — a pip exit 0 that still can't be imported (ABI
@@ -255,27 +318,34 @@ def _install_worker(variant: str) -> None:
         # "installed" that makes the UI poll forever.
         ensure_on_path()
         importlib.invalidate_caches()
-        if ok and deps_available():
+        importable = deps_available()
+        _log_line(f"pip ok={ok} runtime_importable={importable}")
+        if ok and importable:
+            _log_line(f"SUCCESS: {variant} runtime installed and importable")
             with _lock:
                 _status = {"state": "installed", "variant": variant,
                            "message": f"Installed {variant} runtime."}
             logger.info("AI-detection runtime (%s) installed at %s", variant, runtime_dir())
         elif ok:
+            _log_line("ERROR: pip reported success but the runtime cannot be imported")
             with _lock:
                 _status = {"state": "error", "variant": variant,
                            "message": ("Installed, but the runtime still isn't importable "
-                                       f"(possible version mismatch). {tail}")}
-            logger.warning("AI-detection runtime installed but not importable: %s", tail)
+                                       "(version/ABI mismatch). See the install log below.")}
+            logger.warning("AI-detection runtime installed but not importable")
         else:
+            _log_line("ERROR: pip install failed")
             with _lock:
                 _status = {"state": "error", "variant": variant,
-                           "message": f"Install failed. {tail}"}
-            logger.warning("AI-detection runtime install failed: %s", tail)
+                           "message": "Install failed — see the install log below."}
+            logger.warning("AI-detection runtime install failed")
     except Exception as exc:  # noqa: BLE001
+        import traceback
+        _log_line("CRASH:\n" + traceback.format_exc())
         logger.warning("AI-detection runtime install crashed: %s", exc)
         with _lock:
             _status = {"state": "error", "variant": variant,
-                       "message": f"Install failed: {exc}"}
+                       "message": f"Install crashed: {exc}"}
 
 
 def start_install(variant: str = DEFAULT_VARIANT) -> Dict[str, object]:
@@ -289,6 +359,8 @@ def start_install(variant: str = DEFAULT_VARIANT) -> Dict[str, object]:
     with _lock:
         if _status.get("state") == "installing" and _thread and _thread.is_alive():
             return dict(_status, **{"deps_available": False})
+    _log_reset()  # fresh log per install attempt (own lock — keep out of the block above)
+    with _lock:
         _status = {"state": "installing", "variant": variant,
                    "message": f"Installing {variant} runtime…"}
         _thread = threading.Thread(target=_install_worker, args=(variant,), daemon=True)

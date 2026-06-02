@@ -6,6 +6,7 @@ import {
   deleteAIDetectionModel,
   getAIDetectionRuntimeStatus,
   installAIDetectionRuntime,
+  getAIDetectionDiagnostics,
 } from '../utils/api'
 
 // AI-generated-text detection is an OPT-IN, client-side preference (it is not
@@ -52,9 +53,12 @@ export const useAiDetectionStore = create((set, get) => ({
   modelError: null,
 
   // Optional inference-runtime (torch/onnx) lifecycle state
-  runtimeStatus: null,   // { deps_available, installed_variant, is_frozen, ... }
+  runtimeStatus: null,   // { deps_available, installed_variant, is_frozen, log, ... }
   runtimeBusy: false,
   runtimeError: null,
+
+  // Debugger payload: { runtime: {...}, events: [...] }
+  diagnostics: null,
 
   setEnabled: (enabled) => { set({ enabled }); persist(get()) },
   setBackend: (backend) => { set({ backend }); persist(get()) },
@@ -114,7 +118,10 @@ export const useAiDetectionStore = create((set, get) => ({
   fetchRuntimeStatus: async () => {
     try {
       const res = await getAIDetectionRuntimeStatus()
-      set({ runtimeStatus: res.data, runtimeError: null })
+      // Surface a backend-reported failure (state==='error') as runtimeError —
+      // otherwise the button just re-enables with no reason shown.
+      const err = res.data?.state === 'error' ? (res.data.message || 'Install failed') : null
+      set({ runtimeStatus: res.data, runtimeError: err })
       // Keep the model card's deps_available view in sync (the model status
       // also reports deps_available; refresh it so the Download button enables
       // the moment a runtime install finishes).
@@ -127,22 +134,40 @@ export const useAiDetectionStore = create((set, get) => ({
     }
   },
 
+  fetchDiagnostics: async () => {
+    try {
+      const res = await getAIDetectionDiagnostics()
+      set({ diagnostics: res.data })
+      if (res.data?.runtime) {
+        const rt = res.data.runtime
+        const err = rt.state === 'error' ? (rt.message || 'Install failed') : null
+        set({ runtimeStatus: rt, runtimeError: err })
+      }
+      return res.data
+    } catch (e) {
+      logger.warn('AiDetectionStore', 'diagnostics failed', e)
+      return null
+    }
+  },
+
   installRuntime: async (variant = 'torch') => {
     set({ runtimeBusy: true, runtimeError: null })
     try {
       await installAIDetectionRuntime(variant)
-      // Installing torch + transformers is a large download; poll generously.
+      // Installing torch + transformers is a large download; poll generously
+      // and refresh diagnostics each tick so the status bar + log stream live.
       let misses = 0
       for (let i = 0; i < 900; i++) {
-        const st = await get().fetchRuntimeStatus()
+        const d = await get().fetchDiagnostics()
+        const st = d?.runtime || (await get().fetchRuntimeStatus())
         if (!st) {
           if (++misses >= 3) break
-          await new Promise((r) => setTimeout(r, 2000))
+          await new Promise((r) => setTimeout(r, 1500))
           continue
         }
         misses = 0
         if (st.deps_available || st.state === 'error') break
-        await new Promise((r) => setTimeout(r, 2000))
+        await new Promise((r) => setTimeout(r, 1500))
       }
     } catch (e) {
       set({ runtimeError: e?.response?.data?.detail || e.message })
