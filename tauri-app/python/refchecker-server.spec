@@ -87,15 +87,41 @@ hiddenimports += [
 
 # Bundle pip (+ its vendored deps) so the optional AI-detection inference
 # runtime can be installed from the app in the frozen desktop build: the
-# install runs `pip install --target <app-data>` IN-PROCESS, so it resolves
-# wheels for THIS interpreter's version/platform (ABI-matched). Without a
-# bundled pip the app falls back to downloading the standalone pip.pyz.
+# install re-invokes this bundle in a clean `--pip-install` subprocess that runs
+# `pip install --target <app-data>`, resolving wheels for THIS interpreter's
+# version/platform (ABI-matched). Without a bundled pip the subprocess falls
+# back to downloading the standalone pip.pyz.
 try:
     _pip_datas, _pip_bins, _pip_hidden = collect_all("pip")
     datas += _pip_datas
     hiddenimports += _pip_hidden
 except Exception:
     pass  # pip missing at build time → runtime falls back to pip.pyz download
+
+# Ship the FULL Python standard library. The optional AI-detection runtime
+# (torch / transformers, pip-installed at runtime into a --target dir) imports
+# stdlib modules the base app never uses — e.g. torch needs `timeit`, which
+# PyInstaller would otherwise omit, giving "ModuleNotFoundError: No module
+# named 'timeit'" at import time. Adding every stdlib top-level name (plus the
+# submodules of the packages torch/transformers/numpy reach into) makes any
+# pip-installed runtime importable inside the frozen interpreter.
+import sys as _sys
+_STDLIB_SKIP = {
+    "tkinter", "turtle", "turtledemo", "idlelib", "lib2to3", "antigravity",
+    "this", "test", "pydoc_data", "ensurepip", "venv",
+}
+hiddenimports += [
+    _m for _m in sorted(getattr(_sys, "stdlib_module_names", set()))
+    if not _m.startswith("_") and _m not in _STDLIB_SKIP
+]
+for _pkg in ("xml", "concurrent", "ctypes", "multiprocessing", "logging",
+             "json", "http", "email", "unittest", "importlib", "encodings",
+             "collections", "sqlite3", "urllib", "html", "wsgiref", "asyncio",
+             "dbm", "curses"):
+    try:
+        hiddenimports += collect_submodules(_pkg)
+    except Exception:
+        pass
 
 a = Analysis(
     [ENTRY_SCRIPT],
