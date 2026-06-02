@@ -110,12 +110,92 @@ def runtime_dir() -> Path:
     return Path.home() / ".cache" / "refchecker" / "ai-detection-runtime"
 
 
-def ensure_on_path() -> None:
-    """Prepend the runtime dir to ``sys.path`` so installed deps are importable.
+# ── Frozen-bundle import-shadowing fix ─────────────────────────────────────
+# In the PyInstaller bundle, the FrozenImporter (front of sys.meta_path) holds
+# PARTIAL copies of packages the base app imported — e.g. a `tqdm` WITHOUT
+# `tqdm/auto.py`, because the server only does `from tqdm import tqdm`. That
+# partial shadows the COMPLETE copy pip installs into the --target dir, so the
+# runtime fails with `No module named 'tqdm.auto'`. Fix (designed + proof-tested
+# via a workflow): a front-of-meta_path finder that resolves an ALLOWLIST of
+# ML-runtime top-level packages from the target dir, plus eviction of the stale
+# pre-cached `tqdm` (the server imports it at startup, so it's already in
+# sys.modules before the finder exists — a finder alone would be bypassed).
+# Default-deny: the live server's own packages (httpx/pydantic/certifi/...) are
+# never claimed, so its import resolution is unchanged.
+_ML_ALLOWLIST = frozenset({
+    "torch", "transformers", "huggingface_hub", "tqdm", "tokenizers",
+    "safetensors", "regex", "sympy", "networkx", "filelock", "fsspec",
+    "numpy", "accelerate", "hf_xet", "mpmath", "annotated_doc", "typer",
+    "rich", "markdown_it", "mdurl", "pygments", "shellingham", "onnxruntime",
+})
 
-    Idempotent and cheap; safe to call before every dependency check. Only
-    touches ``sys.path`` when the directory actually exists, so a normal
-    environment that never installed a runtime is unaffected.
+_finder = None  # singleton meta-path finder (installed once)
+
+
+class _RuntimeTargetFinder:
+    """MetaPathFinder resolving only allowlisted TOP-LEVEL names from the
+    runtime --target dir, overriding PyInstaller's FrozenImporter. It claims
+    just the top-level name; submodules (tqdm.auto) then follow the now
+    target-rooted parent __path__ via the normal machinery."""
+
+    def __init__(self, target: str, owned):
+        self.target = target
+        self.owned = frozenset(owned)
+
+    def find_spec(self, fullname, path=None, target=None):
+        top = fullname.split(".", 1)[0]
+        if fullname != top or top not in self.owned:
+            return None  # submodule, or not an ML package → default deny
+        try:
+            from importlib.machinery import PathFinder
+            return PathFinder.find_spec(fullname, [self.target], target)
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def _activate_runtime_shadowing(target: str) -> None:
+    """Install the finder (once) and evict the stale pre-cached partial tqdm."""
+    global _finder
+    try:
+        present = set()
+        for entry in os.listdir(target):
+            name = entry[:-3] if entry.endswith(".py") else entry.split("-", 1)[0]
+            present.add(name.split(".", 1)[0])
+    except OSError:
+        return
+    owned = frozenset(_ML_ALLOWLIST & present)
+    if not owned:
+        return
+    # Atomic under the lock: the install worker thread and the UI status-poll
+    # request threads can both reach here, and a half-evicted tqdm observed by a
+    # concurrent import would raise. Only cheap ops here (no heavy imports).
+    with _lock:
+        if _finder is None:
+            _finder = _RuntimeTargetFinder(target, owned)
+            sys.meta_path.insert(0, _finder)
+            # Evict the stale partial tqdm (imported from the bundle at server
+            # startup) so it re-resolves complete from the target. Only the
+            # pure-Python tqdm — NEVER a loaded C-extension (numpy), whose
+            # re-init would crash — and only copies not already from the target.
+            for name in [m for m in list(sys.modules) if m == "tqdm" or m.startswith("tqdm.")]:
+                mod = sys.modules.get(name)
+                if not (getattr(mod, "__file__", "") or "").startswith(target):
+                    del sys.modules[name]
+        else:
+            _finder.target = target
+            _finder.owned = owned
+        importlib.invalidate_caches()
+
+
+def ensure_on_path() -> None:
+    """Make an installed --target runtime importable.
+
+    Source installs: prepend the target to sys.path (the user installed there,
+    so it should win). Frozen desktop bundle: APPEND the target — so the bundle
+    (sys.path[0], set by server_entry) stays ahead for the server's own shared
+    deps — and activate the import-shadowing fix so ML packages resolve from the
+    target over the bundle's partial frozen copies. Idempotent; a no-op until
+    the dir exists, so source / never-installed setups are unaffected.
     """
     global _on_path_done
     d = runtime_dir()
@@ -126,11 +206,15 @@ def ensure_on_path() -> None:
     if not exists:
         return
     s = str(d)
-    if s not in sys.path:
-        sys.path.insert(0, s)
-        # A freshly-created dir may have been probed (and cached as missing)
-        # by an earlier import attempt; clear that so the new packages resolve.
-        importlib.invalidate_caches()
+    if is_frozen():
+        if s not in sys.path:
+            sys.path.append(s)
+            importlib.invalidate_caches()
+        _activate_runtime_shadowing(s)
+    else:
+        if s not in sys.path:
+            sys.path.insert(0, s)
+            importlib.invalidate_caches()
     _on_path_done = True
 
 
@@ -192,6 +276,9 @@ def _verbose_import_check() -> Tuple[bool, str]:
         try:
             importlib.import_module(backend)
             importlib.import_module("transformers")
+            # Probe the exact submodule a partial frozen tqdm would shadow, so a
+            # shadowing regression fails loudly here, not at first detection.
+            importlib.import_module("tqdm.auto")
             return True, ""
         except Exception:  # noqa: BLE001
             import traceback

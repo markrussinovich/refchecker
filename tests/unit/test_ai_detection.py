@@ -201,6 +201,8 @@ def test_record_detection_usage_attributes_to_check_and_flow():
 # ── runtime_manager: optional inference-runtime install (no network) ────────
 
 import sys as _sys
+import sys
+import importlib
 
 from refchecker.ai_detection import runtime_manager as _rt
 
@@ -317,6 +319,55 @@ def test_pip_argv_has_upgrade_and_cli_entry_exists(monkeypatch, tmp_path):
     monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
     assert "--upgrade" in _rt._pip_argv("torch")  # re-install replaces, not skips
     assert callable(_rt.run_pip_cli)               # bundle --pip-install entry
+
+
+def test_runtime_finder_overrides_partial_shadow(tmp_path):
+    """Reproduce the PyInstaller partial-shadow (a `pkg` with no `pkg/auto.py`
+    pre-cached, mimicking the frozen bundle) and prove the finder + sys.modules
+    eviction make the complete runtime copy win so `pkg.auto` resolves."""
+    pkg = "_rcshadowpkg"
+    bundle, runtime = tmp_path / "bundle", tmp_path / "runtime"
+    (bundle / pkg).mkdir(parents=True)
+    (bundle / pkg / "__init__.py").write_text("VER = 'bundle'\n")        # partial: no auto.py
+    (runtime / pkg).mkdir(parents=True)
+    (runtime / pkg / "__init__.py").write_text("VER = 'runtime'\n")
+    (runtime / pkg / "auto.py").write_text("X = 1\n")                    # complete
+
+    finder = None
+    orig_path = list(sys.path)
+    try:
+        # mimic server startup importing the PARTIAL copy first (caches it)
+        sys.path.insert(0, str(bundle))
+        importlib.invalidate_caches()
+        assert importlib.import_module(pkg).VER == "bundle"
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(pkg + ".auto")  # the shadow bug, reproduced
+
+        # apply the fix exactly as runtime_manager does
+        finder = _rt._RuntimeTargetFinder(str(runtime), frozenset({pkg}))
+        sys.meta_path.insert(0, finder)
+        sys.path.append(str(runtime))               # append, not insert(0)
+        for n in [k for k in list(sys.modules) if k == pkg or k.startswith(pkg + ".")]:
+            del sys.modules[n]
+        importlib.invalidate_caches()
+
+        assert importlib.import_module(pkg).VER == "runtime"   # finder won over the partial
+        importlib.import_module(pkg + ".auto")                 # previously-missing submodule resolves
+    finally:
+        if finder in sys.meta_path:
+            sys.meta_path.remove(finder)
+        for n in [k for k in list(sys.modules) if k == pkg or k.startswith(pkg + ".")]:
+            del sys.modules[n]
+        sys.path[:] = orig_path
+        importlib.invalidate_caches()
+
+
+def test_runtime_finder_default_deny(tmp_path):
+    # non-allowlisted names and submodules are never claimed (server untouched)
+    f = _rt._RuntimeTargetFinder(str(tmp_path), frozenset({"torch"}))
+    assert f.find_spec("httpx") is None      # not allowlisted → server keeps its copy
+    assert f.find_spec("torch.nn") is None    # submodule → follows parent __path__
+    assert "tqdm" in _rt._ML_ALLOWLIST and "httpx" not in _rt._ML_ALLOWLIST
 
 
 def test_run_detection_records_a_diagnostic_event():

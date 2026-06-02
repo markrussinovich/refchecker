@@ -98,6 +98,19 @@ try:
 except Exception:
     pass  # pip missing at build time → runtime falls back to pip.pyz download
 
+# Belt-and-suspenders for the known import-shadowing case: the base app imports
+# only `from tqdm import tqdm`, so PyInstaller freezes a PARTIAL tqdm (no
+# tqdm/auto.py) that shadows the complete pip-installed runtime copy
+# ("No module named 'tqdm.auto'"). collect_all bundles the COMPLETE tqdm so it
+# works even if the runtime_manager meta-path finder is bypassed. (tqdm is a
+# build-time base dep, so this is present.)
+try:
+    _tq_datas, _tq_bins, _tq_hidden = collect_all("tqdm")
+    datas += _tq_datas
+    hiddenimports += _tq_hidden
+except Exception:
+    pass
+
 # Ship the FULL Python standard library. The optional AI-detection runtime
 # (torch / transformers, pip-installed at runtime into a --target dir) imports
 # stdlib modules the base app never uses — e.g. torch needs `timeit`, which
