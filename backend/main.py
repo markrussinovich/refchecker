@@ -6672,9 +6672,10 @@ async def ai_detection_diagnostics(current_user: UserInfo = Depends(require_user
     """Debugger payload for Settings → AI Detection: the runtime install
     status + live install log, plus recent (text-free) detection-run events
     so users can see why detection produced a given band / no band."""
-    from refchecker.ai_detection import runtime_manager, diagnostics
+    from refchecker.ai_detection import runtime_manager, model_manager, diagnostics
     return {
         "runtime": runtime_manager.runtime_status(),
+        "model": model_manager.model_status(),
         "events": diagnostics.events(),
     }
 

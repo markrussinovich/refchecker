@@ -600,7 +600,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                     'Inference runtime not installed — install it below, or use the LLM-judge / API engine.'}
                 </div>
                 {aiDetection.modelError && (
-                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.modelError}</div>
+                  <div className="text-xs mt-1 rounded p-2 whitespace-pre-wrap" style={{ color: 'var(--color-error, #ef4444)', backgroundColor: 'var(--color-error-bg, rgba(239,68,68,0.1))' }}>{aiDetection.modelError}</div>
                 )}
               </div>
               <div className="flex gap-2">
@@ -628,6 +628,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 )}
               </div>
             </div>
+            {(aiDetection.modelBusy || (ms && ms.state === 'downloading')) && (
+              <div className="mt-2">
+                <div style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>
+                  <div className="animate-pulse" style={{ height: '100%', width: '45%', background: accent, borderRadius: 4 }} />
+                </div>
+                <div className="text-[11px] mt-1 font-mono truncate" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                  {(ms && ms.message) || 'Downloading…'}
+                </div>
+              </div>
+            )}
             {ms && !ms.deps_available && (
               <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Inference runtime</div>
@@ -778,6 +788,22 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                   {rs && rs.log && rs.log.length ? rs.log.join('\n') : 'No install log yet — click “Install runtime”.'}
                 </pre>
               </div>
+              {(() => {
+                const mlog = (ms && ms.log && ms.log.length)
+                  ? ms.log
+                  : ((aiDetection.diagnostics && aiDetection.diagnostics.model && aiDetection.diagnostics.model.log) || [])
+                return (
+                  <div>
+                    <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Model download log</div>
+                    <pre
+                      className="text-[11px] rounded p-2 overflow-auto m-0"
+                      style={{ maxHeight: 140, backgroundColor: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                    >
+                      {mlog.length ? mlog.join('\n') : 'No model download log yet — click “Download model”.'}
+                    </pre>
+                  </div>
+                )
+              })()}
               <div>
                 <div className="text-[11px] mb-1" style={{ color: 'var(--color-text-muted)' }}>Recent detection runs</div>
                 {(() => {

@@ -362,6 +362,27 @@ def test_runtime_finder_overrides_partial_shadow(tmp_path):
         importlib.invalidate_caches()
 
 
+def test_model_status_includes_log(monkeypatch, tmp_path):
+    from refchecker.ai_detection import model_manager as _mm
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_MODEL_DIR", str(tmp_path))
+    _mm._log_reset()
+    _mm._log_line("hello-model-log")
+    st = _mm.model_status()
+    assert isinstance(st.get("log"), list)
+    assert any("hello-model-log" in line for line in st["log"])
+
+
+def test_model_download_drops_removed_symlinks_kwarg():
+    # local_dir_use_symlinks was REMOVED in huggingface_hub 1.x → it must not be
+    # passed (it raised TypeError and made the download fail silently), and the
+    # worker must make the pip-installed runtime importable first.
+    import inspect
+    from refchecker.ai_detection import model_manager as _mm
+    src = inspect.getsource(_mm._download_worker)
+    assert "local_dir_use_symlinks=" not in src  # the removed kwarg is not passed
+    assert "ensure_on_path" in src
+
+
 def test_runtime_finder_default_deny(tmp_path):
     # non-allowlisted names and submodules are never claimed (server untouched)
     f = _rt._RuntimeTargetFinder(str(tmp_path), frozenset({"torch"}))

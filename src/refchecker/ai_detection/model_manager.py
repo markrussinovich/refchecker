@@ -35,6 +35,31 @@ _status: Dict[str, object] = {
 }
 _thread: Optional[threading.Thread] = None
 
+# Rolling download log surfaced to the Settings debugger (so a failed model
+# download shows the real reason instead of failing silently).
+_LOG_CAP = 200
+_log: list = []
+
+
+def _log_line(msg: str) -> None:
+    import time
+    stamp = time.strftime("%H:%M:%S")
+    with _lock:
+        for line in (str(msg).splitlines() or [""]):
+            _log.append(f"{stamp}  {line}")
+        if len(_log) > _LOG_CAP:
+            del _log[: len(_log) - _LOG_CAP]
+
+
+def _log_reset() -> None:
+    with _lock:
+        _log.clear()
+
+
+def get_log(limit: int = 120) -> list:
+    with _lock:
+        return _log[-limit:]
+
 
 def model_storage_dir() -> Path:
     """Directory that holds downloaded detection models."""
@@ -83,6 +108,7 @@ def model_status() -> Dict[str, object]:
     with _lock:
         state = _status.get("state")
         message = _status.get("message", "")
+        log = list(_log[-120:])
     # If a previous process installed it, reflect that even when state==idle.
     if installed and state not in ("downloading",):
         state = "installed"
@@ -95,6 +121,7 @@ def model_status() -> Dict[str, object]:
         "path": str(model_path()),
         "size_bytes": size,
         "deps_available": deps_available(),
+        "log": log,
     }
 
 
@@ -112,33 +139,77 @@ def deps_available() -> bool:
 
 def _download_worker() -> None:
     global _status
+    _log_reset()
+    _log_line(f"=== downloading {MODEL_REPO} ===")
+    # huggingface_hub is pip-installed into the runtime --target dir; make it
+    # importable in this process (and let the meta-path finder route it) first.
     try:
+        from . import runtime_manager
+        runtime_manager.ensure_on_path()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import huggingface_hub
         from huggingface_hub import snapshot_download
+        _log_line(f"huggingface_hub {getattr(huggingface_hub, '__version__', '?')}")
     except Exception as exc:  # noqa: BLE001
+        import traceback
+        _log_line("huggingface_hub import failed:\n" + traceback.format_exc())
         with _lock:
             _status = {"state": "error", "repo": MODEL_REPO,
-                       "message": f"huggingface_hub not installed: {exc}"}
+                       "message": f"huggingface_hub not available — install the runtime first. {exc}"}
         return
+
+    dest = model_path()
+    stop = threading.Event()
     try:
-        dest = model_path()
         dest.parent.mkdir(parents=True, exist_ok=True)
         with _lock:
             _status = {"state": "downloading", "repo": MODEL_REPO,
                        "message": f"Downloading {MODEL_REPO}…"}
-        snapshot_download(
-            repo_id=MODEL_REPO,
-            local_dir=str(dest),
-            local_dir_use_symlinks=False,
-        )
+        _log_line(f"target={dest}")
+
+        # Live size reporter → the UI status bar shows real progress (the model
+        # is a few hundred MB; snapshot_download gives no easy callback).
+        def _report() -> None:
+            while not stop.wait(1.5):
+                try:
+                    mb = _dir_size_bytes(dest) / (1024 * 1024)
+                except Exception:  # noqa: BLE001
+                    mb = 0
+                with _lock:
+                    if _status.get("state") == "downloading":
+                        _status["message"] = f"Downloading… {mb:.0f} MB"
+        threading.Thread(target=_report, daemon=True).start()
+
+        # NOTE: `local_dir_use_symlinks` was REMOVED in huggingface_hub 1.x
+        # (passing it raises TypeError); local_dir downloads are direct copies
+        # by default now, which is exactly what we want.
+        snapshot_download(repo_id=MODEL_REPO, local_dir=str(dest))
+        stop.set()
+        mb = _dir_size_bytes(dest) / (1024 * 1024)
+        _log_line(f"SUCCESS: model installed ({mb:.0f} MB)")
         with _lock:
             _status = {"state": "installed", "repo": MODEL_REPO,
-                       "message": "Model installed."}
+                       "message": f"Model installed ({mb:.0f} MB)."}
         logger.info("AI-detection model installed at %s", dest)
     except Exception as exc:  # noqa: BLE001
+        stop.set()
+        import traceback
+        _log_line("ERROR: download failed:\n" + traceback.format_exc())
         logger.warning("AI-detection model download failed: %s", exc)
         with _lock:
             _status = {"state": "error", "repo": MODEL_REPO,
-                       "message": f"Download failed: {exc}"}
+                       "message": f"Download failed — see the log below. {exc}"}
+    finally:
+        stop.set()
+    try:
+        from . import diagnostics
+        with _lock:
+            st = _status.get("state")
+        diagnostics.record({"backend": "model-download", "outcome": st, "reason": MODEL_REPO})
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def start_download() -> Dict[str, object]:

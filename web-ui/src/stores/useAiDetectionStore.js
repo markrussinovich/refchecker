@@ -68,7 +68,10 @@ export const useAiDetectionStore = create((set, get) => ({
   fetchModelStatus: async () => {
     try {
       const res = await getAIDetectionModelStatus()
-      set({ modelStatus: res.data, modelError: null })
+      // Surface a backend-reported download failure (state==='error') as
+      // modelError — otherwise the button just re-enables with no reason shown.
+      const err = res.data?.state === 'error' ? (res.data.message || 'Download failed') : null
+      set({ modelStatus: res.data, modelError: err })
       return res.data
     } catch (e) {
       logger.warn('AiDetectionStore', 'model status failed', e)
