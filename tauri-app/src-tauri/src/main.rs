@@ -181,7 +181,13 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
     });
 
     // Block-poll the health endpoint until it answers or we time out.
-    let deadline = Instant::now() + Duration::from_secs(60);
+    // The PyInstaller one-file sidecar extracts to a temp dir and imports a
+    // large dependency set (pandas/numpy + the LLM SDKs) on every launch, which
+    // can take 30-90s on slower disks, first launch, or while antivirus scans
+    // the freshly-extracted binary. 60s was too tight and produced spurious
+    // "did not become healthy" failures; 240s gives ample headroom.
+    let timeout_secs = 240u64;
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     let url = format!("http://127.0.0.1:{port}/api/health");
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_millis(500))
@@ -191,7 +197,7 @@ fn spawn_sidecar(app: &AppHandle) -> Result<u16, String> {
     loop {
         if Instant::now() >= deadline {
             return Err(format!(
-                "Sidecar did not become healthy on http://127.0.0.1:{port}/api/health within 60s"
+                "Sidecar did not become healthy on http://127.0.0.1:{port}/api/health within {timeout_secs}s"
             ));
         }
         match client.get(&url).send() {

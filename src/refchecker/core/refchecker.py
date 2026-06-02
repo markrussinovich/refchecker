@@ -28,7 +28,6 @@ Options:
 """
 
 import arxiv
-import pandas as pd
 import requests
 import re
 import datetime
