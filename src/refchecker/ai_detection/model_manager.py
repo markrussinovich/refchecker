@@ -99,19 +99,15 @@ def model_status() -> Dict[str, object]:
 
 
 def deps_available() -> bool:
-    """Whether an inference runtime (onnxruntime OR torch+transformers) exists."""
-    try:
-        import onnxruntime  # noqa: F401
-        import transformers  # noqa: F401
-        return True
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        import torch  # noqa: F401
-        import transformers  # noqa: F401
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    """Whether an inference runtime (onnxruntime OR torch+transformers) exists.
+
+    Delegates to :mod:`runtime_manager`, which first makes an on-demand
+    ``--target`` runtime install (if any) importable by prepending it to
+    ``sys.path`` — so a runtime the user installed from the app is detected
+    without restarting the server.
+    """
+    from . import runtime_manager
+    return runtime_manager.deps_available()
 
 
 def _download_worker() -> None:

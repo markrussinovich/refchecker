@@ -6621,10 +6621,9 @@ async def ai_detection_model_download(current_user: UserInfo = Depends(require_u
         raise HTTPException(
             status_code=400,
             detail=(
-                "Local detection runtime not installed. Install the optional "
-                "dependencies (onnxruntime + transformers, or torch + "
-                "transformers) to use the local model, or pick the LLM-judge "
-                "or API backend in Settings."
+                "Local detection runtime not installed. Use “Install runtime” "
+                "in Settings → AI Detection (installs torch + transformers), or "
+                "pick the LLM-judge or API backend instead."
             ),
         )
     return model_manager.start_download()
@@ -6641,6 +6640,31 @@ async def ai_detection_model_delete(current_user: UserInfo = Depends(require_use
         _require_admin(current_user)
     from refchecker.ai_detection import model_manager
     return model_manager.delete_model()
+
+
+@app.get("/api/ai-detection/runtime/status")
+async def ai_detection_runtime_status(current_user: UserInfo = Depends(require_user)):
+    """Status of the optional local-detector inference runtime (torch/onnx)."""
+    from refchecker.ai_detection import runtime_manager
+    return runtime_manager.runtime_status()
+
+
+@app.post("/api/ai-detection/runtime/install")
+async def ai_detection_runtime_install(
+    variant: str = "torch",
+    current_user: UserInfo = Depends(require_user),
+):
+    """Install the optional inference runtime from the app (pip --target).
+
+    ``variant`` is 'torch' (default; required by the bundled desklib model,
+    which ships safetensors only) or 'onnx' (smaller; needs an ONNX export).
+    Installed into a per-user dir and added to sys.path — no restart needed.
+    Admin-gated in multi-user mode (it mutates a shared on-disk runtime).
+    """
+    if is_multiuser_mode():
+        _require_admin(current_user)
+    from refchecker.ai_detection import runtime_manager
+    return runtime_manager.start_install(variant)
 
 
 # Mount static files for bundled frontend (if available)

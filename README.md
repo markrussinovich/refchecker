@@ -388,9 +388,11 @@ When enabled (Settings → AI Detection), each checked article's **body text** i
 
 | Engine | What it is | Cost | Notes |
 |--------|-----------|------|-------|
-| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via ONNX/Transformers | Free | One-time download (managed in Settings); calibrated, reproducible; no data leaves your machine |
+| **Local model** (default) | `desklib/ai-text-detector` (DeBERTa-v3, MIT) run offline via Transformers + PyTorch | Free | One-time model **and** runtime download, both installable from Settings → AI Detection; calibrated, reproducible; no data leaves your machine |
 | **LLM judge** | Reuses your configured LLM provider (OpenAI/Anthropic/Google/Azure) with an anti-false-positive rubric | LLM tokens | Uncalibrated, so it is **hard-capped at "medium"** — it can never raise a standalone "high" |
 | **External API** | Pangram or GPTZero | Per-word $ | Requires an API key **and** explicit consent (your manuscript text is sent to a third party) |
+
+The local model needs an inference runtime (`torch` + `transformers`) that is **not** bundled, to keep the desktop app small. Click **Install runtime** under Settings → AI Detection to fetch it on demand (installed into the app's data folder and used without a restart), or install it yourself with `pip install torch transformers`. The LLM-judge and External-API engines need no runtime.
 
 ### Usage & cost tracking
 

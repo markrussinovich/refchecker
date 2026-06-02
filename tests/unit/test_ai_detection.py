@@ -196,3 +196,80 @@ def test_record_detection_usage_attributes_to_check_and_flow():
     assert "ai_detection" in snap["by_flow"]
     assert snap["by_flow"]["ai_detection"]["input_tokens"] == 2500
     assert round(snap["cost_usd"], 4) == 0.1
+
+
+# ── runtime_manager: optional inference-runtime install (no network) ────────
+
+import sys as _sys
+
+from refchecker.ai_detection import runtime_manager as _rt
+
+
+def test_runtime_dir_prefers_explicit_then_data_then_cache(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path / "rt"))
+    monkeypatch.setenv("REFCHECKER_DATA_DIR", str(tmp_path / "data"))
+    assert _rt.runtime_dir() == tmp_path / "rt"
+    monkeypatch.delenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", raising=False)
+    assert _rt.runtime_dir() == tmp_path / "data" / "ai-detection-runtime"
+    monkeypatch.delenv("REFCHECKER_DATA_DIR", raising=False)
+    monkeypatch.setenv("REFCHECKER_CACHE_DIR", str(tmp_path / "cache"))
+    assert _rt.runtime_dir() == tmp_path / "cache" / "ai-detection-runtime"
+
+
+def test_pip_argv_torch_targets_runtime_dir(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    argv = _rt._pip_argv("torch")
+    assert argv[:3] == ["install", "--no-input", "--target"]
+    assert str(tmp_path) in argv
+    assert "torch" in argv and "transformers" in argv
+
+
+def test_pip_argv_cpu_torch_index_off_mac(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt.sys, "platform", "linux")
+    assert "https://download.pytorch.org/whl/cpu" in _rt._pip_argv("torch")
+    # the onnx variant never pulls the torch index
+    assert "https://download.pytorch.org/whl/cpu" not in _rt._pip_argv("onnx")
+
+
+def test_pip_argv_frozen_forces_binary_only(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt, "is_frozen", lambda: True)
+    assert "--only-binary=:all:" in _rt._pip_argv("torch")
+
+
+def test_ensure_on_path_noop_when_missing_then_adds_once(monkeypatch, tmp_path):
+    target = tmp_path / "rt"
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(target))
+    s = str(target)
+    assert s not in _sys.path
+    _rt.ensure_on_path()              # dir absent → no-op
+    assert s not in _sys.path
+    target.mkdir()
+    try:
+        _rt.ensure_on_path()
+        assert _sys.path[0] == s
+        _rt.ensure_on_path()          # idempotent
+        assert _sys.path.count(s) == 1
+    finally:
+        while s in _sys.path:
+            _sys.path.remove(s)
+
+
+def test_runtime_status_shape(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    st = _rt.runtime_status()
+    for k in ("deps_available", "installed_variant", "default_variant",
+              "variants", "is_frozen", "target"):
+        assert k in st
+    assert st["default_variant"] == "torch"
+    assert set(st["variants"]) == {"torch", "onnx"}
+
+
+def test_start_install_short_circuits_when_runtime_present(monkeypatch, tmp_path):
+    # When deps are already importable, start_install must NOT spawn pip — it
+    # normalizes a bogus variant and returns status without side effects.
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    monkeypatch.setattr(_rt, "deps_available", lambda: True)
+    res = _rt.start_install("bogus")
+    assert res["deps_available"] is True

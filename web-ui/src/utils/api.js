@@ -120,6 +120,9 @@ export const cancelDatabaseDownload = (database) => api.post('/databases/downloa
 export const getAIDetectionModelStatus = () => api.get('/ai-detection/model/status')
 export const downloadAIDetectionModel = () => api.post('/ai-detection/model/download')
 export const deleteAIDetectionModel = () => api.delete('/ai-detection/model')
+export const getAIDetectionRuntimeStatus = () => api.get('/ai-detection/runtime/status')
+export const installAIDetectionRuntime = (variant = 'torch') =>
+  api.post('/ai-detection/runtime/install', null, { params: { variant } })
 
 // OpenReview venue scanning
 export const fetchOpenReviewList = (venue, status = 'accepted') =>

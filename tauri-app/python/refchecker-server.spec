@@ -8,7 +8,7 @@ Run from the repo root (so that `src/refchecker` and `backend/` resolve):
 """
 import os
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_all
 
 REPO_ROOT = Path(os.environ.get("REFCHECKER_REPO_ROOT", os.getcwd())).resolve()
 RUNTIME_TMPDIR = os.environ.get("PYINSTALLER_RUNTIME_TMPDIR") or None
@@ -84,6 +84,18 @@ hiddenimports += [
     "multipart",
     "python_multipart",
 ]
+
+# Bundle pip (+ its vendored deps) so the optional AI-detection inference
+# runtime can be installed from the app in the frozen desktop build: the
+# install runs `pip install --target <app-data>` IN-PROCESS, so it resolves
+# wheels for THIS interpreter's version/platform (ABI-matched). Without a
+# bundled pip the app falls back to downloading the standalone pip.pyz.
+try:
+    _pip_datas, _pip_bins, _pip_hidden = collect_all("pip")
+    datas += _pip_datas
+    hiddenimports += _pip_hidden
+except Exception:
+    pass  # pip missing at build time → runtime falls back to pip.pyz download
 
 a = Analysis(
     [ENTRY_SCRIPT],

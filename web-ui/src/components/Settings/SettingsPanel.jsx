@@ -46,6 +46,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   useEffect(() => {
     if (isSettingsOpen && activeSection === 'AI Detection') {
       aiDetection.fetchModelStatus()
+      aiDetection.fetchRuntimeStatus()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsOpen, activeSection])
@@ -525,6 +526,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
 
   const renderAIDetectionSection = () => {
     const ms = aiDetection.modelStatus
+    const rs = aiDetection.runtimeStatus
     const backend = aiDetection.backend
     const fmtMB = (b) => (b ? `${(b / (1024 * 1024)).toFixed(0)} MB` : '')
     const aiKeyName = aiDetection.service // 'pangram' | 'gptzero'
@@ -594,7 +596,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                   {ms && ms.installed && `Installed${ms.size_bytes ? ` · ${fmtMB(ms.size_bytes)}` : ''} · ${ms.repo}`}
                   {ms && !ms.installed && ms.deps_available && 'Not downloaded yet.'}
                   {ms && !ms.installed && !ms.deps_available &&
-                    'Runtime not installed. Install onnxruntime + transformers (or torch + transformers), or use another engine.'}
+                    'Inference runtime not installed — install it below, or use the LLM-judge / API engine.'}
                 </div>
                 {aiDetection.modelError && (
                   <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.modelError}</div>
@@ -625,6 +627,40 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 )}
               </div>
             </div>
+            {ms && !ms.deps_available && (
+              <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>Inference runtime</div>
+                <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  The local model needs <strong>torch + transformers</strong> (it ships safetensors). Install it
+                  here — a one-time download — or use the LLM-judge / API engine, which need no runtime.
+                </div>
+                <div className="flex items-center gap-2 mt-2 flex-wrap">
+                  <button
+                    type="button"
+                    disabled={aiDetection.runtimeBusy}
+                    onClick={() => aiDetection.installRuntime('torch')}
+                    className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                    style={{ backgroundColor: accent, color: 'white', opacity: aiDetection.runtimeBusy ? 0.5 : 1, cursor: aiDetection.runtimeBusy ? 'not-allowed' : 'pointer' }}
+                  >
+                    {aiDetection.runtimeBusy ? 'Installing runtime…' : 'Install runtime'}
+                  </button>
+                  <span className="text-xs" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                    {aiDetection.runtimeBusy
+                      ? (rs && rs.message) || 'Downloading torch + transformers…'
+                      : 'Large one-time download (torch).'}
+                  </span>
+                </div>
+                {aiDetection.runtimeError && (
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-error, #ef4444)' }}>{aiDetection.runtimeError}</div>
+                )}
+                {rs && rs.is_frozen && (
+                  <div className="text-xs mt-1" style={{ color: 'var(--color-text-muted, #94a3b8)' }}>
+                    Installs into the app’s data folder. If it can’t install here, run{' '}
+                    <code>pip install torch transformers</code> in your environment instead.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

@@ -1,10 +1,11 @@
 """Local calibrated detector backend (default engine).
 
 Runs the desklib ``ai-text-detector-v1.01`` model (DeBERTa-v3, MIT) entirely
-offline.  Preferred runtime is ``onnxruntime`` (PyInstaller-friendly, small);
-falls back to ``transformers`` + ``torch`` when only those are installed.  All
-ML imports are lazy and wrapped — a missing dependency or un-downloaded model
-yields an "unavailable" result, never a crash.
+offline.  The default model ships **safetensors**, so it runs via
+``transformers`` + ``torch``; the ``onnxruntime`` path is used only when a
+``model.onnx`` (with a classifier head) is present.  All ML imports are lazy
+and wrapped — a missing dependency or un-downloaded model yields an
+"unavailable" result, never a crash.
 
 Scoring is windowed (>= ~350-word windows, 50 % overlap).  The document score
 is the **mean** of window probabilities (a conservative aggregate — taking the
