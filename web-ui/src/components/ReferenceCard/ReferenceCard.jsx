@@ -7,7 +7,8 @@ import {
   exportReferenceAsBibtex,
   exportReferenceAsStyle,
   CITATION_STYLE_DEFAULTS,
-  copyToClipboard
+  copyToClipboard,
+  displayReferenceValue,
 } from '../../utils/formatters'
 import {
   getEffectiveReferenceStatus,
@@ -511,6 +512,8 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
         warning_details: issue.error_details,
       }, activeFormat)
     })
+  const displayVenue = displayReferenceValue(reference.venue)
+  const displayYear = displayReferenceValue(reference.year)
 
   return (
     <div
@@ -640,9 +643,9 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                   if user cited acronym, or NLM acronym if user cited
                   full name AND the active style accepts abbrevs).
                   Re-evaluates when style changes. */}
-              {reference.venue && reference.venue !== 0 && reference.venue !== '0' && (
+              {displayVenue && displayVenue !== 0 && displayVenue !== '0' && (
                 <VenueLine
-                  venue={reference.venue}
+                  venue={displayVenue}
                   fullVenue={reference.enrichment?.venue}
                   venueOpenalexId={reference.enrichment?.venue_id}
                   activeStyle={activeFormat}
@@ -652,12 +655,12 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               {/* Year — with accessed date if it differs from the
                   published year (web-style references like "Accessed
                   2024-03-12; published 2018"). */}
-              {reference.year && reference.year !== 0 && reference.year !== '0' && (
+              {displayYear && displayYear !== 0 && displayYear !== '0' && (
                 <div
                   style={{ color: 'var(--color-text-secondary)' }}
                 >
-                  {reference.year}
-                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(reference.year) && (
+                  {displayYear}
+                  {reference.accessed_date && String(reference.accessed_date).slice(0, 4) !== String(displayYear) && (
                     <span style={{ color: 'var(--color-text-muted)' }}>
                       {' '}· accessed {reference.accessed_date}
                     </span>

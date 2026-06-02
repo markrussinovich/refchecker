@@ -95,6 +95,18 @@ export function formatAuthors(authors, truncate = false) {
   return list.join(', ')
 }
 
+export function isNoDatePlaceholder(value) {
+  if (value === null || value === undefined) return false
+  const text = String(value).trim().toLowerCase()
+  if (!text) return false
+  const compact = text.replace(/\s+/g, '')
+  return ['n.d.', 'n.d', 'nd'].includes(compact) || ['no date', 'undated'].includes(text)
+}
+
+export function displayReferenceValue(value) {
+  return isNoDatePlaceholder(value) ? '' : value
+}
+
 /**
  * Format a reference in standard bibliographic format
  * @param {object} ref - Reference object
@@ -107,16 +119,18 @@ export function formatReference(ref) {
     parts.push(formatAuthors(ref.authors))
   }
   
-  if (ref.year) {
-    parts.push(`(${ref.year})`)
+  const year = displayReferenceValue(ref.year)
+  if (year) {
+    parts.push(`(${year})`)
   }
   
   if (ref.title) {
     parts.push(`"${ref.title}"`)
   }
   
-  if (ref.venue) {
-    parts.push(ref.venue)
+  const venue = displayReferenceValue(ref.venue)
+  if (venue) {
+    parts.push(venue)
   }
   
   return parts.join(' ')
@@ -591,8 +605,8 @@ function getCorrectedReferenceData(ref) {
   const corrected = {
     title: ref.title,
     authors: ref.authors,
-    year: ref.year,
-    venue: ref.venue,
+    year: displayReferenceValue(ref.year),
+    venue: displayReferenceValue(ref.venue),
     doi: ref.doi || (doiFromUrls ? doiFromUrls.replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') : null),
     arxivId: ref.arxiv_id || (arxivFromUrls ? arxivFromUrls.replace(/^https?:\/\/arxiv\.org\/abs\//i, '') : null),
     citedUrl: ref.cited_url || null,
@@ -625,10 +639,10 @@ function getCorrectedReferenceData(ref) {
           }
           break
         case 'year':
-          corrected.year = actualValue
+          corrected.year = displayReferenceValue(actualValue)
           break
         case 'venue':
-          corrected.venue = actualValue
+          corrected.venue = displayReferenceValue(actualValue)
           break
       }
     }
@@ -648,6 +662,8 @@ function getCorrectedReferenceData(ref) {
     }
   }
   
+  corrected.year = displayReferenceValue(corrected.year)
+  corrected.venue = displayReferenceValue(corrected.venue)
   return corrected
 }
 
@@ -719,13 +735,15 @@ export function exportResultsAsMarkdown({ paperTitle, paperSource, stats, refere
       }
       
       // Venue
-      if (ref.venue) {
-        lines.push(`**Venue:** ${ref.venue}`)
+      const venue = displayReferenceValue(ref.venue)
+      if (venue) {
+        lines.push(`**Venue:** ${venue}`)
       }
       
       // Year
-      if (ref.year) {
-        lines.push(`**Year:** ${ref.year}`)
+      const year = displayReferenceValue(ref.year)
+      if (year) {
+        lines.push(`**Year:** ${year}`)
       }
       
       // Cited URL
@@ -911,8 +929,10 @@ export function exportResultsAsPlainText({ paperTitle, paperSource, stats, refer
       if (ref.authors?.length > 0) {
         lines.push(`    Authors: ${formatAuthors(ref.authors)}`)
       }
-      if (ref.year) lines.push(`    Year: ${ref.year}`)
-      if (ref.venue) lines.push(`    Venue: ${ref.venue}`)
+      const year = displayReferenceValue(ref.year)
+      const venue = displayReferenceValue(ref.venue)
+      if (year) lines.push(`    Year: ${year}`)
+      if (venue) lines.push(`    Venue: ${venue}`)
       
       if (ref.errors?.length > 0) {
         ref.errors.filter(e => e.error_type !== 'unverified').forEach(e => {
@@ -956,8 +976,9 @@ function generateBibtexKey(ref, index) {
     key = parts[parts.length > 1 ? parts.length - 1 : 0] || ''
     key = key.replace(/[^a-zA-Z]/g, '').toLowerCase()
   }
-  if (ref.year) {
-    key += ref.year
+  const year = displayReferenceValue(ref.year)
+  if (year) {
+    key += year
   }
   // Add first word of title for uniqueness
   if (ref.title) {
@@ -1099,8 +1120,8 @@ function _flattenReferenceForReport(ref, index, paperTitle, paperSource) {
     paper_source: paperSource || '',
     cited_title: ref.title || '',
     cited_authors: ref.authors || '',
-    cited_year: ref.year || '',
-    cited_venue: ref.venue || '',
+    cited_year: displayReferenceValue(ref.year) || '',
+    cited_venue: displayReferenceValue(ref.venue) || '',
     cited_doi: ref.doi || '',
     cited_arxiv_id: ref.arxiv_id || '',
     cited_url: ref.cited_url || '',

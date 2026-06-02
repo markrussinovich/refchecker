@@ -69,7 +69,8 @@ from .thumbnail import (
     get_text_thumbnail_async,
     get_text_preview_async,
     get_thumbnail_cache_path,
-    get_preview_cache_path
+    get_preview_cache_path,
+    is_probably_placeholder_thumbnail,
 )
 from .usage_tracking import (
     append_usage_event,
@@ -1940,21 +1941,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
     """
     try:
         check = await _get_owned_check_or_404(check_id, current_user)
-        
-        # Check if we already have a cached thumbnail path
-        thumbnail_path = check.get('thumbnail_path')
-        if thumbnail_path and os.path.exists(thumbnail_path):
-            return FileResponse(
-                thumbnail_path,
-                media_type="image/png",
-                headers=_private_artifact_headers(),
-            )
-        
-        # Stale thumbnail path — clear it from DB so we regenerate cleanly
-        if thumbnail_path:
-            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
-            await db.update_check_thumbnail(check_id, "")
-        
+
         cache_dir = await _get_configured_cache_dir()
 
         # Generate thumbnail based on source type
@@ -1981,6 +1968,25 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
             (paper_source.lower().endswith('.pdf') or 'openreview.net/pdf' in paper_source.lower()) and 
             'arxiv.org' not in paper_source.lower()
         )
+        force_pdf_thumbnail_regen = False
+
+        # Check if we already have a cached thumbnail path
+        thumbnail_path = check.get('thumbnail_path')
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            if is_direct_pdf_url and is_probably_placeholder_thumbnail(thumbnail_path):
+                logger.info(f"Regenerating placeholder PDF thumbnail for check {check_id}: {thumbnail_path}")
+                force_pdf_thumbnail_regen = True
+            else:
+                return FileResponse(
+                    thumbnail_path,
+                    media_type="image/png",
+                    headers=_private_artifact_headers(),
+                )
+
+        # Stale thumbnail path — clear it from DB so we regenerate cleanly
+        if thumbnail_path:
+            logger.info(f"Thumbnail file missing for check {check_id}, regenerating: {thumbnail_path}")
+            await db.update_check_thumbnail(check_id, "")
         
         if is_direct_pdf_url:
             # Generate thumbnail from direct PDF URL
@@ -1998,7 +2004,7 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     thumbnail_path = await get_text_thumbnail_async(
                         check_id,
                         "PDF",
-                        source_identifier=paper_source,
+                        source_identifier=f"{paper_source}#pdf-placeholder",
                         cache_dir=cache_dir,
                     )
                     pdf_path = None
@@ -2008,12 +2014,13 @@ async def get_thumbnail(check_id: int, current_user: UserInfo = Depends(require_
                     pdf_path,
                     source_identifier=paper_source,
                     cache_dir=cache_dir,
+                    force=force_pdf_thumbnail_regen,
                 )
             else:
                 thumbnail_path = await get_text_thumbnail_async(
                     check_id,
                     "PDF",
-                    source_identifier=paper_source,
+                    source_identifier=f"{paper_source}#pdf-placeholder",
                     cache_dir=cache_dir,
                 )
         elif arxiv_match:

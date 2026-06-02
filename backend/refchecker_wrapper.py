@@ -112,7 +112,7 @@ def _process_llm_references_cli_style(references: List[Any]) -> List[Dict[str, A
     (without running its heavy __init__) to avoid diverging behavior between
     CLI and Web extraction.
     """
-    cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
+    cli_checker = _make_cli_checker(None)
     return cli_checker._process_llm_extracted_references(references)
 
 
@@ -125,9 +125,11 @@ def _make_cli_checker(llm_provider):
     cli_checker = ArxivReferenceChecker.__new__(ArxivReferenceChecker)
     cli_checker.llm_extractor = ReferenceExtractor(llm_provider) if llm_provider else None
     cli_checker.llm_enabled = bool(llm_provider)
+    cli_checker.debug_mode = False
     cli_checker.used_regex_extraction = False
     cli_checker.used_unreliable_extraction = False
     cli_checker.fatal_error = False
+    cli_checker.fatal_error_message = None
     return cli_checker
 
 

@@ -55,6 +55,7 @@ from refchecker.utils.text_utils import (clean_author_name, clean_title, clean_t
                        detect_standard_acm_natbib_format, strip_latex_commands, 
                        format_corrected_reference, is_name_match, enhanced_name_match,
                        calculate_title_similarity, normalize_arxiv_url, deduplicate_urls,
+                       display_reference_value,
                        compare_authors)
 from refchecker.utils.url_utils import extract_arxiv_id_from_url, construct_semantic_scholar_url
 from refchecker.utils.database_config import resolve_database_paths, resolve_database_update_paths, DATABASE_LABELS, DATABASE_UPDATE_ORDER
@@ -1846,7 +1847,7 @@ class ArxivReferenceChecker:
             # Numbered post-ref headings with PDF word breaks: "8 R EPRODUCIBILITY".
             r'(?i)\n[ \t]*\d+[ \t]+[A-Z][ \t]+[A-Z]{2,}[A-Za-z]*(?:[ \t]+[A-Z][ \t]*[A-Za-z]+|[ \t]+[A-Z]{2,}|[ \t]+[a-z]+)*[ \t]*\n',
             # Numbered post-ref sections (with period)
-            r'(?i)\n\s*\d+\.\s+(?:Appendix|Conclusion|Supplementary|Additional)\b[A-Za-z\s]*\n',
+            r'(?i)\n[ \t]*\d+\.[ \t]+(?:Appendix|Conclusion|Supplementary|Additional)\b[A-Za-z \t]*\n',
             # Numbered post-ref sections (without period): "7 APPENDIX A", "9 APPENDIX C:"
             r'(?i)\n\s*\d+\s+Appendix\b',
             # Numbered post-ref sections with PDF word-break: "7 A PPENDIX"
@@ -4530,7 +4531,7 @@ class ArxivReferenceChecker:
         try:
             # Use correct information if available, otherwise fall back to cited information
             authors = error.get('ref_authors_correct') or error.get('ref_authors_cited', '')
-            year = error.get('ref_year_correct') or error.get('ref_year_cited', '')
+            year = display_reference_value(error.get('ref_year_correct') or error.get('ref_year_cited', ''))
             title = error.get('ref_title', '')
             url = error.get('ref_url_correct') or error.get('ref_url_cited', '')
             
@@ -4855,6 +4856,7 @@ class ArxivReferenceChecker:
                             if len(chunked_processed) > len(processed_references):
                                 processed_references = chunked_processed
 
+                        fatal_error_before_fallback = self.fatal_error
                         deterministic_references = self._parse_references_regex('\n'.join(numbered_entries))
                         if len(deterministic_references) > len(processed_references):
                             logger.warning(
@@ -4862,6 +4864,7 @@ class ArxivReferenceChecker:
                                 f"({len(deterministic_references)} references) after LLM under-extraction"
                             )
                             return deterministic_references
+                        self.fatal_error = fatal_error_before_fallback
                     return processed_references
                 else:
                     logger.warning("LLM reference extraction returned no results")
@@ -5626,8 +5629,14 @@ class ArxivReferenceChecker:
         # Strip trailing # and normalize
         clean_ref = ref_str.strip().rstrip('#').strip()
         
-        # Split by # to get segments
-        segments = [seg.strip().lower() for seg in clean_ref.split('#') if seg.strip()]
+        # Split by # to get segments. Preserve an empty leading author field
+        # from LLM output like "#Title#Venue#Year#URL" so anonymous URL
+        # references dedupe by title instead of all collapsing to venue "n.d.".
+        segments = [seg.strip().lower() for seg in clean_ref.split('#')]
+        while segments and not segments[-1]:
+            segments.pop()
+        if not (segments and segments[0] == ''):
+            segments = [seg for seg in segments if seg]
         
         return {
             'author': segments[0] if len(segments) > 0 else '',
@@ -7414,8 +7423,8 @@ class ArxivReferenceChecker:
         raw_title = reference.get('display_title') or reference.get('title', 'Untitled')
         title = strip_latex_commands(raw_title)
         authors = format_authors_for_display(reference.get('authors', []))
-        year = reference.get('year', '')
-        venue = reference.get('venue', '') or reference.get('journal', '')
+        year = display_reference_value(reference.get('year', ''))
+        venue = display_reference_value(reference.get('venue', '') or reference.get('journal', ''))
         url = reference.get('url', '')
         doi = reference.get('doi', '')
 
