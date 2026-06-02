@@ -40,6 +40,7 @@ export default function GraphView({ references, paperTitle }) {
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
+  const [isDarkTheme, setIsDarkTheme] = useState(() => document.documentElement.classList.contains('dark'))
   // Source spokes are now always shown — the toggle that hid them was
   // removed in v0.7.18 because users didn't find it useful and the
   // rosette layout is the most readable default. Kept as a constant
@@ -55,6 +56,15 @@ export default function GraphView({ references, paperTitle }) {
     ro.observe(el)
     window.addEventListener('resize', update)
     return () => { ro.disconnect(); window.removeEventListener('resize', update) }
+  }, [])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const update = () => setIsDarkTheme(root.classList.contains('dark'))
+    update()
+    const observer = new MutationObserver(update)
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] })
+    return () => observer.disconnect()
   }, [])
 
   // Fetch the real S2-backed citation graph once references stabilize.
@@ -580,9 +590,9 @@ export default function GraphView({ references, paperTitle }) {
             const ty = node.y
             const w = ctx.measureText(text).width + padX * 2
             const h = fontSize + 4
-            ctx.fillStyle = 'rgba(15,23,42,0.92)'
+            ctx.fillStyle = isDarkTheme ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.9)'
             ctx.fillRect(tx - padX, ty - h / 2, w, h)
-            ctx.fillStyle = 'rgba(255,255,255,0.96)'
+            ctx.fillStyle = isDarkTheme ? 'rgba(255,255,255,0.96)' : 'rgba(0,0,0,0.96)'
             ctx.textAlign = 'left'
             ctx.textBaseline = 'middle'
             ctx.fillText(text, tx, ty)
