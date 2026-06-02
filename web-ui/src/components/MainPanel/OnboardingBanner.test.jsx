@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   multiuser: false,
   fetchSettings: vi.fn(),
   openExternal: vi.fn(),
+  hasKey: vi.fn(() => false),
+  getSemanticScholarKeyStatus: vi.fn(),
+  getPaperclipKeyStatus: vi.fn(),
 }))
 
 vi.mock('../../stores/useConfigStore', () => ({
@@ -24,6 +27,15 @@ vi.mock('../../stores/useAuthStore', () => ({
   useAuthStore: (selector) => selector({ multiuser: mocks.multiuser }),
 }))
 
+vi.mock('../../stores/useKeyStore', () => ({
+  useKeyStore: (selector) => selector({ hasKey: mocks.hasKey }),
+}))
+
+vi.mock('../../utils/api', () => ({
+  getSemanticScholarKeyStatus: mocks.getSemanticScholarKeyStatus,
+  getPaperclipKeyStatus: mocks.getPaperclipKeyStatus,
+}))
+
 vi.mock('../../utils/tauriBridge', () => ({
   openExternal: mocks.openExternal,
   isTauri: () => false,
@@ -38,6 +50,9 @@ describe('OnboardingBanner', () => {
     mocks.configs = []
     mocks.settings = {}
     mocks.multiuser = false
+    mocks.hasKey.mockReturnValue(false)
+    mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: { has_key: false } })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: false } })
   })
 
   it('uses a neutral RefChecker heading in single-user mode', () => {
@@ -79,5 +94,16 @@ describe('OnboardingBanner', () => {
     const { container } = render(<OnboardingBanner onOpenSettings={vi.fn()} />)
 
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('marks Semantic Scholar and Paperclip as configured from server status', async () => {
+    mocks.getSemanticScholarKeyStatus.mockResolvedValue({ data: { has_key: true } })
+    mocks.getPaperclipKeyStatus.mockResolvedValue({ data: { has_key: true } })
+
+    render(<OnboardingBanner onOpenSettings={vi.fn()} />)
+
+    expect(screen.getByText('Bonus: Semantic Scholar API key')).toBeInTheDocument()
+    expect(screen.getByText('Bonus: Paperclip key (biomedical / arXiv full-text)')).toBeInTheDocument()
+    expect(await screen.findAllByText('— configured')).toHaveLength(2)
   })
 })

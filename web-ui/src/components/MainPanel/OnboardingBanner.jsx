@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useConfigStore } from '../../stores/useConfigStore'
 import { useSettingsStore } from '../../stores/useSettingsStore'
 import { useAuthStore } from '../../stores/useAuthStore'
+import { useKeyStore } from '../../stores/useKeyStore'
 import { openExternal, isTauri } from '../../utils/tauriBridge'
+import * as api from '../../utils/api'
 
 /**
  * First-launch guidance for the app.
@@ -20,6 +22,9 @@ export default function OnboardingBanner({ onOpenSettings }) {
   const configs = useConfigStore(s => s.configs)
   const settings = useSettingsStore(s => s.settings)
   const multiuser = useAuthStore(s => s.multiuser)
+  const hasLocalKey = useKeyStore(s => s.hasKey)
+  const [semanticScholarHasKey, setSemanticScholarHasKey] = useState(false)
+  const [paperclipHasKey, setPaperclipHasKey] = useState(false)
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(DISMISS_KEY) === '1' } catch { return false }
   })
@@ -29,10 +34,23 @@ export default function OnboardingBanner({ onOpenSettings }) {
   const fetchSettings = useSettingsStore(s => s.fetchSettings)
   useEffect(() => { fetchSettings?.() }, [fetchSettings])
 
+  useEffect(() => {
+    let cancelled = false
+    api.getSemanticScholarKeyStatus()
+      .then(res => { if (!cancelled) setSemanticScholarHasKey(!!res.data?.has_key) })
+      .catch(() => { if (!cancelled) setSemanticScholarHasKey(false) })
+    api.getPaperclipKeyStatus()
+      .then(res => { if (!cancelled) setPaperclipHasKey(!!res.data?.has_key) })
+      .catch(() => { if (!cancelled) setPaperclipHasKey(false) })
+    return () => { cancelled = true }
+  }, [])
+
   if (dismissed) return null
 
   const hasLlm = Array.isArray(configs) && configs.some(c => c.has_key || c.id)
   const dbPathSet = !!settings?.db_path?.value
+  const hasSemanticScholarKey = hasLocalKey('semantic_scholar') || semanticScholarHasKey
+  const hasPaperclipKey = hasLocalKey('paperclip') || paperclipHasKey
   // Previously auto-hid the banner when LLM and DB were both
   // configured, but that also hid the OPTIONAL bonus steps (Semantic
   // Scholar key, Paperclip key) before the user ever saw them. Users
@@ -127,14 +145,16 @@ export default function OnboardingBanner({ onOpenSettings }) {
                 className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
                 style={{
                   width: 22, height: 22, flexShrink: 0,
-                  backgroundColor: 'var(--color-text-muted, #94a3b8)',
+                  backgroundColor: hasSemanticScholarKey ? 'var(--color-success, #22c55e)' : 'var(--color-text-muted, #94a3b8)',
                   color: 'white',
                 }}
               >
-                i
+                {hasSemanticScholarKey ? '✓' : 'i'}
               </span>
               <div className="flex-1 min-w-0">
-                <div className="font-medium">Bonus: Semantic Scholar API key</div>
+                <div className="font-medium">
+                  Bonus: Semantic Scholar API key {hasSemanticScholarKey && <span style={{ color: 'var(--color-success, #22c55e)' }}>— configured</span>}
+                </div>
                 <div style={{ color: 'var(--color-text-secondary)' }}>
                   Cuts verification time from 5–10s to 1–2s per reference.
                   Free key at{' '}
@@ -156,14 +176,16 @@ export default function OnboardingBanner({ onOpenSettings }) {
                 className="inline-flex items-center justify-center rounded-full text-xs font-semibold"
                 style={{
                   width: 22, height: 22, flexShrink: 0,
-                  backgroundColor: 'var(--color-text-muted, #94a3b8)',
+                  backgroundColor: hasPaperclipKey ? 'var(--color-success, #22c55e)' : 'var(--color-text-muted, #94a3b8)',
                   color: 'white',
                 }}
               >
-                i
+                {hasPaperclipKey ? '✓' : 'i'}
               </span>
               <div className="flex-1 min-w-0">
-                <div className="font-medium">Bonus: Paperclip key (biomedical / arXiv full-text)</div>
+                <div className="font-medium">
+                  Bonus: Paperclip key (biomedical / arXiv full-text) {hasPaperclipKey && <span style={{ color: 'var(--color-success, #22c55e)' }}>— configured</span>}
+                </div>
                 <div style={{ color: 'var(--color-text-secondary)' }}>
                   Activates a secondary verification tier over PMC, bioRxiv, medRxiv, and
                   arXiv full text — useful for medical / life-sciences references the main
