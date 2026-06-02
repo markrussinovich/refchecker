@@ -80,6 +80,7 @@ export default function GraphView({ references, paperTitle }) {
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [expandedNodes, setExpandedNodes] = useState([]) // [{id, paperId, title, authors, year, citationCount, parent}]
   const [expanding, setExpanding] = useState(null)
+  const [hasUserNavigated, setHasUserNavigated] = useState(false)
   const [graphTheme, setGraphTheme] = useState(() => ({
     background: '#f7f7f8',
     text: '#0d0d0d',
@@ -284,6 +285,21 @@ export default function GraphView({ references, paperTitle }) {
       /* d3Force not yet wired — next data update will re-trigger */
     }
   }, [graphData])
+
+  useEffect(() => {
+    const fg = fgRef.current
+    if (!fg || typeof fg.zoomToFit !== 'function' || !graphData.nodes.length) return
+    if (hasUserNavigated && expandedNodes.length === 0) return
+
+    const timers = [250, 900].map((delay) => setTimeout(() => {
+      try {
+        fg.zoomToFit(450, 28, (node) => node.type !== 'source' || graphData.nodes.length <= 12)
+      } catch {
+        /* Graph may not be initialized yet; next timer/data update retries. */
+      }
+    }, delay))
+    return () => timers.forEach(clearTimeout)
+  }, [graphData, dims.w, dims.h, expandedNodes.length, hasUserNavigated])
 
   const handleExpand = async (node) => {
     if (!node || !node.paperId) return
@@ -572,6 +588,7 @@ export default function GraphView({ references, paperTitle }) {
           cooldownTicks={140}
           d3AlphaDecay={0.02}
           d3VelocityDecay={0.4}
+          onZoomEnd={() => setHasUserNavigated(true)}
           onNodeClick={(n) => setSelected(n)}
           onNodeDoubleClick={(n) => handleExpand(n)}
           onNodeHover={(n) => setHovered(n || null)}
