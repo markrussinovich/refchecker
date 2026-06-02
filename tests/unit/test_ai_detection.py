@@ -302,6 +302,23 @@ def test_diagnostics_ring_buffer_newest_first():
     assert all("ts" in e for e in evs)
 
 
+def test_clean_target_wipes_but_keeps_pip_pyz(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    (tmp_path / "torch").mkdir()
+    (tmp_path / "junk.txt").write_text("x")
+    (tmp_path / "pip.pyz").write_bytes(b"PK")
+    _rt._clean_target()
+    assert not (tmp_path / "torch").exists()
+    assert not (tmp_path / "junk.txt").exists()
+    assert (tmp_path / "pip.pyz").exists()  # the downloaded pip is preserved
+
+
+def test_pip_argv_has_upgrade_and_cli_entry_exists(monkeypatch, tmp_path):
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_RUNTIME_DIR", str(tmp_path))
+    assert "--upgrade" in _rt._pip_argv("torch")  # re-install replaces, not skips
+    assert callable(_rt.run_pip_cli)               # bundle --pip-install entry
+
+
 def test_run_detection_records_a_diagnostic_event():
     from refchecker.ai_detection import diagnostics
     diagnostics.clear()

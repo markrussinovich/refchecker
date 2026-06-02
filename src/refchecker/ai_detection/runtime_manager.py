@@ -147,7 +147,11 @@ def _torch_index_args(variant: str) -> List[str]:
 
 def _pip_argv(variant: str) -> List[str]:
     argv = ["install", "--no-input", "--disable-pip-version-check",
-            "--no-warn-script-location", "--target", str(runtime_dir())]
+            "--no-warn-script-location",
+            # --upgrade so a re-install REPLACES existing dirs instead of
+            # skipping them ("Target directory ... already exists"), which would
+            # otherwise leave a half-old/half-new mix that fails to import.
+            "--upgrade", "--target", str(runtime_dir())]
     # In the frozen bundle there is no compiler / usable build environment, so
     # never let pip fall back to building an sdist from source; and skip the
     # cache dir (the bundle's HOME may be read-only / unexpected).
@@ -156,6 +160,44 @@ def _pip_argv(variant: str) -> List[str]:
     argv += _torch_index_args(variant)
     argv += _VARIANTS[variant]
     return argv
+
+
+def _clean_target() -> None:
+    """Empty the runtime dir (keep a downloaded pip.pyz) before a fresh install.
+
+    A prior interrupted/failed install leaves a partial tree that ``pip
+    --target`` skips rather than repairs; wiping guarantees a coherent install.
+    """
+    import shutil
+    d = runtime_dir()
+    if not d.is_dir():
+        return
+    _log_line("clearing previous runtime dir for a clean install")
+    for child in d.iterdir():
+        if child.name == "pip.pyz":
+            continue
+        try:
+            shutil.rmtree(child) if child.is_dir() else child.unlink()
+        except OSError as exc:  # noqa: PERF203
+            _log_line(f"could not remove {child.name}: {exc}")
+
+
+def _verbose_import_check() -> Tuple[bool, str]:
+    """Try to import the runtime and return the REAL traceback on failure, so
+    a 'pip succeeded but not importable' case shows why (not a silent retry)."""
+    ensure_on_path()
+    importlib.invalidate_caches()
+    errs: List[str] = []
+    for backend in ("torch", "onnxruntime"):
+        try:
+            importlib.import_module(backend)
+            importlib.import_module("transformers")
+            return True, ""
+        except Exception:  # noqa: BLE001
+            import traceback
+            errs.append(f"--- import {backend} + transformers failed ---\n"
+                        + traceback.format_exc())
+    return False, "\n".join(errs)
 
 
 def _run_pip_subprocess(argv: List[str]) -> bool:
@@ -179,47 +221,60 @@ def _run_pip_subprocess(argv: List[str]) -> bool:
     return proc.returncode == 0
 
 
-def _run_pip_inprocess(argv: List[str]) -> bool:
-    """Run pip inside this interpreter — used in the frozen desktop bundle,
-    where ``sys.executable`` is the app (not a Python that accepts ``-m pip``).
+def _run_pip_frozen_subprocess(argv: List[str]) -> bool:
+    """Install in the frozen desktop bundle by re-invoking the bundle itself in
+    a hidden ``--pip-install`` mode (handled in ``server_entry``).
 
-    Uses an importable ``pip`` if the bundle has one, else downloads the
-    official ``pip.pyz`` zipapp and runs it. Either way pip resolves wheels for
-    THIS interpreter's version/platform, so installed binaries match the ABI.
-    Output is streamed into the live log.
+    Running pip in a SEPARATE process — rather than in-process inside the live
+    server — is what makes this reliable: the child has a clean ``sys.path`` and
+    no FastAPI/torch already imported, so pip can't half-import torch into the
+    running server and leave it broken. Same interpreter → ABI-matched wheels.
+    Output is streamed back into the live log.
+    """
+    import subprocess
+    cmd = [sys.executable, "--pip-install", *argv]
+    _log_line("$ <app> --pip-install " + " ".join(argv))
+    _log_line("(launching a clean installer subprocess; the one-file bundle "
+              "re-extracts first, so expect ~30s before pip output appears)")
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    )
+    try:
+        for line in proc.stdout:
+            _log_line(line.rstrip("\n"))
+        proc.wait(timeout=3600)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    return proc.returncode == 0
+
+
+def run_pip_cli(argv: List[str]) -> int:
+    """Run pip in THIS (clean) process — the bundle's ``--pip-install`` entry.
+
+    Uses an importable ``pip`` if the bundle has one, else the downloaded
+    ``pip.pyz``. Output goes to real stdout so the parent captures it.
     """
     import runpy
-    writer = _LogWriter()
-    old_argv = sys.argv
-    code = 1
+    if importlib.util.find_spec("pip") is not None:
+        print("[pip] using bundled pip", flush=True)
+        sys.argv = ["pip", *argv]
+        try:
+            runpy.run_module("pip", run_name="__main__", alter_sys=True)
+            return 0
+        except SystemExit as exc:
+            return int(exc.code or 0)
+    pyz = _ensure_pip_pyz()
+    if pyz is None:
+        print("[pip] could not obtain pip", flush=True)
+        return 1
+    print("[pip] using downloaded pip.pyz", flush=True)
+    sys.argv = ["pip", *argv]
     try:
-        with redirect_stdout(writer), redirect_stderr(writer):
-            if importlib.util.find_spec("pip") is not None:
-                _log_line("[pip] using bundled pip")
-                sys.argv = ["pip", *argv]
-                try:
-                    runpy.run_module("pip", run_name="__main__", alter_sys=True)
-                    code = 0
-                except SystemExit as exc:  # pip always exits
-                    code = int(exc.code or 0)
-            else:
-                pyz = _ensure_pip_pyz()
-                if pyz is None:
-                    return False
-                _log_line("[pip] using downloaded pip.pyz")
-                sys.argv = ["pip", *argv]
-                try:
-                    runpy.run_path(str(pyz), run_name="__main__")
-                    code = 0
-                except SystemExit as exc:
-                    code = int(exc.code or 0)
-    except Exception:  # noqa: BLE001
-        import traceback
-        _log_line("pip raised:\n" + traceback.format_exc())
-        return False
-    finally:
-        sys.argv = old_argv
-    return code == 0
+        runpy.run_path(str(pyz), run_name="__main__")
+        return 0
+    except SystemExit as exc:
+        return int(exc.code or 0)
 
 
 def _ensure_pip_pyz() -> Optional[Path]:
@@ -243,7 +298,7 @@ def _ensure_pip_pyz() -> Optional[Path]:
 
 def _run_pip(argv: List[str]) -> bool:
     if is_frozen():
-        return _run_pip_inprocess(argv)
+        return _run_pip_frozen_subprocess(argv)
     return _run_pip_subprocess(argv)
 
 
@@ -310,15 +365,14 @@ def _install_worker(variant: str) -> None:
                   f"platform={sys.platform} executable={sys.executable}")
         _log_line(f"target={runtime_dir()}")
         runtime_dir().mkdir(parents=True, exist_ok=True)
+        _clean_target()
         ok = _run_pip(_pip_argv(variant))
         # Make the just-installed packages importable in-process so the next
         # check / status poll sees them without a restart, then VERIFY they
         # actually import — a pip exit 0 that still can't be imported (ABI
-        # mismatch, partial install) must surface as an error, not a false
-        # "installed" that makes the UI poll forever.
-        ensure_on_path()
-        importlib.invalidate_caches()
-        importable = deps_available()
+        # mismatch, partial install) must surface as an error WITH the real
+        # traceback, not a false "installed" that makes the UI poll forever.
+        importable, import_err = _verbose_import_check()
         _log_line(f"pip ok={ok} runtime_importable={importable}")
         if ok and importable:
             _log_line(f"SUCCESS: {variant} runtime installed and importable")
@@ -327,11 +381,12 @@ def _install_worker(variant: str) -> None:
                            "message": f"Installed {variant} runtime."}
             logger.info("AI-detection runtime (%s) installed at %s", variant, runtime_dir())
         elif ok:
-            _log_line("ERROR: pip reported success but the runtime cannot be imported")
+            _log_line("ERROR: pip reported success but the runtime cannot be imported:")
+            _log_line(import_err or "(no import error captured)")
             with _lock:
                 _status = {"state": "error", "variant": variant,
-                           "message": ("Installed, but the runtime still isn't importable "
-                                       "(version/ABI mismatch). See the install log below.")}
+                           "message": ("Installed, but the runtime still isn't importable. "
+                                       "See the install log below for the import error.")}
             logger.warning("AI-detection runtime installed but not importable")
         else:
             _log_line("ERROR: pip install failed")

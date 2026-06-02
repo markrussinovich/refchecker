@@ -37,6 +37,23 @@ def _resolve_data_dir() -> Path:
 
 
 def main() -> int:
+    # PyInstaller unpacks bundled modules under sys._MEIPASS — make them
+    # importable before anything else (needed for the --pip-install mode too).
+    if hasattr(sys, "_MEIPASS"):
+        sys.path.insert(0, sys._MEIPASS)
+
+    # Hidden installer mode: the AI-detection runtime installer re-invokes this
+    # bundle as a clean, ABI-matched pip runner (a fresh process with no server
+    # loaded). Handle it before argparse so the pass-through pip args aren't
+    # rejected. See refchecker.ai_detection.runtime_manager.
+    if len(sys.argv) >= 2 and sys.argv[1] == "--pip-install":
+        try:
+            from refchecker.ai_detection import runtime_manager
+        except Exception as exc:  # noqa: BLE001
+            print(f"pip-install mode: cannot import runtime_manager: {exc}", flush=True)
+            return 1
+        return runtime_manager.run_pip_cli(sys.argv[2:])
+
     parser = argparse.ArgumentParser(prog="refchecker-server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
@@ -47,13 +64,7 @@ def main() -> int:
     os.environ.setdefault("REFCHECKER_DATA_DIR", str(data_dir))
     os.environ.setdefault("REFCHECKER_LOG_DIR", str(data_dir / "logs"))
 
-    # PyInstaller unpacks bundled files under sys._MEIPASS. Make sure the
-    # backend's package-relative lookups (e.g. backend/static/index.html)
-    # still resolve.
-    if hasattr(sys, "_MEIPASS"):
-        sys.path.insert(0, sys._MEIPASS)
-
-    import uvicorn  # noqa: E402  (imported after env is set)
+    import uvicorn  # noqa: E402  (imported after env is set; sys.path set above)
 
     uvicorn.run(
         "backend.main:app",
