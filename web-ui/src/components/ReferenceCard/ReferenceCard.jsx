@@ -756,7 +756,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                     : 'Context'}
                 </button>
               </span>
-              <span
+              <div
                 style={{
                   flex: '1 1 auto',
                   minWidth: 0,
@@ -765,7 +765,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
               >
                 {contextOpen && (
                   reference.citation_contexts?.length > 0 ? (
-                    <span style={{ display: 'block' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       {reference.citation_contexts.slice(0, 3).map((ctx, i) => {
                         // Split sentence at marker for inline bold
                         // without dangerouslySetInnerHTML.
@@ -775,35 +775,80 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                         const head = markerAt >= 0 ? sent.slice(0, markerAt) : sent
                         const tail = markerAt >= 0 ? sent.slice(markerAt + marker.length) : ''
                         return (
-                          <span
+                          <div
                             key={i}
                             style={{
-                              display: 'block',
-                              color: 'var(--color-text)',
-                              fontStyle: 'italic',
-                              marginBottom: i < Math.min(reference.citation_contexts.length, 3) - 1 ? 6 : 0,
-                              paddingLeft: 6,
-                              borderLeft: '2px solid var(--color-border, #d4d4d8)',
+                              color: 'var(--color-text-primary)',
+                              background: 'var(--color-bg-secondary)',
+                              border: '1px solid var(--color-border, #d4d4d8)',
+                              borderLeft: '3px solid var(--color-accent, #3b82f6)',
+                              borderRadius: 6,
+                              padding: '8px 10px',
+                              boxShadow: '0 1px 0 rgba(0,0,0,0.03)',
                             }}
                             title="Sentence around the citation marker in the source paper"
                           >
-                            {head}
-                            {markerAt >= 0 && (
-                              <span
-                                style={{
-                                  fontStyle: 'normal',
-                                  fontWeight: 700,
-                                  color: 'var(--color-accent, #3b82f6)',
-                                }}
-                              >
-                                {marker}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                marginBottom: 5,
+                                color: 'var(--color-text-muted)',
+                                fontSize: '0.72rem',
+                                fontStyle: 'normal',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}
+                            >
+                              <span>Excerpt {i + 1}</span>
+                              {marker && (
+                                <span
+                                  style={{
+                                    color: 'var(--color-accent, #3b82f6)',
+                                    background: 'var(--color-bg-tertiary)',
+                                    border: '1px solid var(--color-border, #d4d4d8)',
+                                    borderRadius: 999,
+                                    padding: '0 6px',
+                                    textTransform: 'none',
+                                    letterSpacing: 0,
+                                  }}
+                                >
+                                  {marker}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontStyle: 'italic', lineHeight: 1.55 }}>
+                              {ctx.before && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {ctx.before}{' '}
+                                </span>
+                              )}
+                              <span>
+                                {head}
                               </span>
-                            )}
-                            {tail}
-                          </span>
+                              {markerAt >= 0 && (
+                                <span
+                                  style={{
+                                    fontStyle: 'normal',
+                                    fontWeight: 700,
+                                    color: 'var(--color-accent, #3b82f6)',
+                                  }}
+                                >
+                                  {marker}
+                                </span>
+                              )}
+                              <span>{tail}</span>
+                              {ctx.after && (
+                                <span style={{ color: 'var(--color-text-muted)' }}>
+                                  {' '}{ctx.after}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         )
                       })}
-                    </span>
+                    </div>
                   ) : (
                     <span
                       style={{ color: 'var(--color-text)', fontStyle: 'italic' }}
@@ -813,7 +858,7 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
                     </span>
                   )
                 )}
-              </span>
+              </div>
             </div>
           )}
 

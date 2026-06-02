@@ -74,6 +74,7 @@ export default function GraphView({ references, paperTitle }) {
   const containerRef = useRef(null)
   const fgRef = useRef(null)
   const autoFittingRef = useRef(false)
+  const lastNodeClickRef = useRef({ id: null, at: 0 })
   const [dims, setDims] = useState({ w: 800, h: 560 })
   const [selected, setSelected] = useState(null)
   const [hovered, setHovered] = useState(null)
@@ -351,6 +352,18 @@ export default function GraphView({ references, paperTitle }) {
     }
   }
 
+  const handleNodeClick = (node, event) => {
+    const now = Date.now()
+    const last = lastNodeClickRef.current
+    const isDoubleClick = event?.detail >= 2 || (last.id === node?.id && now - last.at < 360)
+    lastNodeClickRef.current = { id: node?.id, at: now }
+
+    setSelected(node)
+    if (isDoubleClick) {
+      handleExpand(node)
+    }
+  }
+
   // ── 2nd-level auto-expansion ─────────────────────────────────────
   // Expand every verified reference one hop in parallel (capped at 4 in
   // flight) so the user sees the references-of-references tree without
@@ -465,6 +478,16 @@ export default function GraphView({ references, paperTitle }) {
     }
   }
 
+  const graphHint = loadingGraph
+    ? 'Fetching S2 citation graph…'
+    : hovered
+      ? hovered.paperId
+        ? 'Double-click this node to expand one hop'
+        : 'This node cannot expand: no DOI, arXiv ID, or Semantic Scholar paperId'
+      : eligibleNodes.length > 0
+        ? `Double-click expandable nodes (${eligibleNodes.length} with DOI/arXiv/S2 IDs)`
+        : 'No expandable nodes: expansion needs DOI, arXiv, or Semantic Scholar IDs'
+
   return (
     <div ref={containerRef} className="rounded-lg border overflow-hidden relative"
       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-bg-secondary)', minHeight: 420 }}>
@@ -473,7 +496,7 @@ export default function GraphView({ references, paperTitle }) {
         style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
       >
         <span>
-          {loadingGraph ? 'Fetching S2 citation graph…' : 'Double-click a node to expand one hop'}
+          {graphHint}
         </span>
         {/* The "Hide source spokes" toggle was removed in v0.7.18 —
             user feedback was that the option served no clear purpose
@@ -595,8 +618,7 @@ export default function GraphView({ references, paperTitle }) {
           d3AlphaDecay={0.02}
           d3VelocityDecay={0.4}
           onZoomEnd={() => { if (!autoFittingRef.current) setHasUserNavigated(true) }}
-          onNodeClick={(n) => setSelected(n)}
-          onNodeDoubleClick={(n) => handleExpand(n)}
+          onNodeClick={handleNodeClick}
           onNodeHover={(n) => setHovered(n || null)}
           onRenderFramePost={(ctx, globalScale = 1) => {
             const nodes = graphData.nodes || []
