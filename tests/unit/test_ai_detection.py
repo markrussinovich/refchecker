@@ -383,6 +383,18 @@ def test_model_download_drops_removed_symlinks_kwarg():
     assert "ensure_on_path" in src
 
 
+def test_model_download_subprocess_watchdog_and_xet_off():
+    # The desktop download must run in a clean subprocess (xet truly off, set
+    # before huggingface_hub import) under a stall watchdog that kills+retries.
+    import inspect
+    from refchecker.ai_detection import model_manager as _mm
+    assert callable(_mm.run_hf_download_cli)
+    cli = inspect.getsource(_mm.run_hf_download_cli)
+    assert 'HF_HUB_DISABLE_XET' in cli and 'hf_xet' in cli  # xet disabled + blocked
+    sup = inspect.getsource(_mm._download_supervised)
+    assert '--hf-download' in sup and 'STALL' in sup and '.kill()' in sup
+
+
 def test_runtime_finder_default_deny(tmp_path):
     # non-allowlisted names and submodules are never claimed (server untouched)
     f = _rt._RuntimeTargetFinder(str(tmp_path), frozenset({"torch"}))

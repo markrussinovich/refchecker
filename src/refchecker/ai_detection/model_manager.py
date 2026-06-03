@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import sys
 import threading
 from pathlib import Path
 from typing import Dict, Optional
@@ -137,103 +138,198 @@ def deps_available() -> bool:
     return runtime_manager.deps_available()
 
 
-def _download_worker() -> None:
-    global _status
-    _log_reset()
-    _log_line(f"=== downloading {MODEL_REPO} ===")
-    # huggingface_hub is pip-installed into the runtime --target dir; make it
-    # importable in this process (and let the meta-path finder route it) first.
+def _safe_mb(path: Path) -> float:
+    try:
+        return _dir_size_bytes(path) / (1024 * 1024)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _set_progress(mb: float, total_mb: float) -> None:
+    if total_mb:
+        pct = min(99, int(mb * 100 / total_mb))
+        msg = f"Downloading… {mb:.0f} / {total_mb:.0f} MB ({pct}%)"
+    else:
+        msg = f"Downloading… {mb:.0f} MB"
+    with _lock:
+        if _status.get("state") == "downloading":
+            _status["message"] = msg
+
+
+def _fetch_total_mb() -> float:
+    """Total download size for the % display (metadata call, no download)."""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(MODEL_REPO, files_metadata=True)
+        mb = sum((getattr(s, "size", 0) or 0) for s in (info.siblings or [])) / (1024 * 1024)
+        _log_line(f"total size ~{mb:.0f} MB")
+        return mb
+    except Exception as exc:  # noqa: BLE001
+        _log_line(f"(could not fetch total size: {exc})")
+        return 0.0
+
+
+def run_hf_download_cli(repo: str, dest: str) -> int:
+    """Run snapshot_download in THIS clean process — the bundle's --hf-download
+    mode. HF_HUB_DISABLE_XET is set BEFORE huggingface_hub is imported, which is
+    the only reliable way to disable the Xet backend (it stalls in the bundle);
+    `import hf_xet` is also blocked as a belt. A fresh standard LFS download."""
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
+    os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
+    sys.modules.setdefault("hf_xet", None)  # makes `import hf_xet` raise → xet off
     try:
         from . import runtime_manager
         runtime_manager.ensure_on_path()
     except Exception:  # noqa: BLE001
         pass
-    # The model repo is Xet-enabled; the hf_xet backend can stall in the frozen
-    # app. Force the battle-tested standard LFS download (env + constant, since
-    # huggingface_hub may already be imported with Xet on). Same speed for a
-    # fresh single-file download, far more reliable.
-    os.environ["HF_HUB_DISABLE_XET"] = "1"
     try:
-        import huggingface_hub
         from huggingface_hub import snapshot_download
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"hf import failed: {exc}", flush=True)
+        return 1
+    try:
+        snapshot_download(repo_id=repo, local_dir=dest)
+        print("HF_DOWNLOAD_OK", flush=True)
+        return 0
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        print(f"download error: {exc}", flush=True)
+        return 1
+
+
+def _download_supervised(dest: Path, total_mb: float) -> bool:
+    """Frozen desktop: download in a CLEAN subprocess (Xet truly off) under a
+    stall watchdog — kill + retry (resume) when progress flatlines for 120s, and
+    wipe for a fresh restart if two attempts make no headway at all."""
+    import subprocess
+    import time
+    prev_start = -1.0
+    stuck_rounds = 0
+    for attempt in range(1, 7):
+        start_mb = _safe_mb(dest)
+        stuck_rounds = stuck_rounds + 1 if start_mb <= prev_start + 1 else 0
+        prev_start = start_mb
+        if stuck_rounds >= 2:
+            _log_line("no cross-attempt progress — wiping the partial for a clean restart")
+            _wipe_model_dir(dest)
+            start_mb, prev_start, stuck_rounds = 0.0, -1.0, 0
+        _log_line(f"download attempt {attempt} (clean subprocess, xet off, from {start_mb:.0f} MB)")
         try:
-            import huggingface_hub.constants as _hfc
-            _hfc.HF_HUB_DISABLE_XET = True
-        except Exception:  # noqa: BLE001
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
             pass
-        _log_line(f"huggingface_hub {getattr(huggingface_hub, '__version__', '?')} (xet disabled)")
+        proc = subprocess.Popen(
+            [sys.executable, "--hf-download", MODEL_REPO, str(dest)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        )
+        out: list = []
+        threading.Thread(
+            target=lambda: [out.append(ln.rstrip("\n")) for ln in proc.stdout], daemon=True,
+        ).start()
+        last_mb, last_advance, stalled, tick = start_mb, time.monotonic(), False, 0
+        while proc.poll() is None:
+            time.sleep(2)
+            mb = _safe_mb(dest)
+            _set_progress(mb, total_mb)
+            tick += 1
+            if tick % 8 == 0:  # ~16s
+                _log_line(f"progress: {mb:.0f} / {total_mb:.0f} MB" if total_mb else f"progress: {mb:.0f} MB")
+            if mb >= last_mb + 1:
+                last_mb, last_advance = mb, time.monotonic()
+            elif time.monotonic() - last_advance > 120:
+                _log_line(f"STALL: stuck at {mb:.0f} MB for 120s — killing and retrying")
+                stalled = True
+                proc.kill()
+                break
+        try:
+            proc.wait(timeout=10)
+        except Exception:  # noqa: BLE001
+            proc.kill()
+        if is_model_installed():
+            return True
+        if not stalled:
+            _log_line(f"attempt {attempt} exited code={proc.returncode}: {' | '.join(out[-4:])}")
+    return is_model_installed()
+
+
+def _download_in_process(dest: Path, total_mb: float) -> bool:
+    """Source install: in-process snapshot_download with Xet disabled + a live
+    size reporter (no frozen-bundle Xet-stall concerns here)."""
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    sys.modules.setdefault("hf_xet", None)
+    try:
+        from huggingface_hub import snapshot_download
     except Exception as exc:  # noqa: BLE001
         import traceback
         _log_line("huggingface_hub import failed:\n" + traceback.format_exc())
-        with _lock:
-            _status = {"state": "error", "repo": MODEL_REPO,
-                       "message": f"huggingface_hub not available — install the runtime first. {exc}"}
-        return
-
-    # Expected total size, so the UI shows a real percentage (the model is a
-    # single ~1.7 GB safetensors file — without a % it looks frozen).
-    total_mb = 0.0
-    try:
-        from huggingface_hub import HfApi
-        _info = HfApi().model_info(MODEL_REPO, files_metadata=True)
-        total_mb = sum((getattr(s, "size", 0) or 0) for s in (_info.siblings or [])) / (1024 * 1024)
-        _log_line(f"total size ~{total_mb:.0f} MB")
-    except Exception as exc:  # noqa: BLE001
-        _log_line(f"(could not fetch total size: {exc})")
-
-    dest = model_path()
+        return False
     stop = threading.Event()
+
+    def _report() -> None:
+        while not stop.wait(1.5):
+            _set_progress(_safe_mb(dest), total_mb)
+
+    threading.Thread(target=_report, daemon=True).start()
+    try:
+        snapshot_download(repo_id=MODEL_REPO, local_dir=str(dest))
+        return is_model_installed()
+    except Exception:  # noqa: BLE001
+        import traceback
+        _log_line("ERROR: download failed:\n" + traceback.format_exc())
+        return False
+    finally:
+        stop.set()
+
+
+def _wipe_model_dir(dest: Path) -> None:
+    try:
+        shutil.rmtree(dest, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _download_worker() -> None:
+    global _status
+    _log_reset()
+    _log_line(f"=== downloading {MODEL_REPO} ===")
+    try:
+        from . import runtime_manager
+        runtime_manager.ensure_on_path()
+        frozen = runtime_manager.is_frozen()
+    except Exception:  # noqa: BLE001
+        frozen = False
+    dest = model_path()
+    existing = _safe_mb(dest)
+    if existing > 1:
+        _log_line(f"{existing:.0f} MB already present — will resume")
+    total_mb = _fetch_total_mb()
+    _log_line(f"target={dest}")
+    with _lock:
+        _status = {"state": "downloading", "repo": MODEL_REPO,
+                   "message": f"Downloading {MODEL_REPO}…"}
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with _lock:
-            _status = {"state": "downloading", "repo": MODEL_REPO,
-                       "message": f"Downloading {MODEL_REPO}…"}
-        _log_line(f"target={dest}")
-
-        # Live size reporter → the UI status bar shows real % progress (the
-        # download is a single big file; snapshot_download gives no callback).
-        # Also logs a progress line every ~15s so a true stall is visible.
-        def _report() -> None:
-            ticks = 0
-            while not stop.wait(1.5):
-                try:
-                    mb = _dir_size_bytes(dest) / (1024 * 1024)
-                except Exception:  # noqa: BLE001
-                    mb = 0
-                if total_mb:
-                    pct = min(99, int(mb * 100 / total_mb))
-                    msg = f"Downloading… {mb:.0f} / {total_mb:.0f} MB ({pct}%)"
-                else:
-                    msg = f"Downloading… {mb:.0f} MB"
-                with _lock:
-                    if _status.get("state") == "downloading":
-                        _status["message"] = msg
-                ticks += 1
-                if ticks % 10 == 0:  # ~every 15s
-                    _log_line(msg.replace("Downloading… ", "progress: "))
-        threading.Thread(target=_report, daemon=True).start()
-
-        # NOTE: `local_dir_use_symlinks` was REMOVED in huggingface_hub 1.x
-        # (passing it raises TypeError); local_dir downloads are direct copies
-        # by default now, which is exactly what we want.
-        snapshot_download(repo_id=MODEL_REPO, local_dir=str(dest))
-        stop.set()
-        mb = _dir_size_bytes(dest) / (1024 * 1024)
+        ok = _download_supervised(dest, total_mb) if frozen else _download_in_process(dest, total_mb)
+    except Exception:  # noqa: BLE001
+        import traceback
+        _log_line("ERROR:\n" + traceback.format_exc())
+        ok = False
+    if ok and is_model_installed():
+        mb = _safe_mb(dest)
         _log_line(f"SUCCESS: model installed ({mb:.0f} MB)")
         with _lock:
             _status = {"state": "installed", "repo": MODEL_REPO,
                        "message": f"Model installed ({mb:.0f} MB)."}
         logger.info("AI-detection model installed at %s", dest)
-    except Exception as exc:  # noqa: BLE001
-        stop.set()
-        import traceback
-        _log_line("ERROR: download failed:\n" + traceback.format_exc())
-        logger.warning("AI-detection model download failed: %s", exc)
+    else:
+        _log_line("ERROR: download did not complete — see the log above.")
         with _lock:
             _status = {"state": "error", "repo": MODEL_REPO,
-                       "message": f"Download failed — see the log below. {exc}"}
-    finally:
-        stop.set()
+                       "message": "Download failed or stalled — see the log below."}
     try:
         from . import diagnostics
         with _lock:
