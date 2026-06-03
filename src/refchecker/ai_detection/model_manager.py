@@ -148,10 +148,20 @@ def _download_worker() -> None:
         runtime_manager.ensure_on_path()
     except Exception:  # noqa: BLE001
         pass
+    # The model repo is Xet-enabled; the hf_xet backend can stall in the frozen
+    # app. Force the battle-tested standard LFS download (env + constant, since
+    # huggingface_hub may already be imported with Xet on). Same speed for a
+    # fresh single-file download, far more reliable.
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
     try:
         import huggingface_hub
         from huggingface_hub import snapshot_download
-        _log_line(f"huggingface_hub {getattr(huggingface_hub, '__version__', '?')}")
+        try:
+            import huggingface_hub.constants as _hfc
+            _hfc.HF_HUB_DISABLE_XET = True
+        except Exception:  # noqa: BLE001
+            pass
+        _log_line(f"huggingface_hub {getattr(huggingface_hub, '__version__', '?')} (xet disabled)")
     except Exception as exc:  # noqa: BLE001
         import traceback
         _log_line("huggingface_hub import failed:\n" + traceback.format_exc())
@@ -159,6 +169,17 @@ def _download_worker() -> None:
             _status = {"state": "error", "repo": MODEL_REPO,
                        "message": f"huggingface_hub not available — install the runtime first. {exc}"}
         return
+
+    # Expected total size, so the UI shows a real percentage (the model is a
+    # single ~1.7 GB safetensors file — without a % it looks frozen).
+    total_mb = 0.0
+    try:
+        from huggingface_hub import HfApi
+        _info = HfApi().model_info(MODEL_REPO, files_metadata=True)
+        total_mb = sum((getattr(s, "size", 0) or 0) for s in (_info.siblings or [])) / (1024 * 1024)
+        _log_line(f"total size ~{total_mb:.0f} MB")
+    except Exception as exc:  # noqa: BLE001
+        _log_line(f"(could not fetch total size: {exc})")
 
     dest = model_path()
     stop = threading.Event()
@@ -169,17 +190,27 @@ def _download_worker() -> None:
                        "message": f"Downloading {MODEL_REPO}…"}
         _log_line(f"target={dest}")
 
-        # Live size reporter → the UI status bar shows real progress (the model
-        # is a few hundred MB; snapshot_download gives no easy callback).
+        # Live size reporter → the UI status bar shows real % progress (the
+        # download is a single big file; snapshot_download gives no callback).
+        # Also logs a progress line every ~15s so a true stall is visible.
         def _report() -> None:
+            ticks = 0
             while not stop.wait(1.5):
                 try:
                     mb = _dir_size_bytes(dest) / (1024 * 1024)
                 except Exception:  # noqa: BLE001
                     mb = 0
+                if total_mb:
+                    pct = min(99, int(mb * 100 / total_mb))
+                    msg = f"Downloading… {mb:.0f} / {total_mb:.0f} MB ({pct}%)"
+                else:
+                    msg = f"Downloading… {mb:.0f} MB"
                 with _lock:
                     if _status.get("state") == "downloading":
-                        _status["message"] = f"Downloading… {mb:.0f} MB"
+                        _status["message"] = msg
+                ticks += 1
+                if ticks % 10 == 0:  # ~every 15s
+                    _log_line(msg.replace("Downloading… ", "progress: "))
         threading.Thread(target=_report, daemon=True).start()
 
         # NOTE: `local_dir_use_symlinks` was REMOVED in huggingface_hub 1.x
