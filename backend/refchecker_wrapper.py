@@ -2415,17 +2415,15 @@ class ProgressRefChecker:
                 except BaseException:  # noqa: BLE001 — reaping a cancelled task
                     pass
 
-    async def _fetch_body_text_for_ai_detection(self, paper_source: Optional[str]) -> str:
-        """Best-effort fetch of the manuscript body when references came from a
-        structured source (Crossref DOI / .bbl) so paper_text is empty.
+    async def _download_and_extract_pdf_body(self, url: str) -> str:
+        """Download a single URL and, if it is a PDF, extract its text.
 
-        Handles the common "paste a PDF link" case (e.g. open-access publisher
-        PDF URLs): download the PDF and extract its text. Only PDFs are handled
-        — HTML article bodies are unreliable/paywalled, so those correctly fall
-        back to the "no body text available" message. Never raises.
+        Returns "" for non-PDF (HTML/paywall) responses or any failure. Caches
+        the downloaded PDF under the artifact cache so repeat runs are cheap.
+        Never raises.
         """
         try:
-            src = str(paper_source or "").strip()
+            src = str(url or "").strip()
             if not src.lower().startswith(("http://", "https://")):
                 return ""
             pdf_path = get_cached_artifact_path(self.cache_dir, src, "ai_body.pdf", create_dir=True)
@@ -2433,8 +2431,18 @@ class ProgressRefChecker:
                 import requests as _req
                 resp = await asyncio.to_thread(
                     _req.get, src,
-                    headers={"User-Agent": "RefChecker/0.7 (mailto:moniriario@gmail.com)"},
+                    headers={
+                        # Some publishers (Springer/BMC) 403 a bare UA; send a
+                        # realistic browser UA while still identifying ourselves.
+                        "User-Agent": (
+                            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
+                            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
+                            "Safari/605.1.15 RefChecker/0.7 (mailto:moniriario@gmail.com)"
+                        ),
+                        "Accept": "application/pdf,*/*",
+                    },
                     timeout=60,
+                    allow_redirects=True,
                 )
                 if resp.status_code != 200:
                     return ""
@@ -2446,8 +2454,100 @@ class ProgressRefChecker:
                 with open(pdf_path, "wb") as fh:
                     fh.write(content)
             text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
-            logger.info("AI-detection body fallback: extracted %d chars from %s", len(text or ""), src)
+            logger.info("AI-detection body fetch: extracted %d chars from %s", len(text or ""), src)
             return text or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI-detection body fetch failed for %s: %s", url, exc)
+            return ""
+
+    async def _resolve_doi_to_pdf_urls(self, doi: str) -> List[str]:
+        """Resolve a DOI to candidate open-access PDF URLs (best-effort).
+
+        Tries Crossref `message.link[content-type=application/pdf]` first
+        (deterministic, no key), then Unpaywall `best_oa_location.url_for_pdf`.
+        Returns an ordered, de-duplicated list of URLs to try. Never raises.
+        """
+        urls: List[str] = []
+        try:
+            import requests as _req
+            try:
+                cr = await asyncio.to_thread(
+                    _req.get,
+                    f"https://api.crossref.org/works/{doi}",
+                    headers={"User-Agent": "RefChecker/0.7 (mailto:moniriario@gmail.com)"},
+                    timeout=15,
+                )
+                if cr.status_code == 200:
+                    msg = (cr.json() or {}).get("message", {}) or {}
+                    for link in (msg.get("link") or []):
+                        if not isinstance(link, dict):
+                            continue
+                        if "pdf" in str(link.get("content-type", "")).lower():
+                            u = link.get("URL")
+                            if u:
+                                urls.append(u)
+            except Exception as _cr_err:  # noqa: BLE001
+                logger.debug("Crossref PDF-link lookup failed for %s: %s", doi, _cr_err)
+            try:
+                uw = await asyncio.to_thread(
+                    _req.get,
+                    f"https://api.unpaywall.org/v2/{doi}?email=moniriario@gmail.com",
+                    timeout=20,
+                )
+                if uw.status_code == 200:
+                    loc = (uw.json() or {}).get("best_oa_location") or {}
+                    pdf = loc.get("url_for_pdf")
+                    if pdf:
+                        urls.append(pdf)
+            except Exception as _uw_err:  # noqa: BLE001
+                logger.debug("Unpaywall lookup failed for %s: %s", doi, _uw_err)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("DOI->PDF resolution failed for %s: %s", doi, exc)
+        # De-dup, preserve order.
+        seen = set()
+        ordered: List[str] = []
+        for u in urls:
+            if u and u not in seen:
+                seen.add(u)
+                ordered.append(u)
+        return ordered
+
+    async def _fetch_body_text_for_ai_detection(self, paper_source: Optional[str]) -> str:
+        """Best-effort fetch of the manuscript body when references came from a
+        structured source (Crossref DOI / .bbl) so paper_text is empty.
+
+        Covers every input "page type" that otherwise yields no body text:
+          • a direct PDF link (open-access publisher PDF URL) — download it;
+          • a DOI link or a bare DOI (`10.xxxx/…`, `doi.org/…`) — resolve the
+            DOI to an open-access PDF via Crossref/Unpaywall, then download it;
+          • a publisher landing-page URL that embeds a DOI — same DOI path.
+        HTML/paywalled bodies are intentionally NOT scraped here (unreliable),
+        so closed-access inputs correctly fall back to the honest "no body
+        text available" message. Never raises.
+        """
+        try:
+            src = str(paper_source or "").strip()
+            if not src:
+                return ""
+
+            # 1) Direct PDF URL (the common "paste a PDF link" case).
+            if src.lower().startswith(("http://", "https://")):
+                text = await self._download_and_extract_pdf_body(src)
+                if text.strip():
+                    return text
+
+            # 2) DOI input (bare `10.xxxx/…`, a doi.org link, or a publisher
+            #    URL that embeds a DOI) — resolve to an OA PDF and download it.
+            import re as _re_doi
+            doi_match = _re_doi.search(r"10\.\d{4,9}/[^\s?#&]+", src)
+            doi = doi_match.group(0).rstrip(".,;)]}'\"") if doi_match else None
+            if doi:
+                for pdf_url in await self._resolve_doi_to_pdf_urls(doi):
+                    text = await self._download_and_extract_pdf_body(pdf_url)
+                    if text.strip():
+                        logger.info("AI-detection body: resolved DOI %s -> %s", doi, pdf_url)
+                        return text
+            return ""
         except Exception as exc:  # noqa: BLE001
             logger.warning("AI-detection body fallback failed: %s", exc)
             return ""
