@@ -27,6 +27,13 @@ def test_abstain_too_short():
     assert base.should_abstain("only a few words here") == "too_short"
 
 
+def test_abstain_no_body_text_distinct_from_too_short():
+    # Empty body (e.g. refs read from a .bbl/.bib) is reported distinctly so the
+    # UI doesn't claim the text is merely "too short".
+    assert base.should_abstain("") == "no_body_text"
+    assert base.should_abstain("   ") == "no_body_text"
+
+
 def test_abstain_technical_section():
     math_heavy = "x = 3.14 + alpha^2 / beta - gamma * 2 == 0 ; " * 80
     assert base.should_abstain(math_heavy) == "technical_section"

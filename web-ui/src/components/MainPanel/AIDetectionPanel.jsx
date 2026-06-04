@@ -21,6 +21,7 @@ const BAND_STYLES = {
 }
 
 const ABSTAIN_REASONS = {
+  no_body_text: 'No manuscript body text was available to analyze — the references were read from a structured source (a .bbl/.bib file or a DOI lookup), so the full text was not extracted. AI detection needs the article body.',
   too_short: 'The manuscript body is too short to assess reliably (under ~300 words).',
   technical_section: 'The text is mostly equations, code, or citations — not reliable terrain for detection.',
   insufficient_signal: 'There was not enough reliable signal to produce a score.',

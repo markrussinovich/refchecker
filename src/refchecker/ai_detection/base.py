@@ -192,6 +192,12 @@ def should_abstain(text: str) -> Optional[str]:
     the most actionable reason.
     """
     wc = count_words(text)
+    if wc == 0:
+        # No manuscript body at all (e.g. references read from a .bbl/.bib file
+        # or a DOI lookup, so the full text was never extracted) — distinct from
+        # a genuinely short body, so the UI can explain it honestly rather than
+        # claim the text is "too short".
+        return "no_body_text"
     if wc < MIN_WORDS:
         return "too_short"
     if nonprose_fraction(text) > NONPROSE_FRACTION_ABSTAIN:

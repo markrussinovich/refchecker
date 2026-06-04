@@ -1989,7 +1989,26 @@ class ProgressRefChecker:
                         # Extract text using the same CLI path for parity.
                         paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
                     else:
-                        paper_text = ""  # Not needed since we have references
+                        # References came from the .bbl/.bib source files, so LLM
+                        # reference extraction is skipped (it's gated on
+                        # arxiv_source_references). But the opt-in AI detector and
+                        # citation-context highlighting need the manuscript BODY —
+                        # so when AI detection is on, still extract the PDF text
+                        # (cached) for them. This does NOT re-trigger LLM extraction.
+                        paper_text = ""
+                        if self.ai_detection_enabled:
+                            try:
+                                pdf_path = get_cached_artifact_path(self.cache_dir, paper_source, 'paper.pdf', create_dir=True)
+                                if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                                    await asyncio.to_thread(download_arxiv_paper_pdf, paper, pdf_path, arxiv_id)
+                                paper_text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
+                                logger.info(
+                                    "Extracted %d chars of body text for AI detection / citation "
+                                    "contexts (references came from source files)", len(paper_text or ""),
+                                )
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning("Body-text extraction for AI detection/contexts failed: %s", exc)
+                                paper_text = ""
 
             elif source_type == "file":
                 set_extraction_method('file')
