@@ -278,6 +278,7 @@ class _TorchEngine:
     """transformers + torch runtime for the desklib custom model."""
 
     def __init__(self, model_dir: str):
+        import warnings
         import torch
         from transformers import AutoTokenizer, AutoConfig, AutoModel, PreTrainedModel
         import torch.nn as nn
@@ -316,12 +317,22 @@ class _TorchEngine:
         # RuntimeError users hit. Loading the state dict ourselves and applying
         # it with strict=False sidesteps that machinery entirely (verified to
         # produce scores identical to a successful from_pretrained load).
+        # Build + load INSIDE catch_warnings. A warning emitted from a frame in
+        # this module (e.g. transformers' weight-init notice during
+        # `_DesklibModel.__init__`) makes the warnings machinery read this file's
+        # SOURCE to format the message. In a PyInstaller bundle the `.py` source
+        # is not extracted, so that read raises
+        # `FileNotFoundError: …/_MEIxxxx/refchecker/ai_detection/local_backend.py`
+        # which surfaced as "model failed to load". Suppressing warnings here
+        # removes the source-format step entirely (we do our own strict checks).
         config = AutoConfig.from_pretrained(model_dir)
         state_dict = _load_checkpoint_state_dict(model_dir)
 
         if state_dict is not None and any(k.startswith("classifier") for k in state_dict):
-            model = _DesklibModel(config)
-            result = model.load_state_dict(state_dict, strict=False)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = _DesklibModel(config)
+                result = model.load_state_dict(state_dict, strict=False)
             missing = list(getattr(result, "missing_keys", []) or [])
             missing_clf = [k for k in missing if k.startswith("classifier")]
             missing_enc = [k for k in missing if k.startswith("model.")]
@@ -355,11 +366,16 @@ class _TorchEngine:
                     )
 
     def score(self, text: str) -> float:
+        import warnings
         torch = self.torch
         enc = self.tokenizer(
             text, truncation=True, max_length=_MAX_TOKENS, return_tensors="pt"
         )
-        with torch.no_grad():
+        # Same frozen-bundle guard as __init__: a warning emitted from
+        # `_DesklibModel.forward` (this module) would try to read the missing
+        # source file. Suppress so inference never raises FileNotFoundError.
+        with warnings.catch_warnings(), torch.no_grad():
+            warnings.simplefilter("ignore")
             if self.model is not None:
                 logit = self.model(enc["input_ids"], attention_mask=enc["attention_mask"])
                 return float(torch.sigmoid(logit).squeeze().item())

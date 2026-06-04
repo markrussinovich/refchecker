@@ -130,6 +130,24 @@ def test_consortium_with_wrong_named_author_still_fails():
     assert compare_authors(cited, correct)[0] is False
 
 
+def test_db_group_author_with_inline_members():
+    # The database returns a collaboration author that inlines its members in
+    # parentheses; a citation listing one member must match.
+    gbd = ('GBD 2021 Diabetes Collaborators (Ong KL, Stafford LK, '
+           'McLaughlin SA, Boyko EJ, Vollset SE, Smith AE, et al.)')
+    assert enhanced_name_match('Ong KL', gbd) is True
+    assert enhanced_name_match('Boyko EJ', gbd) is True
+    assert compare_authors(['Ong KL', 'et al'], [gbd, 'Other Author'])[0] is True
+
+
+def test_parenthetical_members_precision():
+    gbd = 'GBD 2021 Diabetes Collaborators (Ong KL, Stafford LK, Boyko EJ)'
+    # A non-member must NOT match the collaboration.
+    assert enhanced_name_match('Zhang QQ', gbd) is False
+    # A non-group parenthetical (catalog note) must NOT be read as members.
+    assert enhanced_name_match('John Smith', 'Some Title (2021, revised)') is False
+
+
 # ── venue: colon subtitle + Jt→Joint abbreviation ─────────────────────────
 
 def test_venue_colon_subtitle_core_match():

@@ -3162,6 +3162,21 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
 
+    # Group author with an inline member list: the database returns
+    # 'GBD 2021 Diabetes Collaborators (Ong KL, Stafford LK, …)' while the
+    # citation lists one member ('Ong KL'). Match the individual against any
+    # member (or the group name). Members are plain names (no parens), so the
+    # recursive call cannot re-enter this branch — recursion depth is bounded.
+    for a, b in ((name1, name2), (name2, name1)):
+        members = _parenthetical_group_members(a)
+        if members:
+            stripped_group = re.sub(r"\s*\([^)]*\)", "", a).strip()
+            if b.strip() and (
+                enhanced_name_match(b, stripped_group)
+                or any(enhanced_name_match(b, m) for m in members)
+            ):
+                return True
+
     # De-glue an initial concatenated onto a leading surname particle
     # ('Rvan der Straaten' → 'R van der Straaten') so the matchers below see
     # the intended tokens. No-op for normal names.
@@ -3385,20 +3400,50 @@ def _is_collective_author_shorthand(author: str) -> bool:
 
 
 _GROUP_AUTHOR_RE = re.compile(
-    r"\b(consortium|collaboration|collaborative|"
+    r"\b(consortium|collaborat\w*|committee|"
     r"study\s+group|working\s+group|research\s+group|"
-    r"investigators|study\s+team|trial\s+group|"
+    r"investigators|study\s+team|trial\s+group|task\s+force|panel|"
     r"\w+\s+group|network|initiative)\b",
     re.IGNORECASE,
 )
 
 
 def _is_group_author(name: str) -> bool:
-    """Is ``name`` a consortium / collaboration / study-group author rather than
-    an individual? (e.g. 'TKAF Consortium', 'ENIGMA Collaboration')."""
+    """Is ``name`` a consortium / collaboration / study-group / committee author
+    rather than an individual? (e.g. 'TKAF Consortium', 'ENIGMA Collaboration',
+    'GBD 2021 Diabetes Collaborators', 'IDF … scientific committee')."""
     if not name:
         return False
     return bool(_GROUP_AUTHOR_RE.search(str(name)))
+
+
+def _parenthetical_group_members(name: str):
+    """If ``name`` is a group author that inlines its members in parentheses —
+    'GBD 2021 Diabetes Collaborators (Ong KL, Stafford LK, McLaughlin SA, …)' —
+    return the member names; else []. Databases (Crossref/PubMed) routinely
+    return collaboration authors this way, so a citation listing an individual
+    member ('Ong KL') must still match.
+    """
+    if not name:
+        return []
+    m = re.search(r"\(([^)]*)\)", str(name))
+    if not m:
+        return []
+    prefix = name[:m.start()].strip()
+    inside = m.group(1).strip()
+    if not inside:
+        return []
+    # Only treat the parenthetical as a member list when the prefix names a
+    # group — avoids misreading catalog parentheticals like '(2021)' or '(eds)'.
+    if not _is_group_author(prefix):
+        return []
+    members = []
+    for part in inside.split(","):
+        p = part.strip()
+        if not p or re.match(r"(?i)^(et\.?\s*al\.?|and\s+others?)$", p):
+            continue
+        members.append(p)
+    return members
 
 
 def _is_garbage_author_name(name: str) -> bool:
