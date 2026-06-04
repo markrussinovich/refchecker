@@ -2972,6 +2972,78 @@ def _collapsed_author_token_match(parts1: List[str], parts2: List[str]) -> bool:
     return False
 
 
+_NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v", "2nd", "3rd"}
+
+
+def _strip_trailing_name_suffix(tokens):
+    out = list(tokens)
+    while out and out[-1].lower().strip(".") in _NAME_SUFFIXES:
+        out.pop()
+    return out
+
+
+def _norm_name_token(tok: str) -> str:
+    """lowercase + strip diacritics/accents + drop periods, for token compare."""
+    return normalize_diacritics(tok.lower()).replace(".", "").strip()
+
+
+def _parse_vancouver_surname_initials(name: str):
+    """If ``name`` is Vancouver-style 'Surname[ Surname2…] INITIALS [suffix]',
+    return (surname_tokens, initials); else (None, None). The surname may be
+    multi-word and/or hyphenated; INITIALS is a trailing all-caps block
+    (e.g. 'A', 'FJ', 'EJ')."""
+    raw = _strip_trailing_name_suffix(name.replace(",", " ").split())
+    if len(raw) < 2:
+        return None, None
+    last = raw[-1].replace(".", "")
+    if not (last.isalpha() and last.isupper() and 1 <= len(last) <= 4):
+        return None, None
+    initials = [c.lower() for c in last]
+    surname = []
+    for t in raw[:-1]:
+        for piece in t.replace("-", " ").split():
+            p = _norm_name_token(piece)
+            if p:
+                surname.append(p)
+    return (surname, initials) if surname else (None, None)
+
+
+def _full_name_tokens(name: str):
+    """Normalised whitespace/hyphen tokens of a full name (suffix removed)."""
+    toks = []
+    for t in _strip_trailing_name_suffix(name.replace(",", " ").split()):
+        for piece in t.replace("-", " ").split():
+            p = _norm_name_token(piece)
+            if p:
+                toks.append(p)
+    return toks
+
+
+def _vancouver_fullname_match(name1: str, name2: str) -> bool:
+    """Match a Vancouver 'Surname INITIALS' form against a full 'Given… Surname'
+    form, correctly handling MULTI-WORD / HYPHENATED surnames — the case the
+    rest of the matcher mis-parses. Examples that must match:
+        'Feliu-Soler A'  ↔ 'Albert Feliu Soler'
+        'Hornicek FJ Jr' ↔ 'Francis John Hornicek Jr'
+    Conservative (purely additive): the FULL surname must equal the tail of the
+    other name and the initials must be a prefix of the given-name initials, so
+    a real difference (e.g. 'EJ' vs given initials 'E I') still does NOT match.
+    """
+    for v, f in ((name1, name2), (name2, name1)):
+        surname, initials = _parse_vancouver_surname_initials(v)
+        if surname is None:
+            continue
+        f_tokens = _full_name_tokens(f)
+        n = len(surname)
+        if len(f_tokens) <= n or f_tokens[-n:] != surname:
+            continue
+        given_initials = [t[0] for t in f_tokens[:-n] if t]
+        if initials and len(initials) <= len(given_initials) \
+                and all(a == b for a, b in zip(initials, given_initials)):
+            return True
+    return False
+
+
 def enhanced_name_match(name1: str, name2: str) -> bool:
     """
     Enhanced name matching that handles initial-to-full-name and surname variations.
@@ -2989,6 +3061,11 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
 
     # First try the existing matching logic
     if is_name_match(name1, name2):
+        return True
+
+    # Multi-word / hyphenated surname in Vancouver-vs-full form, e.g.
+    # 'Feliu-Soler A' ↔ 'Albert Feliu Soler' (additive; conservative).
+    if _vancouver_fullname_match(name1, name2):
         return True
 
     # Handle "X Team" matching: when one name is "X Team" and the other

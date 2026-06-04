@@ -255,7 +255,32 @@ def is_acceptable_abbreviation(
     return False
 
 
-_STOPWORDS = {'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with'}
+_STOPWORDS = {
+    'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with',
+    # Non-English connectives/articles so abbreviations of foreign-language
+    # venues align token-for-token, e.g. 'Zentralblatt für Neurochirurgie'.
+    'fur', 'für', 'und', 'der', 'die', 'das', 'zur', 'zum', 'im',
+    'de', 'del', 'du', 'des', 'da', 'di', 'la', 'le', 'el', 'et',
+}
+
+
+def _token_abbrev_match(c_tok: str, f_tok: str) -> bool:
+    """Does cited token ``c_tok`` abbreviate full token ``f_tok``?
+
+    Accepts a prefix ('neurochir' → 'neurochirurgie') OR a same-initial
+    subsequence for compound/consonant abbreviations ('zbl' → 'zentralblatt',
+    i.e. Z-entral-B-L-att). Subsequence is gated (len>=3, shorter, same first
+    letter) to stay conservative."""
+    c, f = c_tok.lower(), f_tok.lower()
+    if f.startswith(c):
+        return True
+    if len(c) >= 3 and len(c) < len(f) and c[0] == f[0]:
+        i = 0
+        for ch in f:
+            if i < len(c) and ch == c[i]:
+                i += 1
+        return i == len(c)
+    return False
 
 
 def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
@@ -267,7 +292,7 @@ def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
     for c_tok in cited_tokens:
         if f_idx >= len(full_tokens):
             return False
-        if not full_tokens[f_idx].lower().startswith(c_tok.lower()):
+        if not _token_abbrev_match(c_tok, full_tokens[f_idx]):
             return False
         f_idx += 1
     return True
