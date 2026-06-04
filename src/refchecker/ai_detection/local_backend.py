@@ -280,7 +280,7 @@ class _TorchEngine:
     def __init__(self, model_dir: str):
         import warnings
         import torch
-        from transformers import AutoTokenizer, AutoConfig, AutoModel, PreTrainedModel
+        from transformers import AutoTokenizer, AutoConfig, AutoModel
         import torch.nn as nn
 
         self.torch = torch
@@ -295,14 +295,20 @@ class _TorchEngine:
             warnings.simplefilter("ignore")
             self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
-        class _DesklibModel(PreTrainedModel):
-            config_class = AutoConfig
-
+        # Plain nn.Module — deliberately NOT a transformers PreTrainedModel.
+        # Subclassing PreTrainedModel dragged in its version-fragile construction
+        # surface (init_weights/tie_weights → `all_tied_weights_keys`,
+        # `_tied_weights_keys`, post_init, ignore_mismatched_sizes …), which
+        # breaks differently on every transformers release the user happens to
+        # have pip-installed into the runtime. We only need an encoder + a linear
+        # head + forward, and we load the weights ourselves with
+        # load_state_dict(strict=False) — so a bare nn.Module is both sufficient
+        # and immune to that API drift (verified: identical scores).
+        class _DesklibModel(nn.Module):
             def __init__(self, config):
-                super().__init__(config)
+                super().__init__()
                 self.model = AutoModel.from_config(config)
                 self.classifier = nn.Linear(config.hidden_size, 1)
-                self.init_weights()
 
             def forward(self, input_ids, attention_mask=None, **_):
                 outputs = self.model(input_ids, attention_mask=attention_mask)
