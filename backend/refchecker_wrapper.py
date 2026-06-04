@@ -2165,6 +2165,15 @@ class ProgressRefChecker:
             # citation sentences. The function is cheap (regex over the
             # body text, no LLM), idempotent on refs that already have
             # contexts, and a no-op when paper_text is empty.
+            # If references were read from a structured source (Crossref DOI,
+            # .bbl/.bib) so paper_text is empty, but the manuscript PDF is still
+            # fetchable (e.g. an open-access PDF URL), download + extract the body
+            # now — so BOTH the inline citation contexts below AND the opt-in AI
+            # detector have the article text to work with.
+            if self.ai_detection_enabled and not (paper_text or "").strip():
+                fetched_body = await self._fetch_body_text_for_ai_detection(paper_source)
+                if fetched_body:
+                    paper_text = fetched_body
             _attach_citation_contexts(references, paper_text)
             _ctx_attached = sum(1 for r in (references or []) if r.get("citation_context"))
             logger.info(
@@ -2405,6 +2414,43 @@ class ProgressRefChecker:
                     await ai_detection_task
                 except BaseException:  # noqa: BLE001 — reaping a cancelled task
                     pass
+
+    async def _fetch_body_text_for_ai_detection(self, paper_source: Optional[str]) -> str:
+        """Best-effort fetch of the manuscript body when references came from a
+        structured source (Crossref DOI / .bbl) so paper_text is empty.
+
+        Handles the common "paste a PDF link" case (e.g. open-access publisher
+        PDF URLs): download the PDF and extract its text. Only PDFs are handled
+        — HTML article bodies are unreliable/paywalled, so those correctly fall
+        back to the "no body text available" message. Never raises.
+        """
+        try:
+            src = str(paper_source or "").strip()
+            if not src.lower().startswith(("http://", "https://")):
+                return ""
+            pdf_path = get_cached_artifact_path(self.cache_dir, src, "ai_body.pdf", create_dir=True)
+            if not os.path.exists(pdf_path) or os.path.getsize(pdf_path) == 0:
+                import requests as _req
+                resp = await asyncio.to_thread(
+                    _req.get, src,
+                    headers={"User-Agent": "RefChecker/0.7 (mailto:moniriario@gmail.com)"},
+                    timeout=60,
+                )
+                if resp.status_code != 200:
+                    return ""
+                content = resp.content or b""
+                ctype = (resp.headers.get("Content-Type") or "").lower()
+                is_pdf = content[:5] == b"%PDF-" or "pdf" in ctype or src.lower().endswith(".pdf")
+                if not is_pdf:
+                    return ""  # HTML / paywalled — let the honest "no body" message stand
+                with open(pdf_path, "wb") as fh:
+                    fh.write(content)
+            text = await asyncio.to_thread(self._extract_pdf_text_scoped, pdf_path)
+            logger.info("AI-detection body fallback: extracted %d chars from %s", len(text or ""), src)
+            return text or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("AI-detection body fallback failed: %s", exc)
+            return ""
 
     async def _run_ai_detection(self, paper_text: str, paper_title: Optional[str]) -> Optional[Dict[str, Any]]:
         """Analyze the manuscript body for AI-generated-text likelihood.
