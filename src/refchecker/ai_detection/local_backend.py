@@ -284,7 +284,16 @@ class _TorchEngine:
         import torch.nn as nn
 
         self.torch = torch
-        self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        # Suppress warnings around EVERY transformers call below. A warning
+        # emitted while a frame of THIS module is on the stack makes the warnings
+        # formatter read this file's source; in a PyInstaller bundle that read
+        # used to raise FileNotFoundError (see the longer note below). The
+        # tokenizer/config loads warn too, so they must be wrapped as well — not
+        # just model construction. (Source is also now shipped in the bundle as a
+        # second layer of defence; see the spec's `.py` datas block.)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
 
         class _DesklibModel(PreTrainedModel):
             config_class = AutoConfig
@@ -325,7 +334,9 @@ class _TorchEngine:
         # `FileNotFoundError: …/_MEIxxxx/refchecker/ai_detection/local_backend.py`
         # which surfaced as "model failed to load". Suppressing warnings here
         # removes the source-format step entirely (we do our own strict checks).
-        config = AutoConfig.from_pretrained(model_dir)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            config = AutoConfig.from_pretrained(model_dir)
         state_dict = _load_checkpoint_state_dict(model_dir)
 
         if state_dict is not None and any(k.startswith("classifier") for k in state_dict):
@@ -350,7 +361,9 @@ class _TorchEngine:
             # Not the desklib checkpoint — try a standard sequence-classification
             # head (e.g. a user-supplied alternative detector model).
             from transformers import AutoModelForSequenceClassification
-            self._std = AutoModelForSequenceClassification.from_pretrained(model_dir)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                self._std = AutoModelForSequenceClassification.from_pretrained(model_dir)
             self.model = None
             self._std.eval()
             num_labels = int(getattr(self._std.config, "num_labels", 1) or 1)
@@ -368,14 +381,15 @@ class _TorchEngine:
     def score(self, text: str) -> float:
         import warnings
         torch = self.torch
-        enc = self.tokenizer(
-            text, truncation=True, max_length=_MAX_TOKENS, return_tensors="pt"
-        )
-        # Same frozen-bundle guard as __init__: a warning emitted from
-        # `_DesklibModel.forward` (this module) would try to read the missing
-        # source file. Suppress so inference never raises FileNotFoundError.
+        # Same frozen-bundle guard as __init__: a warning emitted from the
+        # tokenizer or from `_DesklibModel.forward` (this module) would try to
+        # read the missing source file. Suppress so inference never raises
+        # FileNotFoundError.
         with warnings.catch_warnings(), torch.no_grad():
             warnings.simplefilter("ignore")
+            enc = self.tokenizer(
+                text, truncation=True, max_length=_MAX_TOKENS, return_tensors="pt"
+            )
             if self.model is not None:
                 logit = self.model(enc["input_ids"], attention_mask=enc["attention_mask"])
                 return float(torch.sigmoid(logit).squeeze().item())
@@ -390,19 +404,26 @@ class _OnnxEngine:
     """onnxruntime runtime (used only if a model.onnx with a head exists)."""
 
     def __init__(self, model_dir: str, onnx_path: str):
+        import warnings
         import onnxruntime as ort
         from transformers import AutoTokenizer, AutoConfig
         import numpy as np
 
         self.np = np
-        self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        # Same frozen-bundle guard as _TorchEngine: suppress warnings around the
+        # transformers calls so the formatter never reads this module's source.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
         self.session = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
         self.input_names = {i.name for i in self.session.get_inputs()}
         # Resolve the AI-positive class index from the config for multi-class
         # heads (single-logit heads use sigmoid and ignore this).
         self._ai_index: Optional[int] = None
         try:
-            cfg = AutoConfig.from_pretrained(model_dir)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                cfg = AutoConfig.from_pretrained(model_dir)
             if int(getattr(cfg, "num_labels", 1) or 1) > 1:
                 self._ai_index = _ai_positive_index(getattr(cfg, "id2label", None))
         except Exception:  # noqa: BLE001

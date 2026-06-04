@@ -42,6 +42,25 @@ for root, suffixes in [
             rel_parent = path.parent.relative_to(REPO_ROOT)
             datas.append((str(path), str(rel_parent)))
 
+# Ship the refchecker package SOURCE (.py) alongside the bytecode. PyInstaller
+# normally bundles only .pyc, so a module's __file__ points to a path under the
+# extraction dir that does NOT exist. When torch/transformers emit a warning (or
+# anything raises a traceback) while a refchecker frame is on the stack, Python's
+# formatter tries to read that frame's source line via that path and raises
+#   FileNotFoundError: .../_MEIxxxx/refchecker/ai_detection/local_backend.py
+# which surfaced as "local detection model failed to load". Placing the .py at
+# the same path the loader reports makes inspect/warnings/tracebacks behave
+# exactly as in dev (no read failure), for every module — not just the one that
+# happened to warn this time. Target path mirrors the import name (refchecker/…,
+# NOT src/refchecker/…), matching the reported __file__.
+_src_root = REPO_ROOT / "src"
+_pkg_src = _src_root / "refchecker"
+if _pkg_src.exists():
+    for path in _pkg_src.rglob("*.py"):
+        if path.is_file():
+            rel_parent = path.parent.relative_to(_src_root)
+            datas.append((str(path), str(rel_parent)))
+
 datas += collect_data_files("uvicorn")
 datas += collect_data_files("fastapi")
 

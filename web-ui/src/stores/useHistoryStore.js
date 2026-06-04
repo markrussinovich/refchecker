@@ -708,6 +708,17 @@ export const useHistoryStore = create((set, get) => ({
       if (!findHit(r, i)) return r
       const corrected = r.corrected_reference || {}
       const merged = { ...r }
+      // Snapshot the pre-correction state ONCE so optimisticRevertCorrection /
+      // revertAllOptimisticCorrections can roll the badge back when the user
+      // clicks Restore / Reset on a history-viewed check (the badge reads
+      // selectedCheck.results for those, so without this the chip stays frozen).
+      if (!merged._pre_correction) {
+        merged._pre_correction = {
+          status: r.status, errors: r.errors || [], warnings: r.warnings || [],
+          title: r.title, authors: r.authors, year: r.year,
+          venue: r.venue, doi: r.doi, arxiv_id: r.arxiv_id,
+        }
+      }
       for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
         if (corrected[k] !== undefined && corrected[k] !== null && corrected[k] !== '') {
           merged[k] = corrected[k]
@@ -719,6 +730,54 @@ export const useHistoryStore = create((set, get) => ({
       return merged
     })
     set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
+  // Roll one optimistic correction back to its pre-correction snapshot so the
+  // HealthBadge / list react instantly on Restore for a history-viewed check.
+  optimisticRevertCorrection: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    let touched = false
+    const nextResults = selectedCheck.results.map((r, i) => {
+      const hit = String(r.id ?? '') === idStr || String(r.index ?? '') === idStr || String(i) === idStr
+      if (!hit || !r?._pre_correction) return r
+      touched = true
+      const snap = r._pre_correction
+      const restored = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (snap[k] !== undefined) restored[k] = snap[k]
+      }
+      restored.status = snap.status
+      restored.errors = snap.errors || []
+      restored.warnings = snap.warnings || []
+      delete restored._pre_correction
+      return restored
+    })
+    if (touched) set({ selectedCheck: { ...selectedCheck, results: nextResults } })
+  },
+
+  // Revert EVERY optimistic correction (bulk Reset) so the badge returns to the
+  // pre-apply state for a history-viewed check.
+  revertAllOptimisticCorrections: () => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    let touched = false
+    const nextResults = selectedCheck.results.map((r) => {
+      if (!r?._pre_correction) return r
+      touched = true
+      const snap = r._pre_correction
+      const restored = { ...r }
+      for (const k of ['title', 'authors', 'year', 'venue', 'doi', 'arxiv_id']) {
+        if (snap[k] !== undefined) restored[k] = snap[k]
+      }
+      restored.status = snap.status
+      restored.errors = snap.errors || []
+      restored.warnings = snap.warnings || []
+      delete restored._pre_correction
+      return restored
+    })
+    if (touched) set({ selectedCheck: { ...selectedCheck, results: nextResults } })
   },
 
   updateLabel: async (id, label) => {
