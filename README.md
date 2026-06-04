@@ -593,7 +593,7 @@ docker compose pull       # Update to latest
 
 ### Multi-User Server (OAuth)
 
-By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, or `AZURE_OPENAI_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 
@@ -697,6 +697,8 @@ LLM-powered extraction improves accuracy with complex bibliographies. Hallucinat
 | Google | `GOOGLE_API_KEY` | `gemini-3.1-flash-lite-preview` |
 | Azure | `AZURE_OPENAI_API_KEY` | `gpt-4.1` |
 | vLLM | (local) | `meta-llama/Llama-3.3-70B-Instruct` |
+
+When running the Web UI, provider keys present in the server environment are added automatically as selectable LLM configurations in both single-user and multi-user mode. The key value is not returned to the browser; users can still enter a browser/session key to override the server environment key for their own run.
 
 ```bash
 export ANTHROPIC_API_KEY=your_key
