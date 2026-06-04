@@ -34,9 +34,16 @@ def test_two_word_surname_initials():
     assert enhanced_name_match('Garcia-Lopez M', 'Maria Garcia Lopez') is True
 
 
-def test_real_initial_difference_still_mismatches():
-    # 'EJ' vs given initials 'E I' -> the second initial genuinely differs.
-    assert enhanced_name_match('Inarejos Clemente EJ', 'E. I. Inarejos Clemente') is False
+def test_two_word_surname_secondary_initial_tolerated():
+    # 'Inarejos Clemente EJ' ↔ 'E. I. Inarejos Clemente' — two-word surname,
+    # first initial agrees, second differs (J vs I). A two-word surname is
+    # distinctive enough to accept (user-confirmed: this was a false positive).
+    assert enhanced_name_match('Inarejos Clemente EJ', 'E. I. Inarejos Clemente') is True
+
+
+def test_single_word_surname_secondary_conflict_still_mismatches():
+    # Single-token surname keeps the strict rule.
+    assert enhanced_name_match('Smith JA', 'J. B. Smith') is False
 
 
 def test_different_person_same_initial_not_overmatched():
@@ -73,14 +80,31 @@ def test_middle_name_usage():
     assert enhanced_name_match('LS Lohmander', 'Stefan Lohmander') is True
 
 
-def test_plain_two_word_surname_initial_conflict_still_mismatches():
-    # No particle → a genuine secondary-initial conflict must NOT match.
-    assert enhanced_name_match('Inarejos Clemente EJ', 'E I Inarejos Clemente') is False
+def test_surname_first_database_order():
+    # Databases return medical author lists surname-FIRST ('Dürr Hans Roland').
+    assert enhanced_name_match('Durr HR', 'Dürr Hans Roland') is True
+    assert enhanced_name_match('Schaefer IM', 'Schaefer Inga-Marie') is True
+    assert enhanced_name_match('Stacchiotti S', 'Stacchiotti Silvia') is True
+
+
+def test_diacritic_stripped_not_transliterated():
+    # 'ü' must strip to 'u' (cited 'Durr'/'Koter'), not transliterate to 'ue'.
+    assert enhanced_name_match('Durr HR', 'Dürr Hans Roland') is True
+    assert enhanced_name_match('Koter S', 'S. Koëter') is True
+    assert enhanced_name_match('Klassbo M', 'M. Klässbo') is True
+
+
+def test_middle_name_rule_restricted_to_second_initial():
+    # 'LS Lohmander' ↔ 'Stefan Lohmander' (Stefan == 2nd initial S) matches, but
+    # 'Newcomb NRA' vs 'Anders Newcomb' (Anders == 3rd initial A) must NOT.
+    assert enhanced_name_match('LS Lohmander', 'Stefan Lohmander') is True
+    assert enhanced_name_match('Newcomb NRA', 'Anders Newcomb') is False
 
 
 def test_different_surname_never_matches_via_new_rules():
     assert enhanced_name_match('JM Smith', 'David Jones') is False
     assert enhanced_name_match('van der Berg K', 'J. van der Berg') is False
+    assert enhanced_name_match('Durr HR', 'Schmidt Hans Roland') is False
 
 
 # ── author lists: garbage filtering + consortium ──────────────────────────

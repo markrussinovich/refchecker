@@ -2983,8 +2983,14 @@ def _strip_trailing_name_suffix(tokens):
 
 
 def _norm_name_token(tok: str) -> str:
-    """lowercase + strip diacritics/accents + drop periods, for token compare."""
-    return normalize_diacritics(tok.lower()).replace(".", "").strip()
+    """lowercase + strip diacritics/accents + drop periods, for token compare.
+
+    Uses STRIP normalisation (ü→u, ä→a), NOT German transliteration (ü→ue),
+    because citations overwhelmingly write the stripped form ('Durr', 'Klassbo')
+    — matching how is_name_match normalises. Transliterating here made the
+    Vancouver path miss 'Durr HR' ↔ 'Dürr Hans Roland' and 'Klassbo' ↔ 'Klässbo'.
+    """
+    return normalize_diacritics_simple(tok.lower()).replace(".", "").strip()
 
 
 def _parse_vancouver_surname_initials(name: str):
@@ -3064,28 +3070,60 @@ def _deglue_leading_initial(name: str) -> str:
 
 
 def _vancouver_fullname_match(name1: str, name2: str) -> bool:
-    """Match a Vancouver 'Surname INITIALS' form against a full 'Given… Surname'
-    form, correctly handling MULTI-WORD / HYPHENATED / PARTICLE surnames — the
-    cases the rest of the matcher mis-parses. Examples that must match:
+    """Match a Vancouver 'Surname INITIALS' form against a full name, correctly
+    handling MULTI-WORD / HYPHENATED / PARTICLE surnames AND surname-first
+    database ordering — the cases the rest of the matcher mis-parses. Examples
+    that must match:
         'Feliu-Soler A'        ↔ 'Albert Feliu Soler'
         'Hornicek FJ Jr'       ↔ 'Francis John Hornicek Jr'
-        'Newcomb NRA'          ↔ 'Nicolas Newcomb'        (cited has more initials)
-        'da Silva RA'          ↔ 'R. D. da Silva'         (middle initial differs)
-        'de Oliveira MR'       ↔ 'M. D. de Oliveira'
-        'van de Kremers-Hei K' ↔ 'K. Kremers-van de Hei'  (particle reordered)
+        'Newcomb NRA'          ↔ 'Nicolas Newcomb'         (cited has more initials)
+        'da Silva RA'          ↔ 'R. D. da Silva'          (secondary initial differs)
+        'Inarejos Clemente EJ' ↔ 'E. I. Inarejos Clemente' (two-word surname, 2nd differs)
+        'van de Kremers-Hei K' ↔ 'K. Kremers-van de Hei'   (particle reordered)
+        'Durr HR'              ↔ 'Dürr Hans Roland'         (surname-FIRST order)
+        'Schaefer IM'          ↔ 'Schaefer Inga-Marie'      (surname-first, hyphenated given)
 
     Rules (precision-preserving):
-      • the cited surname must equal the tail of the full name — as an ordered
-        run, OR (for ≥3-token surnames) as a multiset, since Dutch/Iberian
-        particles get reordered by alphabetisation convention;
-      • the FIRST given-initial must agree;
+      • the cited surname must equal the full name's TAIL ('Given… Surname') or
+        HEAD ('Surname Given…') — as an ordered run, OR (for ≥3-token surnames)
+        as a multiset, since particles get reordered by alphabetisation;
+      • the FIRST given-initial must agree (or the DB recorded a single given
+        name matching a non-first cited initial — middle-name usage);
       • remaining initials must be consistent (one a prefix of the other), OR —
-        only when the surname carries a name PARTICLE (da/de/van/von…), which
-        makes a same-surname-same-first-initial collision between different
-        people unlikely — a secondary-initial difference is tolerated.
-    A plain multi-word surname with a genuine secondary-initial conflict
-    (e.g. 'Inarejos Clemente EJ' vs 'E I …') still does NOT match.
+        for any DISTINCTIVE multi-word surname (≥2 tokens), where a
+        same-surname-same-first-initial collision between different people is
+        unlikely — a secondary-initial difference is tolerated.
+    A SINGLE-token surname with a genuine secondary-initial conflict
+    (e.g. 'Smith JA' vs 'J. B. Smith') still does NOT match.
     """
+    def _initials_match(initials, given_initials, n):
+        """Given the cited INITIALS and the full name's given-INITIALS (with an
+        n-token surname already confirmed), decide if they refer to one person."""
+        if not initials or not given_initials:
+            return False
+        # Middle-name usage: the database recorded a SINGLE given name that the
+        # citation carried as its SECOND initial ('LS Lohmander' ↔ 'Stefan
+        # Lohmander' — L. Stefan Lohmander publishes under his middle name).
+        # Restricted to the second initial specifically (the common First-Middle
+        # → goes-by-Middle pattern) so an unrelated later-initial coincidence
+        # ('Newcomb NRA' vs 'Anders Newcomb') does NOT spuriously match.
+        if len(given_initials) == 1 and len(initials) >= 2 and given_initials[0] == initials[1]:
+            return True
+        if initials[0] != given_initials[0]:
+            return False
+        # Consistent initials: shorter sequence is a prefix of the longer
+        # (covers 'Newcomb NRA' ↔ 'Nicolas Newcomb' and 'Feliu-Soler A').
+        k = min(len(initials), len(given_initials))
+        if all(a == b for a, b in zip(initials[:k], given_initials[:k])):
+            return True
+        # Secondary initials disagree — accept for any DISTINCTIVE multi-word
+        # surname (n>=2). A two-word/particle/hyphenated surname plus an agreeing
+        # first initial is specific enough that a collision between different
+        # people is unlikely ('da Silva RA' ↔ 'R. D. da Silva',
+        # 'Inarejos Clemente EJ' ↔ 'E. I. Inarejos Clemente'). Single-token
+        # surnames still require consistent initials, preserving precision.
+        return n >= 2
+
     for v, f in ((name1, name2), (name2, name1)):
         surname, initials = _parse_vancouver_surname_initials(v)
         if surname is None:
@@ -3094,30 +3132,18 @@ def _vancouver_fullname_match(name1: str, name2: str) -> bool:
         n = len(surname)
         if len(f_tokens) <= n:
             continue
-        tail = f_tokens[-n:]
-        surname_ok = (tail == surname) or (n >= 3 and sorted(tail) == sorted(surname))
-        if not surname_ok:
-            continue
-        given_initials = [t[0] for t in f_tokens[:-n] if t]
-        if not initials or not given_initials:
-            continue
-        # Middle-name usage: the database recorded a SINGLE given name that the
-        # citation carried as a non-first initial ('LS Lohmander' ↔ 'Stefan
-        # Lohmander' — L. Stefan Lohmander publishes under his middle name).
-        # Gated: exactly one given token, ≥2 cited initials, exact surname.
-        if len(given_initials) == 1 and len(initials) >= 2 and given_initials[0] in initials:
-            return True
-        if initials[0] != given_initials[0]:
-            continue
-        # Consistent initials: shorter sequence is a prefix of the longer
-        # (covers 'Newcomb NRA' ↔ 'Nicolas Newcomb' and 'Feliu-Soler A').
-        k = min(len(initials), len(given_initials))
-        if all(a == b for a, b in zip(initials[:k], given_initials[:k])):
-            return True
-        # Secondary initials disagree — accept only for distinctive PARTICLE
-        # surnames ('da Silva RA' ↔ 'R. D. da Silva').
-        if any(tok in _NAME_PARTICLES for tok in surname):
-            return True
+        # Try the surname at the TAIL ('Given… Surname') AND the HEAD
+        # ('Surname Given…') — databases return medical author lists in either
+        # order ('Dürr Hans Roland', 'Schaefer Inga-Marie' are surname-first).
+        tail, head = f_tokens[-n:], f_tokens[:n]
+        positions = []
+        if tail == surname or (n >= 3 and sorted(tail) == sorted(surname)):
+            positions.append([t[0] for t in f_tokens[:-n] if t])   # given before surname
+        if head == surname or (n >= 3 and sorted(head) == sorted(surname)):
+            positions.append([t[0] for t in f_tokens[n:] if t])    # given after surname
+        for given_initials in positions:
+            if _initials_match(initials, given_initials, n):
+                return True
     return False
 
 
