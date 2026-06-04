@@ -9,7 +9,9 @@ const hallucinationCapableProviders = ['openai', 'anthropic', 'google', 'azure']
 function getStoredSelection(key) {
   try {
     const value = localStorage.getItem(key)
-    return value ? Number(value) : null
+    if (!value) return null
+    const numericValue = Number(value)
+    return Number.isNaN(numericValue) ? value : numericValue
   } catch {
     return null
   }

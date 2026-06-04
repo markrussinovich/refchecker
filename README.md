@@ -593,7 +593,7 @@ docker compose pull       # Update to latest
 
 ### Multi-User Server (OAuth)
 
-By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. LLM API keys are entered per-user in the Settings panel, stored in the **browser's `localStorage`**, and sent per-request — never stored on the server.
+By default, RefChecker runs in **single-user mode** — no login required. Enable multi-user mode for shared deployments where each visitor signs in via OAuth. If the server has LLM provider environment variables such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY`, the Web UI exposes those providers as selectable server-environment configs without revealing the secret. Users can still enter their own keys to override the server key for their browser session; user-entered keys are stored in the **browser's `localStorage`** and sent per-request — never stored on the server.
 
 #### 1. Generate a JWT Secret Key
 

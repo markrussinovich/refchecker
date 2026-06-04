@@ -40,6 +40,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
   const configHasKey = (config) => {
     if (!config) return false
     if (config.provider === 'vllm') return true
+    if (config.key_source === 'environment' || config.env_key_available) return true
     if (hasKeyInBrowser(`llm:${config.id}`)) return true
     if (hasKeyInBrowser(config.provider)) return true
     if (multiuser) return false
@@ -245,6 +246,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
                       style={{ color: 'var(--color-text-muted)' }}
                     >
                       {config.provider}{config.model ? ` / ${config.model}` : ''}
+                      {config.key_source === 'environment' ? ' / server env key' : ''}
                       {!selectable ? ' / key needed' : ''}
                       {config.provider === 'vllm' ? ' / extraction only' : ''}
                     </div>
@@ -290,7 +292,7 @@ export default function LLMSelector({ mode = 'extraction' }) {
                           </svg>
                         </button>
                       </div>
-                    ) : (
+                    ) : config.is_environment ? null : (
                       <>
                         <button
                           onClick={(e) => {

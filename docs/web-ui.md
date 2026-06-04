@@ -131,7 +131,7 @@ export OPENAI_API_KEY=your_key_here
 export GOOGLE_API_KEY=your_key_here
 ```
 
-Saved LLM configurations include provider, model, optional endpoint, and API key state. In single-user mode, API keys may be stored server-side in the local SQLite settings database. In multi-user mode, user-entered keys stay in the browser and are sent with each request; the server stores per-user configuration metadata but not browser-only keys.
+Saved LLM configurations include provider, model, optional endpoint, and API key state. When LLM provider keys are present in the server environment, the Web UI shows those providers as selectable server-environment configs and uses the server-side key without returning the secret to the browser. In single-user mode, user-entered API keys may be stored server-side in the local SQLite settings database. In multi-user mode, user-entered keys stay in the browser and are sent with each request; the server stores per-user configuration metadata but not browser-only keys.
 
 For a run, the Web UI sends both:
 

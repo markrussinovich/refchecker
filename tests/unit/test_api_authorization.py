@@ -485,8 +485,9 @@ def test_multiuser_create_llm_config_does_not_store_api_key(auth_db):
     ))
     config_id = result["id"]
 
-    # The response should indicate no key is stored
-    assert result["has_key"] is False
+    # The posted key must not be stored; any key availability can only come
+    # from server environment configuration.
+    assert result.get("key_source") in (None, "environment")
 
     # Verify the database has no key
     stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
@@ -512,3 +513,48 @@ def test_multiuser_update_llm_config_does_not_store_api_key(auth_db):
 
     stored = _run(db.get_llm_config_by_id(config_id, user_id=owner.id))
     assert stored["api_key"] is None or stored["api_key"] == ""
+
+
+def test_multiuser_llm_configs_include_server_env_metadata(auth_db, monkeypatch):
+    api_main, _db = auth_db
+    owner = _run(_create_user(api_main, _db, "owner-env-config"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-env-secret")
+
+    configs = _run(api_main.get_llm_configs(owner))
+    env_config = next(config for config in configs if config["id"] == "env:anthropic")
+
+    assert env_config["provider"] == "anthropic"
+    assert env_config["has_key"] is True
+    assert env_config["key_source"] == "environment"
+    assert env_config["is_environment"] is True
+    assert "api_key" not in env_config
+    assert "server-env-secret" not in repr(configs)
+
+
+def test_env_llm_config_resolution_prefers_request_key(auth_db, monkeypatch):
+    api_main, _db = auth_db
+    owner = _run(_create_user(api_main, _db, "owner-env-resolution"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "server-env-secret")
+
+    provider, model, api_key, endpoint = _run(api_main._resolve_llm_config_for_request(
+        user_id=owner.id,
+        use_llm=True,
+        llm_config_id="env:anthropic",
+        llm_provider=None,
+        llm_model=None,
+        api_key=None,
+    ))
+    assert provider == "anthropic"
+    assert model
+    assert api_key == "server-env-secret"
+    assert endpoint is None
+
+    _provider, _model, override_key, _endpoint = _run(api_main._resolve_llm_config_for_request(
+        user_id=owner.id,
+        use_llm=True,
+        llm_config_id="env:anthropic",
+        llm_provider=None,
+        llm_model=None,
+        api_key="browser-override",
+    ))
+    assert override_key == "browser-override"

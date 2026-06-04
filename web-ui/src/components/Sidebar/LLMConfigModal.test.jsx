@@ -84,4 +84,28 @@ describe('LLMConfigModal', () => {
       )
     })
   })
+
+  it('allows server environment keys to satisfy validation in multiuser mode', async () => {
+    mocks.multiuser = true
+    mocks.configs = [{
+      id: 'env:anthropic',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      has_key: true,
+      key_source: 'environment',
+      env_key_available: true,
+    }]
+
+    render(<LLMConfigModal isOpen={true} onClose={vi.fn()} />)
+    expect(screen.getByText('Using the server environment key by default. Enter a key here to override it for this browser.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /Test connection/i }))
+
+    await waitFor(() => {
+      expect(mocks.validateLLMConfig).toHaveBeenCalledWith(expect.objectContaining({
+        provider: 'anthropic',
+        api_key: undefined,
+      }))
+    })
+  })
 })
