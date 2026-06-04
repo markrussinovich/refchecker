@@ -269,8 +269,9 @@ def _token_abbrev_match(c_tok: str, f_tok: str) -> bool:
 
     Accepts a prefix ('neurochir' → 'neurochirurgie') OR a same-initial
     subsequence for compound/consonant abbreviations ('zbl' → 'zentralblatt',
-    i.e. Z-entral-B-L-att). Subsequence is gated (len>=3, shorter, same first
-    letter) to stay conservative."""
+    i.e. Z-entral-B-L-att) OR a first+last-letter 2-char abbreviation common in
+    medical NLM titles ('jt' → 'joint', 'st' → 'saint', 'mt' → 'mount').
+    Each rule is gated (shorter, same first letter) to stay conservative."""
     c, f = c_tok.lower(), f_tok.lower()
     if f.startswith(c):
         return True
@@ -280,7 +281,53 @@ def _token_abbrev_match(c_tok: str, f_tok: str) -> bool:
             if i < len(c) and ch == c[i]:
                 i += 1
         return i == len(c)
+    # First+last-letter abbreviation: 'jt'->'joint', 'st'->'saint'/'street'.
+    if len(c) == 2 and len(f) >= 4 and c[0] == f[0] and c[-1] == f[-1]:
+        return True
     return False
+
+
+# Connector tokens that carry no matching weight; dropped before token
+# alignment so 'Bone & Joint' aligns with 'Bone Joint'.
+_VENUE_CONNECTORS = {'&', '+'}
+
+
+def _venue_core(venue: Optional[str]) -> str:
+    """The journal's core name: the part before a ':' subtitle (the
+    '… : official publication of …' boilerplate that publishers append),
+    normalised."""
+    if not venue:
+        return ''
+    head = str(venue).split(':', 1)[0]
+    return _normalize_venue(head)
+
+
+def venues_core_match(venue1: Optional[str], venue2: Optional[str]) -> bool:
+    """Style-independent: do two venue strings name the same journal, allowing
+    a ':' subtitle on either side and NLM-style word abbreviations?
+
+    Examples that must match (no "Venue mismatch" warning):
+        'European spine journal: official publication of …' ↔ 'European spine journal'
+        'Eur Spine Journal: Official Publication Eur Spine Soc …' ↔ 'European spine journal'
+        'Arch Bone Jt Surg' ↔ 'Archives of Bone & Joint Surgery'
+    Returns False when it cannot confidently align the cores (caller then runs
+    the standard mismatch check), so it only ever SUPPRESSES false positives.
+    """
+    c1, c2 = _venue_core(venue1), _venue_core(venue2)
+    if not c1 or not c2:
+        return False
+    if c1 == c2:
+        return True
+
+    def _strip_connectors(s: str) -> str:
+        return ' '.join(t for t in s.split() if t not in _VENUE_CONNECTORS)
+
+    c1s, c2s = _strip_connectors(c1), _strip_connectors(c2)
+    if c1s == c2s:
+        return True
+    # Token-by-token abbreviation match in EITHER direction (either side may be
+    # the abbreviated form). _looks_like_word_abbreviation drops stopwords.
+    return _looks_like_word_abbreviation(c1s, c2s) or _looks_like_word_abbreviation(c2s, c1s)
 
 
 def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:

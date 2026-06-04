@@ -2988,19 +2988,31 @@ def _norm_name_token(tok: str) -> str:
 
 
 def _parse_vancouver_surname_initials(name: str):
-    """If ``name`` is Vancouver-style 'Surname[ Surname2…] INITIALS [suffix]',
-    return (surname_tokens, initials); else (None, None). The surname may be
-    multi-word and/or hyphenated; INITIALS is a trailing all-caps block
-    (e.g. 'A', 'FJ', 'EJ')."""
+    """If ``name`` is Vancouver-style with an all-caps INITIALS block either
+    TRAILING ('Feliu-Soler A', 'Hornicek FJ Jr') or LEADING ('LS Lohmander',
+    'AK Nilsdotter'), return (surname_tokens, initials); else (None, None). The
+    surname may be multi-word and/or hyphenated."""
     raw = _strip_trailing_name_suffix(name.replace(",", " ").split())
     if len(raw) < 2:
         return None, None
-    last = raw[-1].replace(".", "")
-    if not (last.isalpha() and last.isupper() and 1 <= len(last) <= 4):
+
+    def _is_initials_block(tok: str) -> bool:
+        t = tok.replace(".", "")
+        return bool(t) and t.isalpha() and t.isupper() and 1 <= len(t) <= 4
+
+    # Initials trailing ('Surname… INITIALS') — preferred.
+    if _is_initials_block(raw[-1]):
+        initials = [c.lower() for c in raw[-1].replace(".", "")]
+        surname_toks = raw[:-1]
+    # Initials leading ('INITIALS Surname…') — common in NLM/medical refs.
+    elif _is_initials_block(raw[0]):
+        initials = [c.lower() for c in raw[0].replace(".", "")]
+        surname_toks = raw[1:]
+    else:
         return None, None
-    initials = [c.lower() for c in last]
+
     surname = []
-    for t in raw[:-1]:
+    for t in surname_toks:
         for piece in t.replace("-", " ").split():
             p = _norm_name_token(piece)
             if p:
@@ -3019,15 +3031,60 @@ def _full_name_tokens(name: str):
     return toks
 
 
+# Surname particles ("tussenvoegsels" / nobiliary particles). Used to (a) split
+# an initial glued onto a leading particle and (b) recognise distinctive
+# multi-word surnames where a secondary-initial difference is tolerable.
+_NAME_PARTICLES = {
+    "van", "von", "der", "den", "del", "della", "dello", "di", "da", "do",
+    "dos", "das", "de", "du", "la", "le", "el", "ter", "ten", "op", "af",
+    "av", "zu", "bin", "ibn", "abu", "st", "saint",
+}
+
+_PARTICLE_ALT = "(?:" + "|".join(
+    sorted((p for p in _NAME_PARTICLES if p not in {"st", "saint"}),
+           key=len, reverse=True)
+) + ")"
+_DEGLUE_RE = re.compile(
+    r"\b([A-Z])(" + _PARTICLE_ALT + r")\s+(" + _PARTICLE_ALT + r")\b"
+)
+
+
+def _deglue_leading_initial(name: str) -> str:
+    """Split an author initial that PDF/Crossref extraction glued onto a
+    leading surname particle, e.g. 'Rvan der Straaten' → 'R van der Straaten'
+    (really 'R. van der Straaten').
+
+    Triggers only on a single uppercase letter glued to a particle that begins
+    a MULTI-particle run ('van der', 'de la', 'van den', …). That double-
+    particle signal keeps ordinary names like 'Aden'/'Eden' untouched.
+    """
+    if not name:
+        return name
+    return _DEGLUE_RE.sub(lambda m: f"{m.group(1)} {m.group(2)} {m.group(3)}", name)
+
+
 def _vancouver_fullname_match(name1: str, name2: str) -> bool:
     """Match a Vancouver 'Surname INITIALS' form against a full 'Given… Surname'
-    form, correctly handling MULTI-WORD / HYPHENATED surnames — the case the
-    rest of the matcher mis-parses. Examples that must match:
-        'Feliu-Soler A'  ↔ 'Albert Feliu Soler'
-        'Hornicek FJ Jr' ↔ 'Francis John Hornicek Jr'
-    Conservative (purely additive): the FULL surname must equal the tail of the
-    other name and the initials must be a prefix of the given-name initials, so
-    a real difference (e.g. 'EJ' vs given initials 'E I') still does NOT match.
+    form, correctly handling MULTI-WORD / HYPHENATED / PARTICLE surnames — the
+    cases the rest of the matcher mis-parses. Examples that must match:
+        'Feliu-Soler A'        ↔ 'Albert Feliu Soler'
+        'Hornicek FJ Jr'       ↔ 'Francis John Hornicek Jr'
+        'Newcomb NRA'          ↔ 'Nicolas Newcomb'        (cited has more initials)
+        'da Silva RA'          ↔ 'R. D. da Silva'         (middle initial differs)
+        'de Oliveira MR'       ↔ 'M. D. de Oliveira'
+        'van de Kremers-Hei K' ↔ 'K. Kremers-van de Hei'  (particle reordered)
+
+    Rules (precision-preserving):
+      • the cited surname must equal the tail of the full name — as an ordered
+        run, OR (for ≥3-token surnames) as a multiset, since Dutch/Iberian
+        particles get reordered by alphabetisation convention;
+      • the FIRST given-initial must agree;
+      • remaining initials must be consistent (one a prefix of the other), OR —
+        only when the surname carries a name PARTICLE (da/de/van/von…), which
+        makes a same-surname-same-first-initial collision between different
+        people unlikely — a secondary-initial difference is tolerated.
+    A plain multi-word surname with a genuine secondary-initial conflict
+    (e.g. 'Inarejos Clemente EJ' vs 'E I …') still does NOT match.
     """
     for v, f in ((name1, name2), (name2, name1)):
         surname, initials = _parse_vancouver_surname_initials(v)
@@ -3035,11 +3092,31 @@ def _vancouver_fullname_match(name1: str, name2: str) -> bool:
             continue
         f_tokens = _full_name_tokens(f)
         n = len(surname)
-        if len(f_tokens) <= n or f_tokens[-n:] != surname:
+        if len(f_tokens) <= n:
+            continue
+        tail = f_tokens[-n:]
+        surname_ok = (tail == surname) or (n >= 3 and sorted(tail) == sorted(surname))
+        if not surname_ok:
             continue
         given_initials = [t[0] for t in f_tokens[:-n] if t]
-        if initials and len(initials) <= len(given_initials) \
-                and all(a == b for a, b in zip(initials, given_initials)):
+        if not initials or not given_initials:
+            continue
+        # Middle-name usage: the database recorded a SINGLE given name that the
+        # citation carried as a non-first initial ('LS Lohmander' ↔ 'Stefan
+        # Lohmander' — L. Stefan Lohmander publishes under his middle name).
+        # Gated: exactly one given token, ≥2 cited initials, exact surname.
+        if len(given_initials) == 1 and len(initials) >= 2 and given_initials[0] in initials:
+            return True
+        if initials[0] != given_initials[0]:
+            continue
+        # Consistent initials: shorter sequence is a prefix of the longer
+        # (covers 'Newcomb NRA' ↔ 'Nicolas Newcomb' and 'Feliu-Soler A').
+        k = min(len(initials), len(given_initials))
+        if all(a == b for a, b in zip(initials[:k], given_initials[:k])):
+            return True
+        # Secondary initials disagree — accept only for distinctive PARTICLE
+        # surnames ('da Silva RA' ↔ 'R. D. da Silva').
+        if any(tok in _NAME_PARTICLES for tok in surname):
             return True
     return False
 
@@ -3059,12 +3136,18 @@ def enhanced_name_match(name1: str, name2: str) -> bool:
     if not name1 or not name2:
         return False
 
+    # De-glue an initial concatenated onto a leading surname particle
+    # ('Rvan der Straaten' → 'R van der Straaten') so the matchers below see
+    # the intended tokens. No-op for normal names.
+    name1 = _deglue_leading_initial(name1)
+    name2 = _deglue_leading_initial(name2)
+
     # First try the existing matching logic
     if is_name_match(name1, name2):
         return True
 
-    # Multi-word / hyphenated surname in Vancouver-vs-full form, e.g.
-    # 'Feliu-Soler A' ↔ 'Albert Feliu Soler' (additive; conservative).
+    # Multi-word / hyphenated / particle surname in Vancouver-vs-full form,
+    # e.g. 'Feliu-Soler A' ↔ 'Albert Feliu Soler' (additive; conservative).
     if _vancouver_fullname_match(name1, name2):
         return True
 
@@ -3275,6 +3358,49 @@ def _is_collective_author_shorthand(author: str) -> bool:
     )
 
 
+_GROUP_AUTHOR_RE = re.compile(
+    r"\b(consortium|collaboration|collaborative|"
+    r"study\s+group|working\s+group|research\s+group|"
+    r"investigators|study\s+team|trial\s+group|"
+    r"\w+\s+group|network|initiative)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_group_author(name: str) -> bool:
+    """Is ``name`` a consortium / collaboration / study-group author rather than
+    an individual? (e.g. 'TKAF Consortium', 'ENIGMA Collaboration')."""
+    if not name:
+        return False
+    return bool(_GROUP_AUTHOR_RE.search(str(name)))
+
+
+def _is_garbage_author_name(name: str) -> bool:
+    """Detect a corrupted author entry that databases sometimes return, so it
+    is not counted against the citation.
+
+    Markers (any one is enough):
+      • contains '@'  → an email fragment leaked into the name
+        ('Klassbo@liv Maria');
+      • contains ';'  → a delimiter leak ('Stefan Se ; L');
+      • an absurd number of whitespace tokens (>8) with no comma → all the
+        given/family names of many authors merged into one entry
+        ('Thomas Eric Mathias Michael … Bauer Bogner Bostrom Cross …').
+    Conservative: real personal names — even long Iberian/compound ones — stay
+    well under these limits.
+    """
+    if not name:
+        return True
+    s = str(name).strip()
+    if not s:
+        return True
+    if "@" in s or ";" in s:
+        return True
+    if "," not in s and len(s.split()) > 8:
+        return True
+    return False
+
+
 def compare_authors(cited_authors: list, correct_authors: list, normalize_func=None) -> tuple:
     """
     Compare author lists to check if they match.
@@ -3304,7 +3430,15 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         if name and name not in seen_names:
             cleaned_correct_names.append(name)
             seen_names.add(name)
-    
+
+    # Drop corrupted author entries the database leaked in (email fragments,
+    # delimiter spillage, merged mega-names) so they don't inflate the count
+    # and trigger a spurious "Author count mismatch". Only drop them when real
+    # authors remain — never filter the whole list away.
+    non_garbage = [n for n in cleaned_correct_names if not _is_garbage_author_name(n)]
+    if non_garbage and len(non_garbage) < len(cleaned_correct_names):
+        cleaned_correct_names = non_garbage
+
     correct_names = cleaned_correct_names
     
     # Helper function to detect "et al" variations
@@ -3437,6 +3571,24 @@ def compare_authors(cited_authors: list, correct_authors: list, normalize_func=N
         and enhanced_name_match(cleaned_cited[0], correct_names[0])
     ):
         return True, "Authors match (collective authorship shorthand)"
+
+    # Consortium / group authorship: a citation often lists a few lead authors
+    # plus a group name ('Flevas DA, Brenneis M, TKAF Consortium') while the
+    # database expands the consortium to its dozens of individual members. The
+    # group name legitimately stands in for those members, so don't penalise the
+    # count difference — just require every NAMED (non-group) cited author to
+    # appear in the authoritative list.
+    cited_group_authors = [a for a in cleaned_cited if _is_group_author(a)]
+    if cited_group_authors and correct_names:
+        named_cited = [a for a in cleaned_cited if not _is_group_author(a)]
+        if named_cited and all(
+            any(enhanced_name_match(nc, cn) for cn in correct_names)
+            for nc in named_cited
+        ):
+            return True, (
+                "Authors match (consortium/group author stands in for the "
+                "remaining members)"
+            )
 
     def any_cited_author_matches():
         return any(
@@ -5722,10 +5874,17 @@ def are_venues_substantially_different(venue1: str, venue2: str, citation_style:
     """
     # Import here to avoid circular dependency
     from refchecker.utils.url_utils import extract_arxiv_id_from_url
-    from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation
+    from refchecker.utils.venue_abbreviations import is_acceptable_abbreviation, venues_core_match
 
     if not venue1 or not venue2:
         return bool(venue1 != venue2)
+
+    # Style-independent core match: handles a ':' subtitle on either side
+    # ('European spine journal: official publication of …' ↔ 'European spine
+    # journal') and NLM word abbreviations ('Arch Bone Jt Surg' ↔ 'Archives of
+    # Bone & Joint Surgery'). Only ever suppresses false positives.
+    if venues_core_match(venue1, venue2):
+        return False
 
     # Style-aware abbreviation short-circuit. If the citation style
     # permits the cited venue's abbreviated form, accept "ANZ J Surg"

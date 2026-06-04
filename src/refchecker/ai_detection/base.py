@@ -111,6 +111,10 @@ class AIDetectionResult:
     model_version: Optional[str] = None
     operating_point: Optional[str] = None
     abstain_reason: Optional[str] = None
+    # Human-readable detail for an abstention/failure (e.g. the underlying
+    # exception when the local model fails to load). Surfaced to the UI so the
+    # user can act on the REAL cause instead of a generic "failed to load".
+    abstain_detail: Optional[str] = None
     word_count: int = 0
     disclaimer: str = DISCLAIMER
 
@@ -125,6 +129,7 @@ class AIDetectionResult:
             "model_version": self.model_version,
             "operating_point": self.operating_point,
             "abstain_reason": self.abstain_reason,
+            "abstain_detail": self.abstain_detail,
             "word_count": self.word_count,
             "disclaimer": self.disclaimer,
         }
@@ -133,13 +138,19 @@ class AIDetectionResult:
 # ── Convenience constructors ──────────────────────────────────────────────
 
 def make_unavailable(reason: str, backend: Optional[str] = None,
-                     word_count: int = 0) -> AIDetectionResult:
-    """No body text / missing deps / model-not-installed / timeout."""
+                     word_count: int = 0,
+                     detail: Optional[str] = None) -> AIDetectionResult:
+    """No body text / missing deps / model-not-installed / timeout.
+
+    ``detail`` carries the real underlying error (e.g. the load exception) so
+    the UI can show WHY it failed rather than a generic message.
+    """
     return AIDetectionResult(
         band=BAND_UNAVAILABLE,
         summary="AI-text detection could not run for this article.",
         backend_used=backend,
         abstain_reason=reason,
+        abstain_detail=detail,
         word_count=word_count,
     )
 

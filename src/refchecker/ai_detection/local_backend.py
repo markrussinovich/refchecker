@@ -95,8 +95,14 @@ class LocalDetectorBackend(DetectionBackend):
         try:
             engine = _get_engine()
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Local detector load failed: %s", exc)
-            return make_unavailable("model_load_failed", self.name, wc)
+            detail = _format_load_error(exc)
+            logger.warning("Local detector load failed: %s", detail)
+            try:
+                from . import diagnostics
+                diagnostics.record({"event": "model_load_failed", "detail": detail})
+            except Exception:  # noqa: BLE001
+                pass
+            return make_unavailable("model_load_failed", self.name, wc, detail=detail)
 
         # Only score windows that independently clear the SAME reliability
         # floors the document had to clear (>= MIN_WORDS prose, non-prose
@@ -115,8 +121,9 @@ class LocalDetectorBackend(DetectionBackend):
         try:
             probs = [engine.score(w) for w in windows]
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Local detector inference failed: %s", exc)
-            return make_unavailable("inference_failed", self.name, wc)
+            detail = _format_load_error(exc)
+            logger.warning("Local detector inference failed: %s", detail)
+            return make_unavailable("inference_failed", self.name, wc, detail=detail)
 
         doc_score = round(sum(probs) / len(probs), 3)
         raw_band = band_from_probability(doc_score)
@@ -197,6 +204,23 @@ def _summary(band: str, score, n_windows: int) -> str:
 
 # ── Inference engine (lazy) ───────────────────────────────────────────────
 
+def _format_load_error(exc: Exception) -> str:
+    """Compact, user-actionable one-liner for a load/inference exception.
+
+    Includes the exception type and message, and — for the common
+    'model directory not found / missing config.json' case — the resolved
+    model path so a path mismatch is immediately obvious in the UI.
+    """
+    msg = f"{type(exc).__name__}: {exc}".strip()
+    try:
+        p = model_manager.model_path()
+        if isinstance(exc, (FileNotFoundError, OSError)) or "config.json" in msg or "does not appear" in msg:
+            msg = f"{msg} (model path: {p})"
+    except Exception:  # noqa: BLE001
+        pass
+    return msg[:500]
+
+
 def _get_engine():
     global _engine
     if _engine is not None:
@@ -207,6 +231,15 @@ def _get_engine():
     with _engine_lock:
         if _engine is not None:
             return _engine
+        # Defensive: make the pip-installed runtime importable even if detect()
+        # was reached without a prior deps_available() call (e.g. a fresh worker
+        # thread). deps_available() also does this, but calling it here too is
+        # idempotent and closes the "runtime not on sys.path at load time" gap.
+        try:
+            from . import runtime_manager
+            runtime_manager.ensure_on_path()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("ensure_on_path before engine load failed: %s", exc)
         path = str(model_manager.model_path())
         onnx_file = model_manager.model_path() / "model.onnx"
         built = None

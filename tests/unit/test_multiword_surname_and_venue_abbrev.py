@@ -43,6 +43,93 @@ def test_different_person_same_initial_not_overmatched():
     assert enhanced_name_match('Smith J', 'Jane Doe') is False
 
 
+# ── author: the v0.7.85 batch of reported false-positives ─────────────────
+
+def test_initial_glued_to_particle_is_split():
+    # 'Rvan der Straaten' is really 'R. van der Straaten' (extraction glued the
+    # initial onto the leading particle).
+    assert enhanced_name_match('Rvan der Straaten', 'R. van der Straaten') is True
+
+
+def test_dutch_particle_reordering():
+    # 'van de Kremers-Hei K' ↔ 'K. Kremers-van de Hei' — tussenvoegsel reordered.
+    assert enhanced_name_match('van de Kremers-Hei K', 'K. Kremers-van de Hei') is True
+
+
+def test_vancouver_more_initials_than_record():
+    # Cited carries more initials than the DB's single given name.
+    assert enhanced_name_match('Newcomb NRA', 'Nicolas Newcomb') is True
+
+
+def test_particle_surname_secondary_initial_differs():
+    # Same first initial + distinctive particle surname; a middle initial
+    # differs ('RA' vs given 'R D'). Tolerated for particle surnames.
+    assert enhanced_name_match('da Silva RA', 'R. D. da Silva') is True
+    assert enhanced_name_match('de Oliveira MR', 'M. D. de Oliveira') is True
+
+
+def test_middle_name_usage():
+    # 'LS Lohmander' ↔ 'Stefan Lohmander' (publishes under his middle name).
+    assert enhanced_name_match('LS Lohmander', 'Stefan Lohmander') is True
+
+
+def test_plain_two_word_surname_initial_conflict_still_mismatches():
+    # No particle → a genuine secondary-initial conflict must NOT match.
+    assert enhanced_name_match('Inarejos Clemente EJ', 'E I Inarejos Clemente') is False
+
+
+def test_different_surname_never_matches_via_new_rules():
+    assert enhanced_name_match('JM Smith', 'David Jones') is False
+    assert enhanced_name_match('van der Berg K', 'J. van der Berg') is False
+
+
+# ── author lists: garbage filtering + consortium ──────────────────────────
+
+def test_garbage_author_entries_filtered_from_count():
+    # DB leaked email/delimiter fragments inflating the count; the 4 real
+    # authors all match, so it should NOT be a count mismatch.
+    cited = ['AK Nilsdotter', 'LS Lohmander', 'M Klassbo', 'EM Roos']
+    correct = ['A. Nilsdotter', 'Stefan Lohmander', 'M. Klässbo', 'E. M. Roos',
+               'Stefan Se ; L', 'Klässbo-Maria Klassbo@liv Maria', 'M. Se ; Ewa']
+    assert compare_authors(cited, correct)[0] is True
+
+
+def test_consortium_author_covers_members():
+    cited = ['Flevas DA', 'Brenneis M', 'TKAF Consortium']
+    correct = ['D. Flevas', 'M. Brenneis'] + [f'Member {i}' for i in range(38)]
+    assert compare_authors(cited, correct)[0] is True
+
+
+def test_consortium_with_wrong_named_author_still_fails():
+    cited = ['Wrongperson X', 'TKAF Consortium']
+    correct = ['D. Flevas', 'M. Brenneis', 'Member 1']
+    assert compare_authors(cited, correct)[0] is False
+
+
+# ── venue: colon subtitle + Jt→Joint abbreviation ─────────────────────────
+
+def test_venue_colon_subtitle_core_match():
+    long = ('European spine journal: official publication of the European spine '
+            'Society, the European spinal deformity Society')
+    assert are_venues_substantially_different(long, 'European spine journal') is False
+
+
+def test_venue_abbreviated_core_with_subtitle():
+    long = 'Eur Spine Journal: Official Publication Eur Spine Soc Eur Spinal Deformity Soc'
+    assert are_venues_substantially_different(long, 'European spine journal') is False
+
+
+def test_venue_first_last_letter_abbrev():
+    # 'Jt'->'Joint', and '&' connector dropped.
+    assert are_venues_substantially_different(
+        'Arch Bone Jt Surg', 'Archives of Bone & Joint Surgery') is False
+
+
+def test_venue_core_match_does_not_overmatch():
+    assert va.venues_core_match('European Spine Journal', 'European Heart Journal') is False
+    assert va.venues_core_match('Arch Bone Jt Surg', 'Archives of Internal Medicine') is False
+
+
 # ── venue: foreign-language abbreviation ───────────────────────────────────
 
 def test_foreign_compound_abbreviation_matches():

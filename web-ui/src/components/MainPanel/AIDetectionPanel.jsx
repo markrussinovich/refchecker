@@ -95,6 +95,15 @@ export default function AIDetectionPanel({ detection }) {
 
       <div className="px-3 pb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
         {isAbstain ? (reason || detection.summary) : detection.summary}
+        {detection.abstain_detail && (
+          <div
+            className="mt-1.5 text-xs font-mono rounded px-2 py-1.5 overflow-x-auto"
+            style={{ color: 'var(--color-text-muted)', backgroundColor: 'var(--color-bg-tertiary)' }}
+            title="Underlying error — useful for troubleshooting"
+          >
+            {detection.abstain_detail}
+          </div>
+        )}
       </div>
 
       {open && spans.length > 0 && (
