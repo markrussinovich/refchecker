@@ -74,7 +74,15 @@ export default function LLMUsageBadge({ checkId, isComplete }) {
     // → 8s so re-verify cost lands on the chip quickly.
     const interval = isComplete ? 8_000 : 1_500
     const id = setInterval(fetchUsage, interval)
-    return () => { cancelled = true; clearInterval(id) }
+    // Refresh IMMEDIATELY when an edit spends tokens (apply-fix / restore /
+    // re-verify) instead of waiting up to 8s for the next poll — that delay is
+    // why the badge "doesn't update" after the user applies a correction.
+    window.addEventListener('refchecker:usage-changed', fetchUsage)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      window.removeEventListener('refchecker:usage-changed', fetchUsage)
+    }
   }, [checkId, isComplete])
 
   const totalTokens = useMemo(() => {

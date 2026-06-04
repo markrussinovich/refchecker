@@ -430,6 +430,8 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       } catch (e) {
         /* re-verify is best-effort; the optimistic update stands */
       }
+      // The re-verify may have spent tokens — refresh the usage badge now.
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
 
@@ -510,6 +512,7 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       }
       await Promise.all([worker(), worker(), worker(), worker()])
       await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
+      try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }
   const resetDecisions = () => {
