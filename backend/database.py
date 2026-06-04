@@ -2094,7 +2094,7 @@ class Database:
         # Seen Refs library doubles as a curation log. The status column
         # records the verdict; the UI can filter by status to hide
         # unverified ones when desired.
-        result = json.dumps(ref, default=str)
+        result_json = json.dumps(ref, default=str)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("PRAGMA busy_timeout=5000")
             await db.execute(
