@@ -154,6 +154,18 @@ def test_venue_core_match_does_not_overmatch():
     assert va.venues_core_match('Arch Bone Jt Surg', 'Archives of Internal Medicine') is False
 
 
+def test_venue_part_designator_preserved():
+    # 'Am J Med Genet A' ↔ 'American Journal of Medical Genetics. Part A' — the
+    # structural 'Part' is dropped but the 'A' designator is preserved.
+    assert are_venues_substantially_different(
+        'Am J Med Genet A', 'American Journal of Medical Genetics. Part A') is False
+    # Part A vs Part B must STILL differ (the letter distinguishes them).
+    assert are_venues_substantially_different(
+        'Am J Med Genet A', 'American Journal of Medical Genetics. Part B') is True
+    assert are_venues_substantially_different(
+        'Am J Med Genet B', 'American Journal of Medical Genetics. Part A') is True
+
+
 # ── venue: foreign-language abbreviation ───────────────────────────────────
 
 def test_foreign_compound_abbreviation_matches():

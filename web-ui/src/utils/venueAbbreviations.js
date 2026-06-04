@@ -126,7 +126,55 @@ const NLM_ABBREV_TO_FULL = {
   'ieee trans parallel distrib syst': 'ieee transactions on parallel and distributed systems',
 }
 
-const STOPWORDS = new Set(['of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with'])
+const STOPWORDS = new Set([
+  'of', 'the', 'and', 'in', 'on', 'for', 'a', 'an', 'to', 'with',
+  // foreign connectives/articles so abbreviations of non-English venues align
+  'fur', 'für', 'und', 'der', 'die', 'das', 'zur', 'zum', 'im',
+  'de', 'del', 'du', 'des', 'da', 'di', 'la', 'le', 'el', 'et',
+])
+
+// Connector tokens dropped before alignment ('Bone & Joint' ≈ 'Bone Joint').
+const VENUE_CONNECTORS = new Set(['&', '+'])
+
+// Structural words an NLM abbreviation omits while keeping the distinguishing
+// letter/number ('Am J Med Genet A' ≈ 'American Journal of Medical Genetics
+// Part A'). Dropping the word — never the trailing 'A' — keeps Part A ≠ Part B.
+const VENUE_STRUCTURAL = new Set([
+  'part', 'pt', 'section', 'sect', 'series', 'ser',
+  'supplement', 'suppl', 'volume', 'vol',
+])
+
+// Does cited token `c` abbreviate full token `f`? Prefix, same-initial
+// subsequence (zbl→zentralblatt), or first+last-letter (jt→joint).
+function _tokenAbbrevMatch(c, f) {
+  c = String(c).toLowerCase(); f = String(f).toLowerCase()
+  if (f.startsWith(c)) return true
+  if (c.length >= 3 && c.length < f.length && c[0] === f[0]) {
+    let i = 0
+    for (const ch of f) { if (i < c.length && ch === c[i]) i += 1 }
+    if (i === c.length) return true
+  }
+  if (c.length === 2 && f.length >= 4 && c[0] === f[0] && c[c.length - 1] === f[f.length - 1]) return true
+  return false
+}
+
+// Tokenise a venue, dropping stopwords/structural words — but never the LAST
+// token (a trailing single-letter part designator collides with the article
+// 'a'; a real title never ends in an article).
+function _filterVenueTokens(raw, dropStopwords) {
+  const toks = String(raw).split(/\s+/).map(t => t.replace(/\.$/, '')).filter(Boolean)
+  const last = toks.length - 1
+  const out = []
+  toks.forEach((t, i) => {
+    const low = t.toLowerCase()
+    if (i !== last) {
+      if (VENUE_STRUCTURAL.has(low)) return
+      if (dropStopwords && STOPWORDS.has(low)) return
+    }
+    out.push(t)
+  })
+  return out
+}
 
 function normalizeVenue(v) {
   if (!v) return ''
@@ -158,7 +206,7 @@ function _tokensPrefixMatch(citedTokens, fullTokens) {
   let fIdx = 0
   for (const c of citedTokens) {
     if (fIdx >= fullTokens.length) return false
-    if (!fullTokens[fIdx].toLowerCase().startsWith(c.toLowerCase())) return false
+    if (!_tokenAbbrevMatch(c, fullTokens[fIdx])) return false
     fIdx += 1
   }
   return true
@@ -184,8 +232,8 @@ function _isPlausibleAcronymOf(acr, fullTokens) {
 }
 
 function looksLikeWordAbbreviation(cited, full) {
-  const citedTokens = cited.split(/\s+/).map(t => t.replace(/\.$/, '')).filter(Boolean)
-  const fullTokens = full.split(/\s+/).filter(t => t && !STOPWORDS.has(t.toLowerCase()))
+  const citedTokens = _filterVenueTokens(cited, false).filter(t => !VENUE_CONNECTORS.has(t))
+  const fullTokens = _filterVenueTokens(full, true).filter(t => !VENUE_CONNECTORS.has(t))
   if (_tokensPrefixMatch(citedTokens, fullTokens)) return true
   // Allow a leading "journal acronym" token in the cited string (e.g.
   // "AJNR" in "AJNR Am J Neuroradiol", "AJR" in "AJR Am J Roentgenol",
@@ -205,6 +253,31 @@ function looksLikeWordAbbreviation(cited, full) {
  * the cited string normalises to a known NLM abbreviation whose full form
  * matches the database venue.
  */
+// Journal core: the part before a ':' subtitle ('… : official publication of
+// …' boilerplate), normalised.
+function _venueCore(v) {
+  if (!v) return ''
+  return normalizeVenue(String(v).split(':')[0])
+}
+
+/**
+ * Style-INDEPENDENT: do two venue strings name the same journal, allowing a
+ * ':' subtitle on either side and NLM word abbreviations? Mirrors the Python
+ * `venues_core_match`. Only ever suppresses false positives.
+ *   'European spine journal: official publication of …' ≈ 'European spine journal'
+ *   'Am J Med Genet A' ≈ 'American Journal of Medical Genetics. Part A'
+ *   'Arch Bone Jt Surg' ≈ 'Archives of Bone & Joint Surgery'
+ */
+export function venuesCoreMatch(v1, v2) {
+  const c1 = _venueCore(v1), c2 = _venueCore(v2)
+  if (!c1 || !c2) return false
+  if (c1 === c2) return true
+  const strip = (s) => s.split(/\s+/).filter(t => !VENUE_CONNECTORS.has(t)).join(' ')
+  const c1s = strip(c1), c2s = strip(c2)
+  if (c1s === c2s) return true
+  return looksLikeWordAbbreviation(c1s, c2s) || looksLikeWordAbbreviation(c2s, c1s)
+}
+
 export function isAcceptableAbbreviation(cited, full, style) {
   if (!cited || !full) return false
   if (!styleAcceptsAbbreviatedVenue(style)) return false
@@ -307,11 +380,16 @@ export function shouldSuppressVenueWarning(warning, style) {
   const cited = warning.cited_value || warning.cited
   const actual = warning.actual_value || warning.actual || warning.ref_venue_correct
   if (cited && actual) {
-    return isAcceptableAbbreviation(cited, actual, style)
+    // Style-independent core match (same journal, ':' subtitle, NLM word
+    // abbreviation) OR the style-gated NLM-abbreviation check.
+    return venuesCoreMatch(cited, actual) || isAcceptableAbbreviation(cited, actual, style)
   }
   // Fallback: try to parse from the details string.
   const details = warning.warning_details || warning.error_details || warning.message
   const parsed = parseVenueWarning(details)
-  if (parsed) return isAcceptableAbbreviation(parsed.cited, parsed.actual, style)
+  if (parsed) {
+    return venuesCoreMatch(parsed.cited, parsed.actual) ||
+      isAcceptableAbbreviation(parsed.cited, parsed.actual, style)
+  }
   return false
 }

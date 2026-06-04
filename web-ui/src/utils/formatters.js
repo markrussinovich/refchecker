@@ -1,7 +1,7 @@
 /**
  * Formatting utilities
  */
-import { shouldSuppressVenueWarning } from './venueAbbreviations'
+import { shouldSuppressVenueWarning, venuesCoreMatch } from './venueAbbreviations'
 
 /**
  * Format a date for display
@@ -332,6 +332,9 @@ const _venueTokens = (s) =>
     .filter(w => w.length >= 2 && !_COSMETIC_STOPWORDS.has(w))
 
 const _venuesEquivalent = (cited, actual) => {
+  // Style-independent core match (':' subtitle, NLM word abbreviations,
+  // Part-A designators, '&' connectors, foreign-language abbreviations).
+  if (venuesCoreMatch(cited, actual)) return true
   const c = _venueTokens(cited)
   const a = _venueTokens(actual)
   if (c.length === 0 || a.length === 0) return false

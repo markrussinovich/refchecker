@@ -291,6 +291,15 @@ def _token_abbrev_match(c_tok: str, f_tok: str) -> bool:
 # alignment so 'Bone & Joint' aligns with 'Bone Joint'.
 _VENUE_CONNECTORS = {'&', '+'}
 
+# Structural words that an NLM abbreviation routinely omits while keeping the
+# distinguishing letter/number, e.g. 'Am J Med Genet A' ↔ 'American Journal of
+# Medical Genetics Part A'. Dropping the word (not the 'A') keeps Part A vs
+# Part B distinct.
+_VENUE_STRUCTURAL = {
+    'part', 'pt', 'section', 'sect', 'series', 'ser',
+    'supplement', 'suppl', 'volume', 'vol',
+}
+
 
 def _venue_core(venue: Optional[str]) -> str:
     """The journal's core name: the part before a ':' subtitle (the
@@ -345,6 +354,27 @@ def _tokens_prefix_match(cited_tokens, full_tokens) -> bool:
     return True
 
 
+def _filter_venue_tokens(raw: str, drop_stopwords: bool):
+    """Tokenise a venue and drop stopwords/structural words for alignment —
+    but NEVER the final token. A journal's trailing single-letter/number part
+    designator ('… Part A', '… Series B') collides with the article stopword
+    'a'; a real title never ends in an article, so keeping the last token
+    preserves the A/B/1/2 distinction that separates Part A from Part B.
+    """
+    toks = [t.rstrip('.') for t in raw.split() if t.rstrip('.')]
+    out = []
+    last = len(toks) - 1
+    for i, t in enumerate(toks):
+        low = t.lower()
+        if i != last:
+            if low in _VENUE_STRUCTURAL:
+                continue
+            if drop_stopwords and low in _STOPWORDS:
+                continue
+        out.append(t)
+    return out
+
+
 def _is_plausible_acronym_of(acr: str, full_tokens) -> bool:
     """Does ``acr`` plausibly derive from the letters of the full title?
 
@@ -380,8 +410,8 @@ def _looks_like_word_abbreviation(cited: str, full: str) -> bool:
     "AJNR Am J Neuroradiol": strip the leading token if it plausibly
     derives from the full title's letters, then retry the prefix match.
     """
-    cited_tokens = [t.rstrip('.') for t in cited.split() if t]
-    full_tokens = [t for t in full.split() if t and t.lower() not in _STOPWORDS]
+    cited_tokens = _filter_venue_tokens(cited, drop_stopwords=False)
+    full_tokens = _filter_venue_tokens(full, drop_stopwords=True)
 
     if _tokens_prefix_match(cited_tokens, full_tokens):
         return True

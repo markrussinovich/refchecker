@@ -254,6 +254,26 @@ def _get_engine():
         return _engine
 
 
+def _load_checkpoint_state_dict(model_dir: str):
+    """Load a checkpoint's tensors directly (safetensors preferred, then .bin).
+
+    Returns a state-dict mapping or None if no weight file is present. Avoids
+    the version-sensitive ``from_pretrained`` path so the desklib model loads
+    consistently across transformers releases.
+    """
+    import os
+    st = os.path.join(model_dir, "model.safetensors")
+    if os.path.isfile(st):
+        from safetensors.torch import load_file
+        return load_file(st)
+    for fname in ("pytorch_model.bin", "model.bin"):
+        binp = os.path.join(model_dir, fname)
+        if os.path.isfile(binp):
+            import torch
+            return torch.load(binp, map_location="cpu")
+    return None
+
+
 class _TorchEngine:
     """transformers + torch runtime for the desklib custom model."""
 
@@ -284,12 +304,40 @@ class _TorchEngine:
                 return self.classifier(pooled)
 
         self._ai_index: Optional[int] = None
-        _info = None
-        try:
-            self.model, _info = _DesklibModel.from_pretrained(model_dir, output_loading_info=True)
-        except Exception:  # noqa: BLE001
-            # Fall back to a standard sequence-classification head if the
-            # installed model isn't the desklib custom architecture.
+        self._std = None
+
+        # Load the desklib checkpoint by building the architecture and loading
+        # the weights DIRECTLY from the checkpoint file — version-robust.
+        #
+        # The HF `from_pretrained` dance fails on some transformers versions and
+        # silently falls back to a sequence-classification head whose
+        # [num_labels, hidden] classifier mismatches the desklib [1, hidden]
+        # head — producing the "You set ignore_mismatched_sizes to False"
+        # RuntimeError users hit. Loading the state dict ourselves and applying
+        # it with strict=False sidesteps that machinery entirely (verified to
+        # produce scores identical to a successful from_pretrained load).
+        config = AutoConfig.from_pretrained(model_dir)
+        state_dict = _load_checkpoint_state_dict(model_dir)
+
+        if state_dict is not None and any(k.startswith("classifier") for k in state_dict):
+            model = _DesklibModel(config)
+            result = model.load_state_dict(state_dict, strict=False)
+            missing = list(getattr(result, "missing_keys", []) or [])
+            missing_clf = [k for k in missing if k.startswith("classifier")]
+            missing_enc = [k for k in missing if k.startswith("model.")]
+            # Refuse to score with a partially-random model (a random classifier
+            # head could band human text high).
+            if missing_clf or missing_enc:
+                raise ValueError(
+                    "desklib weights did not load cleanly (missing classifier="
+                    f"{missing_clf}, missing {len(missing_enc)} encoder tensors); "
+                    "refusing to score with a partially-initialised model."
+                )
+            model.eval()
+            self.model = model
+        else:
+            # Not the desklib checkpoint — try a standard sequence-classification
+            # head (e.g. a user-supplied alternative detector model).
             from transformers import AutoModelForSequenceClassification
             self._std = AutoModelForSequenceClassification.from_pretrained(model_dir)
             self.model = None
@@ -305,19 +353,6 @@ class _TorchEngine:
                         "id2label; refusing to guess. Use a single-logit detector "
                         "or a model with clearly labelled classes."
                     )
-        else:
-            # If the checkpoint didn't actually contain the classifier head,
-            # from_pretrained leaves it at random init and does NOT raise —
-            # scoring would then return sigmoid over garbage. Refuse rather
-            # than fabricate scores (a random head could band human text high).
-            missing = set((_info or {}).get("missing_keys") or [])
-            if any(k.startswith("classifier") for k in missing):
-                raise ValueError(
-                    "desklib classifier head missing from the checkpoint "
-                    "(would score with a random head); refusing to run."
-                )
-            self.model.eval()
-            self._std = None
 
     def score(self, text: str) -> float:
         torch = self.torch
