@@ -383,16 +383,33 @@ def test_model_download_drops_removed_symlinks_kwarg():
     assert "ensure_on_path" in src
 
 
-def test_model_download_subprocess_watchdog_and_xet_off():
-    # The desktop download must run in a clean subprocess (xet truly off, set
-    # before huggingface_hub import) under a stall watchdog that kills+retries.
+def test_model_download_subprocess_and_xet_off():
+    # The desktop download runs in a clean subprocess (xet truly off, set before
+    # huggingface_hub import); the supervisor resumes via re-run rather than
+    # SIGKILLing hf_hub mid-stream (which corrupts resume).
     import inspect
     from refchecker.ai_detection import model_manager as _mm
     assert callable(_mm.run_hf_download_cli)
     cli = inspect.getsource(_mm.run_hf_download_cli)
     assert 'HF_HUB_DISABLE_XET' in cli and 'hf_xet' in cli  # xet disabled + blocked
     sup = inspect.getsource(_mm._download_supervised)
-    assert '--hf-download' in sup and 'STALL' in sup and '.kill()' in sup
+    assert '--hf-download' in sup and 'resuming' in sup
+
+
+def test_model_installed_requires_completion_marker(monkeypatch, tmp_path):
+    # A weight file that merely EXISTS must not count as installed — only after
+    # the verified-complete marker is written (guards against truncated partials).
+    from refchecker.ai_detection import model_manager as _mm
+    monkeypatch.setenv("REFCHECKER_AI_DETECTION_MODEL_DIR", str(tmp_path))
+    d = _mm.model_path()
+    d.mkdir(parents=True)
+    (d / "config.json").write_text("{}")
+    (d / "model.safetensors").write_bytes(b"x" * (60 * 1024 * 1024))  # 60 MB "weight"
+    assert _mm.is_model_installed() is False          # no marker → not installed
+    assert _mm._model_complete(0) is True             # 60 MB passes the no-expected floor
+    assert _mm._model_complete(200 * 1024 * 1024) is False  # but not vs a 200 MB expected
+    _mm._write_ok_marker()
+    assert _mm.is_model_installed() is True            # marker present → installed
 
 
 def test_runtime_finder_default_deny(tmp_path):

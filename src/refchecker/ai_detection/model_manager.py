@@ -79,17 +79,50 @@ def model_path() -> Path:
 
 
 _WEIGHT_FILES = ("model.onnx", "model.safetensors", "pytorch_model.bin")
+#: Written ONLY after a download is verified complete (weight file size matches
+#: the repo's expected size). Required for "installed" so a partial/truncated
+#: download — e.g. a SIGKILLed resume that left a short model.safetensors — is
+#: never accepted (it would fail or score with garbage at inference).
+_OK_MARKER = ".refcheck_model_ok"
 
 
 def is_model_installed() -> bool:
-    # Require an actual weight artifact, not just config.json — snapshot_download
-    # writes the tiny config first, so checking only config.json would report
-    # "installed" mid-download (premature poll-loop exit + a spurious
-    # model_load_failed if a check starts before the weights land).
+    # Require config.json, a real weight artifact, AND the completion marker —
+    # checking only that the weight file *exists* would accept a truncated
+    # download (snapshot_download writes config first; a partial weight file can
+    # linger). The marker is written only after the size is verified complete.
     p = model_path()
     if not (p.is_dir() and (p / "config.json").is_file()):
         return False
-    return any((p / f).is_file() for f in _WEIGHT_FILES)
+    if not any((p / f).is_file() for f in _WEIGHT_FILES):
+        return False
+    return (p / _OK_MARKER).is_file()
+
+
+def _model_complete(expected_weight_bytes: int) -> bool:
+    """True when config + a weight file are present and the (largest) weight
+    file is at least 99% of its expected size — the authoritative completeness
+    check the worker runs before writing the marker."""
+    p = model_path()
+    if not (p.is_dir() and (p / "config.json").is_file()):
+        return False
+    weights = [p / f for f in _WEIGHT_FILES if (p / f).is_file()]
+    if not weights:
+        return False
+    try:
+        biggest = max(w.stat().st_size for w in weights)
+    except OSError:
+        return False
+    if expected_weight_bytes > 0:
+        return biggest >= int(expected_weight_bytes * 0.99)
+    return biggest > 50 * 1024 * 1024  # no expected size known → 50 MB sanity floor
+
+
+def _write_ok_marker() -> None:
+    try:
+        (model_path() / _OK_MARKER).write_text("ok\n")
+    except OSError:
+        pass
 
 
 def _dir_size_bytes(path: Path) -> int:
@@ -156,17 +189,20 @@ def _set_progress(mb: float, total_mb: float) -> None:
             _status["message"] = msg
 
 
-def _fetch_total_mb() -> float:
-    """Total download size for the % display (metadata call, no download)."""
+def _fetch_sizes() -> tuple:
+    """(total_mb, max_weight_bytes) from repo metadata — for the % display and
+    the completeness check. (total_mb, 0) on failure."""
     try:
         from huggingface_hub import HfApi
         info = HfApi().model_info(MODEL_REPO, files_metadata=True)
-        mb = sum((getattr(s, "size", 0) or 0) for s in (info.siblings or [])) / (1024 * 1024)
-        _log_line(f"total size ~{mb:.0f} MB")
-        return mb
+        sizes = [(getattr(s, "size", 0) or 0) for s in (info.siblings or [])]
+        total_mb = sum(sizes) / (1024 * 1024)
+        max_weight = max(sizes) if sizes else 0  # the safetensors/bin is the big one
+        _log_line(f"total size ~{total_mb:.0f} MB (weight ~{max_weight / (1024*1024):.0f} MB)")
+        return total_mb, max_weight
     except Exception as exc:  # noqa: BLE001
         _log_line(f"(could not fetch total size: {exc})")
-        return 0.0
+        return 0.0, 0
 
 
 def run_hf_download_cli(repo: str, dest: str) -> int:
@@ -201,23 +237,18 @@ def run_hf_download_cli(repo: str, dest: str) -> int:
         return 1
 
 
-def _download_supervised(dest: Path, total_mb: float) -> bool:
-    """Frozen desktop: download in a CLEAN subprocess (Xet truly off) under a
-    stall watchdog — kill + retry (resume) when progress flatlines for 120s, and
-    wipe for a fresh restart if two attempts make no headway at all."""
+def _download_supervised(dest: Path, total_mb: float, expected_weight: int) -> bool:
+    """Frozen desktop: download in a CLEAN subprocess (Xet truly off). The key
+    lesson from the field: do NOT SIGKILL hf_hub mid-download — that corrupts its
+    resume state and restarts from ~0. Instead let each subprocess run to its
+    natural exit (hf_hub retries+resumes internally via the read timeout), then
+    re-run to RESUME cleanly from the consistent .incomplete. SIGKILL only as a
+    true-hang last resort (no progress AND no exit for 6 minutes)."""
     import subprocess
     import time
-    prev_start = -1.0
-    stuck_rounds = 0
-    for attempt in range(1, 7):
+    for attempt in range(1, 11):
         start_mb = _safe_mb(dest)
-        stuck_rounds = stuck_rounds + 1 if start_mb <= prev_start + 1 else 0
-        prev_start = start_mb
-        if stuck_rounds >= 2:
-            _log_line("no cross-attempt progress — wiping the partial for a clean restart")
-            _wipe_model_dir(dest)
-            start_mb, prev_start, stuck_rounds = 0.0, -1.0, 0
-        _log_line(f"download attempt {attempt} (clean subprocess, xet off, from {start_mb:.0f} MB)")
+        _log_line(f"download attempt {attempt} (xet off, resuming from {start_mb:.0f} MB)")
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
@@ -230,36 +261,37 @@ def _download_supervised(dest: Path, total_mb: float) -> bool:
         threading.Thread(
             target=lambda: [out.append(ln.rstrip("\n")) for ln in proc.stdout], daemon=True,
         ).start()
-        last_mb, last_advance, stalled, tick = start_mb, time.monotonic(), False, 0
+        last_mb, last_advance, tick = start_mb, time.monotonic(), 0
         while proc.poll() is None:
-            time.sleep(2)
+            time.sleep(3)
             mb = _safe_mb(dest)
             _set_progress(mb, total_mb)
             tick += 1
-            if tick % 8 == 0:  # ~16s
+            if tick % 6 == 0:  # ~18s
                 _log_line(f"progress: {mb:.0f} / {total_mb:.0f} MB" if total_mb else f"progress: {mb:.0f} MB")
             if mb >= last_mb + 1:
                 last_mb, last_advance = mb, time.monotonic()
-            elif time.monotonic() - last_advance > 120:
-                _log_line(f"STALL: stuck at {mb:.0f} MB for 120s — killing and retrying")
-                stalled = True
+            elif time.monotonic() - last_advance > 360:  # 6 min, genuine hang
+                _log_line(f"no progress for 6 min at {mb:.0f} MB — restarting the process (resume)")
                 proc.kill()
                 break
         try:
-            proc.wait(timeout=10)
+            proc.wait(timeout=15)
         except Exception:  # noqa: BLE001
             proc.kill()
-        if is_model_installed():
+        if _model_complete(expected_weight):
             return True
-        if not stalled:
-            _log_line(f"attempt {attempt} exited code={proc.returncode}: {' | '.join(out[-4:])}")
-    return is_model_installed()
+        _log_line(f"attempt {attempt} ended (exit={proc.returncode}); not complete yet — "
+                  f"{' | '.join(out[-3:])}")
+        time.sleep(2)  # brief backoff before resuming
+    return _model_complete(expected_weight)
 
 
-def _download_in_process(dest: Path, total_mb: float) -> bool:
+def _download_in_process(dest: Path, total_mb: float, expected_weight: int) -> bool:
     """Source install: in-process snapshot_download with Xet disabled + a live
     size reporter (no frozen-bundle Xet-stall concerns here)."""
     os.environ["HF_HUB_DISABLE_XET"] = "1"
+    os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "30")
     sys.modules.setdefault("hf_xet", None)
     try:
         from huggingface_hub import snapshot_download
@@ -276,7 +308,7 @@ def _download_in_process(dest: Path, total_mb: float) -> bool:
     threading.Thread(target=_report, daemon=True).start()
     try:
         snapshot_download(repo_id=MODEL_REPO, local_dir=str(dest))
-        return is_model_installed()
+        return _model_complete(expected_weight)
     except Exception:  # noqa: BLE001
         import traceback
         _log_line("ERROR: download failed:\n" + traceback.format_exc())
@@ -285,11 +317,33 @@ def _download_in_process(dest: Path, total_mb: float) -> bool:
         stop.set()
 
 
-def _wipe_model_dir(dest: Path) -> None:
-    try:
-        shutil.rmtree(dest, ignore_errors=True)
-    except OSError:
-        pass
+def _cleanup_hf_cache(dest: Path) -> None:
+    """Remove hf_hub's .cache/.incomplete scratch after a verified download so
+    the model dir holds only the final files (and frees the resume scratch)."""
+    for sub in (".cache", ".huggingface"):
+        try:
+            shutil.rmtree(dest / sub, ignore_errors=True)
+        except OSError:
+            pass
+
+
+def _purge_truncated_finals(expected_weight: int) -> None:
+    """Remove a truncated TOP-LEVEL weight file (e.g. a model.safetensors left
+    half-written by a SIGKILLed copy). hf_hub would otherwise see the final file
+    present and SKIP re-downloading it, so the model could never complete. A
+    COMPLETE file (size >= expected) is kept — snapshot_download then no-ops."""
+    if not expected_weight:
+        return
+    p = model_path()
+    for f in _WEIGHT_FILES:
+        wf = p / f
+        try:
+            if wf.is_file() and wf.stat().st_size < int(expected_weight * 0.99):
+                _log_line(f"removing truncated {f} ({wf.stat().st_size/(1024*1024):.0f} MB "
+                          f"< expected {expected_weight/(1024*1024):.0f} MB) for a clean re-fetch")
+                wf.unlink()
+        except OSError:
+            pass
 
 
 def _download_worker() -> None:
@@ -305,28 +359,32 @@ def _download_worker() -> None:
     dest = model_path()
     existing = _safe_mb(dest)
     if existing > 1:
-        _log_line(f"{existing:.0f} MB already present — will resume")
-    total_mb = _fetch_total_mb()
+        _log_line(f"{existing:.0f} MB already present — will resume / verify")
+    total_mb, expected_weight = _fetch_sizes()
+    _purge_truncated_finals(expected_weight)
     _log_line(f"target={dest}")
     with _lock:
         _status = {"state": "downloading", "repo": MODEL_REPO,
                    "message": f"Downloading {MODEL_REPO}…"}
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        ok = _download_supervised(dest, total_mb) if frozen else _download_in_process(dest, total_mb)
+        ok = (_download_supervised(dest, total_mb, expected_weight) if frozen
+              else _download_in_process(dest, total_mb, expected_weight))
     except Exception:  # noqa: BLE001
         import traceback
         _log_line("ERROR:\n" + traceback.format_exc())
         ok = False
-    if ok and is_model_installed():
+    if ok and _model_complete(expected_weight):
+        _write_ok_marker()
+        _cleanup_hf_cache(dest)
         mb = _safe_mb(dest)
-        _log_line(f"SUCCESS: model installed ({mb:.0f} MB)")
+        _log_line(f"SUCCESS: model installed and verified ({mb:.0f} MB)")
         with _lock:
             _status = {"state": "installed", "repo": MODEL_REPO,
                        "message": f"Model installed ({mb:.0f} MB)."}
         logger.info("AI-detection model installed at %s", dest)
     else:
-        _log_line("ERROR: download did not complete — see the log above.")
+        _log_line("ERROR: download did not complete or is incomplete — see the log above.")
         with _lock:
             _status = {"state": "error", "repo": MODEL_REPO,
                        "message": "Download failed or stalled — see the log below."}
