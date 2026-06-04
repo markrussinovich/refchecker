@@ -440,6 +440,9 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
   // accepting, or the snapshot map was cleared on tab unmount).
   const restoreOriginal = async (ref, i) => {
     const k = keyFor(ref, i)
+    // Roll the optimistic store mutation back NOW so the HealthBadge / list move
+    // immediately for the current check (which renders from useCheckStore).
+    useCheckStore.getState().revertCorrectionInStore?.(String(ref.id ?? ref.index ?? i))
     const snap = originalSnapshots[k]
     if (!snap) {
       // No snapshot — best we can do is drop the local decision so the
@@ -509,7 +512,12 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
     }
   }
-  const resetDecisions = () => setDecisions({})
+  const resetDecisions = () => {
+    // Reset the undo list AND roll back every optimistic correction so the
+    // HealthBadge returns to the pre-apply value.
+    useCheckStore.getState().revertAllCorrections?.()
+    setDecisions({})
+  }
 
   const startEditing = (k, currentText) => {
     setEditingKey(k); setEditBuffer(currentText)
