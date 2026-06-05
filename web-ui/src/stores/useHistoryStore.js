@@ -780,6 +780,24 @@ export const useHistoryStore = create((set, get) => ({
     if (touched) set({ selectedCheck: { ...selectedCheck, results: nextResults } })
   },
 
+  // Optimistically drop a reference from the historical-view results so the
+  // HealthBadge / list move the instant the user clicks Remove (displayRefs
+  // reads selectedCheck.results for non-current checks). reloadCheck() reconciles
+  // with the server afterwards.
+  optimisticRemoveReference: (refId) => {
+    const { selectedCheck } = get()
+    if (!selectedCheck || !Array.isArray(selectedCheck.results)) return
+    const idStr = String(refId)
+    const next = selectedCheck.results.filter((r, i) => !(
+      String(r?.id ?? '') === idStr ||
+      String(r?.index ?? '') === idStr ||
+      String(i) === idStr
+    ))
+    if (next.length !== selectedCheck.results.length) {
+      set({ selectedCheck: { ...selectedCheck, results: next } })
+    }
+  },
+
   updateLabel: async (id, label) => {
     if (id === -1) return // don't persist or label the placeholder
     try {

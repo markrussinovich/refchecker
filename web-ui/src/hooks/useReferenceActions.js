@@ -140,6 +140,9 @@ export default function useReferenceActions() {
       )
     )
     useCheckStore.getState().removeReference(ident)
+    // Also drop it from the historical-view source so the badge/list move
+    // immediately when displayRefs reads selectedCheck.results (not checkStore).
+    useHistoryStore.getState().optimisticRemoveReference?.(ident)
     try {
       await removeReferenceFromCheck(selectedCheckId, ident)
       setRemovedRefs(prev => [snapshot, ...prev].slice(0, 20))

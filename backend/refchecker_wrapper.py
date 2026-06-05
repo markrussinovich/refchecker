@@ -2253,9 +2253,12 @@ class ProgressRefChecker:
             # If references were read from a structured source (Crossref DOI,
             # .bbl/.bib) so paper_text is empty, but the manuscript PDF is still
             # fetchable (e.g. an open-access PDF URL), download + extract the body
-            # now — so BOTH the inline citation contexts below AND the opt-in AI
-            # detector have the article text to work with.
-            if self.ai_detection_enabled and not (paper_text or "").strip():
+            # now — so the inline citation CONTEXTS below get the article text.
+            # NOT gated on AI detection: contexts are a core feature and a
+            # URL/DOI check (references via Crossref) otherwise has no body, so
+            # the "▶ Context" expandable silently disappeared when AI detection
+            # was off. The fetch is cached, so the cost is paid once.
+            if not (paper_text or "").strip():
                 fetched_body = await self._fetch_body_text_for_ai_detection(paper_source)
                 if fetched_body:
                     paper_text = fetched_body

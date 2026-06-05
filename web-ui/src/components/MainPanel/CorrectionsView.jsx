@@ -425,8 +425,13 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
       useHistoryStore.getState().optimisticApplyCorrection?.(refIdStr)
       useCheckStore.getState().applyCorrectionInStore?.(refIdStr)
       try {
+        // Persist the correction server-side, but DO NOT force-reload the check:
+        // selectCheck({force}) replaces selectedCheck and WIPES the
+        // `_pre_correction` snapshots the optimistic update just set, which left
+        // Reset/Restore unable to roll the badge back. The optimistic update is
+        // the displayed source of truth; the authoritative state loads on the
+        // next natural navigation.
         await verifyReferenceInCheck(selectedCheckId, refIdStr, { apply_correction: true })
-        await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
       } catch (e) {
         /* re-verify is best-effort; the optimistic update stands */
       }
@@ -461,8 +466,9 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
     if (!selectedCheckId) return
     const refIdStr = String(ref.id ?? ref.index ?? i)
     try {
+      // Persist the revert server-side; no force-reload (it would wipe the
+      // optimistic snapshots — see applyAndReverify).
       await verifyReferenceInCheck(selectedCheckId, refIdStr, { overrides: snap })
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
     } catch (e) {
       /* best-effort — the local decision flip already happened */
     }
@@ -529,7 +535,9 @@ export default function CorrectionsView({ references, isCheckComplete = false, p
         }
       }
       await Promise.all([worker(), worker(), worker(), worker()])
-      await useHistoryStore.getState().selectCheck?.(selectedCheckId, { force: true })
+      // No force-reload: it would wipe the optimistic `_pre_correction`
+      // snapshots and leave "Reset" unable to roll the badge back. The
+      // optimistic updates already drove the badge to its applied state.
       try { window.dispatchEvent(new Event('refchecker:usage-changed')) } catch { /* no-op */ }
     }
   }

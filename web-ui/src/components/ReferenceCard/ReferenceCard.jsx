@@ -601,9 +601,22 @@ const ReferenceCard = memo(function ReferenceCard({ reference, index, displayInd
             let rendered = ''
             try { rendered = exportReferenceAsStyle(reference, activeFormat, index, effectiveOpts) } catch { return null }
             if (!rendered) return null
+            // In styled mode the structured VenueLine isn't rendered, so surface
+            // the journal/venue details on hover of the preview block (user
+            // request: "journal info on hover").
+            const _v = reference.venue
+            const _full = _v ? (reference.enrichment?.venue || fullNameFor(_v)) : null
+            const _acr = _v ? acronymFor(_full || _v) : null
+            const _vLower = String(_v || '').toLowerCase()
+            const venueTitle = _v ? [
+              `Journal / venue: ${_v}`,
+              ...(_full && String(_full).toLowerCase() !== _vLower ? [`Full name: ${_full}`] : []),
+              ...(_acr && String(_acr).toLowerCase() !== _vLower ? [`NLM abbreviation: ${_acr}`] : []),
+            ].join('\n') : undefined
             return (
               <div
                 className="mt-1 mb-1 px-2 py-1 rounded text-xs"
+                title={venueTitle}
                 style={{
                   background: 'var(--color-bg-tertiary)',
                   border: '1px solid var(--color-border)',
