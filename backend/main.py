@@ -6670,6 +6670,19 @@ async def ai_detection_model_status(current_user: UserInfo = Depends(require_use
     return model_manager.model_status()
 
 
+@app.get("/api/ai-detection/model/update-check")
+async def ai_detection_model_update_check(current_user: UserInfo = Depends(require_user)):
+    """Is a newer revision of the local model available on Hugging Face?
+
+    Deliberately a SEPARATE endpoint from /status (which the UI polls during
+    downloads) — this makes a network round-trip to HF, run off the hot path and
+    only when the Settings panel asks. Degrades to update_available=false on any
+    failure. The HF call can take a couple of seconds, so run it off-thread.
+    """
+    from refchecker.ai_detection import model_manager
+    return await asyncio.to_thread(model_manager.query_update_available)
+
+
 @app.post("/api/ai-detection/model/download")
 async def ai_detection_model_download(current_user: UserInfo = Depends(require_user)):
     """Start (or report) the background download of the local model.

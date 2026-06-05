@@ -499,6 +499,35 @@ def _is_table_noise(text):
     return False
 
 
+def _extract_clause_containing_marker(sentence, marker):
+    """For bracket-style citations, return the CLAUSE that actually contains the
+    marker rather than the whole (possibly sentence-tokeniser-merged) string —
+    so a context like 'X was done [15]. Table 2 Baseline …' yields just
+    'X was done [15]'. Falls back to the full sentence whenever it can't
+    confidently isolate a clause (so it never DROPS or over-trims a context).
+    """
+    if not sentence or not marker:
+        return sentence
+    idx = sentence.find(marker)
+    if idx < 0:
+        return sentence
+    # Clause start: just after the last sentence terminator before the marker.
+    start = 0
+    for m in re.finditer(r"(?<=[.!?])\s+", sentence[:idx]):
+        start = m.end()
+    # Clause end: the first terminator at/after the marker.
+    end = len(sentence)
+    tail = re.search(r"[.!?](?:\s|$)", sentence[idx + len(marker):])
+    if tail:
+        end = idx + len(marker) + tail.end()
+    clause = sentence[start:end].strip()
+    # Conservative guard: keep the full sentence if the clause is suspiciously
+    # short or somehow lost the marker.
+    if len(clause) < 30 or marker not in clause:
+        return sentence
+    return clause
+
+
 def _attach_citation_contexts(references, paper_text):
     """Find the sentences in the paper where each reference is cited.
 
@@ -689,8 +718,17 @@ def _attach_citation_contexts(references, paper_text):
             # Trim the sentence aggressively but keep enough on either
             # side of the marker that the citation reads naturally.
             sent_clean = re.sub(r"\s+", " ", stripped)[:420]
-            before = (sentences[i - 1].strip()[:160] + " ") if i > 0 else ""
-            after = (" " + sentences[i + 1].strip()[:160]) if i + 1 < len(sentences) else ""
+            # Bracket papers: isolate the clause that actually holds the marker
+            # so a context can't bleed into a following table/figure caption.
+            if _style == "bracket":
+                sent_clean = _extract_clause_containing_marker(sent_clean, marker_text)[:420]
+            # Neighbour context: drop a before/after snippet when it's page-header
+            # or table/figure noise (never the matched sentence) — worst case a
+            # slightly shorter context, never a dropped citation.
+            _prev = sentences[i - 1].strip() if i > 0 else ""
+            _next = sentences[i + 1].strip() if i + 1 < len(sentences) else ""
+            before = (_prev[:160] + " ") if (_prev and not _is_header_noise(_prev) and not _is_table_noise(_prev)) else ""
+            after = (" " + _next[:160]) if (_next and not _is_header_noise(_next) and not _is_table_noise(_next)) else ""
             for n in expanded:
                 lst = by_index.setdefault(n, [])
                 if len(lst) >= 3:

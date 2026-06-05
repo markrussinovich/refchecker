@@ -44,6 +44,7 @@ export default function SettingsPanel({ theme, onThemeChange }) {
   const aiDetection = useAiDetectionStore()
   const [aiDetKey, setAiDetKey] = useState('')
   const [aiDebugOpen, setAiDebugOpen] = useState(false)
+  const [modelUpdate, setModelUpdate] = useState(null)  // { update_available, ... }
   useEffect(() => {
     if (isSettingsOpen && activeSection === 'AI Detection') {
       aiDetection.fetchModelStatus()
@@ -51,6 +52,16 @@ export default function SettingsPanel({ theme, onThemeChange }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSettingsOpen, activeSection])
+  // Off the status-poll hot path: when the section opens and the model IS
+  // installed, ask HF (once) whether a newer revision exists.
+  useEffect(() => {
+    if (isSettingsOpen && activeSection === 'AI Detection' && aiDetection.modelStatus?.installed) {
+      api.checkAIDetectionModelUpdate()
+        .then((r) => setModelUpdate(r?.data || null))
+        .catch(() => setModelUpdate(null))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSettingsOpen, activeSection, aiDetection.modelStatus?.installed])
   
   // Semantic Scholar API key state
   const [ssIsEditing, setSsIsEditing] = useState(false)
@@ -628,6 +639,29 @@ export default function SettingsPanel({ theme, onThemeChange }) {
                 )}
               </div>
             </div>
+            {ms && ms.installed && modelUpdate?.update_available && !aiDetection.modelBusy && (
+              <div className="mt-2 flex items-center justify-between flex-wrap gap-2 rounded-lg p-2"
+                style={{ backgroundColor: 'var(--color-accent-bg, rgba(59,130,246,0.1))', border: '1px solid var(--color-accent, #3b82f6)' }}>
+                <div className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
+                  A newer version of the detection model is available.
+                </div>
+                <button
+                  type="button"
+                  disabled={aiDetection.modelBusy}
+                  onClick={async () => {
+                    try {
+                      await aiDetection.deleteModel()
+                      await aiDetection.downloadModel()
+                      setModelUpdate(null)
+                    } catch (e) { /* surfaced via aiDetection.modelError */ }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium"
+                  style={{ backgroundColor: accent, color: 'white' }}
+                >
+                  Update model
+                </button>
+              </div>
+            )}
             {(aiDetection.modelBusy || (ms && ms.state === 'downloading')) && (
               <div className="mt-2">
                 <div style={{ height: 6, borderRadius: 4, background: 'var(--color-border)', overflow: 'hidden' }}>

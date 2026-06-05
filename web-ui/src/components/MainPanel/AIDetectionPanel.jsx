@@ -44,6 +44,7 @@ const ABSTAIN_REASONS = {
 export default function AIDetectionPanel({ detection, checkId }) {
   const [open, setOpen] = useState(false)
   const [viewerOpen, setViewerOpen] = useState(false)
+  const [focusIdx, setFocusIdx] = useState(null)
   if (!detection) return null
 
   const band = detection.band || 'unavailable'
@@ -108,7 +109,12 @@ export default function AIDetectionPanel({ detection, checkId }) {
         )}
       </div>
       {viewerOpen && (
-        <DocumentViewer checkId={checkId} spans={spans} onClose={() => setViewerOpen(false)} />
+        <DocumentViewer
+          checkId={checkId}
+          spans={spans}
+          focusSpanIndex={focusIdx}
+          onClose={() => { setViewerOpen(false); setFocusIdx(null) }}
+        />
       )}
 
       <div className="px-3 pb-2 text-sm" style={{ color: 'var(--color-text-secondary)' }}>
@@ -126,23 +132,49 @@ export default function AIDetectionPanel({ detection, checkId }) {
 
       {open && spans.length > 0 && (
         <div id="ai-detection-spans" className="px-3 pb-2 space-y-2">
-          {spans.map((sp, i) => (
-            <div
-              key={i}
-              className="text-sm rounded px-2 py-1.5 border-l-2"
-              style={{
-                borderColor: style.dot,
-                backgroundColor: 'var(--color-bg-tertiary)',
-              }}
-            >
-              <div style={{ color: 'var(--color-text-primary)' }}>“{sp.quote}”</div>
-              {sp.reason && (
-                <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-                  {sp.reason}
+          {spans.map((sp, i) => {
+            const pct = typeof sp.model_score === 'number' ? Math.round(sp.model_score * 100) : null
+            const clickable = checkId != null
+            return (
+              <div
+                key={i}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onClick={clickable ? () => { setFocusIdx(i); setViewerOpen(true) } : undefined}
+                onKeyDown={clickable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setFocusIdx(i); setViewerOpen(true) } } : undefined}
+                title={clickable ? 'Show this passage in the document' : undefined}
+                className="text-sm rounded px-2 py-1.5 border-l-2"
+                style={{
+                  borderColor: style.dot,
+                  backgroundColor: 'var(--color-bg-tertiary)',
+                  cursor: clickable ? 'pointer' : undefined,
+                }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div style={{ color: 'var(--color-text-primary)' }}>“{sp.quote}”</div>
+                  {pct != null && (
+                    <span
+                      className="text-xs font-semibold flex-shrink-0 px-1.5 rounded"
+                      style={{ color: style.fg, backgroundColor: style.bg }}
+                      title="This passage's own model score — not a probability that a human wrote it"
+                    >
+                      {pct}
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
+                {sp.reason && (
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+                    {sp.reason}
+                  </div>
+                )}
+                {clickable && (
+                  <div className="text-xs mt-1 underline" style={{ color: 'var(--color-accent)' }}>
+                    View in document →
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
 

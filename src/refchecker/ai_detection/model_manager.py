@@ -125,6 +125,76 @@ def _write_ok_marker() -> None:
         pass
 
 
+_MODEL_INFO_FILE = ".refcheck_model_info.json"
+
+
+def _resolve_latest_revision():
+    """Best-effort: the current HEAD commit sha of the model repo on Hugging
+    Face. Returns None on any failure (offline, rate-limited, hf_hub missing)."""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(MODEL_REPO)
+        return getattr(info, "sha", None) or getattr(info, "lastModified", None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _write_model_info() -> None:
+    """Record the resolved HF revision + timestamp at download time so a later,
+    explicitly-invoked check can tell whether the repo has since updated. Never
+    fatal — a missing info file just means the next check reports 'unknown'."""
+    try:
+        import json
+        from datetime import datetime, timezone
+        info = {
+            "repo": MODEL_REPO,
+            "resolved_revision": _resolve_latest_revision(),
+            "download_timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        (model_path() / _MODEL_INFO_FILE).write_text(json.dumps(info))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def query_update_available() -> Dict[str, object]:
+    """Is a newer revision of the model available on Hugging Face?
+
+    EXPLICITLY invoked (e.g. when the Settings panel opens) — NEVER call this
+    from model_status(), which the UI polls every 1-2s during downloads; the HF
+    round-trip must not sit on that hot path. Network failures degrade to
+    'unable_to_check' so the caller never breaks.
+    """
+    if not is_model_installed():
+        return {"update_available": False, "status": "not_installed"}
+    try:
+        import json
+        info_path = model_path() / _MODEL_INFO_FILE
+        stored = None
+        if info_path.is_file():
+            try:
+                stored = (json.loads(info_path.read_text()) or {}).get("resolved_revision")
+            except Exception:  # noqa: BLE001
+                stored = None
+        latest = _resolve_latest_revision()
+        if latest is None:
+            return {"update_available": False, "status": "unable_to_check", "repo": MODEL_REPO}
+        if stored is None:
+            # Installed before update-tracking existed — record current as
+            # baseline so we don't nag, and report no update this time.
+            _write_model_info()
+            return {"update_available": False, "status": "baseline_recorded",
+                    "latest_revision": str(latest), "repo": MODEL_REPO}
+        return {
+            "update_available": str(stored) != str(latest),
+            "status": "checked",
+            "current_revision": str(stored),
+            "latest_revision": str(latest),
+            "repo": MODEL_REPO,
+        }
+    except Exception:  # noqa: BLE001
+        return {"update_available": False, "status": "unable_to_check", "repo": MODEL_REPO}
+
+
 def _dir_size_bytes(path: Path) -> int:
     total = 0
     for f in path.rglob("*"):
@@ -376,6 +446,7 @@ def _download_worker() -> None:
         ok = False
     if ok and _model_complete(expected_weight):
         _write_ok_marker()
+        _write_model_info()  # record the resolved HF revision for update checks
         _cleanup_hf_cache(dest)
         mb = _safe_mb(dest)
         _log_line(f"SUCCESS: model installed and verified ({mb:.0f} MB)")

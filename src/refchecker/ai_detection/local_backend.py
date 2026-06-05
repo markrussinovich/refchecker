@@ -178,16 +178,23 @@ def _agreeing_spans(windows: List[str], probs: List[float],
     for i, p in enumerate(probs):
         if p < HIGH_THRESHOLD:
             continue
-        neighbour_high = (
-            (i > 0 and probs[i - 1] >= HIGH_THRESHOLD and orig_idx[i] - orig_idx[i - 1] == 1)
-            or (i < n - 1 and probs[i + 1] >= HIGH_THRESHOLD and orig_idx[i + 1] - orig_idx[i] == 1)
-        )
-        if not neighbour_high:
+        left_high = (i > 0 and probs[i - 1] >= HIGH_THRESHOLD and orig_idx[i] - orig_idx[i - 1] == 1)
+        right_high = (i < n - 1 and probs[i + 1] >= HIGH_THRESHOLD and orig_idx[i + 1] - orig_idx[i] == 1)
+        if not (left_high or right_high):
             continue
+        agree = int(bool(left_high)) + int(bool(right_high))
+        score = round(float(p), 3)
         spans.append(SuspectSpan(
             quote=truncate_quote(windows[i]),
-            reason="This passage scored above the high-likelihood threshold.",
+            reason=(
+                f"Model score {score:.2f} for this window, corroborated by "
+                f"{agree} adjacent passage{'s' if agree != 1 else ''} above the "
+                "high-likelihood threshold."
+            ),
             confidence="medium",
+            model_score=score,
+            neighbour_agreement_count=agree,
+            confidence_method="multi_window_agreement",
         ))
         if len(spans) >= 6:
             break

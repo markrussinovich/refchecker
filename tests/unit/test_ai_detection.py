@@ -83,6 +83,23 @@ def test_windows_clear_reliability_floor():
     assert all(base.count_words(w) >= base.MIN_WORDS for w in windows)
 
 
+def test_suspect_span_carries_model_score():
+    # Spans must surface the per-window model score + neighbour agreement so the
+    # UI can show "model score 0.97" per passage (additive, never a guilt prob).
+    from refchecker.ai_detection.local_backend import _agreeing_spans
+    probs = [0.97, 0.99, 0.95]
+    windows = ['window one ' * 40, 'window two ' * 40, 'window three ' * 40]
+    spans = _agreeing_spans(windows, probs, [0, 1, 2])
+    assert spans, 'three adjacent high windows should yield corroborated spans'
+    d = spans[1].to_dict()
+    assert d['model_score'] == 0.99
+    assert d['neighbour_agreement_count'] == 2   # both neighbours agree
+    assert d['confidence_method'] == 'multi_window_agreement'
+    assert '0.99' in d['reason']
+    # Back-compat: the dict always carries the keys (None when not set).
+    assert 'model_score' in base.SuspectSpan(quote='x').to_dict()
+
+
 def test_combine_bands_is_conservative():
     # AND-logic: any disagreement demotes; high only when all agree.
     assert base.combine_bands_and(["high", "medium"]) == "medium"

@@ -118,6 +118,8 @@ export const cancelDatabaseDownload = (database) => api.post('/databases/downloa
 
 // AI-generated-text detection: local model management
 export const getAIDetectionModelStatus = () => api.get('/ai-detection/model/status')
+// Explicit (off the status-poll hot path) check for a newer model revision on HF.
+export const checkAIDetectionModelUpdate = () => api.get('/ai-detection/model/update-check', { timeout: 20000 })
 export const downloadAIDetectionModel = () => api.post('/ai-detection/model/download')
 export const deleteAIDetectionModel = () => api.delete('/ai-detection/model')
 export const getAIDetectionRuntimeStatus = () => api.get('/ai-detection/runtime/status')

@@ -88,9 +88,25 @@ class SuspectSpan:
     quote: str
     reason: str = ""
     confidence: str = "medium"
+    # The richest signal the desklib detector exposes: this window's own model
+    # score (sigmoid prob in [0,1]). NOT a probability of guilt — surfaced only
+    # so the user can see WHICH passages drove the band and by how much.
+    model_score: Optional[float] = None
+    # How many physically-adjacent overlapping windows also cleared the high
+    # threshold (0, 1, or 2) — corroboration strength behind this passage.
+    neighbour_agreement_count: Optional[int] = None
+    # How the passage was validated ("multi_window_agreement").
+    confidence_method: Optional[str] = None
 
     def to_dict(self) -> Dict:
-        return {"quote": self.quote, "reason": self.reason, "confidence": self.confidence}
+        return {
+            "quote": self.quote,
+            "reason": self.reason,
+            "confidence": self.confidence,
+            "model_score": self.model_score,
+            "neighbour_agreement_count": self.neighbour_agreement_count,
+            "confidence_method": self.confidence_method,
+        }
 
 
 @dataclass
