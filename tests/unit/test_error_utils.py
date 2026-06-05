@@ -65,6 +65,23 @@ class TestYearWarning:
         assert warning['warning_details'] == format_year_mismatch(2020, 2021)
         assert warning['ref_year_correct'] == 2021
 
+    def test_validate_year_doi_corroboration_suppresses_false_mismatch(self):
+        """When the reference's own DOI embeds the cited year, a differing DB
+        year is the outlier (bad S2/OpenAlex metadata) — no warning."""
+        from refchecker.utils.error_utils import validate_year
+        # cited 2014, DB says 2007, DOI '10.1016/j.ijsu.2014.07.014' embeds 2014.
+        assert validate_year(2014, 2007,
+                             context={'cited_doi': '10.1016/j.ijsu.2014.07.014'}) is None
+
+    def test_validate_year_real_mismatch_still_flagged(self):
+        from refchecker.utils.error_utils import validate_year
+        # DOI does NOT corroborate the cited year -> real mismatch stays.
+        assert validate_year(2014, 2007,
+                             context={'cited_doi': '10.1016/j.ijsu.2099.07.014'}) is not None
+        assert validate_year(2014, 2007, context={}) is not None
+        # within tolerance -> never a warning
+        assert validate_year(2014, 2015) is None
+
 
 @pytest.mark.skipif(not ERROR_UTILS_AVAILABLE, reason="Error utils module not available")
 class TestDoiError:

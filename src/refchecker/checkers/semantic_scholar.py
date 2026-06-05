@@ -1034,7 +1034,8 @@ class NonArxivReferenceChecker:
             cited_year=year,
             paper_year=paper_year,
             use_flexible_validation=True,
-            context={'arxiv_match': arxiv_id_match}
+            context={'arxiv_match': arxiv_id_match,
+                     'cited_doi': reference.get('doi') or reference.get('DOI')}
         )
         if year_warning:
             errors.append(year_warning)

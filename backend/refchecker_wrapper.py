@@ -432,6 +432,73 @@ def _diff_cited_vs_truth(reference, truth):
     return errors, warnings
 
 
+def _detect_citation_style(text, num_refs=0):
+    """Identify the article's DOMINANT inline-citation marker form so the
+    context scanner matches ONLY that form.
+
+    Mixing forms is what let table / statistics numbers masquerade as citations:
+    a bracket-style paper is full of '(1–2)', '(3–4)', '(50–99)', 'n (%)' in its
+    tables and confidence intervals, and the generic '(N)' branch spliced those
+    table rows into the citation context. Brackets and superscripts are
+    UNAMBIGUOUS citation markers; bare parens are stat-ambiguous, so they are
+    only chosen when no bracket/superscript markers exist (true AMA style).
+
+    Returns 'bracket' | 'superscript' | 'paren' | None.
+    """
+    import re as _re
+    cap = num_refs if (num_refs and num_refs > 0) else 999
+
+    def _plausible(markers):
+        n = 0
+        for mtxt in markers:
+            digits = [int(d) for d in _re.findall(r"\d{1,3}", mtxt)]
+            if digits and all(1 <= d <= cap for d in digits):
+                n += 1
+        return n
+
+    brackets = _plausible(_re.findall(r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]", text))
+    supers = len(_re.findall(r"(?<=\w)[⁰-⁹¹²³]+", text))
+    parens = _plausible(_re.findall(r"(?<=\s)\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)", text))
+
+    # Priority order: prefer the unambiguous forms. Brackets/superscripts win
+    # even when parens-noise is higher (tables inflate the parens count).
+    if brackets >= 3:
+        return "bracket"
+    if supers >= 3:
+        return "superscript"
+    if parens >= 5:          # higher bar — parens are stat-ambiguous
+        return "paren"
+    if brackets >= 1:
+        return "bracket"
+    if supers >= 1:
+        return "superscript"
+    return None
+
+
+_TABLE_NOISE_RE = re.compile(r"(?i)\b(?:table|fig(?:ure)?|appendix|supplementary)\s*\d")
+
+
+def _is_table_noise(text):
+    """True when a candidate context sentence is really a table / figure row,
+    not prose — so we don't show table data ('Age, years, median [Q1, Q3] 75
+    [69, 82] (50–99) … Female 1,125 (64.9)') as a citation context.
+    """
+    if not text or len(text) < 40:
+        return False
+    digits = len(re.findall(r"\d", text))
+    # A 'Table N'/'Fig N' caption with many numbers is a table block.
+    if _TABLE_NOISE_RE.search(text) and digits > 12:
+        return True
+    letters = len(re.findall(r"[A-Za-z]", text))
+    if letters and digits / float(digits + letters) > 0.32:
+        return True
+    # Dense run of "n (%)" / "[lo, hi]" statistical cells.
+    stat_cells = len(re.findall(r"\d+\s*\(\s*\d", text)) + len(re.findall(r"\[\s*\d+\s*[,–-]", text))
+    if stat_cells >= 3:
+        return True
+    return False
+
+
 def _attach_citation_contexts(references, paper_text):
     """Find the sentences in the paper where each reference is cited.
 
@@ -525,20 +592,28 @@ def _attach_citation_contexts(references, paper_text):
             existing_idx = 0
         if existing_idx <= 0:
             ref["index"] = i + 1
-    global _NUMERIC_MARKER_RE
-    if _NUMERIC_MARKER_RE is None:
-        # Match three citation-marker shapes:
-        #   1. Square brackets:  [12]  [12, 14]  [12-15]  [12–15]
-        #   2. Parentheses:      (12)  (12, 14)  (12–15)        — Vancouver/AMA
-        #   3. Superscripts:     ¹²³   ¹·²   ¹⁻³                — medical journals
-        # Each form supports comma- and dash-separated ranges. group(0)
-        # is the whole marker so we can highlight it; inner findall pulls
-        # the ASCII numbers out (superscripts are translated below).
-        _NUMERIC_MARKER_RE = re.compile(
-            r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
-            r"|\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
-            r"|[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
-        )
+    # Build the numeric-marker regex from the article's DETECTED citation style
+    # so we match ONLY that form. A bracket-style paper's tables/CIs are full of
+    # '(1–2)', '(3–4)', '(50–99)' that the generic '(N)' branch used to match —
+    # splicing table rows into the citation context. Matching just '[N]' for a
+    # bracket paper (or just superscripts / just parens for those styles)
+    # eliminates that whole class of false context.
+    _num_refs = len(references)
+    _style = _detect_citation_style(paper_text, _num_refs)
+    _BRACKET_PAT = r"\[\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\]"
+    _PAREN_PAT = r"\(\s*\d{1,3}(?:\s*[\-–,;]\s*\d{1,3})*\s*\)"
+    _SUPER_PAT = r"[⁰-⁹¹²³]+(?:[·,‐-—][⁰-⁹¹²³]+)*"
+    if _style == "superscript":
+        _marker_pat = _SUPER_PAT
+    elif _style == "paren":
+        _marker_pat = _PAREN_PAT
+    elif _style == "bracket":
+        _marker_pat = _BRACKET_PAT
+    else:
+        # Unknown / author-year dominant: brackets + superscripts only, never the
+        # ambiguous bare-parens form, so table stats can't fabricate citations.
+        _marker_pat = _BRACKET_PAT + "|" + _SUPER_PAT
+    _numeric_marker_re = re.compile(_marker_pat)
 
     sentences = _sentence_tokenize(paper_text)
 
@@ -555,7 +630,10 @@ def _attach_citation_contexts(references, paper_text):
         # v0.7.67 (Issue 5): skip page-header / running-foot lines
         if _is_header_noise(stripped):
             continue
-        for m in _NUMERIC_MARKER_RE.finditer(stripped):
+        # Skip table / figure rows so their data cells aren't shown as context.
+        if _is_table_noise(stripped):
+            continue
+        for m in _numeric_marker_re.finditer(stripped):
             marker_text = m.group(0)
             # v0.7.66 (Issue A2): if this is the `(N)` parens form, reject
             # contexts that look like volume(issue) notation. Diagnostic
@@ -601,6 +679,13 @@ def _attach_citation_contexts(references, paper_text):
                     expanded.update(range(lo, hi + 1))
             for n in nums_in_marker:
                 expanded.add(n)
+            # A real citation can only point at a reference we actually have:
+            # bound the marker numbers by the reference count so a table cell
+            # like '[69, 82]' (range/CI) or '(50–99)' can't attach to a ref.
+            if _num_refs > 0:
+                expanded = {n for n in expanded if 1 <= n <= _num_refs}
+            if not expanded:
+                continue
             # Trim the sentence aggressively but keep enough on either
             # side of the marker that the citation reads naturally.
             sent_clean = re.sub(r"\s+", " ", stripped)[:420]
