@@ -144,7 +144,10 @@ export default function BatchSummaryView() {
   // they realise they grabbed the wrong folder.
   const handleCancelAndDelete = async () => {
     if (!batchId || isCancelling) return
-    if (!window.confirm(`Cancel ${agg.inProgress} in-progress AND delete all ${agg.total} papers in this batch? This can't be undone.`)) return
+    const confirmMsg = agg.inProgress > 0
+      ? `Cancel ${agg.inProgress} in-progress AND delete all ${agg.total} papers in this batch? This can't be undone.`
+      : `Delete all ${agg.total} papers in this batch? This can't be undone.`
+    if (!window.confirm(confirmMsg)) return
     setIsCancelling(true)
     try {
       if (agg.inProgress > 0) {
@@ -174,6 +177,7 @@ export default function BatchSummaryView() {
       if (filter === 'warning') return (c.warnings_count || 0) > 0
       if (filter === 'unverified') return (c.unverified_count || 0) > 0
       if (filter === 'hallucinated') return (c.hallucination_count || 0) > 0
+      if (filter === 'ai_flagged') return c.ai_detection_band === 'high' || c.ai_detection_band === 'medium'
       return true
     })
   }, [checks, filter])
@@ -254,9 +258,11 @@ export default function BatchSummaryView() {
               opacity: isCancelling ? 0.5 : 1,
             }}
             type="button"
-            title="Cancel any in-progress AND delete every paper in this batch from history."
+            title={agg.inProgress > 0
+              ? 'Cancel any in-progress AND delete every paper in this batch from history.'
+              : 'Delete every paper in this batch from history.'}
           >
-            {isCancelling ? '…' : 'Cancel & delete all'}
+            {isCancelling ? '…' : (agg.inProgress > 0 ? 'Cancel & delete all' : 'Delete all')}
           </button>
         </div>
 
@@ -308,7 +314,9 @@ export default function BatchSummaryView() {
               label="AI-flagged"
               value={agg.aiHigh + agg.aiMedium}
               color="#ef4444"
-              title="Papers whose body text scored medium/high AI-likelihood (advisory only — not proof of AI authorship)"
+              active={filter === 'ai_flagged'}
+              onClick={() => setFilter(f => f === 'ai_flagged' ? 'all' : 'ai_flagged')}
+              title="Click to filter to papers whose body text scored medium/high AI-likelihood (advisory only — not proof of AI authorship)"
             />
           )}
         </div>

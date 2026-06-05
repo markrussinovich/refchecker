@@ -338,9 +338,69 @@ class DetectionBackend(ABC):
         """
 
 
+# ── Body-text cleanup (feed the detector authored prose, not boilerplate) ──
+
+# Start of the reference list / bibliography — everything after is citations.
+_REFS_HEADER_RE = re.compile(
+    r"(?im)^[^\S\n]*(?:references|bibliography|works\s+cited|literature\s+cited|"
+    r"reference\s+list)[^\S\n]*$"
+)
+
+# Journal front-matter / boilerplate the detector must NOT score: open-access /
+# Creative-Commons license blurbs, copyright lines, correspondence, affiliations,
+# DOIs, emails, received/accepted dates, keyword lines. These are templated and
+# score as "AI-like" but are not authored manuscript prose.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"(?im)^(?:"
+    r".*(?:creative\s+commons|open\s+access|this\s+article\s+is\s+licensed|"
+    r"licensed\s+under|creativecommons\.org|all\s+rights\s+reserved|"
+    r"the\s+author\(s\)\s*\d{4}|©|correspondence|full\s+list\s+of\s+author|"
+    r"received\s*:.*accepted|https?://doi\.org|doi\.org/10\.|keywords).*"
+    r"|.*[\w.+-]+@[\w-]+\.[\w.-]+.*"
+    r")$"
+)
+
+
+def strip_nonbody(text: str) -> str:
+    """Remove journal boilerplate so the AI-detector scores authored prose, not
+    templated front-matter / references.
+
+    Drops, in order: the reference list, the title/author/affiliation/license
+    front-matter (by starting at the Abstract or Introduction), then residual
+    license / copyright / correspondence / email / DOI / keyword lines. Every
+    step is conservative — it only applies when >= MIN_WORDS of body survives,
+    so a short or unusually-formatted paper is never gutted.
+    """
+    if not text:
+        return text or ""
+    t = text
+
+    # 1) Cut the reference list tail.
+    m = None
+    for m in _REFS_HEADER_RE.finditer(t):
+        pass  # keep the LAST heading match (avoids "references" inside the intro)
+    if m and count_words(t[: m.start()]) >= MIN_WORDS:
+        t = t[: m.start()]
+
+    # 2) Start at the Abstract / Introduction to drop the leading front matter
+    #    (title, authors, affiliations, open-access license, correspondence).
+    for kw in (r"\bAbstract\b", r"\bIntroduction\b"):
+        am = re.search(kw, t, re.IGNORECASE)
+        if am and am.start() < len(t) * 0.4 and count_words(t[am.start():]) >= MIN_WORDS:
+            t = t[am.start():]
+            break
+
+    # 3) Scrub residual boilerplate lines wherever they sit in the body.
+    scrubbed = _BOILERPLATE_LINE_RE.sub("", t)
+    if count_words(scrubbed) >= MIN_WORDS:
+        t = scrubbed
+
+    return re.sub(r"[^\S\n]{2,}", " ", re.sub(r"\n{2,}", "\n", t)).strip()
+
+
 def prepared_text(text: str) -> Tuple[str, int]:
-    """Normalize whitespace and return ``(clean_text, word_count)``."""
-    clean = (text or "").strip()
+    """Clean boilerplate, normalize whitespace, return ``(clean_text, word_count)``."""
+    clean = strip_nonbody((text or "").strip())
     return clean, count_words(clean)
 
 

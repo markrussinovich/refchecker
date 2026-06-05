@@ -140,9 +140,12 @@ class LocalDetectorBackend(DetectionBackend):
         # (capped) band is confusing dissonance. Mirrors the LLM backend.
         surfaced_score = None if band_rank(band) < band_rank(raw_band) else doc_score
 
-        # Local inference is free: record the processed word count for the
-        # usage meter (tokens proxy) with $0 cost.
-        record_detection_usage(self.check_id, self.model_version, input_tokens=wc, cost_usd=0.0)
+        # Local inference is free and is NOT an LLM call. Do not record the
+        # processed word count as input_tokens — doing so inflated the usage
+        # meter (e.g. "13k tokens · 2 LLM calls · $0.0000"), which read as paid
+        # API usage that should match a provider console but never would. The
+        # AI-detection result panel already surfaces that the local model ran;
+        # the cost/token meter is for PAID LLM work only.
 
         spans = _agreeing_spans(windows, probs, orig_idx) if band_rank(band) >= band_rank(BAND_MEDIUM) else []
 

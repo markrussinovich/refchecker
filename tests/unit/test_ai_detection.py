@@ -27,6 +27,39 @@ def test_abstain_too_short():
     assert base.should_abstain("only a few words here") == "too_short"
 
 
+def test_strip_nonbody_removes_journal_boilerplate():
+    body = ("This systematic review examined the prevalence of hip and knee "
+            "osteoarthritis across European populations using pooled random "
+            "effects meta analysis of observational studies. ") * 40
+    text = (
+        "RESEARCH Open Access © The Author(s) 2026. This article is licensed "
+        "under a Creative Commons Attribution-NonCommercial license.\n"
+        "https://creativecommons.org/licenses/by-nc-nd/4.0/. "
+        "https://doi.org/10.1186/s12891-026-09493-7\n"
+        "*Correspondence: Ioannis Christofides i.christofides@umcg.nl Full list "
+        "of author information is available at the end of the article\n"
+        "Abstract\nIntroduction Osteoarthritis is a leading cause of disability. "
+        + body +
+        "\nKeywords Osteoarthritis, Hip, Knee, Prevalence, Europe\n"
+        "References\n1. Smith J. Prevalence of OA. J Bone Joint Surg. 2020;12:33.\n"
+    )
+    cleaned = base.strip_nonbody(text)
+    low = cleaned.lower()
+    assert "creative commons" not in low and "creativecommons" not in low
+    assert "correspondence" not in low and "@umcg" not in low
+    assert "doi.org" not in low
+    assert "keywords" not in low
+    assert "j bone joint surg" not in cleaned  # reference list dropped
+    assert "©" not in cleaned             # copyright dropped
+    assert "systematic review examined the prevalence" in cleaned  # body kept
+
+
+def test_strip_nonbody_keeps_short_or_odd_text_intact():
+    # No abstract/refs/boilerplate and below the body floor -> never gutted.
+    note = "A brief methodological note on the sampling frame. " * 6
+    assert base.strip_nonbody(note).strip() == note.strip()
+
+
 def test_abstain_no_body_text_distinct_from_too_short():
     # Empty body (e.g. refs read from a .bbl/.bib) is reported distinctly so the
     # UI doesn't claim the text is merely "too short".
