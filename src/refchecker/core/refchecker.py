@@ -7711,12 +7711,37 @@ def _update_local_databases(
 
 def main():
     """Main function to parse arguments and run the reference checker"""
-    print(f"Refchecker v{__version__} - Validate references in academic papers")
-    print(f"By Mark Russinovich and various agentic AI assistants")
+    # Hermes-Agent-style startup banner (ASCII logo + environment + capabilities).
+    # Printed to stderr so it never pollutes machine-readable stdout (e.g.
+    # --report-format json). Falls back to a one-liner if anything goes wrong.
+    try:
+        from refchecker.utils.banner import print_banner
+        print_banner(__version__)
+    except Exception:  # noqa: BLE001
+        print(f"Refchecker v{__version__} - Validate references in academic papers")
+        print("By Mark Russinovich and various agentic AI assistants")
 
     supported_openreview_help = 'Supported OpenReview shorthands: iclr, icml, aistats, uai, corl'
 
-    parser = argparse.ArgumentParser(description="Academic paper references checker")
+    parser = argparse.ArgumentParser(
+        prog="academic-refchecker",
+        description=(
+            "RefChecker — verify the references in an academic paper against "
+            "Semantic Scholar / OpenAlex / Crossref / DBLP / ACL / arXiv / "
+            "OpenReview, and optionally screen the manuscript for AI-generated text."
+        ),
+        epilog=(
+            "examples:\n"
+            "  academic-refchecker --paper 2406.01234\n"
+            "  academic-refchecker --paper https://arxiv.org/abs/2406.01234\n"
+            "  academic-refchecker --paper ./paper.pdf --report-format json\n"
+            "  academic-refchecker --paper ./refs.bib --output-file errors.txt\n"
+            "  academic-refchecker --paper-list papers.txt\n\n"
+            "AI-text detection is opt-in and ADVISORY ONLY — never proof of "
+            "misconduct. See the README for the full options and the desktop app."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--debug", action="store_true",
                         help="Run in debug mode with verbose logging")
     parser.add_argument("--paper", type=str,

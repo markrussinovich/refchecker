@@ -151,6 +151,39 @@ LLM extraction is generally more accurate, but PDFs can fall back to GROBID when
 <!-- screenshot: webui-main — main UI showing a completed check with stats badges and reference cards -->
 ![RefChecker Web UI](assets/webui.png)
 
+### CLI — Startup banner
+
+Running the CLI prints an environment + capabilities banner (colourised on a TTY,
+plain when piped). `--help` lists the full options and examples.
+
+```
+   ___      __ ___ _           _
+  / _ \___ / _/ __| |_  ___ __| |_____ _ _
+ / , _/ -_) _| (__| ' \/ -_) _| / / -_) '_|
+/_/|_|\__/_|  \___|_||_\___\__|_\_\___|_|
+
+  RefChecker vX.Y.Z  ·  academic reference verification + AI-text detection
+  by Mark Russinovich & agentic AI assistants
+
+  Environment
+    python    3.x.y   ·   Darwin 25.4.0 (arm64)
+    runtime   ● torch/onnx   ● transformers   ● llm sdks
+
+  Verification engines
+    · Semantic Scholar   · OpenAlex   · Crossref   · DBLP
+    · ACL Anthology      · arXiv      · OpenReview · local DBs
+
+  AI-text detection (opt-in, advisory — never proof of misconduct)
+    ● local (desklib DeBERTa)   · LLM-judge   · external API
+
+  Quick start
+    academic-refchecker --paper <arxiv-id|url|pdf|.bib>
+    academic-refchecker --help   · full options
+```
+
+The banner goes to **stderr**, so machine-readable stdout (e.g. `--report-format json`)
+stays clean. Set `NO_COLOR=1` to disable colour, `FORCE_COLOR=1` to force it.
+
 ### CLI — Single Paper
 
 ```
